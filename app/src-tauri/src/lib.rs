@@ -123,8 +123,19 @@ fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: bool)
 }
 
 #[tauri::command]
-fn get_auth_status(state: tauri::State<AuthState>) -> bool {
-    *state.0.lock().unwrap()
+fn get_auth_status(app: AppHandle, state: tauri::State<AuthState>) -> bool {
+    let flag = auth_flag_path(&app);
+    eprintln!("[oculus] get_auth_status — flag path: {}", flag.display());
+    let file_says_auth = flag.exists();
+    let mem_says_auth  = *state.0.lock().unwrap();
+    eprintln!("[oculus] get_auth_status — file={file_says_auth} mem={mem_says_auth}");
+
+    if file_says_auth && !mem_says_auth {
+        // Startup race: file exists but memory not yet set — fix it now
+        *state.0.lock().unwrap() = true;
+    }
+
+    file_says_auth || mem_says_auth
 }
 
 #[tauri::command]
@@ -196,44 +207,40 @@ async fn sync_subjects(
     }};
 
     try {{
-        // 1. Scrape DOM tables — Canvas already separates current vs past for us
-        const scrapeTable = (tableId, isCurrent) => {{
-            const table = document.querySelector(tableId);
-            if (!table) {{ console.warn('[Oculus] table not found:', tableId); return []; }}
-            return [...table.querySelectorAll('tr[id^="course_"]')].map(row => {{
-                const link = row.querySelector('td a');
-                const idMatch = link?.href?.match(/\/courses\/(\d+)/);
-                return idMatch ? {{ id: parseInt(idMatch[1]), _oculus_is_current: isCurrent }} : null;
-            }}).filter(Boolean);
-        }};
-
-        const currentDom = scrapeTable('#my_courses_table', true);
-        const pastDom    = scrapeTable('#past_enrollments_table', false);
-        console.log('[Oculus] DOM current:', currentDom.length, 'past:', pastDom.length);
-
-        if (currentDom.length === 0 && pastDom.length === 0) {{
-            throw new Error('DOM tables not found — navigate to Canvas dashboard, re-authenticate and try again.');
-        }}
-
-        const domMap = new Map([...currentDom, ...pastDom].map(c => [c.id, c]));
-
-        // 2. Fetch API for full metadata
         const resp = await fetch(
             '/api/v1/courses?per_page=100&include[]=term&include[]=account',
             {{ credentials: 'include' }}
         );
         if (!resp.ok) throw new Error(`Canvas API ${{resp.status}}`);
         const all = await resp.json();
-        console.log('[Oculus] API courses:', all.length);
 
-        // 3. Merge: only keep courses visible in DOM tables
-        const courses = all
-            .filter(c => domMap.has(c.id))
-            .map(c => ({{ ...c, _oculus_is_current: domMap.get(c.id)._oculus_is_current }}));
+        // Keep only real academic courses (not Default Term communities)
+        const academic = all.filter(c =>
+            c.term &&
+            c.term.name !== 'Default Term' &&
+            (c.workflow_state === 'available' || c.workflow_state === 'completed')
+        );
 
-        console.log('[Oculus] merged:', courses.length,
-            '| current:', courses.filter(c => c._oculus_is_current).length,
-            '| past:', courses.filter(c => !c._oculus_is_current).length);
+        // Find the latest term among available (enrolled) courses.
+        // UniMelb format "YYYY Semester N" sorts correctly lexicographically.
+        // enrollment_state=active is NOT reliable — keeps old semesters active too.
+        const availableTerms = academic
+            .filter(c => c.workflow_state === 'available' && c.term?.name)
+            .map(c => c.term.name);
+        const latestTerm = [...new Set(availableTerms)].sort().reverse()[0];
+        console.log('[Oculus] latest term detected:', latestTerm);
+
+        // Only courses in the latest term are "current" — everything else is past
+        const courses = academic.map(c => ({{
+            ...c,
+            _oculus_is_current: c.term?.name === latestTerm && c.workflow_state === 'available',
+        }}));
+
+        const nCurrent = courses.filter(c => c._oculus_is_current).length;
+        const nPast    = courses.length - nCurrent;
+        console.log(`[Oculus] current: ${{nCurrent}} | past: ${{nPast}} | total: ${{courses.length}}`);
+
+        if (courses.length === 0) throw new Error('No courses — session may have expired. Re-authenticate.');
 
         await post('/subjects', courses);
         console.log('[Oculus] done');
@@ -310,21 +317,84 @@ pub fn run() {
             let flag       = auth_flag_path(&app_handle);
 
             if flag.exists() {
-                eprintln!("[oculus] auth flag found, restoring session silently");
+                eprintln!("[oculus] auth flag found at {} — restoring session", flag.display());
                 let auth_state = app.state::<AuthState>();
+                // Set memory state immediately — get_auth_status also checks file, but belt+suspenders
                 *auth_state.0.lock().unwrap() = true;
                 let auth_flag = Arc::clone(&auth_state.0);
 
-                // Recreate hidden WebView using existing cookies
+                // Recreate hidden WebView using existing cookies (no delay needed)
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
                     open_canvas_window(app_handle, auth_flag, true);
                 });
+            } else {
+                eprintln!("[oculus] no auth flag — fresh session");
             }
 
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_sql::Builder::new()
+                .add_migrations(
+                    "sqlite:oculus.db",
+                    vec![tauri_plugin_sql::Migration {
+                        version: 1,
+                        description: "initial schema",
+                        sql: r#"
+CREATE TABLE IF NOT EXISTS subjects (
+    id            INTEGER PRIMARY KEY,
+    code          TEXT    NOT NULL,
+    name          TEXT    NOT NULL,
+    term_name     TEXT,
+    is_current    INTEGER NOT NULL DEFAULT 0,
+    workflow_state TEXT   NOT NULL DEFAULT 'available',
+    selected      INTEGER NOT NULL DEFAULT 1,
+    last_synced_at TEXT,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sync_runs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    finished_at      TEXT,
+    status           TEXT    NOT NULL DEFAULT 'running',
+    subjects_synced  INTEGER NOT NULL DEFAULT 0,
+    pages_scraped    INTEGER NOT NULL DEFAULT 0,
+    error            TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sync_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     INTEGER REFERENCES sync_runs(id) ON DELETE SET NULL,
+    subject_id INTEGER REFERENCES subjects(id)  ON DELETE SET NULL,
+    timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
+    level      TEXT    NOT NULL DEFAULT 'info',
+    message    TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS files (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_id    INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    filename      TEXT    NOT NULL,
+    relative_path TEXT    NOT NULL,
+    file_type     TEXT    NOT NULL,
+    size_bytes    INTEGER,
+    scraped_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(subject_id, relative_path)
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+                        "#,
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    }],
+                )
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             get_auth_status,
             launch_canvas_auth,

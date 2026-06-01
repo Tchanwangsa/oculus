@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
+import { upsertSubjects, addLog, type CanvasCourseRaw } from "@/lib/db";
 import { cn } from "@/lib/utils";
 
 type AuthStatus = "connected" | "disconnected" | "pending";
@@ -136,11 +137,17 @@ export default function SyncPage() {
 
   // Subjects events
   useEffect(() => {
-    const loadedUnsub = listen<CanvasCourse[]>("subjects-loaded", (e) => {
+    const loadedUnsub = listen<CanvasCourse[]>("subjects-loaded", async (e) => {
       setFetchedCourses(e.payload);
       setLoadingSubjects(false);
       setSteps((prev) => prev.map((s) => s.id === "courses" ? { ...s, status: "done" } : s));
       setShowSubjectsDialog(true);
+      try {
+        await upsertSubjects(e.payload as unknown as CanvasCourseRaw[]);
+        await addLog(`Loaded ${e.payload.length} subjects from Canvas`);
+      } catch (err) {
+        console.error("DB upsert failed:", err);
+      }
     });
     const errorUnsub = listen<string>("subjects-error", (e) => {
       setSubjectsError(e.payload);
