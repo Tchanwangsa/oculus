@@ -1,7 +1,10 @@
+use std::io::Read as _;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub struct AuthState(pub Arc<Mutex<bool>>);
+pub struct SubjectsState(pub Arc<Mutex<Vec<serde_json::Value>>>);
+pub struct IpcPort(pub u16);
 
 fn canvas_session_dir(app: &AppHandle) -> std::path::PathBuf {
     app.path()
@@ -10,9 +13,107 @@ fn canvas_session_dir(app: &AppHandle) -> std::path::PathBuf {
         .join("canvas-session")
 }
 
+fn cors_header(key: &[u8], val: &[u8]) -> tiny_http::Header {
+    tiny_http::Header::from_bytes(key, val).unwrap()
+}
+
+fn cors_response(status: u16) -> tiny_http::Response<std::io::Empty> {
+    tiny_http::Response::empty(status)
+        .with_header(cors_header(b"Access-Control-Allow-Origin", b"*"))
+        .with_header(cors_header(b"Access-Control-Allow-Methods", b"POST, OPTIONS"))
+        .with_header(cors_header(b"Access-Control-Allow-Headers", b"Content-Type"))
+}
+
 #[tauri::command]
 fn get_auth_status(state: tauri::State<AuthState>) -> bool {
     *state.0.lock().unwrap()
+}
+
+#[tauri::command]
+fn get_subjects(state: tauri::State<SubjectsState>) -> Vec<serde_json::Value> {
+    state.0.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn open_canvas_devtools(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("canvas-auth") {
+        win.show().ok();
+        win.open_devtools();
+    }
+}
+
+#[tauri::command]
+async fn sync_subjects(
+    app: AppHandle,
+    port: tauri::State<'_, IpcPort>,
+) -> Result<(), String> {
+    let win = app
+        .get_webview_window("canvas-auth")
+        .ok_or_else(|| "Not authenticated — connect to Canvas first".to_string())?;
+
+    let p = port.0;
+    eprintln!("[oculus] evaling sync_subjects, IPC port={p}");
+
+    win.eval(&format!(r#"
+(async () => {{
+    console.log('[Oculus] sync_subjects started, IPC port={p}');
+
+    const post = async (path, body) => {{
+        const resp = await fetch(`http://127.0.0.1:{p}${{path}}`, {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: typeof body === 'string' ? body : JSON.stringify(body),
+        }});
+        console.log('[Oculus] POST', path, '->', resp.status);
+    }};
+
+    try {{
+        console.log('[Oculus] fetching Canvas courses API...');
+        const resp = await fetch(
+            '/api/v1/courses?per_page=100&include[]=term&include[]=account',
+            {{ credentials: 'include' }}
+        );
+        console.log('[Oculus] API status:', resp.status);
+        if (!resp.ok) throw new Error(`Canvas API ${{resp.status}}`);
+
+        const all = await resp.json();
+        console.log('[Oculus] total courses from API:', all.length);
+
+        const now = Date.now();
+
+        // Keep only real academic courses — exclude Default Term (communities, admin groups)
+        const academic = all.filter(c => {{
+            if (!c.term || c.term.name === 'Default Term') return false;
+            if (c.workflow_state !== 'available' && c.workflow_state !== 'completed') return false;
+            return true;
+        }});
+        console.log('[Oculus] academic courses (non-Default Term):', academic.length);
+
+        // Tag each course: current = available AND term end date is in the future (or no end date)
+        const courses = academic.map(c => {{
+            let is_current = false;
+            if (c.workflow_state === 'available') {{
+                const end = c.term?.end_at ? new Date(c.term.end_at).getTime() : Infinity;
+                is_current = end >= now;
+            }}
+            return {{ ...c, _oculus_is_current: is_current }};
+        }});
+
+        const currentCount = courses.filter(c => c._oculus_is_current).length;
+        const pastCount = courses.length - currentCount;
+        console.log(`[Oculus] current: ${{currentCount}}, past: ${{pastCount}}`);
+
+        await post('/subjects', courses);
+        console.log('[Oculus] done');
+    }} catch (err) {{
+        console.error('[Oculus] error:', err);
+        try {{ await post('/error', String(err)); }} catch {{}}
+    }}
+}})();
+    "#))
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -20,7 +121,6 @@ async fn launch_canvas_auth(
     app: AppHandle,
     state: tauri::State<'_, AuthState>,
 ) -> Result<(), String> {
-    // Close existing auth window if open
     if let Some(existing) = app.get_webview_window("canvas-auth") {
         existing.close().map_err(|e| e.to_string())?;
     }
@@ -43,13 +143,10 @@ async fn launch_canvas_auth(
     .title("Sign in to Canvas — Oculus")
     .inner_size(900.0, 700.0)
     .center()
-    // Isolated data dir — delete this dir to get a fresh login
     .data_directory(session_dir)
     .on_navigation(move |url| {
         let host_ok = url.host_str() == Some("canvas.lms.unimelb.edu.au");
         let path    = url.path();
-
-        // Positive allowlist — only known authenticated landing paths
         let authenticated = host_ok
             && (path == "/"
                 || path.starts_with("/dashboard")
@@ -76,7 +173,6 @@ async fn launch_canvas_auth(
     .build()
     .map_err(|e| e.to_string())?;
 
-    // CloseRequested fires immediately when user clicks X
     win.on_window_event(move |event| {
         if let tauri::WindowEvent::CloseRequested { .. } = event {
             let authenticated = *auth_flag_win.lock().unwrap();
@@ -96,13 +192,10 @@ async fn disconnect_canvas(
 ) -> Result<(), String> {
     *state.0.lock().unwrap() = false;
 
-    // Close the hidden WebView
     if let Some(win) = app.get_webview_window("canvas-auth") {
         win.close().map_err(|e| e.to_string())?;
     }
 
-    // Delete isolated session directory — clears all cookies, storage, cache
-    // Next launch_canvas_auth will start with a clean browser profile
     let session_dir = canvas_session_dir(&app);
     if session_dir.exists() {
         std::fs::remove_dir_all(&session_dir).map_err(|e| e.to_string())?;
@@ -115,11 +208,70 @@ async fn disconnect_canvas(
 pub fn run() {
     tauri::Builder::default()
         .manage(AuthState(Arc::new(Mutex::new(false))))
+        .manage(SubjectsState(Arc::new(Mutex::new(vec![]))))
+        .setup(|app| {
+            // Bind to port 0 → OS picks an available port
+            let server = tiny_http::Server::http("127.0.0.1:0")
+                .expect("[oculus] failed to start IPC HTTP server");
+            let port = server
+                .server_addr()
+                .to_ip()
+                .expect("IPC server addr missing")
+                .port();
+
+            eprintln!("[oculus] IPC HTTP server listening on 127.0.0.1:{port}");
+            app.manage(IpcPort(port));
+
+            let handle = app.handle().clone();
+
+            std::thread::spawn(move || {
+                for mut request in server.incoming_requests() {
+                    let method = request.method().clone();
+                    let url    = request.url().to_string();
+
+                    if method == tiny_http::Method::Options {
+                        let _ = request.respond(cors_response(200));
+                        continue;
+                    }
+
+                    if method == tiny_http::Method::Post {
+                        let mut body = String::new();
+                        let _ = request.as_reader().read_to_string(&mut body);
+                        eprintln!("[oculus] IPC POST {url} len={}", body.len());
+
+                        if url.starts_with("/subjects") {
+                            match serde_json::from_str::<Vec<serde_json::Value>>(&body) {
+                                Ok(courses) => {
+                                    eprintln!("[oculus] parsed {} courses", courses.len());
+                                    *handle.state::<SubjectsState>().0.lock().unwrap() =
+                                        courses.clone();
+                                    handle.emit("subjects-loaded", courses).ok();
+                                }
+                                Err(e) => {
+                                    eprintln!("[oculus] parse error: {e}");
+                                    handle.emit("subjects-error", e.to_string()).ok();
+                                }
+                            }
+                        } else if url.starts_with("/error") {
+                            eprintln!("[oculus] canvas error: {body}");
+                            handle.emit("subjects-error", body).ok();
+                        }
+
+                        let _ = request.respond(cors_response(200));
+                    }
+                }
+            });
+
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_auth_status,
             launch_canvas_auth,
             disconnect_canvas,
+            sync_subjects,
+            get_subjects,
+            open_canvas_devtools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
