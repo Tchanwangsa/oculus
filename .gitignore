@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Rust (covered by src-tauri/.gitignore but belt+suspenders)
+target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Data / knowledge base (user-generated, not committed)
+data/
+*.db
