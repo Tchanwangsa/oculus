@@ -116,16 +116,21 @@ export default function SyncPage() {
 
   // Auth events
   useEffect(() => {
-    const successUnsub = listen("canvas-auth-success", () => {
+    const successUnsub  = listen("canvas-auth-success", () => {
       setAuthStatus("connected");
       setSteps((prev) => prev.map((s) => s.id === "auth" ? { ...s, status: "done" } : s));
     });
-    const cancelUnsub = listen("canvas-auth-cancelled", () => {
+    const cancelUnsub   = listen("canvas-auth-cancelled", () => {
       setAuthStatus((prev) => prev === "pending" ? "disconnected" : prev);
+    });
+    const expiredUnsub  = listen("canvas-auth-expired", () => {
+      setAuthStatus("disconnected");
+      setSteps(PIPELINE_STEPS);
     });
     return () => {
       successUnsub.then((f) => f());
       cancelUnsub.then((f) => f());
+      expiredUnsub.then((f) => f());
     };
   }, []);
 

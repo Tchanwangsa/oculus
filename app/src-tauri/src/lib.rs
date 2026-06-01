@@ -13,6 +13,10 @@ fn canvas_session_dir(app: &AppHandle) -> std::path::PathBuf {
         .join("canvas-session")
 }
 
+fn auth_flag_path(app: &AppHandle) -> std::path::PathBuf {
+    canvas_session_dir(app).join("authenticated")
+}
+
 fn cors_header(key: &[u8], val: &[u8]) -> tiny_http::Header {
     tiny_http::Header::from_bytes(key, val).unwrap()
 }
@@ -22,6 +26,100 @@ fn cors_response(status: u16) -> tiny_http::Response<std::io::Empty> {
         .with_header(cors_header(b"Access-Control-Allow-Origin", b"*"))
         .with_header(cors_header(b"Access-Control-Allow-Methods", b"POST, OPTIONS"))
         .with_header(cors_header(b"Access-Control-Allow-Headers", b"Content-Type"))
+}
+
+/// Shared window-creation logic used by both startup restore and user-initiated auth.
+/// `silent` = true → start hidden, navigate to canvas home (relies on existing cookies).
+/// `silent` = false → start visible, navigate to SAML login.
+fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: bool) {
+    // Close any existing window first
+    if let Some(existing) = app.get_webview_window("canvas-auth") {
+        existing.close().ok();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    let url = if silent {
+        "https://canvas.lms.unimelb.edu.au/"
+    } else {
+        "https://canvas.lms.unimelb.edu.au/login/saml"
+    };
+
+    let session_dir   = canvas_session_dir(&app);
+    let auth_flag_win = Arc::clone(&auth_flag);
+    let app_nav       = app.clone();
+    let app_win       = app.clone();
+    let flag_path     = auth_flag_path(&app);
+
+    let result = WebviewWindowBuilder::new(
+        &app,
+        "canvas-auth",
+        WebviewUrl::External(url.parse().unwrap()),
+    )
+    .title("Sign in to Canvas — Oculus")
+    .inner_size(900.0, 700.0)
+    .center()
+    .visible(!silent)
+    .data_directory(session_dir)
+    .on_navigation(move |url| {
+        let host_ok = url.host_str() == Some("canvas.lms.unimelb.edu.au");
+        let path    = url.path();
+
+        let authenticated = host_ok
+            && (path == "/"
+                || path.starts_with("/dashboard")
+                || path.starts_with("/courses")
+                || path.starts_with("/calendar")
+                || path.starts_with("/inbox"));
+
+        let on_login = host_ok && path.starts_with("/login");
+
+        if authenticated {
+            let already_done = {
+                let mut flag = auth_flag.lock().unwrap();
+                let prev = *flag;
+                *flag = true;
+                prev
+            };
+            if !already_done {
+                // Persist auth so next app launch skips login
+                std::fs::create_dir_all(flag_path.parent().unwrap()).ok();
+                std::fs::write(&flag_path, b"1").ok();
+
+                if let Some(w) = app_nav.get_webview_window("canvas-auth") {
+                    w.hide().ok();
+                }
+                app_nav.emit("canvas-auth-success", "ok").ok();
+            }
+        } else if silent && on_login {
+            // Session expired — close silently, reset state
+            eprintln!("[oculus] silent auth: session expired, redirected to login");
+            *auth_flag.lock().unwrap() = false;
+            if let Some(w) = app_nav.get_webview_window("canvas-auth") {
+                w.close().ok();
+            }
+            app_nav.emit("canvas-auth-expired", "expired").ok();
+        }
+
+        true
+    })
+    .build();
+
+    match result {
+        Ok(win) => {
+            // Only emit cancelled for user-initiated auth (not silent restore)
+            if !silent {
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        let authenticated = *auth_flag_win.lock().unwrap();
+                        if !authenticated {
+                            app_win.emit("canvas-auth-cancelled", "cancelled").ok();
+                        }
+                    }
+                });
+            }
+        }
+        Err(e) => eprintln!("[oculus] failed to open canvas window: {e}"),
+    }
 }
 
 #[tauri::command]
@@ -40,6 +138,36 @@ fn open_canvas_devtools(app: AppHandle) {
         win.show().ok();
         win.open_devtools();
     }
+}
+
+#[tauri::command]
+async fn launch_canvas_auth(
+    app: AppHandle,
+    state: tauri::State<'_, AuthState>,
+) -> Result<(), String> {
+    let auth_flag = Arc::clone(&state.0);
+    open_canvas_window(app, auth_flag, false);
+    Ok(())
+}
+
+#[tauri::command]
+async fn disconnect_canvas(
+    app: AppHandle,
+    state: tauri::State<'_, AuthState>,
+) -> Result<(), String> {
+    *state.0.lock().unwrap() = false;
+
+    if let Some(win) = app.get_webview_window("canvas-auth") {
+        win.close().map_err(|e| e.to_string())?;
+    }
+
+    // Delete entire session dir → clears cookies + auth flag
+    let session_dir = canvas_session_dir(&app);
+    if session_dir.exists() {
+        std::fs::remove_dir_all(&session_dir).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -68,14 +196,6 @@ async fn sync_subjects(
     }};
 
     try {{
-        console.log('[Oculus] fetching Canvas courses API...');
-        const resp = await fetch(
-            '/api/v1/courses?per_page=100&include[]=term&include[]=account',
-            {{ credentials: 'include' }}
-        );
-        console.log('[Oculus] API status:', resp.status);
-        if (!resp.ok) throw new Error(`Canvas API ${{resp.status}}`);
-
         // 1. Scrape DOM tables — Canvas already separates current vs past for us
         const scrapeTable = (tableId, isCurrent) => {{
             const table = document.querySelector(tableId);
@@ -92,21 +212,26 @@ async fn sync_subjects(
         console.log('[Oculus] DOM current:', currentDom.length, 'past:', pastDom.length);
 
         if (currentDom.length === 0 && pastDom.length === 0) {{
-            throw new Error('DOM tables not found — ensure Canvas dashboard is loaded. Re-authenticate and try again.');
+            throw new Error('DOM tables not found — navigate to Canvas dashboard, re-authenticate and try again.');
         }}
 
         const domMap = new Map([...currentDom, ...pastDom].map(c => [c.id, c]));
 
-        // 2. Fetch API for full metadata (name, course_code, term details)
+        // 2. Fetch API for full metadata
+        const resp = await fetch(
+            '/api/v1/courses?per_page=100&include[]=term&include[]=account',
+            {{ credentials: 'include' }}
+        );
+        if (!resp.ok) throw new Error(`Canvas API ${{resp.status}}`);
         const all = await resp.json();
         console.log('[Oculus] API courses:', all.length);
 
-        // 3. Merge: only keep courses visible in DOM tables (auto-filters communities etc.)
+        // 3. Merge: only keep courses visible in DOM tables
         const courses = all
             .filter(c => domMap.has(c.id))
             .map(c => ({{ ...c, _oculus_is_current: domMap.get(c.id)._oculus_is_current }}));
 
-        console.log('[Oculus] merged courses:', courses.length,
+        console.log('[Oculus] merged:', courses.length,
             '| current:', courses.filter(c => c._oculus_is_current).length,
             '| past:', courses.filter(c => !c._oculus_is_current).length);
 
@@ -123,101 +248,13 @@ async fn sync_subjects(
     Ok(())
 }
 
-#[tauri::command]
-async fn launch_canvas_auth(
-    app: AppHandle,
-    state: tauri::State<'_, AuthState>,
-) -> Result<(), String> {
-    if let Some(existing) = app.get_webview_window("canvas-auth") {
-        existing.close().map_err(|e| e.to_string())?;
-    }
-
-    let auth_flag     = Arc::clone(&state.0);
-    let auth_flag_win = Arc::clone(&state.0);
-    let app_nav       = app.clone();
-    let app_win       = app.clone();
-    let session_dir   = canvas_session_dir(&app);
-
-    let win = WebviewWindowBuilder::new(
-        &app,
-        "canvas-auth",
-        WebviewUrl::External(
-            "https://canvas.lms.unimelb.edu.au/login/saml"
-                .parse()
-                .unwrap(),
-        ),
-    )
-    .title("Sign in to Canvas — Oculus")
-    .inner_size(900.0, 700.0)
-    .center()
-    .data_directory(session_dir)
-    .on_navigation(move |url| {
-        let host_ok = url.host_str() == Some("canvas.lms.unimelb.edu.au");
-        let path    = url.path();
-        let authenticated = host_ok
-            && (path == "/"
-                || path.starts_with("/dashboard")
-                || path.starts_with("/courses")
-                || path.starts_with("/calendar")
-                || path.starts_with("/inbox"));
-
-        if authenticated {
-            let already_done = {
-                let mut flag = auth_flag.lock().unwrap();
-                let prev = *flag;
-                *flag = true;
-                prev
-            };
-            if !already_done {
-                if let Some(w) = app_nav.get_webview_window("canvas-auth") {
-                    w.hide().ok();
-                }
-                app_nav.emit("canvas-auth-success", "ok").ok();
-            }
-        }
-        true
-    })
-    .build()
-    .map_err(|e| e.to_string())?;
-
-    win.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { .. } = event {
-            let authenticated = *auth_flag_win.lock().unwrap();
-            if !authenticated {
-                app_win.emit("canvas-auth-cancelled", "cancelled").ok();
-            }
-        }
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
-async fn disconnect_canvas(
-    app: AppHandle,
-    state: tauri::State<'_, AuthState>,
-) -> Result<(), String> {
-    *state.0.lock().unwrap() = false;
-
-    if let Some(win) = app.get_webview_window("canvas-auth") {
-        win.close().map_err(|e| e.to_string())?;
-    }
-
-    let session_dir = canvas_session_dir(&app);
-    if session_dir.exists() {
-        std::fs::remove_dir_all(&session_dir).map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AuthState(Arc::new(Mutex::new(false))))
         .manage(SubjectsState(Arc::new(Mutex::new(vec![]))))
         .setup(|app| {
-            // Bind to port 0 → OS picks an available port
+            // ── IPC HTTP server ────────────────────────────────────────
             let server = tiny_http::Server::http("127.0.0.1:0")
                 .expect("[oculus] failed to start IPC HTTP server");
             let port = server
@@ -226,11 +263,10 @@ pub fn run() {
                 .expect("IPC server addr missing")
                 .port();
 
-            eprintln!("[oculus] IPC HTTP server listening on 127.0.0.1:{port}");
+            eprintln!("[oculus] IPC HTTP server on 127.0.0.1:{port}");
             app.manage(IpcPort(port));
 
             let handle = app.handle().clone();
-
             std::thread::spawn(move || {
                 for mut request in server.incoming_requests() {
                     let method = request.method().clone();
@@ -268,6 +304,23 @@ pub fn run() {
                     }
                 }
             });
+
+            // ── Silent auth restore on startup ─────────────────────────
+            let app_handle = app.handle().clone();
+            let flag       = auth_flag_path(&app_handle);
+
+            if flag.exists() {
+                eprintln!("[oculus] auth flag found, restoring session silently");
+                let auth_state = app.state::<AuthState>();
+                *auth_state.0.lock().unwrap() = true;
+                let auth_flag = Arc::clone(&auth_state.0);
+
+                // Recreate hidden WebView using existing cookies
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    open_canvas_window(app_handle, auth_flag, true);
+                });
+            }
 
             Ok(())
         })
