@@ -197,6 +197,7 @@ export default function SyncPage() {
                 size="sm"
                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
                 onClick={handleDisconnect}
+                title="Resets local session only — does not log out of Canvas SSO"
               >
                 Disconnect
               </Button>

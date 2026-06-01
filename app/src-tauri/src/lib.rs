@@ -84,16 +84,12 @@ async fn disconnect_canvas(
     app: AppHandle,
     state: tauri::State<'_, AuthState>,
 ) -> Result<(), String> {
-    // Reset auth flag
+    // Reset in-app auth flag only — Canvas SSO session stays alive in WebView.
+    // Actual Canvas logout requires a CSRF-token POST, which is out of scope.
+    // Session expiry is detected later during scraping (redirect to /login).
     *state.0.lock().unwrap() = false;
 
     if let Some(win) = app.get_webview_window("canvas-auth") {
-        // Navigate to Canvas logout to clear server-side session
-        // Then close the window — WebView2 cookies cleared on next open via fresh window
-        win.eval("window.location.href = 'https://canvas.lms.unimelb.edu.au/logout'")
-            .ok();
-        // Short delay then close so logout request fires
-        std::thread::sleep(std::time::Duration::from_millis(800));
         win.close().map_err(|e| e.to_string())?;
     }
 
