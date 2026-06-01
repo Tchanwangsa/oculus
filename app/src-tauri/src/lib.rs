@@ -185,10 +185,26 @@ async fn disconnect_canvas(
 async fn sync_subjects(
     app: AppHandle,
     port: tauri::State<'_, IpcPort>,
+    auth: tauri::State<'_, AuthState>,
 ) -> Result<(), String> {
-    let win = app
-        .get_webview_window("canvas-auth")
-        .ok_or_else(|| "Not authenticated — connect to Canvas first".to_string())?;
+    let win = match app.get_webview_window("canvas-auth") {
+        Some(w) => w,
+        None => {
+            // Window gone (startup race or crash) — reset auth state and notify UI
+            *auth.0.lock().unwrap() = false;
+            app.emit("canvas-auth-expired", "window-missing").ok();
+
+            // If session cookies still exist, recreate the window in background
+            // so the user only needs to click "Connect" once more (not re-login)
+            if auth_flag_path(&app).exists() {
+                let app2 = app.clone();
+                let flag  = Arc::clone(&auth.0);
+                std::thread::spawn(move || open_canvas_window(app2, flag, true));
+            }
+
+            return Err("Canvas session window not ready — reconnecting, please try again in a moment.".to_string());
+        }
+    };
 
     let p = port.0;
     eprintln!("[oculus] evaling sync_subjects, IPC port={p}");
@@ -214,11 +230,15 @@ async fn sync_subjects(
         if (!resp.ok) throw new Error(`Canvas API ${{resp.status}}`);
         const all = await resp.json();
 
-        // Keep only real academic courses (not Default Term communities)
+        // Keep only real academic courses — filter out:
+        //   Default Term  = admin/community groups
+        //   MPMP prefix   = Melbourne Peer Mentor Program (not a subject)
+        const NON_SUBJECT_PREFIXES = ['MPMP'];
         const academic = all.filter(c =>
             c.term &&
             c.term.name !== 'Default Term' &&
-            (c.workflow_state === 'available' || c.workflow_state === 'completed')
+            (c.workflow_state === 'available' || c.workflow_state === 'completed') &&
+            !NON_SUBJECT_PREFIXES.some(p => (c.course_code || '').startsWith(p))
         );
 
         // Find the latest term among available (enrolled) courses.
