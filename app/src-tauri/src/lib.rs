@@ -37,8 +37,15 @@ async fn launch_canvas_auth(
     .center()
     .on_navigation(move |url| {
         let host_ok = url.host_str() == Some("canvas.lms.unimelb.edu.au");
-        let path_ok = !url.path().starts_with("/login");
-        let authenticated = host_ok && path_ok;
+        let path = url.path();
+
+        // Positive allowlist — only these paths mean authenticated
+        let authenticated = host_ok
+            && (path == "/"
+                || path.starts_with("/dashboard")
+                || path.starts_with("/courses")
+                || path.starts_with("/calendar")
+                || path.starts_with("/inbox"));
 
         if authenticated {
             let already_done = {
@@ -48,27 +55,47 @@ async fn launch_canvas_auth(
                 prev
             };
             if !already_done {
-                // Hide window so session stays alive for future scraping
                 if let Some(w) = app_nav.get_webview_window("canvas-auth") {
                     w.hide().ok();
                 }
-                app_nav.emit("canvas-auth-success", ()).ok();
+                app_nav.emit("canvas-auth-success", "ok").ok();
             }
         }
-        true // always allow navigation
+        true
     })
     .build()
     .map_err(|e| e.to_string())?;
 
-    // Emit cancelled if user closes window before authenticating
+    // CloseRequested fires when user clicks X — Destroyed may not propagate reliably
     win.on_window_event(move |event| {
-        if matches!(event, tauri::WindowEvent::Destroyed) {
+        if let tauri::WindowEvent::CloseRequested { .. } = event {
             let authenticated = *auth_flag_win.lock().unwrap();
             if !authenticated {
-                app_win.emit("canvas-auth-cancelled", ()).ok();
+                app_win.emit("canvas-auth-cancelled", "cancelled").ok();
             }
         }
     });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn disconnect_canvas(
+    app: AppHandle,
+    state: tauri::State<'_, AuthState>,
+) -> Result<(), String> {
+    // Reset auth flag
+    *state.0.lock().unwrap() = false;
+
+    if let Some(win) = app.get_webview_window("canvas-auth") {
+        // Navigate to Canvas logout to clear server-side session
+        // Then close the window — WebView2 cookies cleared on next open via fresh window
+        win.eval("window.location.href = 'https://canvas.lms.unimelb.edu.au/logout'")
+            .ok();
+        // Short delay then close so logout request fires
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        win.close().map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }
@@ -81,6 +108,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_auth_status,
             launch_canvas_auth,
+            disconnect_canvas,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

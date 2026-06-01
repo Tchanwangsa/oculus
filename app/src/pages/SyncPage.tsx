@@ -122,9 +122,14 @@ export default function SyncPage() {
     }
   };
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
     setAuthStatus("disconnected");
     setSteps(PIPELINE_STEPS);
+    try {
+      await invoke("disconnect_canvas");
+    } catch (err) {
+      console.error("Disconnect failed:", err);
+    }
   };
 
   const authBadge = AUTH_BADGE[authStatus];
