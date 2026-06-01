@@ -76,32 +76,39 @@ async fn sync_subjects(
         console.log('[Oculus] API status:', resp.status);
         if (!resp.ok) throw new Error(`Canvas API ${{resp.status}}`);
 
+        // 1. Scrape DOM tables — Canvas already separates current vs past for us
+        const scrapeTable = (tableId, isCurrent) => {{
+            const table = document.querySelector(tableId);
+            if (!table) {{ console.warn('[Oculus] table not found:', tableId); return []; }}
+            return [...table.querySelectorAll('tr[id^="course_"]')].map(row => {{
+                const link = row.querySelector('td a');
+                const idMatch = link?.href?.match(/\/courses\/(\d+)/);
+                return idMatch ? {{ id: parseInt(idMatch[1]), _oculus_is_current: isCurrent }} : null;
+            }}).filter(Boolean);
+        }};
+
+        const currentDom = scrapeTable('#my_courses_table', true);
+        const pastDom    = scrapeTable('#past_enrollments_table', false);
+        console.log('[Oculus] DOM current:', currentDom.length, 'past:', pastDom.length);
+
+        if (currentDom.length === 0 && pastDom.length === 0) {{
+            throw new Error('DOM tables not found — ensure Canvas dashboard is loaded. Re-authenticate and try again.');
+        }}
+
+        const domMap = new Map([...currentDom, ...pastDom].map(c => [c.id, c]));
+
+        // 2. Fetch API for full metadata (name, course_code, term details)
         const all = await resp.json();
-        console.log('[Oculus] total courses from API:', all.length);
+        console.log('[Oculus] API courses:', all.length);
 
-        const now = Date.now();
+        // 3. Merge: only keep courses visible in DOM tables (auto-filters communities etc.)
+        const courses = all
+            .filter(c => domMap.has(c.id))
+            .map(c => ({{ ...c, _oculus_is_current: domMap.get(c.id)._oculus_is_current }}));
 
-        // Keep only real academic courses — exclude Default Term (communities, admin groups)
-        const academic = all.filter(c => {{
-            if (!c.term || c.term.name === 'Default Term') return false;
-            if (c.workflow_state !== 'available' && c.workflow_state !== 'completed') return false;
-            return true;
-        }});
-        console.log('[Oculus] academic courses (non-Default Term):', academic.length);
-
-        // Tag each course: current = available AND term end date is in the future (or no end date)
-        const courses = academic.map(c => {{
-            let is_current = false;
-            if (c.workflow_state === 'available') {{
-                const end = c.term?.end_at ? new Date(c.term.end_at).getTime() : Infinity;
-                is_current = end >= now;
-            }}
-            return {{ ...c, _oculus_is_current: is_current }};
-        }});
-
-        const currentCount = courses.filter(c => c._oculus_is_current).length;
-        const pastCount = courses.length - currentCount;
-        console.log(`[Oculus] current: ${{currentCount}}, past: ${{pastCount}}`);
+        console.log('[Oculus] merged courses:', courses.length,
+            '| current:', courses.filter(c => c._oculus_is_current).length,
+            '| past:', courses.filter(c => !c._oculus_is_current).length);
 
         await post('/subjects', courses);
         console.log('[Oculus] done');
