@@ -1,0 +1,174 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+/* ─── Tailwind v4 custom theme ─────────────────────────────────── */
+@theme {
+  /* Brand palette extracted from Oculus logo SVG */
+  --color-teal-50:  #f0faf9;
+  --color-teal-100: #c4e0de;
+  --color-teal-200: #9dd0cc;
+  --color-teal-300: #73c6c2;
+  --color-teal-400: #66b6b2;
+  --color-teal-500: #4fa09c;
+  --color-teal-600: #3a8a86;
+  --color-teal-700: #2d6e6b;
+  --color-teal-800: #1f4f4d;
+  --color-teal-900: #142f2e;
+
+  /* Blue accent — eye/pupil colour from logo */
+  --color-blue-300: #85bfff;
+  --color-blue-400: #5da0ff;
+  --color-blue-500: #4a8fe8;
+  --color-blue-600: #3a7fd4;
+
+  /* ── Semantic colour tokens (light theme defaults) ─────────── */
+  --color-background:        #f7fffe;
+  --color-foreground:        #0d1514;
+
+  --color-card:              #ffffff;
+  --color-card-foreground:   #0d1514;
+
+  --color-surface:           #eef8f7;
+  --color-surface-raised:    #e4f3f2;
+  --color-surface-overlay:   #d8eeed;
+
+  --color-border:            #c2dedd;
+  --color-border-subtle:     #d8eeed;
+
+  --color-muted:             #eef8f7;
+  --color-muted-foreground:  #5a7a78;
+
+  --color-primary:           #3fa8a4;
+  --color-primary-foreground:#ffffff;
+
+  --color-accent:            #4a8fe8;
+  --color-accent-foreground: #ffffff;
+
+  --color-destructive:       #dc2626;
+  --color-destructive-foreground: #ffffff;
+
+  --color-success:           #16a34a;
+  --color-warning:           #d97706;
+
+  --color-sidebar:           #ffffff;
+  --color-sidebar-border:    #daeeed;
+  --color-sidebar-item-hover:#eef8f7;
+  --color-sidebar-item-active:#e0f4f3;
+
+  /* ── Typography ─────────────────────────────────────────────── */
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* ── Radius ──────────────────────────────────────────────────── */
+  --radius-xs:  3px;
+  --radius-sm:  6px;
+  --radius-md:  8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+  --radius-2xl: 20px;
+
+  /* ── Shadows ─────────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+}
+
+/* ─── Dark theme overrides ──────────────────────────────────────── */
+.dark {
+  --color-background:        #080c0c;
+  --color-foreground:        #e8f5f4;
+
+  --color-card:              #0f1514;
+  --color-card-foreground:   #e8f5f4;
+
+  --color-surface:           #161e1d;
+  --color-surface-raised:    #1c2826;
+  --color-surface-overlay:   #22312f;
+
+  --color-border:            #1e2c2a;
+  --color-border-subtle:     #131f1e;
+
+  --color-muted:             #0f1514;
+  --color-muted-foreground:  #8ab5b3;
+
+  --color-primary:           #73c6c2;
+  --color-primary-foreground:#080c0c;
+
+  --color-accent:            #5da0ff;
+  --color-accent-foreground: #080c0c;
+
+  --color-destructive:       #ef4444;
+  --color-destructive-foreground: #ffffff;
+
+  --color-success:           #22c55e;
+  --color-warning:           #f59e0b;
+
+  --color-sidebar:           #0c1312;
+  --color-sidebar-border:    #182322;
+  --color-sidebar-item-hover:#161e1d;
+  --color-sidebar-item-active:#1c2826;
+
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+}
+
+/* ─── Base resets ───────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  border-color: var(--color-border);
+}
+
+html {
+  height: 100%;
+  overflow: hidden; /* desktop app — no scroll on html root */
+}
+
+body {
+  height: 100%;
+  margin: 0;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  font-feature-settings: "cv11", "ss01", "ss03";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+}
+
+/* Allow text selection inside content areas */
+p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
+  user-select: text;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted-foreground);
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
