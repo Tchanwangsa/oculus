@@ -1,4 +1,4 @@
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 pub fn safe_dir(s: &str) -> String {
     s.chars()
