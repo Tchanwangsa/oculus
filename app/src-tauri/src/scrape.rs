@@ -129,9 +129,9 @@ pub fn rescrape_file(
         .ok_or_else(|| "No download URL in API response".to_string())?
         .to_string();
 
-    let name = info["display_name"]
+    let name = info["filename"]
         .as_str()
-        .or_else(|| info["filename"].as_str())
+        .or_else(|| info["display_name"].as_str())
         .unwrap_or("file.bin")
         .replace(['/', '\\'], "_");
 

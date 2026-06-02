@@ -486,7 +486,7 @@
       const dlUrl = pub.public_url || info.url;
       if (!dlUrl) return null;
 
-      const name = (displayName || info.display_name || info.filename || (fileId + ".bin")).replace(/[/\\]/g, "_");
+      const name = (info.filename || info.display_name || displayName || (fileId + ".bin")).replace(/[/\\]/g, "_");
       const path = "files/" + name;
       await fetch(BASE + "/image-proxy?" + q({ course: c.code, subject_id: c.id, path, canvas_id: fileId }), {
         method: "POST",
