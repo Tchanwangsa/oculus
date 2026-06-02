@@ -26,8 +26,10 @@ pub fn is_authenticated_url(url: &url::Url) -> bool {
     url.host_str() == Some("canvas.lms.unimelb.edu.au")
         && {
             let p = url.path();
-            p == "/"
-                || p.starts_with("/dashboard")
+            // `/` matches transient ?login_success=1 page — we intentionally
+            // exclude it so the Canvas JS redirect to /dashboard completes
+            // and the session cookie gets set before we capture + hide.
+            p.starts_with("/dashboard")
                 || p.starts_with("/courses")
                 || p.starts_with("/calendar")
                 || p.starts_with("/inbox")
@@ -144,13 +146,17 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
                 std::fs::create_dir_all(flag_path.parent().unwrap()).ok();
                 std::fs::write(&flag_path, b"1").ok();
 
-                save_cookies(&app_nav);
-
-                if let Some(w) = app_nav.get_webview_window("canvas-auth") {
-                    w.hide().ok();
-                }
                 app_nav.emit("canvas-auth-success", "ok").ok();
                 eprintln!("[oculus] auth success");
+
+                let app_delayed = app_nav.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    save_cookies(&app_delayed);
+                    if let Some(w) = app_delayed.get_webview_window("canvas-auth") {
+                        w.hide().ok();
+                    }
+                });
             }
         }
         true
