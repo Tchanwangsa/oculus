@@ -30,10 +30,11 @@ fn cookie_file_path(app: &AppHandle) -> std::path::PathBuf {
 pub fn is_authenticated_url(url: &url::Url) -> bool {
     url.host_str() == Some("canvas.lms.unimelb.edu.au") && {
         let p = url.path();
-        let q = url.query().unwrap_or("");
-        // Exclude the transient /?login_success=1 hop — session cookie isn't
-        // set yet and Canvas hasn't JS-redirected to the real dashboard.
-        (p == "/" && !q.contains("login_success"))
+        // `/?login_success=1` IS the success signal — Canvas then JS-redirects
+        // to the dashboard, which fires no nav event, so we must catch it here.
+        // (DeepSeek excluded login_success and broke detection.) We delay the
+        // cookie snapshot 2s, by which point the session cookie is set.
+        p == "/"
             || p.starts_with("/dashboard")
             || p.starts_with("/courses")
             || p.starts_with("/calendar")
