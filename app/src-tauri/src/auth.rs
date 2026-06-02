@@ -26,10 +26,11 @@ pub fn is_authenticated_url(url: &url::Url) -> bool {
     url.host_str() == Some("canvas.lms.unimelb.edu.au")
         && {
             let p = url.path();
-            // `/` matches transient ?login_success=1 page — we intentionally
-            // exclude it so the Canvas JS redirect to /dashboard completes
-            // and the session cookie gets set before we capture + hide.
-            p.starts_with("/dashboard")
+            let q = url.query().unwrap_or("");
+            // Exclude transient /?login_success=1 hop — session cookie not
+            // set yet and Canvas hasn't JS-redirected to the real dashboard.
+            (p == "/" && !q.contains("login_success"))
+                || p.starts_with("/dashboard")
                 || p.starts_with("/courses")
                 || p.starts_with("/calendar")
                 || p.starts_with("/inbox")
