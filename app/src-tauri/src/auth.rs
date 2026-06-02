@@ -30,7 +30,7 @@ pub fn is_authenticated_url(url: &url::Url) -> bool {
 pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: bool) {
     if let Some(existing) = app.get_webview_window("canvas-auth") {
         existing.close().ok();
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::thread::sleep(std::time::Duration::from_millis(120));
     }
 
     let url = "https://canvas.lms.unimelb.edu.au/login/saml";
@@ -53,11 +53,9 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: b
     .title("Sign in to Canvas — Oculus")
     .inner_size(900.0, 700.0)
     .center()
-    .visible(true)
+    .visible(!silent)
     .data_directory(session_dir)
     .on_navigation(move |url| {
-        eprintln!("[oculus] nav: {}", url);
-
         if is_authenticated_url(&url) {
             let was_resolved = resolved_nav.swap(true, Ordering::SeqCst);
             if !was_resolved {
@@ -88,22 +86,19 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: b
     };
 
     if silent {
-        let flag_path_to = auth_flag_path(&app);
         let app_to = app.clone();
+        let flag_path_to = auth_flag_path(&app);
+        let session_dir_to = canvas_session_dir(&app);
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            if let Some(w) = app_to.get_webview_window("canvas-auth") {
-                w.hide().ok();
-            }
-
-            std::thread::sleep(std::time::Duration::from_secs(28));
+            std::thread::sleep(std::time::Duration::from_secs(15));
             if !resolved.load(Ordering::SeqCst) {
-                eprintln!("[oculus] silent restore timed out — session expired");
+                eprintln!("[oculus] silent restore timed out — session expired, resetting");
                 *auth_flag_win.lock().unwrap() = false;
                 if let Some(w) = app_to.get_webview_window("canvas-auth") {
                     w.close().ok();
                 }
-                std::fs::remove_file(&flag_path_to).ok();
+                std::fs::remove_dir_all(&session_dir_to).ok();
+                let _ = &flag_path_to;
                 app_to.emit("canvas-auth-expired", "expired").ok();
             }
         });
