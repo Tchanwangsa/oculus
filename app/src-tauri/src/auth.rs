@@ -53,7 +53,7 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: b
     .title("Sign in to Canvas — Oculus")
     .inner_size(900.0, 700.0)
     .center()
-    .visible(!silent)
+    .visible(true)
     .data_directory(session_dir)
     .on_navigation(move |url| {
         eprintln!("[oculus] nav: {}", url);
@@ -91,15 +91,12 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: b
         let flag_path_to = auth_flag_path(&app);
         let app_to = app.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            if !resolved.load(Ordering::SeqCst) {
-                eprintln!("[oculus] silent restore: no auth yet, showing window");
-                if let Some(w) = app_to.get_webview_window("canvas-auth") {
-                    w.show().ok();
-                }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if let Some(w) = app_to.get_webview_window("canvas-auth") {
+                w.hide().ok();
             }
 
-            std::thread::sleep(std::time::Duration::from_secs(25));
+            std::thread::sleep(std::time::Duration::from_secs(28));
             if !resolved.load(Ordering::SeqCst) {
                 eprintln!("[oculus] silent restore timed out — session expired");
                 *auth_flag_win.lock().unwrap() = false;
