@@ -11,10 +11,12 @@ import {
   ExternalLink,
   Layers,
   FileCode,
+  RefreshCw,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { appDataDir } from "@tauri-apps/api/path";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -71,6 +73,9 @@ export default function SubjectsPage() {
   const [announcementsExpanded, setAnnouncementsExpanded] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(false);
   const [pagesExpanded, setPagesExpanded] = useState(false);
+  // canvas_ids of files currently being re-downloaded
+  const [rescraping, setRescraping] = useState<Set<number>>(new Set());
+  const [rescrapeError, setRescrapeError] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
@@ -89,6 +94,37 @@ export default function SubjectsPage() {
     appDataDir()
       .then((d) => setDataDir(d.replace(/\\/g, "/").replace(/\/$/, "")))
       .catch(() => {});
+  }, []);
+
+  // Listen for scrape-file events triggered by rescrape_file command.
+  // Upserts the file into the DB and refreshes the file list.
+  useEffect(() => {
+    const unsub = listen<{
+      subject_id: number;
+      relative_path: string;
+      size_bytes: number;
+      category: string | null;
+      canvas_id: number | null;
+    }>("scrape-file", async (e) => {
+      const { subject_id, relative_path, size_bytes, category, canvas_id } = e.payload;
+      const filename = relative_path.split("/").pop() ?? relative_path;
+      const ext = filename.includes(".") ? filename.split(".").pop()! : "md";
+      try {
+        await upsertFile(subject_id, filename, relative_path, ext, size_bytes, category ?? undefined, canvas_id ?? undefined);
+      } catch { /* ignore */ }
+      // Refresh file list if this subject is currently open
+      if (canvas_id != null) {
+        setRescraping((prev) => { const s = new Set(prev); s.delete(canvas_id); return s; });
+      }
+      setSelectedId((cur) => {
+        if (cur === subject_id) {
+          // Re-trigger file load by toggling selectedId (use functional form to avoid stale closure)
+          getFilesForSubject(subject_id).then((rows) => setFiles(rows)).catch(() => {});
+        }
+        return cur;
+      });
+    });
+    return () => { unsub.then((f) => f()); };
   }, []);
 
   const openFile = useCallback(async (file: DbFile) => {
@@ -216,6 +252,22 @@ export default function SubjectsPage() {
   const courseFiles       = files.filter((f) => f.category === "file");
   const announcementFiles = files.filter((f) => f.category === "announcement");
   const imageFiles        = files.filter((f) => f.category === "image");
+
+  const rescrapeFile = useCallback(async (file: DbFile) => {
+    if (!file.canvas_id || !active) return;
+    setRescrapeError(null);
+    setRescraping((prev) => new Set(prev).add(file.canvas_id!));
+    try {
+      await invoke("rescrape_file", {
+        subjectId: file.subject_id,
+        subjectCode: active.code,
+        canvasId: file.canvas_id,
+      });
+    } catch (err) {
+      setRescraping((prev) => { const s = new Set(prev); s.delete(file.canvas_id!); return s; });
+      setRescrapeError(String(err));
+    }
+  }, [active]);
 
   function selectSubject(s: Subject) {
     setSelectedId(s.id);
@@ -353,7 +405,18 @@ export default function SubjectsPage() {
                       Downloads ({courseFiles.length})
                     </button>
                     {filesExpanded && courseFiles.map((f) => (
-                      <FileRow key={f.id} icon={Paperclip} label={f.filename} size={fmtSize(f.size_bytes)} active={activeFile?.id === f.id} onClick={() => openFile(f)} dimmed rightIcon={ExternalLink} />
+                      <FileRow
+                        key={f.id}
+                        icon={Paperclip}
+                        label={f.filename}
+                        size={fmtSize(f.size_bytes)}
+                        active={activeFile?.id === f.id}
+                        onClick={() => openFile(f)}
+                        dimmed
+                        rightIcon={ExternalLink}
+                        onRescrape={f.canvas_id != null ? () => rescrapeFile(f) : undefined}
+                        isRescaping={f.canvas_id != null && rescraping.has(f.canvas_id)}
+                      />
                     ))}
                   </div>
                 )}
@@ -400,6 +463,12 @@ export default function SubjectsPage() {
                   </div>
                 )}
               </div>
+
+              {rescrapeError && (
+                <div className="mx-2 mb-2 px-2.5 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-[11px] text-destructive leading-snug">
+                  {rescrapeError}
+                </div>
+              )}
             </div>
 
             {/* Markdown viewer */}
@@ -473,6 +542,8 @@ function FileRow({
   onClick,
   dimmed = false,
   rightIcon: RightIcon,
+  onRescrape,
+  isRescaping = false,
 }: {
   icon: typeof FileText;
   label: string;
@@ -481,12 +552,17 @@ function FileRow({
   onClick: () => void;
   dimmed?: boolean;
   rightIcon?: typeof FileText;
+  onRescrape?: () => void;
+  isRescaping?: boolean;
 }) {
   return (
-    <button
+    <div
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && onClick()}
       className={cn(
-        "w-full text-left px-3 py-2 mx-1 rounded-lg flex items-center gap-2.5 transition-colors",
+        "w-full text-left px-3 py-2 mx-1 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer group",
         active
           ? "bg-surface-raised text-foreground"
           : "text-muted-foreground hover:bg-surface hover:text-foreground",
@@ -497,8 +573,24 @@ function FileRow({
       <Icon size={13} className="shrink-0" />
       <span className="text-xs flex-1 truncate">{label}</span>
       <span className="text-[10px] text-muted-foreground/70">{size}</span>
-      {RightIcon && <RightIcon size={10} className="shrink-0 opacity-50" />}
-    </button>
+      {onRescrape ? (
+        <button
+          title={isRescaping ? "Re-downloading…" : "Re-download file"}
+          disabled={isRescaping}
+          onClick={(e) => { e.stopPropagation(); onRescrape(); }}
+          className={cn(
+            "shrink-0 p-0.5 rounded transition-opacity",
+            isRescaping
+              ? "opacity-60"
+              : "opacity-0 group-hover:opacity-70 hover:!opacity-100 hover:text-foreground",
+          )}
+        >
+          <RefreshCw size={10} className={cn(isRescaping && "animate-spin")} />
+        </button>
+      ) : RightIcon ? (
+        <RightIcon size={10} className="shrink-0 opacity-50" />
+      ) : null}
+    </div>
   );
 }
 

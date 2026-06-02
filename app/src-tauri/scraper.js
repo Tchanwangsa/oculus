@@ -31,11 +31,22 @@
       .map(([k, v]) => k + "=" + encodeURIComponent(v))
       .join("&");
 
+  // Fix UTF-8 bytes misread as Latin-1 (common in pasted Canvas content).
+  // Matches lead byte (C0-F7) + continuation bytes (80-BF) and tries UTF-8 decode.
+  function fixMojibake(str) {
+    return str.replace(/[À-÷][-¿]+/g, (m) => {
+      try {
+        const bytes = Uint8Array.from(m, c => c.charCodeAt(0));
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch { return m; }
+    });
+  }
+
   const postText = (course, sid, path, md) =>
     fetch(BASE + "/scrape?" + q({ course, subject_id: sid, path }), {
       method: "POST",
       headers: { "Content-Type": "text/markdown" },
-      body: md,
+      body: fixMojibake(md),
     }).catch(() => {});
 
   const postBinary = (course, sid, path, canvasId, buf) =>
@@ -320,9 +331,15 @@
     return blockMd(doc.body, 0).replace(/\n{3,}/g, "\n\n").trim();
   }
 
+  // ---- Cancel support -------------------------------------------------------
+  // Rust can set window.__oculus_cancel = true via a subsequent win.eval().
+  // Check between each expensive operation and bail early if set.
+  const isCancelled = () => typeof window.__oculus_cancel !== "undefined" && window.__oculus_cancel === true;
+
   // ---- Phase: home ----------------------------------------------------------
 
   async function scrapeHome(c) {
+    if (isCancelled()) return 0;
     const cr = await fetch(
       "/api/v1/courses/" + c.id +
       "?include[]=syllabus_body&include[]=public_description&include[]=teachers&include[]=term",
@@ -333,10 +350,20 @@
     const term = (course.term && course.term.name) || "";
     const teachers = (course.teachers || []).map((t) => t.display_name).filter(Boolean);
 
+    // Syllabus — save separately regardless of front page content.
+    if (course.syllabus_body) {
+      let head = "# " + name + " — Syllabus\n\n";
+      const meta = [];
+      if (term) meta.push("**Term:** " + term);
+      meta.push("**Code:** " + c.code);
+      if (teachers.length) meta.push("**Staff:** " + teachers.join(", "));
+      head += meta.join("  \n") + "\n\n---\n\n";
+      await postText(c.code, c.id, "syllabus.md", head + await toMdAssets(course.syllabus_body, c));
+    }
+
     let body = "", source = "";
     const r = await fetch("/api/v1/courses/" + c.id + "/front_page", { credentials: "include" });
     if (r.ok) { const j = await r.json(); if (j.body) { body = j.body; source = "Front Page"; } }
-    if (!body && course.syllabus_body) { body = course.syllabus_body; source = "Syllabus"; }
     if (!body && course.public_description) { body = "<p>" + course.public_description + "</p>"; source = "Description"; }
 
     if (!body) return 0; // no real content -> write nothing
@@ -354,12 +381,36 @@
   // ---- Phase: pages (fetched individually via module discovery) -------------
   // UniMelb disables /pages bulk listing (404) â€” pages discovered via scrapeModules.
 
-  async function fetchPage(c, pageUrl, title) {
+  // Extracts Canvas page slugs + file IDs linked within an HTML body.
+  function extractCanvasLinks(html, courseId) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const pages = new Set(), files = new Set();
+    const coursePrefix = "/courses/" + courseId + "/";
+    doc.querySelectorAll("a[href]").forEach((a) => {
+      const href = a.getAttribute("href") || "";
+      // Page links: /courses/{id}/pages/{slug}
+      const pm = href.match(/\/courses\/\d+\/pages\/([^?#/]+)/);
+      if (pm) pages.add(pm[1]);
+      // File links: /courses/{id}/files/{id} or /files/{id}
+      const fm = href.match(/\/files\/(\d+)/);
+      if (fm && href.includes(coursePrefix)) files.add(fm[1]);
+    });
+    return { pages, files };
+  }
+
+  async function fetchPage(c, pageUrl, title, orphanPageQueue, orphanFileQueue) {
+    if (isCancelled()) return null;
     try {
       const r = await fetch("/api/v1/courses/" + c.id + "/pages/" + pageUrl, { credentials: "include" });
       if (!r.ok) return null;
       const full = await r.json();
       if (!full.body) return null;
+      // Collect orphaned links within this page for later scraping.
+      if (orphanPageQueue || orphanFileQueue) {
+        const { pages, files } = extractCanvasLinks(full.body, c.id);
+        pages.forEach((p) => orphanPageQueue && orphanPageQueue.add(p));
+        files.forEach((f) => orphanFileQueue && orphanFileQueue.add(f));
+      }
       const md =
         "# " + (full.title || title || "Untitled") + "\n\n" +
         (full.updated_at ? "_Updated: " + full.updated_at + "_\n\n" : "") +
@@ -454,19 +505,24 @@
   // ---- Phase: modules (driver for pages + files) ----------------------------
 
   async function scrapeModules(c) {
+    if (isCancelled()) return 0;
     const modules = await fetchAll(
       "/api/v1/courses/" + c.id + "/modules?include[]=items&per_page=100"
     );
     let pageCount = 0, fileCount = 0;
     const seenPages = new Set(), seenFiles = new Set();
+    // Queues for orphaned links found inside pages (one level deep).
+    const orphanPages = new Set(), orphanFiles = new Set();
 
     for (const mod of modules) {
+      if (isCancelled()) break;
       const items = mod.items || [];
       const pad = String(mod.position || 0).padStart(2, "0");
       const modSlug = slug(mod.name || "module");
       const tocLines = ["# " + (mod.name || "Module") + "\n"];
 
       for (const item of items) {
+        if (isCancelled()) break;
         const type = item.type;
         const title = item.title || "Untitled";
         const indentStr = "  ".repeat(item.indent || 0);
@@ -479,7 +535,7 @@
           if (!seenPages.has(item.page_url)) {
             seenPages.add(item.page_url);
             await progress({ done: pageCount, total: items.length, course: c.code, phase: "pages", label: title });
-            const saved = await fetchPage(c, item.page_url, title);
+            const saved = await fetchPage(c, item.page_url, title, orphanPages, orphanFiles);
             if (saved) pageCount++;
             tocLines.push(indentStr + "- [" + escapeMd(title) + "](../pages/" + slug(title) + ".md)");
           } else {
@@ -498,6 +554,7 @@
           } else {
             tocLines.push(indentStr + "- " + escapeMd(title) + " _(file)_");
           }
+          seenFiles.add(String(item.content_id));
           continue;
         }
         if (type === "Assignment") {
@@ -520,6 +577,24 @@
 
       await postText(c.code, c.id, "modules/" + pad + "-" + modSlug + ".md", tocLines.join("\n") + "\n");
     }
+
+    // Scrape orphaned pages linked within pages but not in any module.
+    for (const pageUrl of orphanPages) {
+      if (isCancelled()) break;
+      if (seenPages.has(pageUrl)) continue;
+      seenPages.add(pageUrl);
+      await progress({ done: pageCount, total: pageCount + orphanPages.size, course: c.code, phase: "orphans", label: pageUrl });
+      const saved = await fetchPage(c, pageUrl, pageUrl, null, null);
+      if (saved) pageCount++;
+    }
+    // Download orphaned files linked within pages but not in any module.
+    for (const fileId of orphanFiles) {
+      if (isCancelled()) break;
+      if (seenFiles.has(fileId)) continue;
+      seenFiles.add(fileId);
+      await fetchFile(c, fileId, null);
+    }
+
     return pageCount + fileCount;
   }
 
@@ -527,24 +602,29 @@
 
   async function scrapeCourse(c, idx, total) {
     const phase = (name, label = "") => progress({ done: idx, total, course: c.code, phase: name, label });
-    await phase("home");          await scrapeHome(c);
-    await phase("pages");         await scrapePages(c);
-    await phase("assignments");   await scrapeAssignments(c);
-    await phase("announcements"); await scrapeAnnouncements(c);
-    await phase("files");         await scrapeFiles(c);
-    await phase("modules");       await scrapeModules(c);
+    await phase("home");          if (isCancelled()) return; await scrapeHome(c);
+    await phase("announcements"); if (isCancelled()) return; await scrapeAnnouncements(c);
+    await phase("modules");       if (isCancelled()) return; await scrapeModules(c);
+    // scrapePages + scrapeFiles are driven by scrapeModules now; stubs kept for compat.
+    void scrapePages; void scrapeAssignments; void scrapeFiles;
   }
 
   (async () => {
     console.log("[Oculus] scrape start:", SUBJECTS.length, "subjects");
+    window.__oculus_cancel = false;
     let i = 0;
     for (const c of SUBJECTS) {
+      if (isCancelled()) {
+        await postJson("/scrape-done", { count: i, cancelled: true });
+        console.log("[Oculus] cancelled after", i, "subjects");
+        return;
+      }
       try { await scrapeCourse(c, i, SUBJECTS.length); }
       catch (e) { await logMsg("error", c.code, String(e)); console.error("[Oculus]", c.code, e); }
       i++;
       await progress({ done: i, total: SUBJECTS.length, course: c.code, phase: "complete", label: "" });
     }
-    await postJson("/scrape-done", { count: i });
+    await postJson("/scrape-done", { count: i, cancelled: false });
     console.log("[Oculus] scrape complete:", i);
   })();
 })();

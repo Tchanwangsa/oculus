@@ -85,6 +85,10 @@ export default function SyncPage() {
   const [scraping, setScraping]             = useState(false);
   const [progress, setProgress]             = useState<{ done: number; total: number; course?: string; phase?: string } | null>(null);
   const runIdRef                            = useRef<number | null>(null);
+  const scrapingRef                         = useRef(false);
+
+  // Keep ref in sync so event listeners that close over [] deps can read current value.
+  useEffect(() => { scrapingRef.current = scraping; }, [scraping]);
 
   // ── Boot ──────────────────────────────────────────────────────────────────
 
@@ -127,6 +131,11 @@ export default function SyncPage() {
       listen("canvas-auth-expired", () => {
         setAuthStatus("disconnected");
         setSteps(PIPELINE_STEPS);
+        if (scrapingRef.current) {
+          setScraping(false);
+          setProgress(null);
+          setSubjectsError("Canvas session expired during sync. Reconnect and try again.");
+        }
       }),
     ];
     return () => { subs.forEach((p) => p.then((f) => f())); };
@@ -182,7 +191,7 @@ export default function SyncPage() {
         const { level, message } = e.payload;
         addLog(message, level === "error" ? "error" : level === "warning" ? "warning" : "info").catch(() => {});
       }),
-      listen<{ count: number }>("scrape-complete", async (e) => {
+      listen<{ count: number; cancelled?: boolean }>("scrape-complete", async (e) => {
         const runId = runIdRef.current;
         if (runId != null) {
           await finishSyncRun(runId, "completed", e.payload.count, e.payload.count);
@@ -233,9 +242,17 @@ export default function SyncPage() {
     }
   };
 
+  const handleCancel = async () => {
+    try { await invoke("cancel_scrape"); } catch { /* ignore */ }
+  };
+
   const handleSyncClick = async () => {
     if (selectedIds.size === 0 || subjects.length === 0) {
       setShowModal(true);
+      return;
+    }
+    if (authStatus !== "connected") {
+      setSubjectsError("Not connected to Canvas. Connect first.");
       return;
     }
     const sel = subjects
@@ -341,6 +358,8 @@ export default function SyncPage() {
                 size="sm"
                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
                 onClick={handleDisconnect}
+                disabled={scraping}
+                title={scraping ? "Cannot disconnect while syncing — cancel first" : undefined}
               >
                 Disconnect
               </Button>
@@ -384,15 +403,28 @@ export default function SyncPage() {
               )}
             </Button>
 
-            <Button
-              variant="outline"
-              size="icon-sm"
-              title="Manage subjects"
-              onClick={() => setShowModal(true)}
-              className="shrink-0 w-9 h-9"
-            >
-              <BookOpen size={14} />
-            </Button>
+            {scraping ? (
+              <Button
+                variant="outline"
+                size="icon-sm"
+                title="Cancel sync"
+                onClick={handleCancel}
+                className="shrink-0 w-9 h-9 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+              >
+                <XCircle size={14} />
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="icon-sm"
+                title="Manage subjects"
+                onClick={() => setShowModal(true)}
+                className="shrink-0 w-9 h-9"
+                disabled={scraping}
+              >
+                <BookOpen size={14} />
+              </Button>
+            )}
 
             <Button
               variant="ghost"
@@ -415,6 +447,14 @@ export default function SyncPage() {
                 fetch subjects first
               </button>
             </p>
+          )}
+
+          {/* Inline error (auth expiry, pre-flight failure, etc.) */}
+          {subjectsError && !showModal && (
+            <div className="mt-3 px-3 py-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive flex items-start gap-2">
+              <AlertCircle size={13} className="shrink-0 mt-0.5" />
+              <span>{subjectsError}</span>
+            </div>
           )}
 
           {/* Progress */}
