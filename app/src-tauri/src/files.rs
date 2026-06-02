@@ -54,6 +54,7 @@ pub fn parse_query(url: &str) -> std::collections::HashMap<String, String> {
     }
 }
 
+/// Live cookies from the login WebView (only available while it's open).
 pub fn canvas_cookie_header(app: &AppHandle) -> String {
     let Some(win) = app.get_webview_window("canvas-auth") else {
         return String::new();
@@ -69,6 +70,17 @@ pub fn canvas_cookie_header(app: &AppHandle) -> String {
             String::new()
         }
     }
+}
+
+/// Cookie to use for server-side Canvas requests. Prefers the persisted
+/// snapshot (survives restart); falls back to the live login WebView if it
+/// happens to be open and nothing was saved yet.
+pub fn proxy_cookie(app: &AppHandle) -> String {
+    let saved = crate::auth::saved_cookie_header(app);
+    if !saved.is_empty() {
+        return saved;
+    }
+    canvas_cookie_header(app)
 }
 
 pub fn category_from_path(path: &str) -> &'static str {

@@ -15,22 +15,106 @@ pub fn auth_flag_path(app: &AppHandle) -> std::path::PathBuf {
     canvas_session_dir(app).join("authenticated")
 }
 
-pub fn is_authenticated_url(url: &url::Url) -> bool {
-    url.host_str() == Some("canvas.lms.unimelb.edu.au")
-        && {
-            let p = url.path();
-            p == "/"
-                || p.starts_with("/dashboard")
-                || p.starts_with("/courses")
-                || p.starts_with("/calendar")
-                || p.starts_with("/inbox")
-        }
+/// Persisted Canvas session cookie header. WebView2 keeps the real session
+/// cookie in RAM only (it's HttpOnly + session-scoped, so Chromium never
+/// writes it to disk and it can't be injected back into a WebView). We snapshot
+/// it here while the login window is alive, then replay it ourselves via ureq
+/// for every Canvas request — that's what survives a restart.
+fn cookie_file_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("no app data dir")
+        .join("canvas-session.cookie")
 }
 
-pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: bool) {
+pub fn is_authenticated_url(url: &url::Url) -> bool {
+    url.host_str() == Some("canvas.lms.unimelb.edu.au") && {
+        let p = url.path();
+        let q = url.query().unwrap_or("");
+        // Exclude the transient /?login_success=1 hop — session cookie isn't
+        // set yet and Canvas hasn't JS-redirected to the real dashboard.
+        (p == "/" && !q.contains("login_success"))
+            || p.starts_with("/dashboard")
+            || p.starts_with("/courses")
+            || p.starts_with("/calendar")
+            || p.starts_with("/inbox")
+    }
+}
+
+// ── Cookie snapshot / replay ────────────────────────────────────────────────
+
+/// Reads every cookie from the live login WebView (includes HttpOnly via the
+/// native store) and writes the joined `name=value; ...` header to disk.
+pub fn save_session_cookie(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("canvas-auth") else {
+        return;
+    };
+    match win.cookies() {
+        Ok(cookies) => {
+            let header = cookies
+                .iter()
+                .map(|c| format!("{}={}", c.name(), c.value()))
+                .collect::<Vec<_>>()
+                .join("; ");
+            if header.is_empty() {
+                eprintln!("[oculus] save_session_cookie: no cookies to save yet");
+                return;
+            }
+            let path = cookie_file_path(app);
+            match std::fs::write(&path, &header) {
+                Ok(_) => eprintln!("[oculus] saved session cookie ({} bytes)", header.len()),
+                Err(e) => eprintln!("[oculus] save_session_cookie write failed: {e}"),
+            }
+        }
+        Err(e) => eprintln!("[oculus] save_session_cookie: cookies() failed: {e}"),
+    }
+}
+
+/// The persisted cookie header, or empty if none saved.
+pub fn saved_cookie_header(app: &AppHandle) -> String {
+    std::fs::read_to_string(cookie_file_path(app)).unwrap_or_default()
+}
+
+/// Pings the Canvas API with the saved cookie. True iff the server still
+/// accepts it — no WebView needed.
+pub fn saved_cookie_valid(app: &AppHandle) -> bool {
+    let cookie = saved_cookie_header(app);
+    if cookie.is_empty() {
+        return false;
+    }
+    match ureq::get("https://canvas.lms.unimelb.edu.au/api/v1/users/self")
+        .set("Cookie", &cookie)
+        .call()
+    {
+        Ok(resp) => {
+            let ok = resp.status() == 200;
+            eprintln!(
+                "[oculus] saved cookie check: HTTP {} → {}",
+                resp.status(),
+                if ok { "valid" } else { "expired" }
+            );
+            ok
+        }
+        Err(ureq::Error::Status(code, _)) => {
+            eprintln!("[oculus] saved cookie check: HTTP {code} → expired");
+            false
+        }
+        Err(e) => {
+            eprintln!("[oculus] saved cookie check failed: {e}");
+            false
+        }
+    }
+}
+
+// ── Login window (interactive only) ──────────────────────────────────────────
+
+/// Opens the visible Canvas SAML login window. On success it writes the auth
+/// flag, snapshots the session cookie, then hides itself. This is the ONLY
+/// path that needs a WebView — all data fetching goes through the cookie proxy.
+pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
     if let Some(existing) = app.get_webview_window("canvas-auth") {
         existing.close().ok();
-        std::thread::sleep(std::time::Duration::from_millis(120));
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
     let url = "https://canvas.lms.unimelb.edu.au/login/saml";
@@ -53,9 +137,10 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: b
     .title("Sign in to Canvas — Oculus")
     .inner_size(900.0, 700.0)
     .center()
-    .visible(!silent)
+    .visible(true)
     .data_directory(session_dir)
     .on_navigation(move |url| {
+        eprintln!("[oculus] nav: {url}");
         if is_authenticated_url(&url) {
             let was_resolved = resolved_nav.swap(true, Ordering::SeqCst);
             if !was_resolved {
@@ -63,14 +148,18 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: b
                 std::fs::create_dir_all(flag_path.parent().unwrap()).ok();
                 std::fs::write(&flag_path, b"1").ok();
 
-                if let Some(w) = app_nav.get_webview_window("canvas-auth") {
-                    w.hide().ok();
-                }
-                app_nav.emit("canvas-auth-success", "ok").ok();
-                eprintln!(
-                    "[oculus] auth success ({})",
-                    if silent { "silent" } else { "interactive" }
-                );
+                // Give Canvas a moment to finish setting the session cookie
+                // before we snapshot it, then hide the window.
+                let app_delayed = app_nav.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    save_session_cookie(&app_delayed);
+                    app_delayed.emit("canvas-auth-success", "ok").ok();
+                    if let Some(w) = app_delayed.get_webview_window("canvas-auth") {
+                        w.hide().ok();
+                    }
+                    eprintln!("[oculus] auth success");
+                });
             }
         }
         true
@@ -85,48 +174,24 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: b
         }
     };
 
-    if silent {
-        // Silent restore: give the SSO redirect chain time to finish using the
-        // persisted IdP cookies in `data_directory`. If it can't auto-complete
-        // (genuine expiry, or the IdP wants an MFA / "stay signed in?" tap), do
-        // NOT wipe anything — just reveal the window so the user finishes
-        // interactively (usually one tap, not a full re-login). Cookies are
-        // only ever cleared by explicit Disconnect. Wiping here was the bug
-        // that made auth "never persist": one timeout poisoned the session.
-        let app_to = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(15));
-            if !resolved.load(Ordering::SeqCst) {
-                eprintln!("[oculus] silent restore didn't auto-complete — revealing window for interactive SSO (cookies kept)");
-                if let Some(w) = app_to.get_webview_window("canvas-auth") {
-                    w.show().ok();
-                    w.set_focus().ok();
-                }
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if !*auth_flag_win.lock().unwrap() {
+                app_win.emit("canvas-auth-cancelled", "cancelled").ok();
             }
-        });
-    } else {
-        win.on_window_event(move |event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if !*auth_flag_win.lock().unwrap() {
-                    app_win.emit("canvas-auth-cancelled", "cancelled").ok();
-                }
-            }
-        });
-    }
+        }
+    });
 }
+
+// ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub fn get_auth_status(app: AppHandle, state: tauri::State<AuthState>) -> bool {
-    let flag = auth_flag_path(&app);
-    eprintln!("[oculus] get_auth_status — flag path: {}", flag.display());
-    let file_says_auth = flag.exists();
+    let file_says_auth = auth_flag_path(&app).exists();
     let mem_says_auth = *state.0.lock().unwrap();
-    eprintln!("[oculus] get_auth_status — file={file_says_auth} mem={mem_says_auth}");
-
     if file_says_auth && !mem_says_auth {
         *state.0.lock().unwrap() = true;
     }
-
     file_says_auth || mem_says_auth
 }
 
@@ -144,7 +209,7 @@ pub async fn launch_canvas_auth(
     state: tauri::State<'_, AuthState>,
 ) -> Result<(), String> {
     let auth_flag = Arc::clone(&state.0);
-    open_canvas_window(app, auth_flag, false);
+    open_canvas_window(app, auth_flag);
     Ok(())
 }
 
@@ -162,6 +227,10 @@ pub async fn disconnect_canvas(
     let session_dir = canvas_session_dir(&app);
     if session_dir.exists() {
         std::fs::remove_dir_all(&session_dir).map_err(|e| e.to_string())?;
+    }
+    let cookie = cookie_file_path(&app);
+    if cookie.exists() {
+        std::fs::remove_file(&cookie).map_err(|e| e.to_string())?;
     }
 
     Ok(())

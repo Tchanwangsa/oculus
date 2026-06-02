@@ -4,11 +4,12 @@ mod files;
 mod ipc;
 mod scrape;
 mod subjects;
+mod worker;
 
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
-use auth::{auth_flag_path, open_canvas_window, AuthState};
+use auth::{auth_flag_path, saved_cookie_valid, AuthState};
 use ipc::IpcPort;
 use subjects::SubjectsState;
 
@@ -22,21 +23,35 @@ pub fn run() {
             let port = ipc::start_ipc_server(app.handle().clone());
             app.manage(IpcPort(port));
 
-            // ── Silent auth restore on startup ─────────────────────────
+            // ── Hidden worker WebView (hosts scraper/subjects JS) ───────
+            worker::ensure_worker_window(app.handle(), port);
+
+            // ── Session restore on startup ──────────────────────────────
+            // No WebView dance: we replay the persisted session cookie via a
+            // server-side ureq ping. Valid → connected instantly. Invalid →
+            // drop the dead cookie + flag (keep the SSO profile so re-login is
+            // a tap, not a full sign-in) and tell the UI to reconnect.
             let app_handle = app.handle().clone();
             let flag = auth_flag_path(&app_handle);
 
             if flag.exists() {
-                eprintln!(
-                    "[oculus] auth flag found at {} — restoring session",
-                    flag.display()
-                );
+                eprintln!("[oculus] auth flag found — checking persisted cookie");
                 let auth_state = app.state::<AuthState>();
+                // Optimistic until the async check below corrects it.
                 *auth_state.0.lock().unwrap() = true;
-                let auth_flag = Arc::clone(&auth_state.0);
+                let mem = Arc::clone(&auth_state.0);
 
                 std::thread::spawn(move || {
-                    open_canvas_window(app_handle, auth_flag, true);
+                    if saved_cookie_valid(&app_handle) {
+                        eprintln!("[oculus] persisted session valid");
+                        *mem.lock().unwrap() = true;
+                        app_handle.emit("canvas-auth-success", "ok").ok();
+                    } else {
+                        eprintln!("[oculus] persisted session expired — reset to disconnected");
+                        std::fs::remove_file(auth_flag_path(&app_handle)).ok();
+                        *mem.lock().unwrap() = false;
+                        app_handle.emit("canvas-auth-expired", "expired").ok();
+                    }
                 });
             } else {
                 eprintln!("[oculus] no auth flag — fresh session");

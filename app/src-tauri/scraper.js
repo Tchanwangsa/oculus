@@ -19,6 +19,18 @@
   const PORT = __PORT__;
   const SUBJECTS = __SUBJECTS__;
   const BASE = "http://127.0.0.1:" + PORT;
+  const CANVAS_ORIGIN = "https://canvas.lms.unimelb.edu.au";
+
+  // Canvas fetches go through the Rust cookie proxy. This worker WebView is NOT
+  // logged in (it loads a blank local page); Rust replays the persisted session
+  // cookie server-side. Accepts a relative path or an absolute Canvas URL (the
+  // latter comes from Link-header pagination). The proxy forwards status, body
+  // and the Link header, so callers use r.ok / r.status / r.headers.get("Link")
+  // exactly as before.
+  const cfetch = (p) => {
+    const abs = /^https?:\/\//.test(p) ? p : CANVAS_ORIGIN + p;
+    return fetch(BASE + "/canvas?url=" + encodeURIComponent(abs));
+  };
 
   // PDF-only file policy for now (user decision). Expand later.
   const ALLOWED_FILE_TYPES = ["application/pdf"];
@@ -72,7 +84,7 @@
     let out = [];
     let next = url;
     while (next) {
-      const r = await fetch(next, { credentials: "include" });
+      const r = await cfetch(next);
       if (!r.ok) {
         if (r.status === 403 || r.status === 404) break; // locked / absent -- skip
         throw new Error("API " + r.status + " " + next);
@@ -293,7 +305,7 @@
         // login HTML page). The /public_url endpoint returns a SIGNED url that needs no
         // auth -- exactly what a cookieless server-side fetch needs.
         console.log("[Oculus] file API:", apiEp);
-        const infoR = await fetch(apiEp, { credentials: "include" });
+        const infoR = await cfetch(apiEp);
         console.log("[Oculus] file API status:", infoR.status);
         if (!infoR.ok) continue;
         const info = await infoR.json();
@@ -301,7 +313,7 @@
         const ext = IMG_EXT[ct] || "png";
         const fid = dataId || info.id || strHash(apiEp);
 
-        const pubR = await fetch(apiEp + "/public_url", { credentials: "include" });
+        const pubR = await cfetch(apiEp + "/public_url");
         const pub = pubR.ok ? await pubR.json() : {};
         const cdnUrl = pub.public_url || info.url;
         console.log("[Oculus] public_url status:", pubR.status, "got url:", !!pub.public_url);
@@ -340,10 +352,9 @@
 
   async function scrapeHome(c) {
     if (isCancelled()) return 0;
-    const cr = await fetch(
+    const cr = await cfetch(
       "/api/v1/courses/" + c.id +
-      "?include[]=syllabus_body&include[]=public_description&include[]=teachers&include[]=term",
-      { credentials: "include" }
+      "?include[]=syllabus_body&include[]=public_description&include[]=teachers&include[]=term"
     );
     const course = cr.ok ? await cr.json() : {};
     const name = course.name || c.code;
@@ -362,7 +373,7 @@
     }
 
     let body = "", source = "";
-    const r = await fetch("/api/v1/courses/" + c.id + "/front_page", { credentials: "include" });
+    const r = await cfetch("/api/v1/courses/" + c.id + "/front_page");
     if (r.ok) { const j = await r.json(); if (j.body) { body = j.body; source = "Front Page"; } }
     if (!body && course.public_description) { body = "<p>" + course.public_description + "</p>"; source = "Description"; }
 
@@ -401,7 +412,7 @@
   async function fetchPage(c, pageUrl, title, orphanPageQueue, orphanFileQueue) {
     if (isCancelled()) return null;
     try {
-      const r = await fetch("/api/v1/courses/" + c.id + "/pages/" + pageUrl, { credentials: "include" });
+      const r = await cfetch("/api/v1/courses/" + c.id + "/pages/" + pageUrl);
       if (!r.ok) return null;
       const full = await r.json();
       if (!full.body) return null;
@@ -436,7 +447,7 @@
 
   async function scrapeAnnouncements(c) {
     const list = await fetchAll(
-      "/api/v1/courses/" + c.id +
+      CANVAS_ORIGIN + "/api/v1/courses/" + c.id +
       "/discussion_topics?only_announcements=true&per_page=100&include[]=author"
     );
     let n = 0;
@@ -474,14 +485,14 @@
 
   async function fetchFile(c, fileId, displayName) {
     try {
-      const infoR = await fetch("/api/v1/files/" + fileId, { credentials: "include" });
+      const infoR = await cfetch("/api/v1/files/" + fileId);
       if (!infoR.ok) return null;
       const info = await infoR.json();
       const ct = ((info["content-type"] || info.content_type || "")).split(";")[0].trim();
       if (!DOWNLOADABLE_TYPES.has(ct)) return null;
       if (info.size > MAX_FILE_BYTES) return null;
 
-      const pubR = await fetch("/api/v1/files/" + fileId + "/public_url", { credentials: "include" });
+      const pubR = await cfetch("/api/v1/files/" + fileId + "/public_url");
       const pub = pubR.ok ? await pubR.json() : {};
       const dlUrl = pub.public_url || info.url;
       if (!dlUrl) return null;

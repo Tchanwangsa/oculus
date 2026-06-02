@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "canvas-auth",
-  "description": "Minimal IPC capability for Canvas auth WebView — allows data callbacks to Rust",
-  "windows": ["canvas-auth"],
+  "description": "Minimal IPC capability for Canvas auth + worker WebViews — allows data callbacks to Rust",
+  "windows": ["canvas-auth", "canvas-worker"],
   "permissions": [
     "core:default"
   ]

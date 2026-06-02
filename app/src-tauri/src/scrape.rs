@@ -2,8 +2,9 @@ use std::io::Read as _;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::auth::{auth_flag_path, AuthState};
-use crate::files::{canvas_cookie_header, write_course_bytes};
+use crate::files::{proxy_cookie, write_course_bytes};
 use crate::ipc::IpcPort;
+use crate::worker::{ensure_worker_window, WORKER_LABEL};
 
 #[derive(serde::Deserialize)]
 pub struct ScrapeSubject {
@@ -15,7 +16,7 @@ const SCRAPER_JS: &str = include_str!("../scraper.js");
 
 #[tauri::command]
 pub fn cancel_scrape(app: AppHandle) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window("canvas-auth") {
+    if let Some(win) = app.get_webview_window(WORKER_LABEL) {
         win.eval("window.__oculus_cancel = true;")
             .map_err(|e| e.to_string())?;
         eprintln!("[oculus] cancel_scrape: signalled");
@@ -30,15 +31,6 @@ pub async fn scrape_content(
     port: tauri::State<'_, IpcPort>,
     auth: tauri::State<'_, AuthState>,
 ) -> Result<(), String> {
-    let win = match app.get_webview_window("canvas-auth") {
-        Some(w) => w,
-        None => {
-            *auth.0.lock().unwrap() = false;
-            app.emit("canvas-auth-expired", "window-missing").ok();
-            return Err("Canvas session not ready. Click Connect to Canvas.".to_string());
-        }
-    };
-
     if subjects.is_empty() {
         return Err("No subjects selected.".to_string());
     }
@@ -48,6 +40,13 @@ pub async fn scrape_content(
         app.emit("canvas-auth-expired", "not-authenticated").ok();
         return Err("Not authenticated. Connect to Canvas first.".to_string());
     }
+
+    // Scraper JS runs in the hidden worker WebView; all Canvas fetches go
+    // through the cookie proxy, so no logged-in WebView is required.
+    ensure_worker_window(&app, port.0);
+    let win = app
+        .get_webview_window(WORKER_LABEL)
+        .ok_or_else(|| "Worker window unavailable".to_string())?;
 
     let subjects_json = serde_json::to_string(
         &subjects
@@ -86,7 +85,7 @@ pub fn rescrape_file(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ];
 
-    let cookie = canvas_cookie_header(&app);
+    let cookie = proxy_cookie(&app);
     if cookie.is_empty() {
         return Err("Not authenticated — connect to Canvas first.".to_string());
     }

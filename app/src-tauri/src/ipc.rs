@@ -1,10 +1,8 @@
 use std::io::Read;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::cors::cors_response;
-use crate::files::{
-    canvas_cookie_header, category_from_path, parse_query, write_course_bytes,
-};
+use crate::cors::{cors_header, cors_response, with_cors};
+use crate::files::{category_from_path, parse_query, proxy_cookie, write_course_bytes};
 use crate::subjects::SubjectsState;
 
 pub struct IpcPort(pub u16);
@@ -30,6 +28,11 @@ pub fn start_ipc_server(app: AppHandle) -> u16 {
 
             if method == tiny_http::Method::Options {
                 let _ = request.respond(cors_response(200));
+                continue;
+            }
+
+            if method == tiny_http::Method::Get {
+                handle_get(&url, &handle, request);
                 continue;
             }
 
@@ -61,6 +64,84 @@ fn route_request(url: &str, bytes: &[u8], handle: &AppHandle) {
     else if url.starts_with("/scrape-binary")    { handle_scrape_artifact(url, bytes, handle, true); }
     else if url.starts_with("/scrape")           { handle_scrape_artifact(url, bytes, handle, false); }
     else if url.starts_with("/error")            { handle_error(bytes, handle); }
+}
+
+// ── GET routes (worker page + Canvas cookie proxy) ──────────────────────────
+
+fn handle_get(url: &str, handle: &AppHandle, request: tiny_http::Request) {
+    if url.starts_with("/worker") {
+        // Blank host page for the hidden worker WebView. Same-origin as this
+        // server, so the scraper's fetches to /canvas and /scrape need no CORS.
+        let html = "<!doctype html><html><head><meta charset=\"utf-8\">\
+                    <title>oculus worker</title></head><body></body></html>";
+        let resp = with_cors(
+            tiny_http::Response::from_string(html)
+                .with_header(cors_header(b"Content-Type", b"text/html; charset=utf-8")),
+        );
+        let _ = request.respond(resp);
+    } else if url.starts_with("/canvas") {
+        handle_canvas_proxy(url, handle, request);
+    } else {
+        let _ = request.respond(cors_response(404));
+    }
+}
+
+/// Reverse-proxy a Canvas request, attaching the persisted session cookie.
+/// `GET /canvas?url=<absolute canvas url>` → forwards status, body, and the
+/// `Link` header (for the scraper's pagination). This is what lets data
+/// fetching survive a restart: the WebView is logged out, but Rust still has
+/// the cookie.
+fn handle_canvas_proxy(url: &str, handle: &AppHandle, request: tiny_http::Request) {
+    let qp = parse_query(url);
+    let target = match qp.get("url") {
+        Some(u) if !u.is_empty() => u.clone(),
+        _ => {
+            let _ = request.respond(cors_response(400));
+            return;
+        }
+    };
+    // Only ever proxy to Canvas — never an arbitrary URL.
+    if !target.starts_with("https://canvas.lms.unimelb.edu.au/") {
+        eprintln!("[oculus] canvas proxy: refused non-Canvas url {target}");
+        let _ = request.respond(cors_response(403));
+        return;
+    }
+
+    let cookie = proxy_cookie(handle);
+    let mut req = ureq::get(&target);
+    if !cookie.is_empty() {
+        req = req.set("Cookie", &cookie);
+    }
+
+    match req.call() {
+        Ok(resp) => respond_proxy(request, resp),
+        // Canvas 4xx/5xx still carry a body — forward it so the scraper can
+        // branch on r.status (e.g. skip 403/404).
+        Err(ureq::Error::Status(_, resp)) => respond_proxy(request, resp),
+        Err(e) => {
+            eprintln!("[oculus] canvas proxy fetch failed: {e}");
+            let _ = request.respond(cors_response(502));
+        }
+    }
+}
+
+fn respond_proxy(request: tiny_http::Request, resp: ureq::Response) {
+    let status = resp.status();
+    let ct = resp
+        .header("content-type")
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let link = resp.header("Link").map(|s| s.to_string());
+
+    let mut body: Vec<u8> = Vec::new();
+    let _ = resp.into_reader().read_to_end(&mut body);
+
+    let mut out = with_cors(tiny_http::Response::from_data(body).with_status_code(status))
+        .with_header(cors_header(b"Content-Type", ct.as_bytes()));
+    if let Some(l) = link {
+        out = out.with_header(cors_header(b"Link", l.as_bytes()));
+    }
+    let _ = request.respond(out);
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -97,7 +178,7 @@ fn handle_image_proxy(url: &str, bytes: &[u8], handle: &AppHandle) {
         return;
     }
 
-    let cookie = canvas_cookie_header(handle);
+    let cookie = proxy_cookie(handle);
     let mut req = ureq::get(&cdn);
     if !cookie.is_empty() {
         req = req.set("Cookie", &cookie);
