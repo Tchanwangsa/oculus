@@ -6,9 +6,9 @@ mod scrape;
 mod subjects;
 
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
-use auth::{auth_flag_path, open_canvas_window, AuthState};
+use auth::{auth_flag_path, check_cached_session, AuthState};
 use ipc::IpcPort;
 use subjects::SubjectsState;
 
@@ -22,22 +22,26 @@ pub fn run() {
             let port = ipc::start_ipc_server(app.handle().clone());
             app.manage(IpcPort(port));
 
-            // ── Silent auth restore on startup ─────────────────────────
+            // ── Session restore on startup ────────────────────────────
+            // Checks cached cookies against Canvas API directly with
+            // ureq — no hidden WebView, no SSO redirect chain, no timeout.
             let app_handle = app.handle().clone();
             let flag = auth_flag_path(&app_handle);
 
             if flag.exists() {
-                eprintln!(
-                    "[oculus] auth flag found at {} — restoring session",
-                    flag.display()
-                );
+                eprintln!("[oculus] auth flag found — checking cached cookies");
                 let auth_state = app.state::<AuthState>();
-                *auth_state.0.lock().unwrap() = true;
-                let auth_flag = Arc::clone(&auth_state.0);
 
-                std::thread::spawn(move || {
-                    open_canvas_window(app_handle, auth_flag, true);
-                });
+                if check_cached_session(&app_handle) {
+                    eprintln!("[oculus] cached session valid");
+                    *auth_state.0.lock().unwrap() = true;
+                    app_handle.emit("canvas-auth-success", "ok").ok();
+                } else {
+                    eprintln!("[oculus] cached session expired");
+                    std::fs::remove_file(&flag).ok();
+                    *auth_state.0.lock().unwrap() = false;
+                    app_handle.emit("canvas-auth-expired", "expired").ok();
+                }
             } else {
                 eprintln!("[oculus] no auth flag — fresh session");
             }
