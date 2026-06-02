@@ -93,6 +93,8 @@ pub fn category_from_path(path: &str) -> &'static str {
     }
 }
 
+// ── Commands ──────────────────────────────────────────────────────────────────
+
 #[tauri::command]
 pub fn read_course_file(app: AppHandle, relative_path: String) -> Result<String, String> {
     let path = app

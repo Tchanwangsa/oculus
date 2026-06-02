@@ -234,3 +234,12 @@ export async function getFilesForSubject(subjectId: number): Promise<DbFile[]> {
     [subjectId]
   );
 }
+
+export async function clearAllFiles(): Promise<number> {
+  const db = await getDb();
+  await db.execute("DELETE FROM files");
+  await db.execute("UPDATE subjects SET last_synced_at = NULL");
+  await db.execute("VACUUM");
+  const rows = await db.select<{ cnt: number }[]>("SELECT COUNT(*) AS cnt FROM files");
+  return rows[0]?.cnt ?? 0;
+}
