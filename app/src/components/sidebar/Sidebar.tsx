@@ -95,12 +95,19 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             collapsed={collapsed}
           />
         ))}
-        <NavItem
-          to="/settings"
-          icon={Settings}
-          label="Settings"
-          collapsed={collapsed}
-        />
+        <button
+          title={collapsed ? "Settings" : undefined}
+          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground opacity-50 cursor-not-allowed relative group w-full"
+          disabled
+        >
+          <Settings size={18} className="shrink-0" />
+          {!collapsed && <span className="truncate">Settings</span>}
+          {collapsed && (
+            <div className="absolute left-full ml-3 px-2.5 py-1.5 rounded-md bg-foreground text-background text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-md">
+              Settings (coming soon)
+            </div>
+          )}
+        </button>
       </div>
 
       {/* Collapse toggle */}

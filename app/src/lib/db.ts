@@ -40,6 +40,10 @@ export interface DbFile {
   relative_path: string;
   file_type: string;
   size_bytes: number | null;
+  category: string | null;
+  canvas_id: number | null;
+  source_url: string | null;
+  modified_at: string | null;
   scraped_at: string;
 }
 
@@ -143,6 +147,14 @@ export async function getRecentSyncRuns(limit = 10): Promise<SyncRun[]> {
   );
 }
 
+export async function getLastCompletedSyncRun(): Promise<SyncRun | null> {
+  const db = await getDb();
+  const rows = await db.select<SyncRun[]>(
+    `SELECT * FROM sync_runs WHERE status = 'completed' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1`
+  );
+  return rows[0] ?? null;
+}
+
 // ── Sync log ─────────────────────────────────────────────────────────────────
 
 export async function addLog(
@@ -193,18 +205,25 @@ export async function upsertFile(
   filename: string,
   relativePath: string,
   fileType: string,
-  sizeBytes?: number
+  sizeBytes?: number,
+  category?: string,
+  canvasId?: number,
+  sourceUrl?: string
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes, category, canvas_id, source_url)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT(subject_id, relative_path) DO UPDATE SET
        filename   = excluded.filename,
        file_type  = excluded.file_type,
        size_bytes = excluded.size_bytes,
+       category   = excluded.category,
+       canvas_id  = excluded.canvas_id,
+       source_url = excluded.source_url,
        scraped_at = datetime('now')`,
-    [subjectId, filename, relativePath, fileType, sizeBytes ?? null]
+    [subjectId, filename, relativePath, fileType, sizeBytes ?? null,
+     category ?? null, canvasId ?? null, sourceUrl ?? null]
   );
 }
 

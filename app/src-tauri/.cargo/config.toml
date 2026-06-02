@@ -1,0 +1,21 @@
+[build]
+# sccache caches compiled crates across builds — massive speedup after first compile.
+# Install: cargo install sccache  (one-time, ~2 min)
+rustc-wrapper = "sccache"
+
+[target.x86_64-pc-windows-msvc]
+# lld is the LLVM linker, much faster than the default MSVC link.exe on large crates.
+linker = "rust-lld"
+rustflags = ["-C", "link-arg=/DEBUG:NONE"]
+
+[profile.dev]
+# Minimal debug info in dev — faster linking, smaller binary, still debuggable.
+debug = 1
+# Don't optimise deps at all in dev builds.
+opt-level = 0
+
+[profile.dev.package."*"]
+# Compile all dependencies with opt-level 3 once — cached after first build.
+# Makes runtime fast without slowing incremental rebuilds of your own code.
+opt-level = 3
+debug = false

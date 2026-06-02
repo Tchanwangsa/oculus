@@ -1,4 +1,4 @@
-use std::io::Read as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -28,27 +28,47 @@ fn cors_response(status: u16) -> tiny_http::Response<std::io::Empty> {
         .with_header(cors_header(b"Access-Control-Allow-Headers", b"Content-Type"))
 }
 
+/// True only when the URL is a Canvas page that requires an authenticated session.
+/// `/login*` is NOT included — it's a transient hop in the SSO redirect chain.
+fn is_authenticated_url(url: &url::Url) -> bool {
+    url.host_str() == Some("canvas.lms.unimelb.edu.au")
+        && {
+            let p = url.path();
+            p == "/"
+                || p.starts_with("/dashboard")
+                || p.starts_with("/courses")
+                || p.starts_with("/calendar")
+                || p.starts_with("/inbox")
+        }
+}
+
 /// Shared window-creation logic used by both startup restore and user-initiated auth.
-/// `silent` = true → start hidden, navigate to canvas home (relies on existing cookies).
-/// `silent` = false → start visible, navigate to SAML login.
+///
+/// `silent` = true  → hidden window, navigate to /login/saml to trigger SSO.
+///                     If the SSO session cookie is still valid the IdP auto-redirects
+///                     back to the dashboard (authenticated). If not, the window sits on
+///                     the SSO login form. A timeout thread decides success vs expiry —
+///                     we never react to a transient `/login` navigation.
+/// `silent` = false → visible window for interactive login.
 fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: bool) {
-    // Close any existing window first
     if let Some(existing) = app.get_webview_window("canvas-auth") {
         existing.close().ok();
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(120));
     }
 
-    let url = if silent {
-        "https://canvas.lms.unimelb.edu.au/"
-    } else {
-        "https://canvas.lms.unimelb.edu.au/login/saml"
-    };
+    // Both modes start at the SSO entry point so existing cookies get a chance to auth.
+    let url = "https://canvas.lms.unimelb.edu.au/login/saml";
 
     let session_dir   = canvas_session_dir(&app);
-    let auth_flag_win = Arc::clone(&auth_flag);
+    let flag_path     = auth_flag_path(&app);
     let app_nav       = app.clone();
     let app_win       = app.clone();
-    let flag_path     = auth_flag_path(&app);
+    let auth_flag_nav = Arc::clone(&auth_flag);
+    let auth_flag_win = Arc::clone(&auth_flag);
+
+    // Per-attempt resolution flag — distinguishes "this restore succeeded" from global state.
+    let resolved = Arc::new(AtomicBool::new(false));
+    let resolved_nav = Arc::clone(&resolved);
 
     let result = WebviewWindowBuilder::new(
         &app,
@@ -61,27 +81,11 @@ fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: bool)
     .visible(!silent)
     .data_directory(session_dir)
     .on_navigation(move |url| {
-        let host_ok = url.host_str() == Some("canvas.lms.unimelb.edu.au");
-        let path    = url.path();
-
-        let authenticated = host_ok
-            && (path == "/"
-                || path.starts_with("/dashboard")
-                || path.starts_with("/courses")
-                || path.starts_with("/calendar")
-                || path.starts_with("/inbox"));
-
-        let on_login = host_ok && path.starts_with("/login");
-
-        if authenticated {
-            let already_done = {
-                let mut flag = auth_flag.lock().unwrap();
-                let prev = *flag;
-                *flag = true;
-                prev
-            };
-            if !already_done {
-                // Persist auth so next app launch skips login
+        if is_authenticated_url(&url) {
+            // Reached an authenticated Canvas page — success (both modes).
+            let was_resolved = resolved_nav.swap(true, Ordering::SeqCst);
+            if !was_resolved {
+                *auth_flag_nav.lock().unwrap() = true;
                 std::fs::create_dir_all(flag_path.parent().unwrap()).ok();
                 std::fs::write(&flag_path, b"1").ok();
 
@@ -89,36 +93,51 @@ fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>, silent: bool)
                     w.hide().ok();
                 }
                 app_nav.emit("canvas-auth-success", "ok").ok();
+                eprintln!("[oculus] auth success ({})", if silent { "silent" } else { "interactive" });
             }
-        } else if silent && on_login {
-            // Session expired — close silently, reset state
-            eprintln!("[oculus] silent auth: session expired, redirected to login");
-            *auth_flag.lock().unwrap() = false;
-            if let Some(w) = app_nav.get_webview_window("canvas-auth") {
-                w.close().ok();
-            }
-            app_nav.emit("canvas-auth-expired", "expired").ok();
         }
-
         true
     })
     .build();
 
-    match result {
-        Ok(win) => {
-            // Only emit cancelled for user-initiated auth (not silent restore)
-            if !silent {
-                win.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { .. } = event {
-                        let authenticated = *auth_flag_win.lock().unwrap();
-                        if !authenticated {
-                            app_win.emit("canvas-auth-cancelled", "cancelled").ok();
-                        }
-                    }
-                });
-            }
+    let win = match result {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("[oculus] failed to open canvas window: {e}");
+            return;
         }
-        Err(e) => eprintln!("[oculus] failed to open canvas window: {e}"),
+    };
+
+    if silent {
+        // Timeout: give the SSO redirect chain time to complete. If we haven't reached an
+        // authenticated page by then, the session is genuinely expired — clean up to a
+        // disconnected state so the UI is unambiguous.
+        let app_to = app.clone();
+        let flag_path_to = auth_flag_path(&app);
+        let session_dir_to = canvas_session_dir(&app);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(15));
+            if !resolved.load(Ordering::SeqCst) {
+                eprintln!("[oculus] silent restore timed out — session expired, resetting");
+                *auth_flag_win.lock().unwrap() = false;
+                if let Some(w) = app_to.get_webview_window("canvas-auth") {
+                    w.close().ok();
+                }
+                // Clear stale cookies + flag so state is clean: user must reconnect
+                std::fs::remove_dir_all(&session_dir_to).ok();
+                let _ = &flag_path_to; // (removed with the dir above)
+                app_to.emit("canvas-auth-expired", "expired").ok();
+            }
+        });
+    } else {
+        // Interactive: detect user closing the window before completing login.
+        win.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if !*auth_flag_win.lock().unwrap() {
+                    app_win.emit("canvas-auth-cancelled", "cancelled").ok();
+                }
+            }
+        });
     }
 }
 
@@ -190,19 +209,10 @@ async fn sync_subjects(
     let win = match app.get_webview_window("canvas-auth") {
         Some(w) => w,
         None => {
-            // Window gone (startup race or crash) — reset auth state and notify UI
+            // No live Canvas window — session not ready. Reset UI to disconnected.
             *auth.0.lock().unwrap() = false;
             app.emit("canvas-auth-expired", "window-missing").ok();
-
-            // If session cookies still exist, recreate the window in background
-            // so the user only needs to click "Connect" once more (not re-login)
-            if auth_flag_path(&app).exists() {
-                let app2 = app.clone();
-                let flag  = Arc::clone(&auth.0);
-                std::thread::spawn(move || open_canvas_window(app2, flag, true));
-            }
-
-            return Err("Canvas session window not ready — reconnecting, please try again in a moment.".to_string());
+            return Err("Canvas session not ready. Click Connect to Canvas.".to_string());
         }
     };
 
@@ -275,6 +285,172 @@ async fn sync_subjects(
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+struct ScrapeSubject {
+    id: i64,
+    code: String,
+}
+
+/// Sanitize a course code into a filesystem-safe directory name.
+fn safe_dir(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
+}
+
+/// Sanitize a filename — keeps dots (extension) but blocks path traversal / separators.
+fn safe_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .collect::<String>()
+        .replace("..", "_")
+}
+
+/// Sanitize a relative path (may contain `/`): each segment cleaned, traversal blocked.
+fn safe_rel_path(rel: &str) -> Option<String> {
+    let parts: Vec<String> = rel
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(safe_filename)
+        .filter(|s| s != "." && s != "_" && !s.is_empty())
+        .collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("/"))
+    }
+}
+
+/// Write raw bytes under {app_data}/courses/{code}/{rel_path}. Returns (relative_path, bytes).
+fn write_course_bytes(
+    app: &AppHandle,
+    code: &str,
+    rel_path: &str,
+    content: &[u8],
+) -> Result<(String, u64), String> {
+    let safe = safe_rel_path(rel_path).ok_or_else(|| format!("invalid path: {rel_path}"))?;
+    let rel = format!("courses/{}/{}", safe_dir(code), safe);
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(&rel);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok((rel, content.len() as u64))
+}
+
+/// Parse a `?a=b&c=d` query string off a request URL into a map.
+fn parse_query(url: &str) -> std::collections::HashMap<String, String> {
+    match url::Url::parse(&format!("http://x{url}")) {
+        Ok(u) => u.query_pairs().into_owned().collect(),
+        Err(_) => std::collections::HashMap::new(),
+    }
+}
+
+/// Build a Cookie header from the authenticated canvas-auth WebView's cookies.
+/// Lets server-side ureq requests authenticate like the browser session does.
+fn canvas_cookie_header(app: &AppHandle) -> String {
+    let Some(win) = app.get_webview_window("canvas-auth") else {
+        return String::new();
+    };
+    match win.cookies() {
+        Ok(cookies) => cookies
+            .iter()
+            .map(|c| format!("{}={}", c.name(), c.value()))
+            .collect::<Vec<_>>()
+            .join("; "),
+        Err(e) => {
+            eprintln!("[oculus] cookies() failed: {e}");
+            String::new()
+        }
+    }
+}
+
+/// File category inferred from the relative path prefix.
+fn category_from_path(path: &str) -> &'static str {
+    if path == "home.md" {
+        "home"
+    } else if path.starts_with("pages/") {
+        "page"
+    } else if path.starts_with("assignments/") {
+        "assignment"
+    } else if path.starts_with("announcements/") {
+        "announcement"
+    } else if path.starts_with("files/") {
+        "file"
+    } else if path.starts_with("modules/") {
+        "module"
+    } else if path.starts_with("images/") {
+        "image"
+    } else {
+        "other"
+    }
+}
+
+/// Read a previously-scraped file back as text (for the markdown viewer).
+#[tauri::command]
+fn read_course_file(app: AppHandle, relative_path: String) -> Result<String, String> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(&relative_path);
+    std::fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+/// Open a scraped file with the system default application (PDF viewer, etc).
+#[tauri::command]
+fn open_course_file(app: AppHandle, relative_path: String) -> Result<(), String> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(&relative_path);
+    tauri_plugin_opener::open_path(path.to_str().unwrap_or(""), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Scraper agent JS, injected into the authenticated Canvas WebView.
+/// Tokens __PORT__ and __SUBJECTS__ are substituted before eval.
+const SCRAPER_JS: &str = include_str!("../scraper.js");
+
+#[tauri::command]
+async fn scrape_content(
+    app: AppHandle,
+    subjects: Vec<ScrapeSubject>,
+    port: tauri::State<'_, IpcPort>,
+    auth: tauri::State<'_, AuthState>,
+) -> Result<(), String> {
+    let win = match app.get_webview_window("canvas-auth") {
+        Some(w) => w,
+        None => {
+            *auth.0.lock().unwrap() = false;
+            app.emit("canvas-auth-expired", "window-missing").ok();
+            return Err("Canvas session not ready. Click Connect to Canvas.".to_string());
+        }
+    };
+
+    if subjects.is_empty() {
+        return Err("No subjects selected.".to_string());
+    }
+
+    let subjects_json = serde_json::to_string(&subjects.iter().map(|s| {
+        serde_json::json!({ "id": s.id, "code": s.code })
+    }).collect::<Vec<_>>())
+    .map_err(|e| e.to_string())?;
+
+    let js = SCRAPER_JS
+        .replace("__PORT__", &port.0.to_string())
+        .replace("__SUBJECTS__", &subjects_json);
+
+    eprintln!("[oculus] scrape_content: {} subjects, IPC port={}", subjects.len(), port.0);
+    win.eval(&js).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -305,11 +481,34 @@ pub fn run() {
                     }
 
                     if method == tiny_http::Method::Post {
-                        let mut body = String::new();
-                        let _ = request.as_reader().read_to_string(&mut body);
-                        eprintln!("[oculus] IPC POST {url} len={}", body.len());
+                        // Read raw bytes once — binary endpoints need them; text decodes lossy.
+                        let mut bytes: Vec<u8> = Vec::new();
+                        let _ = request.as_reader().read_to_end(&mut bytes);
+                        eprintln!("[oculus] IPC POST {url} len={}", bytes.len());
+
+                        // Helper: write a scraped artifact + emit scrape-file event.
+                        let emit_file = |code: &str, sid: i64, path: &str, data: &[u8], canvas_id: Option<i64>| {
+                            match write_course_bytes(&handle, code, path, data) {
+                                Ok((rel, n)) => {
+                                    eprintln!("[oculus] wrote {rel} ({n} bytes)");
+                                    handle.emit("scrape-file", serde_json::json!({
+                                        "subject_id": sid,
+                                        "code": code,
+                                        "relative_path": rel,
+                                        "size_bytes": n,
+                                        "category": category_from_path(path),
+                                        "canvas_id": canvas_id,
+                                    })).ok();
+                                }
+                                Err(e) => {
+                                    eprintln!("[oculus] write failed: {e}");
+                                    handle.emit("scrape-error", e).ok();
+                                }
+                            }
+                        };
 
                         if url.starts_with("/subjects") {
+                            let body = String::from_utf8_lossy(&bytes);
                             match serde_json::from_str::<Vec<serde_json::Value>>(&body) {
                                 Ok(courses) => {
                                     eprintln!("[oculus] parsed {} courses", courses.len());
@@ -322,9 +521,90 @@ pub fn run() {
                                     handle.emit("subjects-error", e.to_string()).ok();
                                 }
                             }
+                        } else if url.starts_with("/scrape-progress") {
+                            let body = String::from_utf8_lossy(&bytes);
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                                handle.emit("scrape-progress", v).ok();
+                            }
+                        } else if url.starts_with("/scrape-done") {
+                            let body = String::from_utf8_lossy(&bytes);
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                                handle.emit("scrape-complete", v).ok();
+                            }
+                        } else if url.starts_with("/scrape-log") {
+                            let body = String::from_utf8_lossy(&bytes);
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                                handle.emit("scrape-log", v).ok();
+                            }
+                        } else if url.starts_with("/image-proxy") {
+                            // JS POSTs the pre-signed CDN URL as plain text; Rust fetches
+                            // server-side (no CORS) and saves bytes directly.
+                            let qp = parse_query(&url);
+                            let code = qp.get("course").map(String::as_str).unwrap_or("UNKNOWN");
+                            let sid = qp.get("subject_id").and_then(|s| s.parse().ok()).unwrap_or(0);
+                            let path = qp.get("path").map(String::as_str).unwrap_or("");
+                            let cid = qp.get("canvas_id").and_then(|s| s.parse().ok());
+                            let cdn_url = String::from_utf8_lossy(&bytes).trim().to_string();
+                            if path.is_empty() || cdn_url.is_empty() {
+                                handle.emit("scrape-error", "image-proxy: missing path or url").ok();
+                            } else {
+                                let cookie_header = canvas_cookie_header(&handle);
+                                let mut req = ureq::get(&cdn_url);
+                                if !cookie_header.is_empty() {
+                                    req = req.set("Cookie", &cookie_header);
+                                }
+                                match req.call() {
+                                    Ok(resp) => {
+                                        let resp_ct = resp.content_type().to_string();
+                                        let mut img_bytes: Vec<u8> = Vec::new();
+                                        let _ = resp.into_reader().read_to_end(&mut img_bytes);
+                                        if resp_ct.contains("text/html") {
+                                            // Got a login/error HTML page instead of the image.
+                                            eprintln!("[oculus] image-proxy: HTML response (auth failed) for {path}");
+                                            handle.emit("scrape-log", serde_json::json!({
+                                                "level": "warning", "course": code,
+                                                "message": format!("image {path}: got HTML (not image) — auth/url issue")
+                                            })).ok();
+                                        } else {
+                                            eprintln!("[oculus] image-proxy: {} bytes ({resp_ct}) for {}", img_bytes.len(), path);
+                                            emit_file(code, sid, path, &img_bytes, cid);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[oculus] image-proxy fetch failed: {e}");
+                                        handle.emit("scrape-log", serde_json::json!({
+                                            "level": "warning", "course": code,
+                                            "message": format!("image-proxy: {e}")
+                                        })).ok();
+                                    }
+                                }
+                            }
+                        } else if url.starts_with("/scrape-binary") {
+                            let qp = parse_query(&url);
+                            let code = qp.get("course").map(String::as_str).unwrap_or("UNKNOWN");
+                            let sid = qp.get("subject_id").and_then(|s| s.parse().ok()).unwrap_or(0);
+                            let path = qp.get("path").map(String::as_str).unwrap_or("");
+                            let cid = qp.get("canvas_id").and_then(|s| s.parse().ok());
+                            if path.is_empty() {
+                                handle.emit("scrape-error", "binary: missing path").ok();
+                            } else {
+                                emit_file(code, sid, path, &bytes, cid);
+                            }
+                        } else if url.starts_with("/scrape") {
+                            // Text/markdown artifact — metadata in query, body is the markdown.
+                            let qp = parse_query(&url);
+                            let code = qp.get("course").map(String::as_str).unwrap_or("UNKNOWN");
+                            let sid = qp.get("subject_id").and_then(|s| s.parse().ok()).unwrap_or(0);
+                            let path = qp.get("path").map(String::as_str).unwrap_or("");
+                            if path.is_empty() {
+                                handle.emit("scrape-error", "scrape: missing path").ok();
+                            } else {
+                                emit_file(code, sid, path, &bytes, None);
+                            }
                         } else if url.starts_with("/error") {
+                            let body = String::from_utf8_lossy(&bytes);
                             eprintln!("[oculus] canvas error: {body}");
-                            handle.emit("subjects-error", body).ok();
+                            handle.emit("subjects-error", body.to_string()).ok();
                         }
 
                         let _ = request.respond(cors_response(200));
@@ -411,6 +691,17 @@ CREATE TABLE IF NOT EXISTS settings (
 );
                         "#,
                         kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 2,
+                        description: "file metadata: category, source_url, canvas_id, modified_at",
+                        sql: r#"
+ALTER TABLE files ADD COLUMN category    TEXT;
+ALTER TABLE files ADD COLUMN source_url  TEXT;
+ALTER TABLE files ADD COLUMN canvas_id   INTEGER;
+ALTER TABLE files ADD COLUMN modified_at TEXT;
+                        "#,
+                        kind: tauri_plugin_sql::MigrationKind::Up,
                     }],
                 )
                 .build(),
@@ -420,6 +711,9 @@ CREATE TABLE IF NOT EXISTS settings (
             launch_canvas_auth,
             disconnect_canvas,
             sync_subjects,
+            scrape_content,
+            read_course_file,
+            open_course_file,
             get_subjects,
             open_canvas_devtools,
         ])

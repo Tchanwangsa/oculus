@@ -1,6 +1,5 @@
 import { Network, Search, ZoomIn, ZoomOut, Maximize2, Filter, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 const GRAPH_STATS = [
   { label: "Nodes", value: "0" },

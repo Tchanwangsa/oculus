@@ -14,13 +14,17 @@
       {
         "title": "Oculus",
         "width": 1200,
-        "height": 800,
+        "height": 750,
         "minWidth": 900,
-        "minHeight": 600
+        "minHeight": 560
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/courses/**"]
+      }
     }
   },
   "bundle": {

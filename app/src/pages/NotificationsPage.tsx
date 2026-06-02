@@ -1,4 +1,4 @@
-import { Bell, Clock, ClipboardList, Megaphone, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Bell, Clock, Megaphone, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
