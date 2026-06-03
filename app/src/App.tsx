@@ -1,6 +1,9 @@
 import { createHashRouter, RouterProvider, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { applyTheme, getStoredTheme } from "@/lib/theme";
+import { ToastProvider } from "@/components/ui/toast";
+import { useBackendEvents } from "@/hooks/useBackendEvents";
+import { useToastBridge } from "@/hooks/useToastBridge";
 import AppLayout from "@/layouts/AppLayout";
 import ChatPage from "@/pages/ChatPage";
 import LecturesPage from "@/pages/LecturesPage";
@@ -25,6 +28,12 @@ const router = createHashRouter([
   },
 ]);
 
+function EventBridge() {
+  useBackendEvents();
+  useToastBridge();
+  return null;
+}
+
 export default function App() {
   useEffect(() => {
     applyTheme(getStoredTheme());
@@ -37,5 +46,10 @@ export default function App() {
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
-  return <RouterProvider router={router} />;
+  return (
+    <ToastProvider>
+      <EventBridge />
+      <RouterProvider router={router} />
+    </ToastProvider>
+  );
 }

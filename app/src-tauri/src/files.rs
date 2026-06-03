@@ -127,3 +127,34 @@ pub fn open_course_file(app: AppHandle, relative_path: String) -> Result<(), Str
     tauri_plugin_opener::open_path(path.to_str().unwrap_or(""), None::<&str>)
         .map_err(|e| e.to_string())
 }
+
+/// Derive parse status from disk for a set of PDF relative paths.
+/// Returns (relative_path, status) where status is "quality" (md + images),
+/// "fast" (md only), or omitted if no md exists.
+#[tauri::command]
+pub fn scan_parsed_files(
+    app: AppHandle,
+    relative_paths: Vec<String>,
+) -> Result<Vec<(String, String)>, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for rel in relative_paths {
+        if !rel.to_lowercase().ends_with(".pdf") {
+            continue;
+        }
+        let pdf = base.join(&rel);
+        let md = pdf.with_extension("md");
+        if !md.exists() {
+            continue;
+        }
+        // images dir: {stem}_images alongside the pdf
+        let stem = pdf.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let images_dir = pdf
+            .parent()
+            .map(|p| p.join(format!("{stem}_images")))
+            .filter(|p| p.is_dir());
+        let status = if images_dir.is_some() { "quality" } else { "fast" };
+        out.push((rel, status.to_string()));
+    }
+    Ok(out)
+}

@@ -11,6 +11,8 @@ import {
   ExternalLink,
   Layers,
   FileCode,
+  FileType2 as MarkdownIcon,
+  FileType,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
@@ -18,16 +20,78 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
-import { upsertFile, type DbFile } from "@/lib/db";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+import { upsertFile, setParseStatusByPath, type DbFile } from "@/lib/db";
 import { useDataDir } from "@/hooks/useDataDir";
 import { useSubjects } from "@/hooks/useSubjects";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useFileContent } from "@/hooks/useFileContent";
+import { useParseStore } from "@/stores/parseStore";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
 import { CourseRow, courseColor } from "@/components/subjects/CourseRow";
 import { FileCategorySection } from "@/components/files/FileCategorySection";
 import { FileRow } from "@/components/files/FileRow";
+import { PDFViewer } from "@/components/files/PDFViewer";
+
+// ── MdFromPath ────────────────────────────────────────────────────────────────
+
+function MdFromPath({
+  relPath, components, qualityStatus, pagesDone, totalPages,
+}: {
+  relPath: string;
+  components: any;
+  qualityStatus?: string;
+  pagesDone?: number;
+  totalPages?: number;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setText(null);
+    setErr(null);
+    invoke<string>("read_course_file", { relativePath: relPath })
+      .then(setText)
+      .catch((e) => setErr(String(e)));
+  }, [relPath]);
+
+  const showBanner = qualityStatus === "queued" || qualityStatus === "running";
+  const bannerLabel =
+    qualityStatus === "queued"
+      ? "queued"
+      : totalPages
+      ? `${pagesDone ?? 0}/${totalPages} pages`
+      : "starting…";
+
+  if (err) return (
+    <div className="px-8 py-6 text-xs text-destructive">Failed to load markdown: {err}</div>
+  );
+  if (text === null) return (
+    <div className="h-full flex items-center justify-center gap-2 text-muted-foreground">
+      <Loader2 size={16} className="animate-spin" /><span className="text-sm">Loading…</span>
+    </div>
+  );
+  return (
+    <div className="flex-1 overflow-y-auto">
+      {showBanner && (
+        <div className="mx-8 mt-5 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 flex items-center gap-2 text-[11px] text-amber-600 dark:text-amber-400">
+          <Loader2 size={10} className="animate-spin shrink-0" />
+          Fast preview · Quality parse {bannerLabel}
+        </div>
+      )}
+      <article className="markdown-body px-8 py-6 max-w-3xl">
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeRaw, rehypeKatex]} components={components}>
+          {text}
+        </ReactMarkdown>
+      </article>
+    </div>
+  );
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -47,6 +111,75 @@ export default function SubjectsPage() {
   const [pagesExpanded, setPagesExpanded] = useState(false);
   const [rescraping, setRescraping] = useState<Set<number>>(new Set());
   const [rescrapeError, setRescrapeError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"pdf" | "markdown">("pdf");
+
+  const subjectsPanel = useResizablePanel({
+    defaultWidth: 220, minWidth: 120, maxWidth: 360,
+    collapseThreshold: 80, storageKey: "subjects-panel",
+  });
+  const filesPanel = useResizablePanel({
+    defaultWidth: 240, minWidth: 160, maxWidth: 420,
+    collapseThreshold: 80, storageKey: "files-panel",
+  });
+
+  // Parse state from the global store (no per-file polling/SSE)
+  const liveStatuses = useParseStore((s) => s.statuses);
+  const parseJobs = useParseStore((s) => s.jobs);
+  const mergeParseStatuses = useParseStore((s) => s.merge);
+
+  // Reconcile parse status from disk when a subject's files load: PDFs with a
+  // sibling .md (+ _images dir) get a badge even if parsed before status
+  // tracking existed. Writes to the store (instant badge) and DB (persistence).
+  useEffect(() => {
+    const pdfPaths = files
+      .filter((f) => f.filename.toLowerCase().endsWith(".pdf"))
+      .map((f) => f.relative_path);
+    if (pdfPaths.length === 0) return;
+    invoke<Array<[string, string]>>("scan_parsed_files", { relativePaths: pdfPaths })
+      .then((entries) => {
+        if (entries.length === 0) return;
+        mergeParseStatuses(Object.fromEntries(entries));
+        setParseStatusByPath(entries).catch(() => {});
+      })
+      .catch(() => {});
+  }, [files, mergeParseStatuses]);
+
+  const isPdf = activeFile?.filename.toLowerCase().endsWith(".pdf") ?? false;
+  const activeRelPath = isPdf && activeFile ? activeFile.relative_path : null;
+
+  // Derive the open file's parse state: a live job (queued/running) takes
+  // precedence, else the last-known terminal status string.
+  const activeJob = activeRelPath ? parseJobs[activeRelPath] : undefined;
+  const activeStatusStr = activeRelPath ? liveStatuses[activeRelPath] : undefined;
+  const parseProgress = {
+    status: activeJob
+      ? activeJob.status // "queued" | "running"
+      : activeStatusStr === "quality"
+      ? "done"
+      : activeStatusStr === "error"
+      ? "error"
+      : "idle",
+    pages_done: activeJob?.pages_done,
+    total_pages: activeJob?.total_pages,
+  };
+
+  const parsePct = parseProgress.total_pages
+    ? Math.round((parseProgress.pages_done ?? 0) / parseProgress.total_pages * 100)
+    : 0;
+  const mdRelPath = isPdf && activeFile
+    ? activeFile.relative_path.replace(/\.pdf$/i, ".md")
+    : null;
+
+  const [mdExists, setMdExists] = useState(false);
+  useEffect(() => {
+    setMdExists(false);
+    if (!mdRelPath) return;
+    invoke<string>("read_course_file", { relativePath: mdRelPath })
+      .then((t) => setMdExists(t.length > 0))
+      .catch(() => setMdExists(false));
+  }, [mdRelPath, parseProgress.status]);
+
+  const canViewMd = mdExists || parseProgress.status === "done";
 
   const navigate = useNavigate();
 
@@ -75,13 +208,17 @@ export default function SubjectsPage() {
     }
   }, [files, activeFile, openFile, byCategory]);
 
-  // Reset expanded sections on subject change
+  // Reset expanded sections + view mode on subject/file change
   useEffect(() => {
     setImagesExpanded(false);
     setAnnouncementsExpanded(false);
     setFilesExpanded(false);
     setPagesExpanded(false);
   }, [selectedId]);
+
+  useEffect(() => {
+    setViewMode("pdf");
+  }, [activeFile?.id]);
 
   // Listen for scrape-file events (trigged by rescrape)
   useEffect(() => {
@@ -114,6 +251,7 @@ export default function SubjectsPage() {
       unsub.then((f) => f());
     };
   }, []);
+
 
   const rescrapeFile = useCallback(
     async (file: DbFile) => {
@@ -189,9 +327,14 @@ export default function SubjectsPage() {
   return (
     <div className="flex h-full">
       {/* Left: subject list */}
-      <div className="w-56 shrink-0 border-r border-border flex flex-col overflow-hidden">
-        <div className="px-4 h-14 flex items-center border-b border-border shrink-0">
-          <span className="font-semibold text-sm text-foreground">Subjects</span>
+      <div
+        className="shrink-0 border-r border-border flex flex-col overflow-hidden transition-none"
+        style={{ width: subjectsPanel.collapsed ? 0 : subjectsPanel.width }}
+      >
+        <div className="px-3 h-14 flex items-center justify-between border-b border-border shrink-0 min-w-0">
+          {!subjectsPanel.collapsed && (
+            <span className="font-semibold text-sm text-foreground truncate">Subjects</span>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto py-2">
@@ -243,6 +386,8 @@ export default function SubjectsPage() {
         </div>
       </div>
 
+      <ResizeHandle onMouseDown={subjectsPanel.onMouseDown} />
+
       {/* Content area */}
       {active ? (
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -262,7 +407,10 @@ export default function SubjectsPage() {
 
           <div className="flex flex-1 overflow-hidden">
             {/* File list sidebar */}
-            <div className="w-60 shrink-0 border-r border-border flex flex-col overflow-hidden">
+            <div
+              className="shrink-0 border-r border-border flex flex-col overflow-hidden"
+              style={{ width: filesPanel.collapsed ? 0 : filesPanel.width }}
+            >
               <div className="flex-1 overflow-y-auto py-2">
                 {filesLoading && (
                   <p className="px-4 py-3 text-xs text-muted-foreground">Loading…</p>
@@ -320,6 +468,8 @@ export default function SubjectsPage() {
                   rightIcon={ExternalLink}
                   onRescrape={rescrapeFile}
                   rescraping={rescraping}
+                  liveStatuses={liveStatuses}
+                  showExtBadge
                 />
 
                 <FileCategorySection
@@ -365,8 +515,10 @@ export default function SubjectsPage() {
               )}
             </div>
 
+            <ResizeHandle onMouseDown={filesPanel.onMouseDown} />
+
             {/* Content viewer */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
               {!activeFile ? (
                 <div className="h-full flex items-center justify-center">
                   <p className="text-sm text-muted-foreground">
@@ -384,6 +536,74 @@ export default function SubjectsPage() {
                     Failed to read file: {contentError}
                   </div>
                 </div>
+              ) : activeFile.category === "file" && isPdf ? (
+                <div className="flex flex-col h-full">
+                  {/* Toolbar */}
+                  <div className="shrink-0 flex items-center justify-between px-4 h-10 border-b border-border bg-surface">
+                    <span className="text-xs text-muted-foreground truncate max-w-xs">{activeFile.filename}</span>
+                    <div className="flex items-center gap-2">
+                      {/* Parse status indicators */}
+                      {parseProgress.status === "error" && (
+                        <span className="text-[11px] text-destructive">Conversion failed</span>
+                      )}
+                      {parseProgress.status === "queued" && (
+                        <span className="text-[11px] text-muted-foreground">Quality parse queued</span>
+                      )}
+                      {parseProgress.status === "running" && (
+                        <div className="flex items-center gap-2">
+                          {parseProgress.total_pages ? (
+                            <>
+                              <div className="w-24 h-1.5 rounded-full bg-border overflow-hidden">
+                                <div
+                                  className="h-full bg-primary transition-all duration-500 rounded-full"
+                                  style={{ width: `${parsePct || 5}%` }}
+                                />
+                              </div>
+                              <span className="text-[11px] text-muted-foreground tabular-nums">
+                                {parseProgress.pages_done ?? 0}/{parseProgress.total_pages} pages
+                              </span>
+                            </>
+                          ) : (
+                            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                              <Loader2 size={10} className="animate-spin" />
+                              Starting quality parse…
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {/* PDF / Markdown toggle */}
+                      {canViewMd && (
+                        <div className="flex items-center rounded-md border border-border overflow-hidden text-[11px]">
+                          <button
+                            onClick={() => setViewMode("pdf")}
+                            className={`flex items-center gap-1 px-2 py-1 transition-colors ${viewMode === "pdf" ? "bg-primary text-primary-foreground" : "hover:bg-surface-raised text-muted-foreground"}`}
+                          >
+                            <FileType size={11} /> PDF
+                          </button>
+                          <button
+                            onClick={() => setViewMode("markdown")}
+                            className={`flex items-center gap-1 px-2 py-1 transition-colors ${viewMode === "markdown" ? "bg-primary text-primary-foreground" : "hover:bg-surface-raised text-muted-foreground"}`}
+                          >
+                            <MarkdownIcon size={11} /> Markdown
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Content */}
+                  {viewMode === "pdf" ? (
+                    <PDFViewer src={assetUrl(activeFile.relative_path)} />
+                  ) : (
+                    <MdFromPath
+                      relPath={mdRelPath!}
+                      components={components}
+                      qualityStatus={parseProgress.status}
+                      pagesDone={parseProgress.pages_done}
+                      totalPages={parseProgress.total_pages}
+                    />
+                  )}
+                </div>
               ) : activeFile.category === "file" ? (
                 <div className="h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
                   <ExternalLink size={24} className="opacity-40" />
@@ -400,15 +620,17 @@ export default function SubjectsPage() {
                   />
                 </div>
               ) : (
+                <div className="flex-1 overflow-y-auto">
                 <article className="markdown-body px-8 py-6 max-w-3xl">
                   <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeRaw]}
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeRaw, rehypeKatex]}
                     components={components}
                   >
                     {content}
                   </ReactMarkdown>
                 </article>
+                </div>
               )}
             </div>
           </div>

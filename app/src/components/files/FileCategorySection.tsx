@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { FileText } from "lucide-react";
-import { FileRow } from "./FileRow";
+import { FileRow, type ParseBadgeStatus } from "./FileRow";
 import type { DbFile } from "@/lib/db";
 import { fmtSize } from "@/lib/format";
 
@@ -17,6 +17,22 @@ interface FileCategorySectionProps {
   onRescrape?: (f: DbFile) => void;
   rescraping?: Set<number>;
   labelFormatter?: (filename: string) => string;
+  /** Live overrides keyed by relative_path (from in-flight parse events). Falls back to DB f.parse_status. */
+  liveStatuses?: Record<string, string>;
+  /** Show coloured extension pill instead of category icon (e.g. Downloads). */
+  showExtBadge?: boolean;
+}
+
+function badgeStatus(
+  f: DbFile,
+  liveStatuses: Record<string, string> | undefined,
+): ParseBadgeStatus {
+  if (!f.filename.toLowerCase().endsWith(".pdf")) return undefined;
+  const s = liveStatuses?.[f.relative_path] ?? f.parse_status ?? undefined;
+  if (s === "queued" || s === "running" || s === "fast") return "running"; // quality pending
+  if (s === "quality" || s === "done") return "done";
+  if (s && s.startsWith("error")) return "error";
+  return undefined;
 }
 
 export function FileCategorySection({
@@ -32,6 +48,8 @@ export function FileCategorySection({
   onRescrape,
   rescraping,
   labelFormatter,
+  liveStatuses,
+  showExtBadge = false,
 }: FileCategorySectionProps) {
   if (files.length === 0) return null;
 
@@ -57,15 +75,13 @@ export function FileCategorySection({
             dimmed={dimmed}
             rightIcon={rightIcon}
             onRescrape={
-              f.canvas_id != null && onRescrape
-                ? () => onRescrape(f)
-                : undefined
+              f.canvas_id != null && onRescrape ? () => onRescrape(f) : undefined
             }
             isRescaping={
-              f.canvas_id != null && rescraping
-                ? rescraping.has(f.canvas_id)
-                : false
+              f.canvas_id != null && rescraping ? rescraping.has(f.canvas_id) : false
             }
+            parseStatus={badgeStatus(f, liveStatuses)}
+            showExtBadge={showExtBadge}
           />
         ))}
     </div>

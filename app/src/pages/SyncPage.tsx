@@ -1,8 +1,15 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
-  RefreshCw, AlertCircle,
-  BookOpen, ChevronRight, ChevronDown,
-  Clock, Loader2, XCircle, Settings, Bug,
+  RefreshCw,
+  AlertCircle,
+  BookOpen,
+  ChevronRight,
+  ChevronDown,
+  Clock,
+  Loader2,
+  XCircle,
+  Settings,
+  Bug,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -10,12 +17,18 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogFooter } from "@/components/ui/dialog";
 import {
-  upsertSubjects, getSubjects, getLastCompletedSyncRun, addLog,
-  startSyncRun, finishSyncRun, markSubjectSynced, upsertFile,
-  type CanvasCourseRaw, type Subject, type SyncRun,
+  upsertSubjects,
+  getSubjects,
+  getLastCompletedSyncRun,
+  addLog,
+  startSyncRun,
+  type CanvasCourseRaw,
+  type Subject,
+  type SyncRun,
 } from "@/lib/db";
 import { fmtDate } from "@/lib/format";
 import { useAuth, type AuthStatus } from "@/hooks/useAuth";
+import { useSyncStore } from "@/stores/syncStore";
 import { AuthCard } from "@/components/sync/AuthCard";
 import { PipelineSteps } from "@/components/sync/PipelineSteps";
 import { SubjectRow } from "@/components/subjects/SubjectRow";
@@ -26,16 +39,19 @@ type StepStatus = "done" | "pending" | "error" | "idle";
 type PipelineStep = { id: string; status: StepStatus };
 
 const INITIAL_STEPS: PipelineStep[] = [
-  { id: "auth",    status: "idle" },
+  { id: "auth", status: "idle" },
   { id: "courses", status: "idle" },
-  { id: "scrape",  status: "idle" },
-  { id: "graph",   status: "idle" },
+  { id: "scrape", status: "idle" },
+  { id: "graph", status: "idle" },
 ];
 
-const AUTH_BADGE: Record<AuthStatus, { label: string; variant: "success" | "secondary" | "warning" }> = {
-  connected:    { label: "Connected",    variant: "success"   },
+const AUTH_BADGE: Record<
+  AuthStatus,
+  { label: string; variant: "success" | "secondary" | "warning" }
+> = {
+  connected: { label: "Connected", variant: "success" },
   disconnected: { label: "Disconnected", variant: "secondary" },
-  pending:      { label: "Signing in…",  variant: "warning"   },
+  pending: { label: "Signing in…", variant: "warning" },
 };
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -50,12 +66,17 @@ export default function SyncPage() {
   const [subjectsError, setSubjectsError] = useState<string | null>(null);
   const [lastSyncRun, setLastSyncRun] = useState<SyncRun | null>(null);
   const [pastExpanded, setPastExpanded] = useState(false);
-  const [scraping, setScraping] = useState(false);
-  const [progress, setProgress] = useState<{ done: number; total: number; course?: string; phase?: string } | null>(null);
-  const runIdRef = useRef<number | null>(null);
+
+  // Sync progress lives in the global store (survives navigation).
+  const scraping = useSyncStore((s) => s.scraping);
+  const progress = useSyncStore((s) => s.progress);
+  const completedAt = useSyncStore((s) => s.completedAt);
+  const syncError = useSyncStore((s) => s.error);
   const scrapingRef = useRef(false);
 
-  useEffect(() => { scrapingRef.current = scraping; }, [scraping]);
+  useEffect(() => {
+    scrapingRef.current = scraping;
+  }, [scraping]);
 
   // ── Boot ──────────────────────────────────────────────────────────────────
 
@@ -80,7 +101,9 @@ export default function SyncPage() {
   // Sync auth status with pipeline steps
   useEffect(() => {
     if (authStatus === "connected") {
-      setSteps((p) => p.map((s) => (s.id === "auth" ? { ...s, status: "done" } : s)));
+      setSteps((p) =>
+        p.map((s) => (s.id === "auth" ? { ...s, status: "done" } : s)),
+      );
     }
   }, [authStatus]);
 
@@ -94,13 +117,16 @@ export default function SyncPage() {
       listen("canvas-auth-expired", () => {
         setSteps(INITIAL_STEPS);
         if (scrapingRef.current) {
-          setScraping(false);
-          setProgress(null);
-          setSubjectsError("Canvas session expired during sync. Reconnect and try again.");
+          useSyncStore.getState().reset();
+          setSubjectsError(
+            "Canvas session expired during sync. Reconnect and try again.",
+          );
         }
       }),
     ];
-    return () => { subs.forEach((p) => p.then((f) => f())); };
+    return () => {
+      subs.forEach((p) => p.then((f) => f()));
+    };
   }, []);
 
   // ── Subjects events ───────────────────────────────────────────────────────
@@ -110,7 +136,9 @@ export default function SyncPage() {
       listen<CanvasCourseRaw[]>("subjects-loaded", async (e) => {
         setLoadingSubjects(false);
         setSubjectsError(null);
-        setSteps((p) => p.map((s) => (s.id === "courses" ? { ...s, status: "done" } : s)));
+        setSteps((p) =>
+          p.map((s) => (s.id === "courses" ? { ...s, status: "done" } : s)),
+        );
         try {
           await upsertSubjects(e.payload as unknown as CanvasCourseRaw[]);
           await addLog(`Fetched ${e.payload.length} subjects from Canvas`);
@@ -122,76 +150,69 @@ export default function SyncPage() {
       listen<string>("subjects-error", (e) => {
         setSubjectsError(e.payload);
         setLoadingSubjects(false);
-        setSteps((p) => p.map((s) => (s.id === "courses" ? { ...s, status: "error" } : s)));
+        setSteps((p) =>
+          p.map((s) => (s.id === "courses" ? { ...s, status: "error" } : s)),
+        );
       }),
     ];
-    return () => { subs.forEach((p) => p.then((f) => f())); };
+    return () => {
+      subs.forEach((p) => p.then((f) => f()));
+    };
   }, [loadFromDb]);
 
-  // ── Scrape events ─────────────────────────────────────────────────────────
+  // ── Scrape lifecycle (driven by global store) ──────────────────────────────
+  // Bookkeeping (upsertFile, finishSyncRun, addLog) lives in useBackendEvents so
+  // it survives navigation. Here we just mirror store state into the pipeline UI.
 
   useEffect(() => {
-    const subs = [
-      listen<{ subject_id: number; relative_path: string; size_bytes: number; category: string | null; canvas_id: number | null }>(
-        "scrape-file",
-        async (e) => {
-          const { subject_id, relative_path, size_bytes, category, canvas_id } = e.payload;
-          const filename = relative_path.split("/").pop() ?? relative_path;
-          const ext = filename.includes(".") ? filename.split(".").pop()! : "md";
-          try {
-            await upsertFile(subject_id, filename, relative_path, ext, size_bytes, category ?? undefined, canvas_id ?? undefined);
-            await markSubjectSynced(subject_id);
-          } catch { /* ignore */ }
-        }
-      ),
-      listen<{ done: number; total: number; course?: string; phase?: string }>("scrape-progress", (e) => {
-        setProgress(e.payload);
-      }),
-      listen<{ level: string; course: string; message: string }>("scrape-log", (e) => {
-        const { level, message } = e.payload;
-        const mapped = level === "error" ? "error" : level === "warning" ? "warning" : "info";
-        addLog(message, mapped).catch(() => {});
-      }),
-      listen<{ count: number; cancelled?: boolean }>("scrape-complete", async (e) => {
-        const runId = runIdRef.current;
-        if (runId != null) {
-          await finishSyncRun(runId, "completed", e.payload.count, e.payload.count);
-          await addLog(`Synced ${e.payload.count} subject(s)`);
-        }
-        setScraping(false);
-        setProgress(null);
-        setSteps((p) => p.map((s) => (s.id === "scrape" ? { ...s, status: "done" } : s)));
-        await loadFromDb();
-      }),
-      listen<string>("scrape-error", async (e) => {
-        const runId = runIdRef.current;
-        if (runId != null) await finishSyncRun(runId, "failed", 0, 0, e.payload);
-        setScraping(false);
-        setProgress(null);
-        setSubjectsError(`Scrape error: ${e.payload}`);
-        setSteps((p) => p.map((s) => (s.id === "scrape" ? { ...s, status: "error" } : s)));
-      }),
-    ];
-    return () => { subs.forEach((p) => p.then((f) => f())); };
-  }, [loadFromDb]);
+    if (scraping) {
+      setSteps((p) =>
+        p.map((s) => (s.id === "scrape" ? { ...s, status: "pending" } : s)),
+      );
+    }
+  }, [scraping]);
+
+  // React to completion: refresh subject list + mark step.
+  useEffect(() => {
+    if (completedAt === 0) return;
+    if (syncError) {
+      setSubjectsError(`Scrape error: ${syncError}`);
+      setSteps((p) =>
+        p.map((s) => (s.id === "scrape" ? { ...s, status: "error" } : s)),
+      );
+    } else {
+      setSteps((p) =>
+        p.map((s) => (s.id === "scrape" ? { ...s, status: "done" } : s)),
+      );
+      loadFromDb();
+    }
+  }, [completedAt, syncError, loadFromDb]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleRefetchSubjects = async () => {
     setLoadingSubjects(true);
     setSubjectsError(null);
-    setSteps((p) => p.map((s) => (s.id === "courses" ? { ...s, status: "pending" } : s)));
+    setSteps((p) =>
+      p.map((s) => (s.id === "courses" ? { ...s, status: "pending" } : s)),
+    );
     try {
       await invoke("sync_subjects");
     } catch (err) {
       setLoadingSubjects(false);
       setSubjectsError(String(err));
-      setSteps((p) => p.map((s) => (s.id === "courses" ? { ...s, status: "error" } : s)));
+      setSteps((p) =>
+        p.map((s) => (s.id === "courses" ? { ...s, status: "error" } : s)),
+      );
     }
   };
 
   const handleCancel = async () => {
-    try { await invoke("cancel_scrape"); } catch { /* ignore */ }
+    try {
+      await invoke("cancel_scrape");
+    } catch {
+      /* ignore */
+    }
   };
 
   const handleSyncClick = async () => {
@@ -207,20 +228,21 @@ export default function SyncPage() {
       .filter((s) => selectedIds.has(s.id))
       .map((s) => ({ id: s.id, code: s.code }));
 
-    setScraping(true);
     setSubjectsError(null);
-    setProgress({ done: 0, total: sel.length });
-    setSteps((p) => p.map((s) => (s.id === "scrape" ? { ...s, status: "pending" } : s)));
+    setSteps((p) =>
+      p.map((s) => (s.id === "scrape" ? { ...s, status: "pending" } : s)),
+    );
 
     try {
-      runIdRef.current = await startSyncRun();
+      const runId = await startSyncRun();
+      useSyncStore.getState().begin(runId, sel.length);
       await invoke("scrape_content", { subjects: sel });
     } catch (err) {
-      setScraping(false);
-      setProgress(null);
+      useSyncStore.getState().fail(String(err));
       setSubjectsError(String(err));
-      setSteps((p) => p.map((s) => (s.id === "scrape" ? { ...s, status: "error" } : s)));
-      if (runIdRef.current != null) await finishSyncRun(runIdRef.current, "failed", 0, 0, String(err));
+      setSteps((p) =>
+        p.map((s) => (s.id === "scrape" ? { ...s, status: "error" } : s)),
+      );
     }
   };
 
@@ -254,18 +276,26 @@ export default function SyncPage() {
         <Badge variant={authBadge.variant}>{authBadge.label}</Badge>
       </div>
 
-      <div className="px-6 py-6 space-y-5 max-w-2xl">
+      <div className="px-6 py-6 space-y-5">
         {/* Auth card */}
         <AuthCard
           status={authStatus}
           onConnect={async () => {
-            try { await invoke("launch_canvas_auth"); } catch { /* useAuth handles */ }
+            try {
+              await invoke("launch_canvas_auth");
+            } catch {
+              /* useAuth handles */
+            }
           }}
           onDisconnect={async () => {
             setSteps(INITIAL_STEPS);
             setSubjects([]);
             setSelectedIds(new Set());
-            try { await invoke("disconnect_canvas"); } catch { /* ignore */ }
+            try {
+              await invoke("disconnect_canvas");
+            } catch {
+              /* ignore */
+            }
           }}
           scraping={scraping}
         />
@@ -273,8 +303,13 @@ export default function SyncPage() {
         {/* Sync card */}
         <div className="rounded-xl border border-border bg-card p-5">
           <div className="flex items-center justify-between mb-1">
-            <span className="font-semibold text-sm text-foreground">Content Sync</span>
-            <button className="text-muted-foreground hover:text-foreground transition-colors" title="Sync settings (coming soon)">
+            <span className="font-semibold text-sm text-foreground">
+              Content Sync
+            </span>
+            <button
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              title="Sync settings (coming soon)"
+            >
               <Settings size={14} />
             </button>
           </div>
@@ -292,7 +327,9 @@ export default function SyncPage() {
               disabled={authStatus !== "connected" || scraping}
             >
               {scraping ? (
-                <><Loader2 size={14} className="animate-spin" /> Syncing…</>
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Syncing…
+                </>
               ) : (
                 <>Sync ({selectedIds.size})</>
               )}
@@ -335,7 +372,10 @@ export default function SyncPage() {
           {noSubjects && authStatus === "connected" && (
             <p className="text-xs text-muted-foreground mt-2 text-center">
               No subjects loaded —{" "}
-              <button className="text-primary hover:underline" onClick={() => setShowModal(true)}>
+              <button
+                className="text-primary hover:underline"
+                onClick={() => setShowModal(true)}
+              >
                 fetch subjects first
               </button>
             </p>
@@ -356,12 +396,16 @@ export default function SyncPage() {
                     ? `${progress.course}${progress.phase && progress.phase !== "complete" ? " · " + progress.phase : ""}…`
                     : "Starting…"}
                 </span>
-                <span>{progress.done} / {progress.total}</span>
+                <span>
+                  {progress.done} / {progress.total}
+                </span>
               </div>
               <div className="h-1.5 rounded-full bg-surface-raised overflow-hidden">
                 <div
                   className="h-full bg-primary transition-all duration-300"
-                  style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }}
+                  style={{
+                    width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%`,
+                  }}
                 />
               </div>
             </div>
@@ -386,9 +430,16 @@ export default function SyncPage() {
       >
         {noSubjects ? (
           <div className="py-6 text-center">
-            <BookOpen size={32} className="text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-sm text-foreground font-medium mb-1">No subjects loaded</p>
-            <p className="text-xs text-muted-foreground">Fetch your Canvas subjects to get started.</p>
+            <BookOpen
+              size={32}
+              className="text-muted-foreground/40 mx-auto mb-3"
+            />
+            <p className="text-sm text-foreground font-medium mb-1">
+              No subjects loaded
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Fetch your Canvas subjects to get started.
+            </p>
           </div>
         ) : (
           <div className="space-y-5 max-h-[420px] overflow-y-auto -mx-6 px-6">
@@ -417,7 +468,11 @@ export default function SyncPage() {
                   onClick={() => setPastExpanded((v) => !v)}
                   className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 hover:text-foreground transition-colors"
                 >
-                  {pastExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                  {pastExpanded ? (
+                    <ChevronDown size={11} />
+                  ) : (
+                    <ChevronRight size={11} />
+                  )}
                   Past subjects ({past.length})
                 </button>
                 {pastExpanded && (
@@ -426,7 +481,9 @@ export default function SyncPage() {
                       .sort(([a], [b]) => b.localeCompare(a))
                       .map(([term, courses]) => (
                         <div key={term}>
-                          <p className="text-[11px] text-muted-foreground mb-1.5 pl-1">{term}</p>
+                          <p className="text-[11px] text-muted-foreground mb-1.5 pl-1">
+                            {term}
+                          </p>
                           <div className="space-y-1">
                             {courses.map((s) => (
                               <SubjectRow
@@ -462,12 +519,20 @@ export default function SyncPage() {
             className="mr-auto gap-1.5"
           >
             {loadingSubjects ? (
-              <><Loader2 size={13} className="animate-spin" /> Fetching…</>
+              <>
+                <Loader2 size={13} className="animate-spin" /> Fetching…
+              </>
             ) : (
-              <><RefreshCw size={13} /> Refetch Subjects</>
+              <>
+                <RefreshCw size={13} /> Refetch Subjects
+              </>
             )}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowModal(false)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowModal(false)}
+          >
             Close
           </Button>
         </DialogFooter>

@@ -451,7 +451,11 @@
       "/discussion_topics?only_announcements=true&per_page=100&include[]=author"
     );
     let n = 0;
+    let idx = 0;
     for (const a of list) {
+      if (isCancelled()) break;
+      idx++;
+      await progress({ done: idx, total: list.length, course: c.code, phase: "announcements", label: a.title || "Announcement" });
       try {
         if (!a.message) continue;
         const date = (a.posted_at || a.created_at || "").slice(0, 10);
@@ -525,6 +529,13 @@
     // Queues for orphaned links found inside pages (one level deep).
     const orphanPages = new Set(), orphanFiles = new Set();
 
+    // Total syncable module items across ALL modules (SubHeaders excluded).
+    // Each item counts as 1 even if it triggers nested page/file fetches.
+    const totalItems = modules.reduce(
+      (n, m) => n + (m.items || []).filter((it) => it.type !== "SubHeader").length, 0
+    );
+    let processed = 0;
+
     for (const mod of modules) {
       if (isCancelled()) break;
       const items = mod.items || [];
@@ -542,10 +553,14 @@
           tocLines.push(indentStr + "## " + escapeMd(title));
           continue;
         }
+
+        // Count every real module item once, before any nested work.
+        processed++;
+        await progress({ done: processed, total: totalItems, course: c.code, phase: "modules", label: title });
+
         if (type === "Page" && item.page_url) {
           if (!seenPages.has(item.page_url)) {
             seenPages.add(item.page_url);
-            await progress({ done: pageCount, total: items.length, course: c.code, phase: "pages", label: title });
             const saved = await fetchPage(c, item.page_url, title, orphanPages, orphanFiles);
             if (saved) pageCount++;
             tocLines.push(indentStr + "- [" + escapeMd(title) + "](../pages/" + slug(title) + ".md)");
@@ -558,7 +573,6 @@
           const key = String(item.content_id);
           if (!seenFiles.has(key)) {
             seenFiles.add(key);
-            await progress({ done: fileCount, total: items.length, course: c.code, phase: "files", label: title });
             const saved = await fetchFile(c, item.content_id, title);
             if (saved) { fileCount++; tocLines.push(indentStr + "- [" + escapeMd(title) + "](../" + saved + ")"); }
             else { tocLines.push(indentStr + "- " + escapeMd(title) + " _(file)_"); }
@@ -590,11 +604,11 @@
     }
 
     // Scrape orphaned pages linked within pages but not in any module.
+    // These are nested content — not counted as module items, no progress emit.
     for (const pageUrl of orphanPages) {
       if (isCancelled()) break;
       if (seenPages.has(pageUrl)) continue;
       seenPages.add(pageUrl);
-      await progress({ done: pageCount, total: pageCount + orphanPages.size, course: c.code, phase: "orphans", label: pageUrl });
       const saved = await fetchPage(c, pageUrl, pageUrl, null, null);
       if (saved) pageCount++;
     }

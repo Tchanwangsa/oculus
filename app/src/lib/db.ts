@@ -45,6 +45,8 @@ export interface DbFile {
   source_url: string | null;
   modified_at: string | null;
   scraped_at: string;
+  parse_status: string | null;
+  parsed_at: string | null;
 }
 
 // ── Singleton ────────────────────────────────────────────────────────────────
@@ -233,6 +235,36 @@ export async function getFilesForSubject(subjectId: number): Promise<DbFile[]> {
     `SELECT * FROM files WHERE subject_id = $1 ORDER BY relative_path ASC`,
     [subjectId]
   );
+}
+
+/** Update a PDF's parse status. status: 'fast' | 'quality' | 'error' | 'queued' | 'running' */
+export async function setParseStatus(
+  subjectId: number,
+  relativePath: string,
+  status: string,
+): Promise<void> {
+  const db = await getDb();
+  const setParsedAt = status === "quality" || status === "fast";
+  await db.execute(
+    `UPDATE files SET parse_status = $1${setParsedAt ? ", parsed_at = datetime('now')" : ""}
+     WHERE subject_id = $2 AND relative_path = $3`,
+    [status, subjectId, relativePath],
+  );
+}
+
+/** Bulk-set parse status by relative_path (used by disk reconciliation). */
+export async function setParseStatusByPath(
+  entries: Array<[string, string]>,
+): Promise<void> {
+  if (entries.length === 0) return;
+  const db = await getDb();
+  for (const [relativePath, status] of entries) {
+    await db.execute(
+      `UPDATE files SET parse_status = $1, parsed_at = datetime('now')
+       WHERE relative_path = $2 AND (parse_status IS NULL OR parse_status != $1)`,
+      [status, relativePath],
+    );
+  }
 }
 
 export async function clearAllFiles(): Promise<number> {

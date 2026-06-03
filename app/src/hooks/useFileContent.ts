@@ -28,9 +28,12 @@ export function useFileContent(dataDir: string) {
     if (file.category === "file") {
       setContent("");
       setLoading(false);
-      invoke("open_course_file", { relativePath: file.relative_path }).catch(
-        (err) => setError(String(err)),
-      );
+      // PDFs render in-app; other file types open in system viewer
+      if (!file.filename.toLowerCase().endsWith(".pdf")) {
+        invoke("open_course_file", { relativePath: file.relative_path }).catch(
+          (err) => setError(String(err)),
+        );
+      }
       return;
     }
     setLoading(true);

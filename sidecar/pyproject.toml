@@ -1,0 +1,16 @@
+[project]
+name = "sidecar"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "docling>=2.96.1",
+    "fastapi>=0.136.3",
+    "magic-pdf[full]>=0.6.1",
+    "marker-pdf>=1.10.2",
+    "pix2tex>=0.1.4",
+    "pymupdf4llm>=1.27.2.3",
+    "scikit-learn>=1.9.0",
+    "uvicorn>=0.48.0",
+]

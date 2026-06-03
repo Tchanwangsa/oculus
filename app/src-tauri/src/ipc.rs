@@ -58,6 +58,7 @@ fn route_request(url: &str, bytes: &[u8], handle: &AppHandle) {
     // since /scrape-progress, /scrape-binary etc. all start with /scrape.
     if url.starts_with("/subjects")              { handle_subjects(bytes, handle); }
     else if url.starts_with("/image-proxy")      { handle_image_proxy(url, bytes, handle); }
+    else if url.starts_with("/parse-status")     { handle_emit_json(bytes, handle, "parse-status"); }
     else if url.starts_with("/scrape-progress")  { handle_emit_json(bytes, handle, "scrape-progress"); }
     else if url.starts_with("/scrape-done")      { handle_emit_json(bytes, handle, "scrape-complete"); }
     else if url.starts_with("/scrape-log")       { handle_emit_json(bytes, handle, "scrape-log"); }
@@ -274,10 +275,40 @@ fn emit_file_event(
                     }),
                 )
                 .ok();
+
+            if path.ends_with(".pdf") {
+                if let Ok(abs) = handle.path().app_data_dir() {
+                    let abs_path = abs.join(&rel).to_string_lossy().to_string();
+                    let code_owned = code.to_string();
+                    let rel_owned = rel.clone();
+                    let ipc_port = handle.state::<IpcPort>().0;
+                    let sid = subject_id;
+                    std::thread::spawn(move || {
+                        trigger_pdf_parse(&abs_path, &code_owned, &rel_owned, sid, ipc_port);
+                    });
+                }
+            }
         }
         Err(e) => {
             eprintln!("[oculus] write failed: {e}");
             handle.emit("scrape-error", e).ok();
         }
+    }
+}
+
+fn trigger_pdf_parse(abs_path: &str, code: &str, rel_path: &str, subject_id: i64, ipc_port: u16) {
+    let body = serde_json::json!({
+        "pdf_path": abs_path,
+        "subject_code": code,
+        "relative_path": rel_path,
+        "subject_id": subject_id,
+        "ipc_port": ipc_port,
+    });
+    match ureq::post("http://127.0.0.1:9547/parse-pdf")
+        .set("Content-Type", "application/json")
+        .send_string(&body.to_string())
+    {
+        Ok(r) => eprintln!("[oculus] parse-pdf {}: {}", abs_path, r.status()),
+        Err(e) => eprintln!("[oculus] parse-pdf sidecar not available: {e}"),
     }
 }

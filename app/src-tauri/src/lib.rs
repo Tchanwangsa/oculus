@@ -131,6 +131,15 @@ ALTER TABLE files ADD COLUMN modified_at TEXT;
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 3,
+                            description: "pdf parse status tracking",
+                            sql: r#"
+ALTER TABLE files ADD COLUMN parse_status TEXT;
+ALTER TABLE files ADD COLUMN parsed_at    TEXT;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -147,6 +156,7 @@ ALTER TABLE files ADD COLUMN modified_at TEXT;
             scrape::rescrape_file,
             files::read_course_file,
             files::open_course_file,
+            files::scan_parsed_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
