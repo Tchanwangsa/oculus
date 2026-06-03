@@ -516,12 +516,6 @@ pub async fn echo360_sync_lectures(
     fetch_syllabus(&session)
 }
 
-#[derive(serde::Serialize)]
-pub struct VideoDownloadResult {
-    pub path: String,
-    pub trim_offset: i64,
-}
-
 #[tauri::command]
 pub async fn echo360_download_video(
     app: AppHandle,
@@ -529,7 +523,7 @@ pub async fn echo360_download_video(
     media_id: String,
     lesson_id: String,
     canvas_course_id: i64,
-) -> Result<VideoDownloadResult, String> {
+) -> Result<String, String> {
     let session = get_or_auth(&app, &cache, canvas_course_id)?;
     let redirect = get_redirect_url(&session, &media_id, &lesson_id)?;
 
@@ -540,11 +534,8 @@ pub async fn echo360_download_video(
     let raw    = dir.join("raw.mp4");
     let final_ = dir.join("source1.mp4");
 
-    // Run download + trim. On ANY error, delete raw.mp4 and final_ to avoid
-    // leaving a partial file that would be mistaken for a complete download.
-    let result = (|| -> Result<VideoDownloadResult, String> {
-        // The redirect URL is a CloudFront signed URL with inline Policy/Signature/Key-Pair-Id.
-        // It is self-authenticating — sending CF cookies alongside a signed URL can conflict.
+    // On ANY error, clean up partial files so re-download starts fresh.
+    let result = (|| -> Result<String, String> {
         let bytes = stream_to_file(&redirect, "", &raw, &app, &media_id)?;
         eprintln!("[oculus] downloaded {} MB", bytes / 1_000_000);
 
@@ -552,22 +543,17 @@ pub async fn echo360_download_video(
             "mediaId": &media_id, "percent": 100u8, "phase": "trimming"
         })).ok();
 
-        let trim_offset = if trim_video(&raw, &final_) {
-            std::fs::remove_file(&raw).ok();
-            eprintln!("[oculus] trimmed 14s: {}", final_.display());
-            0i64
-        } else {
-            eprintln!("[oculus] ffmpeg unavailable — storing trim_offset=14");
-            std::fs::rename(&raw, &final_)
-                .map_err(|e| format!("Failed to finalize video file: {e}"))?;
-            14i64
-        };
+        if !trim_video(&raw, &final_) {
+            return Err("ffmpeg trim failed — ensure ffmpeg is installed".to_string());
+        }
+        std::fs::remove_file(&raw).ok();
+        eprintln!("[oculus] trimmed 14s: {}", final_.display());
 
         app.emit("lecture-download-progress", serde_json::json!({
             "mediaId": &media_id, "percent": 100u8, "phase": "complete"
         })).ok();
 
-        Ok(VideoDownloadResult { path: final_.to_string_lossy().to_string(), trim_offset })
+        Ok(final_.to_string_lossy().to_string())
     })();
 
     if result.is_err() {
@@ -588,7 +574,6 @@ pub async fn echo360_download_transcript(
     lesson_id: String,
     media_id: String,
     canvas_course_id: i64,
-    trim_offset: i64,
 ) -> Result<String, String> {
     let session = get_or_auth(&app, &cache, canvas_course_id)?;
 
@@ -611,12 +596,8 @@ pub async fn echo360_download_transcript(
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let path = dir.join("transcript.vtt");
-    // If video was trimmed (trim_offset=0), shift VTT -14s so timestamps align with
-    // the trimmed video timeline. If untrimmed (trim_offset=14), keep VTT unshifted
-    // so timestamps match the raw video — the player seeks past the copyright on load.
-    let content = if trim_offset == 0 { shift_vtt(&vtt) } else { vtt };
-    std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
-    eprintln!("[oculus] transcript saved (trim_offset={trim_offset}): {}", path.display());
+    std::fs::write(&path, vtt.as_bytes()).map_err(|e| e.to_string())?;
+    eprintln!("[oculus] transcript saved: {}", path.display());
 
     Ok(path.to_string_lossy().to_string())
 }

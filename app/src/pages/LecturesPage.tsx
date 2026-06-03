@@ -161,12 +161,12 @@ export default function LecturesPage() {
   const handleDownloadVideo = async (lec: Lecture) => {
     setDownloading(prev => new Set(prev).add(lec.id));
     try {
-      const result = await invoke<{ path: string; trim_offset: number }>("echo360_download_video", {
+      const path = await invoke<string>("echo360_download_video", {
         mediaId: lec.id,
         lessonId: lec.lesson_id,
         canvasCourseId: lec.subject_id,
       });
-      await updateLectureVideoPath(lec.id, result.path, result.trim_offset);
+      await updateLectureVideoPath(lec.id, path);
       if (selectedSubjectId != null) await refreshLectures(selectedSubjectId);
     } catch (e) {
       setSyncError(`Download failed: ${e}`);
@@ -182,7 +182,6 @@ export default function LecturesPage() {
         lessonId: lec.lesson_id,
         mediaId: lec.id,
         canvasCourseId: lec.subject_id,
-        trimOffset: lec.trim_offset,
       });
       await updateLectureTranscriptPath(lec.id, path);
       if (selectedSubjectId != null) await refreshLectures(selectedSubjectId);
@@ -207,17 +206,13 @@ export default function LecturesPage() {
       } catch { /* transcript unreadable */ }
     }
 
-    // Seek past copyright notice (trim_offset) and restore saved progress
-    if (lec.video_path) {
-      const offset = lec.trim_offset ?? 0;
-      const seekTo = offset + (lec.progress_seconds > 5 ? lec.progress_seconds : 0);
-      if (seekTo > 0) {
-        const onLoaded = () => {
-          if (videoRef.current) videoRef.current.currentTime = seekTo;
-          videoRef.current?.removeEventListener('loadedmetadata', onLoaded);
-        };
-        videoRef.current?.addEventListener('loadedmetadata', onLoaded);
-      }
+    // Restore saved progress position
+    if (lec.video_path && lec.progress_seconds > 5) {
+      const onLoaded = () => {
+        if (videoRef.current) videoRef.current.currentTime = lec.progress_seconds;
+        videoRef.current?.removeEventListener('loadedmetadata', onLoaded);
+      };
+      videoRef.current?.addEventListener('loadedmetadata', onLoaded);
     }
   };
 
@@ -226,15 +221,10 @@ export default function LecturesPage() {
   const handleTimeUpdate = () => {
     const v = videoRef.current;
     if (!v || !selectedLecture) return;
-    const rawTime = v.currentTime;
-    const offset = selectedLecture.trim_offset ?? 0;
-    // When trim_offset=0 (video trimmed, VTT shifted): rawTime IS user time
-    // When trim_offset=14 (video untrimmed, VTT unshifted): subtract offset for display
-    const t = Math.max(0, rawTime - offset);
+    const t = v.currentTime;
     setCurrentTime(t);
 
-    // rawTime always matches VTT timestamps directly (VTT shifted iff video trimmed)
-    const idx = cues.findIndex(c => rawTime >= c.start && rawTime <= c.end);
+    const idx = cues.findIndex(c => t >= c.start && t <= c.end);
     setActiveCueIdx(idx);
     if (idx >= 0 && transcriptRef.current) {
       const el = transcriptRef.current.querySelector(`[data-cue="${idx}"]`);
@@ -245,8 +235,8 @@ export default function LecturesPage() {
     if (progressSaveRef.current) clearTimeout(progressSaveRef.current);
     progressSaveRef.current = setTimeout(async () => {
       if (!selectedLecture) return;
-      await updateLectureProgress(selectedLecture.id, Math.floor(t));
-      if (selectedLecture.duration_seconds > 0 && t >= selectedLecture.duration_seconds - 30) {
+      await updateLectureProgress(selectedLecture.id, Math.floor(v.currentTime));
+      if (selectedLecture.duration_seconds > 0 && v.currentTime >= selectedLecture.duration_seconds - 30) {
         await markLectureComplete(selectedLecture.id);
       }
       if (selectedSubjectId != null) await refreshLectures(selectedSubjectId);
@@ -461,8 +451,7 @@ export default function LecturesPage() {
                 onClick={e => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const pct = (e.clientX - rect.left) / rect.width;
-                  const offset = selectedLecture.trim_offset ?? 0;
-                  if (videoRef.current) videoRef.current.currentTime = offset + pct * selectedLecture.duration_seconds;
+                  if (videoRef.current) videoRef.current.currentTime = pct * selectedLecture.duration_seconds;
                 }}
               >
                 <div
@@ -536,7 +525,7 @@ export default function LecturesPage() {
                       )}
                     >
                       <span className="font-mono text-[10px] shrink-0 pt-px w-10 text-right opacity-60">
-                        {fmtTime(Math.max(0, Math.floor(cue.start - (selectedLecture.trim_offset ?? 0))))}
+                        {fmtTime(Math.floor(cue.start))}
                       </span>
                       <span className="flex-1">{cue.text}</span>
                       <ChevronRight size={10} className="shrink-0 mt-1 opacity-40" />
