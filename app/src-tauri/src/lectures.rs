@@ -298,21 +298,36 @@ fn get_redirect_url(session: &Echo360Session, media_id: &str, lesson_id: &str) -
     let url = format!(
         "https://echo360.net.au/media/download/{media_id}/hd1.mp4?lessonId={lesson_id}"
     );
+    eprintln!("[oculus] echo360 download redirect: GET {url}");
     let agent = ureq::AgentBuilder::new().redirects(0).build();
+    // ureq with redirects(0): 3xx responses come back as Ok(response) with 3xx status,
+    // only 4xx/5xx become Err(Status(...)). So we check status inside Ok branch.
     match agent.get(&url).set("Cookie", &session.cookie_header()).call() {
-        Err(ureq::Error::Status(302, r)) | Err(ureq::Error::Status(301, r)) => {
-            r.header("location")
-                .map(|s| s.to_string())
-                .ok_or_else(|| "Download redirect missing Location header".to_string())
+        Ok(r) => {
+            let status = r.status();
+            if (301..=303).contains(&status) {
+                let loc = r.header("location").unwrap_or("(none)").to_string();
+                eprintln!("[oculus] echo360 download redirect: {status} → {loc}");
+                if loc == "(none)" {
+                    Err("Download redirect missing Location header".to_string())
+                } else {
+                    Ok(loc)
+                }
+            } else {
+                let body = r.into_string().unwrap_or_default();
+                eprintln!("[oculus] echo360 download redirect: unexpected {status}\nbody: {}", &body[..body.len().min(500)]);
+                Err(format!("Expected redirect from echo360 download endpoint, got {status}"))
+            }
         }
-        Ok(r) => Err(format!(
-            "Expected 302 from echo360 download endpoint, got {} — session may have expired",
-            r.status()
-        )),
-        Err(ureq::Error::Status(code, _)) => Err(format!(
-            "Echo360 download endpoint returned HTTP {code}"
-        )),
-        Err(e) => Err(format!("Download redirect request failed: {e}")),
+        Err(ureq::Error::Status(code, r)) => {
+            let body = r.into_string().unwrap_or_default();
+            eprintln!("[oculus] echo360 download redirect: HTTP {code}\nbody: {}", &body[..body.len().min(500)]);
+            Err(format!("Echo360 download endpoint returned HTTP {code}"))
+        }
+        Err(e) => {
+            eprintln!("[oculus] echo360 download redirect: request failed: {e}");
+            Err(format!("Download redirect request failed: {e}"))
+        }
     }
 }
 
@@ -330,9 +345,12 @@ fn stream_to_file(
         .call()
         .map_err(|e| format!("HTTP request failed: {e}"))?;
 
+    let status = resp.status();
+    let content_type = resp.content_type().to_string();
     let total = resp.header("content-length")
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
+    eprintln!("[oculus] CDN response: HTTP {status} content-type={content_type} content-length={total}");
 
     let mut reader = resp.into_reader();
     let mut file = std::fs::File::create(dest)
