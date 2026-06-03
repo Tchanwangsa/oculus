@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // ── Session cache (in-memory, per course) ─────────────────────────────────────
 
@@ -85,16 +85,34 @@ fn get_or_auth(
 }
 
 fn auth_echo360(app: &AppHandle, course_id: i64) -> Result<Echo360Session, String> {
-    let win = app
-        .get_webview_window("canvas-auth")
-        .ok_or_else(|| "Canvas window unavailable — reconnect Canvas first".to_string())?;
-
     let lti_url = format!(
         "https://canvas.lms.unimelb.edu.au/courses/{course_id}{LTI_TOOL_PATH}"
     );
 
-    win.navigate(lti_url.parse::<url::Url>().map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    // canvas-auth window exists when user logged in this session, but on startup
+    // with a valid persisted cookie it is never created. Create it hidden on demand.
+    let win = match app.get_webview_window("canvas-auth") {
+        Some(w) => {
+            w.navigate(lti_url.parse::<url::Url>().map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+            w
+        }
+        None => {
+            let session_dir = crate::auth::canvas_session_dir(app);
+            WebviewWindowBuilder::new(
+                app,
+                "canvas-auth",
+                WebviewUrl::External(lti_url.parse().map_err(|e: url::ParseError| e.to_string())?),
+            )
+            .title("Oculus — Canvas")
+            .inner_size(900.0, 700.0)
+            .visible(false)
+            .skip_taskbar(true)
+            .data_directory(session_dir)
+            .build()
+            .map_err(|e| e.to_string())?
+        }
+    };
 
     eprintln!("[oculus] echo360 auth: navigating to LTI page, waiting for ECHO_JWT...");
 
