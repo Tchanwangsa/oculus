@@ -128,7 +128,7 @@ export default function LecturesPage() {
   useEffect(() => {
     const unsub = listen<DlProgress>("lecture-download-progress", (e) => {
       setDlProgress(prev => ({ ...prev, [e.payload.mediaId]: e.payload }));
-      if (e.payload.phase === "complete") {
+      if (e.payload.phase === "complete" || e.payload.phase === "error") {
         setDownloading(prev => { const s = new Set(prev); s.delete(e.payload.mediaId); return s; });
         setTimeout(() => setDlProgress(prev => { const n = { ...prev }; delete n[e.payload.mediaId]; return n; }), 2000);
       }

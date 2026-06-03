@@ -29,6 +29,9 @@ pub fn run() {
             // ── Hidden worker WebView (hosts scraper/subjects JS) ───────
             worker::ensure_worker_window(app.handle(), port);
 
+            // ── Cleanup orphaned partial lecture downloads ──────────────
+            lectures::cleanup_partial_downloads(app.handle());
+
             // ── Session restore on startup ──────────────────────────────
             // No WebView dance: we replay the persisted session cookie via a
             // server-side ureq ping. Valid → connected instantly. Invalid →

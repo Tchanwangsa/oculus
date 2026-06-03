@@ -310,24 +310,27 @@ fn get_redirect_url(session: &Echo360Session, media_id: &str, lesson_id: &str) -
     }
 }
 
+const MIN_VIDEO_BYTES: u64 = 1_000_000; // 1 MB sanity check
+
 fn stream_to_file(
     url: &str,
     cookie: &str,
     dest: &std::path::Path,
     app: &AppHandle,
     media_id: &str,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let resp = ureq::get(url)
         .set("Cookie", cookie)
         .call()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("HTTP request failed: {e}"))?;
 
     let total = resp.header("content-length")
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
     let mut reader = resp.into_reader();
-    let mut file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::create(dest)
+        .map_err(|e| format!("Failed to create file: {e}"))?;
     let mut buf = [0u8; 65536];
     let mut done = 0u64;
     let mid = media_id.to_string();
@@ -336,7 +339,8 @@ fn stream_to_file(
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+                file.write_all(&buf[..n])
+                    .map_err(|e| format!("Write error after {done} bytes: {e}"))?;
                 done += n as u64;
                 if total > 0 {
                     app.emit("lecture-download-progress", serde_json::json!({
@@ -346,10 +350,31 @@ fn stream_to_file(
                     })).ok();
                 }
             }
-            Err(e) => return Err(format!("Stream read error: {e}")),
+            Err(e) => return Err(format!("Network read error after {done} bytes: {e}")),
         }
     }
-    Ok(())
+
+    if done < MIN_VIDEO_BYTES {
+        return Err(format!("Download incomplete: only {done} bytes received (expected >{MIN_VIDEO_BYTES})"));
+    }
+
+    Ok(done)
+}
+
+/// Remove all raw.mp4 files (incomplete downloads) left by crashed/interrupted sessions.
+pub fn cleanup_partial_downloads(app: &AppHandle) {
+    let Ok(base) = app.path().app_data_dir() else { return };
+    let dir = base.join("lectures");
+    if !dir.exists() { return; }
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let raw = entry.path().join("raw.mp4");
+            if raw.exists() {
+                eprintln!("[oculus] cleanup: removing orphaned {}", raw.display());
+                std::fs::remove_file(&raw).ok();
+            }
+        }
+    }
 }
 
 fn trim_video(raw: &std::path::Path, out: &std::path::Path) -> bool {
@@ -465,27 +490,43 @@ pub async fn echo360_download_video(
         session.cf_key_pair_id, session.cf_policy, session.cf_signature, session.cf_tracking
     );
 
-    stream_to_file(&redirect, &cf_cookie, &raw, &app, &media_id)?;
+    // Run download + trim. On ANY error, delete raw.mp4 and final_ to avoid
+    // leaving a partial file that would be mistaken for a complete download.
+    let result = (|| -> Result<VideoDownloadResult, String> {
+        let bytes = stream_to_file(&redirect, &cf_cookie, &raw, &app, &media_id)?;
+        eprintln!("[oculus] downloaded {} MB", bytes / 1_000_000);
 
-    app.emit("lecture-download-progress", serde_json::json!({
-        "mediaId": &media_id, "percent": 100u8, "phase": "trimming"
-    })).ok();
+        app.emit("lecture-download-progress", serde_json::json!({
+            "mediaId": &media_id, "percent": 100u8, "phase": "trimming"
+        })).ok();
 
-    let trim_offset = if trim_video(&raw, &final_) {
+        let trim_offset = if trim_video(&raw, &final_) {
+            std::fs::remove_file(&raw).ok();
+            eprintln!("[oculus] trimmed 14s: {}", final_.display());
+            0i64
+        } else {
+            eprintln!("[oculus] ffmpeg unavailable — storing trim_offset=14");
+            std::fs::rename(&raw, &final_)
+                .map_err(|e| format!("Failed to finalize video file: {e}"))?;
+            14i64
+        };
+
+        app.emit("lecture-download-progress", serde_json::json!({
+            "mediaId": &media_id, "percent": 100u8, "phase": "complete"
+        })).ok();
+
+        Ok(VideoDownloadResult { path: final_.to_string_lossy().to_string(), trim_offset })
+    })();
+
+    if result.is_err() {
         std::fs::remove_file(&raw).ok();
-        eprintln!("[oculus] trimmed 14s: {}", final_.display());
-        0i64
-    } else {
-        eprintln!("[oculus] ffmpeg unavailable — storing trim offset 14s");
-        std::fs::rename(&raw, &final_).map_err(|e| e.to_string())?;
-        14i64
-    };
+        std::fs::remove_file(&final_).ok();
+        app.emit("lecture-download-progress", serde_json::json!({
+            "mediaId": &media_id, "percent": 0u8, "phase": "error"
+        })).ok();
+    }
 
-    app.emit("lecture-download-progress", serde_json::json!({
-        "mediaId": &media_id, "percent": 100u8, "phase": "complete"
-    })).ok();
-
-    Ok(VideoDownloadResult { path: final_.to_string_lossy().to_string(), trim_offset })
+    result
 }
 
 #[tauri::command]
