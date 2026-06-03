@@ -275,3 +275,74 @@ export async function clearAllFiles(): Promise<number> {
   const rows = await db.select<{ cnt: number }[]>("SELECT COUNT(*) AS cnt FROM files");
   return rows[0]?.cnt ?? 0;
 }
+
+// ── Lectures ──────────────────────────────────────────────────────────────────
+
+export interface Lecture {
+  id: string;
+  lesson_id: string;
+  subject_id: number;
+  title: string;
+  date: string;
+  duration_seconds: number;
+  video_path: string | null;
+  transcript_path: string | null;
+  progress_seconds: number;
+  completed: number;
+  synced_at: string;
+}
+
+export interface LectureData {
+  id: string;
+  lesson_id: string;
+  title: string;
+  date: string;
+  duration_seconds: number;
+}
+
+export async function upsertLectures(subjectId: number, lectures: LectureData[]): Promise<void> {
+  const db = await getDb();
+  for (const l of lectures) {
+    await db.execute(
+      `INSERT INTO lectures (id, lesson_id, subject_id, title, date, duration_seconds, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, datetime('now'))
+       ON CONFLICT(id) DO UPDATE SET
+         title            = excluded.title,
+         date             = excluded.date,
+         duration_seconds = excluded.duration_seconds,
+         synced_at        = datetime('now')`,
+      [l.id, l.lesson_id, subjectId, l.title, l.date, l.duration_seconds]
+    );
+  }
+}
+
+export async function getLectures(subjectId: number): Promise<Lecture[]> {
+  const db = await getDb();
+  return db.select<Lecture[]>(
+    `SELECT * FROM lectures WHERE subject_id = $1 ORDER BY date ASC`,
+    [subjectId]
+  );
+}
+
+export async function updateLectureVideoPath(id: string, path: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`UPDATE lectures SET video_path = $1 WHERE id = $2`, [path, id]);
+}
+
+export async function updateLectureTranscriptPath(id: string, path: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(`UPDATE lectures SET transcript_path = $1 WHERE id = $2`, [path, id]);
+}
+
+export async function updateLectureProgress(id: string, seconds: number): Promise<void> {
+  const db = await getDb();
+  await db.execute(`UPDATE lectures SET progress_seconds = $1 WHERE id = $2`, [seconds, id]);
+}
+
+export async function markLectureComplete(id: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE lectures SET completed = 1, progress_seconds = duration_seconds WHERE id = $1`,
+    [id]
+  );
+}

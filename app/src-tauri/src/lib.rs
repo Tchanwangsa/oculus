@@ -2,6 +2,7 @@ mod auth;
 mod cors;
 mod files;
 mod ipc;
+mod lectures;
 mod scrape;
 mod subjects;
 mod worker;
@@ -11,6 +12,7 @@ use tauri::{Emitter, Manager};
 
 use auth::{auth_flag_path, saved_cookie_valid, AuthState};
 use ipc::IpcPort;
+use lectures::Echo360Cache;
 use subjects::SubjectsState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,6 +20,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AuthState(Arc::new(Mutex::new(false))))
         .manage(SubjectsState(Arc::new(Mutex::new(vec![]))))
+        .manage(Echo360Cache(Arc::new(Mutex::new(std::collections::HashMap::new()))))
         .setup(|app| {
             // ── IPC HTTP server ────────────────────────────────────────
             let port = ipc::start_ipc_server(app.handle().clone());
@@ -140,6 +143,26 @@ ALTER TABLE files ADD COLUMN parsed_at    TEXT;
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 4,
+                            description: "lecture capture",
+                            sql: r#"
+CREATE TABLE IF NOT EXISTS lectures (
+    id                TEXT PRIMARY KEY,
+    lesson_id         TEXT UNIQUE NOT NULL,
+    subject_id        INTEGER NOT NULL,
+    title             TEXT NOT NULL,
+    date              TEXT NOT NULL,
+    duration_seconds  INTEGER NOT NULL DEFAULT 0,
+    video_path        TEXT,
+    transcript_path   TEXT,
+    progress_seconds  INTEGER NOT NULL DEFAULT 0,
+    completed         INTEGER NOT NULL DEFAULT 0,
+    synced_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -157,6 +180,10 @@ ALTER TABLE files ADD COLUMN parsed_at    TEXT;
             files::read_course_file,
             files::open_course_file,
             files::scan_parsed_files,
+            lectures::echo360_sync_lectures,
+            lectures::echo360_download_video,
+            lectures::echo360_download_transcript,
+            lectures::echo360_read_transcript,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
