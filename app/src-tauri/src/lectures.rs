@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager};
 
 // ── Session cache (in-memory, per course) ─────────────────────────────────────
 
@@ -85,110 +84,128 @@ fn get_or_auth(
 }
 
 fn auth_echo360(app: &AppHandle, course_id: i64) -> Result<Echo360Session, String> {
-    let lti_url = format!(
+    let canvas_cookie = crate::auth::saved_cookie_header(app);
+    if canvas_cookie.is_empty() {
+        return Err("Canvas session not found — connect Canvas first".to_string());
+    }
+
+    let canvas_lti_url = format!(
         "https://canvas.lms.unimelb.edu.au/courses/{course_id}{LTI_TOOL_PATH}"
     );
 
-    // canvas-auth window exists when user logged in this session, but on startup
-    // with a valid persisted cookie it is never created. Create it hidden on demand.
-    let win = match app.get_webview_window("canvas-auth") {
-        Some(w) => {
-            w.navigate(lti_url.parse::<url::Url>().map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-            w
-        }
-        None => {
-            let session_dir = crate::auth::canvas_session_dir(app);
-            WebviewWindowBuilder::new(
-                app,
-                "canvas-auth",
-                WebviewUrl::External(lti_url.parse().map_err(|e: url::ParseError| e.to_string())?),
-            )
-            .title("Oculus — Canvas")
-            .inner_size(900.0, 700.0)
-            .visible(false)
-            .skip_taskbar(true)
-            .data_directory(session_dir)
-            .build()
-            .map_err(|e| e.to_string())?
-        }
-    };
+    // Fetch Canvas LTI page — Canvas generates a fresh OAuth-signed LTI form server-side
+    eprintln!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
+    let html = ureq::get(&canvas_lti_url)
+        .set("Cookie", &canvas_cookie)
+        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .call()
+        .map_err(|e| format!("Canvas LTI page fetch failed: {e}"))?
+        .into_string()
+        .map_err(|e| e.to_string())?;
 
-    eprintln!("[oculus] echo360 auth: navigating to LTI page, waiting for ECHO_JWT...");
+    let (lti_action, form_fields) = parse_lti_form(&html)
+        .ok_or_else(|| "Could not parse Echo360 LTI form from Canvas page — check course ID or Canvas session".to_string())?;
 
-    // Poll for ECHO_JWT cookie (LTI iframe completes asynchronously)
-    let start = Instant::now();
+    eprintln!("[oculus] echo360 auth: posting LTI form ({} fields) to {lti_action}", form_fields.len());
+
+    // URL-encode form body
+    let form_body: String = form_fields.iter()
+        .map(|(k, v)| format!(
+            "{}={}",
+            url::form_urlencoded::byte_serialize(k.as_bytes()).collect::<String>(),
+            url::form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>(),
+        ))
+        .collect::<Vec<_>>()
+        .join("&");
+
+    // POST to Echo360 LTI — agent follows redirects and accumulates Set-Cookie headers
+    let agent = ureq::AgentBuilder::new().build();
+    let resp = agent.post(&lti_action)
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .set("Referer", &canvas_lti_url)
+        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .send_string(&form_body)
+        .map_err(|e| format!("Echo360 LTI POST failed: {e}"))?;
+
+    let final_url = resp.get_url().to_string();
+    eprintln!("[oculus] echo360 auth: settled at {final_url}");
+
+    let section_id = extract_section_id(&final_url)?;
+
+    // Extract cookies from agent's cookie store
+    let cs = agent.cookie_store();
     let mut jwt = String::new();
-    loop {
-        std::thread::sleep(Duration::from_secs(1));
-        if let Ok(cookies) = win.cookies() {
-            if let Some(c) = cookies.iter().find(|c| c.name() == "ECHO_JWT") {
-                jwt = c.value().to_string();
-                eprintln!("[oculus] echo360 auth: ECHO_JWT acquired");
-                break;
-            }
-        }
-        if start.elapsed() > Duration::from_secs(25) {
-            return Err("Echo360 auth timed out — LTI iframe did not load in 25s".to_string());
+    let mut play_session = String::new();
+    let mut cf_key_pair_id = String::new();
+    let mut cf_policy = String::new();
+    let mut cf_signature = String::new();
+    let mut cf_tracking = String::new();
+    for cookie in cs.iter_unexpired() {
+        match cookie.name() {
+            "ECHO_JWT"              => jwt           = cookie.value().to_string(),
+            "PLAY_SESSION"          => play_session  = cookie.value().to_string(),
+            "CloudFront-Key-Pair-Id"=> cf_key_pair_id = cookie.value().to_string(),
+            "CloudFront-Policy"     => cf_policy     = cookie.value().to_string(),
+            "CloudFront-Signature"  => cf_signature  = cookie.value().to_string(),
+            "CloudFront-Tracking2"  => cf_tracking   = cookie.value().to_string(),
+            _ => {}
         }
     }
 
-    std::thread::sleep(Duration::from_secs(1)); // let remaining cookies settle
-
-    let all = win.cookies().map_err(|e| e.to_string())?;
-    let get = |name: &str| -> String {
-        all.iter()
-            .find(|c| c.name() == name)
-            .map(|c| c.value().to_string())
-            .unwrap_or_default()
-    };
-
-    let play_session   = get("PLAY_SESSION");
-    let cf_key_pair_id = get("CloudFront-Key-Pair-Id");
-    let cf_policy      = get("CloudFront-Policy");
-    let cf_signature   = get("CloudFront-Signature");
-    let cf_tracking    = get("CloudFront-Tracking2");
-
-    // Get sectionId via LTI links redirect
-    let context_id = extract_play_session_field(&play_session, "ltiContextId")
-        .ok_or_else(|| "ltiContextId not found in PLAY_SESSION".to_string())?;
-
-    let cookie_hdr = format!(
-        "ECHO_JWT={jwt}; PLAY_SESSION={play_session}; CloudFront-Key-Pair-Id={cf_key_pair_id}; \
-         CloudFront-Policy={cf_policy}; CloudFront-Signature={cf_signature}; CloudFront-Tracking2={cf_tracking}"
-    );
-
-    let agent = ureq::AgentBuilder::new().redirects(0).build();
-    let links_url = format!(
-        "https://echo360.net.au/lti/{ECHO360_LTI_PROFILE}/links/{context_id}"
-    );
-    let section_id = match agent.get(&links_url).set("Cookie", &cookie_hdr).call() {
-        Err(ureq::Error::Status(302, r)) | Err(ureq::Error::Status(301, r)) => {
-            extract_section_id(r.header("location").unwrap_or(""))?
-        }
-        Ok(r) => extract_section_id(r.get_url())?,
-        Err(e) => return Err(format!("LTI links request failed: {e}")),
-    };
+    if jwt.is_empty() {
+        return Err("Echo360 auth failed — ECHO_JWT cookie not received. LTI POST may have been rejected.".to_string());
+    }
 
     eprintln!("[oculus] echo360 auth done: section={section_id}");
 
-    Ok(Echo360Session {
-        jwt,
-        play_session,
-        cf_key_pair_id,
-        cf_policy,
-        cf_signature,
-        cf_tracking,
-        section_id,
-    })
+    Ok(Echo360Session { jwt, play_session, cf_key_pair_id, cf_policy, cf_signature, cf_tracking, section_id })
 }
 
-fn extract_play_session_field(ps: &str, field: &str) -> Option<String> {
-    // PLAY_SESSION = {hash}-{url-encoded data}
-    let data = ps.splitn(2, '-').nth(1).unwrap_or(ps);
-    url::form_urlencoded::parse(data.as_bytes())
-        .find(|(k, _)| k == field)
-        .map(|(_, v)| v.into_owned())
+// ── LTI form parser ───────────────────────────────────────────────────────────
+
+fn parse_lti_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
+    // Find the form whose action points to echo360
+    let action_marker = html.find("action=\"https://echo360")?;
+    let form_start = html[..action_marker].rfind('<')?;
+    let form_chunk = &html[form_start..];
+
+    let a_start = form_chunk.find("action=\"")? + 8;
+    let a_end   = a_start + form_chunk[a_start..].find('"')?;
+    let action  = html_unescape(&form_chunk[a_start..a_end]);
+
+    let form_end = form_chunk.find("</form>").unwrap_or(form_chunk.len());
+    let body     = &form_chunk[..form_end];
+
+    let mut fields = Vec::new();
+    let mut rest = body;
+    while let Some(pos) = rest.find("<input") {
+        rest = &rest[pos + 6..];
+        let end  = rest.find('>').unwrap_or(rest.len());
+        let elem = &rest[..end];
+        if elem.contains("type=\"hidden\"") {
+            if let (Some(n), Some(v)) = (attr(elem, "name"), attr(elem, "value")) {
+                fields.push((n, v));
+            }
+        }
+    }
+
+    if fields.is_empty() { return None; }
+    Some((action, fields))
+}
+
+fn attr(elem: &str, name: &str) -> Option<String> {
+    let pat = format!("{name}=\"");
+    let s   = elem.find(&pat)? + pat.len();
+    let e   = s + elem[s..].find('"')?;
+    Some(html_unescape(&elem[s..e]))
+}
+
+fn html_unescape(s: &str) -> String {
+    s.replace("&amp;", "&")
+     .replace("&lt;", "<")
+     .replace("&gt;", ">")
+     .replace("&quot;", "\"")
+     .replace("&#39;", "'")
 }
 
 fn extract_section_id(path: &str) -> Result<String, String> {
