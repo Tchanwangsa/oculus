@@ -401,8 +401,37 @@ pub fn cleanup_partial_downloads(app: &AppHandle) {
     }
 }
 
+fn find_ffmpeg() -> Option<&'static str> {
+    const CANDIDATES: &[&str] = &[
+        "ffmpeg",
+        r"C:\Users\tchan\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe",
+        r"C:\ProgramData\scoop\shims\ffmpeg.exe",
+        r"C:\Users\tchan\scoop\shims\ffmpeg.exe",
+        r"C:\ffmpeg\bin\ffmpeg.exe",
+        r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+    ];
+    for &candidate in CANDIDATES {
+        if std::process::Command::new(candidate)
+            .arg("-version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            eprintln!("[oculus] ffmpeg found: {candidate}");
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn trim_video(raw: &std::path::Path, out: &std::path::Path) -> bool {
-    std::process::Command::new("ffmpeg")
+    let Some(ffmpeg) = find_ffmpeg() else {
+        eprintln!("[oculus] ffmpeg not found in any known location");
+        return false;
+    };
+    let ok = std::process::Command::new(ffmpeg)
         .args([
             "-y", "-ss", "14",
             "-i", raw.to_str().unwrap_or(""),
@@ -413,7 +442,9 @@ fn trim_video(raw: &std::path::Path, out: &std::path::Path) -> bool {
         .stderr(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    if !ok { eprintln!("[oculus] ffmpeg trim failed"); }
+    ok
 }
 
 // ── VTT processing ────────────────────────────────────────────────────────────
@@ -574,14 +605,13 @@ pub async fn echo360_download_transcript(
         .read_to_string(&mut vtt)
         .map_err(|e| e.to_string())?;
 
-    let shifted = shift_vtt(&vtt);
-
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?
         .join("lectures").join(&media_id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let path = dir.join("transcript.vtt");
-    std::fs::write(&path, shifted.as_bytes()).map_err(|e| e.to_string())?;
+    // VTT timestamps match raw video time — keep unshifted, player handles the offset
+    std::fs::write(&path, vtt.as_bytes()).map_err(|e| e.to_string())?;
     eprintln!("[oculus] transcript saved: {}", path.display());
 
     Ok(path.to_string_lossy().to_string())

@@ -230,8 +230,8 @@ export default function LecturesPage() {
     const t = Math.max(0, rawTime - offset); // user-facing time (after copyright skip)
     setCurrentTime(t);
 
-    // Update active cue (transcript cues are already offset-adjusted)
-    const idx = cues.findIndex(c => t >= c.start && t <= c.end);
+    // VTT timestamps match raw video time — sync against rawTime directly
+    const idx = cues.findIndex(c => rawTime >= c.start && rawTime <= c.end);
     setActiveCueIdx(idx);
     if (idx >= 0 && transcriptRef.current) {
       const el = transcriptRef.current.querySelector(`[data-cue="${idx}"]`);
@@ -533,7 +533,7 @@ export default function LecturesPage() {
                       )}
                     >
                       <span className="font-mono text-[10px] shrink-0 pt-px w-10 text-right opacity-60">
-                        {fmtTime(Math.floor(cue.start))}
+                        {fmtTime(Math.max(0, Math.floor(cue.start - (selectedLecture.trim_offset ?? 0))))}
                       </span>
                       <span className="flex-1">{cue.text}</span>
                       <ChevronRight size={10} className="shrink-0 mt-1 opacity-40" />
