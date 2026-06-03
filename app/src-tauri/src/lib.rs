@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS lectures (
             lectures::echo360_download_video,
             lectures::echo360_download_transcript,
             lectures::echo360_read_transcript,
+            lectures::echo360_clear_transcripts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -606,3 +606,24 @@ pub async fn echo360_download_transcript(
 pub fn echo360_read_transcript(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn echo360_clear_transcripts(app: AppHandle) -> Result<u32, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?
+        .join("lectures");
+    if !dir.exists() {
+        return Ok(0);
+    }
+    let mut deleted = 0u32;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let transcript = entry.path().join("transcript.vtt");
+            if transcript.exists() {
+                std::fs::remove_file(&transcript).ok();
+                deleted += 1;
+            }
+        }
+    }
+    eprintln!("[oculus] cleared {deleted} transcript files");
+    Ok(deleted)
+}

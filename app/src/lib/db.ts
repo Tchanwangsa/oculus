@@ -346,3 +346,8 @@ export async function markLectureComplete(id: string): Promise<void> {
     [id]
   );
 }
+
+export async function clearLectureTranscripts(): Promise<void> {
+  const db = await getDb();
+  await db.execute(`UPDATE lectures SET transcript_path = NULL`);
+}
