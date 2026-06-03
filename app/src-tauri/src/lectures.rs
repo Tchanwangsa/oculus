@@ -303,10 +303,16 @@ fn get_redirect_url(session: &Echo360Session, media_id: &str, lesson_id: &str) -
         Err(ureq::Error::Status(302, r)) | Err(ureq::Error::Status(301, r)) => {
             r.header("location")
                 .map(|s| s.to_string())
-                .ok_or_else(|| "No Location header in download redirect".to_string())
+                .ok_or_else(|| "Download redirect missing Location header".to_string())
         }
-        Ok(r) => Ok(r.get_url().to_string()),
-        Err(e) => Err(format!("Download redirect failed: {e}")),
+        Ok(r) => Err(format!(
+            "Expected 302 from echo360 download endpoint, got {} — session may have expired",
+            r.status()
+        )),
+        Err(ureq::Error::Status(code, _)) => Err(format!(
+            "Echo360 download endpoint returned HTTP {code}"
+        )),
+        Err(e) => Err(format!("Download redirect request failed: {e}")),
     }
 }
 
@@ -485,15 +491,12 @@ pub async fn echo360_download_video(
     let raw    = dir.join("raw.mp4");
     let final_ = dir.join("source1.mp4");
 
-    let cf_cookie = format!(
-        "CloudFront-Key-Pair-Id={}; CloudFront-Policy={}; CloudFront-Signature={}; CloudFront-Tracking2={}",
-        session.cf_key_pair_id, session.cf_policy, session.cf_signature, session.cf_tracking
-    );
-
     // Run download + trim. On ANY error, delete raw.mp4 and final_ to avoid
     // leaving a partial file that would be mistaken for a complete download.
     let result = (|| -> Result<VideoDownloadResult, String> {
-        let bytes = stream_to_file(&redirect, &cf_cookie, &raw, &app, &media_id)?;
+        // The redirect URL is a CloudFront signed URL with inline Policy/Signature/Key-Pair-Id.
+        // It is self-authenticating — sending CF cookies alongside a signed URL can conflict.
+        let bytes = stream_to_file(&redirect, "", &raw, &app, &media_id)?;
         eprintln!("[oculus] downloaded {} MB", bytes / 1_000_000);
 
         app.emit("lecture-download-progress", serde_json::json!({
