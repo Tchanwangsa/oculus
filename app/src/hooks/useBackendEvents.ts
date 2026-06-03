@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   setParseStatus, upsertFile, markSubjectSynced, finishSyncRun, addLog,
 } from "@/lib/db";
 import { useSyncStore } from "@/stores/syncStore";
 import { useParseStore } from "@/stores/parseStore";
+import { useJobStore } from "@/stores/jobStore";
 import type { SyncProgress } from "@/stores/syncStore";
 import type { ParseJob } from "@/stores/parseStore";
 
@@ -15,6 +16,10 @@ import type { ParseJob } from "@/stores/parseStore";
  * directly.
  */
 export function useBackendEvents() {
+  // PDF parse aggregate tracking — survives re-renders, reset on mount
+  const pdfSeen = useRef(new Set<string>());  // all paths ever queued
+  const pdfCompleted = useRef(new Set<string>());  // paths that finished (fast/quality/error)
+
   useEffect(() => {
     const unsubs: Array<Promise<() => void>> = [];
 
@@ -22,7 +27,16 @@ export function useBackendEvents() {
     unsubs.push(
       listen<SyncProgress>("scrape-progress", (e) => {
         if (e.payload.phase === "complete") return;
-        useSyncStore.getState().setProgress(e.payload);
+        const p = e.payload;
+        useSyncStore.getState().setProgress(p);
+        useJobStore.getState().upsert({
+          id: "canvas_sync",
+          type: "canvas_sync",
+          status: "running",
+          label: p.course,
+          progress_current: p.done,
+          progress_total: p.total,
+        });
       }),
     );
     unsubs.push(
@@ -54,6 +68,7 @@ export function useBackendEvents() {
           await addLog(`Synced ${e.payload.count} subject(s)`);
         }
         useSyncStore.getState().complete(e.payload.count, !!e.payload.cancelled);
+        useJobStore.getState().remove("canvas_sync");
       }),
     );
     unsubs.push(
@@ -61,6 +76,7 @@ export function useBackendEvents() {
         const runId = useSyncStore.getState().runId;
         if (runId != null) await finishSyncRun(runId, "failed", 0, 0, e.payload);
         useSyncStore.getState().fail(typeof e.payload === "string" ? e.payload : "Sync error");
+        useJobStore.getState().remove("canvas_sync");
       }),
     );
 
@@ -72,6 +88,37 @@ export function useBackendEvents() {
         try {
           await setParseStatus(ev.subject_id, ev.relative_path, ev.status);
         } catch { /* ignore */ }
+
+        // Aggregate into jobStore
+        const path = ev.relative_path;
+        const filename = path.split("/").pop() ?? path;
+        const isTerminal = ev.status === "fast" || ev.status === "quality" || ev.status === "error";
+
+        pdfSeen.current.add(path);
+        if (isTerminal) pdfCompleted.current.add(path);
+
+        const total = pdfSeen.current.size;
+        const done = pdfCompleted.current.size;
+
+        if (done >= total && total > 0) {
+          useJobStore.getState().upsert({
+            id: "pdf_parse",
+            type: "pdf_parse",
+            status: "completed",
+            progress_current: done,
+            progress_total: total,
+          });
+          setTimeout(() => useJobStore.getState().remove("pdf_parse"), 1500);
+        } else {
+          useJobStore.getState().upsert({
+            id: "pdf_parse",
+            type: "pdf_parse",
+            status: "running",
+            label: filename,
+            progress_current: done,
+            progress_total: total,
+          });
+        }
       }),
     );
 
