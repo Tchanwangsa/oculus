@@ -45,7 +45,6 @@ impl Echo360Session {
 }
 
 const LTI_TOOL_PATH: &str = "/external_tools/701";
-const ECHO360_LTI_PROFILE: &str = "9381284d-5253-4e5b-b173-fb47a63576cb";
 const TRIM_SECS: f64 = 14.0;
 const SESSION_TTL_SECS: u64 = 11 * 3600;
 
@@ -437,6 +436,12 @@ pub async fn echo360_sync_lectures(
     fetch_syllabus(&session)
 }
 
+#[derive(serde::Serialize)]
+pub struct VideoDownloadResult {
+    pub path: String,
+    pub trim_offset: i64,
+}
+
 #[tauri::command]
 pub async fn echo360_download_video(
     app: AppHandle,
@@ -444,7 +449,7 @@ pub async fn echo360_download_video(
     media_id: String,
     lesson_id: String,
     canvas_course_id: i64,
-) -> Result<String, String> {
+) -> Result<VideoDownloadResult, String> {
     let session = get_or_auth(&app, &cache, canvas_course_id)?;
     let redirect = get_redirect_url(&session, &media_id, &lesson_id)?;
 
@@ -452,11 +457,9 @@ pub async fn echo360_download_video(
         .join("lectures").join(&media_id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    let raw   = dir.join("raw.mp4");
+    let raw    = dir.join("raw.mp4");
     let final_ = dir.join("source1.mp4");
 
-    // The redirect URL is a CloudFront signed URL — auth is inline in the URL params.
-    // Also send CF cookies for belt-and-suspenders.
     let cf_cookie = format!(
         "CloudFront-Key-Pair-Id={}; CloudFront-Policy={}; CloudFront-Signature={}; CloudFront-Tracking2={}",
         session.cf_key_pair_id, session.cf_policy, session.cf_signature, session.cf_tracking
@@ -468,19 +471,21 @@ pub async fn echo360_download_video(
         "mediaId": &media_id, "percent": 100u8, "phase": "trimming"
     })).ok();
 
-    if trim_video(&raw, &final_) {
+    let trim_offset = if trim_video(&raw, &final_) {
         std::fs::remove_file(&raw).ok();
         eprintln!("[oculus] trimmed 14s: {}", final_.display());
+        0i64
     } else {
-        eprintln!("[oculus] ffmpeg unavailable — keeping raw video");
+        eprintln!("[oculus] ffmpeg unavailable — storing trim offset 14s");
         std::fs::rename(&raw, &final_).map_err(|e| e.to_string())?;
-    }
+        14i64
+    };
 
     app.emit("lecture-download-progress", serde_json::json!({
         "mediaId": &media_id, "percent": 100u8, "phase": "complete"
     })).ok();
 
-    Ok(final_.to_string_lossy().to_string())
+    Ok(VideoDownloadResult { path: final_.to_string_lossy().to_string(), trim_offset })
 }
 
 #[tauri::command]

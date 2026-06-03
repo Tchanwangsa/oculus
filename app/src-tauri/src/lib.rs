@@ -163,6 +163,15 @@ CREATE TABLE IF NOT EXISTS lectures (
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 5,
+                            description: "lecture trim offset",
+                            sql: r#"
+ALTER TABLE lectures ADD COLUMN trim_offset INTEGER NOT NULL DEFAULT 0;
+UPDATE lectures SET trim_offset = 14 WHERE video_path IS NOT NULL;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

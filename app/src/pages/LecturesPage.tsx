@@ -161,12 +161,12 @@ export default function LecturesPage() {
   const handleDownloadVideo = async (lec: Lecture) => {
     setDownloading(prev => new Set(prev).add(lec.id));
     try {
-      const path = await invoke<string>("echo360_download_video", {
+      const result = await invoke<{ path: string; trim_offset: number }>("echo360_download_video", {
         mediaId: lec.id,
         lessonId: lec.lesson_id,
         canvasCourseId: lec.subject_id,
       });
-      await updateLectureVideoPath(lec.id, path);
+      await updateLectureVideoPath(lec.id, result.path, result.trim_offset);
       if (selectedSubjectId != null) await refreshLectures(selectedSubjectId);
     } catch (e) {
       setSyncError(`Download failed: ${e}`);
@@ -206,13 +206,17 @@ export default function LecturesPage() {
       } catch { /* transcript unreadable */ }
     }
 
-    // Restore playback position after video loads
-    if (videoRef.current && lec.video_path && lec.progress_seconds > 5) {
-      const onLoaded = () => {
-        if (videoRef.current) videoRef.current.currentTime = lec.progress_seconds;
-        videoRef.current?.removeEventListener('loadedmetadata', onLoaded);
-      };
-      videoRef.current.addEventListener('loadedmetadata', onLoaded);
+    // Seek past copyright notice (trim_offset) and restore saved progress
+    if (lec.video_path) {
+      const offset = lec.trim_offset ?? 0;
+      const seekTo = offset + (lec.progress_seconds > 5 ? lec.progress_seconds : 0);
+      if (seekTo > 0) {
+        const onLoaded = () => {
+          if (videoRef.current) videoRef.current.currentTime = seekTo;
+          videoRef.current?.removeEventListener('loadedmetadata', onLoaded);
+        };
+        videoRef.current?.addEventListener('loadedmetadata', onLoaded);
+      }
     }
   };
 
@@ -221,10 +225,12 @@ export default function LecturesPage() {
   const handleTimeUpdate = () => {
     const v = videoRef.current;
     if (!v || !selectedLecture) return;
-    const t = v.currentTime;
+    const rawTime = v.currentTime;
+    const offset = selectedLecture.trim_offset ?? 0;
+    const t = Math.max(0, rawTime - offset); // user-facing time (after copyright skip)
     setCurrentTime(t);
 
-    // Update active cue
+    // Update active cue (transcript cues are already offset-adjusted)
     const idx = cues.findIndex(c => t >= c.start && t <= c.end);
     setActiveCueIdx(idx);
     if (idx >= 0 && transcriptRef.current) {
@@ -232,12 +238,12 @@ export default function LecturesPage() {
       el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
-    // Debounce progress save
+    // Debounce progress save (save user-facing time)
     if (progressSaveRef.current) clearTimeout(progressSaveRef.current);
     progressSaveRef.current = setTimeout(async () => {
       if (!selectedLecture) return;
       await updateLectureProgress(selectedLecture.id, Math.floor(t));
-      if (v.duration > 0 && t >= v.duration - 30) {
+      if (selectedLecture.duration_seconds > 0 && t >= selectedLecture.duration_seconds - 30) {
         await markLectureComplete(selectedLecture.id);
       }
       if (selectedSubjectId != null) await refreshLectures(selectedSubjectId);
@@ -452,7 +458,8 @@ export default function LecturesPage() {
                 onClick={e => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const pct = (e.clientX - rect.left) / rect.width;
-                  if (videoRef.current) videoRef.current.currentTime = pct * selectedLecture.duration_seconds;
+                  const offset = selectedLecture.trim_offset ?? 0;
+                  if (videoRef.current) videoRef.current.currentTime = offset + pct * selectedLecture.duration_seconds;
                 }}
               >
                 <div

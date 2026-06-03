@@ -289,6 +289,7 @@ export interface Lecture {
   transcript_path: string | null;
   progress_seconds: number;
   completed: number;
+  trim_offset: number;
   synced_at: string;
 }
 
@@ -324,9 +325,12 @@ export async function getLectures(subjectId: number): Promise<Lecture[]> {
   );
 }
 
-export async function updateLectureVideoPath(id: string, path: string): Promise<void> {
+export async function updateLectureVideoPath(id: string, path: string, trimOffset: number): Promise<void> {
   const db = await getDb();
-  await db.execute(`UPDATE lectures SET video_path = $1 WHERE id = $2`, [path, id]);
+  await db.execute(
+    `UPDATE lectures SET video_path = $1, trim_offset = $2 WHERE id = $3`,
+    [path, trimOffset, id]
+  );
 }
 
 export async function updateLectureTranscriptPath(id: string, path: string): Promise<void> {
