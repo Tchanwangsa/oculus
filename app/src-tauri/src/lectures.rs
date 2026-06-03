@@ -588,6 +588,7 @@ pub async fn echo360_download_transcript(
     lesson_id: String,
     media_id: String,
     canvas_course_id: i64,
+    trim_offset: i64,
 ) -> Result<String, String> {
     let session = get_or_auth(&app, &cache, canvas_course_id)?;
 
@@ -610,9 +611,12 @@ pub async fn echo360_download_transcript(
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
     let path = dir.join("transcript.vtt");
-    // VTT timestamps match raw video time — keep unshifted, player handles the offset
-    std::fs::write(&path, vtt.as_bytes()).map_err(|e| e.to_string())?;
-    eprintln!("[oculus] transcript saved: {}", path.display());
+    // If video was trimmed (trim_offset=0), shift VTT -14s so timestamps align with
+    // the trimmed video timeline. If untrimmed (trim_offset=14), keep VTT unshifted
+    // so timestamps match the raw video — the player seeks past the copyright on load.
+    let content = if trim_offset == 0 { shift_vtt(&vtt) } else { vtt };
+    std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
+    eprintln!("[oculus] transcript saved (trim_offset={trim_offset}): {}", path.display());
 
     Ok(path.to_string_lossy().to_string())
 }

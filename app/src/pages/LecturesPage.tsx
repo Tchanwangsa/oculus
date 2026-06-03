@@ -182,6 +182,7 @@ export default function LecturesPage() {
         lessonId: lec.lesson_id,
         mediaId: lec.id,
         canvasCourseId: lec.subject_id,
+        trimOffset: lec.trim_offset,
       });
       await updateLectureTranscriptPath(lec.id, path);
       if (selectedSubjectId != null) await refreshLectures(selectedSubjectId);
@@ -227,10 +228,12 @@ export default function LecturesPage() {
     if (!v || !selectedLecture) return;
     const rawTime = v.currentTime;
     const offset = selectedLecture.trim_offset ?? 0;
-    const t = Math.max(0, rawTime - offset); // user-facing time (after copyright skip)
+    // When trim_offset=0 (video trimmed, VTT shifted): rawTime IS user time
+    // When trim_offset=14 (video untrimmed, VTT unshifted): subtract offset for display
+    const t = Math.max(0, rawTime - offset);
     setCurrentTime(t);
 
-    // VTT timestamps match raw video time — sync against rawTime directly
+    // rawTime always matches VTT timestamps directly (VTT shifted iff video trimmed)
     const idx = cues.findIndex(c => rawTime >= c.start && rawTime <= c.end);
     setActiveCueIdx(idx);
     if (idx >= 0 && transcriptRef.current) {
