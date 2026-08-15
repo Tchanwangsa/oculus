@@ -1,4 +1,4 @@
-import { FileText, RefreshCw } from "lucide-react";
+import { DocumentTextIcon, ArrowPathIcon } from "@heroicons/react/16/solid";
 import { cn } from "@/lib/utils";
 
 /** "queued" | "running" | "done" | "error" | undefined */
@@ -49,13 +49,13 @@ function ParseDot({ status }: { status: ParseBadgeStatus }) {
 // ── FileRow ───────────────────────────────────────────────────────────────────
 
 interface FileRowProps {
-  icon: typeof FileText;
+  icon: typeof DocumentTextIcon;
   label: string;
   size: string;
   active: boolean;
   onClick: () => void;
   dimmed?: boolean;
-  rightIcon?: typeof FileText;
+  rightIcon?: typeof DocumentTextIcon;
   onRescrape?: () => void;
   isRescaping?: boolean;
   parseStatus?: ParseBadgeStatus;
@@ -91,7 +91,7 @@ export function FileRow({
       )}
       style={{ width: "calc(100% - 8px)" }}
     >
-      {showExtBadge ? <ExtBadge filename={label} /> : <Icon size={13} className="shrink-0" />}
+      {showExtBadge ? <ExtBadge filename={label} /> : <Icon className="size-[13px] shrink-0" />}
       <span className="text-xs flex-1 truncate">{label}</span>
       <ParseDot status={parseStatus} />
       <span className="text-[10px] text-muted-foreground/70">{size}</span>
@@ -107,10 +107,10 @@ export function FileRow({
               : "opacity-0 group-hover:opacity-70 hover:!opacity-100 hover:text-foreground",
           )}
         >
-          <RefreshCw size={10} className={cn(isRescaping && "animate-spin")} />
+          <ArrowPathIcon className={cn("size-[10px]", isRescaping && "animate-spin")} />
         </button>
       ) : RightIcon ? (
-        <RightIcon size={10} className="shrink-0 opacity-50" />
+        <RightIcon className="size-[10px] shrink-0 opacity-50" />
       ) : null}
     </div>
   );

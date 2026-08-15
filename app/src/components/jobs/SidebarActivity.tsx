@@ -1,4 +1,8 @@
-import { Loader2, AlertCircle, Check } from "lucide-react";
+import {
+  ArrowPathIcon,
+  ExclamationCircleIcon,
+  CheckIcon,
+} from "@heroicons/react/16/solid";
 import { cn } from "@/lib/utils";
 import { useJobStore, type Job, type JobType } from "@/stores/jobStore";
 
@@ -23,11 +27,11 @@ function JobEntry({ job }: { job: Job }) {
     <div className="px-2.5 py-2">
       <div className="flex items-center gap-2 mb-1.5">
         {done ? (
-          <Check size={11} className="shrink-0 text-success" />
+          <CheckIcon className="size-[11px] shrink-0 text-success" />
         ) : failed ? (
-          <AlertCircle size={11} className="shrink-0 text-destructive" />
+          <ExclamationCircleIcon className="size-[11px] shrink-0 text-destructive" />
         ) : (
-          <Loader2 size={11} className="shrink-0 text-muted-foreground animate-spin" />
+          <ArrowPathIcon className="size-[11px] shrink-0 text-muted-foreground animate-spin" />
         )}
         <span className="text-xs text-foreground truncate flex-1 min-w-0">
           {TYPE_LABEL[job.type]}
@@ -77,7 +81,7 @@ export function SidebarActivity({ collapsed }: { collapsed: boolean }) {
     return (
       <div className="px-2 pb-2 flex justify-center relative group">
         <div className="w-7 h-7 rounded-md bg-sidebar-item-hover flex items-center justify-center">
-          <Loader2 size={13} className="text-muted-foreground animate-spin" />
+          <ArrowPathIcon className="size-[13px] text-muted-foreground animate-spin" />
         </div>
         <div className="absolute left-full bottom-1 ml-3 px-2 py-1 rounded-md bg-foreground text-background text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-md">
           {jobs.map((j) => TYPE_LABEL[j.type]).join(" · ")}

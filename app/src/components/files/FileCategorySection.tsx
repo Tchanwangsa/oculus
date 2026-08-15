@@ -1,19 +1,22 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { FileText } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  DocumentTextIcon,
+} from "@heroicons/react/16/solid";
 import { FileRow, type ParseBadgeStatus } from "./FileRow";
 import type { DbFile } from "@/lib/db";
 import { fmtSize } from "@/lib/format";
 
 interface FileCategorySectionProps {
   label: string;
-  icon: typeof FileText;
+  icon: typeof DocumentTextIcon;
   files: DbFile[];
   expanded: boolean;
   onToggle: () => void;
   activeFileId: number | null;
   onOpenFile: (f: DbFile) => void;
   dimmed?: boolean;
-  rightIcon?: typeof FileText;
+  rightIcon?: typeof DocumentTextIcon;
   onRescrape?: (f: DbFile) => void;
   rescraping?: Set<number>;
   labelFormatter?: (filename: string) => string;
@@ -59,8 +62,8 @@ export function FileCategorySection({
         onClick={onToggle}
         className="w-full flex items-center gap-2 px-4 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
       >
-        {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-        <Icon size={11} />
+        {expanded ? <ChevronDownIcon className="size-[11px]" /> : <ChevronRightIcon className="size-[11px]" />}
+        <Icon className="size-[11px]" />
         {label} ({files.length})
       </button>
       {expanded &&

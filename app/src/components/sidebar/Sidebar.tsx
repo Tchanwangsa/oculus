@@ -1,11 +1,10 @@
 import {
-  MessageSquare,
-  Video,
-  BookOpen,
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+  ChatBubbleLeftRightIcon,
+  VideoCameraIcon,
+  BookOpenIcon,
+  ArrowPathIcon,
+} from "@heroicons/react/20/solid";
+import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/16/solid";
 import { cn } from "@/lib/utils";
 import NavItem from "./NavItem";
 import { SidebarActivity } from "@/components/jobs/SidebarActivity";
@@ -16,13 +15,13 @@ interface SidebarProps {
 }
 
 const mainNav = [
-  { to: "/chat",     icon: MessageSquare, label: "Chat" },
-  { to: "/lectures", icon: Video,         label: "Lectures" },
-  { to: "/subjects", icon: BookOpen,      label: "Subjects" },
+  { to: "/chat",     icon: ChatBubbleLeftRightIcon, label: "Chat" },
+  { to: "/lectures", icon: VideoCameraIcon,         label: "Lectures" },
+  { to: "/subjects", icon: BookOpenIcon,      label: "Subjects" },
 ] as const;
 
 const bottomNav = [
-  { to: "/sync", icon: RefreshCw, label: "Sync" },
+  { to: "/sync", icon: ArrowPathIcon, label: "Sync" },
 ] as const;
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
@@ -87,7 +86,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         className="absolute -right-3 top-[46px] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-sidebar-border bg-sidebar shadow-sm text-muted-foreground hover:text-foreground transition-colors"
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
-        {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+        {collapsed ? <ChevronRightIcon className="size-[12px]" /> : <ChevronLeftIcon className="size-[12px]" />}
       </button>
     </aside>
   );

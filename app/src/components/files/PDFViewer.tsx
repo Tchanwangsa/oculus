@@ -1,6 +1,10 @@
 import { useState, useCallback } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ArrowPathIcon,
+} from "@heroicons/react/20/solid";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
@@ -46,7 +50,7 @@ export function PDFViewer({ src }: Props) {
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             className="p-0.5 rounded hover:bg-surface-raised disabled:opacity-30"
           >
-            <ChevronLeft size={14} />
+            <ChevronLeftIcon className="size-[14px]" />
           </button>
           <span>
             {page} / {numPages}
@@ -56,7 +60,7 @@ export function PDFViewer({ src }: Props) {
             onClick={() => setPage((p) => Math.min(numPages, p + 1))}
             className="p-0.5 rounded hover:bg-surface-raised disabled:opacity-30"
           >
-            <ChevronRight size={14} />
+            <ChevronRightIcon className="size-[14px]" />
           </button>
         </div>
       )}
@@ -69,7 +73,7 @@ export function PDFViewer({ src }: Props) {
           onLoadError={onLoadError}
           loading={
             <div className="flex items-center gap-2 text-muted-foreground mt-8">
-              <Loader2 size={16} className="animate-spin" />
+              <ArrowPathIcon className="size-[16px] animate-spin" />
               <span className="text-sm">Loading PDF…</span>
             </div>
           }

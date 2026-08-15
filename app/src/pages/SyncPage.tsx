@@ -1,14 +1,13 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
-  RefreshCw,
-  AlertCircle,
-  BookOpen,
-  ChevronRight,
-  ChevronDown,
-  Loader2,
-  XCircle,
-  Bug,
-} from "lucide-react";
+  ArrowPathIcon,
+  ExclamationCircleIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
+  XCircleIcon,
+  BugAntIcon,
+} from "@heroicons/react/16/solid";
+import { BookOpenIcon } from "@heroicons/react/24/outline";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
@@ -219,7 +218,7 @@ export default function SyncPage() {
           onClick={() => invoke("open_canvas_devtools")}
           className="ml-auto text-muted-foreground/60"
         >
-          <Bug size={13} />
+          <BugAntIcon className="size-[13px]" />
         </Button>
       </div>
 
@@ -274,7 +273,7 @@ export default function SyncPage() {
             >
               {scraping ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> Syncing…
+                  <ArrowPathIcon className="size-[13px] animate-spin" /> Syncing…
                 </>
               ) : (
                 "Sync now"
@@ -289,7 +288,7 @@ export default function SyncPage() {
                 onClick={handleCancel}
                 className="shrink-0 h-8 gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
               >
-                <XCircle size={13} /> Cancel
+                <XCircleIcon className="size-[13px]" /> Cancel
               </Button>
             )}
           </div>
@@ -308,7 +307,7 @@ export default function SyncPage() {
 
           {subjectsError && !showModal && (
             <div className="mt-3 px-3 py-2.5 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive flex items-start gap-2">
-              <AlertCircle size={13} className="shrink-0 mt-0.5" />
+              <ExclamationCircleIcon className="size-[13px] shrink-0 mt-0.5" />
               <span>{subjectsError}</span>
             </div>
           )}
@@ -352,10 +351,7 @@ export default function SyncPage() {
       >
         {noSubjects ? (
           <div className="py-6 text-center">
-            <BookOpen
-              size={28}
-              className="text-muted-foreground/40 mx-auto mb-3"
-            />
+            <BookOpenIcon className="size-[28px] text-muted-foreground/40 mx-auto mb-3" />
             <p className="text-sm text-foreground font-medium mb-1">
               No subjects loaded
             </p>
@@ -390,9 +386,9 @@ export default function SyncPage() {
                   className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 hover:text-foreground transition-colors"
                 >
                   {pastExpanded ? (
-                    <ChevronDown size={11} />
+                    <ChevronDownIcon className="size-[11px]" />
                   ) : (
-                    <ChevronRight size={11} />
+                    <ChevronRightIcon className="size-[11px]" />
                   )}
                   Past subjects ({past.length})
                 </button>
@@ -441,11 +437,11 @@ export default function SyncPage() {
           >
             {loadingSubjects ? (
               <>
-                <Loader2 size={13} className="animate-spin" /> Fetching…
+                <ArrowPathIcon className="size-[13px] animate-spin" /> Fetching…
               </>
             ) : (
               <>
-                <RefreshCw size={13} /> Refetch Subjects
+                <ArrowPathIcon className="size-[13px]" /> Refetch Subjects
               </>
             )}
           </Button>

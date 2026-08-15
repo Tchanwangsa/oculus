@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, FileText, Loader2 } from "lucide-react";
+import { DocumentTextIcon } from "@heroicons/react/16/solid";
+import { PaperAirplaneIcon, ArrowPathIcon } from "@heroicons/react/20/solid";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -126,7 +127,7 @@ export default function ChatPage() {
                 className="text-left bg-surface hover:bg-surface-raised border border-border rounded-lg px-4 py-3 transition-colors"
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <FileText size={13} className="text-muted-foreground shrink-0" />
+                  <DocumentTextIcon className="size-[13px] text-muted-foreground shrink-0" />
                   <span className="text-xs font-medium text-foreground truncate">
                     {h.filename}
                   </span>
@@ -177,15 +178,12 @@ export default function ChatPage() {
             title="Search (Enter)"
           >
             {searching ? (
-              <Loader2 size={14} className="animate-spin" />
+              <ArrowPathIcon className="size-[14px] animate-spin" />
             ) : (
-              <Send size={14} />
+              <PaperAirplaneIcon className="size-[14px]" />
             )}
           </Button>
         </div>
-        <p className="text-[11px] text-muted-foreground mt-2 text-center">
-          Retrieval only — ranked pages, no generated answer yet
-        </p>
       </div>
     </div>
   );

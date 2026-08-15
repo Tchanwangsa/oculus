@@ -1,4 +1,4 @@
-import { BookOpen } from "lucide-react";
+import { BookOpenIcon } from "@heroicons/react/16/solid";
 import { cn } from "@/lib/utils";
 import type { Subject } from "@/lib/db";
 
@@ -44,12 +44,7 @@ export function SubjectRow({
           </svg>
         )}
       </div>
-      <BookOpen
-        size={13}
-        className={
-          checked ? "text-primary shrink-0" : "text-muted-foreground shrink-0"
-        }
-      />
+      <BookOpenIcon className={cn("size-[13px]", checked ? "text-primary shrink-0" : "text-muted-foreground shrink-0")} />
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium text-foreground truncate">
           {subject.name}

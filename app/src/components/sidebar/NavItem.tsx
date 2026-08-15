@@ -1,10 +1,13 @@
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import type { LucideIcon } from "lucide-react";
+import type { ComponentType, SVGProps } from "react";
+
+/** Shape of a @heroicons/react component. */
+export type HeroIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
 interface NavItemProps {
   to: string;
-  icon: LucideIcon;
+  icon: HeroIcon;
   label: string;
   collapsed: boolean;
 }
@@ -23,7 +26,7 @@ export default function NavItem({ to, icon: Icon, label, collapsed }: NavItemPro
         )
       }
     >
-      <Icon size={15} className="shrink-0" strokeWidth={1.75} />
+      <Icon className="size-[15px] shrink-0" />
 
       {!collapsed && <span className="truncate">{label}</span>}
 

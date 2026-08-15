@@ -1,21 +1,25 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
-  Play,
-  Pause,
-  Download,
-  CheckCircle2,
-  Clock,
-  Loader2,
-  RefreshCw,
-  FileText,
-  ChevronRight,
-  AlertCircle,
-  Volume2,
-  Captions,
-  CaptionsOff,
-  Maximize,
-  Minimize,
-} from "lucide-react";
+  ArrowPathIcon,
+  ArrowDownTrayIcon as ArrowDownTraySmIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  DocumentTextIcon,
+  ChevronRightIcon,
+  ExclamationCircleIcon,
+  SpeakerWaveIcon,
+  ChatBubbleBottomCenterTextIcon,
+  ChatBubbleBottomCenterIcon,
+  ArrowsPointingOutIcon,
+  ArrowsPointingInIcon,
+} from "@heroicons/react/16/solid";
+import {
+  PlayIcon,
+  PauseIcon,
+  ArrowDownTrayIcon,
+  ArrowPathIcon as ArrowPathMdIcon,
+} from "@heroicons/react/20/solid";
+import { PlayIcon as PlayLgIcon } from "@heroicons/react/24/outline";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cn } from "@/lib/utils";
@@ -465,7 +469,7 @@ export default function LecturesPage() {
               title="Sync lecture list"
               className="p-1 rounded hover:bg-surface text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
             >
-              <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
+              <ArrowPathIcon className={cn("size-[12px]", syncing ? "animate-spin" : "")} />
             </button>
           </div>
         </div>
@@ -474,7 +478,7 @@ export default function LecturesPage() {
         <div className="flex-1 overflow-y-auto">
           {syncError && (
             <div className="mx-3 mt-2 px-2 py-2 rounded bg-destructive/10 text-destructive text-[10px] flex gap-1.5 items-start">
-              <AlertCircle size={11} className="shrink-0 mt-0.5" />
+              <ExclamationCircleIcon className="size-[11px] shrink-0 mt-0.5" />
               <span className="break-words">{syncError}</span>
             </div>
           )}
@@ -491,9 +495,9 @@ export default function LecturesPage() {
                 disabled={syncing}
               >
                 {syncing ? (
-                  <Loader2 size={11} className="animate-spin" />
+                  <ArrowPathIcon className="size-[11px] animate-spin" />
                 ) : (
-                  <RefreshCw size={11} />
+                  <ArrowPathIcon className="size-[11px]" />
                 )}
                 {syncing ? "Syncing…" : "Sync lectures"}
               </Button>
@@ -516,7 +520,7 @@ export default function LecturesPage() {
                   >
                     <div className="mt-0.5 shrink-0">
                       {lec.completed ? (
-                        <CheckCircle2 size={13} className="text-success" />
+                        <CheckCircleIcon className="size-[13px] text-success" />
                       ) : (
                         <div
                           className={cn(
@@ -537,7 +541,7 @@ export default function LecturesPage() {
                       </p>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                          <Clock size={9} />
+                          <ClockIcon className="size-[9px]" />
                           {fmtDuration(lec.duration_seconds)}
                         </span>
                         <span className={cn("text-[10px]", pl.color)}>
@@ -560,20 +564,14 @@ export default function LecturesPage() {
                     </div>
                     <div className="flex flex-col gap-1 items-end shrink-0 mt-0.5">
                       {lec.video_path ? (
-                        <CheckCircle2 size={10} className="text-success" />
+                        <CheckCircleIcon className="size-[10px] text-success" />
                       ) : (
-                        <Download
-                          size={10}
-                          className="text-muted-foreground/50"
-                        />
+                        <ArrowDownTraySmIcon className="size-[10px] text-muted-foreground/50" />
                       )}
                       {lec.transcript_path ? (
-                        <CheckCircle2 size={10} className="text-success" />
+                        <CheckCircleIcon className="size-[10px] text-success" />
                       ) : (
-                        <FileText
-                          size={10}
-                          className="text-muted-foreground/50"
-                        />
+                        <DocumentTextIcon className="size-[10px] text-muted-foreground/50" />
                       )}
                     </div>
                   </button>
@@ -591,7 +589,7 @@ export default function LecturesPage() {
       >
         {!selectedLecture ? (
           <div className="flex-1 flex items-center justify-center flex-col gap-3 text-muted-foreground">
-            <Play size={32} className="opacity-20" />
+            <PlayLgIcon className="size-[32px] opacity-20" />
             <p className="text-sm">Select a lecture to watch</p>
           </div>
         ) : (
@@ -621,7 +619,7 @@ export default function LecturesPage() {
                   </p>
                   {downloading.has(selectedLecture.id) ? (
                     <div className="flex items-center gap-2 text-sm">
-                      <Loader2 size={16} className="animate-spin" />
+                      <ArrowPathMdIcon className="size-[16px] animate-spin" />
                       <span>
                         {dlProgress[selectedLecture.id]?.phase === "trimming"
                           ? "Trimming…"
@@ -635,7 +633,7 @@ export default function LecturesPage() {
                       variant="outline"
                       onClick={() => handleDownloadVideo(selectedLecture)}
                     >
-                      <Download size={14} /> Download video
+                      <ArrowDownTrayIcon className="size-[14px]" /> Download video
                     </Button>
                   )}
                 </div>
@@ -662,7 +660,7 @@ export default function LecturesPage() {
                 disabled={!videoSrc}
                 className="p-1 rounded hover:bg-surface text-foreground disabled:opacity-30 transition-colors"
               >
-                {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                {isPlaying ? <PauseIcon className="size-[14px]" /> : <PlayIcon className="size-[14px]" />}
               </button>
 
               <span className="text-[11px] text-muted-foreground font-mono min-w-[80px]">
@@ -691,7 +689,7 @@ export default function LecturesPage() {
 
               {/* Speed */}
               <div className="flex items-center gap-1">
-                <Volume2 size={11} className="text-muted-foreground" />
+                <SpeakerWaveIcon className="size-[11px] text-muted-foreground" />
                 <select
                   value={speed}
                   onChange={(e) => handleSpeedChange(Number(e.target.value))}
@@ -715,9 +713,9 @@ export default function LecturesPage() {
                     className="p-1 rounded hover:bg-surface text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
                   >
                     {downloading.has(selectedLecture.id) ? (
-                      <Loader2 size={13} className="animate-spin" />
+                      <ArrowPathIcon className="size-[13px] animate-spin" />
                     ) : (
-                      <Download size={13} />
+                      <ArrowDownTraySmIcon className="size-[13px]" />
                     )}
                   </button>
                 )}
@@ -749,7 +747,7 @@ export default function LecturesPage() {
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <FileText size={13} />
+                  <DocumentTextIcon className="size-[13px]" />
                 </button>
                 <button
                   onClick={() => setCaptionsEnabled((v) => !v)}
@@ -763,9 +761,9 @@ export default function LecturesPage() {
                   )}
                 >
                   {captionsEnabled ? (
-                    <Captions size={13} />
+                    <ChatBubbleBottomCenterTextIcon className="size-[13px]" />
                   ) : (
-                    <CaptionsOff size={13} />
+                    <ChatBubbleBottomCenterIcon className="size-[13px]" />
                   )}
                 </button>
                 <button
@@ -774,9 +772,9 @@ export default function LecturesPage() {
                   className="p-1 rounded hover:bg-surface text-muted-foreground hover:text-foreground transition-colors"
                 >
                   {isFullscreen ? (
-                    <Minimize size={13} />
+                    <ArrowsPointingInIcon className="size-[13px]" />
                   ) : (
-                    <Maximize size={13} />
+                    <ArrowsPointingOutIcon className="size-[13px]" />
                   )}
                 </button>
               </div>
@@ -810,10 +808,7 @@ export default function LecturesPage() {
                         {fmtTime(Math.floor(cue.start))}
                       </span>
                       <span className="flex-1">{cue.text}</span>
-                      <ChevronRight
-                        size={10}
-                        className="shrink-0 mt-1 opacity-40"
-                      />
+                      <ChevronRightIcon className="size-[10px] shrink-0 mt-1 opacity-40" />
                     </button>
                   ))}
                 </div>

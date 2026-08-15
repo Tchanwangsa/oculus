@@ -1,4 +1,4 @@
-import { Loader2, RefreshCw } from "lucide-react";
+import { ArrowPathIcon } from "@heroicons/react/16/solid";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -51,7 +51,7 @@ export function AuthCard({ status, onConnect, onDisconnect, scraping = false, ch
           disabled={status === "pending"}
         >
           {status === "pending" ? (
-            <><Loader2 size={13} className="animate-spin" /> Opening Canvas login…</>
+            <><ArrowPathIcon className="size-[13px] animate-spin" /> Opening Canvas login…</>
           ) : status === "connected" ? (
             "Re-authenticate"
           ) : (
@@ -93,9 +93,9 @@ export function AuthCard({ status, onConnect, onDisconnect, scraping = false, ch
             <span className="flex-1 min-w-0">
               <span className="flex items-center gap-1.5 text-xs text-foreground">
                 {kaBusy ? (
-                  <Loader2 size={11} className="animate-spin" />
+                  <ArrowPathIcon className="size-[11px] animate-spin" />
                 ) : (
-                  <RefreshCw size={11} className={ka.enabled ? "text-success" : "text-muted-foreground"} />
+                  <ArrowPathIcon className={cn("size-[11px]", ka.enabled ? "text-success" : "text-muted-foreground")} />
                 )}
                 Keep session alive in the background
               </span>

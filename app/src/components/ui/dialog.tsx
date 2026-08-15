@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { XMarkIcon } from "@heroicons/react/20/solid";
 import { cn } from "@/lib/utils";
 
 interface DialogProps {
@@ -69,7 +69,7 @@ export function Dialog({ open, onClose, title, description, children, className 
               className="shrink-0 text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded"
               aria-label="Close"
             >
-              <X size={15} />
+              <XMarkIcon className="size-[15px]" />
             </button>
           </div>
         )}

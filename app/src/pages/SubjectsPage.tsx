@@ -1,19 +1,22 @@
 import {
-  BookOpen,
-  FileText,
-  FileWarning,
-  ChevronRight,
-  ChevronDown,
-  Loader2,
-  Image as ImageIcon,
-  Megaphone,
-  Paperclip,
-  ExternalLink,
-  Layers,
-  FileCode,
-  FileType2 as MarkdownIcon,
-  FileType,
-} from "lucide-react";
+  BookOpenIcon,
+  DocumentTextIcon,
+  DocumentIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
+  ArrowPathIcon,
+  PhotoIcon,
+  MegaphoneIcon,
+  PaperClipIcon,
+  ArrowTopRightOnSquareIcon,
+  Square3Stack3DIcon,
+  CodeBracketSquareIcon,
+} from "@heroicons/react/16/solid";
+import { ArrowPathIcon as ArrowPathMdIcon } from "@heroicons/react/20/solid";
+import {
+  ExclamationTriangleIcon,
+  ArrowTopRightOnSquareIcon as ArrowTopRightOnSquareLgIcon,
+} from "@heroicons/react/24/outline";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
@@ -73,14 +76,14 @@ function MdFromPath({
   );
   if (text === null) return (
     <div className="h-full flex items-center justify-center gap-2 text-muted-foreground">
-      <Loader2 size={16} className="animate-spin" /><span className="text-sm">Loading…</span>
+      <ArrowPathMdIcon className="size-[16px] animate-spin" /><span className="text-sm">Loading…</span>
     </div>
   );
   return (
     <div className="flex-1 overflow-y-auto">
       {showBanner && (
         <div className="mx-8 mt-5 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 flex items-center gap-2 text-[11px] text-amber-600 dark:text-amber-400">
-          <Loader2 size={10} className="animate-spin shrink-0" />
+          <ArrowPathIcon className="size-[10px] animate-spin shrink-0" />
           Fast preview · Quality parse {bannerLabel}
         </div>
       )}
@@ -367,7 +370,7 @@ export default function SubjectsPage() {
                 onClick={() => setPastExpanded((v) => !v)}
                 className="w-full flex items-center gap-2 px-4 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
               >
-                {pastExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                {pastExpanded ? <ChevronDownIcon className="size-[11px]" /> : <ChevronRightIcon className="size-[11px]" />}
                 Past subjects ({past.length})
               </button>
               {pastExpanded &&
@@ -417,7 +420,7 @@ export default function SubjectsPage() {
 
                 {!filesLoading && files.length === 0 && (
                   <div className="px-4 py-6 text-center">
-                    <FileWarning size={24} className="text-muted-foreground/40 mx-auto mb-2" />
+                    <ExclamationTriangleIcon className="size-[24px] text-muted-foreground/40 mx-auto mb-2" />
                     <p className="text-xs text-muted-foreground">No content scraped yet.</p>
                     <button onClick={() => navigate("/sync")} className="text-xs text-primary hover:underline mt-1">
                       Run a sync →
@@ -427,25 +430,25 @@ export default function SubjectsPage() {
 
                 {/* Home */}
                 {byCategory.home.map((f) => (
-                  <FileRow key={f.id} icon={BookOpen} label="Overview" size="" active={activeFile?.id === f.id} onClick={() => openFile(f)} />
+                  <FileRow key={f.id} icon={BookOpenIcon} label="Overview" size="" active={activeFile?.id === f.id} onClick={() => openFile(f)} />
                 ))}
 
                 {/* Syllabus */}
                 {byCategory.syllabus.map((f) => (
-                  <FileRow key={f.id} icon={BookOpen} label="Syllabus" size="" active={activeFile?.id === f.id} onClick={() => openFile(f)} />
+                  <FileRow key={f.id} icon={BookOpenIcon} label="Syllabus" size="" active={activeFile?.id === f.id} onClick={() => openFile(f)} />
                 ))}
 
                 {/* Modules */}
                 {byCategory.module.length > 0 && (
                   <div className="mt-1">
                     <div className="px-4 py-1.5 flex items-center gap-2">
-                      <Layers size={11} className="text-muted-foreground" />
+                      <Square3Stack3DIcon className="size-[11px] text-muted-foreground" />
                       <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Modules</span>
                     </div>
                     {byCategory.module.map((f) => (
                       <FileRow
                         key={f.id}
-                        icon={FileCode}
+                        icon={CodeBracketSquareIcon}
                         label={f.filename.replace(/^\d+-/, "").replace(/\.md$/, "")}
                         size=""
                         active={activeFile?.id === f.id}
@@ -457,14 +460,14 @@ export default function SubjectsPage() {
 
                 <FileCategorySection
                   label="Downloads"
-                  icon={Paperclip}
+                  icon={PaperClipIcon}
                   files={byCategory.file}
                   expanded={filesExpanded}
                   onToggle={() => setFilesExpanded((v) => !v)}
                   activeFileId={activeFile?.id ?? null}
                   onOpenFile={openFile}
                   dimmed
-                  rightIcon={ExternalLink}
+                  rightIcon={ArrowTopRightOnSquareIcon}
                   onRescrape={rescrapeFile}
                   rescraping={rescraping}
                   liveStatuses={liveStatuses}
@@ -473,7 +476,7 @@ export default function SubjectsPage() {
 
                 <FileCategorySection
                   label="Pages"
-                  icon={FileText}
+                  icon={DocumentTextIcon}
                   files={byCategory.page}
                   expanded={pagesExpanded}
                   onToggle={() => setPagesExpanded((v) => !v)}
@@ -485,7 +488,7 @@ export default function SubjectsPage() {
 
                 <FileCategorySection
                   label="Announcements"
-                  icon={Megaphone}
+                  icon={MegaphoneIcon}
                   files={byCategory.announcement}
                   expanded={announcementsExpanded}
                   onToggle={() => setAnnouncementsExpanded((v) => !v)}
@@ -497,7 +500,7 @@ export default function SubjectsPage() {
 
                 <FileCategorySection
                   label="Images"
-                  icon={ImageIcon}
+                  icon={PhotoIcon}
                   files={byCategory.image}
                   expanded={imagesExpanded}
                   onToggle={() => setImagesExpanded((v) => !v)}
@@ -526,7 +529,7 @@ export default function SubjectsPage() {
                 </div>
               ) : contentLoading ? (
                 <div className="h-full flex items-center justify-center gap-2 text-muted-foreground">
-                  <Loader2 size={16} className="animate-spin" />
+                  <ArrowPathMdIcon className="size-[16px] animate-spin" />
                   <span className="text-sm">Loading…</span>
                 </div>
               ) : contentError ? (
@@ -564,7 +567,7 @@ export default function SubjectsPage() {
                             </>
                           ) : (
                             <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                              <Loader2 size={10} className="animate-spin" />
+                              <ArrowPathIcon className="size-[10px] animate-spin" />
                               Starting quality parse…
                             </span>
                           )}
@@ -577,13 +580,13 @@ export default function SubjectsPage() {
                             onClick={() => setViewMode("pdf")}
                             className={`flex items-center gap-1 px-2 py-1 transition-colors ${viewMode === "pdf" ? "bg-primary text-primary-foreground" : "hover:bg-surface-raised text-muted-foreground"}`}
                           >
-                            <FileType size={11} /> PDF
+                            <DocumentIcon className="size-[11px]" /> PDF
                           </button>
                           <button
                             onClick={() => setViewMode("markdown")}
                             className={`flex items-center gap-1 px-2 py-1 transition-colors ${viewMode === "markdown" ? "bg-primary text-primary-foreground" : "hover:bg-surface-raised text-muted-foreground"}`}
                           >
-                            <MarkdownIcon size={11} /> Markdown
+                            <DocumentTextIcon className="size-[11px]" /> Markdown
                           </button>
                         </div>
                       )}
@@ -605,7 +608,7 @@ export default function SubjectsPage() {
                 </div>
               ) : activeFile.category === "file" ? (
                 <div className="h-full flex flex-col items-center justify-center gap-2 text-muted-foreground">
-                  <ExternalLink size={24} className="opacity-40" />
+                  <ArrowTopRightOnSquareLgIcon className="size-[24px] opacity-40" />
                   <p className="text-sm">Opened in system viewer</p>
                   <p className="text-xs opacity-60">{activeFile.filename}</p>
                 </div>

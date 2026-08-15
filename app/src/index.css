@@ -1,5 +1,14 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
+
+/* Lato ships 300/400/700/900 — there is no 500 or 600 cut. CSS weight
+   matching resolves `font-medium` (500) to 400 and `font-semibold` (600)
+   to 700, which is the intended hierarchy here. */
+@import "@fontsource/lato/300.css";
+@import "@fontsource/lato/400.css";
+@import "@fontsource/lato/700.css";
+@import "@fontsource/lato/900.css";
+@import "@fontsource/lato/400-italic.css";
+@import "@fontsource/lato/700-italic.css";
 
 /* ─── Tailwind v4 custom theme ─────────────────────────────────── */
 @theme {
@@ -48,7 +57,7 @@
   --color-sidebar-item-active:#e6e6e9;
 
   /* ── Typography ─────────────────────────────────────────────── */
-  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Lato", ui-sans-serif, system-ui, sans-serif;
 
   /* ── Radius ──────────────────────────────────────────────────── */
   --radius-xs:  3px;
@@ -129,7 +138,6 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
-  font-feature-settings: "cv11", "ss01", "ss03";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   user-select: none;
