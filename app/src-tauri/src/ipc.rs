@@ -2,12 +2,16 @@ use std::io::Read;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::cors::{cors_header, cors_response, with_cors};
-use crate::files::{category_from_path, parse_query, proxy_cookie, write_course_bytes};
+use crate::files::{category_from_path, parse_query, write_course_bytes};
 use crate::subjects::SubjectsState;
 
 pub struct IpcPort(pub u16);
 
 // ── Server entry point ────────────────────────────────────────────────────────
+
+/// Concurrent IPC workers. Canvas proxy calls are the slow ones; a handful is
+/// plenty to keep a stalled fetch from blocking the scraper behind it.
+const IPC_WORKERS: usize = 8;
 
 pub fn start_ipc_server(app: AppHandle) -> u16 {
     let server =
@@ -21,32 +25,47 @@ pub fn start_ipc_server(app: AppHandle) -> u16 {
     eprintln!("[oculus] IPC HTTP server on 127.0.0.1:{port}");
 
     let handle = app.clone();
-    std::thread::spawn(move || {
-        for mut request in server.incoming_requests() {
-            let method = request.method().clone();
-            let url = request.url().to_string();
+    let server = std::sync::Arc::new(server);
 
-            if method == tiny_http::Method::Options {
-                let _ = request.respond(cors_response(200));
-                continue;
+    // A pool rather than one loop. Every Canvas fetch the scraper makes is
+    // proxied through here, so serving requests one at a time meant a single
+    // slow Canvas response stalled *all* scraping behind it — and a hung one
+    // stalled it forever. Workers also let the sidecar's parse-status posts
+    // land while a large file is still downloading.
+    //
+    // Fixed size, not one thread per request: the scraper can enqueue
+    // thousands of writes and unbounded spawning would be its own failure mode.
+    for _ in 0..IPC_WORKERS {
+        let server = std::sync::Arc::clone(&server);
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+            // recv() hands each request to exactly one worker.
+            while let Ok(mut request) = server.recv() {
+                let method = request.method().clone();
+                let url = request.url().to_string();
+
+                if method == tiny_http::Method::Options {
+                    let _ = request.respond(cors_response(200));
+                    continue;
+                }
+
+                if method == tiny_http::Method::Get {
+                    handle_get(&url, &handle, request);
+                    continue;
+                }
+
+                if method == tiny_http::Method::Post {
+                    let mut bytes: Vec<u8> = Vec::new();
+                    let _ = request.as_reader().read_to_end(&mut bytes);
+                    eprintln!("[oculus] IPC POST {url} len={}", bytes.len());
+
+                    route_request(&url, &bytes, &handle);
+
+                    let _ = request.respond(cors_response(200));
+                }
             }
-
-            if method == tiny_http::Method::Get {
-                handle_get(&url, &handle, request);
-                continue;
-            }
-
-            if method == tiny_http::Method::Post {
-                let mut bytes: Vec<u8> = Vec::new();
-                let _ = request.as_reader().read_to_end(&mut bytes);
-                eprintln!("[oculus] IPC POST {url} len={}", bytes.len());
-
-                route_request(&url, &bytes, &handle);
-
-                let _ = request.respond(cors_response(200));
-            }
-        }
-    });
+        });
+    }
 
     port
 }
@@ -108,17 +127,26 @@ fn handle_canvas_proxy(url: &str, handle: &AppHandle, request: tiny_http::Reques
         return;
     }
 
-    let cookie = proxy_cookie(handle);
-    let mut req = ureq::get(&target);
-    if !cookie.is_empty() {
-        req = req.set("Cookie", &cookie);
-    }
+    // Bounded on purpose. The scraper awaits this call with no timeout of its
+    // own, so an untimed request here does not fail slowly — it hangs the sync
+    // permanently, with the UI still claiming "running" and nothing in the log.
+    // Generous enough for a large file, finite enough to always end.
+    let req = crate::auth::apply_session(handle, ureq::get(&target))
+        .timeout(std::time::Duration::from_secs(180));
 
+    // Every Canvas response may carry a rotated session cookie. Folding it back
+    // here is what keeps the session alive through a long sync.
     match req.call() {
-        Ok(resp) => respond_proxy(request, resp),
+        Ok(resp) => {
+            crate::auth::refresh_cookies(handle, &resp);
+            respond_proxy(request, resp)
+        }
         // Canvas 4xx/5xx still carry a body — forward it so the scraper can
         // branch on r.status (e.g. skip 403/404).
-        Err(ureq::Error::Status(_, resp)) => respond_proxy(request, resp),
+        Err(ureq::Error::Status(_, resp)) => {
+            crate::auth::refresh_cookies(handle, &resp);
+            respond_proxy(request, resp)
+        }
         Err(e) => {
             eprintln!("[oculus] canvas proxy fetch failed: {e}");
             let _ = request.respond(cors_response(502));
@@ -179,11 +207,14 @@ fn handle_image_proxy(url: &str, bytes: &[u8], handle: &AppHandle) {
         return;
     }
 
-    let cookie = proxy_cookie(handle);
-    let mut req = ureq::get(&cdn);
-    if !cookie.is_empty() {
-        req = req.set("Cookie", &cookie);
-    }
+    // `cdn` is whatever URL the page linked to — often a pre-signed S3 link that
+    // needs no credential at all. Only ever attach ours to Canvas itself;
+    // handing a session cookie to a third-party host is a credential leak.
+    let req = if cdn.starts_with(&format!("{}/", crate::auth::CANVAS_BASE)) {
+        crate::auth::apply_session(handle, ureq::get(&cdn))
+    } else {
+        ureq::get(&cdn)
+    };
 
     match req.call() {
         Ok(resp) => {
@@ -304,7 +335,8 @@ fn trigger_pdf_parse(abs_path: &str, code: &str, rel_path: &str, subject_id: i64
         "subject_id": subject_id,
         "ipc_port": ipc_port,
     });
-    match ureq::post("http://127.0.0.1:9547/parse-pdf")
+    let url = format!("http://127.0.0.1:{}/parse-pdf", crate::sidecar::SIDECAR_PORT);
+    match ureq::post(&url)
         .set("Content-Type", "application/json")
         .send_string(&body.to_string())
     {

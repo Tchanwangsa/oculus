@@ -27,9 +27,33 @@
   // latter comes from Link-header pagination). The proxy forwards status, body
   // and the Link header, so callers use r.ok / r.status / r.headers.get("Link")
   // exactly as before.
-  const cfetch = (p) => {
+  // Every await in this file ultimately bottoms out here, and a promise that
+  // never settles has no error to catch — the per-course try/catch in the
+  // orchestrator cannot see it. One such fetch stalls the whole sync silently
+  // and permanently, so the timeout is what guarantees the loop always ends.
+  const CFETCH_TIMEOUT_MS = 200_000; // > the proxy's own 180s ceiling
+  const CFETCH_RETRIES = 2;
+
+  const cfetch = async (p) => {
     const abs = /^https?:\/\//.test(p) ? p : CANVAS_ORIGIN + p;
-    return fetch(BASE + "/canvas?url=" + encodeURIComponent(abs));
+    const target = BASE + "/canvas?url=" + encodeURIComponent(abs);
+
+    let lastErr;
+    for (let attempt = 0; attempt <= CFETCH_RETRIES; attempt++) {
+      try {
+        return await fetch(target, { signal: AbortSignal.timeout(CFETCH_TIMEOUT_MS) });
+      } catch (e) {
+        lastErr = e;
+        // Back off before retrying — an immediate retry of a timed-out request
+        // usually just times out again.
+        if (attempt < CFETCH_RETRIES) {
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+    }
+    // Surface as a normal rejection so the orchestrator's catch logs it and
+    // moves to the next subject, rather than hanging here forever.
+    throw new Error("fetch failed after retries: " + abs + " (" + lastErr + ")");
   };
 
   // PDF-only file policy for now (user decision). Expand later.

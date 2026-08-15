@@ -1,0 +1,20 @@
+<!-- Small-size variant of the app icon: same artwork, no drop shadows.
+     The shadows in oculus-icon.svg are tuned for the 1024px dock icon; at UI
+     sizes (22–48px) their blur halo covers a large share of the mark and reads
+     as blur, so this version drops them. -->
+<svg width="432" height="432" viewBox="0 0 432 432" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<clipPath id="squircle">
+<rect width="432" height="432" rx="97"/>
+</clipPath>
+</defs>
+<g clip-path="url(#squircle)">
+<rect width="432" height="432" fill="#5E6AD2"/>
+<path d="M346.183 221.237C393.092 185.514 419.397 108.02 405.114 103.375C390.83 98.7311 364.624 138.556 319.187 147.047C331.898 164.35 346.183 180.722 346.183 221.237Z" fill="#F9F9F9"/>
+<path d="M107.365 224.394C57.5424 189.836 30.0918 108.038 44.8922 104.803C59.6927 101.568 83.9776 142.504 131.506 147.809C128.349 151.882 107.962 178.791 107.365 224.394Z" fill="#F9F9F9"/>
+<path d="M333.5 432.417C333.5 432.417 345.656 258.595 346.183 221.237C346.183 180.722 331.898 164.35 319.187 147.047C299.407 122.274 269.012 103.929 228.848 103.375C185.827 102.782 152.342 120.926 131.506 147.809C128.349 151.882 107.962 178.791 107.365 224.394C108.712 285.428 120.5 432.187 120.5 432.187C145.5 432.187 170 432.417 198.33 432.187C201.469 428.764 203.591 425.39 207.801 425.39H242.002C246.211 425.39 248.517 428.746 250.946 432.417H333.5Z" fill="white"/>
+<circle cx="225" cy="214.357" r="73" fill="#5E6AD2"/>
+<ellipse cx="224.5" cy="215.357" rx="34.5" ry="34" fill="white"/>
+<circle cx="244.5" cy="196.857" r="20.5" fill="#5E6AD2"/>
+</g>
+</svg>

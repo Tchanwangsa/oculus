@@ -8,6 +8,39 @@ import { useParseStore } from "@/stores/parseStore";
 import { useJobStore } from "@/stores/jobStore";
 import type { SyncProgress } from "@/stores/syncStore";
 import type { ParseJob } from "@/stores/parseStore";
+import { embedFile } from "@/lib/retrieval";
+import { getDb } from "@/lib/db";
+
+/** How long a finished job stays visible in the activity panel. */
+const COMPLETED_LINGER_MS = 2500;
+
+/**
+ * Index a PDF right after it parses.
+ *
+ * Fire-and-forget: a failed embed must never block or fail the parse flow, and
+ * `embedPending()` will retry it later. Serialised through one promise chain
+ * because the sidecar holds a single model — firing these in parallel would
+ * queue on the GPU anyway.
+ */
+let embedChain: Promise<unknown> = Promise.resolve();
+
+async function embedAfterParse(subjectId: number, relativePath: string) {
+  if (!relativePath.toLowerCase().endsWith(".pdf")) return;
+  embedChain = embedChain.then(async () => {
+    try {
+      const db = await getDb();
+      const rows = await db.select<{ id: number }[]>(
+        `SELECT id FROM files WHERE subject_id = $1 AND relative_path = $2`,
+        [subjectId, relativePath],
+      );
+      const fileId = rows[0]?.id;
+      if (fileId == null) return;
+      await embedFile(fileId, relativePath);
+    } catch (e) {
+      console.error("embed after parse failed", relativePath, e);
+    }
+  });
+}
 
 /**
  * Single app-level bridge: subscribes to all backend Tauri events and writes
@@ -16,9 +49,11 @@ import type { ParseJob } from "@/stores/parseStore";
  * directly.
  */
 export function useBackendEvents() {
-  // PDF parse aggregate tracking — survives re-renders, reset on mount
-  const pdfSeen = useRef(new Set<string>());  // all paths ever queued
-  const pdfCompleted = useRef(new Set<string>());  // paths that finished (fast/quality/error)
+  // PDF parse aggregate tracking. Reset once a batch finishes, so the next
+  // batch starts counting from 0/0 instead of inheriting stale totals.
+  const pdfSeen = useRef(new Set<string>());
+  const pdfCompleted = useRef(new Set<string>());
+  const pdfClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const unsubs: Array<Promise<() => void>> = [];
@@ -80,6 +115,28 @@ export function useBackendEvents() {
       }),
     );
 
+    // ── Lecture download events ─────────────────────────────────────────────
+    unsubs.push(
+      listen<{ mediaId: string; percent: number; phase: string }>(
+        "lecture-download-progress",
+        (e) => {
+          const { mediaId, percent, phase } = e.payload;
+          const id = `lecture_download:${mediaId}`;
+          if (phase === "complete" || phase === "error") {
+            useJobStore.getState().remove(id);
+            return;
+          }
+          useJobStore.getState().upsert({
+            id,
+            type: "lecture_download",
+            status: "running",
+            progress_current: Math.round(percent),
+            progress_total: 100,
+          });
+        },
+      ),
+    );
+
     // ── PDF parse events ────────────────────────────────────────────────────
     unsubs.push(
       listen<ParseJob>("parse-status", async (e) => {
@@ -89,10 +146,27 @@ export function useBackendEvents() {
           await setParseStatus(ev.subject_id, ev.relative_path, ev.status);
         } catch { /* ignore */ }
 
+        // Parsed pages are only useful once they are searchable, so indexing
+        // follows parsing automatically. `quality` overwrites the markdown the
+        // `fast` pass wrote, so re-embedding then refreshes the stored text —
+        // the vectors are unchanged (they come from the page image) but the
+        // upsert picks up the better markdown.
+        if (ev.status === "fast" || ev.status === "quality") {
+          void embedAfterParse(ev.subject_id, ev.relative_path);
+        }
+
         // Aggregate into jobStore
         const path = ev.relative_path;
         const filename = path.split("/").pop() ?? path;
         const isTerminal = ev.status === "fast" || ev.status === "quality" || ev.status === "error";
+
+        // A new file arriving after a batch "completed" starts a fresh batch.
+        if (pdfClearTimer.current && !isTerminal) {
+          clearTimeout(pdfClearTimer.current);
+          pdfClearTimer.current = null;
+          pdfSeen.current.clear();
+          pdfCompleted.current.clear();
+        }
 
         pdfSeen.current.add(path);
         if (isTerminal) pdfCompleted.current.add(path);
@@ -108,7 +182,13 @@ export function useBackendEvents() {
             progress_current: done,
             progress_total: total,
           });
-          setTimeout(() => useJobStore.getState().remove("pdf_parse"), 1500);
+          if (pdfClearTimer.current) clearTimeout(pdfClearTimer.current);
+          pdfClearTimer.current = setTimeout(() => {
+            useJobStore.getState().remove("pdf_parse");
+            pdfSeen.current.clear();
+            pdfCompleted.current.clear();
+            pdfClearTimer.current = null;
+          }, COMPLETED_LINGER_MS);
         } else {
           useJobStore.getState().upsert({
             id: "pdf_parse",

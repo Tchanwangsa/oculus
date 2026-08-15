@@ -44,6 +44,11 @@ _quality_lock = threading.Semaphore(1)
 # pdf_path -> progress dict
 _progress: dict[str, dict] = {}
 
+# pdf_path -> quality start time, for the elapsed/ETA readout. Formula
+# enrichment makes per-page cost vary by two orders of magnitude between decks,
+# so a static estimate would be useless — measure this document as it goes.
+_quality_started: dict[str, float] = {}
+
 
 def _status_str(state: dict) -> str:
     if state.get("done"):
@@ -76,12 +81,19 @@ def _run_quality(pdf_path: str, meta: dict) -> None:
 
     def on_progress(state: dict):
         _progress[pdf_path] = {**state, **meta}
-        print(f"  [quality] {name}  chunk {state['chunk']}/{state['total_chunks']}  pages {state['pages_done']}/{state['total_pages']}")
+        started = _quality_started.get(pdf_path, time.time())
+        done, total = state["pages_done"], state["total_pages"]
+        rate = (time.time() - started) / max(1, done)
+        eta = rate * (total - done)
+        print(f"  [quality] {name}  chunk {state['chunk']}/{state['total_chunks']}  "
+              f"pages {done}/{total}  {time.time() - started:.0f}s elapsed, "
+              f"~{eta:.0f}s left ({rate:.1f}s/page)")
         notify("running", {"pages_done": state["pages_done"], "total_pages": state["total_pages"]})
 
     try:
         _progress[pdf_path] = {"chunk": 0, "total_chunks": 0, "pages_done": 0, "total_pages": 0, "done": False, **meta}
         t = time.time()
+        _quality_started[pdf_path] = t
         print(f"[quality] START  {name}")
         notify("running")
         parse_quality(pdf_path, on_progress=on_progress)
@@ -210,10 +222,121 @@ def parse_status_batch(paths: str):
     return result
 
 
+# ── Embeddings ───────────────────────────────────────────────────────────────
+#
+# Retrieval indexes the rendered page image, not scraped text — see embedder.py
+# for why. These endpoints are synchronous: a 37-page deck takes ~20s and the
+# caller is a Rust command already running off the UI thread.
+
+
+class EmbedRequest(BaseModel):
+    pdf_path: str
+    force: bool = False
+
+
+class QueryRequest(BaseModel):
+    text: str
+
+
+@app.post("/embed-pdf")
+def embed_pdf_endpoint(req: EmbedRequest):
+    import embedder
+
+    if not req.pdf_path:
+        raise HTTPException(status_code=400, detail="pdf_path required")
+    if not Path(req.pdf_path).exists():
+        raise HTTPException(status_code=404, detail=f"PDF not found: {req.pdf_path}")
+
+    name = Path(req.pdf_path).name
+    if not req.force and embedder.is_embedded(req.pdf_path):
+        print(f"[embed]   SKIP   {name}  (already embedded)")
+        return {
+            "status": "skip",
+            "embeddings_path": str(embedder.embeddings_path(req.pdf_path)),
+        }
+
+    def on_progress(state: dict):
+        if state["pages_done"] % 10 == 0 or state["pages_done"] == state["total_pages"]:
+            print(f"  [embed] {name}  {state['pages_done']}/{state['total_pages']}")
+
+    try:
+        print(f"[embed]   START  {name}")
+        result = embedder.embed_pdf(req.pdf_path, on_progress=on_progress)
+        return {"status": "ok", **result}
+    except Exception as e:
+        print(f"[embed]   ERROR  {name}  {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/embed-query")
+def embed_query_endpoint(req: QueryRequest):
+    """Embed a search query. Carries the retrieval instruction; pages do not."""
+    import base64
+
+    import embedder
+
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="text required")
+    try:
+        vec = embedder.embed_query(req.text)
+        return {
+            "vector": base64.b64encode(vec.tobytes()).decode("ascii"),
+            "dim": int(vec.shape[0]),
+            "dtype": "float16",
+            "model": embedder.MODEL_REPO,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/embed-info")
+def embed_info():
+    """Config the store must agree with — vectors from a different model or
+    truncation are not comparable."""
+    import embedder
+
+    return {
+        "model": embedder.MODEL_REPO,
+        "dim": embedder.EMBED_DIM,
+        "dtype": "float16",
+        "max_tokens": embedder.EMBED_MAX_TOKENS,
+        "loaded": embedder._embedder is not None,
+    }
+
+
+def _warm_embedder():
+    """Load the embedding model before any parse can start.
+
+    The lock in modellock.py makes a concurrent load safe, but getting the
+    embedder in early means the two never contend at all: by the time the first
+    scraped PDF arrives, docling is the only thing still loading. Costs ~2s on a
+    background thread and makes the first search instant instead of 6s.
+    """
+    def warm():
+        try:
+            import embedder
+            embedder.get_embedder()
+        except Exception as e:
+            # Non-fatal: embedding retries lazily on first use.
+            print(f"[embed] warmup failed: {e}", flush=True)
+
+    threading.Thread(target=warm, daemon=True).start()
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
+# Must stay inside the __main__ guard, not at module scope. MinerU renders PDF
+# pages in a ProcessPoolExecutor using the "spawn" start method, and spawn
+# re-imports the parent's entry module (this file, as __mp_main__) in every
+# worker. At module scope the warmup would therefore load a 4GB Qwen3-VL into
+# each render worker. Under the guard, __name__ is "__mp_main__" there and it
+# doesn't fire.
 if __name__ == "__main__":
+    # Started here rather than via an on_event hook: on_event is deprecated, and
+    # there is nothing to wait for — the thread just needs to be running before
+    # the first parse arrives.
+    _warm_embedder()
     uvicorn.run(app, host="127.0.0.1", port=9547)

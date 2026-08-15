@@ -47,6 +47,9 @@ export interface DbFile {
   scraped_at: string;
   parse_status: string | null;
   parsed_at: string | null;
+  /** 'done' once every page has a stored embedding. See lib/retrieval.ts. */
+  embed_status: string | null;
+  embedded_at: string | null;
 }
 
 // ── Singleton ────────────────────────────────────────────────────────────────
@@ -139,6 +142,28 @@ export async function finishSyncRun(
      WHERE id = $5`,
     [status, subjectsSynced, pagesScraped, error ?? null, id]
   );
+}
+
+/**
+ * Fail any sync run left `running` by a previous process.
+ *
+ * A run is only ever advanced by live events from the scraper, so one that
+ * outlives its process can never finish — it just sits at "running" forever and
+ * the UI has no way to tell that apart from a slow sync. Call once at startup.
+ */
+export async function reconcileStaleSyncRuns(): Promise<number> {
+  const db = await getDb();
+  const stale = await db.select<{ id: number }[]>(
+    `SELECT id FROM sync_runs WHERE status = 'running' AND finished_at IS NULL`,
+  );
+  if (stale.length === 0) return 0;
+  await db.execute(
+    `UPDATE sync_runs
+     SET status = 'failed', finished_at = datetime('now'),
+         error = COALESCE(error, 'Interrupted — app closed or sync stalled')
+     WHERE status = 'running' AND finished_at IS NULL`,
+  );
+  return stale.length;
 }
 
 export async function getRecentSyncRuns(limit = 10): Promise<SyncRun[]> {

@@ -5,12 +5,47 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "docling>=2.96.1",
+    # Quality-tier parser (mineru_parser.py), replacing docling + its
+    # CodeFormulaV2 formula enrichment: ~110x faster on a maths-heavy deck and
+    # far fewer unrenderable LaTeX blocks. Its own formula model is UniMERNet,
+    # and it brings its own layout/OCR/table models, so nothing docling supplied
+    # is still needed.
+    #
+    # `[pipeline]`, NOT `[core]`. core = pipeline + vlm + gradio; we drive the
+    # pipeline backend directly in-process, so the VLM backend (accelerate) and
+    # the gradio web UI (which also pins starlette down) are dead weight.
+    "mineru[pipeline]>=3.4.5",
+    # Undeclared dependency of MinerU's vendored pytorchocr
+    # (mineru/model/utils/pytorchocr/data/imaug/operators.py does `import six`).
+    # It used to arrive by accident through docling's dependency chain; with
+    # docling gone the OCR stage dies on import unless we ask for it directly.
+    "six>=1.16.0",
     "fastapi>=0.136.3",
-    "magic-pdf[full]>=0.6.1",
-    "marker-pdf>=1.10.2",
-    "pix2tex>=0.1.4",
-    "pymupdf4llm>=1.27.2.3",
-    "scikit-learn>=1.9.0",
+    "pillow>=11.0.0",
+    # Pinned below 1.28: that line adds an OCR fallback that fires on
+    # image-heavy slides and takes parse_fast from ~2s to ~24s on a 37-page
+    # deck, which defeats the point of the fast tier. Quality tier does the
+    # thorough pass.
+    "pymupdf>=1.24.0,<1.28",
+    "pymupdf4llm>=1.27.2.3,<1.28",
     "uvicorn>=0.48.0",
+    # ── Retrieval embeddings (embedder.py) ──────────────────────────────
+    # Qwen3-VL-Embedding-2B. torch/transformers/numpy already arrive via
+    # mineru[pipeline], but embedder.py imports them directly so they are
+    # declared rather than relied on transitively. transformers must be >=4.57
+    # for the qwen3_vl architecture; qwen-vl-utils supplies the image
+    # preprocessing that the model's own scripts/qwen3_vl_embedding.py imports
+    # (`from qwen_vl_utils.vision_process import process_vision_info`). It drags
+    # in PyAV (~47MB of video codecs) that we never touch, but it is a hard
+    # requirement of qwen-vl-utils and the model script fails to import without
+    # it — verified by removing it.
+    #
+    # torch >=2.13 is a hard floor for MinerU, not a preference: on 2.12
+    # UniMERNet's generate() returns out-of-range token ids on MPS and the
+    # tokenizer dies with "OverflowError: out of range integral type conversion".
+    "torch>=2.13.0",
+    "transformers>=4.57.0",
+    "qwen-vl-utils>=0.0.14",
+    "numpy>=1.26.0",
+    "huggingface-hub>=0.30.0",
 ]

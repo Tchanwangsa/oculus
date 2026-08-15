@@ -2,13 +2,13 @@ import { cn } from "@/lib/utils";
 import type { Subject } from "@/lib/db";
 
 const PALETTE = [
-  "#5da0ff",
-  "#73c6c2",
+  "#8b93e8",
+  "#6ba5d7",
   "#a78bfa",
-  "#f97316",
-  "#22c55e",
-  "#ec4899",
-  "#eab308",
+  "#d79b6b",
+  "#7bbf8e",
+  "#d78bb0",
+  "#c9b26b",
 ];
 
 export function courseColor(code: string): string {

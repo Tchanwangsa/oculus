@@ -19,7 +19,6 @@ import {
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   getLectures,
@@ -455,8 +454,8 @@ export default function LecturesPage() {
         )}
 
         {/* Header */}
-        <div className="px-3 h-11 flex items-center justify-between border-b border-border shrink-0">
-          <span className="text-xs font-semibold text-foreground">
+        <div className="px-3.5 h-12 flex items-center justify-between border-b border-border-subtle shrink-0">
+          <span className="text-[13px] font-semibold text-foreground">
             {selectedSubject?.code ?? "Lectures"}
           </span>
           <div className="flex items-center gap-1">

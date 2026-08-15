@@ -4,6 +4,8 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 pub struct AuthState(pub Arc<Mutex<bool>>);
 
+pub const CANVAS_BASE: &str = "https://canvas.lms.unimelb.edu.au";
+
 pub fn canvas_session_dir(app: &AppHandle) -> std::path::PathBuf {
     app.path()
         .app_data_dir()
@@ -25,6 +27,156 @@ fn cookie_file_path(app: &AppHandle) -> std::path::PathBuf {
         .app_data_dir()
         .expect("no app data dir")
         .join("canvas-session.cookie")
+}
+
+/// True if we hold a session cookie to authenticate with.
+pub fn has_session(app: &AppHandle) -> bool {
+    !crate::files::proxy_cookie(app).is_empty()
+}
+
+/// Attach the saved session cookie to an outgoing Canvas request.
+pub fn apply_session(app: &AppHandle, req: ureq::Request) -> ureq::Request {
+    let cookie = crate::files::proxy_cookie(app);
+    if cookie.is_empty() {
+        req
+    } else {
+        req.set("Cookie", &cookie)
+    }
+}
+
+// ── Cookie rotation ──────────────────────────────────────────────────────────
+//
+// `canvas_session` carries no Expires/Max-Age — its lifetime is enforced
+// server-side and extended by use, which is what the keep-alive ping is for.
+// Canvas also re-issues the cookie itself now and then (not on every response,
+// as measured). Keeping the login snapshot forever would mean discarding those
+// rotations and eventually presenting a value the server has moved past, so
+// every response we make is folded back into the store.
+
+fn parse_cookie_header(header: &str) -> Vec<(String, String)> {
+    header
+        .split(';')
+        .filter_map(|part| {
+            let part = part.trim();
+            if part.is_empty() {
+                return None;
+            }
+            let (name, value) = part.split_once('=')?;
+            Some((name.trim().to_string(), value.trim().to_string()))
+        })
+        .collect()
+}
+
+/// Merge `Set-Cookie` values into a cookie header. Returns the new header, or
+/// `None` when nothing changed. Order is preserved so the header stays stable.
+fn merged_cookie_header(current: &str, set_cookies: &[String]) -> Option<String> {
+    if current.is_empty() {
+        return None;
+    }
+
+    let mut pairs = parse_cookie_header(current);
+    let mut changed = false;
+
+    for raw in set_cookies {
+        // "name=value; Path=/; HttpOnly" → we only care about the first pair.
+        let Some(first) = raw.split(';').next() else {
+            continue;
+        };
+        let Some((name, value)) = first.trim().split_once('=') else {
+            continue;
+        };
+        let (name, value) = (name.trim(), value.trim());
+        if name.is_empty() {
+            continue;
+        }
+
+        match pairs.iter_mut().find(|(n, _)| n == name) {
+            Some(slot) => {
+                if slot.1 != value {
+                    slot.1 = value.to_string();
+                    changed = true;
+                }
+            }
+            None => {
+                pairs.push((name.to_string(), value.to_string()));
+                changed = true;
+            }
+        }
+    }
+
+    if !changed {
+        return None;
+    }
+
+    Some(
+        pairs
+            .iter()
+            .map(|(n, v)| format!("{n}={v}"))
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
+}
+
+/// Fold `Set-Cookie` values into the stored header, writing only on a change —
+/// a sync makes hundreds of requests and most carry no rotation.
+fn merge_set_cookies(app: &AppHandle, set_cookies: &[String]) {
+    let Some(header) = merged_cookie_header(&saved_cookie_header(app), set_cookies) else {
+        return;
+    };
+    if let Err(e) = std::fs::write(cookie_file_path(app), &header) {
+        eprintln!("[oculus] cookie refresh write failed: {e}");
+    }
+}
+
+/// Fold rotated cookies from a response back into the store.
+pub fn refresh_cookies(app: &AppHandle, resp: &ureq::Response) {
+    let set: Vec<String> = resp
+        .all("set-cookie")
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    if set.is_empty() {
+        return;
+    }
+    merge_set_cookies(app, &set);
+}
+
+/// Outcome of pinging Canvas. `Unreachable` is deliberately distinct from
+/// `Rejected` — a flat network is no reason to throw away a working session
+/// and force a fresh SSO login.
+pub enum AuthProbe {
+    Valid(String),
+    Rejected(String),
+    Unreachable(String),
+}
+
+fn interpret_self(resp: Result<ureq::Response, ureq::Error>) -> AuthProbe {
+    match resp {
+        Ok(resp) => {
+            let parsed: Result<serde_json::Value, _> = serde_json::from_reader(resp.into_reader());
+            match parsed {
+                Ok(v) => AuthProbe::Valid(
+                    v["name"]
+                        .as_str()
+                        .or_else(|| v["short_name"].as_str())
+                        .unwrap_or("Canvas user")
+                        .to_string(),
+                ),
+                Err(e) => AuthProbe::Unreachable(format!("unreadable Canvas response: {e}")),
+            }
+        }
+        Err(ureq::Error::Status(401, _)) => {
+            AuthProbe::Rejected("Canvas rejected the session (401) — sign in again.".to_string())
+        }
+        Err(ureq::Error::Status(code, _)) => {
+            AuthProbe::Rejected(format!("Canvas returned HTTP {code}"))
+        }
+        Err(e) => AuthProbe::Unreachable(format!("could not reach Canvas: {e}")),
+    }
+}
+
+fn self_url() -> String {
+    format!("{CANVAS_BASE}/api/v1/users/self")
 }
 
 pub fn is_authenticated_url(url: &url::Url) -> bool {
@@ -76,35 +228,27 @@ pub fn saved_cookie_header(app: &AppHandle) -> String {
     std::fs::read_to_string(cookie_file_path(app)).unwrap_or_default()
 }
 
-/// Pings the Canvas API with the saved cookie. True iff the server still
-/// accepts it — no WebView needed.
-pub fn saved_cookie_valid(app: &AppHandle) -> bool {
-    let cookie = saved_cookie_header(app);
-    if cookie.is_empty() {
-        return false;
+/// Pings the Canvas API with the saved session cookie — no WebView needed.
+/// Doubles as the keep-alive: the request rolls the session forward and the
+/// rotated cookie is written back.
+pub fn saved_session_probe(app: &AppHandle) -> AuthProbe {
+    if !has_session(app) {
+        return AuthProbe::Rejected("No saved Canvas session.".to_string());
     }
-    match ureq::get("https://canvas.lms.unimelb.edu.au/api/v1/users/self")
-        .set("Cookie", &cookie)
-        .call()
-    {
-        Ok(resp) => {
-            let ok = resp.status() == 200;
-            eprintln!(
-                "[oculus] saved cookie check: HTTP {} → {}",
-                resp.status(),
-                if ok { "valid" } else { "expired" }
-            );
-            ok
-        }
-        Err(ureq::Error::Status(code, _)) => {
-            eprintln!("[oculus] saved cookie check: HTTP {code} → expired");
-            false
-        }
-        Err(e) => {
-            eprintln!("[oculus] saved cookie check failed: {e}");
-            false
-        }
+
+    let resp = apply_session(app, ureq::get(&self_url())).call();
+    match &resp {
+        Ok(r) | Err(ureq::Error::Status(_, r)) => refresh_cookies(app, r),
+        Err(_) => {}
     }
+
+    let probe = interpret_self(resp);
+    match &probe {
+        AuthProbe::Valid(name) => eprintln!("[oculus] session check: valid ({name})"),
+        AuthProbe::Rejected(why) => eprintln!("[oculus] session check: rejected — {why}"),
+        AuthProbe::Unreachable(why) => eprintln!("[oculus] session check: inconclusive — {why}"),
+    }
+    probe
 }
 
 // ── Login window (interactive only) ──────────────────────────────────────────
@@ -233,6 +377,49 @@ pub async fn disconnect_canvas(
     if cookie.exists() {
         std::fs::remove_file(&cookie).map_err(|e| e.to_string())?;
     }
-
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sc(vals: &[&str]) -> Vec<String> {
+        vals.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn replaces_rotated_value_in_place() {
+        let out = merged_cookie_header(
+            "a=1; canvas_session=OLD; z=9",
+            &sc(&["canvas_session=NEW; path=/; secure; httponly"]),
+        );
+        // Position must be preserved, not appended to the end.
+        assert_eq!(out.unwrap(), "a=1; canvas_session=NEW; z=9");
+    }
+
+    #[test]
+    fn appends_cookies_not_seen_before() {
+        let out = merged_cookie_header("a=1", &sc(&["b=2; path=/"]));
+        assert_eq!(out.unwrap(), "a=1; b=2");
+    }
+
+    #[test]
+    fn no_write_when_value_is_unchanged() {
+        assert!(merged_cookie_header("a=1; b=2", &sc(&["b=2; path=/"])).is_none());
+    }
+
+    #[test]
+    fn ignores_junk_and_empty_store() {
+        assert!(merged_cookie_header("", &sc(&["a=1"])).is_none());
+        assert!(merged_cookie_header("a=1", &sc(&["novalue; path=/"])).is_none());
+    }
+
+    #[test]
+    fn keeps_base64_padding_in_values() {
+        // Canvas session values are base64 and end in '='; splitting on the
+        // first '=' only is what preserves them.
+        let out = merged_cookie_header("s=old", &sc(&["s=abc==; path=/"])).unwrap();
+        assert_eq!(out, "s=abc==");
+    }
 }

@@ -1,17 +1,14 @@
 import {
   MessageSquare,
   Video,
-  Network,
   BookOpen,
-  Bell,
   RefreshCw,
   ChevronLeft,
   ChevronRight,
-  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Separator } from "@/components/ui/separator";
 import NavItem from "./NavItem";
+import { SidebarActivity } from "@/components/jobs/SidebarActivity";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -19,15 +16,13 @@ interface SidebarProps {
 }
 
 const mainNav = [
-  { to: "/chat",          icon: MessageSquare, label: "Chat" },
-  { to: "/lectures",      icon: Video,         label: "Lectures" },
-  { to: "/graph",         icon: Network,       label: "Graph" },
-  { to: "/subjects",      icon: BookOpen,      label: "Subjects" },
-  { to: "/notifications", icon: Bell,          label: "Notifications", badge: 3 },
+  { to: "/chat",     icon: MessageSquare, label: "Chat" },
+  { to: "/lectures", icon: Video,         label: "Lectures" },
+  { to: "/subjects", icon: BookOpen,      label: "Subjects" },
 ] as const;
 
 const bottomNav = [
-  { to: "/sync",     icon: RefreshCw, label: "Sync" },
+  { to: "/sync", icon: RefreshCw, label: "Sync" },
 ] as const;
 
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
@@ -35,41 +30,30 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
     <aside
       className={cn(
         "flex flex-col h-full border-r border-sidebar-border bg-sidebar transition-all duration-200 ease-in-out shrink-0 relative",
-        collapsed ? "w-[60px]" : "w-[220px]"
+        collapsed ? "w-[56px]" : "w-[220px]"
       )}
     >
       {/* Logo */}
       <div
         className={cn(
-          "flex items-center gap-3 px-3 h-14 border-b border-sidebar-border shrink-0",
+          "flex items-center gap-2.5 px-3.5 h-13 shrink-0",
           collapsed && "justify-center px-0"
         )}
       >
-        <div className="flex items-center justify-center w-8 h-8 shrink-0">
-          <img
-            src="/oculus-icon.svg"
-            alt="Oculus"
-            className="w-7 h-7 object-contain"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = "none";
-            }}
-          />
-          <span
-            className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-bold text-sm leading-none"
-            style={{ display: "none" }}
-          >
-            O
-          </span>
-        </div>
+        <img
+          src="/oculus-mark.svg"
+          alt=""
+          className="w-[22px] h-[22px] shrink-0"
+        />
         {!collapsed && (
-          <span className="font-semibold text-foreground tracking-tight text-base">
+          <span className="font-semibold text-foreground tracking-tight text-[13px]">
             Oculus
           </span>
         )}
       </div>
 
       {/* Main nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+      <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-px">
         {mainNav.map((item) => (
           <NavItem
             key={item.to}
@@ -77,15 +61,15 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             icon={item.icon}
             label={item.label}
             collapsed={collapsed}
-            badge={"badge" in item ? item.badge : undefined}
           />
         ))}
       </nav>
 
-      <Separator />
+      {/* Background activity */}
+      <SidebarActivity collapsed={collapsed} />
 
       {/* Bottom nav */}
-      <div className="py-3 px-2 space-y-0.5">
+      <div className="py-2 px-2 space-y-px border-t border-sidebar-border">
         {bottomNav.map((item) => (
           <NavItem
             key={item.to}
@@ -95,27 +79,12 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             collapsed={collapsed}
           />
         ))}
-        <button
-          title={collapsed ? "Settings" : undefined}
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground opacity-50 cursor-not-allowed relative group w-full"
-          disabled
-        >
-          <Settings size={18} className="shrink-0" />
-          {!collapsed && <span className="truncate">Settings</span>}
-          {collapsed && (
-            <div className="absolute left-full ml-3 px-2.5 py-1.5 rounded-md bg-foreground text-background text-xs font-medium whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-50 shadow-md">
-              Settings (coming soon)
-            </div>
-          )}
-        </button>
       </div>
 
       {/* Collapse toggle */}
       <button
         onClick={onToggle}
-        className={cn(
-          "absolute -right-3 top-[52px] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-sidebar-border bg-sidebar shadow-sm text-muted-foreground hover:text-foreground transition-colors",
-        )}
+        className="absolute -right-3 top-[46px] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-sidebar-border bg-sidebar shadow-sm text-muted-foreground hover:text-foreground transition-colors"
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
         {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}

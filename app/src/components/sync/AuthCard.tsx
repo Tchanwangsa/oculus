@@ -1,20 +1,9 @@
-import {
-  ShieldCheck,
-  XCircle,
-  Loader2,
-  Globe,
-  Clock,
-} from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import type { AuthStatus } from "@/hooks/useAuth";
-
-const AUTH_BADGE: Record<AuthStatus, { label: string; variant: "success" | "secondary" | "warning" }> = {
-  connected:    { label: "Connected",    variant: "success"   },
-  disconnected: { label: "Disconnected", variant: "secondary" },
-  pending:      { label: "Signing in…",  variant: "warning"   },
-};
+import { useKeepalive } from "@/hooks/useKeepalive";
 
 interface AuthCardProps {
   status: AuthStatus;
@@ -25,41 +14,39 @@ interface AuthCardProps {
 }
 
 export function AuthCard({ status, onConnect, onDisconnect, scraping = false, children }: AuthCardProps) {
-  const badge = AUTH_BADGE[status];
+  const { status: ka, busy: kaBusy, error: kaError, toggle: kaToggle } = useKeepalive();
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          {status === "connected" ? (
-            <ShieldCheck size={16} className="text-success" />
-          ) : status === "pending" ? (
-            <Loader2 size={16} className="text-primary animate-spin" />
-          ) : (
-            <XCircle size={16} className="text-muted-foreground" />
-          )}
-          <span className="font-semibold text-sm text-foreground">Canvas Connection</span>
-        </div>
-        <Badge variant={badge.variant}>{badge.label}</Badge>
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="flex items-center justify-between mb-0.5">
+        <span className="font-medium text-[13px] text-foreground">Canvas</span>
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span
+            className={cn(
+              "w-1.5 h-1.5 rounded-full",
+              status === "connected"
+                ? "bg-success"
+                : status === "pending"
+                  ? "bg-warning"
+                  : "bg-muted-foreground/40",
+            )}
+          />
+          {status === "connected"
+            ? "Session active"
+            : status === "pending"
+              ? "Signing in…"
+              : "Not connected"}
+        </span>
       </div>
-
-      <div className="flex items-center gap-3 text-xs text-muted-foreground mb-4">
-        <Globe size={13} />
-        <span>canvas.lms.unimelb.edu.au</span>
-        {status === "connected" && (
-          <span className="ml-auto flex items-center gap-1">
-            <Clock size={11} /> Session active
-          </span>
-        )}
-      </div>
-
-      <Separator className="mb-4" />
+      <p className="text-xs text-muted-foreground mb-4">
+        canvas.lms.unimelb.edu.au
+      </p>
 
       <div className="flex gap-2">
         <Button
           variant={status === "connected" ? "outline" : "default"}
           size="sm"
-          className="flex-1"
+          className="flex-1 h-8"
           onClick={onConnect}
           disabled={status === "pending"}
         >
@@ -75,7 +62,7 @@ export function AuthCard({ status, onConnect, onDisconnect, scraping = false, ch
           <Button
             variant="ghost"
             size="sm"
-            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            className="h-8 text-destructive hover:text-destructive hover:bg-destructive/10"
             onClick={onDisconnect}
             disabled={scraping}
             title={scraping ? "Cannot disconnect while syncing — cancel first" : undefined}
@@ -89,6 +76,45 @@ export function AuthCard({ status, onConnect, onDisconnect, scraping = false, ch
         <p className="text-xs text-muted-foreground mt-3 text-center">
           Complete sign-in in the Canvas window, then return here.
         </p>
+      )}
+
+      {/* ── Background keep-alive ─────────────────────────────────────────── */}
+      {ka?.supported && (
+        <>
+          <Separator className="my-4" />
+          <label className="flex items-start gap-2.5 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={ka.enabled}
+              disabled={kaBusy || status !== "connected"}
+              onChange={(e) => kaToggle(e.target.checked, ka.interval_hours)}
+              className="mt-0.5 accent-primary cursor-pointer disabled:cursor-not-allowed"
+            />
+            <span className="flex-1 min-w-0">
+              <span className="flex items-center gap-1.5 text-xs text-foreground">
+                {kaBusy ? (
+                  <Loader2 size={11} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={11} className={ka.enabled ? "text-success" : "text-muted-foreground"} />
+                )}
+                Keep session alive in the background
+              </span>
+              <span className="block text-xs text-muted-foreground mt-0.5">
+                {status !== "connected"
+                  ? "Connect to Canvas first."
+                  : ka.enabled
+                    ? `A background job refreshes the session every ${ka.interval_hours}h, even with Oculus closed.`
+                    : `Refreshes the session every ${ka.interval_hours}h so it doesn't expire while Oculus is closed.`}
+              </span>
+              {ka.enabled && ka.last_run && (
+                <span className="block text-xs text-muted-foreground/70 mt-0.5 font-mono truncate">
+                  {ka.last_run}
+                </span>
+              )}
+            </span>
+          </label>
+          {kaError && <p className="text-xs text-destructive mt-2">{kaError}</p>}
+        </>
       )}
 
       {children}

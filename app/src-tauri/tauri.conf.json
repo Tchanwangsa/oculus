@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.tchan.oculus",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "bun run ffmpeg && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run ffmpeg && bun run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/ffmpeg"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

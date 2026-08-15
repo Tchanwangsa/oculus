@@ -1,8 +1,8 @@
 use std::io::Read as _;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::auth::{auth_flag_path, AuthState};
-use crate::files::{proxy_cookie, write_course_bytes};
+use crate::auth::AuthState;
+use crate::files::write_course_bytes;
 use crate::ipc::IpcPort;
 use crate::worker::{ensure_worker_window, WORKER_LABEL};
 
@@ -35,7 +35,9 @@ pub async fn scrape_content(
         return Err("No subjects selected.".to_string());
     }
 
-    if !auth_flag_path(&app).exists() {
+    // Holding an actual session is what matters — the flag file only records
+    // that a login once happened, not that we still have the cookie.
+    if !crate::auth::has_session(&app) {
         *auth.0.lock().unwrap() = false;
         app.emit("canvas-auth-expired", "not-authenticated").ok();
         return Err("Not authenticated. Connect to Canvas first.".to_string());
@@ -76,7 +78,7 @@ pub fn rescrape_file(
     subject_code: String,
     canvas_id: i64,
 ) -> Result<String, String> {
-    const CANVAS_BASE: &str = "https://canvas.lms.unimelb.edu.au";
+    use crate::auth::CANVAS_BASE;
     const DOWNLOADABLE: &[&str] = &[
         "application/pdf",
         "application/vnd.ms-powerpoint",
@@ -85,14 +87,12 @@ pub fn rescrape_file(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ];
 
-    let cookie = proxy_cookie(&app);
-    if cookie.is_empty() {
+    if !crate::auth::has_session(&app) {
         return Err("Not authenticated — connect to Canvas first.".to_string());
     }
 
     let info: serde_json::Value = serde_json::from_reader(
-        ureq::get(&format!("{CANVAS_BASE}/api/v1/files/{canvas_id}"))
-            .set("Cookie", &cookie)
+        crate::auth::apply_session(&app, ureq::get(&format!("{CANVAS_BASE}/api/v1/files/{canvas_id}")))
             .call()
             .map_err(|e| format!("Canvas API: {e}"))?
             .into_reader(),
@@ -114,11 +114,15 @@ pub fn rescrape_file(
     }
 
     let pub_info: serde_json::Value = serde_json::from_reader(
-        ureq::get(&format!("{CANVAS_BASE}/api/v1/files/{canvas_id}/public_url"))
-            .set("Cookie", &cookie)
-            .call()
-            .map_err(|e| format!("public_url API: {e}"))?
-            .into_reader(),
+        crate::auth::apply_session(
+            &app,
+            ureq::get(&format!(
+                "{CANVAS_BASE}/api/v1/files/{canvas_id}/public_url"
+            )),
+        )
+        .call()
+        .map_err(|e| format!("public_url API: {e}"))?
+        .into_reader(),
     )
     .map_err(|e| e.to_string())?;
 

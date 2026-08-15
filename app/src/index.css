@@ -3,99 +3,93 @@
 
 /* ─── Tailwind v4 custom theme ─────────────────────────────────── */
 @theme {
-  /* Brand palette extracted from Oculus logo SVG */
-  --color-teal-50:  #f0faf9;
-  --color-teal-100: #c4e0de;
-  --color-teal-200: #9dd0cc;
-  --color-teal-300: #73c6c2;
-  --color-teal-400: #66b6b2;
-  --color-teal-500: #4fa09c;
-  --color-teal-600: #3a8a86;
-  --color-teal-700: #2d6e6b;
-  --color-teal-800: #1f4f4d;
-  --color-teal-900: #142f2e;
-
-  /* Blue accent — eye/pupil colour from logo */
-  --color-blue-300: #85bfff;
-  --color-blue-400: #5da0ff;
-  --color-blue-500: #4a8fe8;
-  --color-blue-600: #3a7fd4;
+  /* Accent — muted indigo (Linear/Discord adjacent) */
+  --color-indigo-300: #a5aded;
+  --color-indigo-400: #8b93e8;
+  --color-indigo-500: #6e79d6;
+  --color-indigo-600: #5e6ad2;
+  --color-indigo-700: #505bbd;
+  --color-indigo-800: #414a9b;
 
   /* ── Semantic colour tokens (light theme defaults) ─────────── */
-  --color-background:        #f7fffe;
-  --color-foreground:        #0d1514;
+  --color-background:        #fcfcfc;
+  --color-foreground:        #232326;
 
   --color-card:              #ffffff;
-  --color-card-foreground:   #0d1514;
+  --color-card-foreground:   #232326;
 
-  --color-surface:           #eef8f7;
-  --color-surface-raised:    #e4f3f2;
-  --color-surface-overlay:   #d8eeed;
+  --color-surface:           #f4f4f5;
+  --color-surface-raised:    #ececee;
+  --color-surface-overlay:   #e4e4e7;
 
-  --color-border:            #c2dedd;
-  --color-border-subtle:     #d8eeed;
+  --color-border:            #e4e4e7;
+  --color-border-subtle:     #efeff1;
 
-  --color-muted:             #eef8f7;
-  --color-muted-foreground:  #5a7a78;
+  --color-muted:             #f4f4f5;
+  --color-muted-foreground:  #6f6f78;
 
-  --color-primary:           #3fa8a4;
+  --color-primary:           #5e6ad2;
+  --color-primary-hover:     #505bbd;
+  --color-primary-active:    #414a9b;
   --color-primary-foreground:#ffffff;
 
-  --color-accent:            #4a8fe8;
+  --color-accent:            #5e6ad2;
   --color-accent-foreground: #ffffff;
 
   --color-destructive:       #dc2626;
   --color-destructive-foreground: #ffffff;
 
   --color-success:           #16a34a;
-  --color-warning:           #d97706;
+  --color-warning:           #b45309;
 
-  --color-sidebar:           #ffffff;
-  --color-sidebar-border:    #daeeed;
-  --color-sidebar-item-hover:#eef8f7;
-  --color-sidebar-item-active:#e0f4f3;
+  --color-sidebar:           #f8f8f9;
+  --color-sidebar-border:    #e9e9eb;
+  --color-sidebar-item-hover:#ededef;
+  --color-sidebar-item-active:#e6e6e9;
 
   /* ── Typography ─────────────────────────────────────────────── */
   --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
 
   /* ── Radius ──────────────────────────────────────────────────── */
   --radius-xs:  3px;
-  --radius-sm:  6px;
-  --radius-md:  8px;
-  --radius-lg:  12px;
-  --radius-xl:  16px;
-  --radius-2xl: 20px;
+  --radius-sm:  5px;
+  --radius-md:  7px;
+  --radius-lg:  10px;
+  --radius-xl:  14px;
+  --radius-2xl: 18px;
 
   /* ── Shadows ─────────────────────────────────────────────────── */
-  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.06);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.07), 0 4px 6px -4px rgb(0 0 0 / 0.04);
 }
 
 /* ─── Dark theme overrides ──────────────────────────────────────── */
 .dark {
-  --color-background:        #080c0c;
-  --color-foreground:        #e8f5f4;
+  --color-background:        #101012;
+  --color-foreground:        #e7e7ea;
 
-  --color-card:              #0f1514;
-  --color-card-foreground:   #e8f5f4;
+  --color-card:              #17171a;
+  --color-card-foreground:   #e7e7ea;
 
-  --color-surface:           #161e1d;
-  --color-surface-raised:    #1c2826;
-  --color-surface-overlay:   #22312f;
+  --color-surface:           #1c1c1f;
+  --color-surface-raised:    #232327;
+  --color-surface-overlay:   #2a2a2f;
 
-  --color-border:            #1e2c2a;
-  --color-border-subtle:     #131f1e;
+  --color-border:            #27272b;
+  --color-border-subtle:     #1e1e22;
 
-  --color-muted:             #0f1514;
-  --color-muted-foreground:  #8ab5b3;
+  --color-muted:             #1c1c1f;
+  --color-muted-foreground:  #8f8f98;
 
-  --color-primary:           #73c6c2;
-  --color-primary-foreground:#080c0c;
+  --color-primary:           #8b93e8;
+  --color-primary-hover:     #a5aded;
+  --color-primary-active:    #6e79d6;
+  --color-primary-foreground:#131316;
 
-  --color-accent:            #5da0ff;
-  --color-accent-foreground: #080c0c;
+  --color-accent:            #8b93e8;
+  --color-accent-foreground: #131316;
 
   --color-destructive:       #ef4444;
   --color-destructive-foreground: #ffffff;
@@ -103,10 +97,10 @@
   --color-success:           #22c55e;
   --color-warning:           #f59e0b;
 
-  --color-sidebar:           #0c1312;
-  --color-sidebar-border:    #182322;
-  --color-sidebar-item-hover:#161e1d;
-  --color-sidebar-item-active:#1c2826;
+  --color-sidebar:           #141416;
+  --color-sidebar-border:    #212125;
+  --color-sidebar-item-hover:#1d1d21;
+  --color-sidebar-item-active:#242429;
 
   --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.3);
@@ -167,8 +161,11 @@ p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
   background: var(--color-muted-foreground);
 }
 
-/* Focus ring */
-:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+/* Focus ring — inside @layer base so `focus:outline-none` utilities can
+   override it on inputs whose container already shows focus affordance. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
 }

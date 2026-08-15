@@ -331,9 +331,9 @@ export default function SubjectsPage() {
         className="shrink-0 border-r border-border flex flex-col overflow-hidden transition-none"
         style={{ width: subjectsPanel.collapsed ? 0 : subjectsPanel.width }}
       >
-        <div className="px-3 h-14 flex items-center justify-between border-b border-border shrink-0 min-w-0">
+        <div className="px-3.5 h-12 flex items-center justify-between border-b border-border-subtle shrink-0 min-w-0">
           {!subjectsPanel.collapsed && (
-            <span className="font-semibold text-sm text-foreground truncate">Subjects</span>
+            <span className="font-semibold text-[13px] text-foreground truncate">Subjects</span>
           )}
         </div>
 
@@ -392,11 +392,10 @@ export default function SubjectsPage() {
       {active ? (
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Course header */}
-          <div className="px-6 h-14 flex items-center gap-3 border-b border-border shrink-0">
-            <BookOpen size={16} className="text-primary" />
+          <div className="px-5 h-12 flex items-center gap-3 border-b border-border-subtle shrink-0">
             <div>
-              <span className="font-semibold text-sm text-foreground">{active.code}</span>
-              <span className="text-sm text-muted-foreground ml-2">{active.name}</span>
+              <span className="font-semibold text-[13px] text-foreground">{active.code}</span>
+              <span className="text-[13px] text-muted-foreground ml-2">{active.name}</span>
             </div>
             {!active.is_current && (
               <span className="ml-auto text-[10px] uppercase tracking-wide text-muted-foreground font-mono bg-surface-raised px-2 py-0.5 rounded">

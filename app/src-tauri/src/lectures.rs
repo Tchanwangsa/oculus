@@ -401,37 +401,87 @@ pub fn cleanup_partial_downloads(app: &AppHandle) {
     }
 }
 
-fn find_ffmpeg() -> Option<&'static str> {
-    const CANDIDATES: &[&str] = &[
-        "ffmpeg",
-        r"C:\Users\tchan\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe",
-        r"C:\ProgramData\scoop\shims\ffmpeg.exe",
-        r"C:\Users\tchan\scoop\shims\ffmpeg.exe",
-        r"C:\ffmpeg\bin\ffmpeg.exe",
-        r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
-    ];
-    for &candidate in CANDIDATES {
-        if std::process::Command::new(candidate)
-            .arg("-version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-        {
-            eprintln!("[oculus] ffmpeg found: {candidate}");
-            return Some(candidate);
-        }
-    }
-    None
+/// Does this path answer to `-version`? Guards against a truncated download or
+/// a shim that exists but cannot execute.
+fn is_runnable(path: &std::path::Path) -> bool {
+    std::process::Command::new(path)
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
-fn trim_video(raw: &std::path::Path, out: &std::path::Path) -> bool {
-    let Some(ffmpeg) = find_ffmpeg() else {
-        eprintln!("[oculus] ffmpeg not found in any known location");
+/// Where the bundled sidecar lands, in order of likelihood.
+fn bundled_ffmpeg(app: &AppHandle) -> Option<std::path::PathBuf> {
+    let name = format!("ffmpeg{}", std::env::consts::EXE_SUFFIX);
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    // Bundled app: Tauri copies externalBin next to the main executable
+    // (Contents/MacOS on macOS, alongside the .exe on Windows).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(&name));
+        }
+    }
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join(&name));
+    }
+
+    // Dev: `bun run ffmpeg` writes src-tauri/binaries/ffmpeg-<target-triple>.
+    // The triple is not known at runtime, so take whatever the script left.
+    let dev_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+    if let Ok(entries) = std::fs::read_dir(&dev_dir) {
+        for entry in entries.flatten() {
+            let file = entry.file_name();
+            let file = file.to_string_lossy();
+            if file.starts_with("ffmpeg-") && !file.ends_with(".part") {
+                candidates.push(entry.path());
+            }
+        }
+    }
+
+    candidates.into_iter().find(|p| p.is_file() && is_runnable(p))
+}
+
+/// Prefer the ffmpeg we ship; fall back to a system install only if the sidecar
+/// is missing (e.g. someone ran `cargo run` without fetching it).
+fn find_ffmpeg(app: &AppHandle) -> Option<std::path::PathBuf> {
+    static CACHED: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    CACHED
+        .get_or_init(|| {
+            if let Some(p) = bundled_ffmpeg(app) {
+                eprintln!("[oculus] ffmpeg (bundled): {}", p.display());
+                return Some(p);
+            }
+            const SYSTEM: &[&str] = &[
+                "ffmpeg",
+                r"C:\ProgramData\scoop\shims\ffmpeg.exe",
+                r"C:\ffmpeg\bin\ffmpeg.exe",
+                r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+                "/opt/homebrew/bin/ffmpeg",
+                "/usr/local/bin/ffmpeg",
+                "/usr/bin/ffmpeg",
+            ];
+            for &candidate in SYSTEM {
+                let path = std::path::PathBuf::from(candidate);
+                if is_runnable(&path) {
+                    eprintln!("[oculus] ffmpeg (system): {candidate}");
+                    return Some(path);
+                }
+            }
+            None
+        })
+        .clone()
+}
+
+fn trim_video(app: &AppHandle, raw: &std::path::Path, out: &std::path::Path) -> bool {
+    let Some(ffmpeg) = find_ffmpeg(app) else {
+        eprintln!("[oculus] ffmpeg not found — sidecar missing, run `bun run ffmpeg` in app/");
         return false;
     };
-    let ok = std::process::Command::new(ffmpeg)
+    let ok = std::process::Command::new(&ffmpeg)
         .args([
             "-y", "-ss", "14",
             "-i", raw.to_str().unwrap_or(""),
@@ -543,8 +593,8 @@ pub async fn echo360_download_video(
             "mediaId": &media_id, "percent": 100u8, "phase": "trimming"
         })).ok();
 
-        if !trim_video(&raw, &final_) {
-            return Err("ffmpeg trim failed — ensure ffmpeg is installed".to_string());
+        if !trim_video(&app, &raw, &final_) {
+            return Err("ffmpeg trim failed".to_string());
         }
         std::fs::remove_file(&raw).ok();
         eprintln!("[oculus] trimmed 14s: {}", final_.display());

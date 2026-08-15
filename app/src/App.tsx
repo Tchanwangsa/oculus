@@ -1,15 +1,12 @@
 import { createHashRouter, RouterProvider, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { applyTheme, getStoredTheme } from "@/lib/theme";
-import { ToastProvider } from "@/components/ui/toast";
+import { getDb, reconcileStaleSyncRuns } from "@/lib/db";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
-import { useToastBridge } from "@/hooks/useToastBridge";
 import AppLayout from "@/layouts/AppLayout";
 import ChatPage from "@/pages/ChatPage";
 import LecturesPage from "@/pages/LecturesPage";
-import GraphPage from "@/pages/GraphPage";
 import SubjectsPage from "@/pages/SubjectsPage";
-import NotificationsPage from "@/pages/NotificationsPage";
 import SyncPage from "@/pages/SyncPage";
 
 const router = createHashRouter([
@@ -18,25 +15,32 @@ const router = createHashRouter([
     element: <AppLayout />,
     children: [
       { index: true, element: <Navigate to="/chat" replace /> },
-      { path: "chat",          element: <ChatPage /> },
-      { path: "lectures",      element: <LecturesPage /> },
-      { path: "graph",         element: <GraphPage /> },
-      { path: "subjects",      element: <SubjectsPage /> },
-      { path: "notifications", element: <NotificationsPage /> },
-      { path: "sync",          element: <SyncPage /> },
+      { path: "chat",     element: <ChatPage /> },
+      { path: "lectures", element: <LecturesPage /> },
+      { path: "subjects", element: <SubjectsPage /> },
+      { path: "sync",     element: <SyncPage /> },
     ],
   },
 ]);
 
 function EventBridge() {
   useBackendEvents();
-  useToastBridge();
   return null;
 }
 
 export default function App() {
   useEffect(() => {
     applyTheme(getStoredTheme());
+
+    // tauri-plugin-sql runs migrations on first load, not at app startup, so
+    // the schema only existed once you happened to open a page that queried
+    // it. The app opens on /chat, which reads the index through a Rust command
+    // and never touched the plugin — leaving `pages` missing. Load it here so
+    // the schema is up to date before any page mounts.
+    getDb()
+      .then(reconcileStaleSyncRuns)
+      .then((n) => n && console.warn(`marked ${n} interrupted sync run(s) failed`))
+      .catch((e) => console.error("db init failed", e));
 
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handleChange = () => {
@@ -47,9 +51,9 @@ export default function App() {
   }, []);
 
   return (
-    <ToastProvider>
+    <>
       <EventBridge />
       <RouterProvider router={router} />
-    </ToastProvider>
+    </>
   );
 }

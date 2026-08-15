@@ -1,88 +1,151 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Sparkles, Network, BookOpen } from "lucide-react";
+import { Send, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-const TOOLS = [
-  { icon: Network, label: "Knowledge Graph" },
-  { icon: BookOpen, label: "Subjects" },
-];
+import { invoke } from "@tauri-apps/api/core";
+import {
+  embeddingStats,
+  searchPages,
+  type IndexStats,
+  type SearchHit,
+} from "@/lib/retrieval";
 
 const SUGGESTIONS = [
-  "Summarise Week 3 lectures for SWEN30006",
-  "What assignments are due this week?",
-  "Explain the concept of mutual exclusion from COMP30023",
-  "Compare the ML models covered so far in COMP30027",
+  "What is the Bloch sphere representation of a qubit?",
+  "When is assignment 1 due?",
+  "How do I register for the QUI web interface?",
+  "Do quantum gates commute — does the order matter?",
 ];
+
+/** Collapse a page's markdown into a one-line preview for the result row. */
+function preview(markdown: string, chars = 220): string {
+  const flat = markdown
+    .replace(/!\[\]\([^)]*\)/g, "") // inline images
+    .replace(/[#*`>|-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return flat.length > chars ? `${flat.slice(0, chars)}…` : flat;
+}
 
 export default function ChatPage() {
   const [input, setInput] = useState("");
+  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<IndexStats | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
+    embeddingStats().then(setStats).catch(() => setStats(null));
   }, []);
+
+  async function runSearch(query: string) {
+    const q = query.trim();
+    if (!q || searching) return;
+    setSearching(true);
+    setError(null);
+    try {
+      setHits(await searchPages(q, 8));
+    } catch (e) {
+      setError(String(e));
+      setHits(null);
+    } finally {
+      setSearching(false);
+    }
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      // send message — wired up when backend ready
+      runSearch(input);
     }
   };
+
+  const indexed = stats?.pages_embedded ?? 0;
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 h-14 border-b border-border shrink-0">
-        <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-primary" />
-          <span className="font-semibold text-foreground">Chat</span>
-          <Badge variant="secondary">Knowledge Graph</Badge>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {TOOLS.map(({ icon: Icon, label }) => (
-            <button
-              key={label}
-              title={label}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-surface transition-colors"
-            >
-              <Icon size={13} />
-              <span className="hidden sm:inline">{label}</span>
-            </button>
-          ))}
-        </div>
+      <div className="flex items-center justify-between px-6 h-12 border-b border-border-subtle shrink-0">
+        <span className="font-semibold text-[13px] text-foreground">Chat</span>
       </div>
 
-      {/* Messages area */}
+      {/* Results */}
       <div className="flex-1 overflow-y-auto px-6 py-6">
-        {/* Empty state */}
-        <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <Sparkles size={24} className="text-primary" />
+        {error && (
+          <div className="max-w-2xl mx-auto text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3">
+            {error}
+          </div>
+        )}
+
+        {!error && hits === null && (
+          <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
+            <div className="flex flex-col items-center gap-3">
+              <img src="/oculus-mark.svg" alt="" className="w-12 h-12" />
+              <div>
+                <h2 className="text-base font-semibold text-foreground">
+                  Ask Oculus anything
+                </h2>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">Ask Oculus anything</h2>
-              <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-                Reason over your lecture slides, assignments, and notes — all from your personal knowledge graph.
-              </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => {
+                    setInput(s);
+                    runSearch(s);
+                  }}
+                  className="text-left text-xs text-muted-foreground bg-surface hover:bg-surface-raised border border-border rounded-lg px-3 py-2.5 transition-colors"
+                >
+                  {s}
+                </button>
+              ))}
             </div>
           </div>
+        )}
 
-          {/* Suggestions */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
-            {SUGGESTIONS.map((s) => (
+        {!error && hits !== null && (
+          <div className="max-w-2xl mx-auto flex flex-col gap-2">
+            {hits.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No matches. {indexed === 0 && "Nothing has been embedded yet."}
+              </p>
+            )}
+            {hits.map((h) => (
               <button
-                key={s}
-                onClick={() => setInput(s)}
-                className="text-left text-xs text-muted-foreground bg-surface hover:bg-surface-raised border border-border rounded-lg px-3 py-2.5 transition-colors"
+                key={`${h.file_id}-${h.page_no}`}
+                onClick={() =>
+                  invoke("open_course_file", { relativePath: h.relative_path }).catch(
+                    () => {},
+                  )
+                }
+                className="text-left bg-surface hover:bg-surface-raised border border-border rounded-lg px-4 py-3 transition-colors"
               >
-                {s}
+                <div className="flex items-center gap-2 mb-1">
+                  <FileText size={13} className="text-muted-foreground shrink-0" />
+                  <span className="text-xs font-medium text-foreground truncate">
+                    {h.filename}
+                  </span>
+                  <Badge variant="secondary" className="shrink-0">
+                    p{h.page_no}
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground ml-auto shrink-0 tabular-nums">
+                    {h.score.toFixed(3)}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {h.markdown
+                    ? preview(h.markdown)
+                    : "(no markdown yet — run the quality parse)"}
+                </p>
               </button>
             ))}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Input */}
@@ -108,15 +171,20 @@ export default function ChatPage() {
           />
           <Button
             size="icon-sm"
-            disabled={!input.trim()}
+            disabled={!input.trim() || searching}
+            onClick={() => runSearch(input)}
             className="shrink-0 mb-0.5"
-            title="Send (Enter)"
+            title="Search (Enter)"
           >
-            <Send size={14} />
+            {searching ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Send size={14} />
+            )}
           </Button>
         </div>
         <p className="text-[11px] text-muted-foreground mt-2 text-center">
-          Enter to send · Shift+Enter for new line
+          Retrieval only — ranked pages, no generated answer yet
         </p>
       </div>
     </div>
