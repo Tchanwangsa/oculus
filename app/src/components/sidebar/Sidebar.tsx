@@ -1,18 +1,13 @@
-import { useEffect } from "react";
 import {
   Chat,
   CalendarBlank,
   ArrowsClockwise,
   CaretDoubleLeft,
   GearSix,
-  Lightning,
-  Tray,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import NavItem from "./NavItem";
 import SubjectsNavGroup from "./SubjectsNavGroup";
-import { NewCountBadge } from "@/components/NewCountBadge";
-import { useInboxStore } from "@/stores/inboxStore";
 import {
   Tooltip,
   TooltipContent,
@@ -32,15 +27,6 @@ const WIDTH = 220;
  */
 export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const width = collapsed ? 0 : WIDTH;
-  const unread = useInboxStore((s) => s.unread);
-  const loaded = useInboxStore((s) => s.loaded);
-
-  // The count is normally hydrated by useAutomations at startup; this covers
-  // a sidebar mounted before that ran.
-  useEffect(() => {
-    if (!loaded) useInboxStore.getState().refresh().catch(() => {});
-  }, [loaded]);
-
   return (
     <aside
       /* width/min/max are pinned together so flexbox can never clamp the box to
@@ -87,12 +73,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {/* Main nav */}
         <nav className="flex-1 min-h-0 py-1 px-2 space-y-px overflow-y-auto overflow-x-hidden">
           <NavItem to="/chat" icon={Chat} label="Chat" />
-          <NavItem
-            to="/inbox"
-            icon={Tray}
-            label="Inbox"
-            badge={<NewCountBadge count={unread} />}
-          />
           <NavItem to="/calendar" icon={CalendarBlank} label="Calendar" />
           <div className="pt-6">
             <SubjectsNavGroup />
@@ -102,7 +82,6 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {/* Bottom nav */}
         <div className="py-2 px-2 space-y-px border-t border-sidebar-border">
           <NavItem to="/settings" icon={GearSix} label="Settings" />
-          <NavItem to="/automations" icon={Lightning} label="Automations" />
           <NavItem to="/sync" icon={ArrowsClockwise} label="Sync" />
         </div>
       </div>

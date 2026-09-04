@@ -31,9 +31,8 @@ this page is the structure.
 `/subjects/:subjectId` (SubjectLayout → overview / modules / downloads /
 lectures / announcements / assignments / discussion), `/subjects/:subjectId/file`
 and `/lecture` (peek promoted to a full Notion-style page, outside
-SubjectLayout on purpose), `/sync`, `/inbox`, `/automations` (list) and `/automations/:id` (canvas
-editor), `/settings/*`.
-Legacy routes (`/lectures`, `/schedules`, a subject's `files` tab) redirect.
+SubjectLayout on purpose), `/sync` and `/settings/*`.
+Legacy routes (`/lectures`, a subject's `files` tab) redirect.
 
 ## How it connects
 

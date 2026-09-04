@@ -23,7 +23,9 @@ const KIND_LABEL: Record<CalEvent["kind"], string> = {
   note: "Note",
 };
 
-/** Where a local row came from, in the user's words. */
+/** Where a local row came from, in the user's words. Only `manual` is written
+ *  now; `automation` is kept for rows the removed automations feature left
+ *  behind, which are still real events on the user's grid. */
 const SOURCE_LABEL: Record<string, string> = {
   automation: "Added by an automation",
   manual: "Added by you",

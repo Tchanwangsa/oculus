@@ -14,6 +14,8 @@ export interface Subject {
   created_at: string;
 }
 
+/** `scheduled` is no longer produced — only rows from the removed automations
+ *  scheduler carry it — but it must still parse out of `sync_runs`. */
 export type SyncOrigin = "manual" | "scheduled";
 
 export interface SyncRun {
@@ -286,7 +288,6 @@ export interface LlmSettings {
   /** The curated models; every picker in the app chooses from this list. */
   library: ModelRef[];
   chatModel: ModelRef | null;
-  summaryModel: ModelRef | null;
   /** Tried in order when the chosen model cannot run. */
   fallbacks: ModelRef[];
   limits: {
@@ -299,7 +300,6 @@ export const DEFAULT_LLM_SETTINGS: LlmSettings = {
   providers: [],
   library: [],
   chatModel: null,
-  summaryModel: null,
   fallbacks: [],
   limits: { monthlyUsd: null, monthlyTokens: null },
 };
@@ -354,11 +354,10 @@ function migrateLegacy(parsed: any): LlmSettings {
       ? { providerId: provider.id, model: name }
       : null;
   const chatModel = ref(parsed.chatModel);
-  const summaryModel = ref(parsed.summaryModel);
   const fallback = ref(parsed.fallbackModel);
 
   const library: ModelRef[] = [];
-  for (const m of [chatModel, summaryModel, fallback]) {
+  for (const m of [chatModel, fallback]) {
     if (m && !library.some((l) => sameModel(l, m))) library.push(m);
   }
 
@@ -366,7 +365,6 @@ function migrateLegacy(parsed: any): LlmSettings {
     providers: [provider],
     library,
     chatModel,
-    summaryModel,
     fallbacks: fallback ? [fallback] : [],
     limits: { ...DEFAULT_LLM_SETTINGS.limits, ...(parsed.limits ?? {}) },
   };
@@ -443,271 +441,6 @@ export async function getChatMessages(chatId: number): Promise<DbChatMessage[]> 
 export async function deleteChat(id: number): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM chats WHERE id = $1`, [id]);
-}
-
-// ── Automations ──────────────────────────────────────────────────────────────
-
-export interface DbAutomation {
-  id: number;
-  name: string;
-  /** JSON `{nodes, links}` — parse with `parseGraph` in `lib/automations.ts`. */
-  graph: string;
-  enabled: boolean;
-  anchor_at: string;
-  last_fired_at: string | null;
-  /** JSON `{ [nodeId]: { anchor, fired } }` in epoch ms — per-trigger firing
-   *  state, so several triggers on one graph come due independently. Runtime
-   *  state, deliberately not part of the `graph` document. */
-  trigger_state: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export async function getAutomations(): Promise<DbAutomation[]> {
-  const db = await getDb();
-  const rows = await db.select<any[]>(`SELECT * FROM automations ORDER BY id`);
-  return rows.map((r) => ({
-    ...r,
-    enabled: !!r.enabled,
-    trigger_state: r.trigger_state || "{}",
-  }));
-}
-
-export async function addAutomation(name: string, graph: string): Promise<number> {
-  const db = await getDb();
-  const res = await db.execute(
-    `INSERT INTO automations (name, graph) VALUES ($1, $2)`,
-    [name, graph],
-  );
-  if (res.lastInsertId == null) throw new Error("automation insert returned no id");
-  return res.lastInsertId;
-}
-
-export async function updateAutomation(
-  id: number,
-  fields: { name?: string; graph?: string },
-): Promise<void> {
-  const db = await getDb();
-  if (fields.name !== undefined) {
-    await db.execute(
-      `UPDATE automations SET name = $1, updated_at = datetime('now') WHERE id = $2`,
-      [fields.name, id],
-    );
-  }
-  if (fields.graph !== undefined) {
-    await db.execute(
-      `UPDATE automations SET graph = $1, updated_at = datetime('now') WHERE id = $2`,
-      [fields.graph, id],
-    );
-  }
-}
-
-/** Re-anchor on enable so a graph enabled now doesn't fire for a period it
- *  spent switched off — per-trigger anchors are dropped for the same reason. */
-export async function setAutomationEnabled(id: number, enabled: boolean): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `UPDATE automations
-     SET enabled = $1, updated_at = datetime('now'),
-         anchor_at = CASE WHEN $1 = 1 THEN datetime('now') ELSE anchor_at END,
-         trigger_state = CASE WHEN $1 = 1 THEN '{}' ELSE trigger_state END
-     WHERE id = $2`,
-    [enabled ? 1 : 0, id],
-  );
-}
-
-/** Whole-map write of per-trigger firing state; the caller owns the merge. */
-export async function setAutomationTriggerState(id: number, json: string): Promise<void> {
-  const db = await getDb();
-  await db.execute(`UPDATE automations SET trigger_state = $1 WHERE id = $2`, [json, id]);
-}
-
-export async function deleteAutomation(id: number): Promise<void> {
-  const db = await getDb();
-  await db.execute(`DELETE FROM automations WHERE id = $1`, [id]);
-}
-
-/** Display only — what stops a failing action refiring every tick is the
- *  per-trigger anchor in `trigger_state`. This must NOT touch `anchor_at`:
- *  that column is the fallback anchor for triggers which have never fired, and
- *  moving it would let one trigger's firing postpone another's first run. */
-export async function markAutomationFired(id: number): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `UPDATE automations SET last_fired_at = datetime('now') WHERE id = $1`,
-    [id],
-  );
-}
-
-// ── Inbox ────────────────────────────────────────────────────────────────────
-
-export type InboxStatus = "pending" | "ready" | "error";
-export type InboxEntryStatus = "pending" | "ready" | "skipped" | "error";
-
-export interface DbInboxItem {
-  id: number;
-  kind: string;
-  title: string;
-  run_id: number | null;
-  /** The summarising instruction the automation asked for, when this item was
-   *  made by a "Summarise each file" wire. Stored so a fill resumed after a
-   *  quit asks the same question the graph asked. */
-  instruction: string | null;
-  status: InboxStatus;
-  read_at: string | null;
-  archived_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DbInboxEntry {
-  id: number;
-  item_id: number;
-  subject_id: number | null;
-  subject_code: string | null;
-  relative_path: string;
-  filename: string;
-  action: string;
-  status: InboxEntryStatus;
-  summary_md: string | null;
-  updated_at: string;
-}
-
-export async function getInboxItems(includeArchived = false): Promise<DbInboxItem[]> {
-  const db = await getDb();
-  return db.select<DbInboxItem[]>(
-    `SELECT * FROM inbox_items
-     ${includeArchived ? "" : "WHERE archived_at IS NULL"}
-     ORDER BY created_at DESC`,
-  );
-}
-
-export async function getInboxEntries(itemId: number): Promise<DbInboxEntry[]> {
-  const db = await getDb();
-  return db.select<DbInboxEntry[]>(
-    `SELECT * FROM inbox_item_entries WHERE item_id = $1 ORDER BY subject_code, filename`,
-    [itemId],
-  );
-}
-
-export async function getUnreadInboxCount(): Promise<number> {
-  const db = await getDb();
-  const rows = await db.select<{ n: number }[]>(
-    `SELECT COUNT(*) AS n FROM inbox_items WHERE read_at IS NULL AND archived_at IS NULL`,
-  );
-  return rows[0]?.n ?? 0;
-}
-
-export async function createInboxItem(
-  kind: string,
-  title: string,
-  runId: number | null,
-  instruction: string | null = null,
-): Promise<number> {
-  const db = await getDb();
-  const res = await db.execute(
-    `INSERT INTO inbox_items (kind, title, run_id, instruction) VALUES ($1, $2, $3, $4)`,
-    [kind, title, runId, instruction],
-  );
-  if (res.lastInsertId == null) throw new Error("inbox item insert returned no id");
-  return res.lastInsertId;
-}
-
-export async function addInboxEntry(
-  itemId: number,
-  e: {
-    subjectId: number | null;
-    subjectCode: string | null;
-    relativePath: string;
-    filename: string;
-    action: string;
-  },
-): Promise<number> {
-  const db = await getDb();
-  const res = await db.execute(
-    `INSERT INTO inbox_item_entries
-       (item_id, subject_id, subject_code, relative_path, filename, action)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [itemId, e.subjectId, e.subjectCode, e.relativePath, e.filename, e.action],
-  );
-  if (res.lastInsertId == null) throw new Error("inbox entry insert returned no id");
-  return res.lastInsertId;
-}
-
-/**
- * A ready-to-read Inbox item with one free-text body — what an automation's
- * "Add to Inbox" node writes.
- *
- * Reuses the digest's item/entry pair rather than adding a table: the entry
- * row already carries markdown (`summary_md`) and the Inbox already renders
- * it. A note has no file behind it, so `relative_path` is empty and `action`
- * is `note` — which is how the page knows not to draw a clickable file.
- */
-export async function addInboxNote(
-  title: string,
-  bodyMd: string,
-  runId: number | null = null,
-): Promise<number> {
-  const db = await getDb();
-  const itemId = await createInboxItem("note", title, runId);
-  await db.execute(
-    `INSERT INTO inbox_item_entries
-       (item_id, relative_path, filename, action, status, summary_md)
-     VALUES ($1, '', $2, 'note', 'ready', $3)`,
-    [itemId, title, bodyMd],
-  );
-  await db.execute(
-    `UPDATE inbox_items SET status = 'ready', updated_at = datetime('now') WHERE id = $1`,
-    [itemId],
-  );
-  return itemId;
-}
-
-export async function setInboxEntryResult(
-  entryId: number,
-  status: InboxEntryStatus,
-  summaryMd: string | null,
-): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `UPDATE inbox_item_entries
-     SET status = $1, summary_md = $2, updated_at = datetime('now') WHERE id = $3`,
-    [status, summaryMd, entryId],
-  );
-}
-
-export async function setInboxItemStatus(id: number, status: InboxStatus): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `UPDATE inbox_items SET status = $1, updated_at = datetime('now') WHERE id = $2`,
-    [status, id],
-  );
-}
-
-export async function markInboxRead(id: number): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `UPDATE inbox_items SET read_at = COALESCE(read_at, datetime('now')) WHERE id = $1`,
-    [id],
-  );
-}
-
-export async function archiveInboxItem(id: number): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `UPDATE inbox_items
-     SET archived_at = datetime('now'), read_at = COALESCE(read_at, datetime('now'))
-     WHERE id = $1`,
-    [id],
-  );
-}
-
-/** Items whose per-file summaries never finished — resumed at app start. */
-export async function getPendingInboxItems(): Promise<DbInboxItem[]> {
-  const db = await getDb();
-  return db.select<DbInboxItem[]>(
-    `SELECT * FROM inbox_items WHERE status = 'pending' ORDER BY created_at`,
-  );
 }
 
 // ── Sync runs ────────────────────────────────────────────────────────────────
@@ -831,8 +564,6 @@ export async function getSyncRunFiles(runId: number): Promise<SyncRunFile[]> {
     [runId],
   );
 }
-
-// ── Sync schedules ───────────────────────────────────────────────────────────
 
 // ── Sync log ─────────────────────────────────────────────────────────────────
 
@@ -1205,8 +936,8 @@ export async function getAllLectures(): Promise<
 // ── Local calendar events ────────────────────────────────────────────────────
 
 /**
- * A calendar row Oculus wrote itself — an automation deriving a deadline, or
- * the user pinning a reminder.
+ * A calendar row Oculus wrote itself — the user pinning a reminder or a
+ * deadline the calendar has no Canvas source for.
  *
  * Separate from `calendar_events` because that table is Canvas's: every sync
  * deletes a subject's rows and re-inserts them (see `replaceCalendarEvents`),
@@ -1223,7 +954,7 @@ export interface DbLocalEvent {
   end_at: string | null;
   all_day: number;
   notes: string | null;
-  source: string;            // 'automation' | 'manual'
+  source: string;            // 'manual' or 'automation' — see docs/calendar.md
   created_at: string;
 }
 
@@ -1240,147 +971,9 @@ export async function getLocalEvents(): Promise<DbLocalEvent[]> {
   );
 }
 
-export async function addLocalEvent(e: {
-  subjectId: number | null;
-  kind: string;
-  title: string;
-  startAt: string;           // ISO8601
-  endAt?: string | null;
-  allDay?: boolean;
-  notes?: string | null;
-  source?: string;           // default 'automation'
-}): Promise<number> {
-  const db = await getDb();
-  const res = await db.execute(
-    `INSERT INTO local_events
-       (subject_id, kind, title, start_at, end_at, all_day, notes, source)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [
-      e.subjectId,
-      e.kind,
-      e.title,
-      e.startAt,
-      e.endAt ?? null,
-      e.allDay ? 1 : 0,
-      e.notes ?? null,
-      e.source ?? "automation",
-    ],
-  );
-  if (res.lastInsertId == null) throw new Error("local event insert returned no id");
-  return res.lastInsertId;
-}
-
 /** Local events are user data that nothing else ever cleans up — no sync
  *  replaces them — so removing one is always an explicit act. */
 export async function deleteLocalEvent(id: number): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM local_events WHERE id = $1`, [id]);
-}
-
-// ── Automation sources ───────────────────────────────────────────────────────
-
-/** Files for the Read Files node. `days` counts back from now against
- *  scraped_at; subjectIds [] means every subject. */
-export async function getFilesForAutomation(opts: {
-  days: number;
-  subjectIds: number[];
-  category: string | null;
-  limit: number;
-}): Promise<Array<{
-  subject_id: number; subject_code: string | null;
-  relative_path: string; filename: string; category: string | null;
-}>> {
-  const db = await getDb();
-  // Built positionally rather than interpolated: subject ids come from a saved
-  // graph, and a graph is a document the user edits.
-  const params: unknown[] = [];
-  const where: string[] = [];
-
-  params.push(opts.days);
-  where.push(`f.scraped_at >= datetime('now', '-' || $${params.length} || ' days')`);
-
-  if (opts.subjectIds.length > 0) {
-    const slots = opts.subjectIds.map((id) => {
-      params.push(id);
-      return `$${params.length}`;
-    });
-    where.push(`f.subject_id IN (${slots.join(", ")})`);
-  }
-  if (opts.category != null) {
-    params.push(opts.category);
-    where.push(`f.category = $${params.length}`);
-  }
-  params.push(opts.limit);
-
-  return db.select(
-    `SELECT f.subject_id, s.code AS subject_code, f.relative_path, f.filename,
-            f.category
-       FROM files f
-       JOIN subjects s ON s.id = f.subject_id
-      WHERE ${where.join(" AND ")}
-      ORDER BY f.scraped_at DESC, f.filename
-      LIMIT $${params.length}`,
-    params,
-  );
-}
-
-/** Inbox items for the Read Inbox node, newest first, with their entry text
- *  already joined so the node can hand on one block of markdown. */
-export async function getInboxDigest(opts: {
-  scope: "unread" | "all"; days: number; limit: number;
-}): Promise<Array<{ id: number; title: string; created_at: string; body: string }>> {
-  const db = await getDb();
-  // The limit counts *items*, not entries, so the items are picked first and
-  // their entries joined on afterwards — a LIMIT over the joined rows would
-  // truncate one item's summaries mid-way.
-  const rows = await db.select<
-    {
-      id: number;
-      title: string;
-      created_at: string;
-      filename: string | null;
-      action: string | null;
-      summary_md: string | null;
-    }[]
-  >(
-    `WITH picked AS (
-       SELECT id, title, created_at
-         FROM inbox_items
-        WHERE archived_at IS NULL
-          ${opts.scope === "unread" ? "AND read_at IS NULL" : ""}
-          AND created_at >= datetime('now', '-' || $1 || ' days')
-        ORDER BY created_at DESC
-        LIMIT $2
-     )
-     SELECT p.id, p.title, p.created_at, e.filename, e.action, e.summary_md
-       FROM picked p
-       LEFT JOIN inbox_item_entries e ON e.item_id = p.id
-      ORDER BY p.created_at DESC, e.subject_code, e.filename`,
-    [opts.days, opts.limit],
-  );
-
-  const byItem = new Map<number, { id: number; title: string; created_at: string; parts: string[] }>();
-  for (const r of rows) {
-    let item = byItem.get(r.id);
-    if (!item) {
-      item = { id: r.id, title: r.title, created_at: r.created_at, parts: [] };
-      byItem.set(r.id, item);
-    }
-    if (!r.summary_md) continue;  // pending, skipped or errored — nothing to read yet
-    // A note entry is the item's whole body (`addInboxNote`), so it stands on
-    // its own; a per-file summary is titled with the file it came from, or a
-    // digest of six files reads as one undifferentiated wall.
-    item.parts.push(
-      r.action === "note" || !r.filename
-        ? r.summary_md
-        : `### ${r.filename}\n\n${r.summary_md}`,
-    );
-  }
-
-  return [...byItem.values()].map((i) => ({
-    id: i.id,
-    title: i.title,
-    created_at: i.created_at,
-    body: i.parts.join("\n\n"),
-  }));
 }

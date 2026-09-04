@@ -3,8 +3,8 @@
 Class times, deadlines and lecture recordings on one grid. Most rows come from
 Canvas's calendar API during a sync; the page only reads them, so it works
 offline and pages between months without touching Canvas. A fourth layer holds
-what Oculus itself writes — a deadline an automation spotted, a reminder you
-added.
+Oculus's own rows, which the calendar reads and can delete but nothing
+currently creates — see the note under "The four layers".
 
 ## Where
 
@@ -27,7 +27,14 @@ added.
 | `class` | Canvas `calendar_events?type=event` | The published timetable, when staff publish one |
 | `due` | Canvas `calendar_events?type=assignment` | Deadlines, including quizzes (a quiz has an assignment shell) |
 | `lecture` | The `lectures` table already synced from Echo360 | The fallback timetable for a subject Canvas is silent about |
-| `note` | The `local_events` table | Anything Oculus wrote: an automation's deadline, a reminder of your own |
+| `note` | The `local_events` table | Anything Oculus wrote itself, rather than read from Canvas or Echo360 |
+
+**Nothing writes the `note` layer today.** Its only writer was the automations
+feature (removed — see [index.md](./index.md)), so the layer holds whatever
+rows that left behind and is otherwise empty. Reading, rendering and deleting
+are all still wired, because those rows are real events on a real grid; the
+`local_events` table is where a reminder UI or a returning automation writes
+next.
 
 ## How it connects
 
@@ -41,8 +48,8 @@ added.
   the CLI always runs it.
 - **What Oculus writes lives in its own table, and that is the whole point.**
   The Canvas write below deletes a subject's rows and re-inserts them, so a
-  deadline an automation put on the grid would survive exactly until the next
-  sync. `local_events` (migration 22) is therefore separate, never touched by a
+  deadline Oculus derived and put on the grid would survive exactly until the
+  next sync. `local_events` (migration 22) is therefore separate, never touched by a
   sync, and merged in by `loadCalendar` after the Canvas rows and the lecture
   layer — after, so a locally written `class` cannot suppress a subject's
   Echo360 recordings. Its `subject_id` is nullable (`ON DELETE SET NULL`): a

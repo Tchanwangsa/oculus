@@ -144,7 +144,6 @@ export default function SettingsAiPage() {
       providers: prev.providers.filter((p) => p.id !== id),
       library: prev.library.filter(keeps),
       chatModel: prev.chatModel && keeps(prev.chatModel) ? prev.chatModel : null,
-      summaryModel: prev.summaryModel && keeps(prev.summaryModel) ? prev.summaryModel : null,
       fallbacks: prev.fallbacks.filter(keeps),
     }));
     await invoke("llm_delete_api_key", { providerId: id }).catch(() => {});
@@ -159,7 +158,6 @@ export default function SettingsAiPage() {
       return {
         library: prev.library.filter(keeps),
         chatModel: sameModel(prev.chatModel, m) ? null : prev.chatModel,
-        summaryModel: sameModel(prev.summaryModel, m) ? null : prev.summaryModel,
         fallbacks: prev.fallbacks.filter(keeps),
       };
     });
@@ -274,7 +272,7 @@ export default function SettingsAiPage() {
 
       <Section
         title="Defaults"
-        description="Chat answers questions over your library; the summary model powers automations like sync digests. Either can be changed per conversation from the chat composer."
+        description="The model chat answers with over your library. It can be changed per conversation from the chat composer."
       >
         <div className="flex items-center justify-between gap-4 py-2">
           <span className="text-xs text-muted-foreground">Chat model</span>
@@ -283,16 +281,6 @@ export default function SettingsAiPage() {
             providers={settings.providers}
             value={settings.chatModel}
             onChange={(m) => update({ chatModel: m })}
-            className="w-72"
-          />
-        </div>
-        <div className="flex items-center justify-between gap-4 py-2">
-          <span className="text-xs text-muted-foreground">Summary model</span>
-          <ModelSelect
-            library={settings.library}
-            providers={settings.providers}
-            value={settings.summaryModel}
-            onChange={(m) => update({ summaryModel: m })}
             className="w-72"
           />
         </div>

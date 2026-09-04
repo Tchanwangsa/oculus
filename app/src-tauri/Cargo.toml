@@ -44,4 +44,3 @@ scraper = "0.27"
 clap = { version = "4", features = ["derive"] }
 ego-tree = "0.11"
 libc = "0.2.189"
-tauri-plugin-notification = "2.3.3"

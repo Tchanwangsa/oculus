@@ -6,12 +6,14 @@ import {
 import { useSyncStore } from "@/stores/syncStore";
 
 /**
- * Kick off a sync of the currently selected subjects. Shared by the Sync
- * page's button and the scheduler, so scheduled runs go through exactly the
- * same path as manual ones — only the recorded origin differs.
+ * Kick off a sync of the currently selected subjects.
  *
- * Returns the run id: an automation's sync node hands the run's file lists on
- * down the graph, and the ledger those come from is keyed by it.
+ * The Sync page's button is the only caller since automations were removed, so
+ * every run is `manual` today; the `origin` parameter stays because `sync_runs`
+ * already records it and rows written by the old scheduler still say
+ * `scheduled`.
+ *
+ * Returns the run id — the key the run's file ledger is written under.
  */
 export async function triggerSync(origin: SyncOrigin): Promise<number> {
   if (useSyncStore.getState().scraping) throw new Error("A sync is already running");

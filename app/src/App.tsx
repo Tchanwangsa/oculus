@@ -5,7 +5,6 @@ import { applyTheme, getStoredTheme } from "@/lib/theme";
 import { getDb, getParseSettings, reconcileStaleSyncRuns } from "@/lib/db";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useQualitySweep } from "@/hooks/useQualitySweep";
-import { useAutomations } from "@/hooks/useAutomations";
 import { watchNewFiles } from "@/stores/newFilesStore";
 import { watchLectureDownloads } from "@/stores/lectureDownloadStore";
 import AppLayout from "@/layouts/AppLayout";
@@ -23,9 +22,6 @@ import SubjectDiscussionPage from "@/pages/subject/DiscussionPage";
 import SubjectFilePage from "@/pages/subject/FilePage";
 import SubjectLecturePage from "@/pages/subject/LecturePage";
 import SyncPage from "@/pages/SyncPage";
-import AutomationsPage from "@/pages/AutomationsPage";
-import AutomationEditorPage from "@/pages/AutomationEditorPage";
-import InboxPage from "@/pages/InboxPage";
 import SettingsLayout from "@/layouts/SettingsLayout";
 import SettingsCanvasPage from "@/pages/settings/CanvasPage";
 import SettingsAiPage from "@/pages/settings/AiPage";
@@ -63,11 +59,6 @@ const router = createHashRouter([
         ],
       },
       { path: "sync", element: <SyncPage /> },
-      { path: "inbox", element: <InboxPage /> },
-      { path: "automations", element: <AutomationsPage /> },
-      { path: "automations/:id", element: <AutomationEditorPage /> },
-      // Scheduled Tasks became Automations; its rows migrated with it.
-      { path: "schedules", element: <Navigate to="/automations" replace /> },
       {
         path: "settings",
         element: <SettingsLayout />,
@@ -88,7 +79,6 @@ const router = createHashRouter([
 function EventBridge() {
   useBackendEvents();
   useQualitySweep();
-  useAutomations();
   useEffect(() => watchNewFiles(), []);
   useEffect(() => watchLectureDownloads(), []);
   return null;

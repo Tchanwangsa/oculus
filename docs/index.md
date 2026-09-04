@@ -21,7 +21,6 @@ live in the root `CLAUDE.md`, not here.
 | [sidecar.md](./sidecar.md) | The Python process: fast/quality PDF parsing, lifecycle, endpoints |
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |
 | [llm.md](./llm.md) | Provider config, keychain keys, streaming, spend limits, the chat agent |
-| [automations.md](./automations.md) | The automation canvas, triggers/conditions/actions, the Inbox |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [frontend.md](./frontend.md) | Routes, layouts, stores, hooks, the UI system |
 | [cli.md](./cli.md) | The `oculus` binary — headless sync from a terminal |
@@ -44,6 +43,12 @@ live in the root `CLAUDE.md`, not here.
 Built: Canvas SSO + sync, Ed Discussion sync, Echo360 download + player, the
 two-tier PDF pipeline, page-image retrieval, and the chat agent over it
 (BYOK: local Ollama, OpenRouter, OpenCode Go, or any OpenAI-compatible
-URL), and
-automations delivering to an Inbox. When a doc or UI string implies more than
-this, the doc is wrong — fix it.
+URL). When a doc or UI string implies more than this, the doc is wrong — fix
+it.
+
+Removed: **automations and the Inbox** — the trigger/condition/action canvas
+that delivered sync digests. It worked, but it was a detour from the core, so
+it was cut rather than carried. The last version that has it is the
+`automations` branch (its docs page went with it); master keeps migrations 18,
+20 and 21 so the tables still exist, unused, and reinstating needs no
+migration. Scheduled sync went with it — sync is manual-only now.

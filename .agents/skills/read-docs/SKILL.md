@@ -24,7 +24,6 @@ arbitrary from the code and are not.
 | PDF parsing, the sidecar, python deps | `docs/sidecar.md` |
 | Embeddings, search, the `pages` table | `docs/retrieval.md` |
 | LLM providers, keys, the chat agent | `docs/llm.md` |
-| Automations, the Inbox, sync digests | `docs/automations.md` |
 | Class times, due dates, the calendar | `docs/calendar.md` |
 | React pages, stores, hooks, event bridge | `docs/frontend.md` |
 | The `oculus` CLI | `docs/cli.md` |

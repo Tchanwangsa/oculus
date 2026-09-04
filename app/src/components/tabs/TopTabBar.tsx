@@ -7,10 +7,8 @@ import {
   CaretRight,
   Chat,
   GearSix,
-  Lightning,
   Plus,
   Sidebar,
-  Tray,
   X,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
@@ -46,9 +44,6 @@ function tabInfo(path: string, subjects: Subject[]): TabInfo {
     return { title: "Sync", icon: <ArrowsClockwise size={13} /> };
   if (pathname.startsWith("/settings"))
     return { title: "Settings", icon: <GearSix size={13} /> };
-  if (pathname.startsWith("/inbox")) return { title: "Inbox", icon: <Tray size={13} /> };
-  if (pathname.startsWith("/automations"))
-    return { title: "Automations", icon: <Lightning size={13} /> };
   const m = /^\/subjects\/(\d+)(?:\/([\w-]+))?/.exec(pathname);
   if (m) {
     const subject = subjects.find((s) => String(s.id) === m[1]);

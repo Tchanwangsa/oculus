@@ -132,7 +132,6 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_sql::Builder::new()
                 .add_migrations(
@@ -478,6 +477,15 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_chat ON chat_messages(chat_id);
                         tauri_plugin_sql::Migration {
                             version: 18,
                             description: "automations (schedules generalised) + inbox",
+                            // RETIRED FEATURE, LIVE MIGRATION. Automations and
+                            // the Inbox were removed; migrations 18, 20 and 21
+                            // stay because they already ran on every existing
+                            // database, and because 18 is also where
+                            // `sync_schedules` was dropped. The three tables
+                            // are created and then left alone — nothing reads
+                            // or writes them. Reinstating the feature needs no
+                            // new migration; deleting these would need one.
+                            //
                             // An automation is a small graph — trigger node
                             // plus action nodes joined by links — stored as
                             // JSON so adding a node kind never needs a
@@ -634,8 +642,8 @@ ALTER TABLE inbox_items ADD COLUMN instruction TEXT;
                             // replaces a subject's rows wholesale (see the
                             // migration above and `replaceCalendarEvents`) —
                             // anything Oculus wrote there would be destroyed by
-                            // the next sync. A deadline an automation derives,
-                            // or a reminder the user adds, is not Canvas's to
+                            // the next sync. A deadline Oculus derives, or a
+                            // reminder the user adds, is not Canvas's to
                             // delete, so it lives in its own table and the
                             // calendar merges the two on read.
                             //
@@ -705,8 +713,6 @@ CREATE INDEX IF NOT EXISTS idx_local_events_start ON local_events(start_at);
             llm::llm_list_models,
             llm::llm_test_prompt,
             llm::llm_usage_summary,
-            llm::llm_summarize,
-            llm::llm_generate,
             mineru::mineru_set_api_key,
             mineru::mineru_has_api_key,
             mineru::mineru_delete_api_key,

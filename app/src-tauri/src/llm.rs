@@ -118,7 +118,6 @@ pub struct LlmConfig {
     /// The user's curated models — everything selectable anywhere in the app.
     pub library: Vec<ModelRef>,
     pub chat_model: Option<ModelRef>,
-    pub summary_model: Option<ModelRef>,
     /// Tried in order when the preferred model cannot run; at most
     /// `MAX_FALLBACKS`, ordered by the user.
     pub fallbacks: Vec<ModelRef>,
@@ -166,6 +165,9 @@ fn migrate_legacy(v: &serde_json::Value) -> LlmConfig {
             .filter(|s| !s.trim().is_empty())
             .map(|m| ModelRef { provider_id: provider.id.clone(), model: m.to_string() })
     };
+    // `summaryModel` was the automations digest's model. The feature is gone,
+    // so it has no slot — but it still seeds the library, or upgrading would
+    // silently drop a model the user had curated.
     let (chat, summary, fallback) =
         (model_ref("chatModel"), model_ref("summaryModel"), model_ref("fallbackModel"));
 
@@ -180,7 +182,6 @@ fn migrate_legacy(v: &serde_json::Value) -> LlmConfig {
         providers: vec![provider],
         library,
         chat_model: chat,
-        summary_model: summary,
         fallbacks: fallback.into_iter().collect(),
         limits: serde_json::from_value(v["limits"].clone()).unwrap_or_default(),
     }
@@ -725,7 +726,6 @@ pub async fn llm_test_prompt(
     check_budget(&pool, &cfg).await?;
     let preferred = model
         .or_else(|| cfg.chat_model.clone())
-        .or_else(|| cfg.summary_model.clone())
         .ok_or("no model selected — pick one in Settings → AI")?;
     let resolved = resolve(&cfg, &preferred)?;
 
@@ -743,106 +743,6 @@ pub async fn llm_test_prompt(
     record_usage(&pool, &resolved.provider.id, &resolved.model, "test", &outcome.usage, None)
         .await?;
     Ok(TestOutcome { text: outcome.content, usage: outcome.usage })
-}
-
-/// Summarise one library file for the Inbox.
-///
-/// `instruction` is what the automation's "Summarise each file" node asked
-/// for; `None` falls back to the digest wording below. The instruction is a
-/// system prompt, not a wrapper around one, so a graph can ask for exam
-/// questions or a reading list and get that rather than a summary with a
-/// preamble.
-///
-/// Not streamed: the caller writes the result to a row and the Inbox reads
-/// rows, so there is nothing to stream *to*. Uses `summaryModel` — this runs
-/// per file after every sync, which is exactly where a smaller, cheaper model
-/// earns its place.
-#[tauri::command]
-pub async fn llm_summarize(
-    relative_path: String,
-    instruction: Option<String>,
-) -> Result<String, String> {
-    let pool = open_pool().await?;
-    let cfg = load_config(&pool).await?;
-    check_budget(&pool, &cfg).await?;
-    let preferred = cfg
-        .summary_model
-        .clone()
-        .or_else(|| cfg.chat_model.clone())
-        .ok_or("No summary model selected — pick one in Settings → AI")?;
-    let resolved = resolve(&cfg, &preferred)?;
-
-    let text = crate::files::read_parsed_markdown(&relative_path)?;
-    if text.trim().is_empty() {
-        return Err("no text to summarise".into());
-    }
-    // Slide decks and readings run long; the opening pages carry the topic,
-    // which is all a digest line needs.
-    let excerpt: String = text.chars().take(24_000).collect();
-
-    let provider = resolved.provider.clone();
-    let model2 = resolved.model.clone();
-    let system = instruction
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| {
-            "Summarise this piece of course material in 2-3 sentences for a study \
-             inbox. Lead with what it covers. Be concrete and use the course's own \
-             terminology. No preamble, no bullet points, no markdown headings."
-                .to_string()
-        });
-    let outcome = tauri::async_runtime::spawn_blocking(move || {
-        let messages = serde_json::json!([
-            { "role": "system", "content": system },
-            { "role": "user", "content": excerpt },
-        ]);
-        chat_completion_stream(&provider, &model2, &messages, None, |_| {})
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-
-    record_usage(&pool, &resolved.provider.id, &resolved.model, "summary", &outcome.usage, None)
-        .await?;
-    Ok(outcome.content.trim().to_string())
-}
-
-/// Free-form generation for an automation's "Ask AI" node.
-///
-/// Not streamed and not conversational: the caller is a background graph, and
-/// whatever comes back is written to an Inbox row or a notification body. Uses
-/// `summaryModel` for the same reason the digest does — an automation can fire
-/// every sync, which is where the cheaper model belongs — and records its usage
-/// under its own kind so an automation's spend is separable in the ledger.
-#[tauri::command]
-pub async fn llm_generate(prompt: String, system: Option<String>) -> Result<String, String> {
-    if prompt.trim().is_empty() {
-        return Err("empty prompt".into());
-    }
-    let pool = open_pool().await?;
-    let cfg = load_config(&pool).await?;
-    check_budget(&pool, &cfg).await?;
-    let preferred = cfg
-        .summary_model
-        .clone()
-        .or_else(|| cfg.chat_model.clone())
-        .ok_or("No model selected — pick one in Settings → AI")?;
-    let resolved = resolve(&cfg, &preferred)?;
-
-    let provider = resolved.provider.clone();
-    let model2 = resolved.model.clone();
-    let outcome = tauri::async_runtime::spawn_blocking(move || {
-        let mut messages = Vec::new();
-        if let Some(sys) = system.as_deref().filter(|s| !s.trim().is_empty()) {
-            messages.push(serde_json::json!({ "role": "system", "content": sys }));
-        }
-        messages.push(serde_json::json!({ "role": "user", "content": prompt }));
-        chat_completion_stream(&provider, &model2, &serde_json::Value::Array(messages), None, |_| {})
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-
-    record_usage(&pool, &resolved.provider.id, &resolved.model, "automation", &outcome.usage, None)
-        .await?;
-    Ok(outcome.content.trim().to_string())
 }
 
 #[derive(Serialize)]

@@ -9,8 +9,9 @@ Echo360) into a searchable personal knowledge base. Three processes:
 
 Ingestion, retrieval, and the chat agent are built (BYOK — local Ollama,
 OpenRouter, OpenCode Go, or any OpenAI-compatible endpoint; see
-`docs/llm.md`), as
-are automations and the Inbox (`docs/automations.md`).
+`docs/llm.md`). Automations and the Inbox were built and then removed — they
+live on the `automations` branch; do not reintroduce pieces of them here
+without being asked.
 
 ## Orient before you edit
 
@@ -28,7 +29,6 @@ structure by searching.
 | PDF parsing, the Python sidecar | `docs/sidecar.md` |
 | Embeddings, search, the `pages` table | `docs/retrieval.md` |
 | LLM providers, keys, the chat agent | `docs/llm.md` |
-| Automations, the Inbox, sync digests | `docs/automations.md` |
 | Class times, due dates, the calendar | `docs/calendar.md` |
 | React pages, stores, hooks, UI system | `docs/frontend.md` |
 | The `oculus` command line | `docs/cli.md` |

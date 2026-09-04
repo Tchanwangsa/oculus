@@ -13,7 +13,6 @@ import { usePipelineStore } from "@/stores/pipelineStore";
 import type { SyncProgress } from "@/stores/syncStore";
 import type { ParseJob } from "@/stores/parseStore";
 import { embedFile } from "@/lib/retrieval";
-import { runEventAutomations } from "@/lib/automations";
 import { isPdfBacked } from "@/lib/fileTypes";
 import { CALENDAR_UPDATED_EVENT } from "@/lib/calendar";
 import { getDb } from "@/lib/db";
@@ -168,15 +167,6 @@ export function useBackendEvents() {
             }
             window.dispatchEvent(new CustomEvent(CALENDAR_UPDATED_EVENT));
           }
-        }
-
-        // Event-triggered automations. Fire-and-forget: a digest waits on
-        // parses for minutes, and nothing here should hold up the sync's
-        // completion path. A cancelled run has no meaningful file set.
-        if (!e.payload.cancelled && runId != null) {
-          runEventAutomations("sync-complete", { runId }).catch((err) =>
-            addLog(`automation: ${err}`, "warning").catch(() => {}),
-          );
         }
       }),
     );

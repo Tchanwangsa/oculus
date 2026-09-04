@@ -96,13 +96,12 @@ library, API keys, the streaming client, and the spending ledger.
   configured "does this one work" is a per-model question. It streams through
   the `llm-test-delta` event, the same Rust-emits/frontend-folds pattern as
   scrape progress (see [architecture.md](./architecture.md)).
-- **Three call sites, three usage kinds.** `llm_summarize` (one file, with
-  whatever a graph's summarise node asked of it),
-  `llm_generate` (an automation's Ask AI node, free-form) and the chat agent
-  all record into `llm_usage` under their own kind, so what a background graph
-  spends is separable from what you spent asking questions. The first two are
-  unstreamed on purpose — their output lands in a row, not on screen — and
-  both prefer `summaryModel`, because a graph can fire on every sync.
+- **Every call site records its own usage kind.** The chat agent writes
+  `chat`, `llm_test_prompt` writes `test`, so a model you were only trying out
+  never muddies what conversations actually cost. The kind column is the seam
+  the removed automations feature used for its background spend (`summary`,
+  `automation`); old rows still carry those, and a new background caller should
+  add its own kind rather than borrow `chat`.
 
 ## Local models must fit before they load
 

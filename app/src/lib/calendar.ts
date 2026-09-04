@@ -15,7 +15,7 @@ import { displayCode } from "@/lib/format";
  * recordings already in the library — a lecture recording *is* a class that
  * happened, so it fills the timetable in for any subject whose staff never
  * published events to the Canvas calendar. `note` is Oculus's own: a reminder
- * an automation or the user wrote, which has no Canvas counterpart at all.
+ * the user wrote, which has no Canvas counterpart at all.
  *
  * A local event can also be a `class` or a `due` — it is the same kind of
  * thing, just stored elsewhere (`local_events`, see `docs/calendar.md`), so it
@@ -60,8 +60,8 @@ export interface CalEvent {
    *  the set the user must *not* be able to delete: a sync would bring it
    *  straight back. */
   localId: number | null;
-  /** `automation` or `manual` — why a local event exists, shown on its card so
-   *  a deadline the user never typed is explicable. */
+  /** Why a local event exists (`manual`, or `automation` on legacy rows),
+   *  shown on its card so a deadline the user never typed is explicable. */
   localSource: string | null;
 }
 
