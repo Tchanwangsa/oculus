@@ -1,188 +1,391 @@
-import { useState, useRef, useEffect } from "react";
-import { DocumentTextIcon } from "@heroicons/react/16/solid";
-import { PaperAirplaneIcon, ArrowPathIcon } from "@heroicons/react/20/solid";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import {
-  embeddingStats,
-  searchPages,
-  type IndexStats,
-  type SearchHit,
-} from "@/lib/retrieval";
+  CircleNotch,
+  FileText,
+  MagnifyingGlass,
+  PaperPlaneTilt,
+  Plus,
+  Stop,
+} from "@phosphor-icons/react";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Textarea } from "@/components/ui/textarea";
+import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
+import { ModelSelect } from "@/components/llm/ModelSelect";
+import {
+  getChats,
+  getLlmSettings,
+  type DbChat,
+  type DbChatMessage,
+  type LlmSettings,
+} from "@/lib/db";
+import { useChatStore, localUserMessage } from "@/stores/chatStore";
+import { cn } from "@/lib/utils";
 
 const SUGGESTIONS = [
   "What is the Bloch sphere representation of a qubit?",
   "When is assignment 1 due?",
-  "How do I register for the QUI web interface?",
+  "Summarise this week's lecture slides",
   "Do quantum gates commute — does the order matter?",
 ];
 
-/** Collapse a page's markdown into a one-line preview for the result row. */
-function preview(markdown: string, chars = 220): string {
-  const flat = markdown
-    .replace(/!\[\]\([^)]*\)/g, "") // inline images
-    .replace(/[#*`>|-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return flat.length > chars ? `${flat.slice(0, chars)}…` : flat;
+const TOOL_LABEL: Record<string, string> = {
+  search_library: "Searching the library",
+  read_file: "Reading",
+  list_subjects: "Listing subjects",
+  list_files: "Listing files",
+};
+
+interface Citation {
+  subject_id: number;
+  relative_path: string;
+  filename: string;
+  page_no: number | null;
+}
+
+/** The agent cites with `oculus-file://<subjectId>/<relativePath>?page=N`;
+ *  those open the local copy instead of the browser. */
+function openCitation(href: string) {
+  const path = href.replace(/^oculus-file:\/\/\d+\//, "").split("?")[0];
+  invoke("open_course_file", { relativePath: decodeURI(path) }).catch(() => {});
+}
+
+const CHAT_MD = {
+  ...MD_COMPONENTS,
+  a: ({ href, children, ...p }: any) =>
+    href?.startsWith("oculus-file://") ? (
+      <button
+        type="button"
+        onClick={() => openCitation(href)}
+        className="text-primary hover:underline inline"
+        {...p}
+      >
+        {children}
+      </button>
+    ) : (
+      (MD_COMPONENTS.a as any)({ href, children, ...p })
+    ),
+};
+
+function Message({ m }: { m: DbChatMessage }) {
+  const citations = useMemo<Citation[]>(() => {
+    if (!m.citations) return [];
+    try {
+      return JSON.parse(m.citations);
+    } catch {
+      return [];
+    }
+  }, [m.citations]);
+
+  // One chip per document. Keyed on filename, not path: Canvas serves the
+  // same file from both a module folder and the files list, so a path-keyed
+  // dedupe still shows the same name twice.
+  const unique = useMemo(() => {
+    const seen = new Map<string, Citation>();
+    for (const c of citations) if (!seen.has(c.filename)) seen.set(c.filename, c);
+    return [...seen.values()];
+  }, [citations]);
+
+  if (m.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-xl bg-surface-raised px-3.5 py-2 text-sm text-foreground whitespace-pre-wrap">
+          {m.content}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-none">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={CHAT_MD}
+      >
+        {m.content ?? ""}
+      </ReactMarkdown>
+
+      {unique.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {unique.map((c) => (
+            <button
+              key={c.relative_path}
+              type="button"
+              onClick={() =>
+                invoke("open_course_file", { relativePath: c.relative_path }).catch(() => {})
+              }
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            >
+              <FileText size={11} className="shrink-0" />
+              <span className="truncate max-w-[220px]">{c.filename}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ChatPage() {
   const [input, setInput] = useState("");
-  const [hits, setHits] = useState<SearchHit[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<IndexStats | null>(null);
+  const [chats, setChats] = useState<DbChat[]>([]);
+  const [llm, setLlm] = useState<LlmSettings | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const { chatId, messages, streaming, tools, sending, error, model } = useChatStore();
+  const store = useChatStore;
 
   useEffect(() => {
     inputRef.current?.focus();
-    embeddingStats().then(setStats).catch(() => setStats(null));
-  }, []);
+    getChats().then(setChats).catch(() => {});
+    // The switcher starts on the configured chat model and stays wherever the
+    // user left it for the rest of the session.
+    getLlmSettings().then((s) => {
+      setLlm(s);
+      if (!store.getState().model && s.chatModel) store.getState().setModel(s.chatModel);
+    });
+  }, [store]);
 
-  async function runSearch(query: string) {
-    const q = query.trim();
-    if (!q || searching) return;
-    setSearching(true);
-    setError(null);
+  // Live turn events. Scoped to this page: a stream only matters while it is
+  // on screen, and every message is persisted by Rust regardless.
+  useEffect(() => {
+    const unsubs = [
+      listen<{ chatId: number; delta: string }>("chat-delta", (e) => {
+        if (e.payload.chatId === store.getState().chatId) {
+          store.getState().appendDelta(e.payload.delta);
+        }
+      }),
+      listen<{ chatId: number; name: string; args: any; status: string }>("chat-tool", (e) => {
+        if (e.payload.chatId !== store.getState().chatId) return;
+        const a = e.payload.args ?? {};
+        const detail = a.query ?? a.relative_path ?? "";
+        store.getState().toolEvent(e.payload.name, detail, e.payload.status);
+      }),
+      listen<{ chatId: number; message: any }>("chat-message", (e) => {
+        if (e.payload.chatId !== store.getState().chatId) return;
+        const m = e.payload.message;
+        store.getState().commit({
+          id: m.id,
+          chat_id: e.payload.chatId,
+          role: "assistant",
+          content: m.content,
+          tool_calls: null,
+          tool_call_id: null,
+          citations: m.citations ?? null,
+          model: m.model ?? null,
+          created_at: new Date().toISOString(),
+        });
+      }),
+      listen<{ chatId: number }>("chat-done", (e) => {
+        if (e.payload.chatId === store.getState().chatId) {
+          store.getState().finish();
+          getChats().then(setChats).catch(() => {});
+        }
+      }),
+      listen<{ chatId: number; error: string }>("chat-error", (e) => {
+        if (e.payload.chatId === store.getState().chatId) store.getState().fail(e.payload.error);
+      }),
+    ];
+    return () => {
+      unsubs.forEach((u) => u.then((f) => f()));
+    };
+  }, [store]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages.length, streaming, tools.length]);
+
+  async function send(text: string) {
+    const content = text.trim();
+    if (!content || sending) return;
+    setInput("");
+    const s = store.getState();
+    s.commit(localUserMessage(s.chatId, content));
+    s.begin(s.chatId ?? -1);
     try {
-      setHits(await searchPages(q, 8));
+      const id = await invoke<number>("chat_send", {
+        chatId: s.chatId,
+        content,
+        model: s.model,
+      });
+      store.setState({ chatId: id });
+      getChats().then(setChats).catch(() => {});
     } catch (e) {
-      setError(String(e));
-      setHits(null);
-    } finally {
-      setSearching(false);
+      store.getState().fail(String(e));
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      runSearch(input);
-    }
-  };
-
-  const indexed = stats?.pages_embedded ?? 0;
+  const empty = messages.length === 0 && !streaming && !sending;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 h-12 border-b border-border-subtle shrink-0">
-        <span className="font-semibold text-[13px] text-foreground">Chat</span>
-      </div>
+    <div className="flex h-full">
+      {/* Conversations */}
+      <aside className="w-52 shrink-0 border-r border-border-subtle flex flex-col">
+        <div className="p-2">
+          <Button
+            variant="ghost"
+            size="xs"
+            className="w-full justify-start"
+            onClick={() => store.getState().open(null)}
+          >
+            <Plus size={13} /> New chat
+          </Button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 pb-2 flex flex-col gap-0.5">
+          {chats.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => store.getState().open(c.id)}
+              className={cn(
+                "rounded-md px-2 py-1.5 text-left text-xs truncate transition-colors",
+                c.id === chatId
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              {c.title || "Untitled"}
+            </button>
+          ))}
+        </div>
+      </aside>
 
-      {/* Results */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        {error && (
-          <div className="max-w-2xl mx-auto text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3">
-            {error}
-          </div>
-        )}
+      <div className="flex flex-1 flex-col min-w-0">
+        <div className="flex items-center justify-between px-6 h-12 border-b border-border-subtle shrink-0">
+          <span className="font-semibold text-[13px] text-foreground">Chat</span>
+        </div>
 
-        {!error && hits === null && (
-          <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
-            <div className="flex flex-col items-center gap-3">
-              <img src="/oculus-mark.svg" alt="" className="w-12 h-12" />
-              <div>
-                <h2 className="text-base font-semibold text-foreground">
-                  Ask Oculus anything
-                </h2>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
+          {empty && !error && (
+            <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
+              <div className="flex flex-col items-center gap-3">
+                <img src="/oculus-mark.svg" alt="" className="w-12 h-12" />
+                <h2 className="text-base font-semibold text-foreground">Ask Oculus anything</h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
+                {SUGGESTIONS.map((s) => (
+                  <Button
+                    key={s}
+                    variant="outline"
+                    onClick={() => send(s)}
+                    className="h-auto justify-start rounded-lg bg-surface px-3 py-2.5 text-left text-xs font-normal whitespace-normal text-muted-foreground"
+                  >
+                    {s}
+                  </Button>
+                ))}
               </div>
             </div>
+          )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setInput(s);
-                    runSearch(s);
-                  }}
-                  className="text-left text-xs text-muted-foreground bg-surface hover:bg-surface-raised border border-border rounded-lg px-3 py-2.5 transition-colors"
+          <div className="max-w-2xl mx-auto flex flex-col gap-5">
+            {messages.map((m) => (
+              <Message key={m.id} m={m} />
+            ))}
+
+            {tools.map((t, i) => (
+              <div
+                key={`${t.name}-${i}`}
+                className="flex items-center gap-2 text-xs text-muted-foreground"
+              >
+                {t.done ? (
+                  <MagnifyingGlass size={12} className="shrink-0" />
+                ) : (
+                  <CircleNotch size={12} className="shrink-0 animate-spin" />
+                )}
+                <span className="truncate">
+                  {TOOL_LABEL[t.name] ?? t.name}
+                  {t.detail && <span className="text-muted-foreground/70"> — {t.detail}</span>}
+                </span>
+              </div>
+            ))}
+
+            {streaming && (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={CHAT_MD}
+              >
+                {streaming}
+              </ReactMarkdown>
+            )}
+
+            {sending && !streaming && tools.length === 0 && (
+              <CircleNotch size={14} className="animate-spin text-muted-foreground" />
+            )}
+
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-border shrink-0">
+          <div className="flex flex-col gap-2 bg-surface rounded-xl border border-border px-4 py-3 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+            <Textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send(input);
+                }
+              }}
+              rows={1}
+              placeholder="Ask about your courses, deadlines, lectures…"
+              className="min-h-[20px] max-h-[120px] w-full resize-none rounded-none border-0 bg-transparent p-0 text-sm leading-5 shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
+              style={{ height: "20px" }}
+              onInput={(e) => {
+                const el = e.currentTarget;
+                el.style.height = "20px";
+                el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+              }}
+            />
+            <div className="flex items-center gap-2">
+              <ModelSelect
+                library={llm?.library ?? []}
+                providers={llm?.providers ?? []}
+                value={model}
+                onChange={(m) => store.getState().setModel(m)}
+                placeholder="Model"
+                className="h-6 max-w-[280px] border-0 bg-transparent px-1 text-[11px] text-muted-foreground shadow-none dark:bg-transparent"
+              />
+              <div className="flex-1" />
+              {sending ? (
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="shrink-0"
+                  aria-label="Stop"
+                  onClick={() =>
+                    chatId != null && invoke("chat_cancel", { chatId }).catch(() => {})
+                  }
                 >
-                  {s}
-                </button>
-              ))}
+                  <Stop size={14} />
+                </Button>
+              ) : (
+                <Button
+                  size="icon-sm"
+                  disabled={!input.trim()}
+                  onClick={() => send(input)}
+                  className="shrink-0"
+                  aria-label="Send"
+                >
+                  <PaperPlaneTilt size={14} />
+                </Button>
+              )}
             </div>
           </div>
-        )}
-
-        {!error && hits !== null && (
-          <div className="max-w-2xl mx-auto flex flex-col gap-2">
-            {hits.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-8">
-                No matches. {indexed === 0 && "Nothing has been embedded yet."}
-              </p>
-            )}
-            {hits.map((h) => (
-              <button
-                key={`${h.file_id}-${h.page_no}`}
-                onClick={() =>
-                  invoke("open_course_file", { relativePath: h.relative_path }).catch(
-                    () => {},
-                  )
-                }
-                className="text-left bg-surface hover:bg-surface-raised border border-border rounded-lg px-4 py-3 transition-colors"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <DocumentTextIcon className="size-[13px] text-muted-foreground shrink-0" />
-                  <span className="text-xs font-medium text-foreground truncate">
-                    {h.filename}
-                  </span>
-                  <Badge variant="secondary" className="shrink-0">
-                    p{h.page_no}
-                  </Badge>
-                  <span className="text-[11px] text-muted-foreground ml-auto shrink-0 tabular-nums">
-                    {h.score.toFixed(3)}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  {h.markdown
-                    ? preview(h.markdown)
-                    : "(no markdown yet — run the quality parse)"}
-                </p>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Input */}
-      <div className="px-6 py-4 border-t border-border shrink-0">
-        <div className="flex items-end gap-3 bg-surface rounded-xl border border-border px-4 py-3">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            placeholder="Ask about your courses, deadlines, lectures…"
-            className={cn(
-              "flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground",
-              "focus:outline-none min-h-[20px] max-h-[120px] leading-5"
-            )}
-            style={{ height: "20px" }}
-            onInput={(e) => {
-              const el = e.currentTarget;
-              el.style.height = "20px";
-              el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-            }}
-          />
-          <Button
-            size="icon-sm"
-            disabled={!input.trim() || searching}
-            onClick={() => runSearch(input)}
-            className="shrink-0 mb-0.5"
-            title="Search (Enter)"
-          >
-            {searching ? (
-              <ArrowPathIcon className="size-[14px] animate-spin" />
-            ) : (
-              <PaperAirplaneIcon className="size-[14px]" />
-            )}
-          </Button>
         </div>
       </div>
     </div>

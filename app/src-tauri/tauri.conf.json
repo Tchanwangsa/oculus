@@ -6,31 +6,43 @@
   "build": {
     "beforeDevCommand": "bun run ffmpeg && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run ffmpeg && bun run build",
+    "beforeBuildCommand": "bun run ffmpeg && bun run stage-cli && bun run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "title": "Oculus",
-        "width": 1200,
-        "height": 750,
+        "width": 1480,
+        "height": 920,
         "minWidth": 900,
-        "minHeight": 560
+        "minHeight": 560,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 22
+        }
       }
     ],
     "security": {
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/courses/**", "$APPDATA/lectures/**"]
+        "scope": [
+          "$APPDATA/courses/**",
+          "$APPDATA/lectures/**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/ffmpeg"],
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/oculus"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

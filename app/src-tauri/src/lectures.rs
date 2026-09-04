@@ -1,51 +1,26 @@
+//! Tauri commands over the Echo360 core in `echo360.rs`.
+//!
+//! Everything that talks to Echo360 lives there so the CLI can use it too;
+//! this file only adds the app's session cache, its paths and its events.
+
 use std::collections::HashMap;
-use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
+
+pub use crate::echo360::Lecture as LectureData;
+use crate::echo360::{self, Session};
 
 // ── Session cache (in-memory, per course) ─────────────────────────────────────
 
 pub struct Echo360Cache(pub Arc<Mutex<HashMap<i64, CachedSession>>>);
 
 pub struct CachedSession {
-    session: Echo360Session,
+    session: Session,
     saved_unix: u64,
 }
 
-struct Echo360Session {
-    jwt: String,
-    play_session: String,
-    cf_key_pair_id: String,
-    cf_policy: String,
-    cf_signature: String,
-    cf_tracking: String,
-    section_id: String,
-}
-
-impl Echo360Session {
-    fn cookie_header(&self) -> String {
-        format!(
-            "ECHO_JWT={}; PLAY_SESSION={}; CloudFront-Key-Pair-Id={}; \
-             CloudFront-Policy={}; CloudFront-Signature={}; CloudFront-Tracking2={}",
-            self.jwt, self.play_session, self.cf_key_pair_id,
-            self.cf_policy, self.cf_signature, self.cf_tracking
-        )
-    }
-    fn clone_fields(&self) -> Echo360Session {
-        Echo360Session {
-            jwt: self.jwt.clone(),
-            play_session: self.play_session.clone(),
-            cf_key_pair_id: self.cf_key_pair_id.clone(),
-            cf_policy: self.cf_policy.clone(),
-            cf_signature: self.cf_signature.clone(),
-            cf_tracking: self.cf_tracking.clone(),
-            section_id: self.section_id.clone(),
-        }
-    }
-}
-
-const LTI_TOOL_PATH: &str = "/external_tools/701";
-const TRIM_SECS: f64 = 14.0;
+/// Echo360's JWT outlives a sync comfortably; re-launching LTI for every
+/// request would be several round trips through Canvas each time.
 const SESSION_TTL_SECS: u64 = 11 * 3600;
 
 fn now_unix() -> u64 {
@@ -55,13 +30,7 @@ fn now_unix() -> u64 {
         .as_secs()
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
-fn get_or_auth(
-    app: &AppHandle,
-    cache: &Echo360Cache,
-    course_id: i64,
-) -> Result<Echo360Session, String> {
+fn get_or_auth(app: &AppHandle, cache: &Echo360Cache, course_id: i64) -> Result<Session, String> {
     {
         let g = cache.0.lock().unwrap();
         if let Some(c) = g.get(&course_id) {
@@ -71,487 +40,19 @@ fn get_or_auth(
             }
         }
     }
-    let session = auth_echo360(app, course_id)?;
-    {
-        let mut g = cache.0.lock().unwrap();
-        g.insert(course_id, CachedSession {
-            session: session.clone_fields(),
-            saved_unix: now_unix(),
-        });
-    }
+    let session = echo360::connect(&crate::auth::saved_cookie_header(app), course_id)?;
+    cache.0.lock().unwrap().insert(
+        course_id,
+        CachedSession { session: session.clone_fields(), saved_unix: now_unix() },
+    );
     Ok(session)
 }
 
-fn auth_echo360(app: &AppHandle, course_id: i64) -> Result<Echo360Session, String> {
-    let canvas_cookie = crate::auth::saved_cookie_header(app);
-    if canvas_cookie.is_empty() {
-        return Err("Canvas session not found — connect Canvas first".to_string());
-    }
-
-    let canvas_lti_url = format!(
-        "https://canvas.lms.unimelb.edu.au/courses/{course_id}{LTI_TOOL_PATH}"
-    );
-
-    // Fetch Canvas LTI page — Canvas generates a fresh OAuth-signed LTI form server-side
-    eprintln!("[oculus] echo360 auth: fetching LTI page for course {course_id}");
-    let html = ureq::get(&canvas_lti_url)
-        .set("Cookie", &canvas_cookie)
-        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .call()
-        .map_err(|e| format!("Canvas LTI page fetch failed: {e}"))?
-        .into_string()
-        .map_err(|e| e.to_string())?;
-
-    let (lti_action, form_fields) = parse_lti_form(&html)
-        .ok_or_else(|| "Could not parse Echo360 LTI form from Canvas page — check course ID or Canvas session".to_string())?;
-
-    eprintln!("[oculus] echo360 auth: posting LTI form ({} fields) to {lti_action}", form_fields.len());
-
-    // URL-encode form body
-    let form_body: String = form_fields.iter()
-        .map(|(k, v)| format!(
-            "{}={}",
-            url::form_urlencoded::byte_serialize(k.as_bytes()).collect::<String>(),
-            url::form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>(),
-        ))
-        .collect::<Vec<_>>()
-        .join("&");
-
-    // POST to Echo360 LTI — agent follows redirects and accumulates Set-Cookie headers
-    let agent = ureq::AgentBuilder::new().build();
-    let resp = agent.post(&lti_action)
-        .set("Content-Type", "application/x-www-form-urlencoded")
-        .set("Referer", &canvas_lti_url)
-        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .send_string(&form_body)
-        .map_err(|e| format!("Echo360 LTI POST failed: {e}"))?;
-
-    let final_url = resp.get_url().to_string();
-    eprintln!("[oculus] echo360 auth: settled at {final_url}");
-
-    let section_id = extract_section_id(&final_url)?;
-
-    // Extract cookies from agent's cookie store
-    let cs = agent.cookie_store();
-    let mut jwt = String::new();
-    let mut play_session = String::new();
-    let mut cf_key_pair_id = String::new();
-    let mut cf_policy = String::new();
-    let mut cf_signature = String::new();
-    let mut cf_tracking = String::new();
-    for cookie in cs.iter_unexpired() {
-        match cookie.name() {
-            "ECHO_JWT"              => jwt           = cookie.value().to_string(),
-            "PLAY_SESSION"          => play_session  = cookie.value().to_string(),
-            "CloudFront-Key-Pair-Id"=> cf_key_pair_id = cookie.value().to_string(),
-            "CloudFront-Policy"     => cf_policy     = cookie.value().to_string(),
-            "CloudFront-Signature"  => cf_signature  = cookie.value().to_string(),
-            "CloudFront-Tracking2"  => cf_tracking   = cookie.value().to_string(),
-            _ => {}
-        }
-    }
-
-    if jwt.is_empty() {
-        return Err("Echo360 auth failed — ECHO_JWT cookie not received. LTI POST may have been rejected.".to_string());
-    }
-
-    eprintln!("[oculus] echo360 auth done: section={section_id}");
-
-    Ok(Echo360Session { jwt, play_session, cf_key_pair_id, cf_policy, cf_signature, cf_tracking, section_id })
-}
-
-// ── LTI form parser ───────────────────────────────────────────────────────────
-
-fn parse_lti_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
-    // Find the form whose action points to echo360
-    let action_marker = html.find("action=\"https://echo360")?;
-    let form_start = html[..action_marker].rfind('<')?;
-    let form_chunk = &html[form_start..];
-
-    let a_start = form_chunk.find("action=\"")? + 8;
-    let a_end   = a_start + form_chunk[a_start..].find('"')?;
-    let action  = html_unescape(&form_chunk[a_start..a_end]);
-
-    let form_end = form_chunk.find("</form>").unwrap_or(form_chunk.len());
-    let body     = &form_chunk[..form_end];
-
-    let mut fields = Vec::new();
-    let mut rest = body;
-    while let Some(pos) = rest.find("<input") {
-        rest = &rest[pos + 6..];
-        let end  = rest.find('>').unwrap_or(rest.len());
-        let elem = &rest[..end];
-        if elem.contains("type=\"hidden\"") {
-            if let (Some(n), Some(v)) = (attr(elem, "name"), attr(elem, "value")) {
-                fields.push((n, v));
-            }
-        }
-    }
-
-    if fields.is_empty() { return None; }
-    Some((action, fields))
-}
-
-fn attr(elem: &str, name: &str) -> Option<String> {
-    let pat = format!("{name}=\"");
-    let s   = elem.find(&pat)? + pat.len();
-    let e   = s + elem[s..].find('"')?;
-    Some(html_unescape(&elem[s..e]))
-}
-
-fn html_unescape(s: &str) -> String {
-    s.replace("&amp;", "&")
-     .replace("&lt;", "<")
-     .replace("&gt;", ">")
-     .replace("&quot;", "\"")
-     .replace("&#39;", "'")
-}
-
-fn extract_section_id(path: &str) -> Result<String, String> {
-    let segs: Vec<&str> = path.split('/').collect();
-    let idx = segs.iter().position(|&s| s == "section")
-        .ok_or_else(|| format!("No 'section' segment in: {path}"))?;
-    segs.get(idx + 1)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .ok_or_else(|| format!("Empty sectionId in: {path}"))
-}
-
-// ── Syllabus ──────────────────────────────────────────────────────────────────
-
-#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct LectureData {
-    pub id: String,
-    pub lesson_id: String,
-    pub title: String,
-    pub date: String,
-    pub duration_seconds: i64,
-}
-
-fn fetch_syllabus(session: &Echo360Session) -> Result<Vec<LectureData>, String> {
-    let url = format!(
-        "https://echo360.net.au/section/{}/syllabus",
-        session.section_id
-    );
-    let raw = ureq::get(&url)
-        .set("Cookie", &session.cookie_header())
-        .call()
-        .map_err(|e| e.to_string())?
-        .into_string()
-        .map_err(|e| e.to_string())?;
-    let body: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| e.to_string())?;
-
-    let items = body["data"].as_array()
-        .ok_or_else(|| "syllabus: no data array".to_string())?;
-
-    let mut lectures = Vec::new();
-    for item in items {
-        let lesson = &item["lesson"];
-        let inner  = &lesson["lesson"];
-
-        if !lesson["hasVideo"].as_bool().unwrap_or(false)
-            || !lesson["medias"][0]["isAvailable"].as_bool().unwrap_or(false)
-            || lesson["medias"][0]["isProcessing"].as_bool().unwrap_or(true)
-            || !lesson["isPast"].as_bool().unwrap_or(false)
-        {
-            continue;
-        }
-
-        let media_id = lesson["medias"][0]["id"].as_str().unwrap_or("").to_string();
-        if media_id.is_empty() { continue; }
-
-        let raw_dur = duration_between(
-            lesson["captureStartedAt"].as_str().unwrap_or(""),
-            lesson["captureEndedAt"].as_str().unwrap_or(""),
-        );
-
-        lectures.push(LectureData {
-            id: media_id,
-            lesson_id: inner["id"].as_str().unwrap_or("").to_string(),
-            title: inner["name"].as_str().unwrap_or("").to_string(),
-            date: inner["timing"]["start"].as_str().unwrap_or("").to_string(),
-            duration_seconds: (raw_dur - TRIM_SECS as i64).max(0),
-        });
-    }
-
-    eprintln!("[oculus] echo360 syllabus: {} lectures", lectures.len());
-    Ok(lectures)
-}
-
-fn duration_between(start: &str, end: &str) -> i64 {
-    fn secs(s: &str) -> Option<i64> {
-        let t = s.split('T').nth(1)?;
-        let t = t.split('.').next().unwrap_or(t);
-        let p: Vec<i64> = t.split(':').filter_map(|x| x.parse().ok()).collect();
-        if p.len() < 3 { return None; }
-        Some(p[0] * 3600 + p[1] * 60 + p[2])
-    }
-    let s = secs(start).unwrap_or(0);
-    let e = secs(end).unwrap_or(0);
-    if e >= s { e - s } else { e + 86400 - s }
-}
-
-// ── Video download ────────────────────────────────────────────────────────────
-
-fn get_redirect_url(session: &Echo360Session, media_id: &str, lesson_id: &str) -> Result<String, String> {
-    let url = format!(
-        "https://echo360.net.au/media/download/{media_id}/hd1.mp4?lessonId={lesson_id}"
-    );
-    eprintln!("[oculus] echo360 download redirect: GET {url}");
-    let agent = ureq::AgentBuilder::new().redirects(0).build();
-    // ureq with redirects(0): 3xx responses come back as Ok(response) with 3xx status,
-    // only 4xx/5xx become Err(Status(...)). So we check status inside Ok branch.
-    match agent.get(&url).set("Cookie", &session.cookie_header()).call() {
-        Ok(r) => {
-            let status = r.status();
-            if (301..=303).contains(&status) {
-                let loc = r.header("location").unwrap_or("(none)").to_string();
-                eprintln!("[oculus] echo360 download redirect: {status} → {loc}");
-                if loc == "(none)" {
-                    Err("Download redirect missing Location header".to_string())
-                } else {
-                    Ok(loc)
-                }
-            } else {
-                let body = r.into_string().unwrap_or_default();
-                eprintln!("[oculus] echo360 download redirect: unexpected {status}\nbody: {}", &body[..body.len().min(500)]);
-                Err(format!("Expected redirect from echo360 download endpoint, got {status}"))
-            }
-        }
-        Err(ureq::Error::Status(code, r)) => {
-            let body = r.into_string().unwrap_or_default();
-            eprintln!("[oculus] echo360 download redirect: HTTP {code}\nbody: {}", &body[..body.len().min(500)]);
-            Err(format!("Echo360 download endpoint returned HTTP {code}"))
-        }
-        Err(e) => {
-            eprintln!("[oculus] echo360 download redirect: request failed: {e}");
-            Err(format!("Download redirect request failed: {e}"))
-        }
-    }
-}
-
-const MIN_VIDEO_BYTES: u64 = 1_000_000; // 1 MB sanity check
-
-fn stream_to_file(
-    url: &str,
-    cookie: &str,
-    dest: &std::path::Path,
-    app: &AppHandle,
-    media_id: &str,
-) -> Result<u64, String> {
-    let resp = ureq::get(url)
-        .set("Cookie", cookie)
-        .call()
-        .map_err(|e| format!("HTTP request failed: {e}"))?;
-
-    let status = resp.status();
-    let content_type = resp.content_type().to_string();
-    let total = resp.header("content-length")
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
-    eprintln!("[oculus] CDN response: HTTP {status} content-type={content_type} content-length={total}");
-
-    let mut reader = resp.into_reader();
-    let mut file = std::fs::File::create(dest)
-        .map_err(|e| format!("Failed to create file: {e}"))?;
-    let mut buf = [0u8; 65536];
-    let mut done = 0u64;
-    let mid = media_id.to_string();
-
-    loop {
-        match reader.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                file.write_all(&buf[..n])
-                    .map_err(|e| format!("Write error after {done} bytes: {e}"))?;
-                done += n as u64;
-                if total > 0 {
-                    app.emit("lecture-download-progress", serde_json::json!({
-                        "mediaId": &mid,
-                        "percent": (done * 100 / total) as u8,
-                        "phase": "downloading",
-                    })).ok();
-                }
-            }
-            Err(e) => return Err(format!("Network read error after {done} bytes: {e}")),
-        }
-    }
-
-    if done < MIN_VIDEO_BYTES {
-        return Err(format!("Download incomplete: only {done} bytes received (expected >{MIN_VIDEO_BYTES})"));
-    }
-
-    Ok(done)
-}
-
-/// Remove all raw.mp4 files (incomplete downloads) left by crashed/interrupted sessions.
+/// Remove `raw.mp4` files left by an interrupted download.
 pub fn cleanup_partial_downloads(app: &AppHandle) {
-    let Ok(base) = app.path().app_data_dir() else { return };
-    let dir = base.join("lectures");
-    if !dir.exists() { return; }
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let raw = entry.path().join("raw.mp4");
-            if raw.exists() {
-                eprintln!("[oculus] cleanup: removing orphaned {}", raw.display());
-                std::fs::remove_file(&raw).ok();
-            }
-        }
+    if let Ok(dir) = app.path().app_data_dir() {
+        echo360::cleanup_partial_downloads(&dir);
     }
-}
-
-/// Does this path answer to `-version`? Guards against a truncated download or
-/// a shim that exists but cannot execute.
-fn is_runnable(path: &std::path::Path) -> bool {
-    std::process::Command::new(path)
-        .arg("-version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// Where the bundled sidecar lands, in order of likelihood.
-fn bundled_ffmpeg(app: &AppHandle) -> Option<std::path::PathBuf> {
-    let name = format!("ffmpeg{}", std::env::consts::EXE_SUFFIX);
-    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
-
-    // Bundled app: Tauri copies externalBin next to the main executable
-    // (Contents/MacOS on macOS, alongside the .exe on Windows).
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join(&name));
-        }
-    }
-    if let Ok(res) = app.path().resource_dir() {
-        candidates.push(res.join(&name));
-    }
-
-    // Dev: `bun run ffmpeg` writes src-tauri/binaries/ffmpeg-<target-triple>.
-    // The triple is not known at runtime, so take whatever the script left.
-    let dev_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
-    if let Ok(entries) = std::fs::read_dir(&dev_dir) {
-        for entry in entries.flatten() {
-            let file = entry.file_name();
-            let file = file.to_string_lossy();
-            if file.starts_with("ffmpeg-") && !file.ends_with(".part") {
-                candidates.push(entry.path());
-            }
-        }
-    }
-
-    candidates.into_iter().find(|p| p.is_file() && is_runnable(p))
-}
-
-/// Prefer the ffmpeg we ship; fall back to a system install only if the sidecar
-/// is missing (e.g. someone ran `cargo run` without fetching it).
-fn find_ffmpeg(app: &AppHandle) -> Option<std::path::PathBuf> {
-    static CACHED: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
-    CACHED
-        .get_or_init(|| {
-            if let Some(p) = bundled_ffmpeg(app) {
-                eprintln!("[oculus] ffmpeg (bundled): {}", p.display());
-                return Some(p);
-            }
-            const SYSTEM: &[&str] = &[
-                "ffmpeg",
-                r"C:\ProgramData\scoop\shims\ffmpeg.exe",
-                r"C:\ffmpeg\bin\ffmpeg.exe",
-                r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
-                "/opt/homebrew/bin/ffmpeg",
-                "/usr/local/bin/ffmpeg",
-                "/usr/bin/ffmpeg",
-            ];
-            for &candidate in SYSTEM {
-                let path = std::path::PathBuf::from(candidate);
-                if is_runnable(&path) {
-                    eprintln!("[oculus] ffmpeg (system): {candidate}");
-                    return Some(path);
-                }
-            }
-            None
-        })
-        .clone()
-}
-
-fn trim_video(app: &AppHandle, raw: &std::path::Path, out: &std::path::Path) -> bool {
-    let Some(ffmpeg) = find_ffmpeg(app) else {
-        eprintln!("[oculus] ffmpeg not found — sidecar missing, run `bun run ffmpeg` in app/");
-        return false;
-    };
-    let ok = std::process::Command::new(&ffmpeg)
-        .args([
-            "-y", "-ss", "14",
-            "-i", raw.to_str().unwrap_or(""),
-            "-c", "copy",
-            out.to_str().unwrap_or(""),
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !ok { eprintln!("[oculus] ffmpeg trim failed"); }
-    ok
-}
-
-// ── VTT processing ────────────────────────────────────────────────────────────
-
-fn shift_vtt(vtt: &str) -> String {
-    let mut out = String::with_capacity(vtt.len());
-    let mut skip = false;
-
-    for line in vtt.lines() {
-        if line.contains(" --> ") {
-            let mut parts = line.splitn(2, " --> ");
-            let start_str = parts.next().unwrap_or("").trim();
-            let rest = parts.next().unwrap_or("");
-            let end_str = rest.split_whitespace().next().unwrap_or("").trim();
-            let settings = rest.trim_start_matches(end_str).trim();
-
-            if let (Some(s), Some(e)) = (parse_time(start_str), parse_time(end_str)) {
-                if s < TRIM_SECS {
-                    skip = true;
-                    continue;
-                }
-                skip = false;
-                let ns = s - TRIM_SECS;
-                let ne = (e - TRIM_SECS).max(0.0);
-                if settings.is_empty() {
-                    out.push_str(&format!("{} --> {}\n", fmt_time(ns), fmt_time(ne)));
-                } else {
-                    out.push_str(&format!("{} --> {} {settings}\n", fmt_time(ns), fmt_time(ne)));
-                }
-                continue;
-            }
-        }
-
-        if line.is_empty() { skip = false; }
-
-        if !skip {
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
-    out
-}
-
-fn parse_time(s: &str) -> Option<f64> {
-    let p: Vec<&str> = s.split(':').collect();
-    match p.as_slice() {
-        [h, m, sec] => Some(h.parse::<f64>().ok()? * 3600.0 + m.parse::<f64>().ok()? * 60.0 + sec.parse::<f64>().ok()?),
-        [m, sec]    => Some(m.parse::<f64>().ok()? * 60.0 + sec.parse::<f64>().ok()?),
-        _ => None,
-    }
-}
-
-fn fmt_time(secs: f64) -> String {
-    let h = (secs / 3600.0) as u32;
-    let m = ((secs % 3600.0) / 60.0) as u32;
-    let s = secs % 60.0;
-    format!("{h:02}:{m:02}:{s:06.3}")
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -563,7 +64,7 @@ pub async fn echo360_sync_lectures(
     canvas_course_id: i64,
 ) -> Result<Vec<LectureData>, String> {
     let session = get_or_auth(&app, &cache, canvas_course_id)?;
-    fetch_syllabus(&session)
+    echo360::syllabus(&session)
 }
 
 #[tauri::command]
@@ -575,45 +76,46 @@ pub async fn echo360_download_video(
     canvas_course_id: i64,
 ) -> Result<String, String> {
     let session = get_or_auth(&app, &cache, canvas_course_id)?;
-    let redirect = get_redirect_url(&session, &media_id, &lesson_id)?;
+    let url = echo360::download_url(&session, &media_id, &lesson_id)?;
 
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?
-        .join("lectures").join(&media_id);
+    let dir = echo360::lecture_dir(
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        &media_id,
+    );
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-
-    let raw    = dir.join("raw.mp4");
+    let raw = dir.join("raw.mp4");
     let final_ = dir.join("source1.mp4");
 
-    // On ANY error, clean up partial files so re-download starts fresh.
+    let emit = |percent: u8, phase: &str| {
+        app.emit(
+            "lecture-download-progress",
+            serde_json::json!({ "mediaId": &media_id, "percent": percent, "phase": phase }),
+        )
+        .ok();
+    };
+
+    // On ANY error, clean up partial files so a retry starts fresh.
     let result = (|| -> Result<String, String> {
-        let bytes = stream_to_file(&redirect, "", &raw, &app, &media_id)?;
+        let bytes = echo360::stream_to_file(&url, &raw, &|p| emit(p, "downloading"))?;
         eprintln!("[oculus] downloaded {} MB", bytes / 1_000_000);
 
-        app.emit("lecture-download-progress", serde_json::json!({
-            "mediaId": &media_id, "percent": 100u8, "phase": "trimming"
-        })).ok();
-
-        if !trim_video(&app, &raw, &final_) {
+        emit(100, "trimming");
+        let ffmpeg = echo360::find_ffmpeg(app.path().resource_dir().ok())
+            .ok_or("ffmpeg not found — run `bun run ffmpeg` in app/")?;
+        if !echo360::trim_video(&ffmpeg, &raw, &final_) {
             return Err("ffmpeg trim failed".to_string());
         }
         std::fs::remove_file(&raw).ok();
-        eprintln!("[oculus] trimmed 14s: {}", final_.display());
 
-        app.emit("lecture-download-progress", serde_json::json!({
-            "mediaId": &media_id, "percent": 100u8, "phase": "complete"
-        })).ok();
-
+        emit(100, "complete");
         Ok(final_.to_string_lossy().to_string())
     })();
 
     if result.is_err() {
         std::fs::remove_file(&raw).ok();
         std::fs::remove_file(&final_).ok();
-        app.emit("lecture-download-progress", serde_json::json!({
-            "mediaId": &media_id, "percent": 0u8, "phase": "error"
-        })).ok();
+        emit(0, "error");
     }
-
     result
 }
 
@@ -626,29 +128,16 @@ pub async fn echo360_download_transcript(
     canvas_course_id: i64,
 ) -> Result<String, String> {
     let session = get_or_auth(&app, &cache, canvas_course_id)?;
+    let vtt = echo360::transcript(&session, &lesson_id, &media_id)?;
 
-    let url = format!(
-        "https://echo360.net.au/api/ui/echoplayer/lessons/{lesson_id}/medias/{media_id}/transcript-file?format=vtt"
+    let dir = echo360::lecture_dir(
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        &media_id,
     );
-
-    let mut vtt = String::new();
-    ureq::get(&url)
-        .set("Cookie", &session.cookie_header())
-        .set("Authorization", &format!("Bearer {}", session.jwt))
-        .call()
-        .map_err(|e| e.to_string())?
-        .into_reader()
-        .read_to_string(&mut vtt)
-        .map_err(|e| e.to_string())?;
-
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?
-        .join("lectures").join(&media_id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-
     let path = dir.join("transcript.vtt");
     std::fs::write(&path, vtt.as_bytes()).map_err(|e| e.to_string())?;
     eprintln!("[oculus] transcript saved: {}", path.display());
-
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -659,7 +148,10 @@ pub fn echo360_read_transcript(path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn echo360_clear_transcripts(app: AppHandle) -> Result<u32, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
         .join("lectures");
     if !dir.exists() {
         return Ok(0);

@@ -1,5 +1,7 @@
-import { BookOpenIcon } from "@heroicons/react/16/solid";
+import { Checkbox } from "@/components/ui/checkbox";
+import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { cn } from "@/lib/utils";
+import { displayCode, displayName, fmtSynced } from "@/lib/format";
 import type { Subject } from "@/lib/db";
 
 interface SubjectRowProps {
@@ -19,37 +21,29 @@ export function SubjectRow({
     <button
       onClick={onToggle}
       className={cn(
-        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left transition-colors",
+        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left transition-colors cursor-pointer",
         checked
           ? "bg-primary/5 border-primary/20"
           : "bg-surface border-border hover:border-border/80",
         dimmed && !checked && "opacity-60",
       )}
     >
-      <div
-        className={cn(
-          "w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors",
-          checked ? "bg-primary border-primary" : "border-muted-foreground/40",
-        )}
-      >
-        {checked && (
-          <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
-            <path
-              d="M1 3L3 5L7 1"
-              stroke="white"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        )}
-      </div>
-      <BookOpenIcon className={cn("size-[13px]", checked ? "text-primary shrink-0" : "text-muted-foreground shrink-0")} />
+      {/* The row itself is the control, so the checkbox is presentational —
+          pointer-events-none keeps it from swallowing the row's click. */}
+      <Checkbox
+        checked={checked}
+        tabIndex={-1}
+        aria-hidden
+        className="pointer-events-none shrink-0"
+      />
+      <SubjectIcon code={subject.code} size={14} />
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium text-foreground truncate">
-          {subject.name}
+          {displayName(subject.name, subject.code)}
         </p>
-        <p className="text-[11px] text-muted-foreground">{subject.code}</p>
+        <p className="text-[11px] text-muted-foreground truncate">
+          {displayCode(subject.code)} · {fmtSynced(subject.last_synced_at)}
+        </p>
       </div>
     </button>
   );

@@ -23,14 +23,15 @@ import numpy as np
 import torch
 from PIL import Image
 
+from embed_contract import (
+    EMBED_DIM,
+    EMBED_MAX_TOKENS,
+    MODEL_REPO,
+    QUERY_INSTRUCTION,
+    embeddings_path,
+    is_embedded,
+)
 from modellock import MODEL_INIT_LOCK
-
-MODEL_REPO = "Qwen/Qwen3-VL-Embedding-2B"
-
-# Matryoshka truncation. Native is 2048; measured indistinguishable at 512 on
-# the retrieval eval, and a quarter the storage. Slice then re-normalise —
-# a truncated unit vector is no longer unit length.
-EMBED_DIM = 512
 
 # Pages are rendered above the model's own pixel cap and let the processor
 # downscale, so RENDER_DPI only needs to be high enough not to be the
@@ -48,25 +49,15 @@ EMBED_DIM = 512
 # 640 is 2.7x faster than the default and no worse. Semantic queries were 15/15
 # at every setting — only figure-heavy pages care about resolution.
 RENDER_DPI = 200
-EMBED_MAX_TOKENS = 640
 _PIXELS_PER_TOKEN = 32 * 32  # patch 16 with 2x2 spatial merge
 
 # Asymmetric retrieval: documents are embedded plainly, queries carry a task
 # instruction. Changing either invalidates every stored vector.
-QUERY_INSTRUCTION = (
-    "Given a student's question, retrieve the lecture slide that answers it."
-)
-
 _embedder = None
 _load_lock = threading.Lock()
 
 # pdf_path -> progress dict
 _progress: dict[str, dict] = {}
-
-
-def embeddings_path(pdf_path) -> Path:
-    p = Path(pdf_path)
-    return p.parent / f"{p.stem}.emb.json"
 
 
 def _load_model():
@@ -121,7 +112,7 @@ def _load_model():
 def get_embedder():
     """Load once, on whichever thread asks first.
 
-    Takes the process-wide model-init lock as well as its own: docling loads
+    Takes the process-wide model-init lock as well as its own: MinerU loads
     its weights on another thread and two concurrent `from_pretrained` calls
     fail with `Cannot copy out of meta tensor`. See modellock.py.
     """
@@ -208,21 +199,3 @@ def embed_pdf(pdf_path: str, on_progress=None) -> dict:
         "model": MODEL_REPO,
         "seconds": round(elapsed, 1),
     }
-
-
-def is_embedded(pdf_path: str) -> bool:
-    """True when a sidecar exists that matches the current model and dim.
-
-    Vectors from a different model or truncation are not comparable, so a
-    config change has to force a re-embed rather than silently mixing spaces.
-    """
-    p = embeddings_path(pdf_path)
-    if not p.exists():
-        return False
-    try:
-        meta = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return False
-    return (meta.get("model") == MODEL_REPO
-            and meta.get("dim") == EMBED_DIM
-            and meta.get("instruction") == QUERY_INSTRUCTION)

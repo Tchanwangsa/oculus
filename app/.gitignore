@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# bun is this project's package manager — bun.lock is the only lockfile.
+# Never commit a competing one (see tauri.conf.json beforeDevCommand).
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

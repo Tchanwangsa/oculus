@@ -122,7 +122,8 @@ export async function getPagesForFile(fileId: number): Promise<DbPage[]> {
 }
 
 /**
- * Parsed PDFs that have no embeddings yet.
+ * Parsed PDF-backed files (PDFs and Office docs with a converted sibling)
+ * that have no embeddings yet.
  *
  * Parsing must have run first — not because embedding needs the markdown (it
  * works off the page image), but because a hit with no markdown has nothing to
@@ -133,7 +134,7 @@ export async function getUnembeddedPdfs(subjectId?: number): Promise<DbFile[]> {
   const scope = subjectId != null ? `AND f.subject_id = $1` : ``;
   return db.select<DbFile[]>(
     `SELECT f.* FROM files f
-     WHERE f.file_type = 'pdf'
+     WHERE lower(f.file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')
        AND f.parse_status IN ('fast', 'quality')
        AND (f.embed_status IS NULL OR f.embed_status != 'done')
        ${scope}

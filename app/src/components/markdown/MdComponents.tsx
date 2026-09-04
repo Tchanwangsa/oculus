@@ -1,4 +1,5 @@
 import type { Components } from "react-markdown";
+import { ArrowSquareOut } from "@phosphor-icons/react";
 
 export const MD_COMPONENTS: Components = {
   h1: (p: any) => (
@@ -16,8 +17,13 @@ export const MD_COMPONENTS: Components = {
   p: (p: any) => (
     <p className="text-sm text-foreground/90 leading-relaxed my-3" {...p} />
   ),
-  a: (p: any) => (
-    <a className="text-primary hover:underline" target="_blank" rel="noreferrer" {...p} />
+  a: ({ href, children, ...p }: any) => (
+    <a href={href} className="text-primary hover:underline" target="_blank" rel="noreferrer" {...p}>
+      {children}
+      {/^https?:/.test(href ?? "") && (
+        <ArrowSquareOut size={12} className="inline shrink-0 ml-0.5 mb-0.5 opacity-60" />
+      )}
+    </a>
   ),
   ul: (p: any) => (
     <ul className="list-disc pl-5 my-3 space-y-1 text-sm text-foreground/90" {...p} />

@@ -1,10 +1,16 @@
-use std::io::Read as _;
+//! The app's entry point into the scrape engine.
+//!
+//! The engine runs on a plain thread and reports through [`AppReporter`], which
+//! forwards to the same Tauri events the frontend already listens for. Nothing
+//! about the UI contract changed when the scraper moved out of the WebView.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::auth::AuthState;
-use crate::files::write_course_bytes;
 use crate::ipc::IpcPort;
-use crate::worker::{ensure_worker_window, WORKER_LABEL};
+use crate::sync::{Engine, FileEvent, FileStart, Progress, Reporter, Subject, SyncOptions};
 
 #[derive(serde::Deserialize)]
 pub struct ScrapeSubject {
@@ -12,15 +18,19 @@ pub struct ScrapeSubject {
     pub code: String,
 }
 
-const SCRAPER_JS: &str = include_str!("../scraper.js");
+/// Set by `cancel_scrape`, read by the running engine between items.
+pub struct ScrapeCancel(pub Arc<AtomicBool>);
+
+impl Default for ScrapeCancel {
+    fn default() -> Self {
+        ScrapeCancel(Arc::new(AtomicBool::new(false)))
+    }
+}
 
 #[tauri::command]
-pub fn cancel_scrape(app: AppHandle) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window(WORKER_LABEL) {
-        win.eval("window.__oculus_cancel = true;")
-            .map_err(|e| e.to_string())?;
-        eprintln!("[oculus] cancel_scrape: signalled");
-    }
+pub fn cancel_scrape(cancel: tauri::State<ScrapeCancel>) -> Result<(), String> {
+    cancel.0.store(true, Ordering::SeqCst);
+    eprintln!("[oculus] cancel_scrape: signalled");
     Ok(())
 }
 
@@ -28,8 +38,9 @@ pub fn cancel_scrape(app: AppHandle) -> Result<(), String> {
 pub async fn scrape_content(
     app: AppHandle,
     subjects: Vec<ScrapeSubject>,
+    options: Option<SyncOptions>,
     port: tauri::State<'_, IpcPort>,
-    auth: tauri::State<'_, AuthState>,
+    cancel: tauri::State<'_, ScrapeCancel>,
 ) -> Result<(), String> {
     if subjects.is_empty() {
         return Err("No subjects selected.".to_string());
@@ -38,39 +49,110 @@ pub async fn scrape_content(
     // Holding an actual session is what matters — the flag file only records
     // that a login once happened, not that we still have the cookie.
     if !crate::auth::has_session(&app) {
-        *auth.0.lock().unwrap() = false;
         app.emit("canvas-auth-expired", "not-authenticated").ok();
         return Err("Not authenticated. Connect to Canvas first.".to_string());
     }
 
-    // Scraper JS runs in the hidden worker WebView; all Canvas fetches go
-    // through the cookie proxy, so no logged-in WebView is required.
-    ensure_worker_window(&app, port.0);
-    let win = app
-        .get_webview_window(WORKER_LABEL)
-        .ok_or_else(|| "Worker window unavailable".to_string())?;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let targets: Vec<Subject> = subjects
+        .into_iter()
+        .map(|s| Subject { id: s.id, code: s.code })
+        .collect();
 
-    let subjects_json = serde_json::to_string(
-        &subjects
-            .iter()
-            .map(|s| serde_json::json!({ "id": s.id, "code": s.code }))
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|e| e.to_string())?;
+    let flag = Arc::clone(&cancel.0);
+    flag.store(false, Ordering::SeqCst);
+    let ipc_port = port.0;
 
-    let js = SCRAPER_JS
-        .replace("__PORT__", &port.0.to_string())
-        .replace("__SUBJECTS__", &subjects_json);
+    eprintln!("[oculus] scrape: {} subject(s)", targets.len());
 
-    eprintln!(
-        "[oculus] scrape_content: {} subjects, IPC port={}",
-        subjects.len(),
-        port.0
-    );
-    win.eval(&js).map_err(|e| e.to_string())?;
+    // Off the command thread: a sync runs for minutes and the frontend expects
+    // this call to return immediately, then follow the events.
+    std::thread::spawn(move || {
+        let reporter = AppReporter {
+            app: app.clone(),
+            cancel: Arc::clone(&flag),
+        };
+        let engine = Engine::new(&data_dir, Box::new(reporter))
+            .with_ipc_port(ipc_port)
+            .with_options(options.unwrap_or_default());
+        let count = engine.scrape(&targets);
+        let cancelled = flag.load(Ordering::SeqCst);
+
+        eprintln!("[oculus] scrape finished: {count} subject(s), cancelled={cancelled}");
+        app.emit(
+            "scrape-complete",
+            serde_json::json!({ "count": count, "cancelled": cancelled }),
+        )
+        .ok();
+    });
+
     Ok(())
 }
 
+struct AppReporter {
+    app: AppHandle,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Reporter for AppReporter {
+    fn progress(&self, p: &Progress) {
+        self.app.emit("scrape-progress", p).ok();
+    }
+
+    fn file_start(&self, f: &FileStart) {
+        self.app.emit("scrape-file-start", f).ok();
+    }
+
+    fn file(&self, f: &FileEvent) {
+        eprintln!("[oculus] wrote {} ({} bytes)", f.relative_path, f.size_bytes);
+        self.app.emit("scrape-file", f).ok();
+    }
+
+    fn log(&self, level: &str, course: &str, message: &str) {
+        self.app
+            .emit(
+                "scrape-log",
+                serde_json::json!({ "level": level, "course": course, "message": message }),
+            )
+            .ok();
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+}
+
+/// Resume the parse pipeline for one already-downloaded PDF. The sidecar
+/// skips whatever exists (fast parse if markdown is on disk, everything if
+/// the quality pass finished), so this continues where the file left off
+/// rather than starting over. Fire-and-forget: progress arrives as the same
+/// `parse-status` events a sync produces.
+#[tauri::command]
+pub fn parse_file(
+    app: AppHandle,
+    subject_id: i64,
+    subject_code: String,
+    relative_path: String,
+) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // For Office files the parseable artifact is the derived sibling PDF, and
+    // that (not the original, which legacy syncs discarded) must be on disk.
+    let pdf_rel = crate::paths::doc_pdf_rel(&relative_path)
+        .ok_or_else(|| format!("{relative_path}: not a parseable file"))?;
+    if !data_dir.join(&pdf_rel).is_file() {
+        return Err(format!("not on disk: {pdf_rel}"));
+    }
+    let port = app.state::<IpcPort>().0;
+    std::thread::spawn(move || {
+        match crate::sync::parse_pdf(&data_dir, &relative_path, subject_id, &subject_code, port) {
+            Ok(mode) => eprintln!("[oculus] parse_file {relative_path}: {mode}"),
+            Err(e) => eprintln!("[oculus] parse_file {relative_path}: {e}"),
+        }
+    });
+    Ok(())
+}
+
+/// Re-download one file on demand, e.g. after the user deletes a bad copy.
 #[tauri::command]
 pub fn rescrape_file(
     app: AppHandle,
@@ -78,90 +160,20 @@ pub fn rescrape_file(
     subject_code: String,
     canvas_id: i64,
 ) -> Result<String, String> {
-    use crate::auth::CANVAS_BASE;
-    const DOWNLOADABLE: &[&str] = &[
-        "application/pdf",
-        "application/vnd.ms-powerpoint",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ];
-
     if !crate::auth::has_session(&app) {
         return Err("Not authenticated — connect to Canvas first.".to_string());
     }
-
-    let info: serde_json::Value = serde_json::from_reader(
-        crate::auth::apply_session(&app, ureq::get(&format!("{CANVAS_BASE}/api/v1/files/{canvas_id}")))
-            .call()
-            .map_err(|e| format!("Canvas API: {e}"))?
-            .into_reader(),
-    )
-    .map_err(|e| e.to_string())?;
-
-    let ct = info
-        .get("content-type")
-        .or_else(|| info.get("content_type"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim();
-
-    if !DOWNLOADABLE.contains(&ct) {
-        return Err(format!("File type '{ct}' not in download allowlist"));
-    }
-
-    let pub_info: serde_json::Value = serde_json::from_reader(
-        crate::auth::apply_session(
-            &app,
-            ureq::get(&format!(
-                "{CANVAS_BASE}/api/v1/files/{canvas_id}/public_url"
-            )),
-        )
-        .call()
-        .map_err(|e| format!("public_url API: {e}"))?
-        .into_reader(),
-    )
-    .map_err(|e| e.to_string())?;
-
-    let dl_url = pub_info["public_url"]
-        .as_str()
-        .or_else(|| info["url"].as_str())
-        .ok_or_else(|| "No download URL in API response".to_string())?
-        .to_string();
-
-    let name = info["filename"]
-        .as_str()
-        .or_else(|| info["display_name"].as_str())
-        .unwrap_or("file.bin")
-        .replace(['/', '\\'], "_");
-
-    let mut file_bytes: Vec<u8> = Vec::new();
-    ureq::get(&dl_url)
-        .call()
-        .map_err(|e| format!("download: {e}"))?
-        .into_reader()
-        .read_to_end(&mut file_bytes)
-        .map_err(|e| e.to_string())?;
-
-    let path = format!("files/{name}");
-    let (rel, size_saved) = write_course_bytes(&app, &subject_code, &path, &file_bytes)?;
-
-    app.emit(
-        "scrape-file",
-        serde_json::json!({
-            "subject_id": subject_id,
-            "code": subject_code,
-            "relative_path": rel,
-            "size_bytes": size_saved,
-            "category": "file",
-            "canvas_id": canvas_id,
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let engine = Engine::new(
+        &data_dir,
+        Box::new(AppReporter {
+            app: app.clone(),
+            cancel: Arc::new(AtomicBool::new(false)),
         }),
     )
-    .ok();
+    .with_ipc_port(app.state::<IpcPort>().0);
 
-    eprintln!("[oculus] rescrape_file: saved {rel} ({size_saved} bytes)");
-    Ok(rel)
+    engine
+        .refetch_file(&Subject { id: subject_id, code: subject_code }, canvas_id)?
+        .ok_or_else(|| "Canvas would not serve that file (locked, or not a supported type)".to_string())
 }

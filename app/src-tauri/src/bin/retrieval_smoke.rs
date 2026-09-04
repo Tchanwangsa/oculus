@@ -27,7 +27,7 @@ async fn main() {
             let file_id: i64 = args[3].parse().expect("file_id");
             let pdf = args[4].clone();
             let force = args.get(5).map(|s| s == "force").unwrap_or(false);
-            match retrieval::ingest(&db, file_id, pdf, force).await {
+            match retrieval::ingest(&db, file_id, pdf, force, 0, String::new()).await {
                 Ok(s) => println!(
                     "ingest ok: file_id={} pages={} with_markdown={} dim={} model={} skipped={}",
                     s.file_id, s.pages_embedded, s.pages_with_markdown, s.dim, s.model, s.skipped

@@ -6,6 +6,8 @@ export interface ParseJob {
   status: string; // "fast" | "queued" | "running" | "quality" | "error"
   pages_done?: number;
   total_pages?: number;
+  /** For "queued": place in the sidecar's single-slot quality queue. */
+  position?: number;
   error?: string;
 }
 

@@ -172,18 +172,28 @@ fn sibling(pdf_path: &str, suffix: &str) -> PathBuf {
 ///
 /// Idempotent: the sidecar skips a PDF whose sidecar file already matches the
 /// current model and dimension, and the upsert makes a re-run a no-op.
+/// `ipc_port`/`relative_path` let the sidecar stream per-page embed progress
+/// back through the app's IPC server; pass `0` and `""` to run silently (the
+/// CLI does — it has no IPC server).
 pub async fn ingest(
     db_file: &Path,
     file_id: i64,
     pdf_path: String,
     force: bool,
+    ipc_port: u16,
+    relative_path: String,
 ) -> Result<IngestSummary, String> {
     let path_for_call = pdf_path.clone();
 
     let resp: EmbedResponse = tauri::async_runtime::spawn_blocking(move || {
         post_json(
             "/embed-pdf",
-            serde_json::json!({ "pdf_path": path_for_call, "force": force }),
+            serde_json::json!({
+                "pdf_path": path_for_call,
+                "force": force,
+                "ipc_port": ipc_port,
+                "relative_path": relative_path,
+            }),
             EMBED_TIMEOUT,
         )
     })
@@ -372,12 +382,15 @@ pub async fn embed_file(
     force: Option<bool>,
 ) -> Result<IngestSummary, String> {
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let pdf = base.join(&relative_path);
+    let pdf_rel = crate::paths::doc_pdf_rel(&relative_path)
+        .ok_or_else(|| format!("{relative_path}: no PDF representation to embed"))?;
+    let pdf = base.join(&pdf_rel);
     if !pdf.is_file() {
         return Err(format!("not on disk: {}", pdf.display()));
     }
     let db = db_path(&app)?;
-    ingest(&db, file_id, pdf.to_string_lossy().to_string(), force.unwrap_or(false)).await
+    let ipc_port = app.state::<crate::ipc::IpcPort>().0;
+    ingest(&db, file_id, pdf.to_string_lossy().to_string(), force.unwrap_or(false), ipc_port, relative_path).await
 }
 
 #[tauri::command]

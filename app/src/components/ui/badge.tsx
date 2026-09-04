@@ -1,39 +1,53 @@
-import { cva, type VariantProps } from "class-variance-authority";
-import { cn } from "@/lib/utils";
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+import { Slot } from "radix-ui"
+
+import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium transition-colors",
+  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
+      // Badges here are status pills, not buttons — so every variant is a soft
+      // tint of its colour rather than a solid fill. Solid badges would compete
+      // with the primary buttons sitting next to them in the same header.
       variant: {
-        default:
-          "bg-primary/15 text-primary border border-primary/20",
+        default: "border-primary/20 bg-primary/15 text-primary",
         secondary:
-          "bg-surface-raised text-muted-foreground border border-border",
-        accent:
-          "bg-accent/15 text-accent border border-accent/20",
+          "border-border bg-secondary text-muted-foreground [a&]:hover:bg-secondary/90",
         destructive:
-          "bg-destructive/15 text-destructive border border-destructive/20",
-        success:
-          "bg-success/15 text-success border border-success/20",
-        warning:
-          "bg-warning/15 text-warning border border-warning/20",
+          "border-destructive/20 bg-destructive/15 text-destructive focus-visible:ring-destructive/20",
+        success: "border-success/20 bg-success/15 text-success",
+        warning: "border-warning/20 bg-warning/15 text-warning",
         outline:
-          "border border-border text-foreground",
+          "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 [a&]:hover:underline",
       },
     },
     defaultVariants: {
       variant: "default",
     },
   }
-);
+)
 
-export interface BadgeProps
-  extends React.HTMLAttributes<HTMLSpanElement>,
-    VariantProps<typeof badgeVariants> {}
+function Badge({
+  className,
+  variant = "default",
+  asChild = false,
+  ...props
+}: React.ComponentProps<"span"> &
+  VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
+  const Comp = asChild ? Slot.Root : "span"
 
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return <span className={cn(badgeVariants({ variant, className }))} {...props} />;
+  return (
+    <Comp
+      data-slot="badge"
+      data-variant={variant}
+      className={cn(badgeVariants({ variant }), className)}
+      {...props}
+    />
+  )
 }
 
-export { Badge, badgeVariants };
+export { Badge, badgeVariants }

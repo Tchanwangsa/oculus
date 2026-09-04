@@ -35,5 +35,13 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
 base64 = "0.22"
 half = "2"
+# LLM provider API keys live in the macOS keychain, never in SQLite — the
+# platform store is an opt-in feature in keyring 3.
+keyring = { version = "3", features = ["apple-native"] }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+scraper = "0.27"
+clap = { version = "4", features = ["derive"] }
+ego-tree = "0.11"
+libc = "0.2.189"
+tauri-plugin-notification = "2.3.3"

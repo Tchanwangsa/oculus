@@ -1,59 +1,5 @@
 use tauri::{AppHandle, Manager};
 
-pub fn safe_dir(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect()
-}
-
-pub fn safe_filename(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
-        .collect::<String>()
-        .replace("..", "_")
-}
-
-pub fn safe_rel_path(rel: &str) -> Option<String> {
-    let parts: Vec<String> = rel
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .map(safe_filename)
-        .filter(|s| s != "." && s != "_" && !s.is_empty())
-        .collect();
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("/"))
-    }
-}
-
-pub fn write_course_bytes(
-    app: &AppHandle,
-    code: &str,
-    rel_path: &str,
-    content: &[u8],
-) -> Result<(String, u64), String> {
-    let safe = safe_rel_path(rel_path).ok_or_else(|| format!("invalid path: {rel_path}"))?;
-    let rel = format!("courses/{}/{}", safe_dir(code), safe);
-    let path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join(&rel);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(&path, content).map_err(|e| e.to_string())?;
-    Ok((rel, content.len() as u64))
-}
-
-pub fn parse_query(url: &str) -> std::collections::HashMap<String, String> {
-    match url::Url::parse(&format!("http://x{url}")) {
-        Ok(u) => u.query_pairs().into_owned().collect(),
-        Err(_) => std::collections::HashMap::new(),
-    }
-}
-
 /// Live cookies from the login WebView (only available while it's open).
 pub fn canvas_cookie_header(app: &AppHandle) -> String {
     let Some(win) = app.get_webview_window("canvas-auth") else {
@@ -83,26 +29,26 @@ pub fn proxy_cookie(app: &AppHandle) -> String {
     canvas_cookie_header(app)
 }
 
-pub fn category_from_path(path: &str) -> &'static str {
-    if path == "home.md" {
-        "home"
-    } else if path == "syllabus.md" {
-        "syllabus"
-    } else if path.starts_with("pages/") {
-        "page"
-    } else if path.starts_with("assignments/") {
-        "assignment"
-    } else if path.starts_with("announcements/") {
-        "announcement"
-    } else if path.starts_with("files/") {
-        "file"
-    } else if path.starts_with("modules/") {
-        "module"
-    } else if path.starts_with("images/") {
-        "image"
-    } else {
-        "other"
+/// A library file's markdown, resolved headlessly (no `AppHandle`, so the
+/// agent and the CLI can call it).
+///
+/// Markdown-native files — Canvas pages, announcements, Ed threads — *are*
+/// the markdown. PDF-backed ones (real PDFs and the Office conversions) have
+/// it beside the PDF as `{stem}.md`, written by the parser; a file that has
+/// not been parsed yet has none, which is a meaningful answer rather than an
+/// error the caller should retry.
+pub fn read_parsed_markdown(relative_path: &str) -> Result<String, String> {
+    let base = crate::paths::data_dir();
+    if relative_path.to_ascii_lowercase().ends_with(".md") {
+        return std::fs::read_to_string(base.join(relative_path)).map_err(|e| e.to_string());
     }
+    let pdf_rel = crate::paths::doc_pdf_rel(relative_path)
+        .ok_or_else(|| format!("{relative_path}: not a document with parsed markdown"))?;
+    let md = base.join(&pdf_rel).with_extension("md");
+    if !md.is_file() {
+        return Err("not parsed yet — no markdown on disk".into());
+    }
+    std::fs::read_to_string(md).map_err(|e| e.to_string())
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -128,33 +74,20 @@ pub fn open_course_file(app: AppHandle, relative_path: String) -> Result<(), Str
         .map_err(|e| e.to_string())
 }
 
-/// Derive parse status from disk for a set of PDF relative paths.
-/// Returns (relative_path, status) where status is "quality" (md + images),
-/// "fast" (md only), or omitted if no md exists.
+/// Derive parse status from disk for a set of PDF-backed relative paths
+/// (PDFs, plus Office files parsed via their derived sibling PDF).
+/// Returns (relative_path, status); paths with no parse output are omitted.
 #[tauri::command]
 pub fn scan_parsed_files(
     app: AppHandle,
     relative_paths: Vec<String>,
 ) -> Result<Vec<(String, String)>, String> {
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for rel in relative_paths {
-        if !rel.to_lowercase().ends_with(".pdf") {
-            continue;
-        }
-        let pdf = base.join(&rel);
-        let md = pdf.with_extension("md");
-        if !md.exists() {
-            continue;
-        }
-        // images dir: {stem}_images alongside the pdf
-        let stem = pdf.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        let images_dir = pdf
-            .parent()
-            .map(|p| p.join(format!("{stem}_images")))
-            .filter(|p| p.is_dir());
-        let status = if images_dir.is_some() { "quality" } else { "fast" };
-        out.push((rel, status.to_string()));
-    }
-    Ok(out)
+    Ok(relative_paths
+        .into_iter()
+        .filter_map(|rel| {
+            let pdf_rel = crate::paths::doc_pdf_rel(&rel)?;
+            crate::paths::parse_mode(&base.join(&pdf_rel)).map(|mode| (rel, mode.to_string()))
+        })
+        .collect())
 }

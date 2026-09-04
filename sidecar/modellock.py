@@ -1,6 +1,6 @@
 """One lock guarding every torch model load in this process.
 
-Docling's layout/formula models and the Qwen embedder are loaded by different
+MinerU's layout/formula models and the Qwen embedder are loaded by different
 threads — the quality-parse worker and the `/embed-pdf` handler — and parsing a
 freshly scraped PDF kicks off both at the same moment. Loading them
 concurrently fails:
@@ -12,7 +12,8 @@ concurrently fails:
 onto the real device. That two-step is not thread-safe: the losing thread finds
 tensors already moved out from under it and gets a meta tensor with no storage.
 
-Held only for construction, not inference — once loaded, both run concurrently.
+Held only for construction. The heavier document operations are separately
+serialized by the sidecar-wide gate in `main.py`.
 """
 
 import threading

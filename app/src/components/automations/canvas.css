@@ -1,0 +1,28 @@
+/* React Flow ships its own light-mode palette; these pull the canvas onto our
+   tokens so it follows the theme class like everything else. */
+.oculus-canvas .react-flow__background { background: var(--color-background); }
+.oculus-canvas .react-flow__edge-path { stroke: var(--color-border); stroke-width: 1.5; }
+.oculus-canvas .react-flow__edge.selected .react-flow__edge-path,
+.oculus-canvas .react-flow__edge:hover .react-flow__edge-path { stroke: var(--color-primary); }
+.oculus-canvas .react-flow__edge.branch-true .react-flow__edge-path { stroke: var(--color-success); }
+/* A wire carrying values reads heavier than one that only says "then". */
+.oculus-canvas .react-flow__edge.data-wire .react-flow__edge-path {
+  stroke: var(--color-primary);
+  stroke-opacity: 0.55;
+}
+.oculus-canvas .react-flow__connection-path { stroke: var(--color-primary); stroke-width: 1.5; }
+.oculus-canvas .react-flow__handle { border-radius: 2px; }
+.oculus-canvas .react-flow__node { font-family: inherit; }
+.oculus-canvas .react-flow__attribution { display: none; }
+.oculus-canvas .react-flow__controls-button {
+  background: var(--color-card);
+  border-bottom: 1px solid var(--color-border-subtle);
+  fill: var(--color-muted-foreground);
+}
+.oculus-canvas .react-flow__controls-button:hover { background: var(--color-surface); }
+.oculus-canvas .react-flow__controls {
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
