@@ -21,7 +21,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "devtools"] }
+# `unstable` is what enables multiwebview (`Window::add_child`) — every
+# in-app browser tab is a child WebView of the main window, see src/browser.rs.
+tauri = { version = "2", features = ["protocol-asset", "devtools", "unstable"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -49,3 +51,13 @@ libc = "0.2.189"
 # `oculus grep` searches PDF page text, which lives only in the database —
 # ripgrep over the library on disk cannot see it. Already in the lock tree.
 regex = "1"
+
+# The in-app browser seeds WebKit's cookie jar with the Canvas session (see
+# `seed_canvas_session` in src/browser.rs) — Tauri exposes no cookie setter, so
+# that goes through WKHTTPCookieStore directly. These are the same crates wry
+# already builds on.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSHTTPCookie", "NSString"] }
+objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore"] }

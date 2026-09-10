@@ -24,6 +24,7 @@ live in the root `CLAUDE.md`, not here.
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [frontend.md](./frontend.md) | Routes, layouts, stores, hooks, the UI system |
 | [cli.md](./cli.md) | The `oculus` binary — headless sync from a terminal |
+| [cli-reference.md](./cli-reference.md) | Every command and flag — generated from the binary, not hand-kept |
 | [development.md](./development.md) | Building and running each piece |
 
 ## Repo layout
@@ -41,10 +42,11 @@ live in the root `CLAUDE.md`, not here.
 ## Status honesty
 
 Built: Canvas SSO + sync, Ed Discussion sync, Echo360 download + player, the
-two-tier PDF pipeline, page-image retrieval, and the chat agent over it
-(BYOK: local Ollama, OpenRouter, OpenCode Go, or any OpenAI-compatible
-URL). When a doc or UI string implies more than this, the doc is wrong — fix
-it.
+two-tier PDF pipeline, page-image retrieval, the chat agent over it (BYOK:
+local Ollama, OpenRouter, OpenCode Go, or any OpenAI-compatible URL), and an
+in-app browser — external links open as tabs in Oculus's own tab strip,
+signed in to Canvas. When a
+doc or UI string implies more than this, the doc is wrong — fix it.
 
 Removed: **automations and the Inbox** — the trigger/condition/action canvas
 that delivered sync digests. It worked, but it was a detour from the core, so

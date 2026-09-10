@@ -22,6 +22,7 @@ import SubjectDiscussionPage from "@/pages/subject/DiscussionPage";
 import SubjectFilePage from "@/pages/subject/FilePage";
 import SubjectLecturePage from "@/pages/subject/LecturePage";
 import SyncPage from "@/pages/SyncPage";
+import BrowserPage from "@/pages/BrowserPage";
 import SettingsLayout from "@/layouts/SettingsLayout";
 import SettingsCanvasPage from "@/pages/settings/CanvasPage";
 import SettingsAiPage from "@/pages/settings/AiPage";
@@ -59,6 +60,9 @@ const router = createHashRouter([
         ],
       },
       { path: "sync", element: <SyncPage /> },
+      // An in-app browser tab: the id names a native page WebView that Rust
+      // parks over this route's content area. See BrowserPage.
+      { path: "browse/:id", element: <BrowserPage /> },
       {
         path: "settings",
         element: <SettingsLayout />,

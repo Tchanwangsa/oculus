@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "The app's own UI. Scoped to the main WEBVIEW, not the main window: the window also holds one webview of remote content per in-app browser tab (src/browser.rs), and window/webview scopes match by OR — a window scope would hand every Tauri command to whatever page the user browses to.",
+  "webviews": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

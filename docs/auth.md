@@ -18,6 +18,7 @@ session cookie.
 | Ed token minting via LTI | `app/src-tauri/src/ed.rs` |
 | Echo360 session via LTI | `app/src-tauri/src/echo360.rs` |
 | Frontend auth state | `app/src/hooks/useAuth.ts`, `app/src/hooks/useKeepalive.ts` |
+| Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
 | Credential entry UI | `app/src/components/settings/AutoSignIn.tsx` |
 
 ## Canvas
@@ -36,6 +37,34 @@ session cookie.
   extends it on use, so periodic requests are what keep it alive. There is
   no remember-me cookie; once dead, the session must be rebuilt from
   scratch — either by [automated sign-in](#automated-sign-in) or by hand.
+
+### The in-app browser gets the same session
+
+External links open inside Oculus (see [frontend.md](./frontend.md)), and a
+Canvas page there has to be signed in — but the snapshot on disk is not
+something WebKit will read.
+
+- **The cookie has to be put back by hand.** `canvas_session` is HttpOnly
+  *and* session-scoped, so WebKit keeps it in memory only: it dies with the
+  process, and the plaintext snapshot is the sole surviving copy.
+  `browser::seed_canvas_session` writes the snapshot into WebKit's shared jar
+  through `WKHTTPCookieStore` (Tauri exposes no cookie setter) at startup and
+  before each Canvas page. The snapshot carries no domains — it is a bare
+  `name=value` header — so every pair is re-scoped to the Canvas host, which
+  is exactly what the scraper sends over the wire anyway.
+- **Pass a completion handler.** `setCookies:completionHandler:` invokes
+  whatever it was handed once the network process replies; a nil block
+  segfaults the app *seconds later*, from a stack that names only WebKit.
+- **`/login/session_token` is not the shortcut it looks like.** Canvas's own
+  "log a browser in from an authenticated backend" endpoint answers 403 to a
+  session-cookie request — it wants an access token, and those are disabled
+  here. Same wall as above, one layer down.
+- Browsing Canvas in-app rolls the session forward like any other request, so
+  a page load there re-snapshots the cookie and the scraper inherits the
+  fresher one. The snapshot is deduplicated by name on the way out: UniMelb
+  sets a few cookies on the parent domain, and they come back from WebKit
+  next to the seeded copies scoped to the Canvas host — without the dedupe,
+  every Canvas page load grew the file by three cookies.
 
 ### Keep-alive, two layers
 

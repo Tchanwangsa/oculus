@@ -54,16 +54,42 @@ pub fn is_authenticated_url(url: &url::Url) -> bool {
 
 // ── Cookie snapshot / replay ────────────────────────────────────────────────
 
-/// Reads every cookie from the live login WebView (includes HttpOnly via the
+/// Reads the Canvas cookies from a live WebView (includes HttpOnly via the
 /// native store) and writes the joined `name=value; ...` header to disk.
+///
+/// **Canvas cookies only.** Every webview in the app shares one jar —
+/// `data_directory` is a no-op on WKWebView — so `cookies()` would return
+/// whatever the in-app browser has picked up anywhere on the web, and this
+/// header is replayed verbatim to Canvas on every scrape. `cookies_for_url`
+/// scopes it to what Canvas would actually be sent.
 pub fn save_session_cookie(app: &AppHandle) {
-    let Some(win) = app.get_webview_window("canvas-auth") else {
+    let Ok(canvas) = crate::canvas::CANVAS_BASE.parse::<url::Url>() else {
         return;
     };
-    match win.cookies() {
+    // Either live webview will do — same jar. A Canvas page open in the
+    // browser has the *fresher* session, so fall back to it when the login
+    // window is gone.
+    let cookies = match app.get_webview_window("canvas-auth") {
+        Some(win) => win.cookies_for_url(canvas),
+        None => match app
+            .webviews()
+            .into_iter()
+            .find(|(label, _)| label.starts_with(crate::browser::LABEL_PREFIX))
+        {
+            Some((_, webview)) => webview.cookies_for_url(canvas),
+            None => return,
+        },
+    };
+    match cookies {
         Ok(cookies) => {
+            // One entry per name. WebKit hands back both the cookies UniMelb
+            // sets on the parent domain and the copies the in-app browser
+            // seeds on the Canvas host (`browser::seed_canvas_session`);
+            // replaying both would grow the snapshot on every page load.
+            let mut seen = std::collections::HashSet::new();
             let header = cookies
                 .iter()
+                .filter(|c| seen.insert(c.name().to_string()))
                 .map(|c| format!("{}={}", c.name(), c.value()))
                 .collect::<Vec<_>>()
                 .join("; ");

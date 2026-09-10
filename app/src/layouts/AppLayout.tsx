@@ -5,6 +5,9 @@ import Sidebar from "@/components/sidebar/Sidebar";
 import TopTabBar from "@/components/tabs/TopTabBar";
 import FilePeek from "@/components/peek/FilePeek";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { LeaveLectureDialog } from "@/components/lectures/LeaveLectureDialog";
+import { browser, isWebUrl } from "@/lib/browser";
+import { useBrowserTabs } from "@/hooks/useBrowserTabs";
 
 const SIDEBAR_KEY = "oculus-sidebar-collapsed";
 const ZOOM_KEY = "oculus-zoom";
@@ -43,6 +46,32 @@ export default function AppLayout() {
 
   const toggle = useCallback(() => setCollapsed((c) => !c), []);
 
+  // Browser tabs opened in Rust arrive in the tab strip through this.
+  useBrowserTabs();
+
+  // Every external link in the app opens in an in-app browser tab instead
+  // of leaving for Safari — caught here, in the capture phase, so no call
+  // site has to know: an `<a href="https://…">` anywhere, markdown included,
+  // just works. ⌘-click still hands the URL to the real browser.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0) return;
+      const anchor = (e.target as HTMLElement | null)?.closest?.("a[href]") as
+        | HTMLAnchorElement
+        | null;
+      const href = anchor?.getAttribute("href");
+      if (!isWebUrl(href)) return;
+      e.preventDefault();
+      if (e.metaKey || e.ctrlKey) {
+        browser.external(href).catch(() => {});
+        return;
+      }
+      browser.open(href).catch(() => {});
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
+
   // ⌘\ toggles the sidebar; ⌘+/⌘− zoom the whole window; ⌘0 resets to the
   // default scale.
   useEffect(() => {
@@ -80,15 +109,25 @@ export default function AppLayout() {
       <div className="flex flex-col h-full w-full overflow-hidden bg-background">
         {/* Window title bar: traffic lights + back/forward + tabs, full width. */}
         <TopTabBar sidebarCollapsed={collapsed} onToggleSidebar={toggle} />
-        <div className="flex flex-1 overflow-hidden">
+        {/* `gap-2` survives the sidebar collapsing to zero width, so the card
+            keeps its left inset either way. */}
+        <div className="flex flex-1 overflow-hidden gap-2 pb-2 pr-2">
           <Sidebar collapsed={collapsed} onToggle={toggle} />
-          {/* `relative` anchors the peek slide-overs (file peek here, the
+          {/* The document floats: content is a rounded card inset from the
+              ground the shell sits on, so the sidebar and tab strip read as
+              furniture around the page rather than panels beside it. That
+              also means the sidebar needs no divider of its own — this card's
+              border is the separation.
+              `relative` anchors the peek slide-overs (file peek here, the
               lecture peek rendered deeper) so they span the whole page. */}
-          <main className="flex-1 overflow-hidden min-w-0 relative">
+          <main className="flex-1 overflow-hidden min-w-0 relative rounded-xl border border-border bg-card shadow-panel">
             <Outlet />
             <FilePeek />
           </main>
         </div>
+        {/* Raised from the tab strip and from the player alike, so it hangs
+            here rather than in either of them. */}
+        <LeaveLectureDialog />
       </div>
     </TooltipProvider>
   );

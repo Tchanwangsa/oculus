@@ -27,6 +27,7 @@ separate killable model workers rather than retaining their weights itself.
 | Sidecar supervisor (spawn, port reclaim, shutdown) | `app/src-tauri/src/sidecar.rs` |
 | IPC callback server (sidecar → app) | `app/src-tauri/src/ipc.rs` |
 | Media HTTP server (lecture video streaming) | `app/src-tauri/src/media.rs` |
+| In-app browser (one page WebView per tab, in the main window) | `app/src-tauri/src/browser.rs` |
 | LLM provider client (keys, streaming, spend limits) | `app/src-tauri/src/llm.rs` |
 | Sidecar HTTP service | `sidecar/main.py` |
 | Model-worker lifecycle + memory accounting | `sidecar/model_workers.py`, `sidecar/worker_client.py`, `sidecar/memory_governor.py` |
@@ -68,6 +69,10 @@ live. Inside it:
 - `courses/<code>/…` — scraped files, mirrored to Canvas layout, plus `.md`,
   `.pages.json`, and `<stem>_images/` siblings the parser writes
 - `lectures/<uuid>/` — downloaded Echo360 media
+- `agents/` — the docs a coding agent reads, the `AGENTS.md` every course
+  folder symlinks, and the memory layer it writes back (`TASTE.md`,
+  `memories/`); written by `oculus docs` and, for everything but the CLI
+  reference, by every sync (see [cli.md](./cli.md))
 - `mineru-usage.json` — persistent daily cloud reservations and quota latch
 - the session cookie and auth-flag files (see [auth.md](./auth.md))
 
@@ -100,9 +105,23 @@ disappear — see [calendar.md](./calendar.md).
   separate path: Rust keychain → loopback parse body → cloud client. It never
   enters SQLite, health, or progress events. Cloud is off by default.
 - The startup sequence in `app/src-tauri/src/lib.rs` is: start IPC server →
-  spawn sidecar → clean partial lecture downloads → verify the persisted
-  session in a background thread (optimistic until proven rejected) → start
-  the in-app keep-alive loop.
+  spawn sidecar → clean partial lecture downloads → seed WebKit's cookie jar
+  with the Canvas session → verify the persisted session in a background
+  thread (optimistic until proven rejected) → start the in-app keep-alive
+  loop.
+- **The main window holds more than one WebView.** External links open in
+  in-app browser tabs (`app/src-tauri/src/browser.rs`, needs tauri's
+  `unstable` feature for `Window::add_child`): one webview of remote content
+  per tab, a child of the main window stacked above the app's own webview,
+  shown over the slot the `/browse/:id` route leaves in the content card.
+  The frontend reports that slot as insets from the window edges; Rust lays
+  pages out from those and the window size, so a resize never waits on
+  JavaScript. That makes the scope of
+  `app/src-tauri/capabilities/default.json` load-bearing: it names
+  `webviews` (`main`), not `windows`, because the two match by **OR** — a
+  window-scoped capability would hand every Tauri command to whatever page
+  the user browsed to. See [frontend.md](./frontend.md) for the tab strip
+  and slot, and [auth.md](./auth.md) for why those pages are signed in.
 - Everything Canvas-shaped was **moved out of hidden WebViews on purpose**:
   macOS suspends off-screen WKWebView content processes, which froze the old
   `scraper.js` mid-run with nothing to catch. The scrape engine is Rust

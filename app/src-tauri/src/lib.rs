@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod agents;
 mod auth;
+pub mod browser;
 pub mod calendar;
 pub mod canvas;
 pub mod echo360;
@@ -11,6 +12,7 @@ pub mod keepalive;
 mod lectures;
 pub mod llm;
 pub mod md;
+pub mod menu;
 pub mod okta;
 mod media;
 pub mod mineru;
@@ -36,12 +38,16 @@ use subjects::SubjectsState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // ⌘T / ⌘W reach the app as menu events, not key events — see menu.rs.
+        .menu(menu::build)
+        .on_menu_event(menu::handle)
         .manage(AuthState(Arc::new(Mutex::new(false))))
         .manage(SubjectsState(Arc::new(Mutex::new(vec![]))))
         .manage(Echo360Cache(Arc::new(Mutex::new(std::collections::HashMap::new()))))
         .manage(SidecarProcess(Arc::new(Mutex::new(None))))
         .manage(ScrapeCancel::default())
         .manage(agent::ChatCancel::default())
+        .manage(browser::BrowserState::default())
         .setup(|app| {
             // ── IPC HTTP server ────────────────────────────────────────
             let port = ipc::start_ipc_server(app.handle().clone());
@@ -61,6 +67,12 @@ pub fn run() {
             // ── Cleanup orphaned partial lecture downloads ──────────────
             lectures::cleanup_partial_downloads(app.handle());
 
+            // ── In-app browser ──────────────────────────────────────────
+            // Hands WebKit the Canvas session before anything can be
+            // clicked, so the first Canvas page opened is already signed in,
+            // and hooks the main window's resize so pages follow it (see
+            // src/browser.rs).
+            browser::init(app.handle());
             // ── Session restore on startup ──────────────────────────────
             // No WebView dance: we replay the persisted session cookie via a
             // server-side ureq ping. Valid → connected instantly. Rejected →
@@ -722,6 +734,15 @@ CREATE INDEX IF NOT EXISTS idx_local_events_start ON local_events(start_at);
             sidecar::sidecar_health,
             sidecar::sidecar_set_limits,
             storage::storage_report,
+            browser::browser_open_url,
+            browser::browser_state,
+            browser::browser_show,
+            browser::browser_set_viewport,
+            browser::browser_hide,
+            browser::browser_navigate,
+            browser::browser_history,
+            browser::browser_reload,
+            browser::browser_close_tab,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

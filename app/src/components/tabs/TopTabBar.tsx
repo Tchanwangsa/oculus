@@ -1,75 +1,51 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { listen } from "@tauri-apps/api/event";
 import {
-  ArrowsClockwise,
-  BookOpen,
   CaretLeft,
   CaretRight,
-  Chat,
-  GearSix,
   Plus,
   Sidebar,
   X,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useTabStore } from "@/stores/tabStore";
+import { useBrowserStore } from "@/stores/browserStore";
+import { browser, browseId } from "@/lib/browser";
 import { useSubjects } from "@/hooks/useSubjects";
-import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { displayCode, humanizeSlug } from "@/lib/format";
+import { tabInfo } from "@/components/tabs/tabInfo";
+import { recordRecentTab } from "@/stores/recentTabsStore";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { Subject } from "@/lib/db";
+import { useWindowFullscreen } from "@/hooks/useWindowFullscreen";
+import { ownsPlayback } from "@/lib/lecturePlayback";
+import { confirmLeavingLecture } from "@/stores/leaveLectureStore";
 
-const SECTION_LABELS: Record<string, string> = {
-  modules: "Modules",
-  downloads: "Downloads",
-  lectures: "Lectures",
-  announcements: "Announcements",
-  assignments: "Assignments",
-  discussion: "Discussion",
-};
+/** Where a tab opened from the + button or ⌘T starts. */
+const NEW_TAB_PATH = "/subjects";
 
-interface TabInfo {
-  title: string;
-  icon: React.ReactNode;
-}
+/** Width of the column between two tabs: their visual gap, and the extra
+ *  distance a tab travels when it swaps places with a neighbour. */
+const SEPARATOR_W = 6;
 
-function tabInfo(path: string, subjects: Subject[]): TabInfo {
-  const [pathname, search = ""] = path.split("?");
-  if (pathname.startsWith("/chat")) return { title: "Chat", icon: <Chat size={13} /> };
-  if (pathname.startsWith("/sync"))
-    return { title: "Sync", icon: <ArrowsClockwise size={13} /> };
-  if (pathname.startsWith("/settings"))
-    return { title: "Settings", icon: <GearSix size={13} /> };
-  const m = /^\/subjects\/(\d+)(?:\/([\w-]+))?/.exec(pathname);
-  if (m) {
-    const subject = subjects.find((s) => String(s.id) === m[1]);
-    // Anything inside a subject carries the subject's identity glyph.
-    const icon = subject ? (
-      <SubjectIcon code={subject.code} size={13} />
-    ) : (
-      <BookOpen size={13} />
-    );
-    // Full-page documents are titled by themselves, like Notion pages.
-    if (m[2] === "file") {
-      const rel = new URLSearchParams(search).get("path");
-      const base = rel?.split("/").pop();
-      if (base) return { title: humanizeSlug(base.replace(/\.pdf$/i, "")), icon };
-    }
-    if (m[2] === "lecture") {
-      return { title: new URLSearchParams(search).get("t") ?? "Lecture", icon };
-    }
-    const code = subject ? displayCode(subject.code) : "Subject";
-    const section = m[2] ? SECTION_LABELS[m[2]] : null;
-    return { title: section ? `${code} · ${section}` : code, icon };
-  }
-  if (pathname.startsWith("/subjects"))
-    return { title: "Subjects", icon: <BookOpen size={13} /> };
-  return { title: "Oculus", icon: null };
-}
+/** Tabs are uniform and fixed-width, Chrome-style: every tab is TAB_W however
+ *  long its title, until the strip is full — only then do they all shrink
+ *  together to share the space, down to TAB_MIN_W, past which the strip
+ *  scrolls rather than shrinking further.
+ *
+ *  The width is computed here rather than left to `flex-shrink` because a
+ *  flex container that scrolls reports its *content* width as its intrinsic
+ *  width in WebKit: the strip sized itself to the titles and the tabs then
+ *  shrank to fit that, which is exactly the content-hugging this replaces.
+ *  An explicit width also keeps the drag maths honest — every displaced tab
+ *  travels the same distance as the grabbed one. */
+const TAB_W = 200;
+const TAB_MIN_W = 76;
+/** What the new-tab button and its two gaps take out of the tab region. */
+const TRAILING_W = 36;
 
 interface TopTabBarProps {
   sidebarCollapsed: boolean;
@@ -90,9 +66,15 @@ export default function TopTabBar({
   const { tabs, activeId, trackNavigation, addTab, setActive, closeTab } =
     useTabStore();
   const { subjects } = useSubjects();
-  const [historyIdx, setHistoryIdx] = useState(0);
+  const browserTabs = useBrowserStore((s) => s.tabs);
+  const navType = useNavigationType();
+  const fullscreen = useWindowFullscreen();
+  /** Where we sit in the router's history stack, and how far it reaches. */
+  const [pos, setPos] = useState({ idx: 0, top: 0 });
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const tabRefs = useRef(new Map<number, HTMLDivElement>());
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [stripW, setStripW] = useState(0);
   /** Live drag: the grabbed tab follows the pointer (`dx`), the others animate
       towards where they'd land if it were dropped at `target`. */
   const [drag, setDrag] = useState<{
@@ -103,16 +85,88 @@ export default function TopTabBar({
     width: number;
   } | null>(null);
 
-  // Keep the active tab pointed at wherever the router actually is.
+  // Keep the active tab pointed at wherever the router actually is. Only the
+  // location may re-run this: `useBrowserTabs` makes a new browser tab
+  // active *before* the router has moved to it, and a re-run in between
+  // (on the snapshot, say) would track the old route against the new tab.
   useEffect(() => {
+    // History can land on a browser tab whose page has since been closed;
+    // nothing can bring the page back, so go home instead of tracking it.
+    // (A snapshot that has not arrived yet cannot say either way; when it
+    // does, `useBrowserTabs` closes the tab itself.)
+    const bid = browseId(location.pathname);
+    const known = useBrowserStore.getState();
+    if (bid != null && known.loaded && !known.tabs.some((t) => t.id === bid)) {
+      navigate("/subjects", { replace: true });
+      return;
+    }
     trackNavigation(location.pathname + location.search);
-    // React Router stores its position on history.state — the only reliable
-    // way to know whether back/forward have anywhere to go.
-    setHistoryIdx((window.history.state?.idx as number) ?? 0);
-  }, [location.pathname, location.search, trackNavigation]);
+    // This effect is the one place that sees every move the router makes, so
+    // the sidebar's Recent trail is recorded from here too.
+    recordRecentTab(location.pathname + location.search);
+    // Both arrows key off React Router's own index, stored on
+    // `history.state`. That index alone is half the answer: what lies
+    // *ahead* of it cannot come from `window.history.length`, which also
+    // counts entries a reload left behind and never shrinks. So the top of
+    // the stack is tracked here — only a push truncates what was ahead; a
+    // pop or a replace leaves it standing.
+    //
+    // `location.key` is in the deps because it is the only part of the
+    // location that changes on *every* navigation. Keyed on the path alone,
+    // this effect skipped any navigation that kept the path — a second tab
+    // onto the same page, a link to where you already are — and the index it
+    // had cached went stale, which is what left the forward arrow greyed out
+    // with somewhere to go.
+    const idx = (window.history.state?.idx as number) ?? 0;
+    setPos((p) => ({ idx, top: navType === "PUSH" ? idx : Math.max(p.top, idx) }));
+  }, [
+    location.key,
+    location.pathname,
+    location.search,
+    navType,
+    trackNavigation,
+    navigate,
+  ]);
 
-  const canGoBack = historyIdx > 0;
-  const canGoForward = historyIdx < window.history.length - 1;
+  // The tab region is everything right of the history arrows. Its width is
+  // what the tabs divide up, so it is measured rather than assumed.
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    setStripW(el.clientWidth);
+    const ro = new ResizeObserver(([entry]) => setStripW(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Full width each until they no longer fit, then an equal share of what
+  // there is. Before the first measurement, full width — a tab that starts
+  // at the floor and jumps out to TAB_W reads as a flash of the wrong layout.
+  const tabW =
+    stripW === 0 || tabs.length === 0
+      ? TAB_W
+      : Math.max(
+          TAB_MIN_W,
+          Math.min(
+            TAB_W,
+            Math.floor(
+              (stripW - TRAILING_W - (tabs.length - 1) * SEPARATOR_W) /
+                tabs.length,
+            ),
+          ),
+        );
+
+  // While a browser tab is in front, the arrows are the page's history, not
+  // the router's — as they would be in a browser. Whether the page has
+  // anywhere to go is not knowable from outside it, so they stay enabled.
+  const activeBrowse = browseId(tabs.find((t) => t.id === activeId)?.path);
+  const canGoBack = activeBrowse != null || pos.idx > 0;
+  const canGoForward = activeBrowse != null || pos.idx < pos.top;
+  const go = (delta: 1 | -1) => {
+    if (activeBrowse != null)
+      browser.history(activeBrowse, delta).catch(() => {});
+    else navigate(delta);
+  };
 
   const switchTo = (id: number, path: string) => {
     if (id === activeId) return;
@@ -120,10 +174,55 @@ export default function TopTabBar({
     navigate(path);
   };
 
+  // A browser tab closes through Rust, which owns its page; the strip hears
+  // back through `browser-state` and drops the tab then.
   const close = (id: number) => {
-    const nextPath = closeTab(id);
-    if (nextPath != null) navigate(nextPath);
+    const bid = browseId(tabs.find((t) => t.id === id)?.path);
+    if (bid != null) {
+      browser.close(bid).catch(() => {});
+      return;
+    }
+    // Closing the tab a lecture is playing in is the one close that loses
+    // something; it asks first, and goes ahead unprompted for every other tab.
+    const go = () => {
+      const nextPath = closeTab(id);
+      if (nextPath != null) navigate(nextPath);
+    };
+    if (ownsPlayback(id)) confirmLeavingLecture(go);
+    else go();
   };
+
+  const newTab = () => {
+    addTab(NEW_TAB_PATH);
+    navigate(NEW_TAB_PATH);
+  };
+
+  // ⌘T and ⌘W arrive as menu events rather than key presses: macOS hands the
+  // menu bar every ⌘-key before a webview sees it, so they can only be menu
+  // items (`app/src-tauri/src/menu.rs`) — which is also what makes them work
+  // while a browser tab's native page holds focus and the app's own webview
+  // is getting no keys at all. The strip does the work either way.
+  const menuActions = useRef({ newTab, closeActive: () => {} });
+  menuActions.current = {
+    newTab,
+    closeActive: () => {
+      const tab = tabs.find((t) => t.id === activeId);
+      // The same rule the × follows: a sole app tab doesn't offer one,
+      // because there is nothing left to close back to.
+      if (!tab || (tabs.length === 1 && browseId(tab.path) == null)) return;
+      close(tab.id);
+    },
+  };
+
+  useEffect(() => {
+    const pending = [
+      listen("menu-new-tab", () => menuActions.current.newTab()),
+      listen("menu-close-tab", () => menuActions.current.closeActive()),
+    ];
+    return () => {
+      for (const p of pending) p.then((un) => un()).catch(() => {});
+    };
+  }, []);
 
   // Chrome-style drag reorder: the tab activates on pointer-down, then once
   // the pointer moves past a small threshold it lifts and follows the pointer.
@@ -183,18 +282,31 @@ export default function TopTabBar({
   };
 
   const barButton =
-    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent transition-colors";
+    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent transition-colors";
 
   return (
     <div
       data-tauri-drag-region
-      /* The bottom border is an inset shadow, not a real border, so the active
-         tab (an opaque child) covers it and merges into the content below. */
-      className="h-10 shrink-0 flex items-center gap-1 pr-2 bg-sidebar shadow-[inset_0_-1px_0_var(--color-sidebar-border)]"
+      /* No rule under the strip: the content is a card floating below it, so
+         there is nothing for a tab to merge into. Tabs are pills on the same
+         ground as the sidebar, and the active one is a scrap of the card
+         lifted up here. */
+      className="h-11 shrink-0 flex items-center gap-1 pr-2"
       /* Native traffic lights overlay this strip on macOS. They sit at a
          fixed device-pixel position, so the gap they need is measured in
-         device pixels too — divide out the window's page zoom. */
-      style={{ paddingLeft: "calc(84px / var(--app-zoom, 1))" }}
+         device pixels too — divide out the window's page zoom. Fullscreen
+         hides them, and the gap with them: the bar then starts at the same
+         inset as everything else.
+         Their vertical placement is the other half of the same sum, and it
+         lives in `trafficLightPosition.y` in `app/src-tauri/tauri.conf.json`
+         because AppKit owns those buttons. tao insets the button group from
+         the window top, which puts the circles' centre 2pt below the value;
+         this bar's centre is `h-11` (44px) x DEFAULT_ZOOM / 2, so the config
+         holds that centre minus 2. Change the bar height or the default
+         zoom and the lights need retuning — nothing here can do it. */
+      style={{
+        paddingLeft: fullscreen ? "0.5rem" : "calc(84px / var(--app-zoom, 1))",
+      }}
     >
       {/* Sidebar toggle — before the arrows, like Notion. */}
       <Tooltip>
@@ -207,7 +319,10 @@ export default function TopTabBar({
             <Sidebar size={18} />
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom" className="flex flex-col items-start gap-0.5">
+        <TooltipContent
+          side="bottom"
+          className="flex flex-col items-start gap-0.5"
+        >
           {sidebarCollapsed ? "Open sidebar" : "Close sidebar"}
           <span className="text-[11px] text-background/60">⌘\</span>
         </TooltipContent>
@@ -215,7 +330,7 @@ export default function TopTabBar({
 
       {/* History */}
       <button
-        onClick={() => navigate(-1)}
+        onClick={() => go(-1)}
         disabled={!canGoBack}
         aria-label="Go back"
         className={barButton}
@@ -223,7 +338,7 @@ export default function TopTabBar({
         <CaretLeft size={16} />
       </button>
       <button
-        onClick={() => navigate(1)}
+        onClick={() => go(1)}
         disabled={!canGoForward}
         aria-label="Go forward"
         className={cn(barButton, "mr-1")}
@@ -231,12 +346,17 @@ export default function TopTabBar({
         <CaretRight size={16} />
       </button>
 
-      {/* Tabs — full bar height, browser-style. */}
-      <div className="flex select-none items-stretch self-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* Tabs — full bar height, browser-style. The wrapper claims the rest
+          of the bar, giving the tabs a definite width to divide up; the strip
+          inside it is sized by its (now explicitly sized) tabs, which is what
+          keeps the new-tab button beside the last tab instead of out at the
+          far right. */}
+      <div ref={stripRef} className="flex flex-1 min-w-0 items-center gap-1">
+        <div className="flex min-w-0 select-none items-center overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((tab, i) => {
           const active = tab.id === activeId;
           const hovered = tab.id === hoveredId;
-          const { title, icon } = tabInfo(tab.path, subjects);
+          const { title, icon } = tabInfo(tab.path, subjects, browserTabs);
           // Chrome-style: a small vertical separator between two inactive
           // neighbours, hidden next to the active or hovered tab.
           const prev = tabs[i - 1];
@@ -255,7 +375,7 @@ export default function TopTabBar({
             if (grabbed) {
               dragStyle = { transform: `translateX(${drag.dx}px)` };
             } else {
-              const shift = drag.width + 1; // +1 for the separator column
+              const shift = drag.width + SEPARATOR_W;
               if (drag.from < i && i <= drag.target)
                 dragStyle = { transform: `translateX(-${shift}px)` };
               else if (drag.target <= i && i < drag.from)
@@ -264,12 +384,23 @@ export default function TopTabBar({
           }
           return (
             <Fragment key={tab.id}>
+              {/* Always occupies SEPARATOR_W, coloured or not — the drag
+                  maths measures neighbours in tab-width + this column, so it
+                  cannot be allowed to collapse. */}
               <span
                 className={cn(
-                  "self-center h-4 w-px shrink-0 rounded-full transition-colors",
-                  i > 0 ? (showSeparator ? "bg-border" : "bg-transparent") : "hidden",
+                  "flex shrink-0 items-center justify-center",
+                  i === 0 && "hidden",
                 )}
-              />
+                style={{ width: SEPARATOR_W }}
+              >
+                <span
+                  className={cn(
+                    "h-3.5 w-px rounded-full transition-colors",
+                    showSeparator ? "bg-border" : "bg-transparent",
+                  )}
+                />
+              </span>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div
@@ -277,16 +408,16 @@ export default function TopTabBar({
                       if (node) tabRefs.current.set(tab.id, node);
                       else tabRefs.current.delete(tab.id);
                     }}
-                    style={dragStyle}
+                    style={{ flex: "none", width: tabW, ...dragStyle }}
                     className={cn(
-                      "group relative flex items-center rounded-t-[6px] px-5 max-w-60 overflow-hidden cursor-pointer",
+                      "group relative flex h-7 items-center rounded-lg px-3 overflow-hidden cursor-pointer",
                       active
-                        ? "bg-background text-foreground border-x border-t border-border"
+                        ? "bg-card text-foreground border border-border shadow-xs"
                         : "text-muted-foreground hover:text-foreground",
                       grabbed
                         ? // Lifted: a floating card above its neighbours,
                           // tracking the pointer with no easing lag.
-                          "z-10 rounded-b-[6px] border-b shadow-md"
+                          "z-10 shadow-md"
                         : drag
                           ? "transition-transform duration-200 ease-out"
                           : "transition-colors",
@@ -307,7 +438,7 @@ export default function TopTabBar({
                       <span
                         aria-hidden
                         className={cn(
-                          "absolute inset-x-1 inset-y-[6px] rounded-lg transition-colors",
+                          "absolute inset-0 rounded-lg transition-colors",
                           hovered && "bg-sidebar-item-hover",
                         )}
                       />
@@ -317,21 +448,33 @@ export default function TopTabBar({
                         {icon}
                       </span>
                     )}
-                    {/* No ellipsis: long titles run under the × overlay's
-                        fade, Notion-style. */}
-                    <span className="relative text-[12px] whitespace-nowrap overflow-hidden [text-overflow:clip] py-1">
+                    {/* No ellipsis: a title too long for the tab fades out
+                        at the edge instead of being chopped mid-glyph, and
+                        runs under the × overlay's own fade on hover. The span
+                        is flex-1, so for a title that fits, the masked strip
+                        is empty and nothing fades. */}
+                    <span
+                      style={{
+                        maskImage:
+                          "linear-gradient(to right, #000 calc(100% - 22px), transparent)",
+                      }}
+                      className="relative min-w-0 flex-1 text-[12px] whitespace-nowrap overflow-hidden [text-overflow:clip] py-1"
+                    >
                       {title}
                     </span>
-                    {tabs.length > 1 && (
-                      /* The × doesn't take layout space — it fades in over the
-                         right edge on hover, with a gradient masking the title
-                         beneath it. */
+                    {(tabs.length > 1 || browseId(tab.path) != null) && (
+                      /* The × doesn't take layout space — it fades in over
+                         the right edge on hover. Its gradient only has to
+                         clear ground for the button itself: the title's own
+                         edge mask has already faded the text out, so a hard
+                         or wide gradient here just doubles up and reads as a
+                         chunk bitten out of the tab. */
                       <span
                         className={cn(
-                          "absolute flex items-center pl-5 opacity-0 group-hover:opacity-100 transition-opacity",
+                          "absolute flex items-center pl-6 opacity-0 group-hover:opacity-100 transition-opacity",
                           active
-                            ? "inset-y-0 right-0 pr-1 bg-gradient-to-l from-background via-background/90 to-transparent"
-                            : "inset-y-[6px] right-1 pr-0.5 rounded-r-lg bg-gradient-to-l from-sidebar-item-hover via-sidebar-item-hover/90 to-transparent",
+                            ? "inset-y-px right-px pr-1.5 rounded-r-lg bg-gradient-to-l from-card from-40% via-card/70 via-75% to-transparent"
+                            : "inset-y-0 right-0 pr-1.5 rounded-r-lg bg-gradient-to-l from-sidebar-item-hover from-40% via-sidebar-item-hover/70 via-75% to-transparent",
                         )}
                       >
                         <button
@@ -341,7 +484,7 @@ export default function TopTabBar({
                             close(tab.id);
                           }}
                           aria-label="Close tab"
-                          className="rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-sidebar-item-active transition-colors"
+                          className="rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-sidebar-item-active transition-colors"
                         >
                           <X size={11} />
                         </button>
@@ -354,21 +497,15 @@ export default function TopTabBar({
             </Fragment>
           );
         })}
+        </div>
+
+        <button onClick={newTab} aria-label="New tab" className={barButton}>
+          <Plus size={15} />
+        </button>
+
+        {/* Remaining space stays draggable. */}
+        <div data-tauri-drag-region className="flex-1 h-full" />
       </div>
-
-      <button
-        onClick={() => {
-          addTab("/subjects");
-          navigate("/subjects");
-        }}
-        aria-label="New tab"
-        className={barButton}
-      >
-        <Plus size={15} />
-      </button>
-
-      {/* Remaining space stays draggable. */}
-      <div data-tauri-drag-region className="flex-1 h-full" />
     </div>
   );
 }
