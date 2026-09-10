@@ -285,6 +285,21 @@ pub async fn search(
     limit: i64,
     subject_id: Option<i64>,
 ) -> Result<Vec<SearchHit>, String> {
+    let ids: Vec<i64> = subject_id.into_iter().collect();
+    search_in(db_file, query, limit, &ids).await
+}
+
+/// `search`, but over a set of subjects. An empty set means every subject.
+///
+/// Several ids matter for the CLI, which takes prefix codes: `MULT20015`
+/// legitimately matches the same subject in two terms, and ranking each course
+/// separately then merging would embed the query once per course.
+pub async fn search_in(
+    db_file: &Path,
+    query: String,
+    limit: i64,
+    subject_ids: &[i64],
+) -> Result<Vec<SearchHit>, String> {
     let limit = limit.clamp(1, 50) as usize;
     let q = query.clone();
 
@@ -300,16 +315,24 @@ pub async fn search(
     }
 
     let db = pool(db_file).await?;
-    let sql = r#"
+    // Inlined rather than bound: sqlx has no list binding, and these are i64s
+    // that came out of this same database, so there is nothing to escape.
+    let filter = if subject_ids.is_empty() {
+        String::new()
+    } else {
+        let list: Vec<String> = subject_ids.iter().map(|i| i.to_string()).collect();
+        format!(" AND f.subject_id IN ({})", list.join(","))
+    };
+    let sql = format!(
+        r#"
         SELECT p.file_id, p.page_no, p.embedding, p.markdown,
                f.filename, f.relative_path, f.subject_id
         FROM pages p
         JOIN files f ON f.id = p.file_id
-        WHERE p.embedding IS NOT NULL
-          AND (?1 IS NULL OR f.subject_id = ?1)
-    "#;
-    let rows = sqlx::query(sql)
-        .bind(subject_id)
+        WHERE p.embedding IS NOT NULL{filter}
+    "#
+    );
+    let rows = sqlx::query(&sql)
         .fetch_all(&db)
         .await
         .map_err(|e| e.to_string())?;

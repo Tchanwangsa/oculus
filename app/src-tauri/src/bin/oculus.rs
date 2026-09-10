@@ -4,14 +4,17 @@
 //! and the database the app already maintains, so a CLI sync and an in-app sync
 //! are the same operation and either can follow the other.
 
+use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use app_lib::agents;
 use app_lib::store;
 use app_lib::sync::{self, Engine, FileEvent, Progress, Reporter};
-use clap::{Args, Parser, Subcommand};
-use sqlx::SqlitePool;
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use serde::Serialize;
+use sqlx::{Row, SqlitePool};
 use tokio::runtime::Runtime;
 
 #[derive(Parser)]
@@ -24,6 +27,12 @@ struct Cli {
     /// Whole sidecar process-tree memory cap in MB (minimum 5120)
     #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(5120..))]
     memory_cap: Option<u64>,
+    /// Print machine-readable JSON instead of formatted text
+    ///
+    /// Honoured by status, list, search, grep, read, files and calendar. On
+    /// failure the JSON is `{"error": "..."}` on stderr and the exit code is 1.
+    #[arg(long, global = true)]
+    json: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -44,6 +53,32 @@ mod cli_tests {
         }
         assert!(Cli::try_parse_from(["oculus", "--memory-cap", "4096"]).is_err());
     }
+
+    /// The reference is only trustworthy if it covers everything, so a new
+    /// subcommand that nobody remembers to document still fails this.
+    #[test]
+    fn generated_docs_cover_every_command() {
+        let markdown = render_cli_docs();
+        let mut root = Cli::command();
+        root.build();
+        for sub in root.get_subcommands() {
+            if sub.get_name() == "help" {
+                continue;
+            }
+            let heading = format!("## `oculus {}`", sub.get_name());
+            assert!(markdown.contains(&heading), "missing {heading}");
+        }
+        assert!(markdown.contains("### `oculus auth login`"), "nested commands");
+        assert!(!markdown.contains('\u{1b}'), "no ANSI escapes in a file");
+    }
+
+    /// Global options are worth one paragraph, not fifteen.
+    #[test]
+    fn generated_docs_list_global_options_once() {
+        let markdown = render_cli_docs();
+        assert_eq!(markdown.matches("--memory-cap <MEMORY_CAP>").count(), 1);
+        assert_eq!(markdown.matches("      --json").count(), 1);
+    }
 }
 
 #[derive(Subcommand)]
@@ -61,6 +96,15 @@ enum Command {
     Run(RunArgs),
     /// Re-parse and re-embed PDFs already on record
     Index(IndexArgs),
+    // No doc comments on these five: clap would take the variant's text for
+    // both `about` and `long_about` and shadow the fuller help on the Args
+    // struct, where each command explains what it needs and what it costs.
+    Search(SearchArgs),
+    Grep(GrepArgs),
+    Read(ReadArgs),
+    Files(FilesArgs),
+    Calendar(CalendarArgs),
+    Docs(DocsArgs),
 }
 
 #[derive(Args)]
@@ -152,10 +196,168 @@ struct RunArgs {
     codes: Vec<String>,
 }
 
+// ── Read-only query commands ─────────────────────────────────────────────────
+//
+// `search`, `grep`, `read`, `files` and `calendar` are the library's query
+// surface: everything an agent — or a person in a terminal — needs to find
+// coursework and quote it, without the app's UI and without a protocol in
+// between. They only read; nothing here scrapes, parses or writes.
+//
+// The `--help` text is the whole interface documentation for an agent that
+// has never seen this binary, so it says what each command needs and what it
+// costs, not just what it does.
+
+/// Search the library by meaning (needs the sidecar).
+///
+/// The query is embedded by the same vision model that embedded every page
+/// image, so this finds a slide about Lagrange multipliers when you ask for
+/// "constrained optimisation". It needs the sidecar running (open the Oculus
+/// app); when it is not, this fails loudly and points at `oculus grep`, which
+/// searches the same text with no model.
+///
+/// Only PDF and Office pages are ranked here — Canvas pages, announcements
+/// and Ed threads are markdown on disk and are covered by `oculus grep`.
+#[derive(Args)]
+struct SearchArgs {
+    /// What to look for, in plain language
+    #[arg(value_name = "QUERY")]
+    query: String,
+    /// Restrict to one subject; prefix codes are fine (MULT20015)
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    subject: Option<String>,
+    /// How many pages to return (1-50)
+    #[arg(short = 'n', long, default_value_t = 8)]
+    limit: i64,
+    /// Print each hit's whole page instead of a one-line snippet
+    #[arg(long)]
+    full: bool,
+}
+
+/// Search the library by pattern (no sidecar needed).
+///
+/// Covers both halves of the library: the markdown on disk (Canvas pages,
+/// announcements, assignments, Ed threads) and the page text extracted from
+/// PDFs, which lives only in the database — ripgrep over the library
+/// directory cannot see it, which is why this exists.
+///
+/// Needs no sidecar and no model, so it is the fallback whenever `oculus
+/// search` reports the sidecar is down. The pattern is a regular expression
+/// by default and case-insensitive unless you ask otherwise.
+#[derive(Args)]
+struct GrepArgs {
+    /// Regular expression to look for
+    #[arg(value_name = "PATTERN")]
+    pattern: String,
+    /// Restrict to these subjects; prefix codes are fine. Repeatable.
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    subject: Vec<String>,
+    /// Treat the pattern as literal text, not a regular expression
+    #[arg(short = 'F', long)]
+    fixed: bool,
+    /// Match case exactly
+    #[arg(long)]
+    case_sensitive: bool,
+    /// Print matching file paths only, one per line
+    #[arg(short = 'l', long)]
+    files_with_matches: bool,
+    /// Stop after this many matches
+    #[arg(short = 'n', long, default_value_t = 40)]
+    limit: usize,
+}
+
+/// Print the text of one library file.
+///
+/// For a PDF or Office document this is the parsed page markdown from the
+/// database, so `--pages` addresses the same page numbers `oculus search`
+/// and the app's viewer report. For markdown and other text it is the file on
+/// disk. A PDF that has never been parsed says so rather than printing
+/// nothing — run `oculus index <SUBJECT_CODE>` for it.
+///
+/// FILE may be a full library path, a bare filename, or any distinctive
+/// fragment of either. An ambiguous fragment lists the candidates instead of
+/// guessing.
+#[derive(Args)]
+struct ReadArgs {
+    /// Library path, filename, or a fragment of either
+    #[arg(value_name = "FILE")]
+    file: String,
+    /// Pages to print: 12, 12-15, 12,14,20-22, or 30- for "30 to the end"
+    #[arg(short = 'p', long, value_name = "RANGE")]
+    pages: Option<String>,
+    /// Disambiguate by subject; prefix codes are fine
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    subject: Option<String>,
+}
+
+/// List the files in the library.
+///
+/// The `indexed` column is how many pages of a document are searchable; a
+/// PDF showing none has not been parsed yet.
+#[derive(Args)]
+struct FilesArgs {
+    /// Subjects to list. Omit for every subject.
+    #[arg(value_name = "SUBJECT_CODE")]
+    codes: Vec<String>,
+    /// Only this extension (pdf, md, pptx, docx, png …)
+    #[arg(short = 't', long, value_name = "EXT")]
+    r#type: Option<String>,
+    /// Only this Canvas category (file, page, announcement, ed, module,
+    /// assignment, quiz, syllabus, home, image)
+    #[arg(short = 'c', long, value_name = "CATEGORY")]
+    category: Option<String>,
+    /// Only paths containing this text (case-insensitive)
+    #[arg(short = 'm', long, value_name = "TEXT")]
+    r#match: Option<String>,
+    /// Only files with pages in the retrieval index
+    #[arg(long)]
+    indexed: bool,
+    /// Stop after this many files
+    #[arg(short = 'n', long, default_value_t = 200)]
+    limit: usize,
+}
+
+/// Class times and assignment due dates.
+///
+/// Sourced from each subject's Canvas calendar, refreshed by `oculus run -s`.
+/// Times are shown in this machine's local timezone; `--json` also carries
+/// the raw UTC timestamp.
+#[derive(Args)]
+struct CalendarArgs {
+    /// Subjects to include. Omit for every subject.
+    #[arg(value_name = "SUBJECT_CODE")]
+    codes: Vec<String>,
+    /// How far ahead to look
+    #[arg(short = 'd', long, default_value_t = 14, value_name = "DAYS")]
+    days: i64,
+    /// Only assignment due dates, not class times
+    #[arg(long)]
+    due: bool,
+    /// Include events that have already happened
+    #[arg(long)]
+    past: bool,
+}
+
+/// Write the agent-facing docs into the library
+///
+/// Fills `agents/` in the data directory: `OCULUS-CLI.md`, rendered from this
+/// binary's own `--help` so it can never drift from the flags it documents,
+/// and one `AGENTS.md` symlinked into every course folder. `OCULUS.md`,
+/// `TASTE.md` and the `MEMORY.md` index in each memory folder are stubbed on
+/// first run and never touched again — they are what an agent writes back to.
+///
+/// Idempotent, and run by `cli:install`, so the docs always describe the
+/// binary that is actually installed.
+#[derive(Args)]
+struct DocsArgs {
+    /// Print the markdown instead of writing the file
+    #[arg(long)]
+    stdout: bool,
+}
+
 fn main() {
     restore_sigpipe();
     let cli = Cli::parse();
-    let ctx = Ctx::new();
+    let ctx = Ctx::new(cli.json);
 
     if let Some(cap) = cli.memory_cap {
         if let Err(error) = app_lib::sidecar::set_limits(Some(cap), None) {
@@ -183,10 +385,22 @@ fn main() {
         Some(Command::List(args)) => ctx.list(args),
         Some(Command::Run(args)) => ctx.run(args),
         Some(Command::Index(args)) => ctx.index(&args),
+        Some(Command::Search(args)) => ctx.search(&args),
+        Some(Command::Grep(args)) => ctx.grep(&args),
+        Some(Command::Read(args)) => ctx.read(&args),
+        Some(Command::Files(args)) => ctx.files(&args),
+        Some(Command::Calendar(args)) => ctx.calendar(&args),
+        Some(Command::Docs(args)) => ctx.docs(&args),
     };
 
     if let Err(e) = result {
-        eprintln!("{} {e}", paint("error:", RED));
+        // Machine-readable failures too: an agent parsing stdout should not
+        // have to fall back to reading prose to find out what went wrong.
+        if cli.json {
+            eprintln!("{}", serde_json::json!({ "error": e }));
+        } else {
+            eprintln!("{} {e}", paint("error:", RED));
+        }
         std::process::exit(1);
     }
 }
@@ -238,14 +452,24 @@ fn restore_sigpipe() {
 struct Ctx {
     data_dir: PathBuf,
     rt: Runtime,
+    json: bool,
 }
 
 impl Ctx {
-    fn new() -> Self {
+    fn new(json: bool) -> Self {
         Ctx {
             data_dir: app_lib::paths::data_dir(),
             rt: Runtime::new().expect("tokio runtime"),
+            json,
         }
+    }
+
+    /// One JSON document on stdout. Pretty-printed: these outputs are read by
+    /// people as often as by agents, and the extra bytes cost nothing.
+    fn emit(&self, value: &impl Serialize) -> Result<(), String> {
+        let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+        println!("{text}");
+        Ok(())
     }
 
     fn engine(&self, parse: bool) -> Engine {
@@ -267,31 +491,63 @@ impl Ctx {
     // ── status ───────────────────────────────────────────────────────────────
 
     fn status(&self) -> Result<(), String> {
-        println!("{}  {}", paint("library", DIM), self.data_dir.display());
+        #[derive(Serialize)]
+        struct Service {
+            connected: bool,
+            user: Option<String>,
+            /// Why not, when `connected` is false. Prose, for a human or a
+            /// caller deciding what to do about it.
+            detail: Option<String>,
+        }
+        #[derive(Serialize)]
+        struct Sidecar {
+            running: bool,
+            pid: Option<i64>,
+            parser_version: Option<i64>,
+        }
+        #[derive(Serialize)]
+        struct Counts {
+            total: usize,
+            current: usize,
+            synced: usize,
+        }
+        #[derive(Serialize)]
+        struct FileCounts {
+            total: i64,
+            parsed: i64,
+        }
+        fn describe(s: &Service) -> String {
+            match (&s.user, &s.detail) {
+                (Some(name), _) => format!("{} as {name}", paint("connected", GREEN)),
+                (None, Some(why)) => paint(why, YELLOW),
+                (None, None) => paint("unknown", DIM),
+            }
+        }
 
         let canvas = app_lib::canvas::Canvas::open(&self.data_dir);
-        match canvas.whoami() {
-            Ok(name) => println!("{}   {} as {name}", paint("canvas", DIM), paint("connected", GREEN)),
-            Err(e) if !canvas.has_session() => {
-                println!("{}   {} — run `oculus auth login`", paint("canvas", DIM), paint("signed out", YELLOW));
-                let _ = e;
-            }
-            Err(e) => println!("{}   {} — {e}", paint("canvas", DIM), paint("unusable", RED)),
-        }
+        let canvas_status = match canvas.whoami() {
+            Ok(name) => Service { connected: true, user: Some(name), detail: None },
+            Err(_) if !canvas.has_session() => Service {
+                connected: false,
+                user: None,
+                detail: Some("signed out — run `oculus auth login`".to_string()),
+            },
+            Err(e) => Service { connected: false, user: None, detail: Some(e) },
+        };
 
         let ed = app_lib::ed::Ed::open(&self.data_dir);
-        if ed.has_session() {
-            match ed.whoami() {
-                Ok(name) => println!("{}       {} as {name}", paint("ed", DIM), paint("connected", GREEN)),
-                Err(e) => println!("{}       {} — {e}", paint("ed", DIM), paint("unusable", RED)),
+        let ed_status = if !ed.has_session() {
+            Service {
+                connected: false,
+                user: None,
+                detail: Some("not connected — connects automatically on the next sync".to_string()),
             }
         } else {
-            println!(
-                "{}       {} — connects automatically on the next sync",
-                paint("ed", DIM),
-                paint("not connected", DIM)
-            );
-        }
+            match ed.whoami() {
+                Ok(name) => Service { connected: true, user: Some(name), detail: None },
+                Err(e) => Service { connected: false, user: None, detail: Some(e) },
+            }
+        };
 
         // Report the pid: a sidecar that outlived its app answers /health
         // perfectly while serving stale code, and this is the only way to see
@@ -307,44 +563,107 @@ impl Ctx {
         .and_then(|r| r.into_string().ok())
         .and_then(|s| serde_json::from_str(&s).ok());
 
-        println!(
-            "{}  {}",
-            paint("sidecar", DIM),
-            match &health {
-                Some(h) => paint(
-                    &format!(
-                        "running (pid {}, parser v{})",
-                        h["pid"].as_i64().unwrap_or(0),
-                        h["parser_version"].as_i64().unwrap_or(1)
-                    ),
-                    GREEN
-                ),
-                None => paint("not running — PDFs will not be parsed", YELLOW),
-            }
-        );
+        let sidecar = Sidecar {
+            running: health.is_some(),
+            pid: health.as_ref().and_then(|h| h["pid"].as_i64()),
+            parser_version: health.as_ref().and_then(|h| h["parser_version"].as_i64()),
+        };
 
-        if let Some(pool) = self.db() {
-            self.rt.block_on(async {
-                let subjects = store::subjects(&pool).await.unwrap_or_default();
-                let current = subjects.iter().filter(|s| s.is_current).count();
-                let synced = subjects.iter().filter(|s| s.last_synced_at.is_some()).count();
-                println!(
-                    "{} {} ({current} current, {synced} synced)",
-                    paint("subjects", DIM),
-                    subjects.len()
-                );
-                let files: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files")
-                    .fetch_one(&pool)
+        let pool = self.db();
+        let (subjects, files) = match &pool {
+            Some(pool) => self.rt.block_on(async {
+                let rows = store::subjects(pool).await.unwrap_or_default();
+                let counts = Counts {
+                    total: rows.len(),
+                    current: rows.iter().filter(|s| s.is_current).count(),
+                    synced: rows.iter().filter(|s| s.last_synced_at.is_some()).count(),
+                };
+                let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM files")
+                    .fetch_one(pool)
                     .await
                     .unwrap_or(0);
                 let parsed: i64 = sqlx::query_scalar(
                     "SELECT COUNT(*) FROM files WHERE parse_status IN ('fast','quality')",
                 )
-                .fetch_one(&pool)
+                .fetch_one(pool)
                 .await
                 .unwrap_or(0);
-                println!("{}    {files} ({parsed} parsed)", paint("files", DIM));
+                (Some(counts), Some(FileCounts { total, parsed }))
+            }),
+            None => (None, None),
+        };
+
+        // Whether `oculus search` can answer at all, which is the one thing a
+        // caller most needs to know before trying it.
+        let index = pool.as_ref().and_then(|_| {
+            self.rt
+                .block_on(app_lib::retrieval::stats(&app_lib::paths::db_path(&self.data_dir)))
+                .ok()
+        });
+
+        if self.json {
+            #[derive(Serialize)]
+            struct Report<'a> {
+                data_dir: String,
+                canvas: &'a Service,
+                ed: &'a Service,
+                sidecar: &'a Sidecar,
+                subjects: &'a Option<Counts>,
+                files: &'a Option<FileCounts>,
+                index: &'a Option<app_lib::retrieval::IndexStats>,
+            }
+            return self.emit(&Report {
+                data_dir: self.data_dir.display().to_string(),
+                canvas: &canvas_status,
+                ed: &ed_status,
+                sidecar: &sidecar,
+                subjects: &subjects,
+                files: &files,
+                index: &index,
             });
+        }
+
+        println!("{}  {}", paint("library", DIM), self.data_dir.display());
+        println!("{}   {}", paint("canvas", DIM), describe(&canvas_status));
+        println!("{}       {}", paint("ed", DIM), describe(&ed_status));
+        println!(
+            "{}  {}",
+            paint("sidecar", DIM),
+            match sidecar.running {
+                true => paint(
+                    &format!(
+                        "running (pid {}, parser v{})",
+                        sidecar.pid.unwrap_or(0),
+                        sidecar.parser_version.unwrap_or(1)
+                    ),
+                    GREEN
+                ),
+                false => paint("not running — PDFs will not be parsed", YELLOW),
+            }
+        );
+        if let Some(c) = &subjects {
+            println!(
+                "{} {} ({} current, {} synced)",
+                paint("subjects", DIM),
+                c.total,
+                c.current,
+                c.synced
+            );
+        }
+        if let Some(f) = &files {
+            println!("{}    {} ({} parsed)", paint("files", DIM), f.total, f.parsed);
+        }
+        if let Some(i) = &index {
+            println!(
+                "{}    {} page(s) across {} file(s){}",
+                paint("index", DIM),
+                i.pages_embedded,
+                i.files_embedded,
+                match &i.model {
+                    Some(m) => paint(&format!("  {m}"), DIM),
+                    None => String::new(),
+                }
+            );
         }
         Ok(())
     }
@@ -582,6 +901,32 @@ impl Ctx {
             }
         }
 
+        if self.json {
+            #[derive(Serialize)]
+            struct Subject<'a> {
+                id: i64,
+                code: &'a str,
+                name: &'a str,
+                term: Option<&'a str>,
+                current: bool,
+                selected: bool,
+                last_synced_at: Option<&'a str>,
+            }
+            let out: Vec<Subject> = rows
+                .iter()
+                .map(|s| Subject {
+                    id: s.id,
+                    code: &s.code,
+                    name: &s.name,
+                    term: s.term_name.as_deref(),
+                    current: s.is_current,
+                    selected: s.selected,
+                    last_synced_at: s.last_synced_at.as_deref(),
+                })
+                .collect();
+            return self.emit(&out);
+        }
+
         if rows.is_empty() {
             println!("{}", paint("no subjects", DIM));
             return Ok(());
@@ -608,6 +953,34 @@ impl Ctx {
         let pool = self.db().ok_or("lectures live in the database")?;
         let subjects = self.rt.block_on(store::subjects(&pool))?;
         let wanted = filter_subjects(&subjects, codes, true)?;
+
+        if self.json {
+            #[derive(Serialize)]
+            struct Lecture<'a> {
+                subject: &'a str,
+                title: &'a str,
+                date: &'a str,
+                duration_seconds: i64,
+                has_video: bool,
+                has_transcript: bool,
+            }
+            let mut out: Vec<Lecture> = Vec::new();
+            let rows: Vec<(String, Vec<store::LectureRow>)> = wanted
+                .iter()
+                .map(|s| Ok((s.code.clone(), self.rt.block_on(store::lectures(&pool, s.id))?)))
+                .collect::<Result<_, String>>()?;
+            for (code, lectures) in &rows {
+                out.extend(lectures.iter().map(|l| Lecture {
+                    subject: code,
+                    title: &l.title,
+                    date: &l.date,
+                    duration_seconds: l.duration_seconds,
+                    has_video: l.has_video,
+                    has_transcript: l.has_transcript,
+                }));
+            }
+            return self.emit(&out);
+        }
 
         for s in &wanted {
             let rows = self.rt.block_on(store::lectures(&pool, s.id))?;
@@ -991,6 +1364,758 @@ impl Ctx {
         }
         self.index_pdfs(&pool, &pdfs, true)
     }
+
+    // ── search ───────────────────────────────────────────────────────────────
+
+    /// Rank pages by meaning.
+    ///
+    /// The two failure modes below are the point of this function. A caller
+    /// handed an empty result concludes the library has no answer and stops;
+    /// a caller told *why* it is empty tries the other door. So a missing
+    /// sidecar names `grep`, and an empty index names `index`, and both are
+    /// errors rather than a silent zero-hit success.
+    fn search(&self, args: &SearchArgs) -> Result<(), String> {
+        let pool = self.db().ok_or("the retrieval index lives in the database")?;
+        let subjects = self.rt.block_on(store::subjects(&pool))?;
+        let ids: Vec<i64> = match &args.subject {
+            // A bare code can match the same subject in two terms, and both
+            // sets of pages are legitimately in scope.
+            Some(code) => filter_subjects(&subjects, std::slice::from_ref(code), false)?
+                .iter()
+                .map(|s| s.id)
+                .collect(),
+            None => Vec::new(),
+        };
+        let codes: HashMap<i64, String> =
+            subjects.iter().map(|s| (s.id, s.code.clone())).collect();
+
+        if !sidecar_healthy() {
+            return Err(
+                "the sidecar is not running, so semantic search is unavailable.\n       \
+                 Open the Oculus app to start it, or search the same text literally:\n         \
+                 oculus grep \"<pattern>\""
+                    .to_string(),
+            );
+        }
+
+        let db_file = app_lib::paths::db_path(&self.data_dir);
+        let stats = self.rt.block_on(app_lib::retrieval::stats(&db_file))?;
+        if stats.pages_embedded == 0 {
+            return Err(
+                "nothing is indexed yet, so there is nothing to rank.\n       \
+                 Run `oculus index` over PDFs already on record, or `oculus run -s` to scrape."
+                    .to_string(),
+            );
+        }
+
+        let hits = self.rt.block_on(app_lib::retrieval::search_in(
+            &db_file,
+            args.query.clone(),
+            args.limit,
+            &ids,
+        ))?;
+
+        #[derive(Serialize)]
+        struct Hit {
+            score: f32,
+            subject: String,
+            path: String,
+            filename: String,
+            page_no: i64,
+            markdown: String,
+        }
+        let hits: Vec<Hit> = hits
+            .into_iter()
+            .map(|h| Hit {
+                score: h.score,
+                subject: codes.get(&h.subject_id).cloned().unwrap_or_default(),
+                path: h.relative_path,
+                filename: h.filename,
+                page_no: h.page_no,
+                markdown: h.markdown,
+            })
+            .collect();
+
+        if self.json {
+            return self.emit(&hits);
+        }
+        if hits.is_empty() {
+            println!("{}", paint("no matching pages", DIM));
+            return Ok(());
+        }
+        for h in &hits {
+            // Subject plus in-course path, not the bare filename: `12.pdf` is
+            // a name two courses can both have, and a library can hold the
+            // same deck under two folders.
+            let short = h.path.splitn(3, '/').nth(2).unwrap_or(&h.path);
+            println!(
+                "{} {} {} {}",
+                paint(&format!("{:.3}", h.score), BOLD),
+                paint(&format!("{:<20}", truncate(&h.subject, 20)), DIM),
+                truncate(short, 44),
+                paint(&format!("p{}", h.page_no), DIM)
+            );
+            if args.full {
+                println!("{}\n", h.markdown);
+            } else {
+                println!("      {}", snippet(&h.markdown, 96));
+            }
+        }
+        if !args.full {
+            if let Some(top) = hits.first() {
+                println!();
+                println!(
+                    "{} oculus read {} --pages {}",
+                    paint("read one:", DIM),
+                    shell_quote(&top.path),
+                    top.page_no
+                );
+            }
+        }
+        Ok(())
+    }
+
+    // ── grep ─────────────────────────────────────────────────────────────────
+
+    /// Pattern search across both halves of the library.
+    ///
+    /// Scans in path order and stops at the limit, so PDF text and markdown
+    /// interleave the way a caller expects instead of the database half
+    /// crowding out the disk half.
+    fn grep(&self, args: &GrepArgs) -> Result<(), String> {
+        let pool = self.db().ok_or("the library index lives in the database")?;
+        let subjects = self.rt.block_on(store::subjects(&pool))?;
+        let ids: Vec<i64> = filter_subjects(&subjects, &args.subject, false)?
+            .iter()
+            .map(|s| s.id)
+            .collect();
+        let files = self.library_files(&pool, &ids)?;
+        let pages = self.page_text(&pool, &ids)?;
+        let re = build_regex(&args.pattern, args.fixed, args.case_sensitive)?;
+        let limit = args.limit.max(1);
+
+        #[derive(Serialize)]
+        struct Match {
+            subject: String,
+            path: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            page_no: Option<i64>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            line_no: Option<usize>,
+            line: String,
+        }
+
+        let mut hits: Vec<Match> = Vec::new();
+        let mut truncated = false;
+
+        'files: for f in &files {
+            // Parsed documents: the text is in the database, never on disk.
+            if let Some(pages) = pages.get(&f.id) {
+                for (page_no, markdown) in pages {
+                    for line in markdown.lines() {
+                        if !re.is_match(line) {
+                            continue;
+                        }
+                        if hits.len() >= limit {
+                            truncated = true;
+                            break 'files;
+                        }
+                        hits.push(Match {
+                            subject: f.code.clone(),
+                            path: f.relative_path.clone(),
+                            page_no: Some(*page_no),
+                            line_no: None,
+                            line: line.trim().to_string(),
+                        });
+                    }
+                }
+                continue;
+            }
+
+            // Everything else worth scanning is text on disk: Canvas pages,
+            // announcements, assignments, Ed threads.
+            if !is_text_file(&f.relative_path) {
+                continue;
+            }
+            let Ok(body) = std::fs::read_to_string(self.data_dir.join(&f.relative_path)) else {
+                continue;
+            };
+            for (i, line) in body.lines().enumerate() {
+                if !re.is_match(line) {
+                    continue;
+                }
+                if hits.len() >= limit {
+                    truncated = true;
+                    break 'files;
+                }
+                hits.push(Match {
+                    subject: f.code.clone(),
+                    path: f.relative_path.clone(),
+                    page_no: None,
+                    line_no: Some(i + 1),
+                    line: line.trim().to_string(),
+                });
+            }
+        }
+
+        if args.files_with_matches {
+            let mut seen: Vec<&str> = Vec::new();
+            for h in &hits {
+                if !seen.contains(&h.path.as_str()) {
+                    seen.push(&h.path);
+                }
+            }
+            if self.json {
+                return self.emit(&seen);
+            }
+            for p in seen {
+                println!("{p}");
+            }
+            return Ok(());
+        }
+
+        if self.json {
+            return self.emit(&hits);
+        }
+        if hits.is_empty() {
+            println!("{}", paint("no matches", DIM));
+            return Ok(());
+        }
+        for h in &hits {
+            let at = match (h.page_no, h.line_no) {
+                (Some(p), _) => format!("p{p}"),
+                (_, Some(l)) => format!("L{l}"),
+                _ => String::new(),
+            };
+            println!(
+                "{}{} {}",
+                h.path,
+                paint(&format!(":{at}:"), DIM),
+                truncate(&h.line, 140)
+            );
+        }
+        if truncated {
+            println!();
+            println!(
+                "{}",
+                paint(&format!("stopped at {limit} matches — raise it with -n"), DIM)
+            );
+        }
+        Ok(())
+    }
+
+    // ── read ─────────────────────────────────────────────────────────────────
+
+    /// Print one file's text: page markdown for a parsed document, the bytes
+    /// on disk for anything else.
+    fn read(&self, args: &ReadArgs) -> Result<(), String> {
+        let pool = self.db().ok_or("the library index lives in the database")?;
+        let subjects = self.rt.block_on(store::subjects(&pool))?;
+        let ids: Vec<i64> = match &args.subject {
+            Some(code) => filter_subjects(&subjects, std::slice::from_ref(code), false)?
+                .iter()
+                .map(|s| s.id)
+                .collect(),
+            None => Vec::new(),
+        };
+        let files = self.library_files(&pool, &ids)?;
+        let file = resolve_file(&files, &args.file)?;
+
+        let wanted = args.pages.as_deref().map(parse_page_spec).transpose()?;
+
+        #[derive(Serialize)]
+        struct Page {
+            page_no: i64,
+            markdown: String,
+        }
+        #[derive(Serialize)]
+        struct Document<'a> {
+            path: &'a str,
+            filename: &'a str,
+            subject: &'a str,
+            file_type: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pages: Option<Vec<Page>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<String>,
+        }
+
+        let stored = self.pages_of(&pool, file.id)?;
+        let stored = (!stored.is_empty()).then_some(stored);
+
+        // A document that should have pages but has none is the one case worth
+        // an error: printing nothing looks identical to a file with no content.
+        if stored.is_none() && app_lib::paths::doc_pdf_rel(&file.relative_path).is_some() {
+            return Err(format!(
+                "{} has not been parsed, so there is no text to read.\n       \
+                 Run `oculus index {}` with the Oculus app open.",
+                file.relative_path, file.code
+            ));
+        }
+
+        let doc = match &stored {
+            Some(rows) => {
+                let selected: Vec<Page> = rows
+                    .iter()
+                    .filter(|(n, _)| wanted.as_ref().is_none_or(|w| page_wanted(w, *n)))
+                    .map(|(n, md)| Page { page_no: *n, markdown: md.clone() })
+                    .collect();
+                if selected.is_empty() {
+                    let last = rows.last().map(|(n, _)| *n).unwrap_or(0);
+                    return Err(format!(
+                        "no such page — {} has pages 1-{last}",
+                        file.relative_path
+                    ));
+                }
+                Document {
+                    path: &file.relative_path,
+                    filename: &file.filename,
+                    subject: &file.code,
+                    file_type: &file.file_type,
+                    pages: Some(selected),
+                    text: None,
+                }
+            }
+            None => {
+                let abs = self.data_dir.join(&file.relative_path);
+                if !is_text_file(&file.relative_path) {
+                    return Err(format!(
+                        "{} is not text — it is on disk at {}",
+                        file.relative_path,
+                        abs.display()
+                    ));
+                }
+                let text = std::fs::read_to_string(&abs)
+                    .map_err(|e| format!("{}: {e}", abs.display()))?;
+                Document {
+                    path: &file.relative_path,
+                    filename: &file.filename,
+                    subject: &file.code,
+                    file_type: &file.file_type,
+                    pages: None,
+                    text: Some(text),
+                }
+            }
+        };
+
+        if self.json {
+            return self.emit(&doc);
+        }
+        match (&doc.pages, &doc.text) {
+            (Some(pages), _) => {
+                println!(
+                    "{}  {}",
+                    paint(doc.path, BOLD),
+                    paint(&format!("{} page(s)", pages.len()), DIM)
+                );
+                for p in pages {
+                    println!();
+                    println!("{}", paint(&format!("── page {} ──", p.page_no), DIM));
+                    println!("{}", p.markdown);
+                }
+            }
+            (_, Some(text)) => {
+                println!("{}", paint(doc.path, BOLD));
+                println!();
+                print!("{text}");
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    // ── files ────────────────────────────────────────────────────────────────
+
+    fn files(&self, args: &FilesArgs) -> Result<(), String> {
+        let pool = self.db().ok_or("the library index lives in the database")?;
+        let subjects = self.rt.block_on(store::subjects(&pool))?;
+        let ids: Vec<i64> = filter_subjects(&subjects, &args.codes, false)?
+            .iter()
+            .map(|s| s.id)
+            .collect();
+
+        let needle = args.r#match.as_ref().map(|m| m.to_lowercase());
+        let all = self.library_files(&pool, &ids)?;
+        let rows: Vec<&LibFile> = all
+            .iter()
+            .filter(|f| {
+                args.r#type.as_ref().is_none_or(|t| f.file_type.eq_ignore_ascii_case(t))
+                    && args.category.as_ref().is_none_or(|c| {
+                        f.category.as_deref().is_some_and(|k| k.eq_ignore_ascii_case(c))
+                    })
+                    && needle
+                        .as_ref()
+                        .is_none_or(|n| f.relative_path.to_lowercase().contains(n))
+                    && (!args.indexed || f.indexed_pages > 0)
+            })
+            .take(args.limit.max(1))
+            .collect();
+
+        #[derive(Serialize)]
+        struct Entry<'a> {
+            subject: &'a str,
+            path: &'a str,
+            filename: &'a str,
+            file_type: &'a str,
+            category: Option<&'a str>,
+            size_bytes: Option<i64>,
+            parse_status: Option<&'a str>,
+            indexed_pages: i64,
+        }
+        if self.json {
+            let out: Vec<Entry> = rows
+                .iter()
+                .map(|f| Entry {
+                    subject: &f.code,
+                    path: &f.relative_path,
+                    filename: &f.filename,
+                    file_type: &f.file_type,
+                    category: f.category.as_deref(),
+                    size_bytes: f.size_bytes,
+                    parse_status: f.parse_status.as_deref(),
+                    indexed_pages: f.indexed_pages,
+                })
+                .collect();
+            return self.emit(&out);
+        }
+
+        if rows.is_empty() {
+            println!("{}", paint("no matching files", DIM));
+            return Ok(());
+        }
+        let mut current = "";
+        for f in &rows {
+            if f.code != current {
+                current = &f.code;
+                println!("{}", paint(current, BOLD));
+            }
+            let indexed = if f.indexed_pages > 0 {
+                format!("{}p", f.indexed_pages)
+            } else {
+                "-".to_string()
+            };
+            // The course prefix is already the section header.
+            let short = f.relative_path.splitn(3, '/').nth(2).unwrap_or(&f.relative_path);
+            println!(
+                "  {} {} {} {}",
+                paint(&format!("{:<5}", truncate(&f.file_type, 5)), DIM),
+                paint(&format!("{indexed:>5}"), DIM),
+                paint(&format!("{:>9}", human_bytes(f.size_bytes.unwrap_or(0) as u64)), DIM),
+                short
+            );
+        }
+        Ok(())
+    }
+
+    // ── calendar ─────────────────────────────────────────────────────────────
+
+    fn calendar(&self, args: &CalendarArgs) -> Result<(), String> {
+        let pool = self.db().ok_or("the calendar lives in the database")?;
+        let subjects = self.rt.block_on(store::subjects(&pool))?;
+        let ids: Vec<i64> = filter_subjects(&subjects, &args.codes, false)?
+            .iter()
+            .map(|s| s.id)
+            .collect();
+
+        let mut clauses: Vec<String> = Vec::new();
+        if !ids.is_empty() {
+            let list: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+            clauses.push(format!("e.subject_id IN ({})", list.join(",")));
+        }
+        if args.due {
+            clauses.push("e.kind = 'due'".to_string());
+        }
+        // Stored as ISO-8601 UTC, so a string comparison against SQLite's own
+        // UTC clock is the whole date filter — no date library needed.
+        if !args.past {
+            clauses.push("e.start_at >= strftime('%Y-%m-%dT%H:%M:%SZ','now')".to_string());
+        }
+        clauses.push(format!(
+            "e.start_at < strftime('%Y-%m-%dT%H:%M:%SZ','now','+{} days')",
+            args.days.max(0)
+        ));
+        let sql = format!(
+            r#"SELECT s.code AS code, e.kind AS kind, e.title AS title,
+                      e.start_at AS start_at, e.location AS location, e.url AS url,
+                      strftime('%Y-%m-%d %H:%M', e.start_at, 'localtime') AS local_at
+               FROM calendar_events e JOIN subjects s ON s.id = e.subject_id
+               WHERE {}
+               ORDER BY e.start_at"#,
+            clauses.join(" AND ")
+        );
+
+        #[derive(Serialize)]
+        struct Event {
+            subject: String,
+            kind: String,
+            title: String,
+            start_at: String,
+            starts_local: String,
+            location: Option<String>,
+            url: Option<String>,
+        }
+        let events: Vec<Event> = self.rt.block_on(async {
+            let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| e.to_string())?;
+            Ok::<_, String>(
+                rows.iter()
+                    .map(|r| Event {
+                        subject: r.try_get("code").unwrap_or_default(),
+                        kind: r.try_get("kind").unwrap_or_default(),
+                        title: r.try_get("title").unwrap_or_default(),
+                        start_at: r.try_get("start_at").unwrap_or_default(),
+                        starts_local: r.try_get("local_at").unwrap_or_default(),
+                        location: r.try_get("location").ok().flatten(),
+                        url: r.try_get("url").ok().flatten(),
+                    })
+                    .collect(),
+            )
+        })?;
+
+        if self.json {
+            return self.emit(&events);
+        }
+        if events.is_empty() {
+            println!(
+                "{}",
+                paint(
+                    &format!("nothing in the next {} day(s)", args.days.max(0)),
+                    DIM
+                )
+            );
+            return Ok(());
+        }
+        for e in &events {
+            println!(
+                "{} {} {:<20} {}{}",
+                paint(&e.starts_local, DIM),
+                if e.kind == "due" { paint("due  ", YELLOW) } else { paint("class", DIM) },
+                truncate(&e.subject, 20),
+                truncate(&e.title, 44),
+                match e.location.as_deref().filter(|l| !l.is_empty()) {
+                    Some(l) => paint(&format!("  {}", truncate(l, 34)), DIM),
+                    None => String::new(),
+                }
+            );
+        }
+        Ok(())
+    }
+
+    // ── shared loaders ───────────────────────────────────────────────────────
+
+    /// Every library file for the given subjects (all of them when empty),
+    /// ordered by subject then path — the order `grep` scans in and `files`
+    /// prints in.
+    fn library_files(&self, pool: &SqlitePool, ids: &[i64]) -> Result<Vec<LibFile>, String> {
+        let filter = if ids.is_empty() {
+            String::new()
+        } else {
+            let list: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+            format!(" WHERE f.subject_id IN ({})", list.join(","))
+        };
+        let sql = format!(
+            r#"SELECT f.id AS id, s.code AS code, f.filename AS filename,
+                      f.relative_path AS relative_path, f.file_type AS file_type,
+                      f.category AS category, f.size_bytes AS size_bytes,
+                      f.parse_status AS parse_status,
+                      (SELECT COUNT(*) FROM pages p
+                        WHERE p.file_id = f.id AND p.markdown != '') AS indexed_pages
+               FROM files f JOIN subjects s ON s.id = f.subject_id{filter}
+               ORDER BY s.code, f.relative_path"#
+        );
+        self.rt.block_on(async {
+            let rows = sqlx::query(&sql).fetch_all(pool).await.map_err(|e| e.to_string())?;
+            Ok(rows
+                .iter()
+                .map(|r| LibFile {
+                    id: r.try_get("id").unwrap_or_default(),
+                    code: r.try_get("code").unwrap_or_default(),
+                    filename: r.try_get("filename").unwrap_or_default(),
+                    relative_path: r.try_get("relative_path").unwrap_or_default(),
+                    file_type: r.try_get("file_type").unwrap_or_default(),
+                    category: r.try_get("category").ok().flatten(),
+                    size_bytes: r.try_get("size_bytes").ok().flatten(),
+                    parse_status: r.try_get("parse_status").ok().flatten(),
+                    indexed_pages: r.try_get("indexed_pages").unwrap_or_default(),
+                })
+                .collect())
+        })
+    }
+
+    /// One file's parsed pages, in order.
+    fn pages_of(&self, pool: &SqlitePool, file_id: i64) -> Result<Vec<(i64, String)>, String> {
+        self.rt.block_on(async {
+            let rows = sqlx::query(
+                "SELECT page_no, markdown FROM pages
+                  WHERE file_id = ?1 AND markdown != '' ORDER BY page_no",
+            )
+            .bind(file_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(rows
+                .iter()
+                .map(|r| {
+                    (
+                        r.try_get("page_no").unwrap_or_default(),
+                        r.try_get("markdown").unwrap_or_default(),
+                    )
+                })
+                .collect())
+        })
+    }
+
+    /// Parsed page markdown, keyed by file and ordered by page number.
+    ///
+    /// Loaded whole: a degree of coursework is a few thousand pages of a few
+    /// hundred characters each, so this is a couple of megabytes and one
+    /// query, against a scan that would otherwise be a query per file.
+    fn page_text(
+        &self,
+        pool: &SqlitePool,
+        ids: &[i64],
+    ) -> Result<HashMap<i64, Vec<(i64, String)>>, String> {
+        let filter = if ids.is_empty() {
+            String::new()
+        } else {
+            let list: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+            format!(" AND f.subject_id IN ({})", list.join(","))
+        };
+        let sql = format!(
+            r#"SELECT p.file_id AS file_id, p.page_no AS page_no, p.markdown AS markdown
+               FROM pages p JOIN files f ON f.id = p.file_id
+               WHERE p.markdown != ''{filter}
+               ORDER BY p.file_id, p.page_no"#
+        );
+        self.rt.block_on(async {
+            let rows = sqlx::query(&sql).fetch_all(pool).await.map_err(|e| e.to_string())?;
+            let mut out: HashMap<i64, Vec<(i64, String)>> = HashMap::new();
+            for r in &rows {
+                let id: i64 = r.try_get("file_id").unwrap_or_default();
+                let page: i64 = r.try_get("page_no").unwrap_or_default();
+                let md: String = r.try_get("markdown").unwrap_or_default();
+                out.entry(id).or_default().push((page, md));
+            }
+            Ok(out)
+        })
+    }
+
+    // ── docs ──────────────────────────────────────────────────────────────────
+
+    fn docs(&self, args: &DocsArgs) -> Result<(), String> {
+        if args.stdout {
+            print!("{}", render_cli_docs());
+            return Ok(());
+        }
+
+        // Everything that does not need clap's command tree is shared with the
+        // sync path, so a folder scaffolded by a sync and one scaffolded here
+        // cannot drift apart.
+        let dir = agents::agents_dir(&self.data_dir);
+        let docs = agents::ensure_library_docs(&self.data_dir)?;
+
+        // The one file only this binary can produce: it is rendered from the
+        // binary's own help, so it always describes the build that wrote it.
+        let path = dir.join(agents::CLI_DOC_NAME);
+        std::fs::write(&path, render_cli_docs())
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        let mut written = vec![agents::CLI_DOC_NAME];
+        written.extend(docs.generated.iter().copied());
+
+        let links = agents::link_all(&self.data_dir)?;
+
+        if self.json {
+            self.emit(&serde_json::json!({
+                "dir": dir.to_string_lossy(),
+                "generated": written,
+                "created": docs.created,
+                "linked": links.linked,
+                "already_linked": links.current,
+                "skipped": links.skipped,
+            }))
+        } else {
+            println!("{} in {}", written.join(", "), dir.display());
+            for name in &docs.created {
+                println!("created {name} (yours now — it will not be overwritten)");
+            }
+            let n = links.linked.len();
+            println!(
+                "{n} course folder{} linked ({} already current)",
+                if n == 1 { "" } else { "s" },
+                links.current
+            );
+            for path in &links.skipped {
+                eprintln!(
+                    "{} {path}/AGENTS.md is a real file, left alone",
+                    paint("warning:", YELLOW)
+                );
+            }
+            Ok(())
+        }
+    }
+
+}
+
+/// Fixed so the output depends on the binary, not on the terminal that ran it.
+const HELP_WIDTH: usize = 88;
+
+/// Documented once at the root instead of under every subcommand.
+const GLOBAL_ARGS: [&str; 2] = ["json", "memory_cap"];
+
+/// This binary's whole help tree as markdown.
+///
+/// Walks clap's own command tree rather than a hand-kept list, so a new
+/// subcommand or flag appears here the moment it exists.
+fn render_cli_docs() -> String {
+    let mut root = Cli::command();
+    root.build();
+
+    let mut out = String::new();
+    out.push_str("<!-- Generated by `oculus docs` from the binary's own help. Do not edit:\n");
+    out.push_str("     change the CLI and regenerate, or the file will lie to whoever reads it. -->\n\n");
+    out.push_str("# The `oculus` CLI\n\n");
+    out.push_str("`--json` and `--memory-cap` are global: they work on every command below,\n");
+    out.push_str("and are listed once here rather than repeated in each section.\n\n");
+    out.push_str(&help_block(&root, "oculus", true));
+    for sub in root.get_subcommands() {
+        render_subcommand(sub, "oculus", 2, &mut out);
+    }
+    out
+}
+
+fn render_subcommand(cmd: &clap::Command, prefix: &str, depth: usize, out: &mut String) {
+    // `help` is clap's own, and hidden commands are hidden for a reason.
+    if cmd.is_hide_set() || cmd.get_name() == "help" {
+        return;
+    }
+    let path = format!("{prefix} {}", cmd.get_name());
+    out.push_str(&format!("\n{} `{path}`\n\n", "#".repeat(depth)));
+    out.push_str(&help_block(cmd, &path, false));
+    for nested in cmd.get_subcommands() {
+        render_subcommand(nested, &path, depth + 1, out);
+    }
+}
+
+/// One command's long help, fenced. `bin_name` is set explicitly so the usage
+/// line reads `oculus search`, not the bare subcommand name; the global options
+/// are hidden below the root, where clap would otherwise repeat their full text
+/// under every single subcommand.
+fn help_block(cmd: &clap::Command, path: &str, globals: bool) -> String {
+    let mut cmd = cmd
+        .clone()
+        .bin_name(path.to_string())
+        .display_name(path.to_string())
+        .term_width(HELP_WIDTH)
+        .color(clap::ColorChoice::Never);
+    if !globals {
+        for id in GLOBAL_ARGS {
+            if cmd.get_arguments().any(|a| a.get_id() == id) {
+                cmd = cmd.mut_arg(id, |a| a.hide(true));
+            }
+        }
+    }
+    let help = cmd.render_long_help().to_string();
+    let body: Vec<&str> = help.lines().map(|l| l.trim_end()).collect();
+    format!("```\n{}\n```\n", body.join("\n").trim_end())
 }
 
 fn sidecar_healthy() -> bool {
@@ -1008,6 +2133,186 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", s.chars().take(max - 1).collect::<String>())
+    }
+}
+
+// ── Library lookup ───────────────────────────────────────────────────────────
+
+/// One row of `files` with its subject code and how much of it is searchable.
+struct LibFile {
+    id: i64,
+    code: String,
+    filename: String,
+    relative_path: String,
+    file_type: String,
+    category: Option<String>,
+    size_bytes: Option<i64>,
+    parse_status: Option<String>,
+    indexed_pages: i64,
+}
+
+/// Extensions whose bytes are worth reading as text. Everything else in a
+/// library is a document whose text lives in the database, or a binary.
+const TEXT_EXTS: &[&str] = &["md", "txt", "csv", "json", "html", "htm", "vtt", "srt"];
+
+fn is_text_file(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    TEXT_EXTS.iter().any(|e| lower.ends_with(&format!(".{e}")))
+}
+
+/// Find the one file a caller meant.
+///
+/// Tiered rather than fuzzy: an exact path beats an exact filename beats a
+/// fragment, and only the *best* tier that matched anything is considered. A
+/// tie inside that tier is reported, never guessed — a wrong file quietly
+/// substituted is worse than a question.
+fn resolve_file<'a>(files: &'a [LibFile], target: &str) -> Result<&'a LibFile, String> {
+    let needle = target.to_lowercase();
+    let tiers: [Box<dyn Fn(&LibFile) -> bool>; 4] = [
+        Box::new(|f: &LibFile| f.relative_path == target),
+        Box::new(|f: &LibFile| f.filename == target),
+        Box::new(|f: &LibFile| f.filename.to_lowercase() == needle),
+        Box::new(|f: &LibFile| f.relative_path.to_lowercase().contains(&needle)),
+    ];
+
+    for matches in tiers {
+        let hits: Vec<&LibFile> = files.iter().filter(|f| matches(f)).collect();
+        match hits.len() {
+            0 => continue,
+            1 => return Ok(hits[0]),
+            _ => {
+                let mut message = format!("{} matches {} files:\n", target, hits.len());
+                for f in hits.iter().take(12) {
+                    message.push_str(&format!("       {}\n", f.relative_path));
+                }
+                if hits.len() > 12 {
+                    message.push_str(&format!("       … and {} more\n", hits.len() - 12));
+                }
+                message.push_str("       Name one of them, or narrow it with --subject.");
+                return Err(message);
+            }
+        }
+    }
+    Err(format!(
+        "no library file matches {target} — `oculus files -m {}` to look",
+        shell_quote(target)
+    ))
+}
+
+/// `12`, `12-15`, `12,14,20-22`, `30-` (to the end), `-4` (from the start).
+fn parse_page_spec(spec: &str) -> Result<Vec<(i64, i64)>, String> {
+    let mut ranges = Vec::new();
+    for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let bad = || format!("not a page range: {part}");
+        let (lo, hi) = match part.split_once('-') {
+            None => {
+                let n: i64 = part.parse().map_err(|_| bad())?;
+                (n, n)
+            }
+            Some((from, to)) => {
+                let lo = if from.trim().is_empty() { 1 } else { from.trim().parse().map_err(|_| bad())? };
+                let hi = if to.trim().is_empty() { i64::MAX } else { to.trim().parse().map_err(|_| bad())? };
+                (lo, hi)
+            }
+        };
+        if lo > hi {
+            return Err(format!("empty page range: {part}"));
+        }
+        ranges.push((lo, hi));
+    }
+    if ranges.is_empty() {
+        return Err("no pages given".to_string());
+    }
+    Ok(ranges)
+}
+
+fn page_wanted(ranges: &[(i64, i64)], page: i64) -> bool {
+    ranges.iter().any(|(lo, hi)| page >= *lo && page <= *hi)
+}
+
+fn build_regex(pattern: &str, fixed: bool, case_sensitive: bool) -> Result<regex::Regex, String> {
+    let body = if fixed { regex::escape(pattern) } else { pattern.to_string() };
+    regex::RegexBuilder::new(&body)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|e| format!("bad pattern: {e}"))
+}
+
+/// A page of markdown flattened to one line of prose, for a result list.
+fn snippet(markdown: &str, max: usize) -> String {
+    let flat: Vec<&str> = markdown.split_whitespace().collect();
+    truncate(&flat.join(" "), max)
+}
+
+/// Quote a suggested command argument, so a filename with spaces in it can be
+/// pasted — or run by an agent — without falling apart.
+fn shell_quote(s: &str) -> String {
+    if !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || "._-/".contains(c)) {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', r"'\''"))
+    }
+}
+
+#[cfg(test)]
+mod query_tests {
+    use super::*;
+
+    #[test]
+    fn page_specs_cover_points_ranges_and_open_ends() {
+        let spec = parse_page_spec("3,7-9,20-").unwrap();
+        for wanted in [3, 7, 8, 9, 20, 4000] {
+            assert!(page_wanted(&spec, wanted), "{wanted} should be selected");
+        }
+        for unwanted in [2, 4, 6, 10, 19] {
+            assert!(!page_wanted(&spec, unwanted), "{unwanted} should not be");
+        }
+        assert!(parse_page_spec("9-4").is_err());
+        assert!(parse_page_spec("twelve").is_err());
+        assert!(parse_page_spec("").is_err());
+    }
+
+    #[test]
+    fn fixed_strings_do_not_read_as_patterns() {
+        assert!(build_regex("a.c", false, false).unwrap().is_match("abc"));
+        assert!(!build_regex("a.c", true, false).unwrap().is_match("abc"));
+        assert!(build_regex("a.c", true, false).unwrap().is_match("A.C"));
+        assert!(!build_regex("a.c", true, true).unwrap().is_match("A.C"));
+    }
+
+    fn file(code: &str, rel: &str) -> LibFile {
+        LibFile {
+            id: 0,
+            code: code.to_string(),
+            filename: rel.rsplit('/').next().unwrap().to_string(),
+            relative_path: rel.to_string(),
+            file_type: "pdf".to_string(),
+            category: None,
+            size_bytes: None,
+            parse_status: None,
+            indexed_pages: 0,
+        }
+    }
+
+    /// The tiers exist so that a filename shared by two subjects still
+    /// resolves when the caller typed the full path, and reports rather than
+    /// guesses when they did not.
+    #[test]
+    fn resolution_prefers_the_most_exact_tier() {
+        let files = vec![
+            file("COMP30026", "courses/COMP30026/files/week-01.pdf"),
+            file("MULT20015", "courses/MULT20015/files/week-01.pdf"),
+            file("MULT20015", "courses/MULT20015/files/notes.pdf"),
+        ];
+        assert_eq!(
+            resolve_file(&files, "courses/MULT20015/files/week-01.pdf").unwrap().code,
+            "MULT20015"
+        );
+        assert_eq!(resolve_file(&files, "notes.pdf").unwrap().code, "MULT20015");
+        assert_eq!(resolve_file(&files, "NOTES.PDF").unwrap().code, "MULT20015");
+        assert_eq!(resolve_file(&files, "COMP30026/files/week").unwrap().code, "COMP30026");
+        assert!(resolve_file(&files, "week-01.pdf").is_err());
+        assert!(resolve_file(&files, "nothing-like-this").is_err());
     }
 }
 

@@ -27,8 +27,13 @@ job, or while debugging.
 
 ```sh
 bun run cli          # build src-tauri/target/release/oculus
-bun run cli:install  # build + symlink into /usr/local/bin
+bun run cli:install  # build + symlink into ~/.local/bin
+bun run docs:cli     # regenerate ../docs/cli-reference.md from the binary's help
 ```
+
+`docs:cli` also runs as part of `bun run tauri build`, after the CLI has been
+staged — so a release bundle can never ship a CLI that the checked-in
+reference does not describe.
 
 ```sh
 oculus                          # session, sidecar and library status
@@ -53,6 +58,53 @@ oculus run -l MULT20015                 # sync the lecture list
 oculus run -l MULT20015 --transcripts   # + download VTTs
 oculus run -l MULT20015 --videos        # + download and trim the videos
 ```
+
+### Querying the library
+
+Read-only commands, for a terminal or for a coding agent. Every one of them
+takes the global `--json`.
+
+```sh
+oculus search "kkt conditions" -s MULT20015 -n 8   # rank pages by meaning
+oculus search "regular expressions" --full         # whole pages, not snippets
+
+oculus grep "sprint retrospective"                 # regex over all scraped text
+oculus grep "P(A | B)" -F -s COMP30026             # -F: literal, not a regex
+oculus grep todo -l                                # matching paths only
+
+oculus read 13.pdf --pages 30-35                   # parsed page markdown
+oculus read courses/COMP30026_2026_SM2/home.md     # or a file on disk
+
+oculus files COMP30026 --type pdf                  # what is there to read
+oculus files --category ed -m assignment
+
+oculus calendar -d 14                              # next fortnight
+oculus calendar COMP30026 --due                    # due dates only
+
+oculus docs                                        # regenerate the agent CLI reference
+```
+
+`search` ranks page *images* through the sidecar's embedding model, so it
+needs the sidecar running — in practice, the app open. When it is not, the
+command fails with exit 1 and points at `grep`, which needs nothing and
+searches the same text literally.
+
+`grep` is not interchangeable with ripgrep over the library folder: markdown
+is on disk, but PDF page text lives only in `oculus.db`, so ripgrep misses
+every slide deck. `grep` reads both.
+
+`docs` fills `agents/` in the data directory for coding agents working in a
+course folder: a CLI reference rendered from this binary's own help, and one
+`AGENTS.md` symlinked into every course. `bun run cli:install` runs it, so the
+reference always matches the installed binary. It never overwrites
+`OCULUS.md`, `TASTE.md`, or a course's own `agents/INSTRUCTIONS.md`.
+
+Every sync does the linking half itself, so a newly enrolled subject arrives
+ready to work in. Run `docs` when you want the CLI reference refreshed.
+
+`read` takes a full library path, a bare filename, or a distinctive fragment,
+and lists the candidates rather than guessing when a fragment is ambiguous.
+Its `--pages` numbers are the ones `search` reports.
 
 `run -s` also refreshes each subject's Canvas calendar — class times and
 assignment due dates — into the database, which is what the app's Calendar

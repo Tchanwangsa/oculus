@@ -14,6 +14,7 @@ dropped, on measurement.
 | Per-page markdown source | `sidecar/parser.py` (`.pages.json`) |
 | `pages` table schema | migrations in `app/src-tauri/src/lib.rs` |
 | Frontend query path | `app/src/lib/retrieval.ts`, `app/src/pages/ChatPage.tsx` |
+| Terminal query path | `app/src-tauri/src/bin/oculus.rs` (`oculus search`) |
 | Smoke test | `app/src-tauri/src/bin/retrieval_smoke.rs` |
 
 ## The flow
@@ -58,6 +59,12 @@ Benchmarked 2026-08-15 on real course decks (152-page corpus, then re-run at
   parsed; `oculus index` re-parses/re-embeds files already on record —
   which is also how quality markdown (finished after a scrape returned)
   reaches the database.
+- Two callers rank against the same store: the app's chat page and
+  `oculus search`. `search_in` takes a set of subject ids because the CLI
+  accepts prefix codes, which can match the same subject in two terms;
+  `search` is the single-subject wrapper the Tauri command uses. Both embed
+  the query once and the subject filter is SQL, so neither pays per course.
+  See [cli.md](./cli.md).
 - Page-image and query embedding share the sidecar's single heavy-work slot
   with local parsing. The model lives in a separate lazy worker; admission
   can unload idle MinerU to make room and the governor can kill Qwen without

@@ -26,8 +26,9 @@ bun run tauri dev     # full desktop app (spawns the sidecar itself)
 bun run dev           # vite only, browser — no Tauri APIs, limited use
 bun run tauri build   # release build
 bun run cli           # build the headless `oculus` binary
-bun run cli:install   # + symlink into /usr/local/bin
+bun run cli:install   # + symlink into ~/.local/bin
 bun run stage-cli     # build it and stage it as a sidecar for the bundle
+bun run docs:cli      # regenerate docs/cli-reference.md from the binary's help
 ```
 
 `tauri build` runs `stage-cli` for you (it is in `beforeBuildCommand`): the
@@ -35,6 +36,13 @@ bun run stage-cli     # build it and stage it as a sidecar for the bundle
 it. `bun run cli` is the plain build for working on the CLI itself; the two
 share the same compiled binary. See [auth.md](./auth.md) for why the staging
 step writes a placeholder on a cold build.
+
+`docs:cli` follows `stage-cli` in the same hook, which is the only reason it is
+cheap: the release binary is already built and current, so regenerating
+[cli-reference.md](./cli-reference.md) is one process launch. It is not on
+`beforeDevCommand` — `tauri dev` never builds the CLI, so hooking it there
+would put a release build in front of every dev start. Run it by hand after
+changing the CLI if you want the repo copy current before the next bundle.
 
 The sidecar can also be run by hand (`cd sidecar && uv run main.py`) for
 debugging — keep Oculus off port 9547 via the env override documented at the

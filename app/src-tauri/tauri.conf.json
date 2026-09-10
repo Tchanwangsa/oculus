@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "bun run ffmpeg && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run ffmpeg && bun run stage-cli && bun run build",
+    "beforeBuildCommand": "bun run ffmpeg && bun run stage-cli && bun run docs:cli && bun run build",
     "frontendDist": "../dist"
   },
   "app": {

@@ -41,6 +41,11 @@ keyring = { version = "3", features = ["apple-native"] }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 scraper = "0.27"
-clap = { version = "4", features = ["derive"] }
+# wrap_help so `--help` and the generated agents/OCULUS-CLI.md wrap to a width
+# instead of emitting one very long line per option.
+clap = { version = "4", features = ["derive", "wrap_help"] }
 ego-tree = "0.11"
 libc = "0.2.189"
+# `oculus grep` searches PDF page text, which lives only in the database —
+# ripgrep over the library on disk cannot see it. Already in the lock tree.
+regex = "1"

@@ -5,14 +5,24 @@ app, with no window involved. Useful for terminal syncs, cron jobs, and
 debugging. `app/README.md` carries the full command reference; this page is
 how it fits the architecture.
 
+Two halves. `run`, `index` and `auth` **write** — they are the app's engine
+without the window. `search`, `grep`, `read`, `files` and `calendar` only
+**read**, and exist so a coding agent, or a person at a prompt, can query the
+library without the UI and without a protocol in between: one binary, one
+`--json` flag, no per-agent registration and no tool schemas resident in a
+context window. `docs` documents that half to the agents that use it.
+
 ## Where
 
 | Piece | Location |
 | --- | --- |
 | The binary | `app/src-tauri/src/bin/oculus.rs` |
+| Ranking behind `search` | `app/src-tauri/src/retrieval.rs` |
 | Shared path resolution | `app/src-tauri/src/paths.rs` |
+| Agent docs: templates, stubs, linking | `app/src-tauri/src/agents.rs` |
 | Headless DB writes | `app/src-tauri/src/store.rs` |
-| Build scripts (`cli`, `cli:install`) | `app/package.json` |
+| Repo copy of the reference, regenerated at bundle time | `app/scripts/gen-cli-docs.mjs` |
+| Build scripts (`cli`, `cli:install`, `docs:cli`) | `app/package.json` |
 
 ## How it connects
 
@@ -49,3 +59,113 @@ how it fits the architecture.
   dates) into `calendar_events` after the scrape — the CLI has no sync options
   to gate it with, so it always runs. See [calendar.md](./calendar.md).
 - Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`).
+
+## The query half
+
+- **`search` needs the sidecar and says so.** The query is embedded by the
+  same Qwen3-VL model that embedded the page images — there is no text index
+  to fall back on — so semantic search only works while something is running
+  the sidecar, which in practice means the app is open. When it is down the
+  command **fails with exit 1 and names `oculus grep`** rather than returning
+  zero hits. That is deliberate: a caller handed an empty result concludes
+  the library has no answer and stops; a caller told why it is empty tries
+  the other door. An empty index fails the same way, naming `oculus index`.
+- `search` takes a *set* of subject ids, not one — a prefix code legitimately
+  matches the same subject in two terms. `retrieval::search_in` is the
+  multi-subject entry point; `retrieval::search` is the one-subject wrapper
+  the Tauri command still calls. Both embed the query once.
+- **`grep` covers both halves of the library, which is why it is not just
+  ripgrep.** Markdown (Canvas pages, announcements, Ed threads) is on disk;
+  PDF page text is only in the `pages` table. A caller reaching for ripgrep
+  over `courses/` silently misses every slide deck. `grep` scans in subject
+  then path order and stops at its limit, so the two sources interleave
+  instead of the database half crowding out the disk half.
+- `read` addresses PDFs by the **same page numbers** `search` reports and the
+  app's viewer shows, because all three read `pages.markdown` keyed on
+  `(file_id, page_no)`. For an Office document that means the derived sibling
+  PDF's pages, via `paths::doc_pdf_rel`.
+- File lookup is tiered, not fuzzy: exact path, then exact filename, then
+  case-insensitive filename, then path substring — and only the best tier
+  that matched anything is considered. A tie inside a tier is reported, never
+  guessed.
+- `--json` is global and shaped for a caller that will not read prose: one
+  document on stdout, and on failure `{"error": "..."}` on **stderr** with
+  exit 1. `status --json` carries the index stats too, so a caller can find
+  out whether `search` will work before trying it.
+- These commands never start the sidecar and never scrape. A read command on
+  a machine where the app has never run reports what is missing and stops.
+
+## Docs for the agents that use it
+
+`oculus docs` fills `agents/` in the data directory, so a coding agent pointed
+at a course folder can work without anyone explaining Oculus to it. Sources
+live in `app/src-tauri/templates/`; everything except the CLI reference is
+written by `app/src-tauri/src/agents.rs`, which **the sync path calls too** —
+see the bullet on scaffolding in [sync.md](./sync.md).
+
+```
+<data>/agents/
+  AGENTS.md       one copy, symlinked into every course folder
+  OCULUS-CLI.md   rendered from this binary's own help
+  OCULUS.md       stub
+  TASTE.md        stub — standing preferences
+  memories/       cross-subject; MEMORY.md index stubbed beside them
+<data>/courses/<code>/
+  AGENTS.md → ../../agents/AGENTS.md
+  agents/memories/    subject-scoped, with its own MEMORY.md index;
+                      INSTRUCTIONS.md goes here too
+```
+
+Three different lifetimes, which is the whole design:
+
+- **Generated, always overwritten.** `OCULUS-CLI.md` walks clap's command tree
+  rather than any list, so a new subcommand or flag appears the moment it
+  exists and a test asserts the coverage. Nothing is hand-written, because an
+  agent trusts a file over `--help` — a stale reference is worse than none.
+  `AGENTS.md` is overwritten too: it is one universal file, which is what
+  removes any per-course copy to keep in sync.
+- **Stubbed once, then the user's.** `OCULUS.md`, `TASTE.md` and the
+  `MEMORY.md` index in each memory folder are written only when absent. They are the one thing in `agents/` a human authors, and
+  overwriting them would be the only unrecoverable thing this command could
+  do. So is `agents/INSTRUCTIONS.md` in a course folder, which nothing writes
+  at all — it is where per-subject instruction lives now that `AGENTS.md` is
+  universal.
+- **Linked, never clobbered.** The course-folder `AGENTS.md` is a *relative*
+  symlink, so the library stays movable. A wrong target is relinked; a real
+  file is left alone with a warning, because it is somebody's work.
+
+Details worth not rediscovering:
+
+- Rendering is pinned to 88 columns with colour off, so the output depends on
+  the binary and not the terminal that ran it. Wrapping needs clap's
+  `wrap_help` feature, which is why it is enabled in `Cargo.toml`.
+- Global `--json` and `--memory-cap` are hidden below the root: clap would
+  otherwise repeat their full text under all sixteen subcommands, which was a
+  third of the file.
+- At ~12 KB `OCULUS-CLI.md` is a *pull* document. `AGENTS.md` says when to
+  open it rather than pasting it into every context — the same reason
+  `AGENTS.md` itself stays short.
+- `bun run cli:install` runs `oculus docs`, so the reference always describes
+  the binary actually on `PATH`. `bun run cli` deletes the old binary first:
+  cargo will otherwise report success while leaving a stale one in place,
+  which would document the wrong build.
+- The same rendering also lands in the repo as
+  [cli-reference.md](./cli-reference.md), written by
+  `app/scripts/gen-cli-docs.mjs` from `oculus docs --stdout`. It runs from
+  `beforeBuildCommand`, straight after `stage-cli` has built the release
+  binary — the one moment in the toolchain where a current binary is
+  guaranteed to exist, so a bundle cannot ship a CLI its reference does not
+  describe. It is deliberately *not* on `beforeDevCommand`: `tauri dev` never
+  builds the CLI, so hooking it there would add a release build to every dev
+  start. Run `bun run docs:cli` by hand after changing the CLI if you want the
+  repo copy current before a bundle.
+- Why the repo needs a copy at all: `OCULUS-CLI.md` only exists on a machine
+  where the CLI has been installed. The repo copy is for a reader — or an
+  agent working on Oculus rather than on a library — with no built binary.
+  This page stays prose; the generated file carries the flags.
+- **A sync links new course folders on its own**, so `oculus docs` is for
+  refreshing the reference after a rebuild, not for catching up on enrolment.
+  It is still the only thing that writes `OCULUS-CLI.md`, and its `link_all`
+  sweep still covers folders no sync touched — an old term, or a stray
+  directory an earlier sync left behind. `link_course` is narrower by design:
+  it takes a subject code, so a sync annotates only what it actually scraped.
