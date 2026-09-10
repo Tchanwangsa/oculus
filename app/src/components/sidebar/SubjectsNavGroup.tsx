@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, useMatch } from "react-router-dom";
-import { CaretRight } from "@phosphor-icons/react";
+import { CaretRight, DotsThree } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useSubjects } from "@/hooks/useSubjects";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
@@ -10,7 +10,24 @@ import { displayCode } from "@/lib/format";
 import type { Subject } from "@/lib/db";
 
 const OPEN_KEY = "oculus-subjects-nav-open";
-const PAST_KEY = "oculus-subjects-nav-past-open";
+const PAST_KEY = "oculus-subjects-nav-past-shown";
+/** How many more past subjects each "More" click reveals. */
+const PAST_STEP = 5;
+
+/* How far the past list is unfolded lives outside the component so that
+   remounting the sidebar — collapsing it with ⌘\ — doesn't lose it. Writes go
+   through here synchronously rather than from an effect, which could be torn
+   down before it ever ran. Collapsing the Subjects group itself is different:
+   that folds the past subjects away deliberately and resets this to 0. */
+let pastShownCache = ((): number => {
+  const n = Number(localStorage.getItem(PAST_KEY));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+})();
+
+function storePastShown(n: number) {
+  pastShownCache = n;
+  localStorage.setItem(PAST_KEY, String(n));
+}
 
 /**
  * The Subjects group: a header row that navigates to the subject index, plus a
@@ -21,9 +38,8 @@ export default function SubjectsNavGroup() {
   const [open, setOpen] = useState(
     () => localStorage.getItem(OPEN_KEY) !== "false",
   );
-  const [pastOpen, setPastOpen] = useState(
-    () => localStorage.getItem(PAST_KEY) === "true",
-  );
+  // Past subjects unfold a page at a time rather than all at once.
+  const [pastShown, setPastShown] = useState(() => pastShownCache);
 
   // Active only on the subject index itself — inside an individual subject the
   // subject's own row carries the highlight instead.
@@ -32,21 +48,18 @@ export default function SubjectsNavGroup() {
   useEffect(() => {
     localStorage.setItem(OPEN_KEY, String(open));
   }, [open]);
-  useEffect(() => {
-    localStorage.setItem(PAST_KEY, String(pastOpen));
-  }, [pastOpen]);
 
   return (
     <div>
       {/* Notion-style section header: a small muted label, no icon. The label
           navigates to the subject index; the caret (revealed on hover, where
           the count sits) collapses the list. */}
-      <div className="group/row flex items-center justify-between pl-2 pr-1 mb-1">
+      <div className="group/row flex items-center justify-between pl-2 pr-1 mb-0.5">
         <NavLink
           to="/subjects"
           end
           className={cn(
-            "flex-1 min-w-0 truncate py-1 text-[11px] font-medium transition-colors",
+            "flex-1 min-w-0 truncate py-1 text-[11px] font-medium tracking-wide transition-colors",
             inSection
               ? "text-foreground"
               : "text-muted-foreground hover:text-foreground",
@@ -56,10 +69,19 @@ export default function SubjectsNavGroup() {
         </NavLink>
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => {
+            const next = !open;
+            setOpen(next);
+            // Collapsing the group is a fresh start: the past subjects fold
+            // back away, so re-expanding comes back to just the current ones.
+            if (!next) {
+              storePastShown(0);
+              setPastShown(0);
+            }
+          }}
           aria-label={open ? "Collapse subjects" : "Expand subjects"}
           aria-expanded={open}
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground transition-colors"
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground transition-colors"
         >
           <CaretRight
             size={11}
@@ -77,7 +99,7 @@ export default function SubjectsNavGroup() {
       </div>
 
       {open && (
-        <div className="space-y-px">
+        <div className="space-y-0.5">
           {loading && (
             <p className="pl-2 py-1 text-[12px] text-muted-foreground">Loading…</p>
           )}
@@ -94,20 +116,29 @@ export default function SubjectsNavGroup() {
 
           {past.length > 0 && (
             <>
+              {past.slice(0, pastShown).map((s) => (
+                <SubjectNavLink key={s.id} subject={s} dimmed />
+              ))}
+              {/* Notion-style "More" row: sits under the last subject and reads
+                  as one of them, so past subjects unfold in place — a few at a
+                  time, collapsing back once they are all out. */}
               <button
                 type="button"
-                onClick={() => setPastOpen((v) => !v)}
-                aria-expanded={pastOpen}
-                className="w-full flex items-center gap-1.5 pl-2 pr-2 py-1.5 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => {
+                  const next =
+                    pastShown >= past.length
+                      ? 0
+                      : Math.min(pastShown + PAST_STEP, past.length);
+                  storePastShown(next);
+                  setPastShown(next);
+                }}
+                className="w-full flex items-center gap-2.5 rounded-md pl-2 pr-1.5 py-1.5 text-[12.5px] text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground transition-colors"
               >
-                <CaretRight
-                  size={9}
-                  className={cn("shrink-0 transition-transform", pastOpen && "rotate-90")}
-                />
-                Past ({past.length})
+                <DotsThree size={15} weight="bold" className="shrink-0" />
+                <span className="truncate flex-1 text-left">
+                  {pastShown >= past.length ? "Less" : "More"}
+                </span>
               </button>
-              {pastOpen &&
-                past.map((s) => <SubjectNavLink key={s.id} subject={s} dimmed />)}
             </>
           )}
         </div>
@@ -129,10 +160,15 @@ function SubjectNavLink({
   return (
     <NavLink
       to={`/subjects/${subject.id}`}
+      /* `end`: the subject itself, not everything under it. Without it a
+         lecture or a file open in this subject — a page of its own, with its
+         own tab — lit the subject row as though you were sitting in the
+         subject. */
+      end
       title={subject.name}
       className={({ isActive }) =>
         cn(
-          "flex items-center gap-2.5 rounded-md pl-2 pr-2 py-1.5 text-[13px] transition-colors",
+          "flex items-center gap-2.5 rounded-md pl-2 pr-1.5 py-1.5 text-[12.5px] transition-colors",
           isActive
             ? "bg-sidebar-item-active text-foreground font-medium"
             : "text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground",
@@ -140,7 +176,7 @@ function SubjectNavLink({
         )
       }
     >
-      <SubjectIcon code={subject.code} size={16} />
+      <SubjectIcon code={subject.code} size={15} />
       <span className="truncate flex-1">{displayCode(subject.code)}</span>
       <NewCountBadge count={newCount} />
     </NavLink>
