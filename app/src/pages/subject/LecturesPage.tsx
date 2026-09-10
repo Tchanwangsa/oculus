@@ -24,6 +24,7 @@ import { getLectures, upsertLectures, type Lecture } from "@/lib/db";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { PeekPanel } from "@/components/peek/PeekPanel";
 import { LecturePlayer } from "@/components/lectures/LecturePlayer";
+import { stopLecturePlayback } from "@/lib/lecturePlayback";
 import { recordRecent } from "@/lib/recents";
 import {
   fmtDuration,
@@ -111,7 +112,7 @@ export default function SubjectLecturesPage() {
 
   return (
     <>
-      <div className="h-full overflow-y-auto">
+      <div className="page-scroll">
         <div className="mx-auto max-w-5xl px-6 py-5">
           <div className="mb-3 flex items-center justify-end">
             <Button
@@ -163,7 +164,7 @@ export default function SubjectLecturesPage() {
                         <div
                           className={cn(
                             "w-3 h-3 rounded-full border-2",
-                            active ? "border-primary" : "border-muted-foreground/40",
+                            active ? "border-brand" : "border-muted-foreground/40",
                           )}
                         />
                       )}
@@ -190,9 +191,9 @@ export default function SubjectLecturesPage() {
                         <CheckCircle size={11} className="text-success" />
                       ) : isDown ? (
                         prog == null || prog.phase === "trimming" ? (
-                          <CircleNotch size={11} className="animate-spin text-primary" />
+                          <CircleNotch size={11} className="animate-spin text-brand" />
                         ) : (
-                          <span className="text-[10px] tabular-nums text-primary">
+                          <span className="text-[10px] tabular-nums text-brand">
                             {prog.percent}%
                           </span>
                         )
@@ -233,9 +234,17 @@ export default function SubjectLecturesPage() {
           key={selectedLecture.id}
           title={selectedLecture.title}
           onExpand={openAsPage}
-          onClose={() => setSelectedLecture(null)}
+          onClose={() => {
+            // Closing the player is a stop; switching tabs is not.
+            stopLecturePlayback();
+            setSelectedLecture(null);
+          }}
         >
-          <LecturePlayer lecture={selectedLecture} onRefresh={refreshLectures} />
+          <LecturePlayer
+            lecture={selectedLecture}
+            onRefresh={refreshLectures}
+            allowFullscreen={false}
+          />
         </PeekPanel>
       )}
     </>
