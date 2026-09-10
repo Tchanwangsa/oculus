@@ -148,6 +148,13 @@ in Settings drops the last rather than opening a dialog about which to evict.
 - The loop stops after `MAX_TOOL_ROUNDS`, and that final turn is issued with
   the tools withheld — a model that keeps searching is forced to answer
   rather than looping until the budget dies.
+- **The prompt carries the library's global memory.** `agents::user_context`
+  appends `agents/TASTE.md` and the bodies of every memory in
+  `agents/memories/` to the system prompt, once per send. Bodies rather than
+  the `MEMORY.md` index: the agent has no filesystem tool, so a title it
+  cannot open is worse than none. Subject memories stay out, and an unedited
+  stub counts as nothing written. Appended rather than stored as a message, so
+  a chat reopened after the preferences changed is answered under the new ones.
 - **The model is fixed per send, not per chat.** `chat_send` takes an
   optional `ModelRef` from the composer's switcher and resolves it once,
   before the user's row is written; the loop then runs every round on that

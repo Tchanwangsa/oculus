@@ -91,7 +91,16 @@ async fn insert_message(
 }
 
 /// Rebuild the OpenAI-shape history for the next model turn.
-async fn history(pool: &SqlitePool, chat_id: i64) -> Result<Vec<serde_json::Value>, String> {
+///
+/// `context` is the library's global memory layer (`agents/TASTE.md` and
+/// `agents/memories/`), appended to the fixed prompt rather than stored as a
+/// message: it is not part of the conversation, and a chat reopened after the
+/// student's preferences changed should be answered under the new ones.
+async fn history(
+    pool: &SqlitePool,
+    chat_id: i64,
+    context: Option<&str>,
+) -> Result<Vec<serde_json::Value>, String> {
     let rows = sqlx::query(
         "SELECT role, content, tool_calls, tool_call_id FROM chat_messages
          WHERE chat_id = ?1 ORDER BY id ASC",
@@ -101,7 +110,11 @@ async fn history(pool: &SqlitePool, chat_id: i64) -> Result<Vec<serde_json::Valu
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut out = vec![serde_json::json!({ "role": "system", "content": SYSTEM_PROMPT })];
+    let system = match context {
+        Some(c) => format!("{SYSTEM_PROMPT}\n\n{c}"),
+        None => SYSTEM_PROMPT.to_string(),
+    };
+    let mut out = vec![serde_json::json!({ "role": "system", "content": system })];
     for r in rows {
         let role: String = r.get("role");
         let content: Option<String> = r.get("content");
@@ -297,6 +310,10 @@ async fn run_loop(
 ) -> Result<(), String> {
     let tools = tool_schemas();
     let mut collected: Vec<Citation> = Vec::new();
+    // Read once per message, not per tool round: two small files, but a loop
+    // that re-read them every turn would be paying for a change nobody can
+    // make mid-answer.
+    let context = crate::agents::user_context(&crate::paths::data_dir());
 
     for round in 0..=MAX_TOOL_ROUNDS {
         if cancel.load(Ordering::SeqCst) {
@@ -306,7 +323,7 @@ async fn run_loop(
         // at the cap rather than run past it.
         llm::check_budget(&pool, &cfg).await?;
 
-        let msgs = serde_json::Value::Array(history(&pool, chat_id).await?);
+        let msgs = serde_json::Value::Array(history(&pool, chat_id, context.as_deref()).await?);
         let last_round = round == MAX_TOOL_ROUNDS;
 
         let app2 = app.clone();

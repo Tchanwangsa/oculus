@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agents;
 mod auth;
 pub mod calendar;
 pub mod canvas;

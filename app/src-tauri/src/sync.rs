@@ -11,6 +11,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::agents;
 use crate::canvas::Canvas;
 use crate::md::{self, ImageMap};
 use crate::paths;
@@ -310,12 +311,26 @@ impl Engine {
     /// many subjects were attempted.
     pub fn scrape(&self, subjects: &[Subject]) -> usize {
         let total = subjects.len();
+
+        // Write the central `agents/AGENTS.md` before anything points at it,
+        // so the per-course links below cannot come out dangling on a library
+        // where `oculus docs` has never run.
+        if let Err(e) = agents::ensure_library_docs(&self.data_dir) {
+            self.reporter.log("warning", "", &format!("agent docs: {e}"));
+        }
+
         for (i, c) in subjects.iter().enumerate() {
             if self.reporter.cancelled() {
                 return i;
             }
             if let Err(e) = self.scrape_course(c, i, total) {
                 self.reporter.log("error", &c.code, &e);
+            }
+            // A subject enrolled mid-semester gets its agent scaffold from the
+            // run that first scrapes it, rather than waiting for someone to
+            // remember `oculus docs`. Idempotent, so every later run is free.
+            if let Err(e) = agents::link_course(&self.data_dir, &c.code) {
+                self.reporter.log("warning", &c.code, &format!("agent docs: {e}"));
             }
             self.save_manifest();
             self.reporter.progress(&Progress {

@@ -17,6 +17,7 @@ One Rust engine scrapes three services. It runs identically inside the app
 | App-side entry: thread + `AppReporter` | `app/src-tauri/src/scrape.rs` |
 | Headless DB writes | `app/src-tauri/src/store.rs` |
 | Subject list state | `app/src-tauri/src/subjects.rs` |
+| Agent docs written into the library | `app/src-tauri/src/agents.rs` |
 | Canvas calendar (class times, due dates) | `app/src-tauri/src/calendar.rs` |
 | Frontend sync page / runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 
@@ -44,6 +45,18 @@ One Rust engine scrapes three services. It runs identically inside the app
   class times and due dates (see [calendar.md](./calendar.md)). Neither is a
   Rust scrape phase: both run after `scrape-complete`, write only to the
   database, and are ignored by the engine's `SyncOptions`.
+- **A scrape scaffolds the agent docs it just made relevant.** `Engine::scrape`
+  writes the central `agents/AGENTS.md` once per run and links each subject's
+  course folder after scraping it (`app/src-tauri/src/agents.rs`), so a subject
+  enrolled mid-semester is usable by a coding agent from the run that first
+  fetches it — nobody has to remember `oculus docs`. The order matters: the
+  central copy is written *before* anything points at it, because the links are
+  relative and would otherwise dangle on a library where the CLI never ran. A
+  subject whose scrape produced no folder is skipped rather than given an empty
+  one, and a failure here is a warning, never a failed sync — the scaffold is
+  an affordance, not part of the library. What the run cannot write is
+  `OCULUS-CLI.md`, which is rendered from clap's command tree and so belongs to
+  the binary; see [cli.md](./cli.md) for the three lifetimes.
 - **Unchanged files are not re-downloaded.** `file-manifest.json` in the data
   dir maps Canvas file id → (`modified_at`, size) at last download; when the
   metadata call reports the same pair and the artifact is on disk, only that
