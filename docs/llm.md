@@ -1,7 +1,12 @@
 # LLM provider layer
 
-Everything that talks to a language model: provider config, the model
-library, API keys, the streaming client, and the spending ledger.
+Everything that talks to a language model *by API*: provider config, the
+model library, API keys, the streaming client, and the spending ledger.
+
+**Dormant.** Chat is a CLI agent now ([harness.md](./harness.md)); nothing
+routes to `chat_send`, the old chat page and store are gone, and Settings →
+AI keeps the provider section under the CLI agents' health. The code stays
+because the API path is the planned third bridge, behind the same seam.
 
 ## Where
 
@@ -12,8 +17,8 @@ library, API keys, the streaming client, and the spending ledger.
 | `llm_usage` table, `chats`/`chat_messages` | migrations 16–17 in `app/src-tauri/src/lib.rs` |
 | Settings UI | `app/src/pages/settings/AiPage.tsx` |
 | Provider row, model browser, pickers | `app/src/components/llm/` |
-| Chat UI + store | `app/src/pages/ChatPage.tsx`, `app/src/stores/chatStore.ts` |
-| Config read/write, chat reads | `app/src/lib/db.ts` (`getLlmSettings`, `getChats`) |
+| Chat reads (`getChats`, `getChatMessages`), kept for the returning API bridge | `app/src/lib/db.ts` |
+| Config read/write | `app/src/lib/db.ts` (`getLlmSettings`) |
 
 ## How it connects
 

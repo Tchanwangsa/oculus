@@ -679,6 +679,54 @@ export async function markFileAccessed(id: number): Promise<void> {
   await db.execute(`UPDATE files SET last_accessed_at = datetime('now') WHERE id = $1`, [id]);
 }
 
+/** A file the chat composer's `@` can point the agent at. */
+export interface MentionFile {
+  id: number;
+  subject_id: number;
+  subject_code: string;
+  filename: string;
+  /** Path from the library root, e.g. `courses/COMP30026_2026_SM2/pages/x.md`
+   *  — what the composer inserts and what `oculus read` takes. */
+  relative_path: string;
+  category: string | null;
+}
+
+/**
+ * Candidates for an `@` mention, narrowed to the chat's subject when it has
+ * one.
+ *
+ * Only files the agent can actually read are offered: `.md` is on disk as
+ * written, but a PDF or slide deck has text only once the sidecar has parsed
+ * it — the same `('fast', 'quality')` predicate retrieval uses. An unparsed
+ * deck in the list would be an `oculus read` that comes back empty after the
+ * student picked it, which is worse than not offering it.
+ *
+ * Ordered by prefix match, then by what they opened recently: with no query
+ * typed the list is the handful of files they were just working in.
+ */
+export async function searchMentionFiles(
+  subjectId: number | null,
+  query: string,
+  limit = 8,
+): Promise<MentionFile[]> {
+  const db = await getDb();
+  const esc = query.replace(/[%_\\]/g, (c) => `\\${c}`);
+  return db.select<MentionFile[]>(
+    `SELECT f.id, f.subject_id, s.code AS subject_code, f.filename,
+            f.relative_path, f.category
+     FROM files f
+     JOIN subjects s ON s.id = f.subject_id
+     WHERE (f.file_type = 'md' OR f.parse_status IN ('fast', 'quality'))
+       AND ($1 IS NULL OR f.subject_id = $1)
+       AND ($2 = '' OR f.filename LIKE $3 ESCAPE '\\')
+     ORDER BY (f.filename LIKE $4 ESCAPE '\\') DESC,
+              f.last_accessed_at DESC,
+              f.filename ASC
+     LIMIT $5`,
+    [subjectId, query, `%${esc}%`, `${esc}%`, limit],
+  );
+}
+
 export async function getFilesForSubject(subjectId: number): Promise<DbFile[]> {
   const db = await getDb();
   return db.select<DbFile[]>(

@@ -4,8 +4,10 @@ import { humanizeSlug } from "@/lib/format";
 import { isPdfBacked } from "@/lib/fileTypes";
 import { markFileAccessed, type DbFile } from "@/lib/db";
 
-/** What the peek header shows: real filenames stay, slugs get prettified. */
-export function fileTitle(file: DbFile): string {
+/** What the peek header shows: real filenames stay, slugs get prettified.
+ *  Takes the two columns it reads rather than a whole row, so the chat's
+ *  `@` menu labels files the same way the peek panel does. */
+export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
   return file.category === "file" || file.category === "image"
     ? file.filename
     : humanizeSlug(file.filename);

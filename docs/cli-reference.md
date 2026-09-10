@@ -23,6 +23,7 @@ Commands:
   files     List the files in the library
   calendar  Class times and assignment due dates
   docs      Write the agent-facing docs into the library
+  agent     Run one prompt through a CLI agent (Claude Code or Codex)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -472,6 +473,43 @@ Usage: oculus docs [OPTIONS]
 Options:
       --stdout
           Print the markdown instead of writing the file
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus agent`
+
+```
+Run one prompt through a CLI agent and print what it does.
+
+The same bridges the app's chat uses, without the window: the agent runs from the
+library's agents/ folder with the app's instructions appended, can read the whole
+library and write only there, and its normalized events are printed as they arrive.
+Needs the provider's CLI installed and signed in (`claude` or `codex`). Nothing is
+recorded in the database; this is for checking a bridge works.
+
+Usage: oculus agent [OPTIONS] <PROMPT>
+
+Arguments:
+  <PROMPT>
+          What to ask
+
+Options:
+  -p, --provider <PROVIDER>
+          Which CLI to drive
+
+          [default: claude]
+          [possible values: claude, codex]
+
+  -m, --model <MODEL>
+          Model to request (provider-specific name or alias)
+
+      --effort <EFFORT>
+          Codex reasoning effort (low, medium, high, xhigh)
+
+  -s, --subject <SUBJECT_CODE>
+          Scope the turn to one subject, as the app's chat does
 
   -h, --help
           Print help (see a summary with '-h')

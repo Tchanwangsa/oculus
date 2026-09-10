@@ -105,6 +105,35 @@ enum Command {
     Files(FilesArgs),
     Calendar(CalendarArgs),
     Docs(DocsArgs),
+    Agent(AgentArgs),
+}
+
+#[derive(Args)]
+#[command(
+    about = "Run one prompt through a CLI agent (Claude Code or Codex)",
+    long_about = "Run one prompt through a CLI agent and print what it does.\n\n\
+The same bridges the app's chat uses, without the window: the agent runs from \
+the library's agents/ folder with the app's instructions appended, can read the \
+whole library and write only there, and its normalized events are printed as they \
+arrive. Needs the provider's CLI installed and signed in (`claude` or `codex`). \
+Nothing is recorded in the database; this is for checking a bridge works."
+)]
+struct AgentArgs {
+    /// What to ask
+    #[arg(value_name = "PROMPT")]
+    prompt: String,
+    /// Which CLI to drive
+    #[arg(short, long, value_parser = ["claude", "codex"], default_value = "claude")]
+    provider: String,
+    /// Model to request (provider-specific name or alias)
+    #[arg(short, long)]
+    model: Option<String>,
+    /// Codex reasoning effort (low, medium, high, xhigh)
+    #[arg(long)]
+    effort: Option<String>,
+    /// Scope the turn to one subject, as the app's chat does
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    subject: Option<String>,
 }
 
 #[derive(Args)]
@@ -391,6 +420,7 @@ fn main() {
         Some(Command::Files(args)) => ctx.files(&args),
         Some(Command::Calendar(args)) => ctx.calendar(&args),
         Some(Command::Docs(args)) => ctx.docs(&args),
+        Some(Command::Agent(args)) => ctx.agent(&args),
     };
 
     if let Err(e) = result {
@@ -2004,6 +2034,97 @@ impl Ctx {
     }
 
     // ── docs ──────────────────────────────────────────────────────────────────
+
+    /// One turn of a CLI agent, events to stdout. `--json` prints each
+    /// normalized event as a line; otherwise text streams and tool rows are
+    /// summarised as they open and close.
+    fn agent(&self, args: &AgentArgs) -> Result<(), String> {
+        use app_lib::harness::{self, HarnessEvent, Provider};
+        let provider = Provider::parse(&args.provider).ok_or("unknown provider")?;
+        // The folder name is the scope; a headless run has no thread row to
+        // resolve an id against, so the code is given directly.
+        let opts = harness::SendOptions {
+            model: args.model.clone(),
+            reasoning_effort: args.effort.clone(),
+            subject_id: None,
+            scope: args.subject.clone(),
+        };
+        let json = self.json;
+        let streaming = Mutex::new(false);
+        harness::run_once(&self.data_dir, provider, &opts, &args.prompt, move |ev| {
+            if json {
+                if let Ok(line) = serde_json::to_string(ev) {
+                    println!("{line}");
+                }
+                return;
+            }
+            let mut out = std::io::stdout();
+            let mut mid = streaming.lock().unwrap();
+            let end_line = |mid: &mut bool, out: &mut std::io::Stdout| {
+                if *mid {
+                    let _ = writeln!(out);
+                    *mid = false;
+                }
+            };
+            match ev {
+                HarnessEvent::SessionStarted { provider_session_id, model, cwd } => {
+                    let _ = writeln!(
+                        out,
+                        "{} session {provider_session_id}{} in {cwd}",
+                        paint("·", DIM),
+                        model.as_ref().map(|m| format!(" ({m})")).unwrap_or_default()
+                    );
+                }
+                HarnessEvent::AssistantDelta { text } => {
+                    let _ = write!(out, "{text}");
+                    *mid = true;
+                }
+                HarnessEvent::AssistantMessage { .. } => end_line(&mut mid, &mut out),
+                HarnessEvent::Thinking { text } => {
+                    end_line(&mut mid, &mut out);
+                    let first = text.lines().next().unwrap_or("");
+                    let _ = writeln!(out, "{}", paint(&format!("  thinking: {first}"), DIM));
+                }
+                HarnessEvent::ToolStarted { kind, title, .. } => {
+                    end_line(&mut mid, &mut out);
+                    let _ = writeln!(out, "{}", paint(&format!("  ▸ {kind:?}: {title}"), DIM));
+                }
+                HarnessEvent::ToolFinished { ok, output, .. } => {
+                    let first = output.lines().next().unwrap_or("");
+                    let mark = if *ok { "✓" } else { "✗" };
+                    let _ = writeln!(out, "{}", paint(&format!("    {mark} {first}"), DIM));
+                }
+                HarnessEvent::Usage { context_tokens, cost_usd, .. } => {
+                    end_line(&mut mid, &mut out);
+                    let mut s = String::from("  usage:");
+                    if let Some(c) = context_tokens {
+                        s.push_str(&format!(" {c} context tokens"));
+                    }
+                    if let Some(c) = cost_usd {
+                        s.push_str(&format!(", ${c:.3}"));
+                    }
+                    let _ = writeln!(out, "{}", paint(&s, DIM));
+                }
+                HarnessEvent::RateLimits { windows } => {
+                    let parts: Vec<String> = windows
+                        .iter()
+                        .map(|w| format!("{} {:.0}%", w.label, w.used_percent))
+                        .collect();
+                    let _ = writeln!(out, "{}", paint(&format!("  limits: {}", parts.join(", ")), DIM));
+                }
+                HarnessEvent::Error { message } => {
+                    end_line(&mut mid, &mut out);
+                    let _ = writeln!(out, "{} {message}", paint("error:", RED));
+                }
+                HarnessEvent::TurnFinished { status } => {
+                    end_line(&mut mid, &mut out);
+                    let _ = writeln!(out, "{}", paint(&format!("· turn {status}"), DIM));
+                }
+                _ => {}
+            }
+            let _ = out.flush();
+        })
+    }
 
     fn docs(&self, args: &DocsArgs) -> Result<(), String> {
         if args.stdout {

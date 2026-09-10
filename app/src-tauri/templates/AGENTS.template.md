@@ -1,8 +1,12 @@
 # Oculus course directory
 
-You are in an Oculus library folder for one University of Melbourne subject.
-The folder is named for the subject: `COMP30026_2026_SM2` is COMP30026,
-semester 2, 2026. `syllabus.md` and `home.md` name it in full.
+This file describes a course folder in an Oculus library — one University of
+Melbourne subject, synced from Canvas, Ed Discussion and Echo360. The folder
+is named for the subject: `COMP30026_2026_SM2` is COMP30026, semester 2, 2026.
+`syllabus.md` and `home.md` name it in full. If you are reading this from the
+library's own `agents/` folder instead — where the in-app chat runs you —
+the course folders are at `../courses/<CODE>/`, and everything below is about
+them.
 
 Oculus fills this folder by syncing Canvas, Ed Discussion and Echo360 from the
 desktop app. Nothing in it is written by hand.

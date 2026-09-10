@@ -1,5 +1,20 @@
 import type { Components } from "react-markdown";
 import { ArrowSquareOut } from "@phosphor-icons/react";
+import { cn } from "@/lib/utils";
+
+/**
+ * Code outside markdown — a command line, a tool's output. This is the one
+ * file that may use `font-mono` (root CLAUDE.md), so anything code-shaped
+ * elsewhere in the app comes here for it.
+ */
+export function CodeText({ className, ...p }: React.ComponentProps<"pre">) {
+  return (
+    <pre
+      className={cn("whitespace-pre-wrap break-words font-mono text-[12px] leading-[1.5] text-foreground", className)}
+      {...p}
+    />
+  );
+}
 
 export const MD_COMPONENTS: Components = {
   h1: (p: any) => (

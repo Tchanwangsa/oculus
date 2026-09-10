@@ -3,9 +3,11 @@ import {
   Chat,
   CalendarBlank,
   ArrowsClockwise,
+  CircleNotch,
   SidebarSimple,
   GearSix,
 } from "@phosphor-icons/react";
+import { anyRunning, useHarnessStore } from "@/stores/harnessStore";
 import { cn } from "@/lib/utils";
 import NavItem from "./NavItem";
 import SubjectsNavGroup from "./SubjectsNavGroup";
@@ -37,6 +39,9 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const width = collapsed ? 0 : WIDTH;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ top: false, bottom: false });
+  // An agent at work is the one background job that shows here, bb's way:
+  // a spinner on the row, nothing else.
+  const agentBusy = useHarnessStore((s) => anyRunning(s.live));
 
   const measure = useCallback(() => {
     const el = scrollRef.current;
@@ -108,7 +113,12 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
         {/* Pinned top-level nav — outside the scroller, so it never slides away. */}
         <div className="px-2 pb-1.5 shrink-0">
-          <NavItem to="/chat" icon={Chat} label="Chat" />
+          <NavItem
+            to="/chat"
+            icon={Chat}
+            label="Chat"
+            badge={agentBusy ? <CircleNotch size={12} className="shrink-0 animate-spin text-muted-foreground" /> : null}
+          />
           <NavItem to="/calendar" icon={CalendarBlank} label="Calendar" />
         </div>
 

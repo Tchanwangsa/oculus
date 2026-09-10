@@ -16,6 +16,8 @@ import { embedFile } from "@/lib/retrieval";
 import { isPdfBacked } from "@/lib/fileTypes";
 import { CALENDAR_UPDATED_EVENT } from "@/lib/calendar";
 import { getDb } from "@/lib/db";
+import { useHarnessStore } from "@/stores/harnessStore";
+import type { HarnessEnvelope } from "@/lib/harness";
 
 /**
  * Statuses the sidecar always sent, which the file-row badges and the DB's
@@ -65,6 +67,15 @@ export function useBackendEvents() {
   useEffect(() => {
     const unsubs: Array<Promise<() => void>> = [];
     const pipeline = () => usePipelineStore.getState();
+
+    // ── CLI agents ──────────────────────────────────────────────────────────
+    // App-level, not page-level: a thread keeps running while you are on
+    // another page, and the sidebar's spinner needs to know.
+    unsubs.push(
+      listen<HarnessEnvelope>("harness-event", (e) => {
+        useHarnessStore.getState().apply(e.payload);
+      }),
+    );
 
     // ── Sync (scrape) events ────────────────────────────────────────────────
     unsubs.push(

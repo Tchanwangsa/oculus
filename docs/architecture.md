@@ -28,7 +28,8 @@ separate killable model workers rather than retaining their weights itself.
 | IPC callback server (sidecar → app) | `app/src-tauri/src/ipc.rs` |
 | Media HTTP server (lecture video streaming) | `app/src-tauri/src/media.rs` |
 | In-app browser (one page WebView per tab, in the main window) | `app/src-tauri/src/browser.rs` |
-| LLM provider client (keys, streaming, spend limits) | `app/src-tauri/src/llm.rs` |
+| CLI-agent harness (Claude Code / Codex bridges) | `app/src-tauri/src/harness/mod.rs` |
+| LLM provider client (keys, streaming, spend limits; dormant) | `app/src-tauri/src/llm.rs` |
 | Sidecar HTTP service | `sidecar/main.py` |
 | Model-worker lifecycle + memory accounting | `sidecar/model_workers.py`, `sidecar/worker_client.py`, `sidecar/memory_governor.py` |
 | MinerU token (keychain only) | `app/src-tauri/src/mineru.rs` |
@@ -74,14 +75,17 @@ live. Inside it:
 - `agents/` — the docs a coding agent reads, the `AGENTS.md` every course
   folder symlinks, and the memory layer it writes back (`TASTE.md`,
   `memories/`); written by `oculus docs` and, for everything but the CLI
-  reference, by every sync (see [cli.md](./cli.md))
+  reference, by every sync (see [cli.md](./cli.md)). Also the working
+  directory — and only writable root — of every chat thread, and
+  `agents/threads/<id>.ndjson`, the raw provider output per thread (see
+  [harness.md](./harness.md))
 - `mineru-usage.json` — persistent daily cloud reservations and quota latch
 - the session cookie and auth-flag files (see [auth.md](./auth.md))
 
 ## The database
 
 Schema lives in the tauri-plugin-sql migrations in `app/src-tauri/src/lib.rs`
-(19 versions and counting). Ownership is split deliberately:
+(24 versions and counting). Ownership is split deliberately:
 
 - **In the app**, the *frontend* writes the scrape tables: it listens for
   scrape events and upserts through `app/src/lib/db.ts`.

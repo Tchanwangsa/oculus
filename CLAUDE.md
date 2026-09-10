@@ -7,11 +7,13 @@ Echo360) into a searchable personal knowledge base. Three processes:
 - **Rust core** — Tauri backend, scrape engine, and the `oculus` CLI, in `app/src-tauri/`
 - **Python sidecar** — PDF parsing + page-image embeddings, in `sidecar/`
 
-Ingestion, retrieval, and the chat agent are built (BYOK — local Ollama,
-OpenRouter, OpenCode Go, or any OpenAI-compatible endpoint; see
-`docs/llm.md`). Automations and the Inbox were built and then removed — they
-live on the `automations` branch; do not reintroduce pieces of them here
-without being asked.
+Ingestion and retrieval are built. Chat is a **CLI agent** — Claude Code or
+Codex, driven as a subprocess from the library's `agents/` folder
+(`docs/harness.md`). The BYOK API layer it replaced is dormant, not deleted:
+nothing routes to it, and it is the planned third bridge (`docs/llm.md`).
+Automations and the Inbox were built and then removed — they live on the
+`automations` branch; do not reintroduce pieces of them here without being
+asked.
 
 ## Orient before you edit
 
@@ -28,7 +30,8 @@ structure by searching.
 | Sign-in, session cookies, keep-alive | `docs/auth.md` |
 | PDF parsing, the Python sidecar | `docs/sidecar.md` |
 | Embeddings, search, the `pages` table | `docs/retrieval.md` |
-| LLM providers, keys, the chat agent | `docs/llm.md` |
+| Chat: the CLI-agent bridges, containment, the timeline | `docs/harness.md` |
+| LLM providers, keys, the dormant API path | `docs/llm.md` |
 | Class times, due dates, the calendar | `docs/calendar.md` |
 | React pages, stores, hooks, UI system | `docs/frontend.md` |
 | The `oculus` command line | `docs/cli.md` |

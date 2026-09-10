@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { CircleNotch, PaperPlaneRight, Plus, X } from "@phosphor-icons/react";
+import { ArrowsClockwise, CircleNotch, PaperPlaneRight, Plus, X } from "@phosphor-icons/react";
+import { harnessHealth, type BridgeHealth } from "@/lib/harness";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -58,6 +59,59 @@ function newProviderId(kind: string, existing: LlmProvider[]): string {
     const id = `${kind}-${n}`;
     if (!existing.some((p) => p.id === id)) return id;
   }
+}
+
+/**
+ * The CLI agents behind Chat: where each binary was found and which version,
+ * or why it was not. Rechecking clears the cached lookup, for right after an
+ * install.
+ */
+function CliAgentsSection() {
+  const [health, setHealth] = useState<BridgeHealth[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const check = useCallback(() => {
+    setChecking(true);
+    harnessHealth()
+      .then(setHealth)
+      .catch(() => setHealth([]))
+      .finally(() => setChecking(false));
+  }, []);
+  useEffect(check, [check]);
+
+  return (
+    <Section
+      title="CLI agents"
+      description="Chat runs Claude Code or Codex from your own machine, signed in as you — no API key, no per-token billing."
+    >
+      <div className="divide-y divide-border-subtle">
+        {(health ?? []).map((h) => (
+          <div key={h.provider} className="flex items-start justify-between gap-4 py-2.5">
+            <div className="min-w-0">
+              <div className="text-[13px] text-foreground">{h.label}</div>
+              <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                {h.path ?? (
+                  <>
+                    Not found. Install it, or set <span className="text-foreground">{h.overrideEnv}</span> to the binary.
+                  </>
+                )}
+              </div>
+              {h.error && h.path && <div className="mt-0.5 text-xs text-destructive">{h.error}</div>}
+            </div>
+            <div className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {h.version ? `v${h.version}` : h.path ? "—" : "missing"}
+            </div>
+          </div>
+        ))}
+        {health === null && (
+          <div className="py-2.5 text-xs text-muted-foreground">Checking…</div>
+        )}
+      </div>
+      <Button variant="ghost" size="xs" className="mt-2" onClick={check} disabled={checking}>
+        {checking ? <CircleNotch size={12} className="animate-spin" /> : <ArrowsClockwise size={12} />}
+        Recheck
+      </Button>
+    </Section>
+  );
 }
 
 export default function SettingsAiPage() {
@@ -192,6 +246,8 @@ export default function SettingsAiPage() {
 
   return (
     <div className="flex flex-col gap-8">
+      <CliAgentsSection />
+
       <Section
         title="Providers"
         description="Local and cloud providers share the same OpenAI-compatible API, and you can keep as many as you like configured at once. Keys are stored in the macOS keychain, never in the database."

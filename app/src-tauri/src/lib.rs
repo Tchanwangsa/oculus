@@ -7,6 +7,7 @@ pub mod canvas;
 pub mod echo360;
 pub mod ed;
 mod files;
+pub mod harness;
 mod ipc;
 pub mod keepalive;
 mod lectures;
@@ -73,6 +74,10 @@ pub fn run() {
             // and hooks the main window's resize so pages follow it (see
             // src/browser.rs).
             browser::init(app.handle());
+
+            // ── CLI agents (Claude Code / Codex bridges) ────────────────
+            app.manage(harness::app::init(app.handle()));
+            harness::app::reconcile(app.handle());
             // ── Session restore on startup ──────────────────────────────
             // No WebView dance: we replay the persisted session cookie via a
             // server-side ureq ping. Valid → connected instantly. Rejected →
@@ -709,6 +714,61 @@ ALTER TABLE lectures ADD COLUMN has_source2 INTEGER NOT NULL DEFAULT 0;
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 24,
+                            description: "harness: CLI-agent threads and their timeline",
+                            // A thread is one conversation with one provider
+                            // CLI (`claude` or `codex`); `provider_session_id`
+                            // is that CLI's own id for it, which is what a
+                            // restart resumes with. Items are the folded
+                            // timeline — user, assistant, thinking, tool,
+                            // error — written by Rust as the events arrive
+                            // (src/harness/store.rs). `ref_id` is the
+                            // provider's tool-call id, so the result can find
+                            // the row its call made; `meta` is JSON the kind
+                            // decides (a tool's kind, input, ok, output).
+                            //
+                            // `usage` is the last usage report, JSON, kept on
+                            // the thread rather than as rows: the composer
+                            // shows one number, not a history.
+                            sql: r#"
+CREATE TABLE IF NOT EXISTS harness_threads (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider            TEXT    NOT NULL,
+    provider_session_id TEXT,
+    model               TEXT,
+    title               TEXT,
+    status              TEXT    NOT NULL DEFAULT 'idle',
+    usage               TEXT,
+    created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS harness_items (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id  INTEGER NOT NULL REFERENCES harness_threads(id) ON DELETE CASCADE,
+    kind       TEXT    NOT NULL,
+    ref_id     TEXT,
+    content    TEXT,
+    meta       TEXT,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_items_thread ON harness_items(thread_id, id);
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                        tauri_plugin_sql::Migration {
+                            version: 25,
+                            description: "harness: the subject a thread is scoped to",
+                            // NULL is the general thread — the whole library.
+                            // A code is not stored: the join to `subjects`
+                            // keeps a renamed subject's folder name right.
+                            sql: r#"
+ALTER TABLE harness_threads ADD COLUMN subject_id INTEGER REFERENCES subjects(id) ON DELETE SET NULL;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -755,6 +815,11 @@ ALTER TABLE lectures ADD COLUMN has_source2 INTEGER NOT NULL DEFAULT 0;
             mineru::mineru_delete_api_key,
             agent::chat_send,
             agent::chat_cancel,
+            harness::app::harness_health,
+            harness::app::harness_codex_models,
+            harness::app::harness_send,
+            harness::app::harness_interrupt,
+            harness::app::harness_delete_thread,
             sidecar::sidecar_health,
             sidecar::sidecar_set_limits,
             storage::storage_report,
@@ -774,6 +839,7 @@ ALTER TABLE lectures ADD COLUMN has_source2 INTEGER NOT NULL DEFAULT 0;
             // Don't let uvicorn outlive the window.
             if matches!(event, tauri::RunEvent::Exit) {
                 sidecar::shutdown(app_handle);
+                harness::app::shutdown(app_handle);
             }
         });
 }

@@ -10,7 +10,12 @@ without the window. `search`, `grep`, `read`, `files` and `calendar` only
 **read**, and exist so a coding agent, or a person at a prompt, can query the
 library without the UI and without a protocol in between: one binary, one
 `--json` flag, no per-agent registration and no tool schemas resident in a
-context window. `docs` documents that half to the agents that use it.
+context window. `docs` documents that half to the agents that use it, and
+`agent` runs one of those agents for a single turn through the app's own
+bridges — the headless proof that a bridge works, with nothing recorded
+(see [harness.md](./harness.md)). Its `--subject` takes a course code and
+appends the same scope the app's picker does, which is how that section of
+the instructions gets read without opening the window.
 
 ## Where
 
@@ -20,6 +25,7 @@ context window. `docs` documents that half to the agents that use it.
 | Ranking behind `search` | `app/src-tauri/src/retrieval.rs` |
 | Shared path resolution | `app/src-tauri/src/paths.rs` |
 | Agent docs: templates, stubs, linking | `app/src-tauri/src/agents.rs` |
+| `agent`: the bridges it drives | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/store.rs` |
 | Repo copy of the reference, regenerated at bundle time | `app/scripts/gen-cli-docs.mjs` |
 | Build scripts (`cli`, `cli:install`, `docs:cli`) | `app/package.json` |

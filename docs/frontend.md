@@ -13,7 +13,7 @@ this page is the structure.
 | App menu (⌘T / ⌘W and friends) | `app/src-tauri/src/menu.rs` |
 | Per-subject layout (underline tabs) | `app/src/layouts/SubjectLayout.tsx` |
 | Subject tab pages | `app/src/pages/subject/` |
-| Chat (agent loop, streamed) | `app/src/pages/ChatPage.tsx`, `app/src/stores/chatStore.ts` |
+| Chat (a CLI agent's thread list, timeline, composer) | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/harnessStore.ts`, `app/src/lib/harness.ts` |
 | Calendar (month / week / upcoming) | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/`, `app/src/lib/calendar.ts` |
 | Provider/model pickers (settings + composer) | `app/src/components/llm/` |
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
@@ -55,6 +55,11 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   (mounted once in `App.tsx`) listens for scrape/parse/auth Tauri events,
   upserts SQLite through `app/src/lib/db.ts`, and updates the stores. Pages
   read from the DB and stores; they do not talk to the scraper directly.
+  The exception is `harness-event`: its rows are already written by Rust,
+  so the hook only hands it to `harnessStore`, which keeps the streaming
+  text and patches tool rows — see [harness.md](./harness.md). It is
+  app-level rather than page-level because a thread keeps running on
+  another page and the sidebar's Chat row spins while one does.
 - In the app it is the **frontend** that owns scrape-table writes (the Rust
   engine only emits events); the CLI writes the same rows itself via
   `app/src-tauri/src/store.rs`. Change a table's shape and both writers must
@@ -98,7 +103,15 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
 - `ChatPage` renders **one** composer in one of two places: centred under the
   hero while the chat is empty, docked at the bottom once there is a
   transcript. It is a single element moved between branches, not two, so the
-  textarea keeps its ref, focus and draft text across the switch.
+  textarea keeps its ref, focus and draft text across the switch. Its
+  controls are `app/src/components/harness/ModelPicker.tsx` — agent, model and
+  reasoning level in a single trigger, with the vendor marks from
+  `ProviderMark.tsx` beside them — and `SubjectSelect.tsx`, which scopes the
+  thread to one subject or leaves it library-wide. `@` in the textarea opens a
+  file menu narrowed to that subject and writes the picked file's library path
+  into the message; nothing is read or attached in the frontend. See
+  [harness.md](./harness.md#the-model-picker) and
+  [subject scope and `@`](./harness.md#subject-scope-and-).
 - Files and lectures open in the **peek panel** (`peekStore` +
   `app/src/components/peek/PeekPanel.tsx`); "expand" navigates to the
   full-page route. The top tab strip is `tabStore` +
