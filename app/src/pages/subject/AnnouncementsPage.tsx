@@ -27,7 +27,7 @@ export default function SubjectAnnouncementsPage() {
 
   if (loading && announcements.length === 0) {
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="page-scroll">
         <div className="mx-auto max-w-5xl px-6 py-6 space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full" />
@@ -47,7 +47,7 @@ export default function SubjectAnnouncementsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-5">
         <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">
           {announcements.map((f) => {

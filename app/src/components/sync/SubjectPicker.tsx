@@ -58,11 +58,11 @@ export function SubjectPicker({
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
-          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+          className="h-7 gap-1.5 px-3 text-xs font-normal text-foreground"
         >
-          <BookOpen size={13} />
+          <BookOpen size={13} className="text-muted-foreground" />
           {selectedIds.size > 0
             ? `${selectedIds.size} subject${selectedIds.size === 1 ? "" : "s"}`
             : "No subjects"}
@@ -71,8 +71,8 @@ export function SubjectPicker({
       </PopoverTrigger>
 
       <PopoverContent side="bottom" align="start" className="w-80 p-0">
-        <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+        <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
+          <p className="font-display text-[13px] font-semibold text-foreground">
             Subjects to sync
           </p>
           <Button
@@ -80,7 +80,7 @@ export function SubjectPicker({
             size="sm"
             onClick={onRefetch}
             disabled={refetching || !canRefetch}
-            className="h-6 -mr-1 text-[11px] text-muted-foreground hover:text-foreground"
+            className="h-6 -mr-1.5 text-[11px] text-muted-foreground hover:text-foreground"
           >
             {refetching ? (
               <>
@@ -94,7 +94,7 @@ export function SubjectPicker({
           </Button>
         </div>
 
-        <div className="max-h-96 overflow-y-auto px-2 pb-2">
+        <div className="max-h-96 overflow-y-auto p-2">
           {subjects.length === 0 ? (
             <div className="py-6 text-center">
               <BookOpen size={24} className="text-muted-foreground/40 mx-auto mb-2" />

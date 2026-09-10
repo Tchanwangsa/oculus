@@ -113,7 +113,7 @@ export default function SubjectDiscussionPage() {
 
   if (loading && threads.length === 0) {
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="page-scroll">
         <div className="mx-auto max-w-5xl px-6 py-6 space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full" />
@@ -137,7 +137,7 @@ export default function SubjectDiscussionPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-5">
         <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">
           {threads.map((f) => {
@@ -176,7 +176,7 @@ export default function SubjectDiscussionPage() {
                 <span className="shrink-0 w-12 text-right text-[11px] text-muted-foreground">
                   {meta?.posted ? fmtDay(meta.posted) : ""}
                 </span>
-                <span className="shrink-0 w-10 text-right text-[11px] text-muted-foreground font-mono">
+                <span className="shrink-0 w-10 text-right text-[11px] text-muted-foreground tabular-nums">
                   {number ? `#${Number(number)}` : ""}
                 </span>
                 <span className="shrink-0 w-13 flex items-center justify-end">

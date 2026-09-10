@@ -12,7 +12,7 @@ const badgeVariants = cva(
       // tint of its colour rather than a solid fill. Solid badges would compete
       // with the primary buttons sitting next to them in the same header.
       variant: {
-        default: "border-primary/20 bg-primary/15 text-primary",
+        default: "border-brand/25 bg-brand-muted text-brand",
         secondary:
           "border-border bg-secondary text-muted-foreground [a&]:hover:bg-secondary/90",
         destructive:
@@ -22,7 +22,7 @@ const badgeVariants = cva(
         outline:
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 [a&]:hover:underline",
+        link: "text-brand underline-offset-4 [a&]:hover:underline",
       },
     },
     defaultVariants: {

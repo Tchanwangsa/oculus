@@ -50,7 +50,7 @@ export function AgendaView({
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll">
       <div className="mx-auto max-w-3xl px-6 py-5 space-y-5">
         {days.map(({ day, items }) => (
           <section key={day.toDateString()}>

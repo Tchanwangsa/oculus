@@ -21,7 +21,7 @@ export function SubjectRow({
     <button
       onClick={onToggle}
       className={cn(
-        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border text-left transition-colors cursor-pointer",
+        "w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg border text-left transition-colors cursor-pointer",
         checked
           ? "bg-primary/5 border-primary/20"
           : "bg-surface border-border hover:border-border/80",
@@ -34,14 +34,14 @@ export function SubjectRow({
         checked={checked}
         tabIndex={-1}
         aria-hidden
-        className="pointer-events-none shrink-0"
+        className="pointer-events-none shrink-0 size-3.5 [&_svg]:size-2.5"
       />
       <SubjectIcon code={subject.code} size={14} />
       <div className="min-w-0 flex-1">
         <p className="text-xs font-medium text-foreground truncate">
           {displayName(subject.name, subject.code)}
         </p>
-        <p className="text-[11px] text-muted-foreground truncate">
+        <p className="text-[10px] text-muted-foreground truncate">
           {displayCode(subject.code)} · {fmtSynced(subject.last_synced_at)}
         </p>
       </div>

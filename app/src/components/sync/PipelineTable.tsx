@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { CaretDown, CaretRight, FilePdf, Play } from "@phosphor-icons/react";
+import { useMemo, useState } from "react";
+import { CaretRight, FilePdf, Play } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  TablePagination,
+  usePagedRows,
+} from "@/components/ui/TablePagination";
 import { fmtAgo, fmtClock } from "@/lib/format";
 import {
-  isComplete,
   statusOf,
   type PipelineItem,
   type PipelinePhase,
@@ -21,8 +24,8 @@ import {
  * The full ingest ledger: one row per PDF, walking Download → Fast parse →
  * Quality parse → Embed. A row shows the stage dots and, for whatever is
  * running, a single percentage; clicking it expands a timeline of when each
- * step finished. Completed rows drop into a collapsed group at the bottom so
- * the live work stays on top.
+ * step finished. Rows are ranked so live work sits on page one and finished
+ * files fall to the back of the pages.
  */
 
 const STAGES = [
@@ -35,7 +38,7 @@ const STAGES = [
 const DOT: Record<StageState, string> = {
   pending: "bg-muted-foreground/25",
   queued: "bg-warning",
-  active: "bg-primary animate-pulse",
+  active: "bg-brand animate-pulse",
   done: "bg-success",
   error: "bg-destructive",
 };
@@ -61,7 +64,7 @@ const BADGE_VARIANT: Record<
 
 /** Column template shared by the header and every row. */
 const COLS =
-  "grid grid-cols-[minmax(0,1fr)_100px_118px_80px_minmax(120px,160px)] items-center gap-4 px-4";
+  "grid grid-cols-[minmax(0,1fr)_100px_118px_80px_minmax(120px,160px)] items-center gap-4 px-5";
 
 function StageDots({ item }: { item: PipelineItem }) {
   return (
@@ -140,7 +143,7 @@ function timelineSteps(item: PipelineItem): TimelineStep[] {
 function Timeline({ item }: { item: PipelineItem }) {
   const steps = timelineSteps(item);
   return (
-    <div className="px-4 pb-3 pt-1 bg-surface/50">
+    <div className="px-9 pb-3 pt-1">
       <div className="ml-[3px]">
         {steps.map((step, i) => {
           const last = i === steps.length - 1;
@@ -295,6 +298,10 @@ function byActivity(a: PipelineItem, b: PipelineItem): number {
   return b.updatedAt - a.updatedAt;
 }
 
+/** Files per page. The ledger runs to hundreds of PDFs, and every row here
+ *  is live — capping what renders keeps the stage dots cheap to animate. */
+const PAGE_SIZE = 50;
+
 export function PipelineTable({
   items,
   onResume,
@@ -302,7 +309,6 @@ export function PipelineTable({
   items: PipelineItem[];
   onResume?: (item: PipelineItem) => void;
 }) {
-  const [doneExpanded, setDoneExpanded] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const toggle = (path: string) =>
@@ -312,66 +318,59 @@ export function PipelineTable({
       return next;
     });
 
-  const open = items.filter((it) => !isComplete(it)).sort(byActivity);
-  const done = items
-    .filter(isComplete)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
-
-  const renderRow = (it: PipelineItem) => (
-    <Row
-      key={it.relativePath}
-      item={it}
-      expanded={expanded.has(it.relativePath)}
-      onToggle={() => toggle(it.relativePath)}
-      onResume={onResume}
-    />
-  );
+  // One list, ranked: running work first, finished rows last. Paging replaces
+  // the old collapsed "Completed" group — live work is on page one either way,
+  // and the footer says how much is behind it.
+  const sorted = useMemo(() => [...items].sort(byActivity), [items]);
+  const { page, pageCount, setPage, pageRows } = usePagedRows(sorted, PAGE_SIZE);
 
   return (
-    <div className="rounded-lg border border-border-subtle overflow-hidden">
-      <div className={cn(COLS, "py-2 border-b border-border-subtle bg-surface")}>
-        {["File", "Subject", "Stages", "Updated", "Status"].map((h, i) => (
-          <span
-            key={h}
-            className={cn(
-              "text-[11px] font-medium text-muted-foreground uppercase tracking-wider",
-              i === 4 && "justify-self-end",
-            )}
-          >
-            {h}
-          </span>
-        ))}
+    <div className="flex h-full flex-col">
+      {/* Header outside the scroller, gutter re-created by hand — see the note
+          in `SyncHistoryTable`. */}
+      <div className="shrink-0 pr-1.5">
+        <div className={cn(COLS, "border-b border-border-subtle bg-card py-2")}>
+          {["File", "Subject", "Stages", "Updated", "Status"].map((h, i) => (
+            <span
+              key={h}
+              className={cn(
+                "text-[11px] font-medium text-muted-foreground",
+                i === 4 && "justify-self-end",
+              )}
+            >
+              {h}
+            </span>
+          ))}
+        </div>
       </div>
 
-      {open.length === 0 && done.length === 0 && (
-        <p className="px-4 py-10 text-center text-xs text-muted-foreground">
-          Nothing in the pipeline — run a sync to pull new files.
-        </p>
-      )}
+      <div className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
+        {sorted.length === 0 && (
+          <p className="px-5 py-16 text-center text-xs text-muted-foreground">
+            Nothing in the pipeline — run a sync to pull new files.
+          </p>
+        )}
 
-      <div className="divide-y divide-border-subtle">{open.map(renderRow)}</div>
+        <div className="divide-y divide-border-subtle">
+          {pageRows.map((it) => (
+            <Row
+              key={it.relativePath}
+              item={it}
+              expanded={expanded.has(it.relativePath)}
+              onToggle={() => toggle(it.relativePath)}
+              onResume={onResume}
+            />
+          ))}
+        </div>
+      </div>
 
-      {done.length > 0 && (
-        <>
-          <button
-            type="button"
-            onClick={() => setDoneExpanded((v) => !v)}
-            className={cn(
-              "w-full flex items-center gap-1.5 px-4 py-2 text-[11px] font-medium text-muted-foreground",
-              "uppercase tracking-wider hover:text-foreground transition-colors cursor-pointer",
-              "border-t border-border-subtle bg-surface",
-            )}
-          >
-            {doneExpanded ? <CaretDown size={11} /> : <CaretRight size={11} />}
-            Completed ({done.length})
-          </button>
-          {doneExpanded && (
-            <div className="divide-y divide-border-subtle border-t border-border-subtle">
-              {done.map(renderRow)}
-            </div>
-          )}
-        </>
-      )}
+      <TablePagination
+        page={page}
+        pageCount={pageCount}
+        onPage={setPage}
+        total={sorted.length}
+        unit="file"
+      />
     </div>
   );
 }

@@ -12,13 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ViewTabs } from "@/components/ui/ViewTabs";
 import {
   Tooltip,
   TooltipContent,
@@ -62,6 +56,14 @@ const PHASE_LABEL: Record<string, string> = {
 
 type ActivityView = "history" | "pipeline";
 const VIEW_KEY = "oculus-sync-view";
+
+/** The page's two tables, as sibling tabs rather than a dropdown — both are
+ *  always there, and which one you are looking at should be visible without
+ *  opening anything. */
+const VIEWS = [
+  { value: "history", label: "Sync History" },
+  { value: "pipeline", label: "Parse Activity" },
+] as const satisfies ReadonlyArray<{ value: ActivityView; label: string }>;
 
 export default function SyncPage() {
   const { status: authStatus, connect } = useAuth();
@@ -354,169 +356,168 @@ export default function SyncPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* ── Header: activity view switcher + per-view actions ────────────── */}
-      <div className="shrink-0 flex items-center gap-2 px-6 pt-5 pb-3">
-        <Select value={view} onValueChange={(v) => setView(v as ActivityView)}>
-          <SelectTrigger
-            size="sm"
-            className="h-7 -ml-2 gap-1.5 border-0 bg-transparent shadow-none px-2 text-[13px] font-medium text-foreground hover:bg-surface dark:bg-transparent dark:hover:bg-surface"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="history">Sync History</SelectItem>
-            <SelectItem value="pipeline">Parse Activity</SelectItem>
-          </SelectContent>
-        </Select>
-
-        {view === "pipeline" && (
-          <div className="flex items-center gap-1.5 ml-1">
-            {counts.active > 0 && (
-              <Badge className="text-[11px]">{counts.active} running</Badge>
-            )}
-            {counts.waiting > 0 && (
-              <Badge variant="secondary" className="text-[11px]">
-                {counts.waiting} waiting
-              </Badge>
-            )}
-            {counts.paused > 0 && (
-              <Badge variant="warning" className="text-[11px]">
-                {counts.paused} paused
-              </Badge>
-            )}
-            {counts.failed > 0 && (
-              <Badge variant="destructive" className="text-[11px]">
-                {counts.failed} failed
-              </Badge>
-            )}
-            {counts.done > 0 && (
-              <Badge variant="success" className="text-[11px]">
-                {counts.done} done
-              </Badge>
-            )}
-          </div>
-        )}
-
-        <div className="ml-auto flex items-center gap-1">
-          {view === "pipeline" && counts.paused > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={resumeAll}
-              className="h-7 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <Play size={13} /> Resume all ({counts.paused})
-            </Button>
-          )}
-          {view === "pipeline" && finishedCount > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearFinished}
-              className="h-7 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <Broom size={13} /> Clear finished
-            </Button>
-          )}
-        </div>
+      {/* ── Tabs alone on the rule the active tab underlines. Both views
+          render the same strip, so switching can't shift anything below. ── */}
+      <div className="shrink-0 flex items-end border-b border-border-subtle px-5 pt-4">
+        <ViewTabs tabs={VIEWS} value={view} onChange={(v) => setView(v)} />
       </div>
 
-      {/* ── Sync controls: subjects + status + run, above the table ──────── */}
-      {view === "history" && (
-        <div className="shrink-0 flex items-center gap-3 px-6 pb-3">
-          <SubjectPicker
-            subjects={subjects}
-            selectedIds={selectedIds}
-            onToggle={toggleSubject}
-            onRefetch={handleRefetchSubjects}
-            refetching={loadingSubjects}
-            canRefetch={authStatus === "connected"}
-          />
-
-          <span className="flex-1" />
-
-          {scraping && progress ? (
-            <div className="flex items-center gap-2.5 min-w-0">
-              <span className="text-[11px] text-muted-foreground truncate max-w-64">
-                {progress.course
-                  ? `${progress.course}${phase && progress.phase !== "complete" ? ` — ${phase}` : ""}`
-                  : "Starting…"}
-              </span>
-              <Progress
-                value={progress.total ? (progress.done / progress.total) * 100 : 0}
-                className="h-1 w-24"
-              />
-              <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
-                {progress.done}/{progress.total}
-              </span>
-            </div>
-          ) : (
-            <span className="text-[11px] text-muted-foreground shrink-0">
-              Last synced{" "}
-              {lastCompleted ? fmtAgo(sqliteUtcToMs(lastCompleted.finished_at)) : "never"}
-            </span>
-          )}
-
-          <SyncSettings />
-
-          {scraping ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleCancel}
-              className="h-7 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
-            >
-              <XCircle size={13} /> Cancel
-            </Button>
-          ) : needsAuth || selectedIds.size === 0 ? (
-            <Tooltip>
-              {/* span wrapper: a disabled button swallows pointer events, so
-                  the tooltip must hang off something that still gets them. */}
-              <TooltipTrigger asChild>
-                <span className="shrink-0">
-                  <Button
-                    size="sm"
-                    className={cn("h-7", needsAuth && "opacity-50")}
-                    onClick={handleSyncClick}
-                    disabled={selectedIds.size === 0}
-                  >
-                    Sync now
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {needsAuth
-                  ? authStatus === "expired"
-                    ? "Canvas session expired — click to sign in again"
-                    : "Not connected to Canvas — click to sign in"
-                  : "Select at least one subject first"}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <Button size="sm" className="h-7 shrink-0" onClick={handleSyncClick}>
-              Sync now
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* ── Body: the selected table ─────────────────────────────────────── */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-5">
+      {/* ── Toolbar: what the view is scoped to on the left, how it's going
+          and what you can do about it on the right. Fixed height, because a
+          row that measured its contents jumped between the two views. ── */}
+      <div className="shrink-0 flex h-12 items-center gap-2 px-5">
         {view === "history" ? (
-          <SyncHistoryTable runs={runs} progress={progress} />
+          <>
+            <SubjectPicker
+              subjects={subjects}
+              selectedIds={selectedIds}
+              onToggle={toggleSubject}
+              onRefetch={handleRefetchSubjects}
+              refetching={loadingSubjects}
+              canRefetch={authStatus === "connected"}
+            />
+
+            <SyncSettings />
+
+            <span className="flex-1" />
+
+            {scraping && progress ? (
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="text-[11px] text-muted-foreground truncate max-w-64">
+                  {progress.course
+                    ? `${progress.course}${phase && progress.phase !== "complete" ? ` — ${phase}` : ""}`
+                    : "Starting…"}
+                </span>
+                <Progress
+                  value={progress.total ? (progress.done / progress.total) * 100 : 0}
+                  className="h-1 w-24"
+                />
+                <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
+                  {progress.done}/{progress.total}
+                </span>
+              </div>
+            ) : (
+              <span className="text-[11px] text-muted-foreground shrink-0">
+                Last synced{" "}
+                {lastCompleted ? fmtAgo(sqliteUtcToMs(lastCompleted.finished_at)) : "never"}
+              </span>
+            )}
+
+            {scraping ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCancel}
+                className="h-7 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30"
+              >
+                <XCircle size={13} /> Cancel
+              </Button>
+            ) : needsAuth || selectedIds.size === 0 ? (
+              <Tooltip>
+                {/* span wrapper: a disabled button swallows pointer events, so
+                    the tooltip must hang off something that still gets them. */}
+                <TooltipTrigger asChild>
+                  <span className="shrink-0">
+                    <Button
+                      size="sm"
+                      className={cn("h-7", needsAuth && "opacity-50")}
+                      onClick={handleSyncClick}
+                      disabled={selectedIds.size === 0}
+                    >
+                      Sync now
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {needsAuth
+                    ? authStatus === "expired"
+                      ? "Canvas session expired — click to sign in again"
+                      : "Not connected to Canvas — click to sign in"
+                    : "Select at least one subject first"}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Button size="sm" className="h-7 shrink-0" onClick={handleSyncClick}>
+                Sync now
+              </Button>
+            )}
+          </>
         ) : (
-          <PipelineTable items={items} onResume={resumeItem} />
+          <>
+            <div className="flex items-center gap-1.5">
+              {counts.active > 0 && (
+                <Badge className="text-[11px]">{counts.active} running</Badge>
+              )}
+              {counts.waiting > 0 && (
+                <Badge variant="secondary" className="text-[11px]">
+                  {counts.waiting} waiting
+                </Badge>
+              )}
+              {counts.paused > 0 && (
+                <Badge variant="warning" className="text-[11px]">
+                  {counts.paused} paused
+                </Badge>
+              )}
+              {counts.failed > 0 && (
+                <Badge variant="destructive" className="text-[11px]">
+                  {counts.failed} failed
+                </Badge>
+              )}
+              {counts.done > 0 && (
+                <Badge variant="success" className="text-[11px]">
+                  {counts.done} done
+                </Badge>
+              )}
+              {items.length === 0 && (
+                <span className="text-[11px] text-muted-foreground">
+                  Nothing parsed yet
+                </span>
+              )}
+            </div>
+
+            <span className="flex-1" />
+
+            {counts.paused > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resumeAll}
+                className="h-7 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <Play size={13} /> Resume all ({counts.paused})
+              </Button>
+            )}
+            {finishedCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearFinished}
+                className="h-7 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <Broom size={13} /> Clear finished
+              </Button>
+            )}
+          </>
         )}
       </div>
 
       {subjectsError && (
-        <div className="shrink-0 px-6 pb-3">
+        <div className="shrink-0 px-5 pb-2.5">
           <Alert variant="destructive" className="px-3 py-2.5">
             <WarningCircle />
             <AlertDescription className="text-xs">{subjectsError}</AlertDescription>
           </Alert>
         </div>
       )}
+
+      {/* ── Body: the table runs edge to edge, its own header and footer ─── */}
+      <div className="flex-1 min-h-0">
+        {view === "history" ? (
+          <SyncHistoryTable runs={runs} progress={progress} />
+        ) : (
+          <PipelineTable items={items} onResume={resumeItem} />
+        )}
+      </div>
     </div>
   );
 }

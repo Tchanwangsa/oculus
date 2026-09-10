@@ -103,7 +103,7 @@ export default function SubjectDownloadsPage() {
 
   if (loading && downloads.length === 0) {
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="page-scroll">
         <div className="mx-auto max-w-5xl px-6 py-6 space-y-2">
           {Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full" />
@@ -130,7 +130,7 @@ export default function SubjectDownloadsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-5">
         {rescrapeError && (
           <Alert variant="destructive" className="mb-3 w-auto px-2.5 py-2">

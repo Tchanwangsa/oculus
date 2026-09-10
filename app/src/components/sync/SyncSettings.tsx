@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { GearSix } from "@phosphor-icons/react";
+import { SlidersHorizontal } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -25,9 +25,10 @@ const OPTION_ROWS: Array<{ key: keyof SyncOptions; label: string; hint: string }
 ];
 
 /**
- * The gear next to "Sync now": which content categories a sync fetches.
+ * The control next to "Sync now": which content categories a sync fetches.
  * Persisted in settings, read by `triggerSync` at the start of every run —
- * manual and scheduled alike.
+ * manual and scheduled alike. The trigger carries the enabled count so the
+ * toolbar says how much a sync will pull without being opened.
  */
 export function SyncSettings() {
   const [options, setOptions] = useState<SyncOptions>(DEFAULT_SYNC_OPTIONS);
@@ -36,47 +37,85 @@ export function SyncSettings() {
     getSyncOptions().then(setOptions).catch(console.error);
   }, []);
 
-  const toggle = (key: keyof SyncOptions, on: boolean) => {
-    const next = { ...options, [key]: on };
+  const save = (next: SyncOptions) => {
     setOptions(next);
     setSyncOptions(next).catch(console.error);
   };
+
+  const toggle = (key: keyof SyncOptions, on: boolean) =>
+    save({ ...options, [key]: on });
+
+  const setAll = (on: boolean) =>
+    save(
+      OPTION_ROWS.reduce(
+        (acc, { key }) => ({ ...acc, [key]: on }),
+        { ...options },
+      ),
+    );
+
+  const enabled = OPTION_ROWS.filter(({ key }) => options[key]).length;
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Sync settings"
-          className="text-muted-foreground/60 hover:text-foreground"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 px-3 text-xs font-normal text-foreground"
         >
-          <GearSix size={13} />
+          <SlidersHorizontal size={13} className="text-muted-foreground" />
+          View settings
+          <span className="text-muted-foreground/70 tabular-nums">({enabled})</span>
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent side="bottom" align="end" className="w-64 p-0">
-        <p className="px-3 pt-2.5 pb-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+      <PopoverContent side="bottom" align="start" className="w-64 p-0">
+        <p className="border-b border-border-subtle px-3 py-2.5 font-display text-[13px] font-semibold text-foreground">
           What to sync
         </p>
-        <div className="px-1 pb-2">
+
+        <div className="p-1.5">
           {OPTION_ROWS.map(({ key, label, hint }) => (
             <Label
               key={key}
-              className="flex items-center gap-2.5 rounded-md px-2 py-1.5 cursor-pointer hover:bg-surface"
+              className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 cursor-pointer hover:bg-accent"
             >
               <Checkbox
                 checked={options[key]}
                 onCheckedChange={(v) => toggle(key, v === true)}
+                className="size-3.5 [&_svg]:size-2.5"
               />
               <span className="flex-1 min-w-0">
                 <span className="block text-xs text-foreground">{label}</span>
-                <span className="block text-[11px] font-normal text-muted-foreground">
+                <span className="block text-[10px] font-normal text-muted-foreground">
                   {hint}
                 </span>
               </span>
             </Label>
           ))}
+        </div>
+
+        {/* Both actions always render — hiding one would resize the popover
+            as you tick boxes. Disabled is the "nothing to do" state. */}
+        <div className="flex items-center justify-between border-t border-border-subtle px-1.5 py-1.5">
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => setAll(true)}
+            disabled={enabled === OPTION_ROWS.length}
+            className="text-[11px] font-normal text-muted-foreground hover:text-foreground"
+          >
+            Select all
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => setAll(false)}
+            disabled={enabled === 0}
+            className="text-[11px] font-normal text-muted-foreground hover:text-foreground"
+          >
+            Clear all
+          </Button>
         </div>
       </PopoverContent>
     </Popover>

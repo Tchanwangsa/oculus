@@ -132,7 +132,7 @@ function ColorSwatch({
       className={cn(
         "h-[18px] w-[18px] rounded-full transition-shadow",
         selected
-          ? "ring-2 ring-primary ring-offset-2 ring-offset-popover"
+          ? "ring-2 ring-brand ring-offset-2 ring-offset-popover"
           : "hover:ring-2 hover:ring-border hover:ring-offset-2 hover:ring-offset-popover",
       )}
       style={{ backgroundColor: color }}

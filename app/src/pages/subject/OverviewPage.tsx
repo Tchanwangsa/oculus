@@ -59,7 +59,7 @@ export default function SubjectOverviewPage() {
 
   if (filesLoading && files.length === 0) {
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="page-scroll">
         <div className="mx-auto max-w-5xl px-6 py-6 space-y-3">
           <Skeleton className="h-24 w-full" />
           <Skeleton className="h-24 w-full" />
@@ -71,7 +71,7 @@ export default function SubjectOverviewPage() {
   const nothingSynced = files.length === 0 && (lectures?.length ?? 0) === 0;
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-6 space-y-8">
         {nothingSynced && <EmptyState />}
 
@@ -321,7 +321,7 @@ function MoreLink({ to, label }: { to: string; label: string }) {
   return (
     <Link
       to={to}
-      className="mt-2 inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+      className="mt-2 inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
     >
       {label}
       <ArrowRight size={10} />

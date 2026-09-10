@@ -87,17 +87,46 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
 
 # UI conventions
 
-The design direction is Linear-style: white/muted-grey palette, muted indigo
-`#5e6ad2` accent, Inter Variable, Notion-style layout (sidebar subjects →
-per-subject underline tabs, peek panel for files, top tab strip).
+The design direction is quiet and neutral: a dead-grey white palette (no warm
+or blue cast in the greys — anything else fights the accent), muted indigo
+`#5e6ad2` as the one colour, **Manrope for headings / Inter for everything
+else**, and Notion-style layout (sidebar subjects → per-subject underline tabs,
+peek panel for files, top tab strip).
 
+- **The shell frames a floating document.** The window ground is
+  `background`; the sidebar and tab strip sit directly on it with no fill or
+  divider of their own, and content is an inset rounded `card` with a hairline
+  border (`app/src/layouts/AppLayout.tsx`). Tabs are pills on that ground, not
+  browser tabs merging into the page. A sidebar divider or a rule under the
+  tab strip breaks the effect — the card's border is the separation.
+- **Buttons and chips are pills** (`rounded-full` in
+  `app/src/components/ui/button.tsx`); rectangles are for segmented toolbars
+  that override the radius at the call site.
+- **Monospace is for code, and nothing else.** Timestamps, durations, counts,
+  IDs, keys and badges all take the body font — reach for `tabular-nums` when
+  digits need to hold a column, which is what mono was standing in for. The
+  only `font-mono` in the app is `app/src/components/markdown/MdComponents.tsx`
+  (code blocks and inline code); keep it that way.
+- Headings are Manrope via an `h1–h4` rule in `@layer base`, so most pick it
+  up with no markup change; a title that isn't a heading element takes the
+  `font-display` utility.
 - Components are **shadcn/ui** — source in `app/src/components/ui`, config in
   `app/components.json`, primitives from the unified `radix-ui` package. Add
   with `bunx shadcn@latest add <name>`, then swap the generated `lucide-react`
   imports for `@phosphor-icons/react`.
 - All colors go through the semantic tokens in `app/src/index.css` (light +
-  `.dark` class). Trap: in shadcn's vocabulary `accent` is the quiet hover
-  surface, **not** the brand colour — the brand indigo is `primary`.
+  `.dark` class). Two traps: in shadcn's vocabulary `accent` is the quiet
+  hover surface, **not** the brand colour; and the indigo has two tokens —
+  `primary` is the *fill* (buttons, active underline, today's date) while
+  `brand` is the same colour as an *accent* (links, selection, in-flight
+  progress, new-item chips). They are split so the accent can be retuned
+  without restyling every button; use the one that matches the meaning.
+- **Every base reset in `index.css` belongs inside `@layer base`.** Unlayered
+  CSS outranks every layer, so a bare `*, ::before, ::after { border-color }`
+  rule silently beat *all* `border-<colour>` utilities app-wide — active tab
+  underlines, destructive button outlines and selected-row borders all
+  painted plain grey with the class present in the DOM and dead in the
+  cascade. In `@layer base` it stays the default and utilities win again.
 - Dark mode is a `.dark` class on `<html>` driven by `app/src/lib/theme.ts`;
   `index.css` declares `@custom-variant dark` so `dark:` follows the class,
   not the OS.

@@ -130,7 +130,7 @@ export function EventPopover({
                 to={`/subjects/${event.subjectId}/lecture?id=${encodeURIComponent(
                   event.lectureId,
                 )}&t=${encodeURIComponent(event.title)}`}
-                className="inline-flex items-center gap-1.5 text-[11px] text-primary hover:underline"
+                className="inline-flex items-center gap-1.5 text-[11px] text-brand hover:underline"
               >
                 <Play size={11} weight="fill" /> Open recording
               </Link>
@@ -140,7 +140,7 @@ export function EventPopover({
                 href={event.url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-[11px] text-primary hover:underline"
+                className="inline-flex items-center gap-1.5 text-[11px] text-brand hover:underline"
               >
                 <ArrowSquareOut size={11} /> Open in Canvas
               </a>

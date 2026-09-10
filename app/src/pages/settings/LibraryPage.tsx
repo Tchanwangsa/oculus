@@ -243,12 +243,12 @@ export default function SettingsLibraryPage() {
                 void persist({ ...latestSettings.current, backend: value as ParseBackend })
               }
             >
-              <SelectTrigger aria-label="Quality parser backend" size="sm" className="w-48">
+              <SelectTrigger aria-label="Quality parser backend" size="sm" className="h-7 w-48 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {(Object.keys(BACKEND_LABELS) as ParseBackend[]).map((backend) => (
-                  <SelectItem key={backend} value={backend}>
+                  <SelectItem key={backend} value={backend} className="text-xs">
                     {BACKEND_LABELS[backend]}
                   </SelectItem>
                 ))}
@@ -275,7 +275,7 @@ export default function SettingsLibraryPage() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter") event.currentTarget.blur();
                 }}
-                className="h-8 w-20 text-right tabular-nums"
+                className="h-7 w-20 text-xs text-right tabular-nums"
               />
               <span className="w-5 text-xs text-muted-foreground">GB</span>
             </div>
@@ -292,7 +292,7 @@ export default function SettingsLibraryPage() {
               {hasToken && !tokenExpired ? (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-success">Connected</span>
-                  <Button variant="outline" size="sm" onClick={() => void deleteToken()}>
+                  <Button variant="outline" size="xs" onClick={() => void deleteToken()}>
                     Remove
                   </Button>
                 </div>
@@ -309,10 +309,10 @@ export default function SettingsLibraryPage() {
                       if (event.key === "Enter") void saveToken();
                     }}
                     placeholder={tokenExpired ? "Paste new token" : "Paste token"}
-                    className="h-8 w-44"
+                    className="h-7 w-44 text-xs"
                   />
                   <Button
-                    size="sm"
+                    size="xs"
                     disabled={!token.trim() || checkingToken}
                     onClick={() => void saveToken()}
                   >
@@ -383,7 +383,7 @@ export default function SettingsLibraryPage() {
                   sidecarDown
                     ? "bg-destructive"
                     : sidecar?.quality_current || sidecar?.cloud_current.length
-                      ? "bg-primary animate-pulse"
+                      ? "bg-brand animate-pulse"
                       : sidecar
                         ? "bg-success"
                         : "bg-muted-foreground/40",

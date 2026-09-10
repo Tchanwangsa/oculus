@@ -27,6 +27,10 @@ import {
   sqliteUtcToMs,
 } from "@/lib/format";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
+import {
+  TablePagination,
+  usePagedRows,
+} from "@/components/ui/TablePagination";
 import type { SyncProgress } from "@/stores/syncStore";
 
 /**
@@ -48,8 +52,11 @@ const ACTION_VARIANT: Record<SyncFileAction, "success" | "default" | "secondary"
 };
 
 /** Column template shared by the header and every row. */
+// The run name is a fixed-length string ("Manual run at 9 Sep, 16:59"), so it
+// gets a fixed column rather than the leftover space — the file counts are the
+// column that actually has something to say, and they take the slack instead.
 const COLS =
-  "grid grid-cols-[16px_minmax(0,1fr)_90px_80px_minmax(150px,220px)_100px] items-center gap-3 px-4";
+  "grid grid-cols-[14px_200px_90px_80px_minmax(0,1fr)_100px] items-center gap-3 px-5";
 
 const INLINE_FILE_LIMIT = 8;
 
@@ -120,7 +127,7 @@ function FileCounts({ run }: { run: SyncRunSummary }) {
   }
   const parts: Array<{ n: number; label: string; cls: string }> = [
     { n: run.new_count, label: "downloaded", cls: "text-success" },
-    { n: run.updated_count, label: "updated", cls: "text-primary" },
+    { n: run.updated_count, label: "updated", cls: "text-brand" },
     { n: run.unchanged_count, label: "skipped", cls: "text-muted-foreground" },
   ];
   return (
@@ -168,7 +175,7 @@ function RunFilesDialog({
         <div className="max-h-[55vh] overflow-y-auto -mx-1 px-1">
           {groups.map((g) => (
             <div key={g.action} className="mb-3 last:mb-0">
-              <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider py-1.5 sticky top-0 bg-background">
+              <p className="text-[11px] font-medium text-muted-foreground py-1.5 sticky top-0 bg-background">
                 {ACTION_LABEL[g.action]} ({g.files.length})
               </p>
               <div className="divide-y divide-border-subtle">
@@ -202,7 +209,7 @@ function RunDetail({ run }: { run: SyncRunSummary }) {
   }, [run.id, run.file_count, run.status]);
 
   if (files === null) {
-    return <div className="px-11 py-3 text-xs text-muted-foreground bg-surface/50">Loading…</div>;
+    return <div className="px-12 py-3 text-xs text-muted-foreground">Loading…</div>;
   }
 
   const changed = files.filter((f) => f.action !== "unchanged");
@@ -210,7 +217,7 @@ function RunDetail({ run }: { run: SyncRunSummary }) {
   const skipped = run.unchanged_count;
 
   return (
-    <div className="px-11 pb-3 pt-1 bg-surface/50">
+    <div className="px-12 pb-3 pt-1">
       {run.error && (
         <p className="text-xs text-destructive py-1.5">{run.error}</p>
       )}
@@ -374,6 +381,10 @@ function groupByDay(runs: SyncRunSummary[]) {
   return groups;
 }
 
+/** Runs per page. Enough that a normal week fits on page one, few enough
+ *  that the day groups stay scannable. */
+const PAGE_SIZE = 25;
+
 export function SyncHistoryTable({
   runs,
   progress,
@@ -383,6 +394,7 @@ export function SyncHistoryTable({
 }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
+  const { page, pageCount, setPage, pageRows } = usePagedRows(runs, PAGE_SIZE);
 
   const toggle = (id: number) =>
     setExpanded((prev) => {
@@ -399,76 +411,96 @@ export function SyncHistoryTable({
     });
 
   return (
-    <div className="rounded-lg border border-border-subtle overflow-hidden">
-      <div className={cn(COLS, "py-2 border-b border-border-subtle bg-surface")}>
-        <span />
-        {["Started", "Duration", "Subjects", "Files", "Status"].map((h, i) => (
-          <span
-            key={h}
-            className={cn(
-              "text-[11px] font-medium text-muted-foreground uppercase tracking-wider",
-              i === 4 && "justify-self-end",
-            )}
-          >
-            {h}
-          </span>
-        ))}
+    <div className="flex h-full flex-col">
+      {/* The header sits OUTSIDE the scroll container, not sticky inside it:
+          the scrollbar is a 6px classic bar that takes its gutter from the
+          scroller's full height, so a header within it gets a bar drawn down
+          its right edge. The wrapper's `pr-1.5` re-creates that gutter's width
+          for the header, and `scrollbar-gutter: stable` on the body keeps the
+          gutter reserved when there is nothing to scroll — without both, the
+          header and its rows would sit 6px out of column. */}
+      <div className="shrink-0 pr-1.5">
+        <div className={cn(COLS, "border-b border-border-subtle bg-card py-2")}>
+          <span />
+          {["Started", "Duration", "Subjects", "Files", "Status"].map((h, i) => (
+            <span
+              key={h}
+              className={cn(
+                "text-[11px] font-medium text-muted-foreground",
+                i === 4 && "justify-self-end",
+              )}
+            >
+              {h}
+            </span>
+          ))}
+        </div>
       </div>
 
-      {runs.length === 0 && (
-        <p className="px-4 py-10 text-center text-xs text-muted-foreground">
-          No sync runs yet — pick your subjects above and run one.
-        </p>
-      )}
+      {/* The body scrolls between the fixed header and the pinned footer. */}
+      <div className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
+        {runs.length === 0 && (
+          <p className="px-5 py-16 text-center text-xs text-muted-foreground">
+            No sync runs yet — pick your subjects above and run one.
+          </p>
+        )}
 
-      <div className="divide-y divide-border-subtle">
-        {groupByDay(runs).map((group) => {
-          const collapsed = collapsedDays.has(group.key);
-          return (
-            <div key={group.key}>
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => toggleDay(group.key)}
-                onKeyDown={(e) => e.key === "Enter" && toggleDay(group.key)}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-1.5 bg-surface/80 cursor-pointer select-none hover:bg-surface transition-colors",
-                  !collapsed && "border-b border-border-subtle",
-                )}
-              >
-                <CaretRight
-                  size={9}
+        <div className="divide-y divide-border-subtle">
+          {groupByDay(pageRows).map((group) => {
+            const collapsed = collapsedDays.has(group.key);
+            return (
+              <div key={group.key}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggleDay(group.key)}
+                  onKeyDown={(e) => e.key === "Enter" && toggleDay(group.key)}
                   className={cn(
-                    "shrink-0 text-muted-foreground/50 transition-transform",
-                    !collapsed && "rotate-90",
+                    "flex items-center gap-2 px-5 py-1.5 bg-surface/70 cursor-pointer select-none hover:bg-surface transition-colors",
+                    !collapsed && "border-b border-border-subtle",
                   )}
-                />
-                <span className="text-[11px] font-medium text-muted-foreground">
-                  {group.heading}
-                </span>
-                {collapsed && (
-                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-muted-foreground/15 px-1 text-[10px] font-medium tabular-nums text-muted-foreground">
-                    {group.runs.length}
+                >
+                  <CaretRight
+                    size={9}
+                    className={cn(
+                      "shrink-0 text-muted-foreground/50 transition-transform",
+                      !collapsed && "rotate-90",
+                    )}
+                  />
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    {group.heading}
                   </span>
+                  {collapsed && (
+                    <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-muted-foreground/15 px-1 text-[10px] font-medium tabular-nums text-muted-foreground">
+                      {group.runs.length}
+                    </span>
+                  )}
+                </div>
+                {!collapsed && (
+                  <div className="divide-y divide-border-subtle">
+                    {group.runs.map((run) => (
+                      <RunRow
+                        key={run.id}
+                        run={run}
+                        progress={run.status === "running" ? progress : null}
+                        expanded={expanded.has(run.id)}
+                        onToggle={() => toggle(run.id)}
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
-              {!collapsed && (
-                <div className="divide-y divide-border-subtle">
-                  {group.runs.map((run) => (
-                    <RunRow
-                      key={run.id}
-                      run={run}
-                      progress={run.status === "running" ? progress : null}
-                      expanded={expanded.has(run.id)}
-                      onToggle={() => toggle(run.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
+
+      <TablePagination
+        page={page}
+        pageCount={pageCount}
+        onPage={setPage}
+        total={runs.length}
+        unit="sync run"
+      />
     </div>
   );
 }

@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSubjects } from "@/hooks/useSubjects";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { displayCode, displayName } from "@/lib/format";
+import { displayCode, displayName, fmtSynced } from "@/lib/format";
+import { newCountForSubject, useNewFilesStore } from "@/stores/newFilesStore";
 import type { Subject } from "@/lib/db";
 
 /** The landing page for /subjects — pick a subject, then work inside it. */
@@ -16,7 +17,7 @@ export default function SubjectsIndexPage() {
   const [pastOpen, setPastOpen] = useState(false);
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-6">
         <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-none">
           Subjects
@@ -24,11 +25,12 @@ export default function SubjectsIndexPage() {
         <p className="mt-1.5 text-[13px] text-muted-foreground">
           Everything synced from Canvas, one home per subject.
         </p>
+        <div className="mt-5 border-t border-border" />
 
         {loading && (
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-20 w-full" />
+              <Skeleton key={i} className="h-24 w-full" />
             ))}
           </div>
         )}
@@ -51,26 +53,36 @@ export default function SubjectsIndexPage() {
         )}
 
         {current.length > 0 && (
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {current.map((s) => (
-              <SubjectCard key={s.id} subject={s} />
-            ))}
-          </div>
+          <section className="mt-7">
+            <h2 className="mb-2.5 text-[13px] font-semibold text-foreground">
+              Current subjects
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {current.map((s) => (
+                <SubjectCard key={s.id} subject={s} />
+              ))}
+            </div>
+          </section>
         )}
 
         {past.length > 0 && (
-          <div className="mt-8">
+          <section className="mt-8">
             <button
               type="button"
               onClick={() => setPastOpen((v) => !v)}
               aria-expanded={pastOpen}
-              className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+              // Not an <h2> — a heading element can't live inside a button —
+              // so it borrows the base heading rule's font and tracking.
+              className="flex items-center gap-1.5 font-display text-[13px] font-semibold tracking-[-0.02em] text-foreground hover:opacity-70 transition-opacity"
             >
               <CaretRight
-                size={10}
+                size={11}
                 className={cn("transition-transform", pastOpen && "rotate-90")}
               />
-              Past subjects ({past.length})
+              Past subjects
+              <span className="font-normal text-muted-foreground/70 tabular-nums">
+                {past.length}
+              </span>
             </button>
             {pastOpen && (
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -79,7 +91,7 @@ export default function SubjectsIndexPage() {
                 ))}
               </div>
             )}
-          </div>
+          </section>
         )}
       </div>
     </div>
@@ -93,17 +105,20 @@ function SubjectCard({
   subject: Subject;
   dimmed?: boolean;
 }) {
+  const bySubject = useNewFilesStore((s) => s.bySubject);
+  const newCount = newCountForSubject(bySubject, subject.id);
+
   return (
     <Link
       to={`/subjects/${subject.id}`}
       className={cn(
-        "group rounded-lg border border-border px-4 py-3.5 hover:bg-surface transition-colors",
+        "group rounded-xl border border-border px-4 py-3.5 hover:bg-surface transition-colors",
         dimmed && "opacity-70 hover:opacity-100",
       )}
     >
       <div className="flex items-center gap-2.5">
         <SubjectIcon code={subject.code} size={16} />
-        <span className="text-[13px] font-semibold text-foreground truncate">
+        <span className="font-display text-[13px] font-semibold text-foreground truncate">
           {displayCode(subject.code)}
         </span>
         <ArrowRight
@@ -114,11 +129,18 @@ function SubjectCard({
       <p className="mt-1.5 ml-[26px] text-[12px] text-muted-foreground line-clamp-2 leading-snug">
         {displayName(subject.name, subject.code)}
       </p>
-      {subject.term_name && (
-        <p className="mt-1.5 ml-[26px] text-[10px] uppercase tracking-wide font-mono text-muted-foreground/70">
-          {subject.term_name}
-        </p>
-      )}
+      <p className="mt-2 ml-[26px] flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+        {newCount > 0 && (
+          <>
+            <span className="size-1.5 shrink-0 rounded-full bg-brand" />
+            <span className="font-medium text-brand tabular-nums">
+              {newCount} new {newCount === 1 ? "item" : "items"}
+            </span>
+            <span aria-hidden>·</span>
+          </>
+        )}
+        <span className="truncate">{fmtSynced(subject.last_synced_at)}</span>
+      </p>
     </Link>
   );
 }

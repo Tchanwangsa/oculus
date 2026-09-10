@@ -19,7 +19,7 @@ export function FileRecency({ file }: { file: DbFile }) {
     return (
       <span
         title={isNew ? "New since last sync" : "Updated since last opened"}
-        className="shrink-0 size-1.5 rounded-full bg-primary"
+        className="shrink-0 size-1.5 rounded-full bg-brand"
       />
     );
   }

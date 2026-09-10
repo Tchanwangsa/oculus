@@ -149,7 +149,7 @@ export function FileViewer({
           );
         }
         return (
-          <a href={href} target="_blank" rel="noreferrer" className="text-primary hover:underline" {...p}>
+          <a href={href} target="_blank" rel="noreferrer" className="text-brand hover:underline" {...p}>
             {children}
             <ArrowSquareOut size={12} className="inline shrink-0 ml-0.5 mb-0.5 opacity-60" />
           </a>

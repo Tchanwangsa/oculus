@@ -142,7 +142,7 @@ export default function SubjectAssignmentsPage() {
 
   if (grouped == null) {
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="page-scroll">
         <div className="mx-auto max-w-5xl px-6 py-6 space-y-2">
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-10 w-full" />
@@ -157,7 +157,7 @@ export default function SubjectAssignmentsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-5 space-y-5">
         {GROUPS.map((group) => {
           const tasks = grouped.get(group);
@@ -253,7 +253,7 @@ function TocFallback() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-5">
         <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">
           {tasks.map((t, i) => {

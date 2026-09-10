@@ -147,7 +147,7 @@ export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
             onChange={(e) => setPassword(e.target.value)}
           />
           <Input
-            className="h-7 text-xs font-mono"
+            className="h-7 text-xs"
             type="password"
             placeholder="Authenticator setup key"
             autoComplete="off"

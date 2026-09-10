@@ -29,10 +29,10 @@ import { useChatStore, localUserMessage } from "@/stores/chatStore";
 import { cn } from "@/lib/utils";
 
 const SUGGESTIONS = [
-  "What is the Bloch sphere representation of a qubit?",
-  "When is assignment 1 due?",
+  "What's due this week?",
   "Summarise this week's lecture slides",
-  "Do quantum gates commute — does the order matter?",
+  "Explain the Bloch sphere",
+  "Find the worked example on Dijkstra",
 ];
 
 const TOOL_LABEL: Record<string, string> = {
@@ -63,7 +63,7 @@ const CHAT_MD = {
       <button
         type="button"
         onClick={() => openCitation(href)}
-        className="text-primary hover:underline inline"
+        className="text-brand hover:underline inline"
         {...p}
       >
         {children}
@@ -225,6 +225,69 @@ export default function ChatPage() {
 
   const empty = messages.length === 0 && !streaming && !sending;
 
+  /* One composer, rendered in one of two places: centred under the hero on an
+     empty chat, or docked at the bottom once there is a transcript to sit
+     under. Keeping it a single element means the textarea keeps its ref,
+     focus and draft text across that move. */
+  const composer = (
+    <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card px-4 py-3.5 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
+      <Textarea
+        ref={inputRef}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            send(input);
+          }
+        }}
+        rows={1}
+        placeholder="Ask about your courses, deadlines, lectures…"
+        className="min-h-[20px] max-h-[160px] w-full resize-none rounded-none border-0 bg-transparent p-0 text-sm leading-5 shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
+        style={{ height: "20px" }}
+        onInput={(e) => {
+          const el = e.currentTarget;
+          el.style.height = "20px";
+          el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+        }}
+      />
+      <div className="flex items-center gap-2">
+        <ModelSelect
+          library={llm?.library ?? []}
+          providers={llm?.providers ?? []}
+          value={model}
+          onChange={(m) => store.getState().setModel(m)}
+          placeholder="Model"
+          className="h-6 max-w-[280px] border-0 bg-transparent px-1 text-[11px] text-muted-foreground shadow-none dark:bg-transparent"
+        />
+        <div className="flex-1" />
+        {sending ? (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="shrink-0"
+            aria-label="Stop"
+            onClick={() =>
+              chatId != null && invoke("chat_cancel", { chatId }).catch(() => {})
+            }
+          >
+            <Stop size={14} />
+          </Button>
+        ) : (
+          <Button
+            size="icon-sm"
+            disabled={!input.trim()}
+            onClick={() => send(input)}
+            className="shrink-0"
+            aria-label="Send"
+          >
+            <PaperPlaneTilt size={14} />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex h-full">
       {/* Conversations */}
@@ -246,7 +309,7 @@ export default function ChatPage() {
               type="button"
               onClick={() => store.getState().open(c.id)}
               className={cn(
-                "rounded-md px-2 py-1.5 text-left text-xs truncate transition-colors",
+                "rounded-lg px-2.5 py-1.5 text-left text-xs truncate transition-colors",
                 c.id === chatId
                   ? "bg-accent text-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -260,133 +323,91 @@ export default function ChatPage() {
 
       <div className="flex flex-1 flex-col min-w-0">
         <div className="flex items-center justify-between px-6 h-12 border-b border-border-subtle shrink-0">
-          <span className="font-semibold text-[13px] text-foreground">Chat</span>
+          <span className="font-display font-semibold text-[13px] text-foreground">Chat</span>
         </div>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
-          {empty && !error && (
-            <div className="flex flex-col items-center justify-center h-full gap-6 text-center">
-              <div className="flex flex-col items-center gap-3">
-                <img src="/oculus-mark.svg" alt="" className="w-12 h-12" />
-                <h2 className="text-base font-semibold text-foreground">Ask Oculus anything</h2>
+        {empty && !error ? (
+          /* Nothing said yet: the page is a title and a place to type, the
+             way a blank document is. The transcript layout only appears once
+             there is a transcript. */
+          <div className="flex-1 overflow-y-auto px-6">
+            <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col items-center justify-center gap-7 pb-16">
+              <div className="flex flex-col items-center gap-4">
+                <h1 className="text-display text-foreground">Ask Oculus anything</h1>
+                <p className="max-w-md text-center text-[13px] leading-relaxed text-muted-foreground">
+                  It searches your subjects — pages, slides, lecture transcripts,
+                  Ed threads — and answers with the file it read.
+                </p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
-                {SUGGESTIONS.map((s) => (
-                  <Button
-                    key={s}
-                    variant="outline"
-                    onClick={() => send(s)}
-                    className="h-auto justify-start rounded-lg bg-surface px-3 py-2.5 text-left text-xs font-normal whitespace-normal text-muted-foreground"
+
+              <div className="w-full">{composer}</div>
+
+              <div className="flex flex-wrap justify-center gap-2">
+                {SUGGESTIONS.map((sugg) => (
+                  <button
+                    key={sugg}
+                    type="button"
+                    onClick={() => send(sugg)}
+                    className="rounded-full border border-border bg-card px-3.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-surface-overlay hover:bg-accent hover:text-foreground"
                   >
-                    {s}
-                  </Button>
+                    {sugg}
+                  </button>
                 ))}
               </div>
             </div>
-          )}
+          </div>
+        ) : (
+          <>
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
+              <div className="max-w-2xl mx-auto flex flex-col gap-5">
+                {messages.map((m) => (
+                  <Message key={m.id} m={m} />
+                ))}
 
-          <div className="max-w-2xl mx-auto flex flex-col gap-5">
-            {messages.map((m) => (
-              <Message key={m.id} m={m} />
-            ))}
+                {tools.map((t, i) => (
+                  <div
+                    key={`${t.name}-${i}`}
+                    className="flex items-center gap-2 text-xs text-muted-foreground"
+                  >
+                    {t.done ? (
+                      <MagnifyingGlass size={12} className="shrink-0" />
+                    ) : (
+                      <CircleNotch size={12} className="shrink-0 animate-spin" />
+                    )}
+                    <span className="truncate">
+                      {TOOL_LABEL[t.name] ?? t.name}
+                      {t.detail && <span className="text-muted-foreground/70"> — {t.detail}</span>}
+                    </span>
+                  </div>
+                ))}
 
-            {tools.map((t, i) => (
-              <div
-                key={`${t.name}-${i}`}
-                className="flex items-center gap-2 text-xs text-muted-foreground"
-              >
-                {t.done ? (
-                  <MagnifyingGlass size={12} className="shrink-0" />
-                ) : (
-                  <CircleNotch size={12} className="shrink-0 animate-spin" />
+                {streaming && (
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={CHAT_MD}
+                  >
+                    {streaming}
+                  </ReactMarkdown>
                 )}
-                <span className="truncate">
-                  {TOOL_LABEL[t.name] ?? t.name}
-                  {t.detail && <span className="text-muted-foreground/70"> — {t.detail}</span>}
-                </span>
+
+                {sending && !streaming && tools.length === 0 && (
+                  <CircleNotch size={14} className="animate-spin text-muted-foreground" />
+                )}
+
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
               </div>
-            ))}
-
-            {streaming && (
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[rehypeKatex]}
-                components={CHAT_MD}
-              >
-                {streaming}
-              </ReactMarkdown>
-            )}
-
-            {sending && !streaming && tools.length === 0 && (
-              <CircleNotch size={14} className="animate-spin text-muted-foreground" />
-            )}
-
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-          </div>
-        </div>
-
-        <div className="px-6 py-4 border-t border-border shrink-0">
-          <div className="flex flex-col gap-2 bg-surface rounded-xl border border-border px-4 py-3 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
-            <Textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send(input);
-                }
-              }}
-              rows={1}
-              placeholder="Ask about your courses, deadlines, lectures…"
-              className="min-h-[20px] max-h-[120px] w-full resize-none rounded-none border-0 bg-transparent p-0 text-sm leading-5 shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
-              style={{ height: "20px" }}
-              onInput={(e) => {
-                const el = e.currentTarget;
-                el.style.height = "20px";
-                el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-              }}
-            />
-            <div className="flex items-center gap-2">
-              <ModelSelect
-                library={llm?.library ?? []}
-                providers={llm?.providers ?? []}
-                value={model}
-                onChange={(m) => store.getState().setModel(m)}
-                placeholder="Model"
-                className="h-6 max-w-[280px] border-0 bg-transparent px-1 text-[11px] text-muted-foreground shadow-none dark:bg-transparent"
-              />
-              <div className="flex-1" />
-              {sending ? (
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  className="shrink-0"
-                  aria-label="Stop"
-                  onClick={() =>
-                    chatId != null && invoke("chat_cancel", { chatId }).catch(() => {})
-                  }
-                >
-                  <Stop size={14} />
-                </Button>
-              ) : (
-                <Button
-                  size="icon-sm"
-                  disabled={!input.trim()}
-                  onClick={() => send(input)}
-                  className="shrink-0"
-                  aria-label="Send"
-                >
-                  <PaperPlaneTilt size={14} />
-                </Button>
-              )}
             </div>
-          </div>
-        </div>
+
+            <div className="px-6 pb-5 pt-2 shrink-0">
+              <div className="mx-auto max-w-2xl">{composer}</div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

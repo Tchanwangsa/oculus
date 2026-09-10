@@ -96,7 +96,7 @@ export default function SubjectLayout() {
                 {displayCode(subject.code)}
               </h1>
               {!subject.is_current && (
-                <span className="text-[10px] uppercase tracking-wide text-muted-foreground font-mono bg-surface-raised px-2 py-0.5 rounded">
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground bg-surface-raised px-2 py-0.5 rounded">
                   {subject.term_name ?? "Past"}
                 </span>
               )}

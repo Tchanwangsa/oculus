@@ -46,7 +46,7 @@ export default function SubjectModulesPage() {
 
   if (modules == null) {
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="page-scroll">
         <div className="mx-auto max-w-5xl px-6 py-6 space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-28 w-full" />
@@ -73,7 +73,7 @@ export default function SubjectModulesPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-5">
         <div className="mb-3 flex justify-end">
           <Button

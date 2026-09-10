@@ -18,7 +18,7 @@ export const MD_COMPONENTS: Components = {
     <p className="text-sm text-foreground/90 leading-relaxed my-3" {...p} />
   ),
   a: ({ href, children, ...p }: any) => (
-    <a href={href} className="text-primary hover:underline" target="_blank" rel="noreferrer" {...p}>
+    <a href={href} className="text-brand hover:underline" target="_blank" rel="noreferrer" {...p}>
       {children}
       {/^https?:/.test(href ?? "") && (
         <ArrowSquareOut size={12} className="inline shrink-0 ml-0.5 mb-0.5 opacity-60" />
@@ -33,7 +33,7 @@ export const MD_COMPONENTS: Components = {
   ),
   li: (p: any) => <li className="leading-relaxed" {...p} />,
   blockquote: (p: any) => (
-    <blockquote className="border-l-2 border-primary/40 pl-4 my-3 text-sm text-muted-foreground italic" {...p} />
+    <blockquote className="border-l-2 border-border pl-4 my-3 text-sm text-muted-foreground italic" {...p} />
   ),
   code: ({ className, children, ...p }: any) => {
     const isBlock = /language-/.test(className ?? "") || String(children).includes("\n");

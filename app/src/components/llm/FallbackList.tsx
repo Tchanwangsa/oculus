@@ -64,7 +64,7 @@ export function FallbackList({
           className={cn(
             "flex items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 cursor-grab active:cursor-grabbing transition-colors",
             dragFrom === i && "opacity-50",
-            dragOver === i && dragFrom !== i && "border-primary",
+            dragOver === i && dragFrom !== i && "border-brand",
           )}
         >
           <DotsSixVertical size={13} className="text-muted-foreground shrink-0" />
