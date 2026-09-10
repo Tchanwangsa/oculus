@@ -26,6 +26,8 @@ const FULL_DAY_KEY = "calendar-full-day";
  *  the grid's own edges — see the clamp where they are positioned. */
 const MARKER_PX = 16;
 const MARKER_INSET = 2;
+/** The shortest a class block is drawn, however little time it covers. */
+const BLOCK_MIN_PX = 16;
 
 /**
  * How much of the subject's hue an instant's pill is tinted with.
@@ -303,9 +305,24 @@ export function WeekView({
                 )}
 
                 {laid.map(({ event, lane, of }) => {
-                  const top =
+                  // Blocks are clamped into the grid the way the deadline
+                  // markers below are, and for the same reason: Canvas
+                  // publishes cutoff-shaped *classes* (an 11:59pm–11:59pm peer
+                  // review), and one drawn at its own minute with the minimum
+                  // block height hangs off the bottom edge of the card. A block
+                  // with real length is shortened to the last row instead of
+                  // moved, so 11pm–12:30am still starts at 11pm.
+                  const exact =
                     ((minutesFromMidnight(event.start) - fromHour * 60) / 60) * HOUR_PX;
-                  const height = Math.max(16, (durationMinutes(event) / 60) * HOUR_PX - 2);
+                  const wanted = Math.max(
+                    BLOCK_MIN_PX,
+                    (durationMinutes(event) / 60) * HOUR_PX - 2,
+                  );
+                  const height = Math.max(
+                    BLOCK_MIN_PX,
+                    Math.min(wanted, gridHeight - exact),
+                  );
+                  const top = Math.max(0, Math.min(exact, gridHeight - height));
                   const color = colors.get(event.subjectId) ?? "";
                   // A finished class keeps its shape but loses its subject
                   // colour, so the eye lands on what is still ahead.

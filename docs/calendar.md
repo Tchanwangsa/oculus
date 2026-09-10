@@ -113,6 +113,14 @@ next.
   "Due" strip above it. Every deadline is in exactly one of the two, never
   both. Deadlines are also kept out of `hourRange`: letting an 11:59pm cutoff
   stretch the grid would pin every week open to midnight for one marker.
+- **A class block is clamped into the grid too.** Canvas publishes
+  cutoff-shaped *events*, not only assignments — a peer-review "class" that
+  runs 11:59pm to 11:59pm is a `class` row of no length, and drawn at its own
+  minute with the minimum block height it hangs off the bottom of the card.
+  A block that has real length is shortened to the last row rather than moved,
+  so an 11pm–12:30am class still starts at 11pm; only one that cannot fit at
+  all rides up against the bottom edge
+  (`app/src/components/calendar/WeekView.tsx`).
 - **A deadline never has a class's shape.** Wherever it appears it is a flag on
   a tinted pill; a class is a flat dot-and-time row. Before that they were
   rendered but not *indicated* — a deadline read as just another line in a
