@@ -91,6 +91,24 @@ One Rust engine scrapes three services. It runs identically inside the app
   what the media CDN accepts. Everything starts from the Canvas cookie.
   Videos are trimmed with the fetched ffmpeg binary; VTT captions are
   aligned to the trimmed timeline.
+- **A capture is one lesson with up to two streams.** The Presenter screen and
+  the room camera are `hd1.mp4` and `hd2.mp4` behind a single media id, so a
+  "source" is a file name, not a second recording; they land side by side as
+  `source1.mp4` and `source2.mp4` and are trimmed identically, which is what
+  lets the player run them off one clock (see [frontend.md](./frontend.md)).
+  Only source 1 is fetched by a sync — the camera roughly doubles a semester
+  on disk and is downloaded per lecture, on demand, from the player.
+- **Whether a camera exists is probed, not read.** `syllabus` looks for
+  `secondaryFiles` anywhere under the lesson (the nesting has moved between
+  Echo360 versions, so it searches for the key rather than a path), but this
+  university's syllabus carries no file lists at all — so in practice every
+  lecture falls back to asking the download endpoint for `hd2.mp4`. That
+  answer is trustworthy: Echo360 resolves the stream before it signs anything,
+  so a missing source is a 500 rather than a signed URL that would 404 later
+  (measured against `hd3.mp4`, which is never real). It costs one redirect per
+  lecture, and a `warn` line says when the fallback is being used — if the
+  syllabus ever starts carrying file lists again, that line goes quiet and the
+  requests stop.
 - **Scrape and parse are decoupled.** A scrape completes even when the
   sidecar is down; parsing/embedding of the PDFs it wrote is a separate,
   idempotent pass (see [sidecar.md](./sidecar.md) and

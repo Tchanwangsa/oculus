@@ -237,6 +237,21 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   [architecture.md](./architecture.md)). Its scrub bar is a local `SeekBar`
   rather than the shadcn Slider, kept because `offsetX / offsetWidth` needs
   one measurement where Radix mixes `clientX` with `getBoundingClientRect`.
+- **A click that puts a panel away is not also a click on the video.** The
+  player is the one place in the app where a bare click on the background does
+  something, so it is the one place that has to tell the two apart: clicking
+  off the source or layout panel used to close it *and* toggle playback.
+  Radix defers its outside-dismissal to the `click` rather than the
+  pointerdown, and handles it on `document`, so during the target phase — the
+  video's own handler, and the scrub bar's pointerdown before that — the panel
+  is still on screen. Its presence is therefore the whole test, and
+  `panelOnScreen()` in `app/src/components/lectures/LecturePlayer.tsx` is it.
+  The `[data-state=open]` in that selector matters: a closing panel stays
+  mounted for its exit animation, and a click landing in those 150ms is real.
+  Picking a source or a layout closes its own panel
+  (`app/src/components/lectures/SourceControls.tsx`) — you came to switch and
+  the panel has nothing left to say — except on the row that starts a
+  download, which stays up because the percentage is in it.
 - **The scrub bar previews the frame under the pointer**
   (`app/src/components/lectures/ScrubPreview.tsx`), the way YouTube does. It
   is a second muted `<video>` on the same localhost source rather than a
@@ -274,15 +289,15 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   panel does) and while it holds focus, so the keyboard can reach it. An "on"
   toggle (captions, transcript) is marked by an underline under the icon,
   since white-on-frame reads the same lit or unlit.
-- **The video element outlives the route.** A tab switch is a navigation, and
+- **The video elements outlive the route.** A tab switch is a navigation, and
   a navigation unmounts the page — which used to take the `<video>`, and the
-  lecture, down with it. The element is a singleton owned by
-  `app/src/lib/lecturePlayback.ts` instead: the player adopts it into its frame
-  on mount and hands it back to an off-screen host (positioned away, *not*
-  `display: none`, which is where a browser feels entitled to stop playback)
-  on unmount, so a lecture keeps playing while you are in another tab and picks
-  up on screen where it actually is when you come back — expanding the peek
-  into its own tab included. This is a DOM node in the visible webview, not a
+  lecture, down with it. The elements are owned by
+  `app/src/lib/lecturePlayback.ts` instead: the player adopts them into its
+  frames on mount and hands them back to an off-screen host (positioned away,
+  *not* `display: none`, which is where a browser feels entitled to stop
+  playback) on unmount, so a lecture keeps playing while you are in another tab
+  and picks up on screen where it actually is when you come back — expanding
+  the peek into its own tab included. This is a DOM node in the visible webview, not a
   hidden WebView; the suspension problem that keeps scraping in Rust does not
   apply. Because the element outlives the player, so does the progress writing:
   the module saves every 5s of playback and immediately on pause, seek, end and
@@ -299,13 +314,89 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   still the active one when the navigation starts (the strip activates the
   destination tab *before* it navigates). A paused lecture never prompts, and
   the peek's own close button is an outright stop.
+- **Two streams, one lecture, one clock.** A capture can be a Presenter screen
+  *and* a room camera ([sync.md](./sync.md)), so `lecturePlayback.ts` keeps one
+  element **per source** and nominates one of them the **leader**: it carries
+  the audio, it is the clock every readout counts against, and it is what
+  writes progress. The others are muted followers, walked back onto the
+  leader's `currentTime` on every play, pause, seek and rate change, plus a 1s
+  timer that only runs while more than one source is on screen. Both files are
+  trimmed identically, so "in sync" is simply the same `currentTime` — there is
+  no offset to carry — and drift under ~0.35s is left alone, because a seek is
+  a re-buffer and stuttering the picture to fix something nobody can see is a
+  bad trade. Past that the correction is a **trim to the follower's playback
+  rate**, not a seek: a follower that cannot quite hold real time — which is
+  what coming back to a backgrounded tab leaves you with — would otherwise
+  earn a decoder flush every tick, invisible on a slide and a picture that
+  stutters once a second on the room camera. Only a gap over ~1.5s, or a
+  paused leader (no rate to ride), is worth the seek. The leader is whichever
+  source is in the **main frame**, so the picture you are watching is the
+  audio you hear.
+- **A parked element keeps a real size.** Between players the elements sit in
+  an off-screen host rather than a hidden subtree, because a hidden subtree is
+  where a browser feels entitled to stop a media element. That host is
+  480×270, not the 1×1 it started as: the elements are `w-full h-full`, so a
+  pixel-sized host is a pixel-sized picture, and WebKit sizes the decode path
+  to the picture it is asked for — park a playing lecture in one and it comes
+  back to the player as mush. Nothing off screen is painted, so the size costs
+  nothing. The player also re-aligns on `visibilitychange`, since a hidden
+  page is a throttled page and both decoders come back however far apart you
+  left them.
+- **The player restates its layout; the module works out the diff.**
+  `syncLectureSources(lecture, plan, tabId)` takes the whole arrangement —
+  which sources, from which files, into which host elements, leader first — and
+  is called again whenever any of that changes. That puts the two awkward
+  moments in one place: a source *joining* (it loads and the follower sync
+  walks it in) and the leader *changing* (a different file and a different
+  decoder, so the position and the playing/paused state are carried across by
+  hand). It is also why restoring `progress_seconds` moved out of the player's
+  `loadedmetadata` handler: only the module can tell a fresh lecture, which
+  should resume at the saved second, from a source switch mid-lecture, which
+  should land on the second you were actually watching rather than the last one
+  written.
+- **The source and layout controls only exist where there is a choice.** The
+  per-frame pill (`app/src/components/lectures/SourceControls.tsx`, top-left,
+  revealed on frame hover and hidden with the control bar rather than only on
+  pointer-out) is rendered only for a capture Echo360 publishes two streams
+  for; the layout control on the bar likewise. Picking a source in *either*
+  frame swaps the pair — the two frames always show the two streams, so one
+  number (`mainSource`) says everything. Which is why the *second* frame's
+  pill needs the mirrored half of that swap: picking Source 2 there means
+  Source 2 in that frame and so Source 1 in the main one, and handing it the
+  main frame's handler inverted the panel — the row you ticked was the row you
+  did not get. A stream that has not been downloaded
+  is still listed, because the pill is where you find out the camera exists and
+  so is where you ask for it; the two-frame layouts stay listed but disabled
+  until it is on disk, since hiding them would mean the feature only ever
+  appears to someone who already found the download somewhere else.
+- **The two-frame geometry is fractions of the video area, not pixels**
+  (`app/src/hooks/useSourceLayout.ts`) — the player is a peek panel one moment
+  and a fullscreen overlay the next, and an inset pinned at "320px from the
+  left" means something different in each. The PIP's height is never stored:
+  the box carries `aspect-ratio`, read from the inset picture's own
+  `videoWidth`/`videoHeight`, so a corner drag can only ever produce a similar
+  rectangle and the ratio is locked by construction rather than by arithmetic
+  kept right in three places. A fraction is not a size, though, so the width
+  also has a floor in pixels (160×90, the height reaching the width through
+  that same aspect) applied where the area is measured: the same 26% is a
+  legible inset over a fullscreen lecture and a postage stamp in a peek panel.
+  The cap still wins on an area narrower than the floor itself. The inset's
+  four resize handles fade with the control bar rather than on frame hover
+  alone — white pips left on the picture after the bar has gone read as
+  furniture stuck to it — and pin themselves for the length of a drag, since a
+  handle that vanishes under the pointer resizing with it is the one moment
+  they must not go. The stacked view divides with `flex-grow` on a
+  zero basis rather than percentage heights, so the two screens share what is
+  left *after* the divider and the split can never add up to more than the
+  frame. The inset sits at `z-20`, under the control bar's `z-30`, so it can
+  never cover the scrub bar.
 - **The element's duration wins over the catalogue's.** Echo360's lesson
   duration comes from its scheduling data and the recording it serves runs a
   few seconds past it, so a clock counting against `lectures.duration_seconds`
   ended a lecture reading `1:55:00 / 1:54:46`. The player takes `video.duration`
-  at `loadedmetadata` and counts everything — the clock, the scrub bar, the
-  within-30s "complete" mark — against that, falling back to the DB value
-  until it arrives or when there is no downloaded video. The lecture's own
+  of the leader at `loadedmetadata` and counts everything — the clock, the
+  scrub bar, the within-30s "complete" mark — against that, falling back to the
+  DB value until it arrives or when there is no downloaded video. The lecture's own
   metadata line keeps the catalogue figure, which is what the lectures list
   shows too.
 - **Fullscreen is the window's, not the element's.** `requestFullscreen()`
@@ -358,13 +449,16 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   of its own; the dock side and size are player preferences (below).
 - **Player preferences are the person's, not the lecture's.**
   `app/src/stores/playerPrefsStore.ts` holds speed, captions on/off,
-  transcript shown/hidden, and the transcript's dock side and size, as one
-  global set persisted under a single `localStorage` key — set 1.5× and a
-  left-docked transcript once and every recording opens that way. The only
-  per-lecture playback state is the position, and that is a DB column
-  (`lectures.progress_seconds`), not a preference. Speed is applied to the
-  element in an effect keyed on the source as well as the value, because
-  `playbackRate` resets when a new source loads.
+  transcript shown/hidden, the transcript's dock side and size, and the
+  two-source arrangement (layout, which stream is in the main frame, the PIP
+  box, the stacked split), as one global set persisted under a single
+  `localStorage` key — set 1.5×, a left-docked transcript and a camera inset
+  once and every recording opens that way. The only per-lecture playback state
+  is the position, and that is a DB column (`lectures.progress_seconds`), not a
+  preference. Speed and volume are applied in effects keyed on the *leader
+  element*, not just the value: `playbackRate` and `volume` are per-element and
+  reset on load, so a source switch has to re-apply both to the decoder that
+  just took over the audio.
 - **The transcript follows playback until the reader takes it over.** The
   list auto-scrolls to keep the playing cue in the middle band, then hands
   control over — a brand pill fades in at the bottom of the panel to go *Back

@@ -20,7 +20,12 @@ import {
 } from "@/stores/lectureDownloadStore";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { getLectures, upsertLectures, type Lecture } from "@/lib/db";
+import {
+  getLectures,
+  upsertLectures,
+  type Lecture,
+  type LectureData,
+} from "@/lib/db";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { PeekPanel } from "@/components/peek/PeekPanel";
 import { LecturePlayer } from "@/components/lectures/LecturePlayer";
@@ -79,15 +84,9 @@ export default function SubjectLecturesPage() {
     setSyncing(true);
     setSyncError(null);
     try {
-      const data = await invoke<
-        {
-          id: string;
-          lesson_id: string;
-          title: string;
-          date: string;
-          duration_seconds: number;
-        }[]
-      >("echo360_sync_lectures", { canvasCourseId: subject.id });
+      const data = await invoke<LectureData[]>("echo360_sync_lectures", {
+        canvasCourseId: subject.id,
+      });
       await upsertLectures(subject.id, data);
       await refreshLectures();
     } catch (e) {

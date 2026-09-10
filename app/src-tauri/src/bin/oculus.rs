@@ -1067,16 +1067,20 @@ impl Ctx {
                 }
 
                 if let Some(ffmpeg) = &ffmpeg {
-                    let final_ = dir.join("source1.mp4");
+                    // Source 1 only — the Presenter screen is what an archive is
+                    // for, and pulling every room camera as well would roughly
+                    // double a semester on disk. The app downloads the camera
+                    // on demand, per lecture.
+                    let final_ = app_lib::echo360::source_path(&dir, 1);
                     if final_.exists() {
                         continue;
                     }
                     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-                    let raw = dir.join("raw.mp4");
+                    let raw = app_lib::echo360::partial_path(&dir, 1);
                     print!("  {}       {date}  {} ", paint("video", DIM), l.title);
                     let _ = std::io::stdout().flush();
 
-                    let outcome = app_lib::echo360::download_url(&session, &l.id, &l.lesson_id)
+                    let outcome = app_lib::echo360::download_url(&session, &l.id, &l.lesson_id, 1)
                         .and_then(|url| app_lib::echo360::stream_to_file(&url, &raw, &|_| {}))
                         .and_then(|bytes| {
                             if app_lib::echo360::trim_video(ffmpeg, &raw, &final_) {

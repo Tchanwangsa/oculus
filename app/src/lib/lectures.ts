@@ -1,4 +1,4 @@
-import type { Lecture } from "@/lib/db";
+import type { Lecture, SourceNum } from "@/lib/db";
 
 // ── VTT parsing ───────────────────────────────────────────────────────────────
 
@@ -90,6 +90,8 @@ export function progressLabel(lec: Lecture): { text: string; color: string } {
 
 export interface DlProgress {
   mediaId: string;
+  /** Which stream this bar belongs to; see `dlKey` in the download store. */
+  source: SourceNum;
   percent: number;
   phase: string;
 }

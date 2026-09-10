@@ -290,12 +290,14 @@ pub async fn upsert_lectures(
 ) -> Result<(), String> {
     for l in lectures {
         sqlx::query(
-            r#"INSERT INTO lectures (id, lesson_id, subject_id, title, date, duration_seconds, synced_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+            r#"INSERT INTO lectures
+                 (id, lesson_id, subject_id, title, date, duration_seconds, has_source2, synced_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
                ON CONFLICT(id) DO UPDATE SET
                  title            = excluded.title,
                  date             = excluded.date,
                  duration_seconds = excluded.duration_seconds,
+                 has_source2      = excluded.has_source2,
                  synced_at        = datetime('now')"#,
         )
         .bind(&l.id)
@@ -304,6 +306,7 @@ pub async fn upsert_lectures(
         .bind(&l.title)
         .bind(&l.date)
         .bind(l.duration_seconds)
+        .bind(l.has_second_source as i64)
         .execute(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -322,6 +325,7 @@ pub async fn set_lecture_path(
     // `column` is never user input — it is one of two literals below.
     let sql = match column {
         "video_path" => "UPDATE lectures SET video_path = ?1 WHERE id = ?2",
+        "video2_path" => "UPDATE lectures SET video2_path = ?1 WHERE id = ?2",
         "transcript_path" => "UPDATE lectures SET transcript_path = ?1 WHERE id = ?2",
         other => return Err(format!("unknown lecture column {other}")),
     };

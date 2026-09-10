@@ -48,7 +48,7 @@ fn get_or_auth(app: &AppHandle, cache: &Echo360Cache, course_id: i64) -> Result<
     Ok(session)
 }
 
-/// Remove `raw.mp4` files left by an interrupted download.
+/// Remove the untrimmed partials left by an interrupted download.
 pub fn cleanup_partial_downloads(app: &AppHandle) {
     if let Ok(dir) = app.path().app_data_dir() {
         echo360::cleanup_partial_downloads(&dir);
@@ -67,6 +67,9 @@ pub async fn echo360_sync_lectures(
     echo360::syllabus(&session)
 }
 
+/// Fetch one stream of a lecture. `source` is 1 for the Presenter screen and 2
+/// for the room camera; both land in the same directory as `source<n>.mp4`,
+/// and each carries its own untrimmed partial so the two can run at once.
 #[tauri::command]
 pub async fn echo360_download_video(
     app: AppHandle,
@@ -74,22 +77,31 @@ pub async fn echo360_download_video(
     media_id: String,
     lesson_id: String,
     canvas_course_id: i64,
+    source: Option<u8>,
 ) -> Result<String, String> {
+    let source = source.unwrap_or(1);
     let session = get_or_auth(&app, &cache, canvas_course_id)?;
-    let url = echo360::download_url(&session, &media_id, &lesson_id)?;
+    let url = echo360::download_url(&session, &media_id, &lesson_id, source)?;
 
     let dir = echo360::lecture_dir(
         &app.path().app_data_dir().map_err(|e| e.to_string())?,
         &media_id,
     );
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let raw = dir.join("raw.mp4");
-    let final_ = dir.join("source1.mp4");
+    let raw = echo360::partial_path(&dir, source);
+    let final_ = echo360::source_path(&dir, source);
 
+    // The frontend keys its progress by media id *and* source — two streams of
+    // one lecture download independently and would otherwise share a bar.
     let emit = |percent: u8, phase: &str| {
         app.emit(
             "lecture-download-progress",
-            serde_json::json!({ "mediaId": &media_id, "percent": percent, "phase": phase }),
+            serde_json::json!({
+                "mediaId": &media_id,
+                "source": source,
+                "percent": percent,
+                "phase": phase,
+            }),
         )
         .ok();
     };
@@ -97,7 +109,7 @@ pub async fn echo360_download_video(
     // On ANY error, clean up partial files so a retry starts fresh.
     let result = (|| -> Result<String, String> {
         let bytes = echo360::stream_to_file(&url, &raw, &|p| emit(p, "downloading"))?;
-        eprintln!("[oculus] downloaded {} MB", bytes / 1_000_000);
+        eprintln!("[oculus] downloaded source {source}: {} MB", bytes / 1_000_000);
 
         emit(100, "trimming");
         let ffmpeg = echo360::find_ffmpeg(app.path().resource_dir().ok())

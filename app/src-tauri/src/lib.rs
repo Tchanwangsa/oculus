@@ -685,6 +685,30 @@ CREATE INDEX IF NOT EXISTS idx_local_events_start ON local_events(start_at);
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 23,
+                            description: "lectures: the second Echo360 source",
+                            // A capture is one lesson with up to two streams —
+                            // the Presenter screen and the room camera — behind
+                            // one media id, so they are columns on the lecture
+                            // rather than rows of their own.
+                            //
+                            // `has_source2` is what Echo360 offers, filled by
+                            // the syllabus; `video2_path` is what is actually
+                            // on disk. They are separate because the player
+                            // needs both answers: whether to show the source
+                            // control at all, and whether to offer a download.
+                            //
+                            // Existing rows default to no second source and
+                            // pick the truth up on the next lecture sync;
+                            // nothing already downloaded is invalidated, since
+                            // source 1 keeps the `source1.mp4` name it had.
+                            sql: r#"
+ALTER TABLE lectures ADD COLUMN video2_path TEXT;
+ALTER TABLE lectures ADD COLUMN has_source2 INTEGER NOT NULL DEFAULT 0;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

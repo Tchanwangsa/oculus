@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { SourceNum } from "@/lib/db";
 
 /** Which edge of the player the transcript panel is attached to. */
 export type Dock = "bottom" | "top" | "left" | "right";
@@ -37,6 +38,42 @@ export const clampVolume = (v: number) =>
 export const DEFAULT_H = 176;
 export const DEFAULT_W = 320;
 
+// ── Two sources ──────────────────────────────────────────────────────────────
+
+/** How the two streams of a capture share the frame. */
+export type Layout = "single" | "pip" | "stack";
+
+/** Which stream a frame shows — the row's own type, so the two never drift. */
+export type { SourceNum };
+
+/** PIP width as a fraction of the video area. Height follows the aspect. */
+export const PIP_MIN_W = 0.12;
+export const PIP_MAX_W = 0.6;
+
+/**
+ * …and a floor in pixels underneath that, because a fraction is not a size.
+ * The same 12% is a postage stamp in a peek panel and a comfortable inset
+ * fullscreen, and the small end is where the camera stops being watchable.
+ * Applied in `useSourceLayout`, which is where the area is measured; the
+ * height floor reaches the width through the picture's locked aspect.
+ */
+export const PIP_MIN_PX_W = 160;
+export const PIP_MIN_PX_H = 90;
+
+/** How little of the stacked view either screen can be squeezed to. */
+export const SPLIT_MIN = 0.15;
+export const SPLIT_MAX = 0.85;
+
+export const clampPipWidth = (w: number) =>
+  Math.min(PIP_MAX_W, Math.max(PIP_MIN_W, w));
+
+export const clampSplit = (v: number) =>
+  Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, v));
+
+/** Keep a fraction inside 0…1 given something of size `size` sits at it. */
+export const clampOffset = (v: number, size: number) =>
+  Math.min(Math.max(0, 1 - size), Math.max(0, v));
+
 /**
  * How *this person* likes the lecture player, not how one lecture was left.
  * Speed, captions and the transcript's side and size are habits — you pick
@@ -55,6 +92,18 @@ export interface PlayerPrefs {
   muted: boolean;
   captionsEnabled: boolean;
   transcriptVisible: boolean;
+  /** How the two sources share the frame, when a lecture has two. */
+  layout: Layout;
+  /** The stream in the main frame — the only one in `single`, the big one in
+      `pip`, the top one in `stack`. The other frame takes the other stream. */
+  mainSource: SourceNum;
+  /** PIP box, in fractions of the video area. Its height is not stored: it
+      follows the picture's own aspect, which is what locks the ratio. */
+  pipX: number;
+  pipY: number;
+  pipW: number;
+  /** Share of the stacked view's height the top screen takes. */
+  split: number;
 }
 
 const DEFAULTS: PlayerPrefs = {
@@ -66,6 +115,14 @@ const DEFAULTS: PlayerPrefs = {
   muted: false,
   captionsEnabled: false,
   transcriptVisible: true,
+  layout: "single",
+  mainSource: 1,
+  // Bottom-right, out of the way of slide content and clear of the scrub bar.
+  pipX: 0.72,
+  pipY: 0.62,
+  pipW: 0.26,
+  // The Presenter screen is the one you read; the camera only has to be legible.
+  split: 0.68,
 };
 
 const KEY = "oculus-lecture-player-prefs";
@@ -110,6 +167,17 @@ function load(): PlayerPrefs {
       muted: !!p.muted,
       captionsEnabled: !!p.captionsEnabled,
       transcriptVisible: p.transcriptVisible !== false,
+      layout:
+        p.layout === "single" || p.layout === "pip" || p.layout === "stack"
+          ? p.layout
+          : DEFAULTS.layout,
+      mainSource: p.mainSource === 2 ? 2 : 1,
+      // `frac` allows 0, which `num` does not — a PIP flush to the left edge
+      // is a real position, and a width of 0 is not.
+      pipX: clampOffset(frac(p.pipX, DEFAULTS.pipX), frac(p.pipW, DEFAULTS.pipW)),
+      pipY: frac(p.pipY, DEFAULTS.pipY),
+      pipW: clampPipWidth(frac(p.pipW, DEFAULTS.pipW)),
+      split: clampSplit(frac(p.split, DEFAULTS.split)),
     };
   } catch {
     return DEFAULTS;
@@ -118,6 +186,9 @@ function load(): PlayerPrefs {
 
 const num = (v: unknown, fallback: number) =>
   typeof v === "number" && Number.isFinite(v) && v > 0 ? v : fallback;
+
+const frac = (v: unknown, fallback: number) =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1 ? v : fallback;
 
 /**
  * The dock side and size used to live in three loose keys of their own. Read

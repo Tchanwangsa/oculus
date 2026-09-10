@@ -68,7 +68,9 @@ live. Inside it:
 - `oculus.db` — SQLite, everything structured
 - `courses/<code>/…` — scraped files, mirrored to Canvas layout, plus `.md`,
   `.pages.json`, and `<stem>_images/` siblings the parser writes
-- `lectures/<uuid>/` — downloaded Echo360 media
+- `lectures/<uuid>/` — downloaded Echo360 media: `source1.mp4` (the Presenter
+  screen), `source2.mp4` (the room camera, when the capture has one and it has
+  been asked for) and `transcript.vtt`
 - `agents/` — the docs a coding agent reads, the `AGENTS.md` every course
   folder symlinks, and the memory layer it writes back (`TASTE.md`,
   `memories/`); written by `oculus docs` and, for everything but the CLI

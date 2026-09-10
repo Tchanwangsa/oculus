@@ -11,7 +11,6 @@ import {
 import {
   ArrowLineDown,
   ArrowLineUp,
-  CaretRight,
   DotsSixVertical,
   MagnifyingGlass,
   X,
@@ -536,7 +535,6 @@ export const TranscriptPanel = memo(function TranscriptPanel({
                     <span className="flex-1">
                       <Highlight text={cue.text} needle={needle} />
                     </span>
-                    <CaretRight size={10} className="shrink-0 mt-1 opacity-40" />
                   </button>
                 );
               })}

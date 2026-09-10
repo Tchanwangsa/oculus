@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useBlocker } from "react-router-dom";
 import {
   ArrowsIn,
@@ -14,6 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
 import {
+  dlKey,
   downloadLecture,
   isDownloading,
   useLectureDownloads,
@@ -21,16 +22,21 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { mediaSrc } from "@/lib/media";
-import { updateLectureTranscriptPath, type Lecture } from "@/lib/db";
+import {
+  updateLectureTranscriptPath,
+  videoPathFor,
+  type Lecture,
+  type SourceNum,
+} from "@/lib/db";
 import {
   LECTURE_PROGRESS_EVENT,
-  adoptLectureVideo,
   isLecturePlaying,
-  lectureVideo,
-  openLecture,
   ownsPlayback,
-  parkLectureVideo,
+  parkLectureVideos,
   stopLecturePlayback,
+  syncLectureSources,
+  videoForSource,
+  type SourcePlan,
 } from "@/lib/lecturePlayback";
 import { useTabStore } from "@/stores/tabStore";
 import { confirmLeavingLecture } from "@/stores/leaveLectureStore";
@@ -42,7 +48,15 @@ import {
   type Cue,
 } from "@/lib/lectures";
 import { useTranscriptDock } from "@/hooks/useTranscriptDock";
+import { PIP_CORNERS, useSourceLayout, type PipCorner } from "@/hooks/useSourceLayout";
 import { usePlayerPrefs } from "@/stores/playerPrefsStore";
+import {
+  LayoutControl,
+  SOURCES,
+  SourceSwitcher,
+  type SourceState,
+  type SourceStates,
+} from "@/components/lectures/SourceControls";
 import { CaptionOverlay } from "@/components/lectures/CaptionOverlay";
 import { ScrubPreview } from "@/components/lectures/ScrubPreview";
 import { SpeedControl } from "@/components/lectures/SpeedControl";
@@ -52,6 +66,27 @@ import {
   DockResizeHandle,
   TranscriptPanel,
 } from "@/components/lectures/TranscriptPanel";
+
+/**
+ * Is a panel on screen right now?
+ *
+ * The player is the one place in the app where a bare click on the background
+ * *does* something — it plays or pauses — so it is the one place that has to
+ * tell a click from a dismissal. Clicking off the source or layout panel used
+ * to close it *and* toggle playback, which is one action too many.
+ *
+ * Radix defers its outside-dismissal to the `click` (not the pointerdown) and
+ * handles it on `document`, so during the target phase — where the video's own
+ * handler runs, and before the pointer even lifts for the scrub bar — the
+ * panel is still up and still what the click was for. Which makes its presence
+ * the whole test.
+ *
+ * `[data-state=open]` earns its keep: Radix keeps a closing panel mounted for
+ * the length of its exit animation, and a click landing in those 150ms is a
+ * real click.
+ */
+const panelOnScreen = () =>
+  !!document.querySelector('[data-slot="popover-content"][data-state="open"]');
 
 /**
  * Video scrub bar. Not the shadcn Slider: it mixes `clientX` with
@@ -116,6 +151,8 @@ function SeekBar({
         if (!insideRef.current) setHovering(false);
       }}
       onPointerDown={(e) => {
+        // The click that closes a panel is not also a seek.
+        if (panelOnScreen()) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         setHovering(true);
         onSeek(trackFromEvent(e));
@@ -202,6 +239,125 @@ function ControlButton({
   );
 }
 
+/**
+ * One picture in the player. The `<video>` itself is not rendered here — it is
+ * a long-lived element moved into `hostRef` by `lib/lecturePlayback.ts` — so
+ * this is the box around it plus the control that says which stream it shows.
+ *
+ * The switcher hides with the control bar rather than only on pointer-out: a
+ * frame the pointer is resting on still counts as idle after a couple of
+ * seconds, and a lone pill floating over a lecture with no bar under it reads
+ * as a stuck overlay.
+ */
+function VideoFrame({
+  hostRef,
+  source,
+  sources,
+  showSwitcher,
+  chromeVisible,
+  pinned,
+  onSelectSource,
+  onDownloadSource,
+  onSwitcherOpenChange,
+  onPointerDown,
+  className,
+  style,
+  children,
+}: {
+  hostRef: React.RefObject<HTMLDivElement | null>;
+  source: SourceNum;
+  sources: SourceStates;
+  /** False for a capture with one stream — there is nothing to switch to, so
+      no pill, rather than a control whose only option is the current one. */
+  showSwitcher: boolean;
+  /** The control bar is showing, so frame chrome may show too. */
+  chromeVisible: boolean;
+  /** This frame's switcher is open, so it stays put whatever the pointer does. */
+  pinned: boolean;
+  onSelectSource: (source: SourceNum) => void;
+  onDownloadSource: (source: SourceNum) => void;
+  onSwitcherOpenChange: (open: boolean) => void;
+  /** Set on the PIP, where the whole box is the drag handle. */
+  onPointerDown?: (e: React.PointerEvent) => void;
+  className?: string;
+  style?: React.CSSProperties;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn("group/frame relative min-h-0 min-w-0 overflow-hidden", className)}
+      style={style}
+      onPointerDown={onPointerDown}
+    >
+      {/* Empty on purpose: the shared element is moved in here. */}
+      <div ref={hostRef} className="h-full w-full" />
+
+      {showSwitcher && (
+        <div
+          className={cn(
+            "absolute left-2 top-2 z-20 transition-opacity duration-150",
+            pinned
+              ? "opacity-100"
+              : chromeVisible
+                ? "opacity-0 group-hover/frame:opacity-100"
+                : "pointer-events-none opacity-0",
+          )}
+          // Inside the PIP the whole box is a drag handle; the pill is not.
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <SourceSwitcher
+            active={source}
+            states={sources}
+            onSelect={onSelectSource}
+            onDownload={onDownloadSource}
+            onOpenChange={onSwitcherOpenChange}
+          />
+        </div>
+      )}
+
+      {children}
+    </div>
+  );
+}
+
+/** Where a corner handle sits, and which way it resizes from there. */
+const CORNER_STYLE: Record<PipCorner, string> = {
+  nw: "left-0 top-0 cursor-nwse-resize",
+  ne: "right-0 top-0 cursor-nesw-resize",
+  sw: "bottom-0 left-0 cursor-nesw-resize",
+  se: "bottom-0 right-0 cursor-nwse-resize",
+};
+
+/** The divider between the two stacked screens — drag it to change the split. */
+function StackDivider({
+  onPointerDown,
+  dragging,
+}: {
+  onPointerDown: (e: React.PointerEvent) => void;
+  dragging: boolean;
+}) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize screens"
+      onPointerDown={onPointerDown}
+      className={cn(
+        "group/split relative z-20 h-1.5 shrink-0 cursor-row-resize touch-none",
+        "transition-colors",
+        dragging ? "bg-brand" : "bg-white/10 hover:bg-white/30",
+      )}
+    >
+      <span
+        className={cn(
+          "pointer-events-none absolute left-1/2 top-1/2 h-[2px] w-8 -translate-x-1/2 -translate-y-1/2",
+          "rounded-full bg-white/50 opacity-0 transition-opacity group-hover/split:opacity-100",
+        )}
+      />
+    </div>
+  );
+}
+
 interface LecturePlayerProps {
   lecture: Lecture;
   /** Fired after anything persisted changes (progress, downloads). */
@@ -256,18 +412,27 @@ export function LecturePlayer({
   const muted = usePlayerPrefs((s) => s.muted);
   const captionsEnabled = usePlayerPrefs((s) => s.captionsEnabled);
   const transcriptVisible = usePlayerPrefs((s) => s.transcriptVisible);
+  const layoutPref = usePlayerPrefs((s) => s.layout);
+  const mainPref = usePlayerPrefs((s) => s.mainSource);
   const setPrefs = usePlayerPrefs((s) => s.set);
 
   // Global on purpose: a download outlives this component (close the peek,
   // reopen it — the same download is still running in Rust).
   const downloads = useLectureDownloads();
   const downloading = isDownloading(downloads, lecture.id);
-  const dlProgress = downloads.progress[lecture.id] ?? null;
+  const dlProgress = downloads.progress[dlKey(lecture.id, 1)] ?? null;
 
-  /** The shared element while this player has it; see lib/lecturePlayback.ts. */
+  /** The leader element while this player has it; see lib/lecturePlayback.ts. */
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  /** The box in the frame the element is moved into. */
-  const videoHostRef = useRef<HTMLDivElement>(null);
+  /**
+   * The leader in state as well as in a ref: the ref is what handlers read,
+   * and the state is what makes the preference effects below re-apply speed
+   * and volume when a source switch hands the audio to a different decoder.
+   */
+  const [leaderEl, setLeaderEl] = useState<HTMLVideoElement | null>(null);
+  /** The boxes in the frames the elements are moved into. */
+  const mainHostRef = useRef<HTMLDivElement>(null);
+  const secondHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const videoAreaRef = useRef<HTMLDivElement>(null);
   const togglePlayRef = useRef<() => void>(() => {});
@@ -279,14 +444,14 @@ export function LecturePlayer({
   const followingRef = useRef(true);
   const hideControlsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Three reasons to pin the bar open, tracked apart because they end apart:
-  // the pointer resting on it, a panel of its own being open, and a volume
-  // drag that has wandered off the bar.
+  // the pointer resting on it, one of its panels being open (speed, layout),
+  // and a volume drag that has wandered off the bar.
   const pointerOnControlsRef = useRef(false);
-  const speedPanelOpenRef = useRef(false);
+  const panelOpenRef = useRef(false);
   const volumeDraggingRef = useRef(false);
   const controlsHeld = () =>
     pointerOnControlsRef.current ||
-    speedPanelOpenRef.current ||
+    panelOpenRef.current ||
     volumeDraggingRef.current;
 
   // Where the transcript sits (any edge of the player) and how big it is.
@@ -301,22 +466,96 @@ export function LecturePlayer({
     startResize,
   } = useTranscriptDock(containerRef);
 
+  // ── Sources ──────────────────────────────────────────────────────────────
+
   // Served over localhost HTTP, not convertFileSrc — WebKit's media stack
   // refuses custom-scheme (asset://) sources outright. See lib/media.ts.
-  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [urls, setUrls] = useState<Record<SourceNum, string | null>>({
+    1: null,
+    2: null,
+  });
   useEffect(() => {
     let stale = false;
-    if (!lecture.video_path) {
-      setVideoSrc(null);
-      return;
-    }
-    mediaSrc(lecture.video_path).then((url) => {
-      if (!stale) setVideoSrc(url);
+    Promise.all(
+      SOURCES.map(async (n) => {
+        const path = videoPathFor(lecture, n);
+        return [n, path ? await mediaSrc(path) : null] as const;
+      }),
+    ).then((pairs) => {
+      if (!stale) {
+        setUrls({ 1: pairs[0][1], 2: pairs[1][1] });
+      }
     });
     return () => {
       stale = true;
     };
-  }, [lecture.video_path]);
+  }, [lecture.video_path, lecture.video2_path]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Downloaded / downloading, per source, for the two source controls. */
+  const sources: SourceStates = useMemo(() => {
+    const of = (n: SourceNum): SourceState => {
+      const p = downloads.progress[dlKey(lecture.id, n)] ?? null;
+      return {
+        ready: !!videoPathFor(lecture, n),
+        busy: isDownloading(downloads, lecture.id, n),
+        percent: p?.percent ?? 0,
+        phase: p?.phase ?? "",
+      };
+    };
+    return { 1: of(1), 2: of(2) };
+  }, [downloads, lecture]);
+
+  /** Echo360 publishes a camera stream for this capture (`docs/sync.md`). */
+  const hasSecondSource = lecture.has_source2 === 1;
+
+  // A two-frame layout needs two files, so it falls back to one screen rather
+  // than half a player while the camera is still a download away.
+  const layout = urls[1] && urls[2] ? layoutPref : "single";
+  /** The stream in the main frame; the other frame gets the other one. The
+   *  preference only holds while that stream is actually on disk — a camera
+   *  that has not been downloaded cannot be the one screen you are watching. */
+  const mainSource: SourceNum = urls[mainPref] ? mainPref : urls[2] && !urls[1] ? 2 : 1;
+  const otherSource: SourceNum = mainSource === 1 ? 2 : 1;
+  const mainSrc = urls[mainSource];
+
+  /**
+   * Choosing a source in *either* frame swaps the pair, because the two frames
+   * always show the two streams — there is no state where both show the same
+   * one. So one number says everything: which stream is in the main frame.
+   *
+   * Which is why the second frame needs the other half of that swap: picking
+   * Source 2 *there* means Source 2 in that frame, so Source 1 in the main
+   * one. Handing it `selectSource` read the choice as the main frame's and
+   * inverted the panel — the row you ticked was the one you did not get.
+   */
+  const selectSource = (n: SourceNum) => setPrefs({ mainSource: n });
+  const selectSecondSource = (n: SourceNum) =>
+    setPrefs({ mainSource: n === 1 ? 2 : 1 });
+
+  const handleDownloadSource = (n: SourceNum) => {
+    setError(null);
+    downloadLecture(lecture, n)
+      .then(onRefresh)
+      .catch((e) => setError(`Download failed: ${e}`));
+  };
+
+  /** The PIP box keeps the inset picture's own shape, not an assumed 16:9.
+   *  Filled in by the reconcile effect below, which is where the element the
+   *  dimensions come from is known to exist. */
+  const [pipAspect, setPipAspect] = useState(16 / 9);
+
+  const {
+    pipStyle,
+    split,
+    pipDragging,
+    splitting,
+    startPipMove,
+    startPipResize,
+    startSplitDrag,
+  } = useSourceLayout(videoAreaRef, pipAspect);
+
+  /** Which frame has its source pill open, so it stays put while it is. */
+  const [openSwitcher, setOpenSwitcher] = useState<SourceNum | null>(null);
 
   // ── Transcript loading ───────────────────────────────────────────────────
 
@@ -344,13 +583,14 @@ export function LecturePlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lecture.id, lecture.transcript_path, lecture.video_path]);
 
-  // Restore saved progress once the (async-resolved) source has metadata.
+  // Where playback resumes is `lib/lecturePlayback.ts`'s call, not this one:
+  // it is the only thing that knows whether a load is a fresh lecture (restore
+  // the saved second) or a source switch mid-lecture (carry the live one).
   const handleLoadedMetadata = () => {
     const v = videoRef.current;
     if (!v) return;
     // A stream still being sized reports Infinity or NaN; keep the fallback.
     if (Number.isFinite(v.duration) && v.duration > 0) setFileDuration(v.duration);
-    if (lecture.progress_seconds > 5) v.currentTime = lecture.progress_seconds;
   };
 
   /** What every clock in the player counts against. */
@@ -452,7 +692,7 @@ export function LecturePlayer({
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      // An open popover (the speed panel) owns its own arrows and space bar.
+      // An open popover (speed, layout, source) owns its arrows and space bar.
       if (target?.closest('[data-slot="popover-content"]')) return;
 
       switch (e.key) {
@@ -507,15 +747,7 @@ export function LecturePlayer({
 
   // Downloads the transcript alongside the video; both land in the DB before
   // it resolves, so the refresh picks the paths up.
-  const handleDownloadVideo = async () => {
-    setError(null);
-    try {
-      await downloadLecture(lecture);
-      onRefresh();
-    } catch (e) {
-      setError(`Download failed: ${e}`);
-    }
-  };
+  const handleDownloadVideo = () => handleDownloadSource(1);
 
   const handleDownloadTranscript = async () => {
     setError(null);
@@ -611,18 +843,17 @@ export function LecturePlayer({
   // `playbackRate` is per-element and resets when a new source loads, so the
   // preference is applied as an effect rather than only on change.
   useEffect(() => {
-    if (videoRef.current) videoRef.current.playbackRate = speed;
-  }, [speed, videoSrc]);
+    if (leaderEl) leaderEl.playbackRate = speed;
+  }, [speed, leaderEl]);
 
   // Volume and mute are per-element the same way, and set together: they are
   // independent on the element, which is what lets unmuting land back on the
   // level rather than on full.
   useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.volume = volume;
-    v.muted = muted;
-  }, [volume, muted, videoSrc]);
+    if (!leaderEl) return;
+    leaderEl.volume = volume;
+    leaderEl.muted = muted;
+  }, [volume, muted, leaderEl]);
 
   // ── The shared element ───────────────────────────────────────────────────
 
@@ -645,16 +876,40 @@ export function LecturePlayer({
   };
 
   useEffect(() => {
-    const host = videoHostRef.current;
-    if (!host || !videoSrc) {
+    const mainHost = mainHostRef.current;
+    if (!mainHost || !mainSrc) {
       videoRef.current = null;
+      setLeaderEl(null);
       return;
     }
 
-    const v = lectureVideo();
+    // Restate the whole layout; the module works out what that means for the
+    // elements it owns. The main frame is first, and first is the leader — the
+    // picture you are watching is the audio you hear.
+    const plan: SourcePlan[] = [{ source: mainSource, src: mainSrc, host: mainHost }];
+    const secondHost = secondHostRef.current;
+    const secondSrc = urls[otherSource];
+    if (layout !== "single" && secondHost && secondSrc) {
+      plan.push({ source: otherSource, src: secondSrc, host: secondHost });
+    }
+
+    const v = syncLectureSources(lecture, plan, activeTabId);
+    if (!v) return;
     videoRef.current = v;
-    openLecture(lecture, videoSrc);
-    adoptLectureVideo(host, activeTabId);
+    setLeaderEl(v);
+
+    // The inset's shape comes from the picture in it. Read here rather than in
+    // an effect of its own: the element only exists once the plan above has
+    // been reconciled, and an effect that ran before it would find nothing and
+    // never look again.
+    const inset = plan.length > 1 ? videoForSource(plan[1].source) : null;
+    const readAspect = () => {
+      if (inset?.videoWidth && inset.videoHeight) {
+        setPipAspect(inset.videoWidth / inset.videoHeight);
+      }
+    };
+    readAspect();
+    inset?.addEventListener("loadedmetadata", readAspect);
 
     // A lecture that kept playing while its tab was gone is already somewhere
     // when this mounts, and this component's state starts empty — so the state
@@ -665,7 +920,10 @@ export function LecturePlayer({
 
     const onTimeUpdate = () => mediaRef.current.timeUpdate();
     const onLoadedMetadata = () => mediaRef.current.loadedMetadata();
-    const onClick = () => mediaRef.current.togglePlay();
+    const onClick = () => {
+      if (panelOnScreen()) return;
+      mediaRef.current.togglePlay();
+    };
     const onPlay = () => {
       setIsPlaying(true);
       // Pressing play is a request to be back where the video is.
@@ -698,13 +956,14 @@ export function LecturePlayer({
       v.removeEventListener("pause", onPause);
       v.removeEventListener("ended", onEnded);
       v.removeEventListener("error", onError);
+      inset?.removeEventListener("loadedmetadata", readAspect);
       videoRef.current = null;
-      // Unmounting is a tab switch, not a stop: the element goes back to its
-      // off-screen host and carries on. Closing the lecture is what stops it.
-      parkLectureVideo();
+      // Unmounting is a tab switch, not a stop: the elements go back to their
+      // off-screen host and carry on. Closing the lecture is what stops them.
+      parkLectureVideos();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoSrc, lecture.id, activeTabId]);
+  }, [lecture.id, urls[1], urls[2], layout, mainSource, activeTabId]);
 
   // ── Leaving ──────────────────────────────────────────────────────────────
 
@@ -785,9 +1044,98 @@ export function LecturePlayer({
             }
           }}
         >
-          {videoSrc ? (
-            /* Empty on purpose: the shared element is moved in here. */
-            <div ref={videoHostRef} className="w-full h-full min-h-0" />
+          {mainSrc ? (
+            <>
+              {/* `flexGrow` on a zero basis, not a percentage height: the two
+                  screens divide what is left *after* the divider, so the split
+                  can never add up to more than the frame. */}
+              <VideoFrame
+                hostRef={mainHostRef}
+                source={mainSource}
+                sources={sources}
+                showSwitcher={hasSecondSource}
+                chromeVisible={controlsVisible}
+                pinned={openSwitcher === mainSource}
+                onSelectSource={selectSource}
+                onDownloadSource={handleDownloadSource}
+                onSwitcherOpenChange={(open) =>
+                  setOpenSwitcher(open ? mainSource : null)
+                }
+                className={layout === "stack" ? undefined : "flex-1"}
+                style={
+                  layout === "stack" ? { flexGrow: split, flexBasis: 0 } : undefined
+                }
+              />
+
+              {layout === "stack" && (
+                <>
+                  <StackDivider onPointerDown={startSplitDrag} dragging={splitting} />
+                  <VideoFrame
+                    hostRef={secondHostRef}
+                    source={otherSource}
+                    sources={sources}
+                    showSwitcher={hasSecondSource}
+                    chromeVisible={controlsVisible}
+                    pinned={openSwitcher === otherSource}
+                    onSelectSource={selectSecondSource}
+                    onDownloadSource={handleDownloadSource}
+                    onSwitcherOpenChange={(open) =>
+                      setOpenSwitcher(open ? otherSource : null)
+                    }
+                    style={{ flexGrow: 1 - split, flexBasis: 0 }}
+                  />
+                </>
+              )}
+
+              {layout === "pip" && (
+                <VideoFrame
+                  hostRef={secondHostRef}
+                  source={otherSource}
+                  sources={sources}
+                  showSwitcher={hasSecondSource}
+                  chromeVisible={controlsVisible}
+                  pinned={openSwitcher === otherSource}
+                  onSelectSource={selectSecondSource}
+                  onDownloadSource={handleDownloadSource}
+                  onSwitcherOpenChange={(open) =>
+                    setOpenSwitcher(open ? otherSource : null)
+                  }
+                  // Under the control bar (z-30) so it can never cover the
+                  // scrub bar, over the main picture so it is visible at all.
+                  className={cn(
+                    "absolute z-20 touch-none rounded-lg border border-white/20 bg-black",
+                    "shadow-2xl shadow-black/60",
+                    pipDragging ? "cursor-grabbing" : "cursor-grab",
+                  )}
+                  style={pipStyle}
+                  onPointerDown={startPipMove}
+                >
+                  {/* On the switcher pill's terms, not hover's alone: four
+                      white pips sitting on the inset after the bar has faded
+                      read as furniture stuck to the picture. A drag pins them,
+                      since a handle that vanishes under the pointer you are
+                      resizing with is the one moment they must not go. */}
+                  {PIP_CORNERS.map((corner) => (
+                    <span
+                      key={corner}
+                      aria-hidden="true"
+                      onPointerDown={(e) => startPipResize(e, corner)}
+                      className={cn(
+                        "absolute z-10 size-5 touch-none transition-opacity",
+                        pipDragging
+                          ? "opacity-100"
+                          : controlsVisible
+                            ? "opacity-0 group-hover/frame:opacity-100"
+                            : "pointer-events-none opacity-0",
+                        CORNER_STYLE[corner],
+                      )}
+                    >
+                      <span className="absolute inset-1 rounded-[3px] bg-white/70" />
+                    </span>
+                  ))}
+                </VideoFrame>
+              )}
+            </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-white/60 p-6">
               <p className="text-sm font-medium text-white">{lecture.title}</p>
@@ -846,7 +1194,7 @@ export function LecturePlayer({
               <SeekBar
                 value={Math.min(currentTime, duration)}
                 max={duration || 1}
-                previewSrc={videoSrc}
+                previewSrc={mainSrc}
                 onSeek={(v) => {
                   setCurrentTime(v);
                   if (videoRef.current) videoRef.current.currentTime = v;
@@ -857,7 +1205,7 @@ export function LecturePlayer({
                 <ControlButton
                   label={isPlaying ? "Pause" : "Play"}
                   onClick={togglePlay}
-                  disabled={!videoSrc}
+                  disabled={!mainSrc}
                 >
                   {isPlaying ? (
                     <Pause size={16} weight="fill" />
@@ -892,7 +1240,7 @@ export function LecturePlayer({
                   speed={speed}
                   onChange={(s) => setPrefs({ speed: s })}
                   onOpenChange={(open) => {
-                    speedPanelOpenRef.current = open;
+                    panelOpenRef.current = open;
                     revealControls();
                   }}
                 />
@@ -909,6 +1257,19 @@ export function LecturePlayer({
                       <DownloadSimple size={16} />
                     )}
                   </ControlButton>
+                )}
+
+                {hasSecondSource && (
+                  <LayoutControl
+                    layout={layout}
+                    onChange={(l) => setPrefs({ layout: l })}
+                    second={sources[2]}
+                    onDownloadSecond={() => handleDownloadSource(2)}
+                    onOpenChange={(open) => {
+                      panelOpenRef.current = open;
+                      revealControls();
+                    }}
+                  />
                 )}
 
                 <ControlButton

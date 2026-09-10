@@ -57,7 +57,15 @@ pub struct Lecture {
     pub title: String,
     pub date: String,
     pub duration_seconds: i64,
+    /// Whether the capture has a camera stream alongside the Presenter screen.
+    /// See `second_source_hint` — one media id, two downloadable files.
+    pub has_second_source: bool,
 }
+
+/// A capture is published as one or two streams: `hd1.mp4` is the Presenter
+/// screen, `hd2.mp4` the room camera where the theatre has one. Both hang off
+/// the same media id, so a "source" is a file name, not a second recording.
+pub type SourceNum = u8;
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -210,6 +218,10 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
     let items = body["data"].as_array().ok_or("syllabus: no data array")?;
 
     let mut out = Vec::new();
+    // How many lectures the syllabus couldn't answer for. Zero is the normal
+    // case; anything else means Echo360 has stopped sending its file lists and
+    // every sync is now paying a redirect per lecture to find the camera.
+    let mut probed = 0usize;
     for item in items {
         let lesson = &item["lesson"];
         let inner = &lesson["lesson"];
@@ -229,17 +241,68 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
             lesson["captureStartedAt"].as_str().unwrap_or(""),
             lesson["captureEndedAt"].as_str().unwrap_or(""),
         );
+        let lesson_id = inner["id"].as_str().unwrap_or("").to_string();
+        // The syllabus usually says outright whether there is a camera stream.
+        // When it doesn't, one redirect request per lecture does — see below.
+        let has_second_source = match second_source_hint(lesson) {
+            Some(known) => known,
+            None => {
+                probed += 1;
+                download_url(session, &media_id, &lesson_id, 2).is_ok()
+            }
+        };
+
         out.push(Lecture {
             id: media_id,
-            lesson_id: inner["id"].as_str().unwrap_or("").to_string(),
+            lesson_id,
             title: inner["name"].as_str().unwrap_or("").to_string(),
             date: inner["timing"]["start"].as_str().unwrap_or("").to_string(),
             // The stored duration is post-trim, so it matches the file on disk.
             duration_seconds: (raw_dur - TRIM_SECS as i64).max(0),
+            has_second_source,
         });
     }
-    eprintln!("[oculus] echo360 syllabus: {} lectures", out.len());
+    let dual = out.iter().filter(|l| l.has_second_source).count();
+    eprintln!("[oculus] echo360 syllabus: {} lectures ({dual} with a second source)", out.len());
+    if probed > 0 {
+        eprintln!(
+            "[oculus] warn: syllabus carried no file lists for {probed} lecture(s) — \
+             fell back to probing the download endpoint"
+        );
+    }
     Ok(out)
+}
+
+/// Does this lesson have a camera stream as well as the Presenter screen?
+///
+/// Echo360 carries the two as `primaryFiles` / `secondaryFiles`, but the
+/// nesting under `lesson` has moved between versions of the syllabus payload,
+/// so this searches for the keys rather than walking a fixed path.
+///
+/// `None` means the payload isn't carrying file lists at all — a *negative* is
+/// only trustworthy when `primaryFiles` is there to prove the shape is present.
+/// The caller falls back to probing the download endpoint in that case.
+fn second_source_hint(lesson: &serde_json::Value) -> Option<bool> {
+    let non_empty = |v: &serde_json::Value| v.as_array().is_some_and(|a| !a.is_empty());
+    if find_key(lesson, "secondaryFiles").is_some_and(non_empty) {
+        return Some(true);
+    }
+    find_key(lesson, "primaryFiles").map(|_| false)
+}
+
+/// First value under `key` anywhere in the tree, breadth of shape over depth
+/// of assumption.
+fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    match v {
+        serde_json::Value::Object(map) => {
+            if let Some(hit) = map.get(key) {
+                return Some(hit);
+            }
+            map.values().find_map(|child| find_key(child, key))
+        }
+        serde_json::Value::Array(items) => items.iter().find_map(|child| find_key(child, key)),
+        _ => None,
+    }
 }
 
 fn duration_between(start: &str, end: &str) -> i64 {
@@ -279,8 +342,23 @@ pub fn transcript(session: &Session, lesson_id: &str, media_id: &str) -> Result<
 
 /// The download endpoint answers with a 302 to a signed CDN URL rather than
 /// the bytes, so redirects are disabled and the Location header is the result.
-pub fn download_url(session: &Session, media_id: &str, lesson_id: &str) -> Result<String, String> {
-    let url = format!("https://echo360.net.au/media/download/{media_id}/hd1.mp4?lessonId={lesson_id}");
+///
+/// `source` picks the stream: 1 is the Presenter screen, 2 the room camera.
+///
+/// This doubles as the availability probe above, because Echo360 resolves the
+/// stream before it signs anything: a source that does not exist answers 500
+/// rather than handing back a URL that would 404 on the CDN (measured against
+/// `hd3.mp4`, which is never a real stream). So a redirect here means the file
+/// is there.
+pub fn download_url(
+    session: &Session,
+    media_id: &str,
+    lesson_id: &str,
+    source: SourceNum,
+) -> Result<String, String> {
+    let url = format!(
+        "https://echo360.net.au/media/download/{media_id}/hd{source}.mp4?lessonId={lesson_id}"
+    );
     let agent = ureq::AgentBuilder::new().redirects(0).build();
     match agent.get(&url).set("Cookie", &session.cookie_header()).call() {
         Ok(r) => {
@@ -417,21 +495,38 @@ pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Remove `raw.mp4` files left behind by an interrupted download.
+/// Remove the untrimmed downloads left behind by an interrupted run. Both
+/// sources land in the same lecture directory, so this matches by prefix
+/// rather than by name (and still catches the pre-source-2 `raw.mp4`).
 pub fn cleanup_partial_downloads(data_dir: &Path) {
     let dir = data_dir.join("lectures");
-    let Ok(entries) = std::fs::read_dir(&dir) else { return };
-    for entry in entries.flatten() {
-        let raw = entry.path().join("raw.mp4");
-        if raw.exists() {
-            eprintln!("[oculus] cleanup: removing orphaned {}", raw.display());
-            std::fs::remove_file(&raw).ok();
+    let Ok(lectures) = std::fs::read_dir(&dir) else { return };
+    for lecture in lectures.flatten() {
+        let Ok(files) = std::fs::read_dir(lecture.path()) else { continue };
+        for file in files.flatten() {
+            let name = file.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("raw") && name.ends_with(".mp4") {
+                eprintln!("[oculus] cleanup: removing orphaned {}", file.path().display());
+                std::fs::remove_file(file.path()).ok();
+            }
         }
     }
 }
 
 pub fn lecture_dir(data_dir: &Path, media_id: &str) -> PathBuf {
     data_dir.join("lectures").join(media_id)
+}
+
+/// Where a trimmed stream lives. Source 1 keeps the name it has always had,
+/// so nothing already downloaded has to be fetched again.
+pub fn source_path(dir: &Path, source: SourceNum) -> PathBuf {
+    dir.join(format!("source{source}.mp4"))
+}
+
+/// The untrimmed download, one per source so both can run at once.
+pub fn partial_path(dir: &Path, source: SourceNum) -> PathBuf {
+    dir.join(format!("raw{source}.mp4"))
 }
 
 #[cfg(test)]
@@ -471,6 +566,30 @@ mod tests {
     fn durations_handle_midnight_rollover() {
         assert_eq!(duration_between("2026-01-01T10:00:00Z", "2026-01-01T11:30:00Z"), 5400);
         assert_eq!(duration_between("2026-01-01T23:30:00Z", "2026-01-02T00:30:00Z"), 3600);
+    }
+
+    #[test]
+    fn a_camera_stream_is_found_wherever_echo360_nests_it() {
+        let with_camera = serde_json::json!({
+            "medias": [{ "media": { "current": {
+                "primaryFiles": [{ "s3Url": "a" }],
+                "secondaryFiles": [{ "s3Url": "b" }],
+            }}}]
+        });
+        assert_eq!(second_source_hint(&with_camera), Some(true));
+
+        let screen_only = serde_json::json!({
+            "medias": [{ "media": { "current": {
+                "primaryFiles": [{ "s3Url": "a" }],
+                "secondaryFiles": [],
+            }}}]
+        });
+        assert_eq!(second_source_hint(&screen_only), Some(false));
+
+        // No file lists at all: unknowable from the syllabus, so the caller
+        // probes rather than being told a confident "no".
+        let no_files = serde_json::json!({ "medias": [{ "id": "abc", "isAvailable": true }] });
+        assert_eq!(second_source_hint(&no_files), None);
     }
 
     #[test]

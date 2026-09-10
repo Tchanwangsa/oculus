@@ -755,6 +755,9 @@ export async function clearAllFiles(): Promise<number> {
 
 // ── Lectures ──────────────────────────────────────────────────────────────────
 
+/** Which of a capture's two streams: 1 the Presenter screen, 2 the room camera. */
+export type SourceNum = 1 | 2;
+
 export interface Lecture {
   id: string;
   lesson_id: string;
@@ -763,6 +766,10 @@ export interface Lecture {
   date: string;
   duration_seconds: number;
   video_path: string | null;
+  /** The camera stream, downloaded separately and often not at all. */
+  video2_path: string | null;
+  /** 1 when Echo360 publishes a camera stream for this capture. */
+  has_source2: number;
   transcript_path: string | null;
   progress_seconds: number;
   completed: number;
@@ -775,20 +782,39 @@ export interface LectureData {
   title: string;
   date: string;
   duration_seconds: number;
+  has_second_source: boolean;
 }
+
+/** The column a source's file path is stored in. */
+export const videoPathColumn = (source: SourceNum) =>
+  source === 1 ? "video_path" : "video2_path";
+
+/** A lecture's downloaded file for one source, or null. */
+export const videoPathFor = (lec: Lecture, source: SourceNum) =>
+  source === 1 ? lec.video_path : lec.video2_path;
 
 export async function upsertLectures(subjectId: number, lectures: LectureData[]): Promise<void> {
   const db = await getDb();
   for (const l of lectures) {
     await db.execute(
-      `INSERT INTO lectures (id, lesson_id, subject_id, title, date, duration_seconds, synced_at)
-       VALUES ($1, $2, $3, $4, $5, $6, datetime('now'))
+      `INSERT INTO lectures
+         (id, lesson_id, subject_id, title, date, duration_seconds, has_source2, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, datetime('now'))
        ON CONFLICT(id) DO UPDATE SET
          title            = excluded.title,
          date             = excluded.date,
          duration_seconds = excluded.duration_seconds,
+         has_source2      = excluded.has_source2,
          synced_at        = datetime('now')`,
-      [l.id, l.lesson_id, subjectId, l.title, l.date, l.duration_seconds]
+      [
+        l.id,
+        l.lesson_id,
+        subjectId,
+        l.title,
+        l.date,
+        l.duration_seconds,
+        l.has_second_source ? 1 : 0,
+      ]
     );
   }
 }
@@ -801,9 +827,17 @@ export async function getLectures(subjectId: number): Promise<Lecture[]> {
   );
 }
 
-export async function updateLectureVideoPath(id: string, path: string): Promise<void> {
+export async function updateLectureVideoPath(
+  id: string,
+  path: string,
+  source: SourceNum = 1
+): Promise<void> {
   const db = await getDb();
-  await db.execute(`UPDATE lectures SET video_path = $1 WHERE id = $2`, [path, id]);
+  // The column name is one of two literals, never user input.
+  await db.execute(`UPDATE lectures SET ${videoPathColumn(source)} = $1 WHERE id = $2`, [
+    path,
+    id,
+  ]);
 }
 
 export async function updateLectureTranscriptPath(id: string, path: string): Promise<void> {
