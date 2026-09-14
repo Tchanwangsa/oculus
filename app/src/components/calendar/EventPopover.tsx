@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowSquareOut, MapPin, Play, Trash } from "@phosphor-icons/react";
+import { ArrowSquareOut, Kanban, MapPin, Play, Trash } from "@phosphor-icons/react";
 import {
   Popover,
   PopoverContent,
@@ -15,12 +15,14 @@ import {
   type CalEvent,
 } from "@/lib/calendar";
 import { deleteLocalEvent } from "@/lib/db";
+import { projectHref } from "@/components/projects/projectHref";
 
 const KIND_LABEL: Record<CalEvent["kind"], string> = {
   class: "Class",
   due: "Due",
   lecture: "Recording",
   note: "Note",
+  task: "Task",
 };
 
 /** Where a local row came from, in the user's words. Only `manual` is written
@@ -39,7 +41,10 @@ const SOURCE_LABEL: Record<string, string> = {
  * It is also where a local event is deleted. Canvas rows need no such control
  * (the next sync would write them straight back), so the affordance belongs
  * with the one layer that owns its own lifetime rather than in a panel of its
- * own.
+ * own. A task is not deletable here either, for a different reason: the
+ * calendar only *reads* `project_tasks`, and everything you would do to a task
+ * — re-date it, move its column, drop it — belongs on its board, which the card
+ * links through to.
  */
 export function EventPopover({
   event,
@@ -51,6 +56,12 @@ export function EventPopover({
   children: ReactNode;
 }) {
   const localId = event.localId;
+  // A task's project, if this is one. The name travels in the href because the
+  // tab strip titles a project tab from the query alone (`projectHref`).
+  const project =
+    event.projectId != null && event.projectName != null
+      ? { id: event.projectId, name: event.projectName }
+      : null;
   /** Nothing else ever clears a local event — no sync replaces the table — so
    *  removing one is final and immediate, like every other Remove in the app.
    *  The page reloads off the same signal a sync raises. */
@@ -109,7 +120,7 @@ export function EventPopover({
           </div>
         )}
 
-        {(event.url || event.lectureId || localId != null) && (
+        {(event.url || event.lectureId || project || localId != null) && (
           <div className="border-t border-border-subtle px-3.5 py-2 flex items-center gap-3">
             {localId != null && (
               <>
@@ -124,6 +135,15 @@ export function EventPopover({
                   <Trash size={11} /> Remove
                 </button>
               </>
+            )}
+            {project && (
+              <Link
+                to={projectHref(project)}
+                className="inline-flex min-w-0 items-center gap-1.5 text-[11px] text-brand hover:underline"
+              >
+                <Kanban size={11} className="shrink-0" />
+                <span className="truncate">{project.name}</span>
+              </Link>
             )}
             {event.lectureId && (
               <Link

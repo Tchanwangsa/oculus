@@ -6,6 +6,7 @@ import {
   fmtEventTime,
   isInstant,
   isPast,
+  isSelfImposed,
   monthGrid,
   sameDay,
   startOfDay,
@@ -131,12 +132,13 @@ function Chip({
   color: string;
   gone: boolean;
 }) {
-  // A deadline or a note is an instant with no shape of its own, so it is
-  // tinted to stand out of a column of classes; a class stays flat, or a busy
-  // day turns into stripes. A note is tinted more faintly than a deadline.
+  // A deadline, a note or a task is an instant with no shape of its own, so it
+  // is tinted to stand out of a column of classes; a class stays flat, or a
+  // busy day turns into stripes. What you set yourself — a note, a task — is
+  // tinted more faintly than a deadline a course set for you.
   const instant = isInstant(event);
   const tone = gone ? "var(--color-chart-other)" : color;
-  const fill = event.kind === "note" ? (gone ? 8 : 12) : gone ? 12 : 20;
+  const fill = isSelfImposed(event) ? (gone ? 8 : 12) : gone ? 12 : 20;
   return (
     <EventPopover event={event} color={color}>
       <button

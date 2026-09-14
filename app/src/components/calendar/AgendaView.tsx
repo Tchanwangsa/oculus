@@ -16,6 +16,7 @@ const KIND_LABEL: Record<CalEvent["kind"], string> = {
   due: "due",
   lecture: "recording",
   note: "note",
+  task: "task",
 };
 
 /**
@@ -93,7 +94,12 @@ export function AgendaView({
                         </span>
                         <span className="block truncate text-[11px] text-muted-foreground">
                           {e.subjectCode}
-                          {e.kind === "due" ? (
+                          {/* A task names the project it belongs to: which
+                              piece of work this is part of is what tells you
+                              what to do about it. */}
+                          {e.kind === "task" && e.projectName ? (
+                            ` · task · ${e.projectName}`
+                          ) : e.kind === "due" ? (
                             <span className="font-medium text-foreground/70"> · due</span>
                           ) : (
                             ` · ${KIND_LABEL[e.kind]}`

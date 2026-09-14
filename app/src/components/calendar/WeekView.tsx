@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Flag, PushPin } from "@phosphor-icons/react";
 import { useNow } from "@/hooks/useNow";
 import {
   durationMinutes,
@@ -9,15 +8,28 @@ import {
   hourRange,
   isInstant,
   isPast,
+  isSelfImposed,
   minutesFromMidnight,
   sameDay,
   shortLocation,
   startOfDay,
   weekDays,
   type CalEvent,
+  type CalKind,
 } from "@/lib/calendar";
+import { packLanes } from "@/lib/lanes";
 import { EventMark } from "./EventMark";
 import { EventPopover } from "./EventPopover";
+
+/** The kinds the strip above the grid can be named after. `Extract` rather
+ *  than a literal union, so a renamed {@link CalKind} breaks here too. */
+type StripKind = Extract<CalKind, "due" | "note" | "task">;
+
+const STRIP_LABEL: Record<StripKind, string> = {
+  due: "Due",
+  note: "Notes",
+  task: "Tasks",
+};
 
 const HOUR_PX = 46;
 const GUTTER = "3.25rem";
@@ -32,49 +44,21 @@ const BLOCK_MIN_PX = 16;
 /**
  * How much of the subject's hue an instant's pill is tinted with.
  *
- * A note is washed out beside a deadline of the same colour: a reminder you
- * wrote should not read as loudly as a cutoff you will be marked against.
- * Anything already past is quieter again, like every other layer.
+ * A note or a task is washed out beside a deadline of the same colour: a
+ * reminder you wrote, or a date you set yourself on a board, should not read as
+ * loudly as a cutoff you will be marked against. Anything already past is
+ * quieter again, like every other layer.
  */
 function tintPct(e: CalEvent, gone: boolean, full: number): number {
-  const base = e.kind === "note" ? full * 0.6 : full;
+  const base = isSelfImposed(e) ? full * 0.6 : full;
   return Math.round(gone ? base * 0.6 : base);
 }
 
-/** Lay overlapping classes out side by side: cluster anything that touches,
- *  then give each event the first lane free at its start time. */
-function packLanes(events: CalEvent[]): { event: CalEvent; lane: number; of: number }[] {
-  const sorted = [...events].sort((a, b) => a.start.getTime() - b.start.getTime());
-  const out: { event: CalEvent; lane: number; of: number }[] = [];
-
-  let cluster: CalEvent[] = [];
-  let clusterEnd = -Infinity;
-
-  const flush = () => {
-    if (cluster.length === 0) return;
-    const laneEnds: number[] = [];
-    const placed = cluster.map((e) => {
-      const start = e.start.getTime();
-      const end = start + durationMinutes(e) * 60_000;
-      let lane = laneEnds.findIndex((t) => t <= start);
-      if (lane === -1) lane = laneEnds.length;
-      laneEnds[lane] = end;
-      return { event: e, lane };
-    });
-    for (const p of placed) out.push({ ...p, of: laneEnds.length });
-    cluster = [];
-    clusterEnd = -Infinity;
-  };
-
-  for (const e of sorted) {
-    const start = e.start.getTime();
-    const end = start + durationMinutes(e) * 60_000;
-    if (start >= clusterEnd) flush();
-    cluster.push(e);
-    clusterEnd = Math.max(clusterEnd, end);
-  }
-  flush();
-  return out;
+/** A class's span in epoch milliseconds, for {@link packLanes} — the only
+ *  CalEvent-specific part of laying overlapping classes side by side. */
+function classSpan(e: CalEvent) {
+  const start = e.start.getTime();
+  return { start, end: start + durationMinutes(e) * 60_000 };
 }
 
 /**
@@ -130,10 +114,16 @@ export function WeekView({
   const scroller = useRef<HTMLDivElement>(null);
   const stripDue = inWeek.filter((e) => (isInstant(e) || e.allDay) && !placeable(e));
   const hasDue = stripDue.length > 0;
-  // The strip is named after what is in it. A week whose unplaceable instants
-  // are all notes would otherwise file them under "Due", which is a claim
-  // about a deadline that does not exist.
-  const stripOnlyNotes = hasDue && stripDue.every((e) => e.kind === "note");
+  // The strip is named after the loudest layer in it. A week whose unplaceable
+  // instants are all notes, or all tasks, would otherwise file them under
+  // "Due", which is a claim about a deadline that does not exist. A real
+  // deadline — or an all-day class, which has no quieter name — still wins the
+  // heading whenever one is present.
+  const stripKind: StripKind = stripDue.some((e) => e.kind === "due" || !isInstant(e))
+    ? "due"
+    : stripDue.some((e) => e.kind === "task")
+      ? "task"
+      : "note";
 
   // Open where the user actually is: "now", a couple of hours up so there is
   // context above it, on the week containing today — otherwise the start of
@@ -201,8 +191,8 @@ export function WeekView({
           style={{ gridTemplateColumns: `${GUTTER} repeat(7, minmax(0, 1fr))` }}
         >
           <div className="flex items-center justify-end gap-1 px-2 py-1.5 text-right text-[10px] font-medium text-muted-foreground">
-            {stripOnlyNotes ? <PushPin size={10} weight="fill" /> : <Flag size={10} weight="fill" />}
-            {stripOnlyNotes ? "Notes" : "Due"}
+            <EventMark kind={stripKind} color="currentColor" size={10} />
+            {STRIP_LABEL[stripKind]}
           </div>
           {days.map((d) => (
             <div
@@ -277,6 +267,7 @@ export function WeekView({
               eventsOn(timed, day).filter(
                 (e) => minutesFromMidnight(e.start) >= fromHour * 60,
               ),
+              classSpan,
             );
             return (
               <div
@@ -304,7 +295,7 @@ export function WeekView({
                   <NowLine fromHour={fromHour} toHour={toHour} />
                 )}
 
-                {laid.map(({ event, lane, of }) => {
+                {laid.map(({ item: event, lane, of }) => {
                   // Blocks are clamped into the grid the way the deadline
                   // markers below are, and for the same reason: Canvas
                   // publishes cutoff-shaped *classes* (an 11:59pm–11:59pm peer

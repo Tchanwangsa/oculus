@@ -20,6 +20,7 @@ import {
   subjectColors,
   type CalEvent,
 } from "@/lib/calendar";
+import { PROJECTS_UPDATED_EVENT } from "@/lib/projects";
 import { MonthView } from "@/components/calendar/MonthView";
 import { WeekView } from "@/components/calendar/WeekView";
 import { AgendaView } from "@/components/calendar/AgendaView";
@@ -33,7 +34,8 @@ const VIEWS: { id: View; label: string }[] = [
 ];
 
 /**
- * Classes, deadlines and recordings across every subject, in one place.
+ * Classes, deadlines, recordings and task due dates across every subject, in
+ * one place.
  *
  * The rows come from Canvas's calendar API during a sync (see
  * `app/src-tauri/src/calendar.rs`); this page only reads them, and its refresh
@@ -56,10 +58,18 @@ export default function CalendarPage() {
       });
   }, []);
 
+  // Two signals, one reload: a sync raises CALENDAR_UPDATED_EVENT for the rows
+  // it replaced, and every project write raises PROJECTS_UPDATED_EVENT. The
+  // task layer is read live off `project_tasks`, so a task re-dated or ticked
+  // off on its board has to leave the grid without a refresh.
   useEffect(() => {
     reload();
     window.addEventListener(CALENDAR_UPDATED_EVENT, reload);
-    return () => window.removeEventListener(CALENDAR_UPDATED_EVENT, reload);
+    window.addEventListener(PROJECTS_UPDATED_EVENT, reload);
+    return () => {
+      window.removeEventListener(CALENDAR_UPDATED_EVENT, reload);
+      window.removeEventListener(PROJECTS_UPDATED_EVENT, reload);
+    };
   }, [reload]);
 
   // Colours are keyed off the full set, not the visible one, so hiding a

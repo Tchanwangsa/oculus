@@ -5,7 +5,8 @@ import {
   type DbCalendarEvent,
   type DbLocalEvent,
 } from "@/lib/db";
-import { displayCode } from "@/lib/format";
+import { getAllOpenTasks } from "@/lib/projects";
+import { displayCode, sqliteUtcToMs } from "@/lib/format";
 
 /**
  * What the calendar can draw.
@@ -15,13 +16,16 @@ import { displayCode } from "@/lib/format";
  * recordings already in the library — a lecture recording *is* a class that
  * happened, so it fills the timetable in for any subject whose staff never
  * published events to the Canvas calendar. `note` is Oculus's own: a reminder
- * the user wrote, which has no Canvas counterpart at all.
+ * the user wrote, which has no Canvas counterpart at all. `task` is a dated,
+ * unfinished project task, read live off `project_tasks`
+ * (`app/src/lib/projects.ts`) — a deadline you set yourself rather than one the
+ * university set for you.
  *
  * A local event can also be a `class` or a `due` — it is the same kind of
  * thing, just stored elsewhere (`local_events`, see `docs/calendar.md`), so it
- * is drawn the same way rather than as a fourth layer.
+ * is drawn the same way rather than as a fifth layer.
  */
-export type CalKind = "class" | "due" | "lecture" | "note";
+export type CalKind = "class" | "due" | "lecture" | "note" | "task";
 
 /**
  * The subject id a local event with no subject is filed under.
@@ -63,10 +67,23 @@ export interface CalEvent {
   /** Why a local event exists (`manual`, or `automation` on legacy rows),
    *  shown on its card so a deadline the user never typed is explicable. */
   localSource: string | null;
+  /** `project_tasks.id` for a `task` row — the handle back to the row this
+   *  event is a live *view* of. Nothing is copied into the calendar's own
+   *  tables (see `docs/calendar.md`), so a task edited or ticked off on its
+   *  board simply stops being read here. `null` on every other layer. */
+  taskId: number | null;
+  /** The project a `task` belongs to, so its card can open the board it lives
+   *  on — the only place a task can be edited or deleted. `null` elsewhere. */
+  projectId: number | null;
+  /** That project's name, carried along because the calendar has no project
+   *  list to look one up in, and a bare task title on a grid ("Draft the
+   *  intro") is not enough to act on. `null` elsewhere. */
+  projectName: string | null;
 }
 
 /**
- * An instant rather than a span: a deadline, or a note pinned to a time.
+ * An instant rather than a span: a deadline, a note pinned to a time, or a
+ * task's due date.
  *
  * The distinction the week grid runs on — an instant is drawn as a marker laid
  * over the hours, never as a block competing with the classes, and it is kept
@@ -74,7 +91,19 @@ export interface CalEvent {
  * to midnight.
  */
 export function isInstant(e: CalEvent): boolean {
-  return e.kind === "due" || e.kind === "note";
+  return e.kind === "due" || e.kind === "note" || e.kind === "task";
+}
+
+/**
+ * An instant the user set for themselves, rather than one a course set for
+ * them: a pinned note, or a project task's due date.
+ *
+ * Drawn in a quieter register everywhere — a lighter tint, a lighter mark —
+ * because a plan you wrote should not shout over a submission you will be
+ * marked against. The one rule three views share, so it lives here.
+ */
+export function isSelfImposed(e: CalEvent): boolean {
+  return e.kind === "note" || e.kind === "task";
 }
 
 // ── Loading ───────────────────────────────────────────────────────────────────
@@ -98,6 +127,9 @@ function fromDbRow(r: DbCalendarEvent): CalEvent | null {
     lectureId: null,
     localId: null,
     localSource: null,
+    taskId: null,
+    projectId: null,
+    projectName: null,
   };
 }
 
@@ -123,6 +155,9 @@ function fromLocalRow(r: DbLocalEvent): CalEvent | null {
     lectureId: null,
     localId: r.id,
     localSource: r.source,
+    taskId: null,
+    projectId: null,
+    projectName: null,
   };
 }
 
@@ -134,10 +169,11 @@ function fromLocalRow(r: DbLocalEvent): CalEvent | null {
  * another query.
  */
 export async function loadCalendar(): Promise<CalEvent[]> {
-  const [rows, lectures, local] = await Promise.all([
+  const [rows, lectures, local, tasks] = await Promise.all([
     getCalendarEvents(),
     getAllLectures(),
     getLocalEvents(),
+    getAllOpenTasks(),
   ]);
 
   const out: CalEvent[] = [];
@@ -179,6 +215,9 @@ export async function loadCalendar(): Promise<CalEvent[]> {
       lectureId: l.id,
       localId: null,
       localSource: null,
+      taskId: null,
+      projectId: null,
+      projectName: null,
     });
   }
 
@@ -188,6 +227,46 @@ export async function loadCalendar(): Promise<CalEvent[]> {
   for (const r of local) {
     const e = fromLocalRow(r);
     if (e) out.push(e);
+  }
+
+  // Tasks are read live, never copied into `local_events`: a task moved,
+  // re-dated or deleted on its board would otherwise leave a row on the grid
+  // that nothing cleans up. `getAllOpenTasks` has already dropped the undated
+  // and the finished in SQL, so everything here belongs on the calendar.
+  for (const t of tasks) {
+    // `due_at` is whatever the writer stored — an ISO8601 stamp from the UI, or
+    // SQLite's own "YYYY-MM-DD HH:MM:SS" from the CLI. `sqliteUtcToMs` reads
+    // both, and nothing normalises the zone on the way in.
+    const ms = sqliteUtcToMs(t.due_at);
+    if (ms == null) continue;
+    out.push({
+      id: `task_${t.id}`,
+      kind: "task",
+      // The subject comes from the task's *project*, not the task: a personal
+      // project has none, and falls to NO_SUBJECT so it files under "Personal"
+      // and stays out of the subject colour palette.
+      subjectId: t.project_subject_id ?? NO_SUBJECT,
+      subjectCode: t.project_subject_code
+        ? displayCode(t.project_subject_code)
+        : NO_SUBJECT_LABEL,
+      title: t.title,
+      start: new Date(ms),
+      // An instant, like a deadline: a task is due at a moment, and giving it a
+      // length would draw it as a block competing with the classes.
+      end: null,
+      allDay: false,
+      location: null,
+      url: null,
+      description: t.body,
+      lectureId: null,
+      // Not deletable from the grid, so no local handle: you delete a task on
+      // its board, which is also the only place its subtasks and column are.
+      localId: null,
+      localSource: null,
+      taskId: t.id,
+      projectId: t.project_id,
+      projectName: t.project_name,
+    });
   }
 
   out.sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -217,10 +296,11 @@ const PALETTE = [
  * the sorted id list, so a subject keeps its colour as long as the set does —
  * and colours never shift about as events are filtered.
  *
- * Subject-less local events are kept out of that indexing and painted in the
- * brand colour instead. They are Oculus's own rather than a course's, and
- * letting them take a palette slot would recolour every subject the moment you
- * pinned your first note.
+ * Subject-less rows — a local note, or a task on a project that belongs to no
+ * subject — are kept out of that indexing and painted in the brand colour
+ * instead. They are Oculus's own rather than a course's, and letting them take
+ * a palette slot would recolour every subject the moment you pinned your first
+ * note or opened a personal project.
  */
 export function subjectColors(events: CalEvent[]): Map<number, string> {
   const ids = [...new Set(events.map((e) => e.subjectId))]

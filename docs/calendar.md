@@ -2,9 +2,10 @@
 
 Class times, deadlines and lecture recordings on one grid. Most rows come from
 Canvas's calendar API during a sync; the page only reads them, so it works
-offline and pages between months without touching Canvas. A fourth layer holds
-Oculus's own rows, which the calendar reads and can delete but nothing
-currently creates — see the note under "The four layers".
+offline and pages between months without touching Canvas. Two further layers
+are Oculus's own: a `note` table it reads and can delete but nothing currently
+creates, and the tasks on a project's board, which it reads live and never
+copies — see the notes under "The five layers".
 
 ## Where
 
@@ -15,12 +16,14 @@ currently creates — see the note under "The four layers".
 | `local_events` table (migration 22) | `app/src-tauri/src/lib.rs` |
 | Headless writes (CLI) | `app/src-tauri/src/store.rs` |
 | Frontend reads + writes | `app/src/lib/db.ts` |
+| The task layer's read | `getAllOpenTasks` in `app/src/lib/projects.ts` |
 | Event model, colours, date maths | `app/src/lib/calendar.ts` |
 | Minute clock for "now" markers | `app/src/hooks/useNow.ts` |
 | Page + views | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/` |
-| Post-sync refresh | `app/src/hooks/useBackendEvents.ts` |
+| Post-sync refresh (`CALENDAR_UPDATED_EVENT`) | `app/src/hooks/useBackendEvents.ts` |
+| Refresh after any project write (`PROJECTS_UPDATED_EVENT`) | `app/src/lib/projects.ts`, `app/src/pages/CalendarPage.tsx` |
 
-## The four layers
+## The five layers
 
 | Layer | Source | Why it exists |
 | --- | --- | --- |
@@ -28,6 +31,7 @@ currently creates — see the note under "The four layers".
 | `due` | Canvas `calendar_events?type=assignment` | Deadlines, including quizzes (a quiz has an assignment shell) |
 | `lecture` | The `lectures` table already synced from Echo360 | The fallback timetable for a subject Canvas is silent about |
 | `note` | The `local_events` table | Anything Oculus wrote itself, rather than read from Canvas or Echo360 |
+| `task` | The `project_tasks` table, read live | A deadline you set yourself: a dated, unfinished task on a project's board ([projects.md](./projects.md)) |
 
 **Nothing writes the `note` layer today.** Its only writer was the automations
 feature (removed — see [index.md](./index.md)), so the layer holds whatever
@@ -57,11 +61,32 @@ next.
   take your own rows with it. Subject-less rows file under a "Personal" key that
   is kept out of the subject colour palette, or one note would recolour
   everything. Because nothing else will ever clean these up, every local row is
-  deletable from `EventPopover`; Canvas rows get no such control, since a sync
-  would only write them straight back.
-- **A note is an instant, not a span** — the same rule deadlines follow, and the
-  same machinery (`isInstant` in `app/src/lib/calendar.ts`), drawn with a pin
-  and a quieter tint so a reminder does not shout over a real cutoff.
+  deletable from `EventPopover`.
+- **A task is deliberately *not* copied into that table.** It would be the
+  obvious move — a task has a date and a subject, and `local_events` is the
+  table for rows Oculus owns — and it is wrong, for the reason the paragraph
+  above ends on: nothing cleans `local_events` up. A task re-dated, ticked off
+  or deleted on its board would leave a copy on the grid that no sync and no
+  sweep would ever come back for. So `loadCalendar` reads `project_tasks`
+  live, through `getAllOpenTasks` in `app/src/lib/projects.ts`, which drops the
+  undated and the finished in SQL — the grid then cannot show a task that is
+  not still a task. The cost is a refresh signal rather than a table: the page
+  listens for `PROJECTS_UPDATED_EVENT` as well as `CALENDAR_UPDATED_EVENT`, and
+  every project write fires it (see [projects.md](./projects.md)).
+- **Deletability now has three answers, not two.** A local row is deletable
+  because nothing else will ever clean it up. A Canvas row is not, since a sync
+  would only write it straight back. And a **task** is not either, for a third
+  reason: the calendar only *reads* `project_tasks`, and everything you
+  would do to a task — re-date it, finish it, delete it with its subtasks — is
+  on its board. So the card links through to the project instead, carrying the
+  project's name because a bare task title on a grid is not enough to act on.
+- **A note is an instant, and so is a task** — the same rule deadlines follow,
+  and the same machinery (`isInstant` in `app/src/lib/calendar.ts`). What the
+  two of them share beyond that is `isSelfImposed`, the other predicate in that
+  file: an instant *you* set rather than one a course set for you, drawn in a
+  quieter register — a lighter tint, a lighter mark — everywhere it appears.
+  That is one rule three views were each about to grow their own copy of, so it
+  lives with the model.
 - **The write replaces, it does not accumulate.** A class moved or cancelled in
   Canvas has to disappear, and an upsert into a growing set would leave the old
   occurrence on the grid forever. Both writers delete the subject's rows and
@@ -109,10 +134,16 @@ next.
   bottom edge. It is nudged by at most half its own height rather than snapped
   to the nearest hour, which would redraw an 11:59pm cutoff at 11pm or at
   midnight — a time it is not due. The ones the grid cannot reach (an
-  11:59pm cutoff against a grid that stops at 7pm) collect in the labelled
-  "Due" strip above it. Every deadline is in exactly one of the two, never
-  both. Deadlines are also kept out of `hourRange`: letting an 11:59pm cutoff
-  stretch the grid would pin every week open to midnight for one marker.
+  11:59pm cutoff against a grid that stops at 7pm) collect in a labelled strip
+  above it. Every deadline is in exactly one of the two, never both. **The
+  strip is named after the loudest layer in it** — "Due", "Tasks" or "Notes",
+  with the matching mark beside the word — because it now collects three kinds:
+  a week whose unplaceable instants are all tasks filed under "Due" would be
+  making a claim about a deadline that does not exist. A real deadline, or an
+  all-day class (which has no quieter name), still takes the heading whenever
+  one is present. Deadlines are also kept out of `hourRange`: letting an
+  11:59pm cutoff stretch the grid would pin every week open to midnight for one
+  marker.
 - **A class block is clamped into the grid too.** Canvas publishes
   cutoff-shaped *events*, not only assignments — a peer-review "class" that
   runs 11:59pm to 11:59pm is a `class` row of no length, and drawn at its own
@@ -121,10 +152,15 @@ next.
   so an 11pm–12:30am class still starts at 11pm; only one that cannot fit at
   all rides up against the bottom edge
   (`app/src/components/calendar/WeekView.tsx`).
-- **A deadline never has a class's shape.** Wherever it appears it is a flag on
-  a tinted pill; a class is a flat dot-and-time row. Before that they were
-  rendered but not *indicated* — a deadline read as just another line in a
-  column of classes.
+- **A deadline never has a class's shape**, and neither layer of self-imposed
+  instant borrows one either. `app/src/components/calendar/EventMark.tsx` is
+  the one vocabulary all three views draw from: a filled flag is a Canvas
+  deadline, a filled pin is a note, an **outline** checkbox is a project task,
+  and a dot is anything that occupies time. The silhouettes differ rather than
+  only the colours, because a task's date must not read as a submission cutoff
+  at a glance; the mark is shared rather than branched per view because the
+  flag-or-dot test had already grown a copy in each of the three views, and a
+  new kind would have drifted between them.
 - **The week grid sizes itself to what it must show**: the classes in view, an
   hour of padding either side, a floor of 8am–6pm, and — on the week containing
   today — the current hour, which is why the grid reaches 3am when you open it
@@ -142,5 +178,9 @@ next.
   want to look.
 - **Times are stored exactly as each source gives them.** Canvas sends ISO8601
   UTC, Echo360 sends local wall clock with no zone marker, and `new Date` reads
-  each correctly. Nothing normalises them on the way in — a room booking is a
-  wall-clock fact, and rewriting it to UTC would only add a way to be wrong.
+  each correctly. A task's `due_at` is a third shape, and is two shapes at
+  once: ISO8601 from the app, SQLite's own `YYYY-MM-DD HH:MM:SS` from the CLI,
+  whichever writer got there — so tasks go through `sqliteUtcToMs`
+  (`app/src/lib/format.ts`), which reads both. Nothing normalises any of them
+  on the way in: a room booking is a wall-clock fact, and rewriting it to UTC
+  would only add a way to be wrong.
