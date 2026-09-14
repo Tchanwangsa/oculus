@@ -771,6 +771,20 @@ ALTER TABLE harness_threads ADD COLUMN subject_id INTEGER REFERENCES subjects(id
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
                         tauri_plugin_sql::Migration {
+                            version: 26,
+                            description: "harness: whether the model has named the thread",
+                            // A thread is born titled with the first line of
+                            // its first message; neither CLI announces a name
+                            // over its protocol, so a real one costs a turn
+                            // (`Harness::name_thread`). This flag is claimed
+                            // before that turn runs, so two completed turns
+                            // arriving together cannot both pay for it.
+                            sql: r#"
+ALTER TABLE harness_threads ADD COLUMN title_generated INTEGER NOT NULL DEFAULT 0;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                        tauri_plugin_sql::Migration {
                             version: 27,
                             description: "projects: per-subject boards, tasks and subtasks",
                             // A project is a piece of work you are doing — an
@@ -846,6 +860,26 @@ CREATE INDEX IF NOT EXISTS idx_projects_subject      ON projects(subject_id);
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 28,
+                            description: "harness: the provider's handle for each question",
+                            // What a rewind has to name. Claude's
+                            // `rewind_conversation` takes the uuid of the user
+                            // message in its own transcript; Codex's
+                            // `thread/revert` takes the id of the turn to
+                            // revert before. Both are learned once, when the
+                            // turn goes out, and neither CLI will say it again
+                            // later — so it is kept on the row.
+                            //
+                            // NULL on every row written before this migration,
+                            // and on a question whose turn never started.
+                            // Editing one of those still rewinds the thread
+                            // being read; it just cannot rewind the agent.
+                            sql: r#"
+ALTER TABLE harness_items ADD COLUMN anchor TEXT;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -894,7 +928,13 @@ CREATE INDEX IF NOT EXISTS idx_projects_subject      ON projects(subject_id);
             agent::chat_cancel,
             harness::app::harness_health,
             harness::app::harness_codex_models,
+            harness::app::harness_refresh_rate_limits,
             harness::app::harness_send,
+            harness::app::harness_edit_resend,
+            harness::app::harness_rewind,
+            harness::app::harness_queued,
+            harness::app::harness_unqueue,
+            harness::app::harness_edit_queued,
             harness::app::harness_interrupt,
             harness::app::harness_delete_thread,
             sidecar::sidecar_health,

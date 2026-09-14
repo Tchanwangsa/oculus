@@ -29,8 +29,9 @@ pub mod discover;
 pub mod event;
 pub mod store;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -145,6 +146,193 @@ fn validate_effort(value: Option<String>) -> Result<Option<String>, String> {
     }
 }
 
+// ── One turn at a time ───────────────────────────────────────────────────────
+
+/// A message typed while a turn was running, waiting its own.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedMessage {
+    pub id: String,
+    pub text: String,
+}
+
+fn next_queue_id() -> String {
+    static N: AtomicU64 = AtomicU64::new(1);
+    format!("q{}", N.fetch_add(1, Ordering::SeqCst))
+}
+
+/// Which threads have a turn open, and what is waiting behind each.
+///
+/// Both CLIs accept a second message mid-turn and neither does anything good
+/// with it. Measured against both, and the recordings are the fixtures the
+/// bridge tests replay: `claude` queues it itself and starts a second turn
+/// the instant the first closes — so the composer flickers idle between them
+/// and stop has nothing to stop — while `codex` answers a second `turn/start`
+/// with the *running* turn's id and folds the message into it, so the
+/// question lands in the timeline above the answer to the previous one, and
+/// sometimes is never answered visibly at all.
+///
+/// So the waiting happens here: one turn per thread, everything else pending,
+/// and a pending message is not part of the conversation — no row is written
+/// for it until it goes out, which is why it can still be edited or dropped.
+#[derive(Default)]
+pub struct Queue {
+    threads: HashMap<i64, ThreadQueue>,
+}
+
+#[derive(Default)]
+struct ThreadQueue {
+    /// A turn of ours is open on this thread. Released by the
+    /// `TurnFinished` that closes it — both bridges promise exactly one per
+    /// message they accept, which is what `expecting` (Claude) and the turn
+    /// id taken from `turn/start` (Codex) are for.
+    busy: bool,
+    pending: VecDeque<(QueuedMessage, SendOptions)>,
+}
+
+impl Queue {
+    /// Take the thread for a send. False when a turn already has it.
+    pub fn try_claim(&mut self, thread_id: i64) -> bool {
+        let q = self.threads.entry(thread_id).or_default();
+        if q.busy {
+            return false;
+        }
+        q.busy = true;
+        true
+    }
+
+    /// Fall in behind the turn that has the thread.
+    pub fn push(&mut self, thread_id: i64, text: &str, opts: &SendOptions) -> QueuedMessage {
+        let msg = QueuedMessage {
+            id: next_queue_id(),
+            text: text.to_string(),
+        };
+        self.threads
+            .entry(thread_id)
+            .or_default()
+            .pending
+            .push_back((msg.clone(), opts.clone()));
+        msg
+    }
+
+    /// The turn ended: the next message waiting, if there is one. The thread
+    /// stays claimed when one is handed back — it is about to be sent — and
+    /// goes idle when nothing is.
+    pub fn next(&mut self, thread_id: i64) -> Option<(QueuedMessage, SendOptions)> {
+        let q = self.threads.entry(thread_id).or_default();
+        match q.pending.pop_front() {
+            Some(next) => Some(next),
+            None => {
+                q.busy = false;
+                None
+            }
+        }
+    }
+
+    /// Everything still waiting, dropped — what stop does. They are handed
+    /// back rather than discarded so the composer can return them to the
+    /// student, who typed them and never saw them sent.
+    pub fn clear(&mut self, thread_id: i64) -> Vec<QueuedMessage> {
+        match self.threads.get_mut(&thread_id) {
+            Some(q) => q.pending.drain(..).map(|(m, _)| m).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Drop one pending message.
+    pub fn remove(&mut self, thread_id: i64, id: &str) -> bool {
+        let Some(q) = self.threads.get_mut(&thread_id) else {
+            return false;
+        };
+        let before = q.pending.len();
+        q.pending.retain(|(m, _)| m.id != id);
+        q.pending.len() != before
+    }
+
+    /// Rewrite one that has not gone out yet.
+    pub fn edit(&mut self, thread_id: i64, id: &str, text: &str) -> Option<QueuedMessage> {
+        let q = self.threads.get_mut(&thread_id)?;
+        let (m, _) = q.pending.iter_mut().find(|(m, _)| m.id == id)?;
+        m.text = text.to_string();
+        Some(m.clone())
+    }
+
+    pub fn list(&self, thread_id: i64) -> Vec<QueuedMessage> {
+        match self.threads.get(&thread_id) {
+            Some(q) => q.pending.iter().map(|(m, _)| m.clone()).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// A turn of ours is open on this thread, or something is waiting behind
+    /// one. Anything that rewrites the thread's rows has to wait for both.
+    pub fn is_busy(&self, thread_id: i64) -> bool {
+        self.threads.get(&thread_id).is_some_and(|q| q.busy)
+    }
+
+    pub fn forget(&mut self, thread_id: i64) {
+        self.threads.remove(&thread_id);
+    }
+}
+
+// ── Naming a thread ──────────────────────────────────────────────────────────
+
+/// The model a Claude naming turn runs on. Naming is a one-line job on a
+/// clipped exchange, so it is always the cheapest model in the catalogue
+/// rather than whatever the thread itself is using. Codex is left on the
+/// student's own default: it lists its models at runtime and has no cheap one
+/// this side can name without asking.
+const TITLE_MODEL_CLAUDE: &str = "claude-haiku-4-5";
+
+/// Long enough for a cold `claude` start on a slow disk, short enough that a
+/// wedged CLI does not leave a thread thinking it is being named.
+const NAMING_TIMEOUT_SECS: u64 = 90;
+
+const NAMING_INSTRUCTIONS: &str =
+    "You name conversations. Reply with the name alone — never a sentence about it.";
+
+/// How much of the exchange the namer sees. A name comes from what was asked
+/// and the shape of the answer; the rest is tokens.
+const NAMING_CLIP: usize = 800;
+
+fn naming_prompt(first_message: &str, reply: &str) -> String {
+    let clip = |s: &str| -> String {
+        let t: String = s.chars().take(NAMING_CLIP).collect();
+        if s.chars().count() > NAMING_CLIP {
+            format!("{t}…")
+        } else {
+            t
+        }
+    };
+    format!(
+        "Name this conversation between a university student and their study assistant.\n\n\
+         Reply with the name and nothing else: three to six words, sentence case, no quotes and \
+         no full stop. Name what the conversation is *about* — the topic, the subject, the \
+         artefact — not what happened in it. Do not write \"the student asks\" or \"discussion \
+         of\".\n\n\
+         <student>\n{}\n</student>\n\n<assistant>\n{}\n</assistant>",
+        clip(first_message.trim()),
+        clip(reply.trim()),
+    )
+}
+
+/// What survives from a naming reply, if anything.
+///
+/// A model asked for a name alone still sometimes wraps it in quotes, labels
+/// it, or writes a sentence. The first non-empty line is taken, the wrapping
+/// is stripped, and anything that reads like prose rather than a name — too
+/// long — is refused so the first-line title stays instead.
+fn clean_title(raw: &str) -> Option<String> {
+    let line = raw.lines().find(|l| !l.trim().is_empty())?.trim();
+    let line = line.strip_prefix("Title:").or_else(|| line.strip_prefix("Name:")).unwrap_or(line);
+    let line = line.trim().trim_matches(|c| matches!(c, '"' | '\'' | '`' | '*' | '#')).trim();
+    let line = line.trim_end_matches(['.', '!']).trim();
+    if line.is_empty() || line.chars().count() > 60 {
+        return None;
+    }
+    Some(line.to_string())
+}
+
 /// A running provider process bound to one thread.
 enum Live {
     Claude {
@@ -177,11 +365,23 @@ impl Live {
     }
 }
 
+/// A session lifted out of the map so it can be talked to without holding it.
+enum Rewindable {
+    Claude(Arc<ClaudeSession>),
+    Codex(Arc<CodexServer>, String),
+}
+
 /// The set of live sessions plus the shared Codex server. One per app.
 pub struct Harness {
     data_dir: PathBuf,
     live: Mutex<HashMap<i64, Live>>,
     codex: Mutex<Option<Arc<CodexServer>>>,
+    /// Codex events that belong to the account rather than to any one
+    /// thread — the rate-limit windows, which the shared server reports with
+    /// no `threadId` on them. Claude needs no equivalent: its processes are
+    /// one per thread, so its windows already arrive on a thread's stream.
+    /// Set by the app; `None` headless, where nothing is listening.
+    codex_account_sink: Mutex<Option<Sink>>,
 }
 
 impl Harness {
@@ -190,7 +390,16 @@ impl Harness {
             data_dir,
             live: Mutex::new(HashMap::new()),
             codex: Mutex::new(None),
+            codex_account_sink: Mutex::new(None),
         }
+    }
+
+    /// Where Codex's account-scoped events go, set once at startup. It is on
+    /// the harness rather than on a session because the fact it carries — how
+    /// much of the plan is spent — outlives every thread that reports it, and
+    /// the server that reports it is shared by all of them.
+    pub fn set_codex_account_sink(&self, sink: Sink) {
+        *self.codex_account_sink.lock().unwrap() = Some(sink);
     }
 
     /// The shared Codex server, started on first use.
@@ -204,9 +413,37 @@ impl Harness {
             bin,
             env: discover::child_env(),
             raw_log: RawLog::open(&self.data_dir, 0),
+            account_sink: self.codex_account_sink.lock().unwrap().clone(),
         })?;
         *slot = Some(server.clone());
+        // Seed the meter off the pull, so the windows are current from the
+        // moment the server is up rather than from the first turn. Off the
+        // caller's thread: this runs inside the first send.
+        {
+            let s = server.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = s.read_rate_limits() {
+                    eprintln!("[oculus] codex rate limits: {e}");
+                }
+            });
+        }
         Ok(server)
+    }
+
+    /// Re-read the windows on a server that is already up — what the Chat
+    /// page asks for when it opens. It never starts the server to answer:
+    /// a page visit is not a reason to spawn a CLI, and a server that has
+    /// just started has already seeded itself above.
+    pub fn refresh_codex_rate_limits(&self) {
+        let server = {
+            let slot = self.codex.lock().unwrap();
+            slot.as_ref().filter(|s| s.is_alive()).cloned()
+        };
+        if let Some(s) = server {
+            if let Err(e) = s.read_rate_limits() {
+                eprintln!("[oculus] codex rate limits: {e}");
+            }
+        }
     }
 
     pub fn codex_models(&self) -> Result<Vec<ModelInfo>, String> {
@@ -225,21 +462,80 @@ impl Harness {
         sink: Sink,
     ) -> Result<(), String> {
         let mut live = self.live.lock().unwrap();
-        // A live session is reused only if it is running under the level this
-        // send asks for; both CLIs bind the level at session start, so a new
-        // one means a new process (Claude) or a new thread (Codex).
-        if let Some(l) = live
-            .get(&thread_id)
-            .filter(|l| l.is_alive() && l.effort() == opts.reasoning_effort.as_deref())
-        {
-            return match l {
-                Live::Claude { session, .. } => session.send(text),
+        self.ensure(&mut live, thread_id, provider, resume, opts, sink)?;
+        match live.get(&thread_id).ok_or("no session")? {
+            Live::Claude { session, .. } => session.send(text),
+            Live::Codex {
+                server,
+                thread_id: tid,
+                opts,
+            } => server.start_turn(tid, text, opts),
+        }
+    }
+
+    /// Take a question and everything after it out of the provider's own
+    /// session, so the agent's context matches the thread the student is
+    /// reading. `anchor` is the provider's handle for that question, kept on
+    /// its row when the turn went out.
+    ///
+    /// A thread whose process has gone is resumed for this, without a turn:
+    /// both bridges take the instruction on their control channel, which is
+    /// live as soon as the session is, so nothing is spent on the model.
+    pub fn rewind(
+        &self,
+        thread_id: i64,
+        provider: Provider,
+        resume: Option<&str>,
+        opts: &SendOptions,
+        anchor: &str,
+        sink: Sink,
+    ) -> Result<(), String> {
+        // The handle is taken out from under the lock and the rewind done
+        // outside it: a rewind waits on the CLI's answer, and holding the map
+        // for that would stall every *other* thread's next message behind it.
+        let handle = {
+            let mut live = self.live.lock().unwrap();
+            // Any live session will do. `ensure` would respawn one running
+            // under a different reasoning level, which matters for a turn and
+            // not at all for an instruction on the control channel.
+            if !live.get(&thread_id).is_some_and(|l| l.is_alive()) {
+                self.ensure(&mut live, thread_id, provider, resume, opts, sink)?;
+            }
+            match live.get(&thread_id).ok_or("no session")? {
+                Live::Claude { session, .. } => Rewindable::Claude(session.clone()),
                 Live::Codex {
                     server,
                     thread_id: tid,
-                    opts,
-                } => server.start_turn(tid, text, opts),
-            };
+                    ..
+                } => Rewindable::Codex(server.clone(), tid.clone()),
+            }
+        };
+        match handle {
+            Rewindable::Claude(s) => s.rewind(anchor),
+            Rewindable::Codex(server, tid) => server.revert(&tid, anchor),
+        }
+    }
+
+    /// Make sure this thread has a session that can be talked to, spawning or
+    /// resuming one when it has none.
+    ///
+    /// A live session is reused only if it is running under the level asked
+    /// for; both CLIs bind the reasoning level at session start, so a
+    /// different one means a new process (Claude) or a new thread (Codex).
+    fn ensure(
+        &self,
+        live: &mut HashMap<i64, Live>,
+        thread_id: i64,
+        provider: Provider,
+        resume: Option<&str>,
+        opts: &SendOptions,
+        sink: Sink,
+    ) -> Result<(), String> {
+        if live
+            .get(&thread_id)
+            .is_some_and(|l| l.is_alive() && l.effort() == opts.reasoning_effort.as_deref())
+        {
+            return Ok(());
         }
         live.remove(&thread_id);
 
@@ -263,7 +559,6 @@ impl Harness {
                     },
                     sink,
                 )?;
-                s.send(text)?;
                 Live::Claude {
                     session: s,
                     effort: opts.reasoning_effort.clone(),
@@ -284,7 +579,6 @@ impl Harness {
                     }
                     None => server.start_thread(&topts, sink)?,
                 };
-                server.start_turn(&tid, text, &topts)?;
                 Live::Codex {
                     server,
                     thread_id: tid,
@@ -294,6 +588,100 @@ impl Harness {
         };
         live.insert(thread_id, session);
         Ok(())
+    }
+
+    /// Ask the provider to name a thread from its first exchange.
+    ///
+    /// Neither CLI names a conversation on its own: Claude's stream-json has
+    /// no title event, and `app-server` sends none either — so a name that
+    /// the model wrote has to be asked for, and it costs one turn. It is
+    /// asked once, after the first exchange (`store::claim_naming`), on the
+    /// thread's own provider so a student who only has one CLI still gets
+    /// names, and on the cheapest model that provider has.
+    ///
+    /// It runs outside the thread: its own short-lived Claude process, or a
+    /// throwaway thread on the shared Codex server. Sending it down the
+    /// thread's own session would put a question the student never asked into
+    /// the timeline, and would spend the thread's context on it.
+    pub fn name_thread(&self, provider: Provider, first_message: &str, reply: &str) -> Result<String, String> {
+        let prompt = naming_prompt(first_message, reply);
+        let (tx, rx) = mpsc::channel::<HarnessEvent>();
+        let sink: Sink = Arc::new(move |ev| {
+            let _ = tx.send(ev);
+        });
+        let cwd = thread_cwd(&self.data_dir);
+
+        // Held so the session outlives the collect loop, and dropped after it.
+        let claude;
+        let codex;
+        match provider {
+            Provider::Claude => {
+                let s = ClaudeSession::spawn(
+                    ClaudeSpawn {
+                        bin: discover::binary(provider)?,
+                        cwd,
+                        library: self.data_dir.clone(),
+                        resume: None,
+                        model: Some(TITLE_MODEL_CLAUDE.into()),
+                        effort: None,
+                        // Nothing here needs a tool, and `default` auto-allows
+                        // none — with prompts routed to `none` a stray call is
+                        // refused rather than hanging the turn.
+                        permission_mode: "default".into(),
+                        system_append: String::new(),
+                        env: discover::child_env(),
+                        raw_log: None,
+                    },
+                    sink,
+                )?;
+                s.send(&prompt)?;
+                claude = Some(s);
+                codex = None;
+            }
+            Provider::Codex => {
+                let server = self.codex_server()?;
+                let opts = CodexThreadOpts {
+                    cwd,
+                    model: None,
+                    reasoning_effort: None,
+                    instructions: NAMING_INSTRUCTIONS.into(),
+                };
+                let tid = server.start_thread(&opts, sink)?;
+                server.start_turn(&tid, &prompt, &opts)?;
+                claude = None;
+                codex = Some((server, tid));
+            }
+        }
+
+        let mut text = String::new();
+        let mut failed: Option<String> = None;
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(NAMING_TIMEOUT_SECS)) {
+                Ok(HarnessEvent::AssistantMessage { text: t }) => text.push_str(&t),
+                Ok(HarnessEvent::Error { message }) => failed = Some(message),
+                Ok(HarnessEvent::TurnFinished { .. }) => break,
+                Ok(HarnessEvent::Exited { code }) => {
+                    failed.get_or_insert(format!("provider exited (code {code:?}) before naming the thread"));
+                    break;
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    failed.get_or_insert_with(|| "timed out naming the thread".into());
+                    break;
+                }
+            }
+        }
+        if let Some(s) = claude {
+            s.kill();
+        }
+        if let Some((server, tid)) = codex {
+            server.detach(&tid);
+        }
+        match (clean_title(&text), failed) {
+            (Some(t), _) => Ok(t),
+            (None, Some(e)) => Err(e),
+            (None, None) => Err(format!("no usable name in the reply: {text:?}")),
+        }
     }
 
     pub fn interrupt(&self, thread_id: i64) -> Result<(), String> {
@@ -380,18 +768,34 @@ pub mod app {
     use tauri::{AppHandle, Emitter, Manager, State};
 
     /// What the webview gets on `harness-event`: the thread and the event,
-    /// plus the row id when the event became a row.
+    /// plus the row id when the event became a row. The provider is on it
+    /// too, because an account-scoped event (rate limits) has no thread to
+    /// read it off — it arrives with `threadId` 0.
     #[derive(Serialize, Clone)]
     #[serde(rename_all = "camelCase")]
     struct Envelope {
         thread_id: i64,
+        provider: Provider,
         item_id: Option<i64>,
         event: HarnessEvent,
     }
 
+    /// Where every bridge's events go, tagged with the thread they belong
+    /// to. One consumer reads it; see [`init`].
+    type Bus = mpsc::Sender<(i64, Provider, HarnessEvent)>;
+
     pub struct HarnessState {
         pub harness: Arc<Harness>,
-        bus: mpsc::Sender<(i64, Provider, HarnessEvent)>,
+        bus: Bus,
+        /// Which threads have a turn open, and what is waiting behind each.
+        queue: Arc<Mutex<Queue>>,
+    }
+
+    fn sink_for(bus: &Bus, thread_id: i64, provider: Provider) -> Sink {
+        let bus = bus.clone();
+        Arc::new(move |ev| {
+            let _ = bus.send((thread_id, provider, ev));
+        })
     }
 
     /// One consumer thread folds every event, from every thread, in order:
@@ -400,6 +804,19 @@ pub mod app {
     pub fn init(app: &AppHandle) -> HarnessState {
         let (tx, rx) = mpsc::channel::<(i64, Provider, HarnessEvent)>();
         let handle = app.clone();
+        let harness = Arc::new(Harness::new(crate::paths::data_dir()));
+        let queue: Arc<Mutex<Queue>> = Arc::new(Mutex::new(Queue::default()));
+        // Codex's rate-limit windows come off the shared server with no thread
+        // attached; thread id 0 is the same id its raw log uses.
+        {
+            let bus = tx.clone();
+            harness.set_codex_account_sink(Arc::new(move |ev| {
+                let _ = bus.send((0, Provider::Codex, ev));
+            }));
+        }
+        // The naming turn's answer comes back in as an event like any other,
+        // so it is written and forwarded by this same loop.
+        let (namer, bus, queued) = (harness.clone(), tx.clone(), queue.clone());
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
             let mut pool: Option<SqlitePool> = None;
@@ -418,11 +835,50 @@ pub mod app {
                     if let Err(e) = rt.block_on(store::save_rate_limits(p, provider, &ev)) {
                         eprintln!("[oculus] harness rate limits: {e}");
                     }
+                    // A finished first exchange is when a thread can be named.
+                    // The claim is atomic, so this asks at most once; the turn
+                    // itself takes seconds and cannot run on this loop, which
+                    // every other thread's events are waiting behind.
+                    if thread_id > 0 && matches!(&ev, HarnessEvent::TurnFinished { status } if status == "completed") {
+                        match rt.block_on(store::claim_naming(p, thread_id)) {
+                            Ok(Some(seed)) => {
+                                let (namer, bus) = (namer.clone(), bus.clone());
+                                std::thread::spawn(move || {
+                                    match namer.name_thread(provider, &seed.first_message, &seed.reply) {
+                                        Ok(title) => {
+                                            let _ = bus.send((thread_id, provider, HarnessEvent::ThreadTitled { title }));
+                                        }
+                                        Err(e) => eprintln!("[oculus] harness title: {e}"),
+                                    }
+                                });
+                            }
+                            Ok(None) => {}
+                            Err(e) => eprintln!("[oculus] harness title: {e}"),
+                        }
+                    }
                 }
+                // A closed turn is when the next message waiting on this
+                // thread may go. It cannot go from here — every other
+                // thread's events queue behind this loop, and a send starts
+                // a process — so the dispatch is spawned and this moves on.
+                if thread_id > 0 && matches!(&ev, HarnessEvent::TurnFinished { .. }) {
+                    let next = queued.lock().unwrap().next(thread_id);
+                    if let Some((msg, opts)) = next {
+                        let (h, b) = (namer.clone(), bus.clone());
+                        let _ = b.send((thread_id, provider, HarnessEvent::Unqueued { id: msg.id }));
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = dispatch(h, b, thread_id, provider, opts, msg.text).await {
+                                eprintln!("[oculus] harness queued send: {e}");
+                            }
+                        });
+                    }
+                }
+
                 let _ = handle.emit(
                     "harness-event",
                     Envelope {
                         thread_id,
+                        provider,
                         item_id,
                         event: ev,
                     },
@@ -430,18 +886,85 @@ pub mod app {
             }
         });
         HarnessState {
-            harness: Arc::new(Harness::new(crate::paths::data_dir())),
+            harness,
             bus: tx,
+            queue,
         }
     }
 
     impl HarnessState {
         fn sink(&self, thread_id: i64, provider: Provider) -> Sink {
-            let bus = self.bus.clone();
-            Arc::new(move |ev| {
-                let _ = bus.send((thread_id, provider, ev));
-            })
+            sink_for(&self.bus, thread_id, provider)
         }
+    }
+
+    /// Everything a send does once the thread exists and the queue has said
+    /// it may go: resolve what the *row* says rather than what the payload
+    /// asked for, write the question through the event path like any other
+    /// row, and hand the text to the bridge.
+    ///
+    /// A failure here closes the turn it never opened — the error becomes a
+    /// row and a `TurnFinished` releases the thread — so a send that cannot
+    /// start does not leave whatever was queued behind it stranded.
+    async fn dispatch(
+        harness: Arc<Harness>,
+        bus: Bus,
+        thread_id: i64,
+        provider: Provider,
+        opts: SendOptions,
+        text: String,
+    ) -> Result<(), String> {
+        let sink = sink_for(&bus, thread_id, provider);
+        match start_turn(&harness, thread_id, provider, opts, &text, sink.clone()).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                sink(HarnessEvent::error(e.clone()));
+                sink(HarnessEvent::TurnFinished {
+                    status: "failed".into(),
+                });
+                Err(e)
+            }
+        }
+    }
+
+    async fn start_turn(
+        harness: &Arc<Harness>,
+        thread_id: i64,
+        provider: Provider,
+        opts: SendOptions,
+        text: &str,
+        sink: Sink,
+    ) -> Result<(), String> {
+        let pool = crate::llm::open_pool().await?;
+        let row = store::thread(&pool, thread_id).await?;
+        if row.provider != provider {
+            return Err(format!("thread {thread_id} is a {} thread", row.provider.label()));
+        }
+        if opts.model.is_some() && opts.model != row.model {
+            store::set_model(&pool, thread_id, opts.model.as_deref()).await?;
+            // A different model means a different Claude process. Safe here
+            // and not at the moment the student picked it: the thread is
+            // between turns, so nothing is killed mid-answer.
+            if provider == Provider::Claude {
+                harness.close(thread_id);
+            }
+        }
+        // The row, not the payload, decides both: an open thread keeps the
+        // model it was last set to and the subject it was created with.
+        let opts = SendOptions {
+            model: opts.model.or(row.model),
+            scope: row.subject_code,
+            ..opts
+        };
+        let resume = row.provider_session_id;
+        sink(HarnessEvent::UserMessage { text: text.to_string() });
+
+        let (h, text, sink) = (harness.clone(), text.to_string(), sink.clone());
+        tokio::task::spawn_blocking(move || {
+            h.send(thread_id, provider, resume.as_deref(), &opts, &text, sink)
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
 
     #[tauri::command]
@@ -454,6 +977,23 @@ pub mod app {
         .unwrap_or_default()
     }
 
+    /// The Chat page, on open and on a provider switch. Codex answers a read
+    /// for its plan windows; Claude has no such request over `stream-json`,
+    /// so its windows keep arriving with a turn and this is a no-op for it.
+    #[tauri::command]
+    pub async fn harness_refresh_rate_limits(
+        state: State<'_, HarnessState>,
+        provider: Provider,
+    ) -> Result<(), String> {
+        if provider != Provider::Codex {
+            return Ok(());
+        }
+        let h = state.harness.clone();
+        tokio::task::spawn_blocking(move || h.refresh_codex_rate_limits())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     #[tauri::command]
     pub async fn harness_codex_models(state: State<'_, HarnessState>) -> Result<Vec<ModelInfo>, String> {
         let h = state.harness.clone();
@@ -463,8 +1003,13 @@ pub mod app {
     }
 
     /// Send a message; creates the thread when `thread_id` is null. Returns
-    /// the thread id. The user's row is written by the event path like every
-    /// other row, so the timeline sees it in order with what follows.
+    /// the thread id.
+    ///
+    /// A message sent while the thread is working does not reach the CLI: it
+    /// waits in the [`Queue`], and the `queued` event is all the webview
+    /// gets until the running turn ends and it goes out for real. The user's
+    /// row is written by the event path like every other row, so the
+    /// timeline sees the question in order with the answer it gets.
     #[tauri::command]
     pub async fn harness_send(
         state: State<'_, HarnessState>,
@@ -478,65 +1023,236 @@ pub mod app {
         opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
         let pool = crate::llm::open_pool().await?;
 
-        let (id, resume) = match thread_id {
+        let id = match thread_id {
             Some(id) => {
                 let row = store::thread(&pool, id).await?;
                 if row.provider != provider {
                     return Err(format!("thread {id} is a {} thread", row.provider.label()));
                 }
-                if opts.model.is_some() && opts.model != row.model {
-                    store::set_model(&pool, id, opts.model.as_deref()).await?;
-                    // A different model means a different Claude process.
-                    if provider == Provider::Claude {
-                        state.harness.close(id);
-                    }
-                }
-                (id, row.provider_session_id)
+                id
             }
-            None => (
+            None => {
                 store::create_thread(&pool, provider, opts.model.as_deref(), opts.subject_id, &text)
-                    .await?,
-                None,
-            ),
-        };
-        // The row, not the payload, decides both: an open thread keeps the
-        // model it was last set to and the subject it was created with.
-        let row = store::thread(&pool, id).await?;
-        let opts = SendOptions {
-            model: opts.model.or(row.model),
-            scope: row.subject_code,
-            ..opts
+                    .await?
+            }
         };
 
-        let sink = state.sink(id, provider);
-        sink(HarnessEvent::UserMessage { text: text.clone() });
-
-        let h = state.harness.clone();
-        let sink2 = sink.clone();
-        let res = tokio::task::spawn_blocking(move || h.send(id, provider, resume.as_deref(), &opts, &text, sink2))
-            .await
-            .map_err(|e| e.to_string())?;
-        if let Err(e) = res {
-            sink(HarnessEvent::error(e.clone()));
-            sink(HarnessEvent::TurnFinished {
-                status: "failed".into(),
+        if !state.queue.lock().unwrap().try_claim(id) {
+            let msg = state.queue.lock().unwrap().push(id, &text, &opts);
+            state.sink(id, provider)(HarnessEvent::Queued {
+                id: msg.id,
+                text: msg.text,
             });
-            return Err(e);
+            return Ok(id);
         }
+        dispatch(state.harness.clone(), state.bus.clone(), id, provider, opts, text).await?;
         Ok(id)
     }
 
+    /// Ask a question again, differently: the thread is rewound to that
+    /// question — it and everything after it stop being rows, and the agent
+    /// is told to forget them too — and the new text is sent as the next
+    /// turn.
+    ///
+    /// The agent's half is [`Harness::rewind`], and it is done first: if the
+    /// provider will not rewind, its context and the timeline would disagree,
+    /// and the timeline is the thing the student is about to reason from. It
+    /// is not fatal, though — a question asked before the anchor was recorded
+    /// has nothing to name, and a session the CLI has since dropped cannot be
+    /// resumed — so the rewind falls back to our rows alone and says so on
+    /// the event, which is what the timeline's note is drawn from.
     #[tauri::command]
-    pub async fn harness_interrupt(state: State<'_, HarnessState>, thread_id: i64) -> Result<(), String> {
+    pub async fn harness_edit_resend(
+        state: State<'_, HarnessState>,
+        thread_id: i64,
+        item_id: i64,
+        text: String,
+        options: Option<SendOptions>,
+    ) -> Result<(), String> {
+        let mut opts = options.unwrap_or_default();
+        opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
+        let pool = crate::llm::open_pool().await?;
+        let row = store::thread(&pool, thread_id).await?;
+        // The id comes from the webview and everything from it on is about to
+        // be deleted, so it is checked against the row it names.
+        let question = store::user_item(&pool, thread_id, item_id).await?;
+        // Rewinding under a running turn would delete rows it is still
+        // writing, and the CLI would answer the old question anyway.
+        if !state.queue.lock().unwrap().try_claim(thread_id) {
+            return Err("stop the current turn before editing a question".into());
+        }
+        let context = rewind_provider(&state, thread_id, &row, &question, &opts).await;
+        if let Err(e) = store::truncate_from(&pool, thread_id, item_id).await {
+            // Nothing was sent, so nothing will close the turn this claimed.
+            state.queue.lock().unwrap().next(thread_id);
+            return Err(e);
+        }
+        let sink = state.sink(thread_id, row.provider);
+        sink(HarnessEvent::Rewound {
+            from_item_id: item_id,
+            context,
+        });
+        dispatch(
+            state.harness.clone(),
+            state.bus.clone(),
+            thread_id,
+            row.provider,
+            opts,
+            text,
+        )
+        .await
+    }
+
+    /// Ask the provider to forget this question and everything after it.
+    /// Answers whether it did.
+    ///
+    /// A thread with no anchor on the row is one whose question predates the
+    /// column (migration 28) or whose turn never started; there is nothing to
+    /// name, and no amount of retrying will produce one. A provider that
+    /// refuses, or a session that can no longer be resumed, lands the same
+    /// way: the rows still go, and the `false` travels to the timeline so the
+    /// student is told the agent kept the original rather than finding out
+    /// from an answer that refers to it.
+    async fn rewind_provider(
+        state: &State<'_, HarnessState>,
+        thread_id: i64,
+        row: &store::ThreadRow,
+        question: &store::Question,
+        opts: &SendOptions,
+    ) -> bool {
+        let Some(anchor) = question.anchor.clone() else {
+            return false;
+        };
+        let Some(resume) = row.provider_session_id.clone() else {
+            return false;
+        };
+        let (h, provider) = (state.harness.clone(), row.provider);
+        let sink = state.sink(thread_id, provider);
+        let opts = SendOptions {
+            model: opts.model.clone().or_else(|| row.model.clone()),
+            scope: row.subject_code.clone(),
+            ..opts.clone()
+        };
+        tokio::task::spawn_blocking(move || {
+            h.rewind(thread_id, provider, Some(&resume), &opts, &anchor, sink)
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r)
+        .is_ok()
+    }
+
+    /// Take the thread back to just before a question: it and everything
+    /// after it stop being rows, and the question comes back as text for the
+    /// composer to hold. Claude Code's rewind, without the branching — there
+    /// is one thread, and going back means the rest is gone.
+    ///
+    /// Nothing is sent. That is the whole difference from
+    /// [`harness_edit_resend`]: rewinding is for picking the conversation up
+    /// again yourself, which is why the words are handed back rather than
+    /// put straight to the agent. The agent forgets either way.
+    #[tauri::command]
+    pub async fn harness_rewind(
+        state: State<'_, HarnessState>,
+        thread_id: i64,
+        item_id: i64,
+    ) -> Result<String, String> {
+        let pool = crate::llm::open_pool().await?;
+        let row = store::thread(&pool, thread_id).await?;
+        let question = store::user_item(&pool, thread_id, item_id).await?;
+        if state.queue.lock().unwrap().is_busy(thread_id) {
+            return Err("stop the current turn before rewinding".into());
+        }
+        let opts = SendOptions {
+            model: row.model.clone(),
+            ..Default::default()
+        };
+        let context = rewind_provider(&state, thread_id, &row, &question, &opts).await;
+        store::truncate_from(&pool, thread_id, item_id).await?;
+        state.sink(thread_id, row.provider)(HarnessEvent::Rewound {
+            from_item_id: item_id,
+            context,
+        });
+        Ok(question.text)
+    }
+
+    /// What is still waiting behind this thread's turn. The queue is in
+    /// memory — a message that was never sent is not history — so this is
+    /// how a reloaded page finds out it is there.
+    #[tauri::command]
+    pub async fn harness_queued(
+        state: State<'_, HarnessState>,
+        thread_id: i64,
+    ) -> Result<Vec<QueuedMessage>, String> {
+        Ok(state.queue.lock().unwrap().list(thread_id))
+    }
+
+    /// Drop one message that has not gone out yet.
+    #[tauri::command]
+    pub async fn harness_unqueue(
+        state: State<'_, HarnessState>,
+        thread_id: i64,
+        queue_id: String,
+    ) -> Result<(), String> {
+        if state.queue.lock().unwrap().remove(thread_id, &queue_id) {
+            let pool = crate::llm::open_pool().await?;
+            let row = store::thread(&pool, thread_id).await?;
+            state.sink(thread_id, row.provider)(HarnessEvent::Unqueued { id: queue_id });
+        }
+        Ok(())
+    }
+
+    /// Rewrite one that has not gone out yet. It arrives back as a `queued`
+    /// event under the same id, which is how the webview knows to replace it
+    /// rather than add another.
+    #[tauri::command]
+    pub async fn harness_edit_queued(
+        state: State<'_, HarnessState>,
+        thread_id: i64,
+        queue_id: String,
+        text: String,
+    ) -> Result<(), String> {
+        let edited = state.queue.lock().unwrap().edit(thread_id, &queue_id, &text);
+        if let Some(msg) = edited {
+            let pool = crate::llm::open_pool().await?;
+            let row = store::thread(&pool, thread_id).await?;
+            state.sink(thread_id, row.provider)(HarnessEvent::Queued {
+                id: msg.id,
+                text: msg.text,
+            });
+        }
+        Ok(())
+    }
+
+    /// Stop the running turn, and drop whatever was waiting behind it —
+    /// stop means nothing more goes out, not "one more first". The dropped
+    /// messages are handed back so the composer can return them to the
+    /// student, who typed them and never saw them sent.
+    #[tauri::command]
+    pub async fn harness_interrupt(
+        state: State<'_, HarnessState>,
+        thread_id: i64,
+    ) -> Result<Vec<String>, String> {
+        let cleared = state.queue.lock().unwrap().clear(thread_id);
+        if !cleared.is_empty() {
+            let pool = crate::llm::open_pool().await?;
+            let row = store::thread(&pool, thread_id).await?;
+            let sink = state.sink(thread_id, row.provider);
+            for m in &cleared {
+                sink(HarnessEvent::Unqueued { id: m.id.clone() });
+            }
+        }
         let h = state.harness.clone();
         tokio::task::spawn_blocking(move || h.interrupt(thread_id))
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())??;
+        Ok(cleared.into_iter().map(|m| m.text).collect())
     }
 
     #[tauri::command]
     pub async fn harness_delete_thread(state: State<'_, HarnessState>, thread_id: i64) -> Result<(), String> {
         state.harness.close(thread_id);
+        state.queue.lock().unwrap().forget(thread_id);
         let pool = crate::llm::open_pool().await?;
         store::delete_thread(&pool, thread_id).await
     }
@@ -565,6 +1281,72 @@ pub mod app {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A model asked for a name alone mostly gives one, and sometimes dresses
+    /// it up. What it dresses it in is stripped; a whole sentence is refused,
+    /// because the first-line title it would replace is better than prose.
+    #[test]
+    fn a_name_is_taken_out_of_whatever_the_model_wrapped_it_in() {
+        assert_eq!(clean_title("Dijkstra worked example").as_deref(), Some("Dijkstra worked example"));
+        assert_eq!(clean_title("\"Week 6 tutorial questions\"\n").as_deref(), Some("Week 6 tutorial questions"));
+        assert_eq!(clean_title("Title: **Semaphores and deadlock**").as_deref(), Some("Semaphores and deadlock"));
+        assert_eq!(clean_title("Assignment 2 marking scheme.").as_deref(), Some("Assignment 2 marking scheme"));
+        assert_eq!(clean_title(""), None);
+        assert_eq!(clean_title("   \n\n "), None);
+        assert_eq!(
+            clean_title("The student asks about the difficulty of the week 6 lecture and the assistant replies"),
+            None,
+            "prose is refused rather than becoming the name"
+        );
+    }
+
+    /// One turn per thread, and the rest in the order they were typed. The
+    /// queue is the whole of what makes a message sent mid-turn behave: both
+    /// CLIs would take it immediately, and both would ruin the thread doing
+    /// it (`Queue`'s own docs).
+    #[test]
+    fn a_thread_runs_one_turn_and_the_rest_wait_in_order() {
+        let mut q = Queue::default();
+        let opts = SendOptions::default();
+        assert!(q.try_claim(1), "an idle thread is taken by the first send");
+        assert!(!q.try_claim(1), "and not by the second");
+
+        let a = q.push(1, "first", &opts);
+        let b = q.push(1, "second", &opts);
+        assert_eq!(q.list(1).len(), 2);
+        // Another thread is not held up by this one.
+        assert!(q.try_claim(2));
+
+        assert_eq!(q.next(1).map(|(m, _)| m), Some(a), "in the order they were typed");
+        assert!(!q.try_claim(1), "the thread stays claimed while one is going out");
+        assert_eq!(q.next(1).map(|(m, _)| m.text), Some("second".into()));
+        assert!(q.next(1).is_none(), "nothing left");
+        assert!(q.try_claim(1), "and the thread is free again");
+        let _ = b;
+    }
+
+    /// Stop means nothing more goes out — and hands back what was waiting,
+    /// because the student typed those words and never saw them sent.
+    #[test]
+    fn stopping_clears_the_queue_and_returns_what_it_held() {
+        let mut q = Queue::default();
+        let opts = SendOptions::default();
+        q.try_claim(7);
+        q.push(7, "one", &opts);
+        let two = q.push(7, "two", &opts);
+        q.push(7, "three", &opts);
+        assert!(q.remove(7, &two.id), "a pending message can be dropped on its own");
+        assert_eq!(
+            q.clear(7).into_iter().map(|m| m.text).collect::<Vec<_>>(),
+            vec!["one".to_string(), "three".to_string()]
+        );
+        assert!(q.list(7).is_empty());
+        // The turn itself is still running: only its `TurnFinished` releases
+        // the thread, and it finds nothing waiting.
+        assert!(!q.try_claim(7));
+        assert!(q.next(7).is_none());
+        assert!(q.try_claim(7));
+    }
 
     /// The scope is appended, not substituted: a scoped thread gets the whole
     /// library brief *and* the subject it is about, because it still reads

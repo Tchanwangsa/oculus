@@ -4,10 +4,12 @@ import {
   defaultSelection,
   getHarnessItems,
   getHarnessThreads,
+  harnessQueued,
   type HarnessEnvelope,
   type HarnessItem,
   type HarnessThread,
   type Provider,
+  type QueuedMessage,
   type RateWindow,
   type ThreadUsage,
 } from "@/lib/harness";
@@ -46,6 +48,21 @@ interface HarnessState {
   subjectId: number | null;
   /** Every subject, for the composer's picker and its `@` menu. */
   subjects: Subject[];
+  /** Messages typed while a turn was running, per thread, in the order they
+   *  will go out. Rust holds the real queue; these are folded from its
+   *  `queued`/`unqueued` events, and nothing here decides when one is sent. */
+  queued: Record<number, QueuedMessage[]>;
+  /** Threads where a rewind could not reach the agent — a question older than
+   *  the anchor, or a provider session that is gone. The agent still holds the
+   *  exchange that left the screen, which is worth saying once, so this stays
+   *  set for the life of the thread rather than being cleared on the next
+   *  turn: the context does not forget later either. */
+  contextDrift: Record<number, boolean>;
+  /** Text handed back to the composer, because stopping a turn drops what was
+   *  waiting behind it and the student typed those words. The counter is what
+   *  the composer watches: the same text twice is still two restores. */
+  restore: { text: string; n: number } | null;
+  restored: () => void;
 
   loadThreads: () => Promise<void>;
   open: (id: number | null) => Promise<void>;
@@ -55,9 +72,41 @@ interface HarnessState {
   setSubject: (id: number | null) => void;
   loadSubjects: () => Promise<void>;
   apply: (env: HarnessEnvelope) => void;
+  /** Fold the buffered deltas below into `live` now. Exposed for the tests
+   *  and for anything that needs the stream settled before it reads. */
+  flushLive: () => void;
   /** The thread is being created by a send that has not returned an id yet. */
   beginNew: () => void;
   removed: (id: number) => void;
+}
+
+/**
+ * Deltas arrive per token — tens a second — and each one used to be a
+ * `set`, so every keystroke of the model's re-rendered the whole timeline.
+ * They are buffered here instead and folded in on a timer, which caps the
+ * page at one render per tick however fast the provider talks. Only the three
+ * delta events buffer; every other event flushes first, so nothing can
+ * overtake the row it belongs to.
+ */
+const FLUSH_MS = 48;
+
+interface PendingDeltas {
+  streaming: string;
+  thinking: string;
+  toolOutput: Record<string, string>;
+}
+
+const pending = new Map<number, PendingDeltas>();
+let timer: ReturnType<typeof setTimeout> | null = null;
+
+function buffer(threadId: number): PendingDeltas {
+  let p = pending.get(threadId);
+  if (!p) {
+    p = { streaming: "", thinking: "", toolOutput: {} };
+    pending.set(threadId, p);
+  }
+  if (timer == null) timer = setTimeout(() => useHarnessStore.getState().flushLive(), FLUSH_MS);
+  return p;
 }
 
 /** A synthetic row from a live event, keyed on the Rust row id when there is
@@ -80,6 +129,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   items: [],
   live: {},
   rateLimits: {},
+  queued: {},
+  contextDrift: {},
+  restore: null,
   provider: "claude",
   subjectId: null,
   subjects: [],
@@ -106,10 +158,24 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       set({ activeId: null, items: [] });
       return;
     }
-    set({ activeId: id, items: [] });
-    const items = await getHarnessItems(id);
-    // Guard against a switch while the query was in flight.
+    // Re-opening the thread already on screen would clear and re-read it for
+    // nothing, and the reader would watch it happen.
+    if (get().activeId === id) return;
+    // The rows of the thread being left stay up for the beat the query takes.
+    // Clearing them here instead made `items` empty with a thread selected,
+    // which is the empty composer's own state (`ChatPage`) — so every switch
+    // flashed the hero and re-mounted the composer under it before the rows
+    // landed. A stale row for a few milliseconds is invisible; that was not.
+    set({ activeId: id });
+    // Guard both answers against a switch while the query was in flight. A
+    // read that fails still has to clear: the rows held over belong to the
+    // thread we left, and they would otherwise sit under this one's name.
+    const items = await getHarnessItems(id).catch(() => [] as HarnessItem[]);
     if (get().activeId === id) set({ items });
+    // The queue is in Rust's memory, not the database, so a page that has
+    // just loaded — or a thread opened in another window — has to ask.
+    const waiting = await harnessQueued(id).catch(() => [] as QueuedMessage[]);
+    if (get().activeId === id) set((s) => ({ queued: { ...s.queued, [id]: waiting } }));
   },
 
   // The two agents share no model ids and no level vocabulary, so switching
@@ -121,21 +187,76 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       provider,
       ...(provider === "claude" ? defaultSelection(CLAUDE_MODELS) : { model: null, reasoning: null }),
     }),
+  restored: () => set({ restore: null }),
   setModel: (model) => set({ model }),
   setReasoning: (reasoning) => set({ reasoning }),
   setSubject: (subjectId) => set({ subjectId }),
   loadSubjects: async () => set({ subjects: await getSubjects() }),
   beginNew: () => set({ items: [] }),
 
-  removed: (id) =>
-    set((s) => ({
-      threads: s.threads.filter((t) => t.id !== id),
-      activeId: s.activeId === id ? null : s.activeId,
-      items: s.activeId === id ? [] : s.items,
-    })),
+  removed: (id) => {
+    pending.delete(id);
+    set((s) => {
+      const queued = { ...s.queued };
+      delete queued[id];
+      return {
+        threads: s.threads.filter((t) => t.id !== id),
+        activeId: s.activeId === id ? null : s.activeId,
+        items: s.activeId === id ? [] : s.items,
+        queued,
+      };
+    });
+  },
+
+  flushLive: () => {
+    if (timer != null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (pending.size === 0) return;
+    const batch = [...pending.entries()];
+    pending.clear();
+    set((s) => {
+      const live = { ...s.live };
+      for (const [id, p] of batch) {
+        const prev = live[id] ?? IDLE;
+        let toolOutput = prev.toolOutput;
+        for (const [ref, text] of Object.entries(p.toolOutput)) {
+          if (toolOutput === prev.toolOutput) toolOutput = { ...prev.toolOutput };
+          toolOutput[ref] = (toolOutput[ref] ?? "") + text;
+        }
+        live[id] = {
+          ...prev,
+          streaming: prev.streaming + p.streaming,
+          thinking: prev.thinking + p.thinking,
+          toolOutput,
+        };
+      }
+      return { live };
+    });
+  },
 
   apply: (env) => {
     const { threadId, event } = env;
+
+    // The three streaming events buffer; everything else is a row, and a row
+    // has to land after the text that preceded it.
+    switch (event.type) {
+      case "assistant_delta":
+        buffer(threadId).streaming += event.text;
+        return;
+      case "thinking_delta":
+        buffer(threadId).thinking += event.text;
+        return;
+      case "tool_output_delta": {
+        const p = buffer(threadId);
+        p.toolOutput[event.id] = (p.toolOutput[event.id] ?? "") + event.text;
+        return;
+      }
+      default:
+        get().flushLive();
+    }
+
     set((s) => {
       const prev = s.live[threadId] ?? IDLE;
       const onScreen = s.activeId === threadId;
@@ -164,15 +285,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           live = { ...prev, running: true };
           touchThread({ status: "running" });
           break;
-        case "assistant_delta":
-          live = { ...prev, streaming: prev.streaming + event.text };
-          break;
         case "assistant_message":
           push(rowFrom(env, "assistant", event.text));
           live = { ...prev, streaming: "" };
-          break;
-        case "thinking_delta":
-          live = { ...prev, thinking: prev.thinking + event.text };
           break;
         case "thinking":
           push(rowFrom(env, "thinking", event.text));
@@ -191,12 +306,6 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           // Text streamed before the call belongs to the call's message; the
           // committed row already carries it.
           live = { ...prev, streaming: "", thinking: "" };
-          break;
-        case "tool_output_delta":
-          live = {
-            ...prev,
-            toolOutput: { ...prev.toolOutput, [event.id]: (prev.toolOutput[event.id] ?? "") + event.text },
-          };
           break;
         case "tool_finished": {
           if (onScreen) {
@@ -217,6 +326,33 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
         case "error":
           push(rowFrom(env, "error", event.message));
           break;
+        // The queue is Rust's; this only draws it. `queued` is both "new" and
+        // "edited" — the id is the key either way.
+        case "queued": {
+          const list = s.queued[threadId] ?? [];
+          const msg = { id: event.id, text: event.text };
+          const next = list.some((q) => q.id === event.id)
+            ? list.map((q) => (q.id === event.id ? msg : q))
+            : [...list, msg];
+          return { queued: { ...s.queued, [threadId]: next } };
+        }
+        case "unqueued":
+          return {
+            queued: { ...s.queued, [threadId]: (s.queued[threadId] ?? []).filter((q) => q.id !== event.id) },
+          };
+        // A question was edited or taken back: it and everything after it are
+        // gone. The rows Rust has already deleted; this is the copy on screen.
+        // `context` is whether the agent went back with them — recorded even
+        // for a thread that is not open, since it is a fact about the thread.
+        case "rewound": {
+          const drift = event.context
+            ? s.contextDrift
+            : { ...s.contextDrift, [threadId]: true };
+          return {
+            contextDrift: drift,
+            ...(onScreen ? { items: items.filter((i) => i.id > 0 && i.id < event.from_item_id) } : {}),
+          };
+        }
         case "usage": {
           const usage: ThreadUsage = {
             inputTokens: event.input_tokens,
@@ -228,16 +364,33 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           touchThread({ usage: JSON.stringify(usage) });
           break;
         }
-        case "rate_limits": {
-          const t = threads.find((t) => t.id === threadId);
-          if (t) {
-            return { rateLimits: { ...s.rateLimits, [t.provider]: event.windows } };
-          }
+        // The windows are the account's, not the thread's: Codex reports them
+        // off the shared server with no thread attached at all.
+        case "rate_limits":
+          return { rateLimits: { ...s.rateLimits, [env.provider]: event.windows } };
+        case "turn_finished": {
+          // Whatever was still streaming has just been committed as a row by
+          // the bridge — including the half-written answer of a turn that was
+          // stopped — so clearing the live tail here loses nothing.
+          //
+          // The thread is only *idle* if nothing is waiting behind this turn.
+          // Rust sends the next queued message the moment this event lands,
+          // and a spinner that stopped for those few milliseconds — with the
+          // composer swapping stop for send and back — read as the answer
+          // having finished when it had not started.
+          // The stop leaves a row behind (`store.rs`), and it has to land
+          // now rather than on the next reload — it is the line that says
+          // why the answer above it stops mid-sentence.
+          if (event.status === "interrupted") push(rowFrom(env, "interrupted", ""));
+          const more = (s.queued[threadId]?.length ?? 0) > 0;
+          live = { ...IDLE, running: more };
+          touchThread({ status: event.status === "failed" ? "error" : more ? "running" : "idle" });
           break;
         }
-        case "turn_finished":
-          live = { ...IDLE };
-          touchThread({ status: event.status === "failed" ? "error" : "idle" });
+        case "thread_titled":
+          // The name arrives a beat after the first turn ends, from a naming
+          // turn of its own; the row is already written.
+          touchThread({ title: event.title });
           break;
         case "session_started":
           touchThread({ provider_session_id: event.provider_session_id, model: event.model ?? undefined });

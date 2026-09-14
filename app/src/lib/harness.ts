@@ -139,12 +139,30 @@ export type HarnessEvent =
   | { type: "tool_finished"; id: string; ok: boolean; output: string }
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number | null; context_window: number | null; cost_usd: number | null }
   | { type: "rate_limits"; windows: RateWindow[] }
+  | { type: "thread_titled"; title: string }
+  /** A message waiting behind the running turn. Also how an edit to one
+   *  arrives: the same `id`, new text. */
+  | { type: "queued"; id: string; text: string }
+  /** One left the queue — cancelled, cleared by stop, or going out now, in
+   *  which case its `user_message` follows. */
+  | { type: "unqueued"; id: string }
+  /** The provider's handle for the turn that just went out, kept on the
+   *  question's row so a later rewind can name it. Nothing on screen changes;
+   *  Rust writes it and the webview ignores it. */
+  | { type: "turn_anchor"; anchor: string }
+  /** Rows from `from_item_id` on are gone: a question was edited or taken
+   *  back. `context` is whether the agent was rewound with them; false means
+   *  it still holds the original, and the timeline says so. */
+  | { type: "rewound"; from_item_id: number; context: boolean }
   | { type: "turn_finished"; status: "completed" | "interrupted" | "failed" }
   | { type: "error"; message: string }
   | { type: "exited"; code: number | null };
 
 export interface HarnessEnvelope {
   threadId: number;
+  /** The thread's provider — or, for an account-scoped event with no thread
+   *  behind it (rate limits, which arrive on `threadId` 0), whose account. */
+  provider: Provider;
   itemId: number | null;
   event: HarnessEvent;
 }
@@ -166,6 +184,8 @@ export interface HarnessThread {
    *  when the thread is created — both CLIs bind the appended instructions at
    *  session start, so it cannot change under a live session. */
   subject_id: number | null;
+  /** The model's own name for the thread once it has been asked for; until
+   *  then, the first line of the first message. */
   title: string | null;
   status: "idle" | "running" | "error";
   /** JSON `ThreadUsage`, or null. */
@@ -174,7 +194,18 @@ export interface HarnessThread {
   updated_at: string;
 }
 
-export type ItemKind = "user" | "assistant" | "thinking" | "tool" | "error";
+/** `interrupted` is the one row with nothing in it: a mark left where a turn
+ *  was stopped, so the answer above it reads as cut short rather than given
+ *  up on. */
+export type ItemKind = "user" | "assistant" | "thinking" | "tool" | "error" | "interrupted";
+
+/** A message typed while a turn was running. It is not in the conversation
+ *  yet — Rust holds it in memory and writes no row until it goes out — which
+ *  is why it can still be edited or dropped. */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+}
 
 export interface ToolMeta {
   kind?: ToolKind;
@@ -235,13 +266,24 @@ export function parseUsage(t: HarnessThread | null): ThreadUsage | null {
   }
 }
 
+/** Parsed `meta` per row object. A tool's output can be hundreds of
+ *  kilobytes and every render of its row asks for it again; the row object is
+ *  replaced whenever the row changes (the store never mutates one in place),
+ *  so keying the cache on it is both cheap and self-invalidating. */
+const TOOL_META = new WeakMap<HarnessItem, ToolMeta>();
+
 export function parseToolMeta(item: HarnessItem): ToolMeta {
   if (!item.meta) return {};
+  const hit = TOOL_META.get(item);
+  if (hit) return hit;
+  let meta: ToolMeta = {};
   try {
-    return JSON.parse(item.meta);
+    meta = JSON.parse(item.meta);
   } catch {
-    return {};
+    meta = {};
   }
+  TOOL_META.set(item, meta);
+  return meta;
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────
@@ -291,8 +333,57 @@ export function harnessSend(
   return invoke<number>("harness_send", { threadId, provider, text, options });
 }
 
-export function harnessInterrupt(threadId: number): Promise<void> {
-  return invoke("harness_interrupt", { threadId });
+/**
+ * Ask the same question differently. The thread is rewound to that question —
+ * it and everything after it stop being rows — and the new text goes as the
+ * next turn.
+ *
+ * The agent is rewound too, over its own control channel, so its context
+ * matches what is on screen. The exception is a question asked before the
+ * anchor was recorded, or one whose session the CLI has since dropped: the
+ * rows still go, and the `rewound` event's `context: false` is what draws the
+ * note saying the agent kept the original.
+ */
+export function harnessEditResend(
+  threadId: number,
+  itemId: number,
+  text: string,
+  options: SendOptions,
+): Promise<void> {
+  return invoke("harness_edit_resend", { threadId, itemId, text, options });
+}
+
+/**
+ * Take the thread back to just before a question: it and everything after it
+ * stop being rows, and the question comes back as text for the composer.
+ * Claude Code's rewind without the branching — there is one thread, so going
+ * back means the rest is gone. The agent is rewound too, on the same terms as
+ * `harnessEditResend`; not sending is the whole difference between them.
+ */
+export function harnessRewind(threadId: number, itemId: number): Promise<string> {
+  return invoke<string>("harness_rewind", { threadId, itemId });
+}
+
+/** What is still waiting behind this thread's turn. The queue lives in Rust's
+ *  memory rather than the database — a message that was never sent is not
+ *  history — so a reloaded page asks for it. */
+export function harnessQueued(threadId: number): Promise<QueuedMessage[]> {
+  return invoke<QueuedMessage[]>("harness_queued", { threadId });
+}
+
+export function harnessUnqueue(threadId: number, queueId: string): Promise<void> {
+  return invoke("harness_unqueue", { threadId, queueId });
+}
+
+export function harnessEditQueued(threadId: number, queueId: string, text: string): Promise<void> {
+  return invoke("harness_edit_queued", { threadId, queueId, text });
+}
+
+/** Stop the running turn and drop whatever was waiting behind it. The dropped
+ *  messages come back so the composer can hand them to the student rather
+ *  than swallow what they typed. */
+export function harnessInterrupt(threadId: number): Promise<string[]> {
+  return invoke<string[]>("harness_interrupt", { threadId });
 }
 
 export function harnessDeleteThread(threadId: number): Promise<void> {
@@ -301,6 +392,14 @@ export function harnessDeleteThread(threadId: number): Promise<void> {
 
 export function harnessHealth(): Promise<BridgeHealth[]> {
   return invoke<BridgeHealth[]>("harness_health");
+}
+
+/** Ask the provider for its plan windows now, rather than waiting for a turn
+ *  to report them. The answer comes back as a `rate_limits` event like any
+ *  other, so nothing here reads a return value. Codex answers; Claude has no
+ *  such request and ignores it. */
+export function harnessRefreshRateLimits(provider: Provider): Promise<void> {
+  return invoke<void>("harness_refresh_rate_limits", { provider });
 }
 
 export function harnessCodexModels(): Promise<CodexModel[]> {

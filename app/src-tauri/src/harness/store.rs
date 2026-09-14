@@ -42,8 +42,9 @@ pub async fn create_thread(
     Ok(res.last_insert_rowid())
 }
 
-/// The first line of the first message, clipped. bb derives titles the same
-/// way until the provider names the thread; there is no naming step here.
+/// The first line of the first message, clipped: the name a thread has for
+/// the length of its first turn, until the naming turn replaces it
+/// (`claim_naming` below, `Harness::name_thread`).
 fn title_from(text: &str) -> String {
     let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
     let mut t: String = line.chars().take(72).collect();
@@ -169,6 +170,22 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             insert_item(pool, thread_id, "user", None, Some(text), None).await.map(Some)
         }
         HarnessEvent::TurnStarted => set_status(pool, thread_id, "running").await.map(|_| None),
+        HarnessEvent::TurnAnchor { anchor } => {
+            // The newest question is the one this turn is answering: the
+            // manager runs one turn per thread (`Queue` in `super`), so there
+            // is no second question in flight to confuse it with.
+            sqlx::query(
+                "UPDATE harness_items SET anchor = ?2 WHERE id =
+                   (SELECT id FROM harness_items
+                     WHERE thread_id = ?1 AND kind = 'user' ORDER BY id DESC LIMIT 1)",
+            )
+            .bind(thread_id)
+            .bind(anchor)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(None)
+        }
         HarnessEvent::AssistantMessage { text } => {
             insert_item(pool, thread_id, "assistant", None, Some(text), None).await.map(Some)
         }
@@ -254,20 +271,143 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
                 .map_err(|e| e.to_string())?;
             Ok(None)
         }
+        HarnessEvent::ThreadTitled { title } => {
+            sqlx::query("UPDATE harness_threads SET title = ?2 WHERE id = ?1")
+                .bind(thread_id)
+                .bind(title)
+                .execute(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(None)
+        }
         HarnessEvent::TurnFinished { status } => {
             let s = if status == "failed" { "error" } else { "idle" };
-            set_status(pool, thread_id, s).await.map(|_| None)
+            set_status(pool, thread_id, s).await?;
+            // A stopped turn leaves a mark. The answer above it breaks off
+            // mid-sentence on purpose, and a thread reopened tomorrow should
+            // say that rather than look like the agent gave up.
+            if status == "interrupted" {
+                return insert_item(pool, thread_id, "interrupted", None, None, None)
+                    .await
+                    .map(Some);
+            }
+            Ok(None)
         }
         HarnessEvent::Exited { .. } => {
             // A process gone mid-turn already produced a failed TurnFinished;
             // an idle one leaving changes nothing the reader can see.
             Ok(None)
         }
+        // The queue is not the conversation: a message waiting behind a
+        // running turn has no row until it is sent, and the rewind has
+        // already deleted its rows by the time it is announced.
         HarnessEvent::AssistantDelta { .. }
         | HarnessEvent::ThinkingDelta { .. }
         | HarnessEvent::ToolOutputDelta { .. }
+        | HarnessEvent::Queued { .. }
+        | HarnessEvent::Unqueued { .. }
+        | HarnessEvent::Rewound { .. }
         | HarnessEvent::RateLimits { .. } => Ok(None),
     }
+}
+
+/// A question in this thread: what it said, and the provider's handle for the
+/// turn it started. The guard on an edit — the id comes from the webview, and
+/// everything after it is about to be deleted, so it is checked against the
+/// row rather than trusted.
+///
+/// The anchor is None for a question asked before migration 28, and for one
+/// whose turn never started. A rewind falls back to the thread alone there.
+pub struct Question {
+    pub text: String,
+    pub anchor: Option<String>,
+}
+
+pub async fn user_item(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Result<Question, String> {
+    let row = sqlx::query("SELECT kind, content, anchor FROM harness_items WHERE id = ?1 AND thread_id = ?2")
+        .bind(item_id)
+        .bind(thread_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no item {item_id} in thread {thread_id}"))?;
+    let kind: String = row.get("kind");
+    if kind != "user" {
+        return Err(format!("item {item_id} is a {kind} row, not a question"));
+    }
+    Ok(Question {
+        text: row.get::<Option<String>, _>("content").unwrap_or_default(),
+        anchor: row.get::<Option<String>, _>("anchor"),
+    })
+}
+
+/// Delete this row and everything after it in the thread — the local half of
+/// a rewind. The provider's own session is rewound separately, by the command
+/// that calls this (`Harness::rewind`); this one only touches our rows.
+pub async fn truncate_from(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Result<u64, String> {
+    sqlx::query("DELETE FROM harness_items WHERE thread_id = ?1 AND id >= ?2")
+        .bind(thread_id)
+        .bind(item_id)
+        .execute(pool)
+        .await
+        .map(|r| r.rows_affected())
+        .map_err(|e| e.to_string())
+}
+
+/// The exchange a naming turn is given: the first thing the student asked and
+/// the last thing the agent answered.
+pub struct NamingSeed {
+    pub first_message: String,
+    pub reply: String,
+}
+
+/// The first or last non-empty row of one kind. `order` is a literal, never
+/// user input.
+async fn one_item(
+    pool: &SqlitePool,
+    thread_id: i64,
+    kind: &str,
+    order: &'static str,
+) -> Result<Option<String>, String> {
+    sqlx::query(&format!(
+        "SELECT content FROM harness_items
+         WHERE thread_id = ?1 AND kind = ?2 AND content IS NOT NULL AND content != ''
+         ORDER BY id {order} LIMIT 1"
+    ))
+    .bind(thread_id)
+    .bind(kind)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())
+    .map(|r| r.and_then(|r| r.get::<Option<String>, _>("content")))
+}
+
+/// Claim the right to name this thread, and hand back what to name it from.
+///
+/// The claim is the same statement as the read: `title_generated` flips to 1
+/// only if it was 0, so two turns finishing at once cannot both spawn a
+/// naming turn, and a thread is never named twice. A naming turn that then
+/// fails leaves the first-line title in place rather than retrying on every
+/// message — the cost of a name is a real turn on the student's subscription.
+pub async fn claim_naming(pool: &SqlitePool, thread_id: i64) -> Result<Option<NamingSeed>, String> {
+    let first_message = one_item(pool, thread_id, "user", "ASC").await?;
+    let reply = one_item(pool, thread_id, "assistant", "DESC").await?;
+    let (Some(first_message), Some(reply)) = (first_message, reply) else {
+        // Nothing was said back — a failed first turn. Leave the claim open.
+        return Ok(None);
+    };
+    let claimed = sqlx::query(
+        "UPDATE harness_threads SET title_generated = 1 WHERE id = ?1 AND title_generated = 0",
+    )
+    .bind(thread_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .rows_affected();
+    if claimed == 0 {
+        return Ok(None);
+    }
+    Ok(Some(NamingSeed { first_message, reply }))
 }
 
 /// Rate limits are per provider account, not per thread, so they live in
