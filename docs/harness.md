@@ -128,6 +128,17 @@ old chat page and store are gone.
   good with it, and the two do different wrong things, which is why the wait
   is here rather than left to them. See [One turn at a
   time](#one-turn-at-a-time).
+- **`run_once` has a caller outside chat now.** One prompt, one turn, no
+  thread and no rows — `oculus agent` was its only user, as the smallest
+  end-to-end proof of a bridge, and the chaptering job in
+  [chapters.md](./chapters.md) is the first real one. That job is worth reading
+  as the shape of a *headless* agent job here: it picks its own provider,
+  model and reasoning level (deliberately not chat's defaults), it collects
+  the `AssistantMessage` text and parses it itself, and the database write is
+  Rust's — the agent replies with JSON and never goes near a table, because
+  chapters are derived data rather than the student's own planning. Thread id
+  0's raw log (`agents/threads/0.ndjson`) is where such a run's provider lines
+  land, alongside the shared Codex server's.
 - **Every raw line is kept.** `agents/threads/<id>.ndjson` gets each provider
   line as it arrives (id 0 is the shared Codex server and headless runs). It
   is how a translation bug is diagnosed without re-running an agent, and the

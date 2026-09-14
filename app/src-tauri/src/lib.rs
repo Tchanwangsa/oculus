@@ -881,6 +881,52 @@ ALTER TABLE harness_items ADD COLUMN anchor TEXT;
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 29,
+                            description: "lecture chapters: named topic spans, and how they were made",
+                            // What a chaptering run leaves behind. Derived
+                            // data, like `pages` and `files.parse_status`:
+                            // the recording on disk is the source of truth
+                            // and a chapter set is regenerable from it, so
+                            // these rows cascade with the lecture and nothing
+                            // here is the student's own work.
+                            //
+                            // **No `end_seconds`.** A chapter ends where the
+                            // next one begins, and the last at the lecture's
+                            // duration — one fact in one column, which is the
+                            // lesson migration 27 records about `column_id` /
+                            // `position` / `done_at`. A stored end is a
+                            // second place for the same fact to be wrong,
+                            // and the reader derives it for free.
+                            //
+                            // `idx` rather than an autoincrement id: the
+                            // order *is* the data, the pair is the identity,
+                            // and a regenerate replaces the set wholesale.
+                            //
+                            // `chapter_status` is NULL | running | ready |
+                            // error, mirroring `files.parse_status`
+                            // (migration 3); only a terminal status stamps
+                            // `chaptered_at`. `chapter_error` carries the
+                            // failure message because a status column cannot
+                            // — the player has to be able to show what went
+                            // wrong and offer a retry — and is cleared on
+                            // success.
+                            sql: r#"
+CREATE TABLE IF NOT EXISTS lecture_chapters (
+    lecture_id    TEXT    NOT NULL REFERENCES lectures(id) ON DELETE CASCADE,
+    idx           INTEGER NOT NULL,
+    start_seconds INTEGER NOT NULL,
+    title         TEXT    NOT NULL,
+    summary       TEXT    NOT NULL,
+    PRIMARY KEY (lecture_id, idx)
+);
+
+ALTER TABLE lectures ADD COLUMN chapter_status TEXT;
+ALTER TABLE lectures ADD COLUMN chaptered_at   TEXT;
+ALTER TABLE lectures ADD COLUMN chapter_error  TEXT;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

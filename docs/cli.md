@@ -21,10 +21,15 @@ those commands refuse an unknown column instead of guessing, why a whole
 breakdown goes in as one transaction, and why the destructive one says in its
 own `--help` that there is no undo.
 
-`lecture` is a third kind again: it **writes nothing** and reads no upstream
-copy either — it decodes a recording already on disk and reports what it found
+`lecture` reads no upstream copy at all: it decodes a recording already on disk
 (see [chapters.md](./chapters.md)), which is why it has no cache to invalidate
-and re-running it is the whole story.
+and re-running it is the whole story. `lecture candidates` writes nothing at
+all. `lecture chapters` writes **derived** rows — not a copy of anything
+upstream and not the user's own work either, but something regenerable from
+the file on disk — so it is deleted and remade rather than repaired, and
+`--force` is the door for that. It is also the only command that spends a
+model's quota, which is why it leaves a lecture that already has chapters
+alone unless asked.
 
 Two commands stand outside that split. `docs` documents the whole agent-facing
 surface to the agents that use it, and `agent` runs one of those agents for a

@@ -341,6 +341,107 @@ pub async fn set_lecture_path(
     Ok(())
 }
 
+/// The chaptering job's own three columns on `lectures`, written together.
+///
+/// A sibling of [`set_lecture_path`] rather than another arm of it: that
+/// function's allow-list takes a `&str` value and so cannot clear a column
+/// back to NULL, which is exactly what starting a run and succeeding at one
+/// both have to do. `status` NULL means "never chaptered"; only a terminal
+/// status stamps `chaptered_at`, and `error` is cleared by every write that
+/// does not carry one.
+pub async fn set_chapter_status(
+    pool: &SqlitePool,
+    lecture_id: &str,
+    status: Option<&str>,
+    error: Option<&str>,
+) -> Result<(), String> {
+    let terminal = matches!(status, Some("ready") | Some("error"));
+    sqlx::query(
+        "UPDATE lectures
+            SET chapter_status = ?1,
+                chapter_error  = ?2,
+                chaptered_at   = CASE WHEN ?3 THEN datetime('now') ELSE NULL END
+          WHERE id = ?4",
+    )
+    .bind(status)
+    .bind(error)
+    .bind(i64::from(terminal))
+    .bind(lecture_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Replace a lecture's chapters, and mark it chaptered.
+///
+/// One transaction for the whole set, and the caller has already run
+/// `chapters::validate` over it — half a chapter list is worse than none,
+/// because a missing chapter is not a gap on the scrub bar but twenty extra
+/// minutes silently attributed to the chapter before it. The delete is in the
+/// same transaction as the inserts for the same reason: a regenerate that
+/// fails partway must leave the chapters that were already there.
+pub async fn save_chapters(
+    pool: &SqlitePool,
+    lecture_id: &str,
+    chapters: &[crate::chapters::Chapter],
+) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM lecture_chapters WHERE lecture_id = ?1")
+        .bind(lecture_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    for (idx, chapter) in chapters.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO lecture_chapters (lecture_id, idx, start_seconds, title, summary)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(lecture_id)
+        .bind(idx as i64)
+        .bind(i64::from(chapter.start_seconds))
+        .bind(&chapter.title)
+        .bind(&chapter.summary)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    sqlx::query(
+        "UPDATE lectures
+            SET chapter_status = 'ready', chapter_error = NULL, chaptered_at = datetime('now')
+          WHERE id = ?1",
+    )
+    .bind(lecture_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// A lecture's chapters in play order. Empty when it has never been chaptered.
+pub async fn chapters(
+    pool: &SqlitePool,
+    lecture_id: &str,
+) -> Result<Vec<crate::chapters::Chapter>, String> {
+    let rows = sqlx::query(
+        "SELECT start_seconds, title, summary FROM lecture_chapters
+          WHERE lecture_id = ?1 ORDER BY idx",
+    )
+    .bind(lecture_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| crate::chapters::Chapter {
+            start_seconds: r.get::<i64, _>("start_seconds").max(0) as u32,
+            title: r.get("title"),
+            summary: r.get("summary"),
+        })
+        .collect())
+}
+
 pub async fn lectures(pool: &SqlitePool, subject_id: i64) -> Result<Vec<LectureRow>, String> {
     let rows = sqlx::query(
         "SELECT id, title, date, duration_seconds, video_path, transcript_path

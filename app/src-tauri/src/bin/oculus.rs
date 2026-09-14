@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use app_lib::agents;
 use app_lib::projects;
@@ -651,6 +651,7 @@ struct TaskRmArgs {
 #[derive(Subcommand)]
 enum LectureAction {
     Candidates(LectureCandidatesArgs),
+    Chapters(LectureChaptersArgs),
 }
 
 /// Find where a recording plausibly changes topic
@@ -673,6 +674,41 @@ struct LectureCandidatesArgs {
     /// so the boundaries can be checked by eye
     #[arg(long)]
     frames: bool,
+}
+
+/// Name a recording's chapters with a CLI agent, and store them
+///
+/// Detects the boundary candidates, grabs a frame for each, then hands the
+/// list, the transcript and the frames folder to a coding agent and asks it
+/// which of them are real topic changes. The agent replies with JSON; this
+/// command validates it against the candidate set and writes the rows. The
+/// agent never touches the database.
+///
+/// One bad chapter rejects the whole set: a chapter list is a shape, and a
+/// missing chapter is not a gap but twenty minutes silently attributed to the
+/// chapter before it.
+#[derive(Args)]
+struct LectureChaptersArgs {
+    /// Lecture id, as `oculus list -l` prints it; a unique prefix is enough
+    #[arg(value_name = "LECTURE_ID")]
+    id: String,
+    // These three defaults are this command's own, and deliberately not
+    // `oculus agent`'s: chaptering is a long look at slides and a transcript,
+    // which is what the reasoning level is for. Stage 3 moves them into a
+    // settings registry shared with every other model-backed job — until then
+    // they live here, in one place, rather than being spread across callers.
+    /// Which CLI to drive
+    #[arg(short, long, value_parser = ["claude", "codex"], default_value = "codex")]
+    provider: String,
+    /// Model to request (provider-specific name or alias)
+    #[arg(short, long, default_value = "gpt-5.6-luna")]
+    model: String,
+    /// Reasoning effort (low, medium, high, xhigh, max)
+    #[arg(long, default_value = "xhigh")]
+    effort: String,
+    /// Re-run over a lecture that already has chapters, replacing them
+    #[arg(long)]
+    force: bool,
 }
 
 /// Write the agent-facing docs into the library
@@ -743,6 +779,7 @@ fn main() {
         },
         Some(Command::Lecture { action }) => match action {
             LectureAction::Candidates(a) => ctx.lecture_candidates(&a),
+            LectureAction::Chapters(a) => ctx.lecture_chapters(&a),
         },
         Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
@@ -2706,6 +2743,197 @@ impl Ctx {
         Ok(())
     }
 
+    /// Name a recording's chapters with a CLI agent, and store them.
+    ///
+    /// The detector from `lecture_candidates` runs first and a frame is
+    /// grabbed for every candidate, because the whole advantage of driving a
+    /// coding agent rather than calling a model API is that it can *open* the
+    /// five frames it is unsure about — a stuffed prompt would have to carry
+    /// all fifty. So the prompt stays small (the candidate list, two paths,
+    /// the title and the duration) and the agent does the reading.
+    ///
+    /// The agent replies with JSON and nothing more: chapters are derived data
+    /// like `pages`, not the student's own planning, so unlike `oculus project`
+    /// there is no write door for a model here. Rust parses the reply,
+    /// validates it against the candidate set, and writes the rows.
+    ///
+    /// This is the first caller of `harness::run_once` outside `oculus agent`.
+    fn lecture_chapters(&self, args: &LectureChaptersArgs) -> Result<(), String> {
+        use app_lib::harness::{self, HarnessEvent, Provider};
+
+        let provider = Provider::parse(&args.provider).ok_or("unknown provider")?;
+        let pool = self.db().ok_or("lectures live in the database")?;
+        let (id, title, duration, video, transcript) = self.one_lecture(&pool, &args.id)?;
+
+        let existing = self.rt.block_on(store::chapters(&pool, &id))?;
+        if !existing.is_empty() && !args.force {
+            return Err(format!(
+                "{title} already has {} chapter(s) — `--force` re-runs and replaces them",
+                existing.len()
+            ));
+        }
+        let video = video.ok_or_else(|| {
+            format!("{title} is not downloaded — `oculus run -l --videos` fetches it")
+        })?;
+        let video = PathBuf::from(&video);
+        if !video.exists() {
+            return Err(format!("{} is on record but missing from disk", video.display()));
+        }
+        let ffmpeg = app_lib::echo360::find_ffmpeg(None)
+            .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
+
+        // Detection is seconds and nothing is cached, so this is the same pass
+        // `oculus lecture candidates` makes; see `app_lib::chapters`.
+        let diffs = app_lib::chapters::sample_diffs(&ffmpeg, &video)?;
+        let gaps = transcript
+            .as_deref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|vtt| app_lib::chapters::cue_gaps(&vtt))
+            .unwrap_or_default();
+        let found = app_lib::chapters::candidates(&diffs, &gaps, duration as u32);
+        if found.is_empty() {
+            return Err(format!("no boundary candidates in {title} — nothing to chapter"));
+        }
+
+        // Second 0 is never a detected candidate — the first change is
+        // typically twenty seconds in — but a lecture always starts somewhere,
+        // so the opening is prepended as an always-available boundary and
+        // accepted as one by the validator.
+        let mut boundaries: Vec<u32> = vec![0];
+        boundaries.extend(found.iter().map(|c| c.seconds));
+        let mut with_opening = vec![app_lib::chapters::Candidate {
+            seconds: 0,
+            score: 0.0,
+            diff: 0.0,
+            pause: false,
+        }];
+        with_opening.extend(found.iter().cloned());
+
+        let dir = app_lib::echo360::lecture_dir(&self.data_dir, &id);
+        if !self.json {
+            println!(
+                "{}  {}  {}",
+                paint(&title, BOLD),
+                paint(&clock(duration as u32), DIM),
+                paint(&format!("{} candidate(s)", found.len()), DIM)
+            );
+        }
+        app_lib::chapters::extract_frames(&ffmpeg, &video, &boundaries, &dir.join("frames"))?;
+
+        // An Echo360 title is a room booking rather than a topic, so the
+        // subject's own folder — where the deck is — is worth naming.
+        let course_dir = self
+            .rt
+            .block_on(
+                sqlx::query_scalar::<_, String>(
+                    "SELECT s.code FROM lectures l JOIN subjects s ON s.id = l.subject_id
+                      WHERE l.id = ?1",
+                )
+                .bind(&id)
+                .fetch_optional(&pool),
+            )
+            .ok()
+            .flatten()
+            .map(|code| format!("../courses/{}", app_lib::paths::safe_dir(&code)));
+
+        let prompt = app_lib::chapters::prompt(&app_lib::chapters::Job {
+            title: &title,
+            duration_secs: duration as u32,
+            // Every agent turn runs from the library's `agents/` folder, so
+            // this is the path the agent can paste straight into a read.
+            lecture_dir: &format!("../lectures/{id}"),
+            course_dir: course_dir.as_deref(),
+            candidates: &with_opening,
+        });
+
+        self.rt
+            .block_on(store::set_chapter_status(&pool, &id, Some("running"), None))?;
+
+        let reply = Arc::new(Mutex::new(String::new()));
+        let collect = reply.clone();
+        // Assistant text is not echoed: the reply *is* the chapter JSON, and
+        // it is printed properly below. The tool rows are the interesting part
+        // while the turn runs.
+        let printer = AgentPrinter::new(false);
+        let quiet = self.json;
+        let opts = harness::SendOptions {
+            model: Some(args.model.clone()),
+            reasoning_effort: Some(args.effort.clone()),
+            subject_id: None,
+            scope: None,
+        };
+        let outcome = harness::run_once(&self.data_dir, provider, &opts, &prompt, move |ev| {
+            if let HarnessEvent::AssistantMessage { text } = ev {
+                collect.lock().unwrap().push_str(text);
+            }
+            if !quiet {
+                printer.print(ev);
+            }
+        });
+
+        let reply = reply.lock().unwrap().clone();
+        let parsed = outcome
+            .and_then(|()| app_lib::chapters::parse_chapters(&reply))
+            .and_then(|chapters| {
+                app_lib::chapters::validate(&chapters, &boundaries, duration as u32)
+                    .map(|()| chapters)
+            });
+        let chapters = match parsed {
+            Ok(c) => c,
+            Err(e) => {
+                // The failure is kept on the row, not just printed: a player
+                // showing "chaptering failed" needs to say why and offer a
+                // retry, and a bare status cannot carry a message.
+                self.rt
+                    .block_on(store::set_chapter_status(&pool, &id, Some("error"), Some(&e)))?;
+                return Err(e);
+            }
+        };
+        self.rt.block_on(store::save_chapters(&pool, &id, &chapters))?;
+
+        if self.json {
+            #[derive(Serialize)]
+            struct Out<'a> {
+                lecture: &'a str,
+                title: &'a str,
+                duration_seconds: i64,
+                provider: &'a str,
+                model: &'a str,
+                effort: &'a str,
+                candidates: usize,
+                chapters: &'a [app_lib::chapters::Chapter],
+            }
+            return self.emit(&Out {
+                lecture: &id,
+                title: &title,
+                duration_seconds: duration,
+                provider: provider.as_str(),
+                model: &args.model,
+                effort: &args.effort,
+                candidates: found.len(),
+                chapters: &chapters,
+            });
+        }
+
+        println!();
+        for chapter in &chapters {
+            println!(
+                "  {}  {}",
+                paint(&clock(chapter.start_seconds), DIM),
+                paint(&chapter.title, BOLD)
+            );
+            println!("            {}", paint(&chapter.summary, DIM));
+        }
+        println!(
+            "{}",
+            paint(
+                &format!("{} chapter(s) written for {title}", chapters.len()),
+                DIM
+            )
+        );
+        Ok(())
+    }
+
     /// One lecture row from an id, or a unique prefix of one. Lecture ids are
     /// UUIDs nobody types in full, and a prefix that matches two lectures is
     /// reported rather than guessed — the same rule `one_subject` follows.
@@ -2884,7 +3112,7 @@ impl Ctx {
     /// normalized event as a line; otherwise text streams and tool rows are
     /// summarised as they open and close.
     fn agent(&self, args: &AgentArgs) -> Result<(), String> {
-        use app_lib::harness::{self, HarnessEvent, Provider};
+        use app_lib::harness::{self, Provider};
         let provider = Provider::parse(&args.provider).ok_or("unknown provider")?;
         // The folder name is the scope; a headless run has no thread row to
         // resolve an id against, so the code is given directly.
@@ -2895,7 +3123,7 @@ impl Ctx {
             scope: args.subject.clone(),
         };
         let json = self.json;
-        let streaming = Mutex::new(false);
+        let printer = AgentPrinter::new(true);
         harness::run_once(&self.data_dir, provider, &opts, &args.prompt, move |ev| {
             if json {
                 if let Ok(line) = serde_json::to_string(ev) {
@@ -2903,71 +3131,7 @@ impl Ctx {
                 }
                 return;
             }
-            let mut out = std::io::stdout();
-            let mut mid = streaming.lock().unwrap();
-            let end_line = |mid: &mut bool, out: &mut std::io::Stdout| {
-                if *mid {
-                    let _ = writeln!(out);
-                    *mid = false;
-                }
-            };
-            match ev {
-                HarnessEvent::SessionStarted { provider_session_id, model, cwd } => {
-                    let _ = writeln!(
-                        out,
-                        "{} session {provider_session_id}{} in {cwd}",
-                        paint("·", DIM),
-                        model.as_ref().map(|m| format!(" ({m})")).unwrap_or_default()
-                    );
-                }
-                HarnessEvent::AssistantDelta { text } => {
-                    let _ = write!(out, "{text}");
-                    *mid = true;
-                }
-                HarnessEvent::AssistantMessage { .. } => end_line(&mut mid, &mut out),
-                HarnessEvent::Thinking { text } => {
-                    end_line(&mut mid, &mut out);
-                    let first = text.lines().next().unwrap_or("");
-                    let _ = writeln!(out, "{}", paint(&format!("  thinking: {first}"), DIM));
-                }
-                HarnessEvent::ToolStarted { kind, title, .. } => {
-                    end_line(&mut mid, &mut out);
-                    let _ = writeln!(out, "{}", paint(&format!("  ▸ {kind:?}: {title}"), DIM));
-                }
-                HarnessEvent::ToolFinished { ok, output, .. } => {
-                    let first = output.lines().next().unwrap_or("");
-                    let mark = if *ok { "✓" } else { "✗" };
-                    let _ = writeln!(out, "{}", paint(&format!("    {mark} {first}"), DIM));
-                }
-                HarnessEvent::Usage { context_tokens, cost_usd, .. } => {
-                    end_line(&mut mid, &mut out);
-                    let mut s = String::from("  usage:");
-                    if let Some(c) = context_tokens {
-                        s.push_str(&format!(" {c} context tokens"));
-                    }
-                    if let Some(c) = cost_usd {
-                        s.push_str(&format!(", ${c:.3}"));
-                    }
-                    let _ = writeln!(out, "{}", paint(&s, DIM));
-                }
-                HarnessEvent::RateLimits { windows } => {
-                    let parts: Vec<String> = windows
-                        .iter()
-                        .map(|w| format!("{} {:.0}%", w.label, w.used_percent))
-                        .collect();
-                    let _ = writeln!(out, "{}", paint(&format!("  limits: {}", parts.join(", ")), DIM));
-                }
-                HarnessEvent::Error { message } => {
-                    end_line(&mut mid, &mut out);
-                    let _ = writeln!(out, "{} {message}", paint("error:", RED));
-                }
-                HarnessEvent::TurnFinished { status } => {
-                    end_line(&mut mid, &mut out);
-                    let _ = writeln!(out, "{}", paint(&format!("· turn {status}"), DIM));
-                }
-                _ => {}
-            }
-            let _ = out.flush();
+            printer.print(ev);
         })
     }
 
@@ -3361,6 +3525,110 @@ fn nullable_minutes(value: Option<&String>) -> Result<Option<Option<i64>>, Strin
 /// indented on its own when they do not — a `--column` listing must not
 /// silently drop rows.
 /// `HH:MM:SS`, so an offset can be read off against a player's own readout.
+/// Normalized harness events as terminal lines.
+///
+/// One printer for both callers of `harness::run_once`: `oculus agent`, where
+/// the answer is the point, and `oculus lecture chapters`, where the answer is
+/// JSON this binary parses and prints properly itself — hence `show_text`.
+/// Everything else is the same, because "what is the agent doing" looks the
+/// same whatever it was asked.
+struct AgentPrinter {
+    show_text: bool,
+    /// Whether the cursor is mid-line inside streamed text, so the next
+    /// non-text line breaks before it rather than running on.
+    mid: Mutex<bool>,
+}
+
+impl AgentPrinter {
+    fn new(show_text: bool) -> Self {
+        AgentPrinter {
+            show_text,
+            mid: Mutex::new(false),
+        }
+    }
+
+    fn print(&self, ev: &app_lib::harness::HarnessEvent) {
+        use app_lib::harness::HarnessEvent;
+        let mut out = std::io::stdout();
+        let mut mid = self.mid.lock().unwrap();
+        let end_line = |mid: &mut bool, out: &mut std::io::Stdout| {
+            if *mid {
+                let _ = writeln!(out);
+                *mid = false;
+            }
+        };
+        match ev {
+            HarnessEvent::SessionStarted { provider_session_id, model, cwd } => {
+                let _ = writeln!(
+                    out,
+                    "{} session {provider_session_id}{} in {cwd}",
+                    paint("·", DIM),
+                    model.as_ref().map(|m| format!(" ({m})")).unwrap_or_default()
+                );
+            }
+            HarnessEvent::AssistantDelta { text } => {
+                if self.show_text {
+                    let _ = write!(out, "{text}");
+                    *mid = true;
+                }
+            }
+            HarnessEvent::AssistantMessage { text } => {
+                if self.show_text {
+                    end_line(&mut mid, &mut out);
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "{}",
+                        paint(&format!("  · replied ({} chars)", text.chars().count()), DIM)
+                    );
+                }
+            }
+            HarnessEvent::Thinking { text } => {
+                end_line(&mut mid, &mut out);
+                let first = text.lines().next().unwrap_or("");
+                let _ = writeln!(out, "{}", paint(&format!("  thinking: {first}"), DIM));
+            }
+            HarnessEvent::ToolStarted { kind, title, .. } => {
+                end_line(&mut mid, &mut out);
+                let _ = writeln!(out, "{}", paint(&format!("  ▸ {kind:?}: {title}"), DIM));
+            }
+            HarnessEvent::ToolFinished { ok, output, .. } => {
+                let first = output.lines().next().unwrap_or("");
+                let mark = if *ok { "✓" } else { "✗" };
+                let _ = writeln!(out, "{}", paint(&format!("    {mark} {first}"), DIM));
+            }
+            HarnessEvent::Usage { context_tokens, cost_usd, .. } => {
+                end_line(&mut mid, &mut out);
+                let mut s = String::from("  usage:");
+                if let Some(c) = context_tokens {
+                    s.push_str(&format!(" {c} context tokens"));
+                }
+                if let Some(c) = cost_usd {
+                    s.push_str(&format!(", ${c:.3}"));
+                }
+                let _ = writeln!(out, "{}", paint(&s, DIM));
+            }
+            HarnessEvent::RateLimits { windows } => {
+                let parts: Vec<String> = windows
+                    .iter()
+                    .map(|w| format!("{} {:.0}%", w.label, w.used_percent))
+                    .collect();
+                let _ = writeln!(out, "{}", paint(&format!("  limits: {}", parts.join(", ")), DIM));
+            }
+            HarnessEvent::Error { message } => {
+                end_line(&mut mid, &mut out);
+                let _ = writeln!(out, "{} {message}", paint("error:", RED));
+            }
+            HarnessEvent::TurnFinished { status } => {
+                end_line(&mut mid, &mut out);
+                let _ = writeln!(out, "{}", paint(&format!("· turn {status}"), DIM));
+            }
+            _ => {}
+        }
+        let _ = out.flush();
+    }
+}
+
 fn clock(secs: u32) -> String {
     format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
 }

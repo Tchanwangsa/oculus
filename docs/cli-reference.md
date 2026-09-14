@@ -807,6 +807,7 @@ Usage: oculus lecture <COMMAND>
 
 Commands:
   candidates  Find where a recording plausibly changes topic
+  chapters    Name a recording's chapters with a CLI agent, and store them
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -837,6 +838,49 @@ Options:
       --frames
           Also write one JPEG per candidate into the lecture's `frames/` folder, so the
           boundaries can be checked by eye
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus lecture chapters`
+
+```
+Name a recording's chapters with a CLI agent, and store them
+
+Detects the boundary candidates, grabs a frame for each, then hands the list, the
+transcript and the frames folder to a coding agent and asks it which of them are real
+topic changes. The agent replies with JSON; this command validates it against the
+candidate set and writes the rows. The agent never touches the database.
+
+One bad chapter rejects the whole set: a chapter list is a shape, and a missing chapter
+is not a gap but twenty minutes silently attributed to the chapter before it.
+
+Usage: oculus lecture chapters [OPTIONS] <LECTURE_ID>
+
+Arguments:
+  <LECTURE_ID>
+          Lecture id, as `oculus list -l` prints it; a unique prefix is enough
+
+Options:
+  -p, --provider <PROVIDER>
+          Which CLI to drive
+
+          [default: codex]
+          [possible values: claude, codex]
+
+  -m, --model <MODEL>
+          Model to request (provider-specific name or alias)
+
+          [default: gpt-5.6-luna]
+
+      --effort <EFFORT>
+          Reasoning effort (low, medium, high, xhigh, max)
+
+          [default: xhigh]
+
+      --force
+          Re-run over a lecture that already has chapters, replacing them
 
   -h, --help
           Print help (see a summary with '-h')

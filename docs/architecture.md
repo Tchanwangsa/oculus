@@ -30,6 +30,7 @@ separate killable model workers rather than retaining their weights itself.
 | In-app browser (one page WebView per tab, in the main window) | `app/src-tauri/src/browser.rs` |
 | CLI-agent harness (Claude Code / Codex bridges) | `app/src-tauri/src/harness/mod.rs` |
 | Projects and tasks, written headlessly | `app/src-tauri/src/projects.rs` |
+| Lecture chapters: boundary detection and the naming job | `app/src-tauri/src/chapters.rs` |
 | LLM provider client (keys, streaming, spend limits; dormant) | `app/src-tauri/src/llm.rs` |
 | Sidecar HTTP service | `sidecar/main.py` |
 | Model-worker lifecycle + memory accounting | `sidecar/model_workers.py`, `sidecar/worker_client.py`, `sidecar/memory_governor.py` |
@@ -73,9 +74,9 @@ live. Inside it:
 - `lectures/<uuid>/` — downloaded Echo360 media: `source1.mp4` (the Presenter
   screen), `source2.mp4` (the room camera, when the capture has one and it has
   been asked for) and `transcript.vtt`. A `frames/` subfolder appears only when
-  `oculus lecture candidates --frames` is asked for one — a JPEG per detected
-  topic boundary, regenerable in seconds and nothing's source of truth (see
-  [chapters.md](./chapters.md))
+  `oculus lecture candidates --frames` or `oculus lecture chapters` is run over
+  it — a JPEG per detected topic boundary, regenerable in seconds and nothing's
+  source of truth (see [chapters.md](./chapters.md))
 - `agents/` — the docs a coding agent reads, the `AGENTS.md` every course
   folder symlinks, and the memory layer it writes back (`TASTE.md`,
   `memories/`); written by `oculus docs` and, for everything but the CLI
@@ -89,7 +90,7 @@ live. Inside it:
 ## The database
 
 Schema lives in the tauri-plugin-sql migrations in `app/src-tauri/src/lib.rs`
-(28 versions and counting). Ownership is split deliberately:
+(29 versions and counting). Ownership is split deliberately:
 
 - **In the app**, the *frontend* writes the scrape tables: it listens for
   scrape events and upserts through `app/src/lib/db.ts`.
@@ -99,7 +100,10 @@ Schema lives in the tauri-plugin-sql migrations in `app/src-tauri/src/lib.rs`
   which is why a fresh machine must open the app once before the CLI works.
 
 The `pages` table (markdown + embedding blob per PDF page) is the retrieval
-substrate — see [retrieval.md](./retrieval.md). `calendar_events` is the one
+substrate — see [retrieval.md](./retrieval.md). `lecture_chapters` (migration
+29) is the other derived table: a recording's named topic spans, written by
+the agent job in [chapters.md](./chapters.md) and regenerable from the file on
+disk, with the job's own status on `lectures` beside it. `calendar_events` is the one
 table a sync *replaces* rather than upserts into, so a cancelled class can
 disappear — see [calendar.md](./calendar.md).
 

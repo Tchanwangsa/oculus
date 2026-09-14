@@ -448,6 +448,370 @@ fn spread(frame: &[u8]) -> f32 {
     variance.sqrt()
 }
 
+// ── Naming them: the agent job ───────────────────────────────────────────────
+//
+// Candidates are seconds; chapters are seconds with a name on them. Naming is
+// a *coding agent's* job rather than an API call, and that choice is what
+// keeps the prompt below small: the agent is handed the candidate list, the
+// path to `transcript.vtt` and the path to `frames/`, and reads what it needs.
+// An API prompt would have to carry fifty frames to let a model look at five.
+//
+// The agent never touches the database. It replies with JSON, Rust parses it,
+// validates it against the candidate set, and writes the rows — chapters are
+// derived data like `pages`, not the student's own planning, so there is no
+// `oculus chapter add` and no write door for a model. See `projects.rs` for
+// the other shape, and why it is different.
+
+/// One named span of a recording. It ends where the next one begins — and the
+/// last at the lecture's duration — so there is no end here to disagree with
+/// the next chapter's start.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Chapter {
+    pub start_seconds: u32,
+    pub title: String,
+    pub summary: String,
+}
+
+/// What the agent replies with, before any of it is believed. Field names are
+/// the prompt's contract; the aliases are there because a model asked for
+/// `start` sometimes writes `start_seconds` anyway, and refusing that would be
+/// a whole turn thrown away over a synonym.
+#[derive(serde::Deserialize)]
+struct ReplyChapter {
+    #[serde(alias = "start_seconds", alias = "seconds", alias = "at")]
+    start: f64,
+    title: String,
+    #[serde(default)]
+    summary: String,
+}
+
+/// A reply that wrapped the array in an object, which both providers do
+/// perhaps one turn in five however plainly the format is asked for.
+#[derive(serde::Deserialize)]
+struct ReplyEnvelope {
+    chapters: Vec<ReplyChapter>,
+}
+
+/// More than this and it is a slide list, not a shape. A ceiling rather than a
+/// target: most lectures are five to eight things.
+pub const MAX_CHAPTERS: usize = 12;
+
+/// The lecture a chaptering run is about. Everything the prompt needs and
+/// nothing it does not — the agent reads the rest off disk itself.
+pub struct Job<'a> {
+    pub title: &'a str,
+    pub duration_secs: u32,
+    /// Where the recording's folder sits *relative to the agent's working
+    /// directory*, which is always `agents/`. Paths it can paste into a
+    /// `Read`, not paths it has to rebuild.
+    pub lecture_dir: &'a str,
+    /// The subject's course folder, same relative shape. An Echo360 title is
+    /// a room booking ("MULT20015_2026_SM2 MO L105"), so without this the
+    /// agent goes looking for the deck itself — measured, and it costs
+    /// several turns of `find` before it gets there.
+    pub course_dir: Option<&'a str>,
+    /// Boundaries to choose from, in play order, second 0 first.
+    pub candidates: &'a [Candidate],
+}
+
+/// The prompt for one chaptering turn.
+///
+/// Deliberately short. It says what the lecture is, what a candidate is, where
+/// the transcript and the frames are, and what a good chapter looks like —
+/// then gets out of the way. Two things in it are lessons rather than
+/// decoration: the note that a candidate is *not* a chapter (candidate density
+/// varies threefold between lectures of the same length, so "one chapter per
+/// candidate" gives a boundary every two minutes on a busy deck), and the note
+/// about the room's AV splash screen (a dropout spanning the whole probe
+/// window survives frame selection, and a model that does not know what it is
+/// looking at will happily name a chapter after it).
+pub fn prompt(job: &Job) -> String {
+    let mut list = String::new();
+    for c in job.candidates {
+        if c.seconds == 0 {
+            list.push_str("      0  00:00:00        —  the opening\n");
+            continue;
+        }
+        list.push_str(&format!(
+            "{:>7}  {}  {:>7.1}{}\n",
+            c.seconds,
+            hms(c.seconds),
+            c.score,
+            if c.pause { "  pause" } else { "" }
+        ));
+    }
+
+    format!(
+        "Chapter a university lecture recording: choose its real topic boundaries from the \
+candidates below and name each one.\n\n\
+Lecture: {title}\n\
+Duration: {clock} ({mins} minutes)\n\
+Recording folder: {dir}\n  \
+{dir}/transcript.vtt        the whole transcript, WebVTT, timestamped\n  \
+{dir}/frames/<second>.jpg   one slide grab per candidate, named by its second\n\
+{course}\n\
+Candidates (second, timestamp, score, and whether the lecturer paused there):\n\n\
+{list}\n\
+A candidate is a second where the picture changed hard enough to be a new \
+slide. The score is how hard, comparable only within this lecture. Most slide \
+changes are the same topic carrying on — so these are places you *may* cut, \
+not places you should.\n\n\
+How to work\n\
+- Read the transcript across a candidate to see whether the subject actually \
+turns there. That is the evidence; the frames are corroboration. It is plain \
+WebVTT, so read the spans you want rather than the whole file.\n\
+- Open the frames you are unsure about. A title slide or a section divider \
+usually starts a chapter; the next bullet of the same argument does not. View \
+a handful as images — they are pictures of slides, so looking at them is the \
+point; do not hash them or reach for an OCR tool.\n\
+- Some frames are the lecture theatre's own AV splash screen — a \
+room-control panel saying something like \"connect your laptop\" — and not a \
+slide at all. They survive when the recording dropped out for a while. Ignore \
+them completely and never name a chapter after one.\n\n\
+Rules\n\
+- Give the lecture as many chapters as it genuinely has: usually 5 to 8, never \
+more than {max}. Do not pad a coherent fifteen-minute stretch into three \
+chapters, and do not merge two genuinely different topics to keep the list \
+short.\n\
+- A chapter shorter than about three minutes is a slide, not a topic: fold it \
+into whichever neighbour it belongs to. But do not let that swallow a real \
+segment — a long stretch of housekeeping, a worked example or a Q&A is its own \
+chapter if it lasts.\n\
+- The first chapter starts at second 0.\n\
+- Every other start must be exactly one of the candidate seconds listed above.\n\
+- Titles name the topic in the lecturer's own vocabulary, two to six words, \
+sentence case: \"Grover's search\", \"Proving unsatisfiability by resolution\". \
+Never \"Introduction\", \"Part 2\", \"Continued\", \"Wrap-up\", and never the \
+lecture's own title.\n\
+- Summaries are one or two sentences saying what is covered and why a student \
+would come back to this span. Say something the title does not — a summary \
+that restates its title is worth nothing.\n\n\
+Reply with JSON and nothing else, in play order:\n\n\
+[\n  {{\"start\": 0, \"title\": \"...\", \"summary\": \"...\"}},\n  \
+{{\"start\": 742, \"title\": \"...\", \"summary\": \"...\"}}\n]\n",
+        title = job.title,
+        course = job
+            .course_dir
+            .map(|d| format!("  {d}/   the subject's own materials, including the slide deck\n"))
+            .unwrap_or_default(),
+        clock = hms(job.duration_secs),
+        mins = job.duration_secs / 60,
+        dir = job.lecture_dir,
+        list = list,
+        max = MAX_CHAPTERS,
+    )
+}
+
+/// `HH:MM:SS`. The CLI has its own copy for its own output; this one is the
+/// prompt's, and the two must agree with the frame filenames, which are plain
+/// seconds — so both are always printed.
+fn hms(secs: u32) -> String {
+    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+}
+
+/// The chapter array out of whatever the agent actually said.
+///
+/// Models wrap JSON in prose, in fences, or in an object, however plainly the
+/// format was asked for — the same tolerance `clean_title` in
+/// `harness/mod.rs` exists for, and for the same reason: the alternative is
+/// throwing away a good answer over its packaging. Four attempts, cheapest
+/// first: the whole reply, each fenced block, then the first balanced
+/// `[…]` or `{…}` found anywhere in the text.
+///
+/// This only reads the reply. Whether the chapters are *allowed* is
+/// [`validate`]'s question.
+pub fn parse_chapters(reply: &str) -> Result<Vec<Chapter>, String> {
+    for candidate in json_candidates(reply) {
+        if let Some(parsed) = decode(&candidate) {
+            return Ok(parsed);
+        }
+    }
+    Err(format!(
+        "no chapter list in the reply ({} chars): {}",
+        reply.chars().count(),
+        clip(reply.trim(), 200)
+    ))
+}
+
+/// Either shape, as a list of chapters, or `None` if this fragment is not one.
+fn decode(text: &str) -> Option<Vec<Chapter>> {
+    let items: Vec<ReplyChapter> = serde_json::from_str(text)
+        .or_else(|_| serde_json::from_str::<ReplyEnvelope>(text).map(|e| e.chapters))
+        .ok()?;
+    if items.is_empty() {
+        return None;
+    }
+    Some(
+        items
+            .into_iter()
+            .map(|c| Chapter {
+                // A model that writes 742.0 means 742; one that writes a
+                // negative second is caught by `validate`, not here.
+                start_seconds: c.start.max(0.0).round() as u32,
+                title: c.title.trim().to_string(),
+                summary: c.summary.trim().to_string(),
+            })
+            .collect(),
+    )
+}
+
+/// Fragments of `reply` worth trying to parse, in order of how likely they are
+/// to be the answer.
+fn json_candidates(reply: &str) -> Vec<String> {
+    let mut out = vec![reply.trim().to_string()];
+    // Fenced blocks, ```json or otherwise. The opening fence's info string is
+    // dropped with the rest of its line.
+    let mut rest = reply;
+    while let Some(open) = rest.find("```") {
+        let after = &rest[open + 3..];
+        let body = match after.find('\n') {
+            Some(nl) => &after[nl + 1..],
+            None => break,
+        };
+        match body.find("```") {
+            Some(close) => {
+                out.push(body[..close].trim().to_string());
+                rest = &body[close + 3..];
+            }
+            None => {
+                out.push(body.trim().to_string());
+                break;
+            }
+        }
+    }
+    // Anything balanced, anywhere — the prose-wrapped case.
+    for open in ['[', '{'] {
+        out.extend(balanced_runs(reply, open));
+    }
+    out
+}
+
+/// At most [`BALANCED_RUNS`] balanced `open`…`close` spans of `text`, in order.
+///
+/// Several rather than the first because prose around the answer can contain a
+/// bracket of its own — a citation, an empty list, a worked example — and the
+/// real array would then never be tried. String literals and their escapes are
+/// respected, so a bracket inside a summary cannot end a scan early.
+fn balanced_runs(text: &str, open: char) -> Vec<String> {
+    const BALANCED_RUNS: usize = 8;
+    let close = if open == '[' { ']' } else { '}' };
+    let mut out: Vec<String> = Vec::new();
+    let mut from = 0usize;
+    while out.len() < BALANCED_RUNS {
+        let Some(offset) = text[from..].find(open) else { break };
+        let start = from + offset;
+        let mut depth = 0i32;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut end: Option<usize> = None;
+        for (at, ch) in text[start..].char_indices() {
+            if in_string {
+                match ch {
+                    _ if escaped => escaped = false,
+                    '\\' => escaped = true,
+                    '"' => in_string = false,
+                    _ => {}
+                }
+                continue;
+            }
+            match ch {
+                '"' => in_string = true,
+                c if c == open => depth += 1,
+                c if c == close => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(start + at + ch.len_utf8());
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        match end {
+            Some(e) => {
+                out.push(text[start..e].to_string());
+                from = e;
+            }
+            // Unbalanced from here on: nothing later can close either.
+            None => break,
+        }
+    }
+    out
+}
+
+fn clip(text: &str, chars: usize) -> String {
+    let head: String = text.chars().take(chars).collect();
+    if text.chars().count() > chars {
+        format!("{head}…")
+    } else {
+        head.to_string()
+    }
+}
+
+/// Whether a parsed chapter set may be written at all.
+///
+/// **One bad chapter rejects the whole set.** A chapter list is a shape rather
+/// than a pile of rows — drop the third of nine and the second chapter now
+/// silently swallows twenty minutes it was never named for — so a single
+/// failure means nothing is written, exactly as a rejected item rolls back a
+/// whole task breakdown in `projects::create_tasks`. The error names the
+/// chapter, because "not a candidate boundary" on its own is unfixable.
+///
+/// `boundaries` is the candidate set the agent was given, second 0 included.
+pub fn validate(
+    chapters: &[Chapter],
+    boundaries: &[u32],
+    duration_secs: u32,
+) -> Result<(), String> {
+    if chapters.is_empty() {
+        return Err("no chapters in the reply".to_string());
+    }
+    if chapters.len() > MAX_CHAPTERS {
+        return Err(format!(
+            "{} chapters is more than the {MAX_CHAPTERS} allowed — that is a slide list, not a shape",
+            chapters.len()
+        ));
+    }
+    if chapters[0].start_seconds != 0 {
+        return Err(format!(
+            "chapter 1 ({:?}): the first chapter must start at 0, not {}",
+            chapters[0].title, chapters[0].start_seconds
+        ));
+    }
+    let mut previous: Option<u32> = None;
+    for (n, chapter) in chapters.iter().enumerate() {
+        let where_ = format!("chapter {} ({:?}): ", n + 1, chapter.title);
+        if chapter.title.is_empty() {
+            return Err(format!("chapter {}: a chapter needs a title", n + 1));
+        }
+        if chapter.summary.is_empty() {
+            return Err(format!("{where_}a chapter needs a summary"));
+        }
+        if !boundaries.contains(&chapter.start_seconds) {
+            return Err(format!(
+                "{where_}{} is not one of the candidate boundaries",
+                chapter.start_seconds
+            ));
+        }
+        if duration_secs > 0 && chapter.start_seconds >= duration_secs {
+            return Err(format!(
+                "{where_}starts at {}, past the end of a {duration_secs}s recording",
+                chapter.start_seconds
+            ));
+        }
+        if let Some(p) = previous {
+            if chapter.start_seconds <= p {
+                return Err(format!(
+                    "{where_}starts at {}, which is not after the chapter before it ({p})",
+                    chapter.start_seconds
+                ));
+            }
+        }
+        previous = Some(chapter.start_seconds);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,6 +995,183 @@ mod tests {
         assert_eq!(pick_offset(&probed), Some(1388));
         // Past the end of the recording, ffmpeg returns no frames at all.
         assert_eq!(pick_offset(&[]), None);
+    }
+
+    // ── The agent's reply ────────────────────────────────────────────────────
+
+    fn chapter(start: u32, title: &str) -> Chapter {
+        Chapter {
+            start_seconds: start,
+            title: title.to_string(),
+            summary: format!("What happens in {title}."),
+        }
+    }
+
+    const REPLY: &str = r#"[
+      {"start": 0, "title": "Qubits and superposition", "summary": "Sets up the state vector."},
+      {"start": 742, "title": "Hadamard gates", "summary": "Builds the uniform superposition."}
+    ]"#;
+
+    #[test]
+    fn a_bare_json_array_is_the_easy_case() {
+        let parsed = parse_chapters(REPLY).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].start_seconds, 0);
+        assert_eq!(parsed[1].title, "Hadamard gates");
+    }
+
+    #[test]
+    fn a_reply_wrapped_in_prose_still_parses() {
+        let reply = format!(
+            "I read the transcript around each candidate. Here are the chapters:\n\n{REPLY}\n\n\
+             Let me know if you would like them merged differently."
+        );
+        let parsed = parse_chapters(&reply).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[1].start_seconds, 742);
+    }
+
+    #[test]
+    fn a_fenced_reply_still_parses() {
+        let reply = format!("Done — six chapters.\n\n```json\n{REPLY}\n```\n");
+        assert_eq!(parse_chapters(&reply).unwrap().len(), 2);
+        // And an unlabelled fence, which is just as common.
+        let reply = format!("```\n{REPLY}\n```");
+        assert_eq!(parse_chapters(&reply).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn an_object_around_the_array_is_accepted() {
+        let reply = format!("{{\"chapters\": {REPLY}}}");
+        assert_eq!(parse_chapters(&reply).unwrap()[0].title, "Qubits and superposition");
+    }
+
+    #[test]
+    fn a_bracket_inside_a_summary_does_not_end_the_scan() {
+        let reply = r#"Here you go:
+        [{"start": 0, "title": "Resolution", "summary": "The rule [A ∨ B], [¬B ∨ C] ⊢ [A ∨ C]."}]
+        That's it."#;
+        let parsed = parse_chapters(reply).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].summary.ends_with("[A ∨ C]."));
+    }
+
+    #[test]
+    fn a_reply_with_no_chapters_in_it_is_refused() {
+        let error = parse_chapters("I could not open the frames, sorry.").unwrap_err();
+        assert!(error.contains("no chapter list"), "{error}");
+        // Valid JSON that is not a chapter list is no better.
+        assert!(parse_chapters("[]").is_err());
+        assert!(parse_chapters(r#"{"ok": true}"#).is_err());
+        // A truncated reply: the array never closes.
+        assert!(parse_chapters(r#"[{"start": 0, "title": "Qubits","#).is_err());
+    }
+
+    #[test]
+    fn a_bracket_in_the_prose_does_not_hide_the_answer() {
+        // An empty list, then a citation, then the real array.
+        let reply = format!("I found no splash frames [] — see slide [3].\n\n{REPLY}");
+        assert_eq!(parse_chapters(&reply).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_float_second_and_a_synonym_for_start_are_tolerated() {
+        let reply = r#"[{"start_seconds": 0.0, "title": "Opening", "summary": "Sets up."}]"#;
+        assert_eq!(parse_chapters(reply).unwrap()[0].start_seconds, 0);
+    }
+
+    // ── Whether a set may be written ─────────────────────────────────────────
+
+    const BOUNDS: [u32; 5] = [0, 300, 700, 1200, 2000];
+
+    #[test]
+    fn a_well_formed_set_validates() {
+        let set = vec![chapter(0, "Opening"), chapter(700, "Middle"), chapter(2000, "End")];
+        assert!(validate(&set, &BOUNDS, 2400).is_ok());
+    }
+
+    #[test]
+    fn a_boundary_the_detector_never_offered_rejects_the_whole_set() {
+        let set = vec![chapter(0, "Opening"), chapter(701, "Middle"), chapter(2000, "End")];
+        let error = validate(&set, &BOUNDS, 2400).unwrap_err();
+        assert_eq!(
+            error,
+            "chapter 2 (\"Middle\"): 701 is not one of the candidate boundaries"
+        );
+    }
+
+    #[test]
+    fn chapters_out_of_order_reject_the_whole_set() {
+        let set = vec![chapter(0, "Opening"), chapter(1200, "Middle"), chapter(700, "End")];
+        let error = validate(&set, &BOUNDS, 2400).unwrap_err();
+        assert!(error.starts_with("chapter 3 (\"End\"): starts at 700, which is not after"), "{error}");
+        // A repeat is not contiguous either — two chapters starting at the same
+        // second means one of them is zero seconds long.
+        let set = vec![chapter(0, "Opening"), chapter(700, "A"), chapter(700, "B")];
+        assert!(validate(&set, &BOUNDS, 2400).is_err());
+    }
+
+    #[test]
+    fn a_first_chapter_that_does_not_start_at_zero_rejects_the_whole_set() {
+        let set = vec![chapter(300, "Opening"), chapter(700, "Middle")];
+        let error = validate(&set, &BOUNDS, 2400).unwrap_err();
+        assert_eq!(
+            error,
+            "chapter 1 (\"Opening\"): the first chapter must start at 0, not 300"
+        );
+    }
+
+    #[test]
+    fn thirteen_chapters_reject_the_whole_set() {
+        let bounds: Vec<u32> = (0..13).map(|n| n * 300).collect();
+        let set: Vec<Chapter> = bounds.iter().map(|s| chapter(*s, "Topic")).collect();
+        assert_eq!(set.len(), 13);
+        let error = validate(&set, &bounds, 9000).unwrap_err();
+        assert!(error.starts_with("13 chapters is more than the 12 allowed"), "{error}");
+        // Twelve is the ceiling, not one short of it.
+        assert!(validate(&set[..12], &bounds, 9000).is_ok());
+    }
+
+    #[test]
+    fn an_empty_or_gutted_set_is_refused() {
+        assert!(validate(&[], &BOUNDS, 2400).is_err());
+        let mut set = vec![chapter(0, "Opening")];
+        set[0].summary.clear();
+        assert!(validate(&set, &BOUNDS, 2400).unwrap_err().contains("needs a summary"));
+        set[0].summary = "Sets up.".into();
+        set[0].title.clear();
+        assert!(validate(&set, &BOUNDS, 2400).unwrap_err().contains("needs a title"));
+    }
+
+    #[test]
+    fn a_chapter_past_the_end_of_the_recording_is_refused() {
+        let set = vec![chapter(0, "Opening"), chapter(2000, "End")];
+        assert!(validate(&set, &BOUNDS, 2000).unwrap_err().contains("past the end"));
+        assert!(validate(&set, &BOUNDS, 2001).is_ok());
+    }
+
+    #[test]
+    fn the_prompt_carries_the_candidates_and_the_two_paths() {
+        let found = vec![
+            Candidate { seconds: 0, score: 0.0, diff: 0.0, pause: false },
+            Candidate { seconds: 742, score: 38.5, diff: 35.5, pause: true },
+        ];
+        let text = prompt(&Job {
+            title: "Lecture 7: Grover",
+            duration_secs: 2534,
+            lecture_dir: "../lectures/abc-123",
+            course_dir: Some("../courses/MULT20015_2026_SM2"),
+            candidates: &found,
+        });
+        assert!(text.contains("Lecture 7: Grover"));
+        assert!(text.contains("00:42:14"), "the duration as a clock");
+        assert!(text.contains("../lectures/abc-123/transcript.vtt"));
+        assert!(text.contains("\n  ../lectures/abc-123/frames/<second>.jpg"), "indented under the folder");
+        assert!(text.contains("../courses/MULT20015_2026_SM2/"));
+        assert!(text.contains("    742  00:12:22     38.5  pause"));
+        assert!(text.contains("the opening"), "second 0 is labelled, not scored");
+        assert!(text.contains("never more than 12"));
+        assert!(text.contains("connect your laptop"), "the AV splash warning");
     }
 
     #[test]

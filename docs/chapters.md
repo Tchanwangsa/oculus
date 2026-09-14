@@ -5,16 +5,23 @@ beside it. There is no way to see that minute 34 is where the lecturer stopped
 proving things and started on the assignment. Chapters are the shape: the
 recording cut at its real topic boundaries, each one named.
 
-**Only the boundary detector is built.** `oculus lecture candidates` finds the
-moments worth cutting at and prints them. Nothing names them, nothing stores
-them, and the player does not show them — see [What is not built](#what-is-not-built).
+Two halves are built: a **detector** that finds the moments worth cutting at,
+and a **naming job** that drives a CLI coding agent over those moments and
+writes the named chapters to the database. `oculus lecture candidates` is the
+first; `oculus lecture chapters` is the whole pipeline. The app does not
+trigger either yet and the player does not draw them — see
+[What is not built](#what-is-not-built).
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
 | Detection: sampling, scoring, thinning, frame grabs | `app/src-tauri/src/chapters.rs` |
-| `oculus lecture candidates` | `app/src-tauri/src/bin/oculus.rs` |
+| The prompt, the reply parser, the validator | `app/src-tauri/src/chapters.rs` |
+| Writing the rows and the job's status | `app/src-tauri/src/store.rs` |
+| `lecture_chapters` + the three `lectures` columns (migration 29) | `app/src-tauri/src/lib.rs` |
+| `oculus lecture candidates`, `oculus lecture chapters` | `app/src-tauri/src/bin/oculus.rs` |
+| The one-turn headless run both share | `run_once` in `app/src-tauri/src/harness/mod.rs` |
 | ffmpeg lookup (bundled, dev copy, or system) | `app/src-tauri/src/echo360.rs` |
 | The frontend's VTT parser, whose timing half is mirrored | `app/src/lib/lectures.ts` |
 | A fixture transcript for the parser tests | `app/src-tauri/fixtures/chapters/sample.vtt` |
@@ -107,19 +114,110 @@ titles and formulas legible, which is the size a model will need.
   thing adds well under a second per candidate. The file keeps the **boundary**
   second in its name, not the offset one.
 
+## Naming them is an agent job
+
+`oculus lecture chapters <ID>` detects the candidates, grabs a frame for each,
+and hands the lot to a CLI coding agent through `harness::run_once` — one
+prompt, one turn, no thread, nothing in `harness_threads`. It is the first
+caller of that function outside `oculus agent` (see
+[harness.md](./harness.md)).
+
+**The prompt is small on purpose, and that is the whole argument for driving a
+coding agent rather than calling a model API.** It carries the candidate list,
+the lecture's title and duration, the path to `transcript.vtt`, the path to
+`frames/` and how those files are named — and then stops. The agent opens the
+five frames it is unsure about and reads the transcript across the boundaries
+it doubts; a prompt to an API would have to *carry* fifty frames to let a model
+look at five. Three things in the prompt are lessons rather than decoration:
+
+- **A candidate is not a chapter.** Candidate density varies threefold between
+  lectures of the same length (two 107-minute recordings in this library give
+  15 and 49), so "one chapter per candidate" would cut a busy deck every two
+  minutes. The agent is asked for the number of things the lecture is actually
+  about — usually five to eight, never more than twelve — and the score field
+  is there to help it choose. It is also told that a chapter shorter than about
+  three minutes is a slide rather than a topic — without that line a 51-minute
+  lecture split two adjacent slide titles into two chapters ninety seconds
+  apart — and, in the same breath, that a long stretch of housekeeping or a
+  worked example *is* a chapter if it lasts, because on its own the minimum
+  read as licence to merge and the same lecture came back with its last eleven
+  minutes folded into the chapter before them.
+- **The room's AV splash screen is not a slide.** A dropout spanning the whole
+  probe window survives frame selection, so a "connect your laptop" panel does
+  reach the agent occasionally. A model looking at the image recognises one
+  instantly once it has been told they exist; one that has not been told will
+  name a chapter after it.
+- **The subject's course folder is named.** An Echo360 title is a room booking
+  ("MULT20015_2026_SM2 MO L105"), so without the folder the agent spends
+  several turns hunting for the deck — measured on the first run.
+
+**Rust writes the rows; there is no agent write door.** Unlike `oculus project`
+and `oculus task`, which put the *student's own* planning into the database
+([projects.md](./projects.md)), chapters are derived data like `pages` and
+`parse_status` — regenerable from the recording, and nobody's work. So the
+agent replies with JSON and Rust parses it: there is no `oculus chapter add`,
+and `oculus.db` stays on the deny list it has always been on.
+
+`parse_chapters` is tolerant of how the reply is packaged — prose around the
+array, a fence, an object wrapping it, a float where an integer was asked for
+— for the same reason `clean_title` is: the alternative is throwing away a good
+answer over its wrapper. What it is *not* tolerant of is the content.
+
+**One bad chapter rolls the whole set back.** `validate` checks that every
+boundary came from the candidate list (second 0 always counts — the detector's
+first candidate is typically twenty seconds in, so the opening is prepended
+before the agent ever sees the list), that starts are strictly increasing, that
+the first is 0, and that there are no more than twelve. A single failure means
+nothing is written at all, and the error names the chapter the way
+`projects::create_tasks` names a task — `chapter 3 ("…"): …`. The reason is
+sharper here than for a task breakdown: drop the third of nine chapters and
+there is no gap on the scrub bar to notice, only twenty minutes silently
+attributed to the chapter before it.
+
+## What is stored, and what is not
+
+Migration 29: `lecture_chapters` (`lecture_id`, `idx`, `start_seconds`,
+`title`, `summary`, cascading with the lecture) plus `chapter_status`,
+`chaptered_at` and `chapter_error` on `lectures`.
+
+- **There is no `end_seconds`.** A chapter ends where the next one begins, and
+  the last at the lecture's duration; the reader derives it. One fact in one
+  column — the lesson migration 27 records about `column_id` / `position` /
+  `done_at` — because a stored end is a second place for the same fact to be
+  wrong.
+- `chapter_status` is `NULL | running | ready | error`, mirroring
+  `files.parse_status` (migration 3); only a terminal status stamps
+  `chaptered_at`. `chapter_error` carries the failure message, because a
+  status column cannot and the player has to be able to say what went wrong.
+  It is cleared on success. A run killed mid-turn leaves `running` behind with
+  no `chaptered_at`, which is the same stale-status shape the parse pipeline
+  has and the same thing Stage 3 will have to sweep.
+- Writing goes through `store::save_chapters`, one transaction that deletes the
+  old set and inserts the new one, so a regenerate that fails partway leaves
+  the chapters that were already there. `store::set_chapter_status` is a
+  sibling of `set_lecture_path` rather than another arm of it: that function's
+  allow-list takes a `&str` and so cannot clear a column back to NULL, which is
+  what a fresh run needs.
+- **Regenerating is deleting and re-running**, the shape `resetFilePipeline` in
+  `app/src/lib/db.ts` has for the parse pipeline. `--force` is that door on the
+  CLI; without it a lecture that already has chapters is left alone.
+
+The frames stay on disk after a run — ~30 KB each, regenerable in seconds, and
+overwritten by the next run. Deleting them would be tidier by a megabyte and
+would throw away the one thing Stage 4 might want a picture of: a chapter's
+opening slide is already sitting at `frames/<start_seconds>.jpg`.
+
 ## What is not built
 
-Stages 2–4 of this feature do not exist. There is no code for them anywhere in
-the repo; this page describes only the detector above.
+Stages 3 and 4 do not exist.
 
-- **No agent job.** Nothing sends a candidate's frames and transcript span to a
-  model, and nothing writes a chapter title or summary.
-- **No model configuration.** Which provider names chapters, and at what
-  reasoning level, would be a Settings choice like every other job — see
-  [harness.md](./harness.md) — and no such setting exists.
-- **No storage.** There is no chapters table and no migration for one. The
-  candidate set lives as long as the command that printed it.
+- **No trigger in the app.** Nothing runs the job from the lecture page or
+  after a sync; the CLI is the only door.
+- **No model configuration.** The command's defaults (`codex`,
+  `gpt-5.6-luna`, `xhigh`) are literals in its `clap` struct. Which provider
+  runs which job, at what reasoning level, belongs in a settings registry
+  shared with every other model-backed job — see [harness.md](./harness.md) —
+  and no such registry exists yet.
 - **No UI.** The lecture player still shows a transcript and a plain scrub bar
   (`app/src/pages/subject/LecturePage.tsx`, see
-  [frontend.md](./frontend.md)). Nothing renders
-  chapters.
+  [frontend.md](./frontend.md)). Nothing reads `lecture_chapters`.
