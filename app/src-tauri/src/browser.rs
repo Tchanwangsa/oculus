@@ -18,16 +18,19 @@
 //!   bar's draft. Page URLs never touch the React router — the route for a
 //!   browser tab is `/browse/<id>`, stable for the life of the tab — which is
 //!   what keeps a page load from re-laying-out the page that fired it.
-//! - **The frontend says where the page goes, Rust puts it there.** A native
-//!   view cannot interleave with the DOM, so the page lives in a slot the
-//!   React page leaves for it and the frontend reports that slot as insets
-//!   from the window's edges (`Viewport`). Insets, not a rect: a window
-//!   resize is then laid out here from the window size alone, with no
-//!   JavaScript in the loop to lag behind it. The frontend only speaks up
-//!   when the insets themselves change — sidebar, zoom — and when something
-//!   of its own has to draw over the page, which is the one thing a native
-//!   view cannot allow: it asks for the page to be hidden until the popup
-//!   is gone.
+//! - **The frontend says which pages are on screen and where, Rust puts
+//!   them there.** A native view cannot interleave with the DOM, so a page
+//!   lives in a slot the React tree leaves for it and the frontend reports
+//!   that slot as insets from the window's edges (`Viewport`). Insets, not a
+//!   rect: a window resize is then laid out here from the window size alone,
+//!   with no JavaScript in the loop to lag behind it. Slot and visibility are
+//!   both per page — a page in the content card and a page in a side panel
+//!   are on screen together — so Rust never takes showing one to mean hiding
+//!   another; it does what it is told, page by page. The frontend speaks up
+//!   when a page's insets change — sidebar, panel drag, zoom — and when
+//!   something of its own has to draw over a page, which is the one thing a
+//!   native view cannot allow: it asks for that page to be hidden until the
+//!   popup is gone.
 //!
 //! Signed in, not for free: `canvas_session` is HttpOnly *and* session-scoped,
 //! so WebKit holds it in memory only and it is gone when the app quits — the
@@ -38,6 +41,7 @@
 //! `docs/auth.md`.) Browsing Canvas then rolls the session forward, so every
 //! Canvas page load re-snapshots the cookie and the scraper inherits it.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -90,9 +94,10 @@ pub struct Viewport {
 struct Inner {
     tabs: Vec<Tab>,
     next_id: u32,
-    /// Last reported by the frontend; `None` until a browser tab has been
-    /// shown once. Pages created before then are hidden anyway.
-    viewport: Option<Viewport>,
+    /// Where each page goes, as the frontend last reported it. A tab is
+    /// absent until its page has been placed once — it is hidden until
+    /// then — and drops out again when the tab closes.
+    viewports: HashMap<u32, Viewport>,
 }
 
 #[derive(Default)]
@@ -230,6 +235,11 @@ fn page(app: &AppHandle, id: u32) -> Option<Webview<tauri::Wry>> {
     app.get_webview(&label(id))
 }
 
+/// The tab a page webview belongs to, read back out of its label.
+fn tab_id(label: &str) -> Option<u32> {
+    label.strip_prefix(LABEL_PREFIX)?.parse().ok()
+}
+
 /// Every page webview, whatever tab it belongs to.
 fn pages(app: &AppHandle) -> Vec<Webview<tauri::Wry>> {
     app.webviews()
@@ -239,20 +249,29 @@ fn pages(app: &AppHandle) -> Vec<Webview<tauri::Wry>> {
         .collect()
 }
 
-/// The page rect in logical points: the window's content area minus the
-/// reported insets. Before any viewport was reported, the whole window —
-/// nothing is visible then, so it only has to be somewhere.
-fn rect(app: &AppHandle, window: &Window) -> (LogicalPosition<f64>, LogicalSize<f64>, f64) {
+/// The window's content area in logical points. Measured once per layout
+/// pass: every page's rect is cut out of the same window.
+fn content_size(window: &Window) -> LogicalSize<f64> {
     let scale = window.scale_factor().unwrap_or(1.0);
-    let size = window
+    window
         .inner_size()
         .map(|s| s.to_logical::<f64>(scale))
-        .unwrap_or_else(|_| LogicalSize::new(1480.0, 920.0));
-    let Some(vp) = with_state(app, |s| s.viewport) else {
-        return (LogicalPosition::new(0.0, 0.0), size, 0.0);
+        .unwrap_or_else(|_| LogicalSize::new(1480.0, 920.0))
+}
+
+/// One page's rect in logical points: the window's content area minus the
+/// insets its tab reported. A page with no insets yet — just created, never
+/// placed — takes the whole window; nothing is visible then, so it only has
+/// to be somewhere.
+fn rect(
+    window: LogicalSize<f64>,
+    viewport: Option<Viewport>,
+) -> (LogicalPosition<f64>, LogicalSize<f64>, f64) {
+    let Some(vp) = viewport else {
+        return (LogicalPosition::new(0.0, 0.0), window, 0.0);
     };
-    let width = (size.width - vp.left - vp.right).max(1.0);
-    let height = (size.height - vp.top - vp.bottom).max(1.0);
+    let width = (window.width - vp.left - vp.right).max(1.0);
+    let height = (window.height - vp.top - vp.bottom).max(1.0);
     (
         LogicalPosition::new(vp.left, vp.top),
         LogicalSize::new(width, height),
@@ -291,18 +310,38 @@ fn round_corners(page: &Webview<tauri::Wry>, radius: f64) {
 #[cfg(not(target_os = "macos"))]
 fn round_corners(_page: &Webview<tauri::Wry>, _radius: f64) {}
 
-/// Puts every page in the slot. Called on each window resize and whenever
-/// the frontend reports new insets.
+/// Puts every placed page back in its own slot. Insets hang off the window's
+/// edges, so a resize moves all of them at once — this is the resize handler,
+/// and it reads the window and the slots once for the whole pass. A page the
+/// frontend has never placed is skipped: it is hidden, and there is no slot
+/// to put it back in.
 fn layout(app: &AppHandle) {
     let Some(window) = app.get_window(MAIN) else {
         return;
     };
-    let (position, size, radius) = rect(app, &window);
+    let bounds = content_size(&window);
+    let viewports = with_state(app, |s| s.viewports.clone());
     for page in pages(app) {
+        let Some(vp) = tab_id(page.label()).and_then(|id| viewports.get(&id).copied()) else {
+            continue;
+        };
+        let (position, size, radius) = rect(bounds, Some(vp));
         page.set_position(position).ok();
         page.set_size(size).ok();
         round_corners(&page, radius);
     }
+}
+
+/// Puts one page in its slot, for when only that page moved.
+fn layout_tab(app: &AppHandle, id: u32) {
+    let (Some(window), Some(page)) = (app.get_window(MAIN), page(app, id)) else {
+        return;
+    };
+    let viewport = with_state(app, |s| s.viewports.get(&id).copied());
+    let (position, size, radius) = rect(content_size(&window), viewport);
+    page.set_position(position).ok();
+    page.set_size(size).ok();
+    round_corners(&page, radius);
 }
 
 /// Attaches a page webview to a tab, pointed at `url`. It starts hidden: the
@@ -365,7 +404,8 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
             NewWindowResponse::Deny
         });
 
-    let (position, size, radius) = rect(app, &window);
+    let viewport = with_state(app, |s| s.viewports.get(&id).copied());
+    let (position, size, radius) = rect(content_size(&window), viewport);
     let webview = window
         .add_child(builder, position, size)
         .map_err(|e| format!("failed to open page webview: {e}"))?;
@@ -374,20 +414,6 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     webview.hide().ok();
     round_corners(&webview, radius);
     Ok(())
-}
-
-/// Shows one tab's page and hides the rest. Hidden, not destroyed: a tab you
-/// come back to is still on the page you left it on.
-fn show_only(app: &AppHandle, id: u32) {
-    let target = label(id);
-    for page in pages(app) {
-        if page.label() == target {
-            page.show().ok();
-            page.set_focus().ok();
-        } else {
-            page.hide().ok();
-        }
-    }
 }
 
 fn hide_all(app: &AppHandle) {
@@ -434,26 +460,43 @@ pub fn browser_state(app: AppHandle) -> Snapshot {
     snapshot(&app)
 }
 
-/// The browser route has mounted for tab `id`: this is where the page goes,
-/// show it there.
+/// A slot for tab `id` has mounted: this is where its page goes, put it
+/// there and show it. Nothing else is touched — whichever other pages the
+/// frontend has on screen stay where they are and stay visible.
 #[tauri::command]
-pub fn browser_show(app: AppHandle, id: u32, viewport: Viewport) {
-    with_state(&app, |s| s.viewport = Some(viewport));
-    layout(&app);
-    if with_state(&app, |s| s.tabs.iter().any(|t| t.id == id)) {
-        show_only(&app, id);
+pub fn browser_place(app: AppHandle, id: u32, viewport: Viewport) {
+    with_state(&app, |s| {
+        s.viewports.insert(id, viewport);
+    });
+    layout_tab(&app, id);
+    if let Some(page) = page(&app, id) {
+        page.show().ok();
+        page.set_focus().ok();
     }
 }
 
-/// The slot moved or resized in a way the window size does not explain: the
-/// sidebar toggled, the zoom changed.
+/// Tab `id`'s slot moved or resized in a way the window size does not
+/// explain: the sidebar toggled, a panel was dragged, the zoom changed.
+/// Placement only — a hidden page stays hidden.
 #[tauri::command]
-pub fn browser_set_viewport(app: AppHandle, viewport: Viewport) {
-    with_state(&app, |s| s.viewport = Some(viewport));
-    layout(&app);
+pub fn browser_set_viewport(app: AppHandle, id: u32, viewport: Viewport) {
+    with_state(&app, |s| {
+        s.viewports.insert(id, viewport);
+    });
+    layout_tab(&app, id);
 }
 
-/// The browser route unmounted, or the app needs to draw over the page.
+/// Tab `id`'s slot went away, or the app has to draw over that page. Hidden,
+/// not destroyed: a page you come back to is still where you left it.
+#[tauri::command]
+pub fn browser_hide_tab(app: AppHandle, id: u32) {
+    if let Some(page) = page(&app, id) {
+        page.hide().ok();
+    }
+}
+
+/// Every page off screen at once, for teardown — the app is leaving a state
+/// where any of them could be showing and does not want to name them.
 #[tauri::command]
 pub fn browser_hide(app: AppHandle) {
     hide_all(&app);
@@ -497,6 +540,9 @@ pub fn browser_close_tab(app: AppHandle, id: u32) {
     if let Some(webview) = page(&app, id) {
         webview.close().ok();
     }
-    with_state(&app, |s| s.tabs.retain(|t| t.id != id));
+    with_state(&app, |s| {
+        s.tabs.retain(|t| t.id != id);
+        s.viewports.remove(&id);
+    });
     broadcast(&app);
 }

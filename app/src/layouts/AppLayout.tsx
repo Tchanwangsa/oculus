@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
-import { Outlet } from "react-router-dom";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import Sidebar from "@/components/sidebar/Sidebar";
 import TopTabBar from "@/components/tabs/TopTabBar";
-import FilePeek from "@/components/peek/FilePeek";
+import TabPane from "@/components/tabs/TabPane";
+import { SidePanel } from "@/components/panel/SidePanel";
+import CommandPalette from "@/components/palette/CommandPalette";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LeaveLectureDialog } from "@/components/lectures/LeaveLectureDialog";
 import { browser, isWebUrl } from "@/lib/browser";
 import { useBrowserTabs } from "@/hooks/useBrowserTabs";
+import { useTabStore } from "@/stores/tabStore";
 
 const SIDEBAR_KEY = "oculus-sidebar-collapsed";
 const ZOOM_KEY = "oculus-zoom";
@@ -17,7 +19,16 @@ const DEFAULT_ZOOM = 1.15;
 const ZOOM_MIN = 0.7;
 const ZOOM_MAX = 1.8;
 
+/**
+ * The shell: the furniture around the pages, and the one place every tab is
+ * mounted. It is not a route element — there is a router per tab below it
+ * (`app/src/components/tabs/TabPane.tsx`), so the sidebar, the strip and the
+ * palette all sit outside every one of them and navigate through
+ * `app/src/lib/tabRouters.ts`.
+ */
 export default function AppLayout() {
+  const tabs = useTabStore((s) => s.tabs);
+  const activeId = useTabStore((s) => s.activeId);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     return localStorage.getItem(SIDEBAR_KEY) === "true";
   });
@@ -72,13 +83,18 @@ export default function AppLayout() {
     return () => document.removeEventListener("click", onClick, true);
   }, []);
 
-  // ⌘\ toggles the sidebar; ⌘+/⌘− zoom the whole window; ⌘0 resets to the
+  // ⌘B toggles the sidebar; ⌘+/⌘− zoom the whole window; ⌘0 resets to the
   // default scale.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // ⌥ is not part of any of these, and saying so is what keeps ⌘⌥B — the
+      // chat page's own panel, in `ChatPage` — from also closing the sidebar.
+      if (e.altKey) return;
       if (!(e.metaKey || e.ctrlKey)) return;
       switch (e.key) {
-        case "\\":
+        // Both cases: with caps lock on, `key` is the capital.
+        case "b":
+        case "B":
           e.preventDefault();
           toggle();
           break;
@@ -118,16 +134,26 @@ export default function AppLayout() {
               furniture around the page rather than panels beside it. That
               also means the sidebar needs no divider of its own — this card's
               border is the separation.
-              `relative` anchors the peek slide-overs (file peek here, the
-              lecture peek rendered deeper) so they span the whole page. */}
-          <main className="flex-1 overflow-hidden min-w-0 relative rounded-xl border border-border bg-card shadow-panel">
-            <Outlet />
-            <FilePeek />
+              The card is a row: the panes on the left, the side panel docked
+              against its right edge. `relative` sits on the pane stack rather
+              than here, because that is what every tab is positioned against —
+              all of them mounted and filling it, with only the one in front
+              visible. */}
+          <main className="flex-1 overflow-hidden min-w-0 flex rounded-xl border border-border bg-card shadow-panel">
+            <div className="relative flex-1 min-w-0">
+              {tabs.map((tab) => (
+                <TabPane key={tab.id} tab={tab} active={tab.id === activeId} />
+              ))}
+            </div>
+            <SidePanel />
           </main>
         </div>
         {/* Raised from the tab strip and from the player alike, so it hangs
             here rather than in either of them. */}
         <LeaveLectureDialog />
+        {/* ⌘K, over everything. It listens for the menu event itself; the
+            sidebar's Search row is the other way in. */}
+        <CommandPalette />
       </div>
     </TooltipProvider>
   );

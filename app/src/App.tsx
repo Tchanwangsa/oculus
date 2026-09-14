@@ -1,4 +1,3 @@
-import { createHashRouter, RouterProvider, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { applyTheme, getStoredTheme } from "@/lib/theme";
@@ -8,77 +7,6 @@ import { useQualitySweep } from "@/hooks/useQualitySweep";
 import { watchNewFiles } from "@/stores/newFilesStore";
 import { watchLectureDownloads } from "@/stores/lectureDownloadStore";
 import AppLayout from "@/layouts/AppLayout";
-import SubjectLayout from "@/layouts/SubjectLayout";
-import ChatPage from "@/pages/ChatPage";
-import CalendarPage from "@/pages/CalendarPage";
-import SubjectsIndexPage from "@/pages/SubjectsIndexPage";
-import SubjectOverviewPage from "@/pages/subject/OverviewPage";
-import SubjectModulesPage from "@/pages/subject/ModulesPage";
-import SubjectDownloadsPage from "@/pages/subject/DownloadsPage";
-import SubjectLecturesPage from "@/pages/subject/LecturesPage";
-import SubjectAnnouncementsPage from "@/pages/subject/AnnouncementsPage";
-import SubjectAssignmentsPage from "@/pages/subject/AssignmentsPage";
-import SubjectDiscussionPage from "@/pages/subject/DiscussionPage";
-import SubjectFilePage from "@/pages/subject/FilePage";
-import SubjectLecturePage from "@/pages/subject/LecturePage";
-import SyncPage from "@/pages/SyncPage";
-import BrowserPage from "@/pages/BrowserPage";
-import SettingsLayout from "@/layouts/SettingsLayout";
-import SettingsCanvasPage from "@/pages/settings/CanvasPage";
-import SettingsAiPage from "@/pages/settings/AiPage";
-import SettingsStoragePage from "@/pages/settings/StoragePage";
-import SettingsLibraryPage from "@/pages/settings/LibraryPage";
-
-const router = createHashRouter([
-  {
-    path: "/",
-    element: <AppLayout />,
-    children: [
-      { index: true, element: <Navigate to="/chat" replace /> },
-      { path: "chat", element: <ChatPage /> },
-      { path: "calendar", element: <CalendarPage /> },
-      { path: "subjects", element: <SubjectsIndexPage /> },
-      // A file/lecture promoted to a full page (peek → expand). Outside
-      // SubjectLayout: full pages take the whole content area, Notion-style.
-      { path: "subjects/:subjectId/file", element: <SubjectFilePage /> },
-      { path: "subjects/:subjectId/lecture", element: <SubjectLecturePage /> },
-      {
-        // Everything for one subject lives under its id; SubjectLayout resolves
-        // it once and hands it to the tabs via outlet context.
-        path: "subjects/:subjectId",
-        element: <SubjectLayout />,
-        children: [
-          { index: true, element: <SubjectOverviewPage /> },
-          { path: "modules", element: <SubjectModulesPage /> },
-          { path: "downloads", element: <SubjectDownloadsPage /> },
-          { path: "lectures", element: <SubjectLecturesPage /> },
-          { path: "announcements", element: <SubjectAnnouncementsPage /> },
-          { path: "assignments", element: <SubjectAssignmentsPage /> },
-          { path: "discussion", element: <SubjectDiscussionPage /> },
-          // The old Files tab is gone; its bookmarks land on Downloads.
-          { path: "files", element: <Navigate to="../downloads" replace /> },
-        ],
-      },
-      { path: "sync", element: <SyncPage /> },
-      // An in-app browser tab: the id names a native page WebView that Rust
-      // parks over this route's content area. See BrowserPage.
-      { path: "browse/:id", element: <BrowserPage /> },
-      {
-        path: "settings",
-        element: <SettingsLayout />,
-        children: [
-          { index: true, element: <Navigate to="canvas" replace /> },
-          { path: "canvas", element: <SettingsCanvasPage /> },
-          { path: "ai", element: <SettingsAiPage /> },
-          { path: "storage", element: <SettingsStoragePage /> },
-          { path: "library", element: <SettingsLibraryPage /> },
-        ],
-      },
-      // Old top-level /lectures had no subject — send it to the picker.
-      { path: "lectures", element: <Navigate to="/subjects" replace /> },
-    ],
-  },
-]);
 
 function EventBridge() {
   useBackendEvents();
@@ -119,10 +47,12 @@ export default function App() {
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
+  // The shell is no longer a route element: it is above every tab's router
+  // (`app/src/routes.tsx`), and the tabs are mounted inside it.
   return (
     <>
       <EventBridge />
-      <RouterProvider router={router} />
+      <AppLayout />
     </>
   );
 }

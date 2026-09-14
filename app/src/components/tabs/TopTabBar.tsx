@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import {
   CaretLeft,
@@ -14,7 +13,7 @@ import { useBrowserStore } from "@/stores/browserStore";
 import { browser, browseId } from "@/lib/browser";
 import { useSubjects } from "@/hooks/useSubjects";
 import { tabInfo } from "@/components/tabs/tabInfo";
-import { recordRecentTab } from "@/stores/recentTabsStore";
+import { goInActiveTab } from "@/lib/tabRouters";
 import {
   Tooltip,
   TooltipContent,
@@ -61,16 +60,10 @@ export default function TopTabBar({
   sidebarCollapsed,
   onToggleSidebar,
 }: TopTabBarProps) {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { tabs, activeId, trackNavigation, addTab, setActive, closeTab } =
-    useTabStore();
+  const { tabs, activeId, addTab, setActive, closeTab } = useTabStore();
   const { subjects } = useSubjects();
   const browserTabs = useBrowserStore((s) => s.tabs);
-  const navType = useNavigationType();
   const fullscreen = useWindowFullscreen();
-  /** Where we sit in the router's history stack, and how far it reaches. */
-  const [pos, setPos] = useState({ idx: 0, top: 0 });
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const tabRefs = useRef(new Map<number, HTMLDivElement>());
   const stripRef = useRef<HTMLDivElement>(null);
@@ -84,49 +77,6 @@ export default function TopTabBar({
     target: number;
     width: number;
   } | null>(null);
-
-  // Keep the active tab pointed at wherever the router actually is. Only the
-  // location may re-run this: `useBrowserTabs` makes a new browser tab
-  // active *before* the router has moved to it, and a re-run in between
-  // (on the snapshot, say) would track the old route against the new tab.
-  useEffect(() => {
-    // History can land on a browser tab whose page has since been closed;
-    // nothing can bring the page back, so go home instead of tracking it.
-    // (A snapshot that has not arrived yet cannot say either way; when it
-    // does, `useBrowserTabs` closes the tab itself.)
-    const bid = browseId(location.pathname);
-    const known = useBrowserStore.getState();
-    if (bid != null && known.loaded && !known.tabs.some((t) => t.id === bid)) {
-      navigate("/subjects", { replace: true });
-      return;
-    }
-    trackNavigation(location.pathname + location.search);
-    // This effect is the one place that sees every move the router makes, so
-    // the sidebar's Recent trail is recorded from here too.
-    recordRecentTab(location.pathname + location.search);
-    // Both arrows key off React Router's own index, stored on
-    // `history.state`. That index alone is half the answer: what lies
-    // *ahead* of it cannot come from `window.history.length`, which also
-    // counts entries a reload left behind and never shrinks. So the top of
-    // the stack is tracked here — only a push truncates what was ahead; a
-    // pop or a replace leaves it standing.
-    //
-    // `location.key` is in the deps because it is the only part of the
-    // location that changes on *every* navigation. Keyed on the path alone,
-    // this effect skipped any navigation that kept the path — a second tab
-    // onto the same page, a link to where you already are — and the index it
-    // had cached went stale, which is what left the forward arrow greyed out
-    // with somewhere to go.
-    const idx = (window.history.state?.idx as number) ?? 0;
-    setPos((p) => ({ idx, top: navType === "PUSH" ? idx : Math.max(p.top, idx) }));
-  }, [
-    location.key,
-    location.pathname,
-    location.search,
-    navType,
-    trackNavigation,
-    navigate,
-  ]);
 
   // The tab region is everything right of the history arrows. Its width is
   // what the tabs divide up, so it is measured rather than assumed.
@@ -159,19 +109,23 @@ export default function TopTabBar({
   // While a browser tab is in front, the arrows are the page's history, not
   // the router's — as they would be in a browser. Whether the page has
   // anywhere to go is not knowable from outside it, so they stay enabled.
-  const activeBrowse = browseId(tabs.find((t) => t.id === activeId)?.path);
-  const canGoBack = activeBrowse != null || pos.idx > 0;
-  const canGoForward = activeBrowse != null || pos.idx < pos.top;
+  // For an app tab the answer comes from the tab itself: its pane keeps its
+  // own history index, since a memory router has no `window.history` to read.
+  const activeTab = tabs.find((t) => t.id === activeId);
+  const activeBrowse = browseId(activeTab?.path);
+  const canGoBack = activeBrowse != null || !!activeTab?.canBack;
+  const canGoForward = activeBrowse != null || !!activeTab?.canForward;
   const go = (delta: 1 | -1) => {
     if (activeBrowse != null)
       browser.history(activeBrowse, delta).catch(() => {});
-    else navigate(delta);
+    else goInActiveTab(delta);
   };
 
-  const switchTo = (id: number, path: string) => {
+  // Switching tabs is no longer a navigation: the destination pane is already
+  // mounted at its own path, and bringing it forward is all there is to do.
+  const switchTo = (id: number) => {
     if (id === activeId) return;
     setActive(id);
-    navigate(path);
   };
 
   // A browser tab closes through Rust, which owns its page; the strip hears
@@ -184,18 +138,11 @@ export default function TopTabBar({
     }
     // Closing the tab a lecture is playing in is the one close that loses
     // something; it asks first, and goes ahead unprompted for every other tab.
-    const go = () => {
-      const nextPath = closeTab(id);
-      if (nextPath != null) navigate(nextPath);
-    };
-    if (ownsPlayback(id)) confirmLeavingLecture(go);
-    else go();
+    if (ownsPlayback(id)) confirmLeavingLecture(() => closeTab(id));
+    else closeTab(id);
   };
 
-  const newTab = () => {
-    addTab(NEW_TAB_PATH);
-    navigate(NEW_TAB_PATH);
-  };
+  const newTab = () => addTab(NEW_TAB_PATH);
 
   // ⌘T and ⌘W arrive as menu events rather than key presses: macOS hands the
   // menu bar every ⌘-key before a webview sees it, so they can only be menu
@@ -234,7 +181,7 @@ export default function TopTabBar({
     tab: { id: number; path: string },
   ) => {
     if (e.button !== 0) return;
-    switchTo(tab.id, tab.path);
+    switchTo(tab.id);
     const el = e.currentTarget;
     const pointerId = e.pointerId;
     const startX = e.clientX;
@@ -324,7 +271,7 @@ export default function TopTabBar({
           className="flex flex-col items-start gap-0.5"
         >
           {sidebarCollapsed ? "Open sidebar" : "Close sidebar"}
-          <span className="text-[11px] text-background/60">⌘\</span>
+          <span className="text-[11px] text-background/60">⌘B</span>
         </TooltipContent>
       </Tooltip>
 

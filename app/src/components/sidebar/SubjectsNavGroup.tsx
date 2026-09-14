@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { NavLink, useMatch } from "react-router-dom";
 import { CaretRight, DotsThree } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
+import { navigateActive } from "@/lib/tabRouters";
+import { useActivePath } from "@/stores/tabStore";
 import { useSubjects } from "@/hooks/useSubjects";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { NewCountBadge } from "@/components/NewCountBadge";
@@ -43,7 +44,7 @@ export default function SubjectsNavGroup() {
 
   // Active only on the subject index itself — inside an individual subject the
   // subject's own row carries the highlight instead.
-  const inSection = useMatch("/subjects") != null;
+  const inSection = useActivePath().split("?")[0] === "/subjects";
 
   useEffect(() => {
     localStorage.setItem(OPEN_KEY, String(open));
@@ -55,18 +56,18 @@ export default function SubjectsNavGroup() {
           navigates to the subject index; the caret (revealed on hover, where
           the count sits) collapses the list. */}
       <div className="group/row flex items-center justify-between pl-2 pr-1 mb-0.5">
-        <NavLink
-          to="/subjects"
-          end
+        <button
+          type="button"
+          onClick={() => navigateActive("/subjects")}
           className={cn(
-            "flex-1 min-w-0 truncate py-1 text-[11px] font-medium tracking-wide transition-colors",
+            "flex-1 min-w-0 truncate py-1 text-left text-[11px] font-medium tracking-wide transition-colors",
             inSection
               ? "text-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
           Subjects
-        </NavLink>
+        </button>
         <button
           type="button"
           onClick={() => {
@@ -111,13 +112,13 @@ export default function SubjectsNavGroup() {
           )}
 
           {current.map((s) => (
-            <SubjectNavLink key={s.id} subject={s} />
+            <SubjectNavRow key={s.id} subject={s} />
           ))}
 
           {past.length > 0 && (
             <>
               {past.slice(0, pastShown).map((s) => (
-                <SubjectNavLink key={s.id} subject={s} dimmed />
+                <SubjectNavRow key={s.id} subject={s} dimmed />
               ))}
               {/* Notion-style "More" row: sits under the last subject and reads
                   as one of them, so past subjects unfold in place — a few at a
@@ -147,7 +148,7 @@ export default function SubjectsNavGroup() {
   );
 }
 
-function SubjectNavLink({
+function SubjectNavRow({
   subject,
   dimmed = false,
 }: {
@@ -156,29 +157,29 @@ function SubjectNavLink({
 }) {
   const bySubject = useNewFilesStore((s) => s.bySubject);
   const newCount = newCountForSubject(bySubject, subject.id);
+  const to = `/subjects/${subject.id}`;
+  // An exact match, which is `NavLink`'s `end`: the subject itself, not
+  // everything under it. Without it a lecture or a file open in this subject —
+  // a page of its own, with its own tab — lit the subject row as though you
+  // were sitting in the subject.
+  const isActive = useActivePath().split("?")[0] === to;
 
   return (
-    <NavLink
-      to={`/subjects/${subject.id}`}
-      /* `end`: the subject itself, not everything under it. Without it a
-         lecture or a file open in this subject — a page of its own, with its
-         own tab — lit the subject row as though you were sitting in the
-         subject. */
-      end
+    <button
+      type="button"
+      onClick={() => navigateActive(to)}
       title={subject.name}
-      className={({ isActive }) =>
-        cn(
-          "flex items-center gap-2.5 rounded-md pl-2 pr-1.5 py-1.5 text-[12.5px] transition-colors",
-          isActive
-            ? "bg-sidebar-item-active text-foreground font-medium"
-            : "text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground",
-          dimmed && "opacity-60",
-        )
-      }
+      className={cn(
+        "flex w-full items-center gap-2.5 rounded-md pl-2 pr-1.5 py-1.5 text-[12.5px] transition-colors",
+        isActive
+          ? "bg-sidebar-item-active text-foreground font-medium"
+          : "text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground",
+        dimmed && "opacity-60",
+      )}
     >
       <SubjectIcon code={subject.code} size={15} />
-      <span className="truncate flex-1">{displayCode(subject.code)}</span>
+      <span className="truncate flex-1 text-left">{displayCode(subject.code)}</span>
       <NewCountBadge count={newCount} />
-    </NavLink>
+    </button>
   );
 }

@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { browser, browseId, browsePath, type BrowserSnapshot } from "@/lib/browser";
 import { useBrowserStore } from "@/stores/browserStore";
@@ -13,12 +12,10 @@ import { useTabStore } from "@/stores/tabStore";
  * lacks is opened in front (a link was clicked, or a page popped one), and
  * a strip tab whose page Rust no longer has is closed.
  *
- * Mounted once, in AppLayout — it needs the router to bring a new tab to
- * the front.
+ * Mounted once, in AppLayout: it is the strip it reconciles, not any one
+ * page.
  */
 export function useBrowserTabs() {
-  const navigate = useNavigate();
-
   useEffect(() => {
     let cancelled = false;
 
@@ -27,15 +24,16 @@ export function useBrowserTabs() {
       const live = new Set(snapshot.tabs.map((t) => t.id));
 
       // Closed in Rust: drop it from the strip. `closeTab` picks the
-      // neighbour and, for the last tab, sends it home.
+      // neighbour — already sitting at its own path — and, for the last tab,
+      // sends it home.
       for (const tab of useTabStore.getState().tabs) {
         const id = browseId(tab.path);
         if (id == null || live.has(id)) continue;
-        const next = useTabStore.getState().closeTab(tab.id);
-        if (next != null) navigate(next);
+        useTabStore.getState().closeTab(tab.id);
       }
 
-      // Opened in Rust: a new strip tab, in front.
+      // Opened in Rust: a new strip tab, in front. Opening it *is* the
+      // navigation — the pane is created at its route and comes forward.
       const known = new Set(
         useTabStore
           .getState()
@@ -44,9 +42,7 @@ export function useBrowserTabs() {
       );
       for (const tab of snapshot.tabs) {
         if (known.has(tab.id)) continue;
-        const path = browsePath(tab.id);
-        useTabStore.getState().addTab(path);
-        navigate(path);
+        useTabStore.getState().addTab(browsePath(tab.id));
       }
     };
 
@@ -65,5 +61,5 @@ export function useBrowserTabs() {
       cancelled = true;
       unlisten.then((off) => off());
     };
-  }, [navigate]);
+  }, []);
 }

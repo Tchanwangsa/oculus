@@ -82,17 +82,18 @@ export default function BrowserPage() {
   const editingRef = useRef(false);
   const coveredRef = useRef(false);
 
-  // Show this tab's page in the slot. Rust hides every other page itself,
-  // so switching between two browser tabs is one call, not a hide and a
-  // show with a blank frame between them.
+  // Put this tab's page in the slot. Only this page: Rust places what it is
+  // told and nothing else, so whatever else is on screen stays put.
   useEffect(() => {
     const slot = slotRef.current;
     if (!slot || !Number.isInteger(id) || coveredRef.current) return;
-    browser.show(id, measure(slot)).catch(() => {});
+    browser.place(id, measure(slot)).catch(() => {});
   }, [id]);
 
-  // Leaving the route — for an app tab — takes the page with it.
-  useEffect(() => () => void browser.hide().catch(() => {}), []);
+  // Leaving the slot takes the page with it — on unmount for an app tab, and
+  // on an id change, which is the same slot handed to another tab. Keyed on
+  // the id it put there, so it is the outgoing page that goes down.
+  useEffect(() => () => void browser.hideTab(id).catch(() => {}), [id]);
 
   // The slot moves when the sidebar toggles or the zoom changes (page zoom
   // reflows the viewport, so this fires for it too); the window's own
@@ -101,11 +102,11 @@ export default function BrowserPage() {
     const slot = slotRef.current;
     if (!slot) return;
     const observer = new ResizeObserver(() => {
-      browser.setViewport(measure(slot)).catch(() => {});
+      browser.setViewport(id, measure(slot)).catch(() => {});
     });
     observer.observe(slot);
     return () => observer.disconnect();
-  }, []);
+  }, [id]);
 
   // A native view cannot interleave with the DOM: anything the app draws
   // over the page — a sidebar popover, a tooltip reaching in, a dialog —
@@ -121,7 +122,7 @@ export default function BrowserPage() {
       const covered = coveredBy(slot);
       if (covered === coveredRef.current) return;
       coveredRef.current = covered;
-      (covered ? browser.hide() : browser.show(id, measure(slot))).catch(
+      (covered ? browser.hideTab(id) : browser.place(id, measure(slot))).catch(
         () => {},
       );
     };

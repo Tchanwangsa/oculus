@@ -1,5 +1,6 @@
-import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { navigateActive } from "@/lib/tabRouters";
+import { useActivePath } from "@/stores/tabStore";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
 
 interface NavItemProps {
@@ -10,24 +11,33 @@ interface NavItemProps {
   badge?: React.ReactNode;
 }
 
+/**
+ * A row in the sidebar. Not a `NavLink`: the sidebar is outside every tab's
+ * router, so it has neither a location to match against nor one to navigate
+ * — it asks the strip which tab is in front and where that tab is, and sends
+ * the tab somewhere new through `navigateActive`.
+ */
 export default function NavItem({ to, icon: Icon, label, badge }: NavItemProps) {
+  // `NavLink`'s default, not its `end`: /settings lights for /settings/canvas.
+  const here = useActivePath().split("?")[0];
+  const isActive = here === to || here.startsWith(`${to}/`);
+
   return (
-    <NavLink
-      to={to}
-      className={({ isActive }) =>
-        cn(
-          "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[12.5px] transition-colors",
-          isActive
-            ? "bg-sidebar-item-active text-foreground font-medium"
-            : "text-muted-foreground font-normal hover:bg-sidebar-item-hover hover:text-foreground",
-        )
-      }
+    <button
+      type="button"
+      onClick={() => navigateActive(to)}
+      className={cn(
+        "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12.5px] transition-colors",
+        isActive
+          ? "bg-sidebar-item-active text-foreground font-medium"
+          : "text-muted-foreground font-normal hover:bg-sidebar-item-hover hover:text-foreground",
+      )}
     >
       <Icon size={16} className="shrink-0" />
-      <span className="flex-1 min-w-0 overflow-hidden whitespace-nowrap text-clip">
+      <span className="flex-1 min-w-0 overflow-hidden whitespace-nowrap text-clip text-left">
         {label}
       </span>
       {badge}
-    </NavLink>
+    </button>
   );
 }

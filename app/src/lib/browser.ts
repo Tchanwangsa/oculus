@@ -4,8 +4,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 /**
  * The in-app browser, as the frontend sees it. Every tab is a native page
  * WebView that Rust owns (`app/src-tauri/src/browser.rs`); the frontend
- * mirrors Rust's tab list into the top tab strip, and the `/browse/:id`
- * route leaves a slot in the content card for the page to sit in.
+ * mirrors Rust's tab list into the top tab strip, and whatever wants to show
+ * a page — the `/browse/:id` route, in the content card — leaves an empty
+ * slot for it and reports where that slot is.
+ *
+ * Placement and visibility are per page: `place` shows one page and moves no
+ * other, `hideTab` takes one back down. Rust never infers that showing one
+ * page means hiding another, so two slots can hold two pages at once and this
+ * side is the one that knows which.
  */
 
 export interface BrowserTab {
@@ -72,11 +78,17 @@ export const browser = {
   /** The escape hatch: hand the URL to the real browser. */
   external: (url: string) => openUrl(url),
   state: () => invoke<BrowserSnapshot>("browser_state"),
-  /** Show tab `id`'s page in the slot described by `viewport`. */
-  show: (id: number, viewport: Viewport) =>
-    invoke("browser_show", { id, viewport }),
-  setViewport: (viewport: Viewport) =>
-    invoke("browser_set_viewport", { viewport }),
+  /** Show tab `id`'s page in the slot `viewport` describes, leaving every
+   *  other page where and as it is. */
+  place: (id: number, viewport: Viewport) =>
+    invoke("browser_place", { id, viewport }),
+  /** Move one page's slot without changing whether it is showing. */
+  setViewport: (id: number, viewport: Viewport) =>
+    invoke("browser_set_viewport", { id, viewport }),
+  /** Take one page off screen: its slot is gone, or something has to draw
+   *  over it. The page keeps its position in history. */
+  hideTab: (id: number) => invoke("browser_hide_tab", { id }),
+  /** Every page off screen at once, for teardown. */
   hide: () => invoke("browser_hide"),
   navigate: (id: number, url: string) =>
     invoke("browser_navigate", { id, url }),
