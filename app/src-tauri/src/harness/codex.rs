@@ -41,6 +41,9 @@ pub struct CodexSpawn {
     pub bin: PathBuf,
     pub env: Vec<(String, String)>,
     pub raw_log: Option<RawLog>,
+    /// Takes the notifications that are about the account rather than a
+    /// thread; see `translate_account`.
+    pub account_sink: Option<Sink>,
 }
 
 /// How to open a thread. `cwd` is the sandbox's writable root as well as
@@ -81,6 +84,12 @@ struct ThreadState {
     /// Agent messages whose deltas have been streamed; `item/completed`
     /// carries the whole text again.
     streamed_messages: std::collections::HashSet<String>,
+    /// The answer as it streams, until the `item/completed` that commits it.
+    /// An interrupted turn never sends that completion — measured, and the
+    /// recording is `fixtures/harness/codex-interrupt.ndjson` — so without
+    /// this the half-written answer is only ever live text, and stopping a
+    /// turn wiped what the agent had already said off the screen.
+    partial_message: String,
 }
 
 pub struct CodexServer {
@@ -89,6 +98,9 @@ pub struct CodexServer {
     next_id: AtomicI64,
     pending: Mutex<HashMap<i64, mpsc::Sender<Result<Value, String>>>>,
     routes: Mutex<HashMap<String, Arc<ThreadRoute>>>,
+    /// Where account-scoped events go. Set for the app, absent for headless
+    /// runs, which have no place to put them.
+    account_sink: Option<Sink>,
     alive: Arc<AtomicBool>,
 }
 
@@ -114,6 +126,7 @@ impl CodexServer {
             next_id: AtomicI64::new(1),
             pending: Mutex::new(HashMap::new()),
             routes: Mutex::new(HashMap::new()),
+            account_sink: cfg.account_sink,
             alive: alive.clone(),
         });
 
@@ -267,6 +280,24 @@ impl CodexServer {
         Ok(out)
     }
 
+    /// Ask for the plan windows instead of waiting for a turn to push them.
+    /// The push (`account/rateLimits/updated`) only comes with a model call,
+    /// so without this the meter shows the last turn's numbers — which after
+    /// a night's gap can be a window that has since reset. The answer goes
+    /// out on the account sink, the same path the push takes, so it is stored
+    /// and drawn identically.
+    pub fn read_rate_limits(&self) -> Result<(), String> {
+        let r = self.request("account/rateLimits/read", json!({}))?;
+        let windows = rate_windows(&r["rateLimits"]);
+        if windows.is_empty() {
+            return Ok(());
+        }
+        if let Some(sink) = &self.account_sink {
+            sink(HarnessEvent::RateLimits { windows });
+        }
+        Ok(())
+    }
+
     fn thread_params(opts: &CodexThreadOpts) -> Value {
         let mut config = json!({
             // Native questions have no UI yet; a request for one would sit
@@ -350,7 +381,25 @@ impl CodexServer {
         if let Some(m) = &opts.model {
             p["model"] = json!(m);
         }
-        self.request("turn/start", p)?;
+        let r = self.request("turn/start", p)?;
+        // The turn id also arrives on the `turn/started` notification, but
+        // not until the server has warmed its MCP servers and hooks — a
+        // second or more. In that window an interrupt had no turn to name
+        // and a server that died had no turn to fail, so a thread waiting on
+        // its `TurnFinished` (`Queue` in the manager) would have waited for
+        // ever. The response says it straight away, so it is taken from here.
+        if let Some(id) = r.pointer("/turn/id").and_then(|s| s.as_str()) {
+            let route = self.routes.lock().unwrap().get(thread_id).cloned();
+            if let Some(route) = route {
+                route.state.lock().unwrap().active_turn.get_or_insert(id.to_string());
+                // The same id is what a later `thread/revert` names, so it is
+                // kept on the question's row. It is announced here rather
+                // than from the `turn/started` notification for the same
+                // reason the line above reads it here: that notification can
+                // be a second or more behind.
+                (route.sink)(HarnessEvent::TurnAnchor { anchor: id.to_string() });
+            }
+        }
         Ok(())
     }
 
@@ -365,6 +414,23 @@ impl CodexServer {
             return Ok(());
         };
         self.request("turn/interrupt", json!({ "threadId": thread_id, "turnId": turn_id }))?;
+        Ok(())
+    }
+
+    /// Drop a turn and every later one from the server's own history of this
+    /// thread, so the agent's context matches the thread being read.
+    ///
+    /// `before_turn_id` is the turn the question started, kept on its row
+    /// when the turn went out. The server keeps the thread — only the history
+    /// is replaced — so the session id on our row stays good.
+    ///
+    /// Files the agent wrote are not put back: the schema says outright that
+    /// reverting those is the client's job, and this bridge does not try.
+    pub fn revert(&self, thread_id: &str, before_turn_id: &str) -> Result<(), String> {
+        self.request(
+            "thread/revert",
+            json!({ "threadId": thread_id, "beforeTurnId": before_turn_id }),
+        )?;
         Ok(())
     }
 
@@ -426,6 +492,18 @@ impl CodexServer {
     }
 
     fn handle_notification(&self, method: &str, params: &Value) {
+        // Account-scoped first: rate limits belong to the subscription, not to
+        // a thread, so they arrive without a `threadId` and would otherwise be
+        // dropped by the route lookup below.
+        let account = translate_account(method, params);
+        if !account.is_empty() {
+            if let Some(sink) = &self.account_sink {
+                for ev in account {
+                    sink(ev);
+                }
+            }
+            return;
+        }
         let thread_id = params
             .get("threadId")
             .and_then(|t| t.as_str())
@@ -466,6 +544,45 @@ fn s(v: &Value, key: &str) -> String {
 
 // ── Translation ──────────────────────────────────────────────────────────────
 
+/// Notifications about the *account*, not a thread. They carry no `threadId`
+/// — one server serves every thread and the limits are the same for all of
+/// them — so `handle_notification` takes them before it looks a route up, and
+/// they go to the harness's account sink instead of a thread's.
+fn translate_account(method: &str, p: &Value) -> Vec<HarnessEvent> {
+    let mut out = Vec::new();
+    if method == "account/rateLimits/updated" {
+        let windows = rate_windows(&p["rateLimits"]);
+        if !windows.is_empty() {
+            out.push(HarnessEvent::RateLimits { windows });
+        }
+    }
+    out
+}
+
+/// The `rateLimits` object, pushed after a turn and returned by
+/// `account/rateLimits/read`, as the two windows the meter draws. Codex names
+/// them by length rather than by role, so the duration is the label and the
+/// key is only the fallback.
+fn rate_windows(rl: &Value) -> Vec<RateWindow> {
+    let mut windows = Vec::new();
+    for (key, fallback) in [("primary", "5-hour"), ("secondary", "Weekly")] {
+        let Some(w) = rl.get(key).filter(|w| !w.is_null()) else { continue };
+        let mins = w.get("windowDurationMins").and_then(|m| m.as_u64());
+        let label = match mins {
+            Some(10080) => "Weekly",
+            Some(300) => "5-hour",
+            Some(m) if m % 60 == 0 => return_label(format!("{}-hour", m / 60)),
+            _ => fallback,
+        };
+        windows.push(RateWindow {
+            label: label.to_string(),
+            used_percent: w.get("usedPercent").and_then(|u| u.as_f64()).unwrap_or(0.0),
+            resets_at: w.get("resetsAt").and_then(|r| r.as_i64()),
+        });
+    }
+    windows
+}
+
 fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent> {
     let mut out = Vec::new();
     match method {
@@ -474,6 +591,7 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
             st.ignore_usage_until_turn = false;
             st.open_items.clear();
             st.streamed_messages.clear();
+            st.partial_message.clear();
             out.push(HarnessEvent::TurnStarted);
         }
         "turn/completed" => {
@@ -485,6 +603,15 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
             };
             if let Some(msg) = p.pointer("/turn/error/message").and_then(|m| m.as_str()) {
                 out.push(HarnessEvent::error(msg));
+            }
+            // Whatever the agent had said when the turn was cut short. It is
+            // committed here rather than left as live text, so the row
+            // survives the turn ending and a reload after it. A turn that
+            // ended on its own has already cleared this on `item/completed`,
+            // so nothing is written twice.
+            let partial = std::mem::take(&mut st.partial_message);
+            if !partial.trim().is_empty() {
+                out.push(HarnessEvent::AssistantMessage { text: partial });
             }
             out.push(HarnessEvent::TurnFinished {
                 status: status.into(),
@@ -557,6 +684,7 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
             st.streamed_messages.insert(s(p, "itemId"));
             let text = s(p, "delta");
             if !text.is_empty() {
+                st.partial_message.push_str(&text);
                 out.push(HarnessEvent::AssistantDelta { text });
             }
         }
@@ -581,6 +709,7 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
             let status = s(item, "status");
             match s(item, "type").as_str() {
                 "agentMessage" => {
+                    st.partial_message.clear();
                     let text = s(item, "text");
                     if !text.trim().is_empty() {
                         out.push(HarnessEvent::AssistantMessage { text });
@@ -679,28 +808,6 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
                 cost_usd: None,
             });
         }
-        "account/rateLimits/updated" => {
-            let rl = &p["rateLimits"];
-            let mut windows = Vec::new();
-            for (key, fallback) in [("primary", "5-hour"), ("secondary", "Weekly")] {
-                let Some(w) = rl.get(key).filter(|w| !w.is_null()) else { continue };
-                let mins = w.get("windowDurationMins").and_then(|m| m.as_u64());
-                let label = match mins {
-                    Some(10080) => "Weekly",
-                    Some(300) => "5-hour",
-                    Some(m) if m % 60 == 0 => return_label(format!("{}-hour", m / 60)),
-                    _ => fallback,
-                };
-                windows.push(RateWindow {
-                    label: label.to_string(),
-                    used_percent: w.get("usedPercent").and_then(|u| u.as_f64()).unwrap_or(0.0),
-                    resets_at: w.get("resetsAt").and_then(|r| r.as_i64()),
-                });
-            }
-            if !windows.is_empty() {
-                out.push(HarnessEvent::RateLimits { windows });
-            }
-        }
         "error" => {
             let msg = p.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or("codex error");
             let will_retry = p.get("willRetry").and_then(|b| b.as_bool()).unwrap_or(false);
@@ -753,6 +860,14 @@ mod tests {
         for line in raw.lines() {
             let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
             let Some(method) = v.get("method").and_then(|m| m.as_str()) else { continue };
+            // The same order `handle_notification` uses: account-scoped
+            // notifications never reach the thread translator, so a test that
+            // only called `translate` would pass on a stream the app drops.
+            let account = translate_account(method, &v["params"]);
+            if !account.is_empty() {
+                events.extend(account);
+                continue;
+            }
             events.extend(translate(method, &v["params"], &mut st));
         }
         assert!(matches!(events.first(), Some(HarnessEvent::TurnStarted)));
@@ -771,5 +886,37 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::Usage { context_window: Some(_), .. })));
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::RateLimits { windows } if windows.len() == 2)));
         assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed"));
+    }
+
+    /// A turn stopped mid-answer. Recorded: the deltas simply stop, the
+    /// `item/completed` that would carry the whole text never comes, and
+    /// `turn/completed` says `interrupted`. Without the partial being
+    /// committed here, everything the agent had already said was live text
+    /// with no row behind it — so stopping a turn wiped the answer off the
+    /// screen, which is exactly what it looked like from the outside.
+    #[test]
+    fn a_stopped_turn_keeps_what_was_said() {
+        let raw = include_str!("../../fixtures/harness/codex-interrupt.ndjson");
+        let mut st = ThreadState::default();
+        let mut events = Vec::new();
+        for line in raw.lines() {
+            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+            let Some(method) = v.get("method").and_then(|m| m.as_str()) else { continue };
+            events.extend(translate(method, &v["params"], &mut st));
+        }
+        let deltas: String = events
+            .iter()
+            .filter_map(|e| match e {
+                HarnessEvent::AssistantDelta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(!deltas.is_empty(), "the fixture streams an answer");
+        let message = events.iter().find_map(|e| match e {
+            HarnessEvent::AssistantMessage { text } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(message.as_deref(), Some(deltas.as_str()), "the partial is committed as a row");
+        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted"));
     }
 }

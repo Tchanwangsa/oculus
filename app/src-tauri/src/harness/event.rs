@@ -135,6 +135,36 @@ pub enum HarnessEvent {
         cost_usd: Option<f64>,
     },
     RateLimits { windows: Vec<RateWindow> },
+    /// The thread has a name. Neither CLI names a conversation over its own
+    /// protocol, so this is the answer to a naming turn asked of the thread's
+    /// provider once its first exchange is done
+    /// ([`super::Harness::name_thread`]). It rides the same stream as
+    /// everything else so the row is written before the webview hears it.
+    ThreadTitled { title: String },
+    /// A message typed while a turn was running. It is not in the
+    /// conversation yet and no row is written for it: it is waiting its turn
+    /// (`Queue` in [`super`]), and the webview draws it as pending.
+    Queued { id: String, text: String },
+    /// A queued message has left the queue — cancelled, cleared by an
+    /// interrupt, or about to go out, in which case its
+    /// [`Self::UserMessage`] follows immediately.
+    Unqueued { id: String },
+    /// The provider's own handle for the turn that just went out — Claude's
+    /// uuid for the user message, Codex's turn id. It is kept on the user's
+    /// row because it is the thing a later rewind has to name
+    /// (`rewind_conversation`, `thread/revert`), and neither CLI will hand it
+    /// out again afterwards.
+    TurnAnchor { anchor: String },
+    /// Rows from `from_item_id` on are gone: a question was edited and the
+    /// thread rewound to it.
+    Rewound {
+        from_item_id: i64,
+        /// Whether the provider's own session was rewound too. False only for
+        /// a question asked before the anchor was recorded, or one whose
+        /// session has since been deleted — there the agent keeps the
+        /// original in its context and the timeline says so.
+        context: bool,
+    },
     /// The provider stopped working on the user's message.
     TurnFinished {
         /// `completed`, `interrupted`, `failed`.

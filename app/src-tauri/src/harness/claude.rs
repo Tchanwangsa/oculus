@@ -30,11 +30,13 @@
 //! memory layer under `agents/`, and asked to write there the CLI reached for
 //! `~/.claude/projects/…/memory/` instead.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -68,6 +70,22 @@ pub struct ClaudeSession {
     stdin: Mutex<ChildStdin>,
     alive: Arc<AtomicBool>,
     request_ids: AtomicU64,
+    /// Set between asking the CLI to stop and the `result` that answers.
+    /// The translator reads it, because an interrupted turn is not something
+    /// the `result` line says plainly — see the `result` arm below.
+    interrupting: Arc<AtomicBool>,
+    /// Control requests waiting on their `control_response`, by request id.
+    /// `interrupt` does not wait — it is answered by the `result` that
+    /// follows — but a rewind has to know whether it actually happened
+    /// before the rows are deleted on the strength of it.
+    pending: Mutex<HashMap<String, mpsc::Sender<Value>>>,
+    /// Set between a message going in and the `result` that closes its turn.
+    /// A process that dies in that window has to close the turn anyway:
+    /// upstream a thread is only released for its next message by a
+    /// `TurnFinished` (`Queue` in the manager), and the window is a real one
+    /// — a model name the CLI rejects kills it before the first stream
+    /// event, which is the point at which `turn_open` would otherwise notice.
+    expecting: Arc<AtomicBool>,
 }
 
 impl ClaudeSession {
@@ -112,11 +130,16 @@ impl ClaudeSession {
         let stderr = child.stderr.take().ok_or("no stderr on claude child")?;
 
         let alive = Arc::new(AtomicBool::new(true));
+        let interrupting = Arc::new(AtomicBool::new(false));
+        let expecting = Arc::new(AtomicBool::new(false));
         let session = Arc::new(ClaudeSession {
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             alive: alive.clone(),
             request_ids: AtomicU64::new(1),
+            pending: Mutex::new(HashMap::new()),
+            interrupting: interrupting.clone(),
+            expecting: expecting.clone(),
         });
 
         // stderr is the CLI's own log. Keep a tail so a process that dies
@@ -138,7 +161,11 @@ impl ClaudeSession {
         let reader_session = session.clone();
         let raw_log = cfg.raw_log;
         std::thread::spawn(move || {
-            let mut state = Translator::default();
+            let mut state = Translator {
+                interrupting,
+                expecting: expecting.clone(),
+                ..Default::default()
+            };
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Some(log) = &raw_log {
                     log.write(&line);
@@ -146,6 +173,10 @@ impl ClaudeSession {
                 let Ok(v) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
+                if v.get("type").and_then(|t| t.as_str()) == Some("control_response") {
+                    reader_session.settle(&v);
+                    continue;
+                }
                 for ev in state.translate(&v) {
                     sink(ev);
                 }
@@ -159,7 +190,7 @@ impl ClaudeSession {
                 .wait()
                 .ok()
                 .and_then(|s| s.code());
-            if !state.turn_open_closed_cleanly() {
+            if expecting.swap(false, Ordering::SeqCst) || !state.turn_open_closed_cleanly() {
                 let tail = stderr_tail.lock().unwrap().join("\n");
                 let msg = if tail.trim().is_empty() {
                     format!("claude exited (code {code:?}) mid-turn")
@@ -191,9 +222,12 @@ impl ClaudeSession {
             .map_err(|e| format!("claude stdin: {e}"))
     }
 
-    /// One user turn. The CLI accepts the next line as soon as the previous
-    /// turn's `result` is out; sending mid-turn queues it as a steer.
+    /// One user turn. The CLI takes the next line as soon as the previous
+    /// turn's `result` is out — and takes one mid-turn too, queueing it
+    /// itself and running it the instant the current turn ends, which is why
+    /// the manager holds messages back rather than letting them through.
     pub fn send(&self, text: &str) -> Result<(), String> {
+        self.expecting.store(true, Ordering::SeqCst);
         self.write_line(&serde_json::json!({
             "type": "user",
             "message": { "role": "user", "content": text },
@@ -203,14 +237,77 @@ impl ClaudeSession {
     }
 
     /// Stop the current turn without ending the session. The CLI answers
-    /// with a `control_response` and closes the turn with a `result`.
+    /// with a `control_response`, emits the half-written assistant message as
+    /// an ordinary `assistant` line, and closes the turn with a `result` that
+    /// calls itself an error. The flag is how the translator tells that one
+    /// apart from a real failure.
     pub fn interrupt(&self) -> Result<(), String> {
+        self.interrupting.store(true, Ordering::SeqCst);
         let id = self.request_ids.fetch_add(1, Ordering::SeqCst);
         self.write_line(&serde_json::json!({
             "type": "control_request",
             "request_id": format!("oculus-{id}"),
             "request": { "subtype": "interrupt" },
         }))
+    }
+
+    /// Hand a `control_response` to whoever is waiting on it. A response
+    /// nobody asked about — the one an `interrupt` gets — is dropped.
+    fn settle(&self, v: &Value) {
+        let Some(id) = v.pointer("/response/request_id").and_then(|s| s.as_str()) else {
+            return;
+        };
+        if let Some(tx) = self.pending.lock().unwrap().remove(id) {
+            let _ = tx.send(v.clone());
+        }
+    }
+
+    /// Drop a question and everything after it from the CLI's *own* session,
+    /// so the agent's context matches the thread the student is reading.
+    ///
+    /// `target_message_uuid` is the CLI's id for the user message, which it
+    /// never puts on stdout — it is read out of the session transcript when
+    /// the turn ends ([`anchor_for`]) and kept on the row.
+    ///
+    /// This waits for the `control_response`, unlike every other line written
+    /// here: the rows are deleted on the strength of the answer, so a rewind
+    /// that quietly did nothing would put the thread and the agent back out
+    /// of step in the one place the student is guaranteed to notice.
+    pub fn rewind(&self, target_message_uuid: &str) -> Result<(), String> {
+        let id = format!("oculus-{}", self.request_ids.fetch_add(1, Ordering::SeqCst));
+        let (tx, rx) = mpsc::channel();
+        self.pending.lock().unwrap().insert(id.clone(), tx);
+        let sent = self.write_line(&serde_json::json!({
+            "type": "control_request",
+            "request_id": id,
+            "request": {
+                "subtype": "rewind_conversation",
+                "target_message_uuid": target_message_uuid,
+                // The manager only rewinds a thread that is between turns, so
+                // there is nothing running to cut short.
+                "interrupt_if_running": false,
+            },
+        }));
+        let answer = sent.and_then(|()| {
+            rx.recv_timeout(Duration::from_secs(30))
+                .map_err(|_| "claude did not answer the rewind".to_string())
+        });
+        // A write that failed and a wait that timed out both leave the id in
+        // the map, where it would hold a sender for a response that is never
+        // coming.
+        self.pending.lock().unwrap().remove(&id);
+        let v = answer?;
+        if v.pointer("/response/subtype").and_then(|s| s.as_str()) != Some("success") {
+            let why = v
+                .pointer("/response/error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("refused");
+            return Err(format!("claude would not rewind: {why}"));
+        }
+        if v.pointer("/response/response/rewound").and_then(|b| b.as_bool()) == Some(false) {
+            return Err("claude found nothing to rewind to".into());
+        }
+        Ok(())
     }
 
     pub fn kill(&self) {
@@ -281,6 +378,22 @@ struct Translator {
     /// What the last request occupied — `result.usage` sums every request in
     /// the turn, which is spend, not context.
     last_context_tokens: Option<u64>,
+    /// Shared with the session: whether the turn being closed was stopped on
+    /// purpose.
+    interrupting: Arc<AtomicBool>,
+    /// Shared with the session: a turn is owed a `result`. Cleared here, on
+    /// the `result` itself.
+    expecting: Arc<AtomicBool>,
+    /// From the `init` line: what this session's transcript is called and
+    /// which working directory files it under. Together they are the only
+    /// way to the uuid a rewind needs, since the uuid of the question never
+    /// comes back on stdout.
+    session_id: String,
+    cwd: String,
+    /// The first `assistant` line of the open turn. Its ancestry in the
+    /// transcript names the question that started the turn — see
+    /// [`anchor_for`].
+    turn_first_assistant: Option<String>,
 }
 
 impl Translator {
@@ -301,6 +414,8 @@ impl Translator {
         match ty {
             "system" => {
                 if v.get("subtype").and_then(|s| s.as_str()) == Some("init") {
+                    self.session_id = str_of(v, "session_id");
+                    self.cwd = str_of(v, "cwd");
                     out.push(HarnessEvent::SessionStarted {
                         provider_session_id: str_of(v, "session_id"),
                         model: v.get("model").and_then(|m| m.as_str()).map(String::from),
@@ -367,6 +482,9 @@ impl Translator {
                 let Some(content) = v.pointer("/message/content").and_then(|c| c.as_array()) else {
                     return out;
                 };
+                if self.turn_first_assistant.is_none() {
+                    self.turn_first_assistant = v.get("uuid").and_then(|u| u.as_str()).map(String::from);
+                }
                 self.open_turn(&mut out);
                 if let Some(u) = v.pointer("/message/usage") {
                     let n = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
@@ -441,7 +559,29 @@ impl Translator {
                 self.saw_result = true;
                 let is_error = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false);
                 let subtype = v.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
-                if let Some(u) = v.get("usage") {
+                // A stopped turn does not say so. Recorded (the fixture this
+                // line's test replays): `is_error: true`, `subtype:
+                // "error_during_execution"`, `stop_reason: null`, and an
+                // `errors` array holding the CLI's own diagnostic —
+                // `[ede_diagnostic] result_type=user …`, which is the string
+                // that was reaching the timeline as a red row every time the
+                // student pressed stop. `terminal_reason: "aborted_streaming"`
+                // is the only field that names it, so that and the flag we
+                // set when we asked are what decide; the rest is a fallback
+                // for a CLI that words it differently.
+                let interrupted = self.interrupting.swap(false, Ordering::SeqCst)
+                    || v.get("terminal_reason")
+                        .and_then(|t| t.as_str())
+                        .is_some_and(|t| t.starts_with("aborted"))
+                    || matches!(
+                        v.get("stop_reason").and_then(|s| s.as_str()),
+                        Some("interrupted") | Some("interrupt")
+                    )
+                    || subtype.contains("interrupt");
+                // An interrupted result reports zeros for everything —
+                // `duration_api_ms: 0`, no tokens, no cost. Folding that in
+                // would blank the thread's usage for a turn that did happen.
+                if let Some(u) = v.get("usage").filter(|_| !interrupted) {
                     let n = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
                     let input = n("input_tokens");
                     let cached = n("cache_read_input_tokens") + n("cache_creation_input_tokens");
@@ -457,7 +597,7 @@ impl Translator {
                         cost_usd: v.get("total_cost_usd").and_then(|c| c.as_f64()),
                     });
                 }
-                if is_error {
+                if is_error && !interrupted {
                     let msg = v
                         .get("result")
                         .and_then(|r| r.as_str())
@@ -472,10 +612,6 @@ impl Translator {
                         .unwrap_or_else(|| format!("claude: {subtype}"));
                     out.push(HarnessEvent::error(msg));
                 }
-                let interrupted = matches!(
-                    v.get("stop_reason").and_then(|s| s.as_str()),
-                    Some("interrupted") | Some("interrupt")
-                ) || subtype.contains("interrupt");
                 let status = if interrupted {
                     "interrupted"
                 } else if is_error {
@@ -483,7 +619,18 @@ impl Translator {
                 } else {
                     "completed"
                 };
+                // The question's uuid is readable now that the turn's rows
+                // are on disk, and this is the last moment it can be had:
+                // the transcript is walked back from this turn's first
+                // answer, and the next turn would move that landmark.
+                let first = self.turn_first_assistant.take();
+                if let Some(path) = transcript_path(&self.cwd, &self.session_id) {
+                    if let Some(anchor) = anchor_for(&path, first.as_deref()) {
+                        out.push(HarnessEvent::TurnAnchor { anchor });
+                    }
+                }
                 self.turn_open = false;
+                self.expecting.store(false, Ordering::SeqCst);
                 out.push(HarnessEvent::TurnFinished {
                     status: status.into(),
                 });
@@ -513,6 +660,93 @@ impl Translator {
         }
         out
     }
+}
+
+/// Where the CLI keeps a session's transcript.
+///
+/// It is not announced: `memory_paths` on the `init` line would give the
+/// folder away, but it is null whenever auto-memory is off, which is how this
+/// bridge runs it (`settings_json`). So the path is rebuilt the way the CLI
+/// builds it — every character of the working directory that is not a letter
+/// or a digit becomes `-`, measured against real folders rather than assumed.
+/// A slug that does not resolve falls back to finding the file by name, since
+/// the session id is unique across projects and the rule is the CLI's to
+/// change.
+fn transcript_path(cwd: &str, session_id: &str) -> Option<PathBuf> {
+    if cwd.is_empty() || session_id.is_empty() {
+        return None;
+    }
+    let root = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude")))?;
+    let projects = root.join("projects");
+    let slug: String = cwd
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let name = format!("{session_id}.jsonl");
+    let direct = projects.join(&slug).join(&name);
+    if direct.exists() {
+        return Some(direct);
+    }
+    std::fs::read_dir(&projects).ok()?.flatten().find_map(|e| {
+        let p = e.path().join(&name);
+        p.exists().then_some(p)
+    })
+}
+
+/// The uuid of the question a turn answered, read out of the transcript.
+///
+/// The transcript is a tree, not a list: every row names its `parentUuid`,
+/// and a turn's rows hang off the question that started it. So the walk goes
+/// up from the turn's first answer until it reaches a `user` row — skipping
+/// the attachments the CLI threads in between, and skipping `user` rows that
+/// are tool results rather than anything a student typed.
+///
+/// With no answer to start from — an interrupted turn can produce none — the
+/// newest question in the file is taken instead. That is this turn's: the
+/// manager runs one at a time, and the file has just been written.
+fn anchor_for(path: &Path, first_assistant: Option<&str>) -> Option<String> {
+    struct Row {
+        parent: Option<String>,
+        question: bool,
+    }
+    let file = std::fs::File::open(path).ok()?;
+    let mut by_uuid: HashMap<String, Row> = HashMap::new();
+    let mut newest_question: Option<String> = None;
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let Some(uuid) = v.get("uuid").and_then(|u| u.as_str()) else {
+            continue;
+        };
+        let question = v.get("type").and_then(|t| t.as_str()) == Some("user")
+            && v.get("tool_use_result").is_none();
+        if question {
+            newest_question = Some(uuid.to_string());
+        }
+        by_uuid.insert(
+            uuid.to_string(),
+            Row {
+                parent: v.get("parentUuid").and_then(|p| p.as_str()).map(String::from),
+                question,
+            },
+        );
+    }
+    let Some(start) = first_assistant else {
+        return newest_question;
+    };
+    let mut at = start.to_string();
+    // Bounded by the file: a malformed parent chain must not loop forever.
+    for _ in 0..by_uuid.len() {
+        let row = by_uuid.get(&at)?;
+        if row.question {
+            return Some(at);
+        }
+        at = row.parent.clone()?;
+    }
+    None
 }
 
 fn str_of(v: &Value, key: &str) -> String {
@@ -558,6 +792,69 @@ mod tests {
     /// Replays a recorded `claude -p` session and checks the folded shape.
     /// The fixture is the real output of `claude 2.1.267` asked to `ls` the
     /// library and describe it, captured with the flags `spawn` uses.
+    /// A transcript in the shape the CLI writes one: a question, the
+    /// attachments it threads in after it, the answer, then a tool result
+    /// that is also a `user` row and must not be mistaken for a question.
+    fn transcript(dir: &Path) -> PathBuf {
+        let rows = [
+            r#"{"type":"user","uuid":"q1","parentUuid":null,"message":{"role":"user","content":"first"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"q1"}"#,
+            r#"{"type":"user","uuid":"q2","parentUuid":"a1","message":{"role":"user","content":"second"}}"#,
+            r#"{"type":"attachment","uuid":"at1","parentUuid":"q2"}"#,
+            r#"{"type":"attachment","uuid":"at2","parentUuid":"at1"}"#,
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"at2"}"#,
+            r#"{"type":"user","uuid":"tr1","parentUuid":"a2","tool_use_result":{"ok":true}}"#,
+            r#"{"type":"assistant","uuid":"a3","parentUuid":"tr1"}"#,
+        ];
+        let path = dir.join("session.jsonl");
+        std::fs::write(&path, rows.join("\n")).unwrap();
+        path
+    }
+
+    /// The question a turn answered is found by walking the transcript's
+    /// parent chain up from the turn's first answer — past the attachments
+    /// the CLI inserts, and never stopping on a tool result.
+    #[test]
+    fn the_anchor_is_the_question_the_answer_hangs_off() {
+        let dir = std::env::temp_dir().join(format!("oculus-anchor-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = transcript(&dir);
+
+        assert_eq!(anchor_for(&path, Some("a2")).as_deref(), Some("q2"));
+        assert_eq!(anchor_for(&path, Some("a1")).as_deref(), Some("q1"));
+        // A later answer in the same turn walks back through the tool result
+        // to the same question, not to the tool row.
+        assert_eq!(anchor_for(&path, Some("a3")).as_deref(), Some("q2"));
+        // An interrupted turn can produce no answer at all; the newest
+        // question in the file is this turn's.
+        assert_eq!(anchor_for(&path, None).as_deref(), Some("q2"));
+        // An answer the file has never heard of anchors nothing rather than
+        // guessing.
+        assert_eq!(anchor_for(&path, Some("nope")), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The transcript is filed under the working directory with every
+    /// character that is not a letter or a digit replaced — measured against
+    /// the CLI's own folders, including the double dash a dotfile produces.
+    #[test]
+    fn the_transcript_slug_flattens_everything_but_letters_and_digits() {
+        let dir = std::env::temp_dir().join(format!("oculus-slug-{}", std::process::id()));
+        let projects = dir.join("projects").join("-tmp-a-b--claude-c-d");
+        std::fs::create_dir_all(&projects).unwrap();
+        std::fs::write(projects.join("sess.jsonl"), "").unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &dir);
+
+        let found = transcript_path("/tmp/a b/.claude/c_d", "sess");
+        assert_eq!(found.as_deref(), Some(projects.join("sess.jsonl").as_path()));
+        // A session that is nowhere under `projects` is not invented.
+        assert_eq!(transcript_path("/tmp/a b/.claude/c_d", "gone"), None);
+
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn folds_a_recorded_session() {
         let raw = include_str!("../../fixtures/harness/claude-ls.ndjson");
@@ -602,5 +899,46 @@ mod tests {
         assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed"));
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::Usage { cost_usd: Some(_), .. })));
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::RateLimits { windows } if windows.len() == 2)));
+    }
+
+    /// A turn stopped mid-answer. The recording is a real one: the CLI sends
+    /// the half-written text as an ordinary `assistant` line, then closes the
+    /// turn with a `result` that calls itself an error and carries its own
+    /// diagnostic — `[ede_diagnostic] result_type=user …`. That string was
+    /// reaching the timeline as a red row every time stop was pressed, and
+    /// the zeroed usage on the same line was blanking the thread's numbers.
+    #[test]
+    fn a_stopped_turn_is_not_an_error() {
+        let raw = include_str!("../../fixtures/harness/claude-interrupt.ndjson");
+        let mut t = Translator::default();
+        let events: Vec<HarnessEvent> = raw
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .flat_map(|v| t.translate(&v))
+            .collect();
+
+        assert!(
+            !events.iter().any(|e| matches!(e, HarnessEvent::Error { .. })),
+            "the CLI's own diagnostic is not something the student did"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(e, HarnessEvent::Usage { .. })),
+            "an interrupted result reports zeros; folding them in blanks the meter"
+        );
+        // What the agent had already said is a row like any other, so it
+        // survives the turn ending and the reload after it.
+        let deltas: String = events
+            .iter()
+            .filter_map(|e| match e {
+                HarnessEvent::AssistantDelta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        let message = events.iter().find_map(|e| match e {
+            HarnessEvent::AssistantMessage { text } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(message.as_deref(), Some(deltas.trim()));
+        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted"));
     }
 }
