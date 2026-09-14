@@ -8,10 +8,8 @@ import {
   Play,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
-import { useTabStore } from "@/stores/tabStore";
 import {
   LECTURE_DOWNLOADED_EVENT,
   downloadLecture,
@@ -27,44 +25,57 @@ import {
   type LectureData,
 } from "@/lib/db";
 import { useSubject } from "@/layouts/SubjectLayout";
-import { PeekPanel } from "@/components/peek/PeekPanel";
-import { LecturePlayer } from "@/components/lectures/LecturePlayer";
-import { stopLecturePlayback } from "@/lib/lecturePlayback";
+import { useSidePanelStore } from "@/stores/sidePanelStore";
+import { useTabId } from "@/components/tabs/TabContext";
 import { recordRecent } from "@/lib/recents";
 import {
   fmtDuration,
   fmtLectureDate,
   progressLabel,
-  lecturePagePath,
+  LECTURES_CHANGED_EVENT,
 } from "@/lib/lectures";
 
 /**
- * Flat list of the subject's lectures. Selecting one opens the player in a
- * peek; the peek's expand button promotes it to a fully standalone page
+ * Flat list of the subject's lectures. Selecting one opens the player in the
+ * side panel; the panel's expand button promotes it to a fully standalone page
  * (`/subjects/:id/lecture`) in its own tab.
  */
 export default function SubjectLecturesPage() {
   const subject = useSubject();
   const [lectures, setLectures] = useState<Lecture[]>([]);
-  const [selectedLecture, setSelectedLecture] = useState<Lecture | null>(null);
+  // What is open lives in the panel, not here: the row highlight and the
+  // player are then the same fact, and closing the panel un-highlights the row
+  // without this page hearing about it.
+  const tabId = useTabId();
+  const openInPanel = useSidePanelStore((s) => s.open);
+  const syncPanel = useSidePanelStore((s) => s.sync);
+  const openItem = useSidePanelStore((s) => s.items[tabId]);
+  const selectedId = openItem?.kind === "lecture" ? openItem.lecture.id : null;
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const downloads = useLectureDownloads();
 
-  const navigate = useNavigate();
-  const addTab = useTabStore((s) => s.addTab);
-
   const refreshLectures = useCallback(async () => {
     const rows = await getLectures(subject.id);
     setLectures(rows);
-    // Update selected lecture if still in list
-    setSelectedLecture((prev) =>
-      prev ? (rows.find((r) => r.id === prev.id) ?? null) : null,
-    );
-  }, [subject.id]);
+    // Hand the panel the fresh row for whatever it has open, so a progress
+    // tick or a finished download reaches the player too.
+    const open = useSidePanelStore.getState().items[tabId];
+    if (open?.kind === "lecture") {
+      const fresh = rows.find((r) => r.id === open.lecture.id);
+      if (fresh) syncPanel(tabId, { kind: "lecture", lecture: fresh });
+    }
+  }, [subject.id, tabId, syncPanel]);
 
   useEffect(() => {
     refreshLectures();
+  }, [refreshLectures]);
+
+  // The panel's player has no list to call back into, so it says so here.
+  useEffect(() => {
+    const h = () => refreshLectures();
+    window.addEventListener(LECTURES_CHANGED_EVENT, h);
+    return () => window.removeEventListener(LECTURES_CHANGED_EVENT, h);
   }, [refreshLectures]);
 
   // A finished download (started here or in a player) lands in the DB before
@@ -97,16 +108,9 @@ export default function SubjectLecturesPage() {
   };
 
   const handleSelectLecture = (lec: Lecture) => {
-    setSelectedLecture(lec);
+    openInPanel({ kind: "lecture", lecture: lec });
     // Feeds the "Recently visited" row on the subject home.
     recordRecent(subject.id, { kind: "lecture", ref: lec.id, title: lec.title });
-  };
-
-  const openAsPage = () => {
-    if (!selectedLecture) return;
-    const to = lecturePagePath(selectedLecture);
-    addTab(to);
-    navigate(to);
   };
 
   return (
@@ -143,7 +147,7 @@ export default function SubjectLecturesPage() {
           ) : (
             <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">
               {lectures.map((lec) => {
-                const active = selectedLecture?.id === lec.id;
+                const active = selectedId === lec.id;
                 const pl = progressLabel(lec);
                 const prog = downloads.progress[lec.id];
                 const isDown = !lec.video_path && isDownloading(downloads, lec.id);
@@ -226,26 +230,6 @@ export default function SubjectLecturesPage() {
           )}
         </div>
       </div>
-
-      {/* Player peek — expand promotes the lecture to its own standalone tab. */}
-      {selectedLecture && (
-        <PeekPanel
-          key={selectedLecture.id}
-          title={selectedLecture.title}
-          onExpand={openAsPage}
-          onClose={() => {
-            // Closing the player is a stop; switching tabs is not.
-            stopLecturePlayback();
-            setSelectedLecture(null);
-          }}
-        >
-          <LecturePlayer
-            lecture={selectedLecture}
-            onRefresh={refreshLectures}
-            allowFullscreen={false}
-          />
-        </PeekPanel>
-      )}
     </>
   );
 }

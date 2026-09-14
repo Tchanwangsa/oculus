@@ -1,4 +1,5 @@
 import {
+  ChatsCircle,
   File,
   FileArchive,
   FileAudio,
@@ -16,6 +17,10 @@ import {
   FileVideo,
   FileXls,
   FileZip,
+  Megaphone,
+  PencilLine,
+  Rocket,
+  Stack,
   type Icon,
 } from "@phosphor-icons/react";
 
@@ -62,6 +67,29 @@ export function parsedMdRelPath(file: { filename: string; relative_path: string 
   if (e === "pdf") return file.relative_path.replace(/\.pdf$/i, ".md");
   if (OFFICE_EXTS.includes(e)) return `${file.relative_path}.md`;
   return null;
+}
+
+/**
+ * The icon a file wears in a list that mixes categories, matching the glyph its
+ * own subject tab uses — a page is a `FileText`, an announcement a `Megaphone`,
+ * a downloaded artefact whatever its extension says. Only downloads carry a
+ * meaningful extension, which is why `fileIconFor` is the fallback and not the
+ * rule.
+ */
+export function categoryIconFor(file: {
+  category: string | null;
+  filename: string;
+}): Icon {
+  switch (file.category) {
+    case "announcement": return Megaphone;
+    case "assignment": return PencilLine;
+    case "quiz": return Rocket;
+    case "ed": return ChatsCircle;
+    case "module": return Stack;
+    case "file":
+    case "image": return fileIconFor(file.filename);
+    default: return FileText;
+  }
 }
 
 /** Phosphor's per-format file icon, `File` when the extension has none. */

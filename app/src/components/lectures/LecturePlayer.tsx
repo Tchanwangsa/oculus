@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useBlocker } from "react-router-dom";
+import { useBlocker, useInRouterContext } from "react-router-dom";
 import {
   ArrowsIn,
   ArrowsOut,
@@ -33,6 +33,7 @@ import {
   isLecturePlaying,
   ownsPlayback,
   parkLectureVideos,
+  playbackClaim,
   stopLecturePlayback,
   syncLectureSources,
   videoForSource,
@@ -356,6 +357,45 @@ function StackDivider({
       />
     </div>
   );
+}
+
+/**
+ * Asks before a navigation walks away from a playing lecture.
+ *
+ * Switching tabs leaves the lecture playing behind a tab you can get back to.
+ * Navigating *this* tab somewhere else does not — the lecture would be playing
+ * with nothing on screen owning it — so that one asks first.
+ *
+ * The check is which tab is active at the moment of the navigation: the strip
+ * sets the destination tab active before it navigates, so a tab switch is
+ * already "some other tab" here, while a sidebar click from the lecture's own
+ * tab is still this one.
+ *
+ * Its own component so the player can mount it only where a router exists.
+ */
+function LeaveGuard() {
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      isLecturePlaying() &&
+      ownsPlayback(useTabStore.getState().activeId) &&
+      currentLocation.pathname + currentLocation.search !==
+        nextLocation.pathname + nextLocation.search,
+  );
+
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    confirmLeavingLecture(
+      () => {
+        stopLecturePlayback();
+        blocker.proceed();
+      },
+      // Either way the blocker has to be released, or the router stays stuck
+      // on a navigation nobody is going to answer twice.
+      () => blocker.reset(),
+    );
+  }, [blocker]);
+
+  return null;
 }
 
 interface LecturePlayerProps {
@@ -894,6 +934,11 @@ export function LecturePlayer({
     }
 
     const v = syncLectureSources(lecture, plan, activeTabId);
+    // Kept for the cleanup: parking is "put these back if they are still
+    // mine", never "put back whatever is out there". Another player may have
+    // taken them over in between — expanding the panel into a tab is exactly
+    // that — and parking those would black out a picture somebody is watching.
+    const claim = playbackClaim();
     if (!v) return;
     videoRef.current = v;
     setLeaderEl(v);
@@ -960,41 +1005,23 @@ export function LecturePlayer({
       videoRef.current = null;
       // Unmounting is a tab switch, not a stop: the elements go back to their
       // off-screen host and carry on. Closing the lecture is what stops them.
-      parkLectureVideos();
+      parkLectureVideos(claim);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lecture.id, urls[1], urls[2], layout, mainSource, activeTabId]);
 
   // ── Leaving ──────────────────────────────────────────────────────────────
 
-  // Switching tabs leaves the lecture playing behind a tab you can get back
-  // to. Navigating *this* tab somewhere else does not — the lecture would be
-  // playing with nothing on screen owning it — so that one asks first.
-  //
-  // The check is which tab is active at the moment of the navigation: the
-  // strip sets the destination tab active before it navigates, so a tab switch
-  // is already "some other tab" here, while a sidebar click from the lecture's
-  // own tab is still this one.
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      isLecturePlaying() &&
-      ownsPlayback(useTabStore.getState().activeId) &&
-      currentLocation.pathname + currentLocation.search !==
-        nextLocation.pathname + nextLocation.search,
-  );
-
-  useEffect(() => {
-    if (blocker.state !== "blocked") return;
-    confirmLeavingLecture(
-      () => {
-        stopLecturePlayback();
-        blocker.proceed();
-      },
-      // Either way the blocker has to be released, or the router stays stuck
-      // on a navigation nobody is going to answer twice.
-      () => blocker.reset(),
-    );
-  }, [blocker]);
+  // The guard is a child, and a conditional one, because `useBlocker` is only
+  // legal inside a router: the routers in this app are one per tab and live
+  // below the shell (`app/src/components/tabs/TabPane.tsx`), while the side
+  // panel is shell furniture mounted outside every one of them. Calling the
+  // hook here unconditionally threw "useBlocker must be used within a data
+  // router" the moment a lecture opened in the panel. It is also the right
+  // condition rather than a workaround: a panel player has no navigation that
+  // could unmount it — the panel stays put while the page behind it moves —
+  // so there is nothing there to guard against.
+  const inRouter = useInRouterContext();
 
   // Progress is written by the module, including while nothing is mounted;
   // the list this player sits in still wants to hear about it.
@@ -1026,6 +1053,8 @@ export function LecturePlayer({
         dock === "left" && "flex-row-reverse",
       )}
     >
+      {inRouter && <LeaveGuard />}
+
       {/* Video + controls stack */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
         {/* Video area — the controls live over the frame, YouTube-style */}

@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { usePeekStore } from "@/stores/peekStore";
+import { useSidePanelStore } from "@/stores/sidePanelStore";
 import { humanizeSlug } from "@/lib/format";
 import { isPdfBacked } from "@/lib/fileTypes";
-import { markFileAccessed, type DbFile } from "@/lib/db";
+import { getFileByRelativePath, markFileAccessed, type DbFile } from "@/lib/db";
 
-/** What the peek header shows: real filenames stay, slugs get prettified.
+/** What the panel header shows: real filenames stay, slugs get prettified.
  *  Takes the two columns it reads rather than a whole row, so the chat's
- *  `@` menu labels files the same way the peek panel does. */
+ *  `@` menu labels files the same way the side panel does. */
 export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
   return file.category === "file" || file.category === "image"
     ? file.filename
@@ -25,9 +25,9 @@ export function recordFileAccess(file: Pick<DbFile, "id">): void {
 
 /**
  * The one way any list row opens a file: PDFs, pages, announcements, images
- * and Office documents (rendered from their converted sibling PDF) peek
- * in-app; other binaries hand off to the system viewer since we can't render
- * them. Either way the access is recorded.
+ * and Office documents (rendered from their converted sibling PDF) open in
+ * the side panel; other binaries hand off to the system viewer since we can't
+ * render them. Either way the access is recorded.
  */
 export function openFileSmart(file: DbFile): void {
   recordFileAccess(file);
@@ -37,5 +37,36 @@ export function openFileSmart(file: DbFile): void {
     );
     return;
   }
-  usePeekStore.getState().openFile(file);
+  useSidePanelStore.getState().open({ kind: "file", file });
+}
+
+/**
+ * The shape of a path the agent can be talking about: the library paths it is
+ * given (`courses/<subject>/…`) and the ones it actually uses, which carry a
+ * `../` because every thread runs from `agents/` beside `courses/`.
+ *
+ * Matched on shape rather than resolved, so a timeline of a hundred tool rows
+ * costs no queries — the lookup happens when one is clicked.
+ */
+const LIBRARY_PATH = /^(?:\.\.\/)?(courses\/[^\s]+)$/;
+
+/** The library path inside an agent's tool argument, if that is what it is. */
+export function libraryPath(raw: string | null | undefined): string | null {
+  const m = raw ? LIBRARY_PATH.exec(raw.trim()) : null;
+  return m ? m[1] : null;
+}
+
+/**
+ * Opens a file the agent named. Falls back to the system viewer for anything
+ * the library knows nothing about — a path under `courses/` that has no row is
+ * a file on disk that never made it through a sync, and handing it to the OS
+ * is better than a click that does nothing.
+ */
+export function openLibraryPath(path: string): void {
+  getFileByRelativePath(path)
+    .then((file) => {
+      if (file) openFileSmart(file);
+      else invoke("open_course_file", { relativePath: path }).catch(console.error);
+    })
+    .catch(console.error);
 }

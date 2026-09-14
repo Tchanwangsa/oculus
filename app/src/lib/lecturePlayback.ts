@@ -92,6 +92,20 @@ let lastWritten = -1;
  * it or navigating it elsewhere is leaving the lecture, and asks first.
  */
 let ownerTab: number | null = null;
+/**
+ * Which mounted player the elements belong to, as a counter bumped on every
+ * claim.
+ *
+ * Two players can be mounted over the same lecture at once — the side panel is
+ * shell furniture and every tab's pane stays mounted behind the one in front —
+ * and handing a lecture from one to the other is a normal move: expanding the
+ * panel into its own tab mounts the page's player before the panel's is taken
+ * down. Without a token the one leaving parks the elements a beat *after* the
+ * new one adopted them, which leaves the picture off screen and playing: black
+ * frame, audio carrying on, controls counting up. A player parks only what is
+ * still its own.
+ */
+let claim = 0;
 
 /**
  * Where an element sits while it is not in a player. Off screen rather than
@@ -304,6 +318,7 @@ export function syncLectureSources(
   tabId: number,
 ): HTMLVideoElement | null {
   ownerTab = tabId;
+  claim++;
 
   const lectureChanged = current?.id !== lecture.id;
   // A different lecture takes the elements over, so the old one's position
@@ -352,6 +367,12 @@ export function syncLectureSources(
   return lead;
 }
 
+/** The claim the last `syncLectureSources` handed out. A player keeps its own
+ *  and gives it back when it parks, so a stale one parks nothing. */
+export function playbackClaim(): number {
+  return claim;
+}
+
 /** Is a lecture actually running right now (as opposed to loaded and paused)? */
 export function isLecturePlaying(): boolean {
   const v = leaderVideo();
@@ -368,8 +389,16 @@ export function ownsPlayback(tabId: number): boolean {
   return ownerTab === tabId;
 }
 
-/** Hand every element back to the off-screen host — still playing, if it was. */
-export function parkLectureVideos() {
+/**
+ * Hand every element back to the off-screen host — still playing, if it was.
+ *
+ * `forClaim` is a player parking its own: give it the claim the matching
+ * `syncLectureSources` returned and the call is a no-op once someone else has
+ * taken the elements over. Omitted, it parks whatever is out there, which is
+ * what closing a lecture wants.
+ */
+export function parkLectureVideos(forClaim?: number) {
+  if (forClaim != null && forClaim !== claim) return;
   if (!leaderVideo()) return;
   if (!isLecturePlaying()) void saveLectureProgress();
   for (const v of els.values()) parked().appendChild(v);

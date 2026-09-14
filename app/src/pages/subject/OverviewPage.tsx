@@ -297,7 +297,7 @@ function Section({
   );
 }
 
-/** Opens the file in the peek. */
+/** Opens the file in the side panel. */
 function FileLink({
   file, label, meta,
 }: {

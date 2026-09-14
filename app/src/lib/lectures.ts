@@ -96,7 +96,16 @@ export interface DlProgress {
   phase: string;
 }
 
-/** The standalone full-page player route (peek → expand). `t` titles the tab. */
-export function lecturePagePath(lec: Lecture): string {
+/** Fired when a player changes something the lecture list shows (progress,
+ *  a finished download). The panel's player has no list to call back into, so
+ *  it says so here and whichever list is mounted refreshes itself. */
+export const LECTURES_CHANGED_EVENT = "oculus:lectures-changed";
+
+/** The standalone full-page player route (panel → expand). `t` titles the tab.
+ *  Takes the three columns it reads rather than a whole row, so the ⌘K palette
+ *  can route to a lecture from its search hit. */
+export function lecturePagePath(
+  lec: Pick<Lecture, "id" | "subject_id" | "title">,
+): string {
   return `/subjects/${lec.subject_id}/lecture?id=${encodeURIComponent(lec.id)}&t=${encodeURIComponent(lec.title)}`;
 }

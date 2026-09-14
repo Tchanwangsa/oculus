@@ -94,7 +94,7 @@ The design direction is quiet and neutral: a dead-grey white palette (no warm
 or blue cast in the greys — anything else fights the accent), muted indigo
 `#5e6ad2` as the one colour, **Manrope for headings / Inter for everything
 else**, and Notion-style layout (sidebar subjects → per-subject underline tabs,
-peek panel for files, top tab strip).
+docked side panel for files and lectures, top tab strip).
 
 - **The shell frames a floating document.** The window ground is
   `background`; the sidebar and tab strip sit directly on it with no fill or
