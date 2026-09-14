@@ -1035,6 +1035,14 @@ export interface Lecture {
   progress_seconds: number;
   completed: number;
   synced_at: string;
+  /** The chaptering job's state: `null` (never run), `running`, `ready`,
+   *  `error` — the same vocabulary `files.parse_status` uses. */
+  chapter_status: string | null;
+  /** Stamped only by a terminal status. */
+  chaptered_at: string | null;
+  /** Why the last run failed; cleared on success. A status column cannot
+   *  carry a message, and the player has to be able to say what went wrong. */
+  chapter_error: string | null;
 }
 
 export interface LectureData {
@@ -1122,6 +1130,45 @@ export async function markLectureComplete(id: string): Promise<void> {
 export async function clearLectureTranscripts(): Promise<void> {
   const db = await getDb();
   await db.execute(`UPDATE lectures SET transcript_path = NULL`);
+}
+
+// ── Lecture chapters ──────────────────────────────────────────────────────────
+
+/**
+ * One row of `lecture_chapters` (migration 29), written by the chaptering job
+ * in `app/src-tauri/src/chapters.rs`.
+ *
+ * **There is no end.** A chapter runs until the next one starts, and the last
+ * until the lecture does — one fact in one column, derived by whoever reads
+ * it (`chapterSpans` in `app/src/lib/lectures.ts`).
+ */
+export interface Chapter {
+  lecture_id: string;
+  idx: number;
+  start_seconds: number;
+  title: string;
+  summary: string;
+}
+
+export async function getChapters(lectureId: string): Promise<Chapter[]> {
+  const db = await getDb();
+  return db.select<Chapter[]>(
+    `SELECT * FROM lecture_chapters WHERE lecture_id = $1 ORDER BY idx ASC`,
+    [lectureId],
+  );
+}
+
+/** The job's state for one lecture, read on its own: the player's `lecture`
+ *  prop comes from a list (or the side-panel store) that is not re-read when a
+ *  run lands, so the status cannot be taken from the row it was opened with. */
+export async function getChapterStatus(
+  lectureId: string,
+): Promise<{ chapter_status: string | null; chapter_error: string | null } | null> {
+  const db = await getDb();
+  const rows = await db.select<
+    { chapter_status: string | null; chapter_error: string | null }[]
+  >(`SELECT chapter_status, chapter_error FROM lectures WHERE id = $1`, [lectureId]);
+  return rows[0] ?? null;
 }
 
 // ── Calendar ──────────────────────────────────────────────────────────────────

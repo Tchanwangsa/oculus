@@ -132,6 +132,33 @@ export function findLectureChapters(lectureId: string, force = false): Promise<v
   return invoke("lecture_find_chapters", { lectureId, force });
 }
 
+/**
+ * Where each chapter ends.
+ *
+ * **Derived, never stored.** There is no `end_seconds` column: a chapter runs
+ * until the next one starts and the last until the lecture does, so the end is
+ * arithmetic on two facts that already exist. A stored end would be a second
+ * place for the same fact to be wrong — see docs/chapters.md.
+ *
+ * `duration` is the player's, which is the *element's* where one is loaded:
+ * Echo360's catalogue length runs a few seconds short of the file.
+ */
+export function chapterEnds(starts: number[], duration: number): number[] {
+  return starts.map((s, i) => Math.max(s, i + 1 < starts.length ? starts[i + 1] : duration));
+}
+
+/** Which chapter second `t` falls in, or -1 before the first one starts. */
+export function chapterAt(starts: number[], t: number): number {
+  let idx = -1;
+  for (let i = starts.length - 1; i >= 0; i--) {
+    if (t >= starts[i]) {
+      idx = i;
+      break;
+    }
+  }
+  return idx;
+}
+
 /** The standalone full-page player route (panel → expand). `t` titles the tab.
  *  Takes the three columns it reads rather than a whole row, so the ⌘K palette
  *  can route to a lecture from its search hit. */

@@ -43,11 +43,15 @@ import { useTabStore } from "@/stores/tabStore";
 import { confirmLeavingLecture } from "@/stores/leaveLectureStore";
 import {
   parseVtt,
+  chapterAt,
+  chapterEnds,
   fmtDuration,
   fmtTime,
   fmtLectureDate,
   type Cue,
 } from "@/lib/lectures";
+import { useLectureChapters } from "@/hooks/useLectureChapters";
+import type { ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
 import { useTranscriptDock } from "@/hooks/useTranscriptDock";
 import { PIP_CORNERS, useSourceLayout, type PipCorner } from "@/hooks/useSourceLayout";
 import { usePlayerPrefs } from "@/stores/playerPrefsStore";
@@ -102,12 +106,15 @@ function SeekBar({
   value,
   max,
   previewSrc,
+  chapters,
   onSeek,
 }: {
   value: number;
   max: number;
   /** Source for the hover thumbnail; `null` until the video is downloaded. */
   previewSrc: string | null;
+  /** Chapter boundaries, in seconds — notched into the track. */
+  chapters: number[];
   onSeek: (seconds: number) => void;
 }) {
   const pct = Math.min(100, Math.max(0, (value / max) * 100));
@@ -182,6 +189,21 @@ function SeekBar({
         )}
       >
         <div className="absolute h-full bg-brand" style={{ width: `${pct}%` }} />
+        {/* A notch, not a segmented bar: cutting the track into pieces costs
+            the rounded ends and the growing hover height that make this read
+            as one bar. Drawn in the scrim's own black so it shows against the
+            played fill and the unplayed track alike — the first boundary is
+            second 0, which is the left edge, so it is not drawn. */}
+        {chapters.map((t) =>
+          t > 0 && t < max ? (
+            <span
+              key={t}
+              aria-hidden
+              className="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-black/55"
+              style={{ left: `${(t / max) * 100}%` }}
+            />
+          ) : null,
+        )}
       </div>
       <div
         className={cn(
@@ -452,6 +474,7 @@ export function LecturePlayer({
   const muted = usePlayerPrefs((s) => s.muted);
   const captionsEnabled = usePlayerPrefs((s) => s.captionsEnabled);
   const transcriptVisible = usePlayerPrefs((s) => s.transcriptVisible);
+  const dockTab = usePlayerPrefs((s) => s.dockTab);
   const layoutPref = usePlayerPrefs((s) => s.layout);
   const mainPref = usePlayerPrefs((s) => s.mainSource);
   const setPrefs = usePlayerPrefs((s) => s.set);
@@ -596,6 +619,17 @@ export function LecturePlayer({
 
   /** Which frame has its source pill open, so it stays put while it is. */
   const [openSwitcher, setOpenSwitcher] = useState<SourceNum | null>(null);
+
+  // ── Chapters ─────────────────────────────────────────────────────────────
+
+  // Read from SQLite here rather than off the `lecture` row: in the side panel
+  // that row is a snapshot held by a store, and a run lands eight minutes after
+  // it was taken. The hook owns the refresh and the backend's own event.
+  const chapterState = useLectureChapters(lecture.id);
+  const chapterStarts = useMemo(
+    () => chapterState.chapters.map((c) => c.start_seconds),
+    [chapterState.chapters],
+  );
 
   // ── Transcript loading ───────────────────────────────────────────────────
 
@@ -806,15 +840,18 @@ export function LecturePlayer({
     }
   };
 
-  // What the transcript button does, so T does the same three-way: fetch the
-  // transcript if this lecture has never had one, parse it if it is on disk
-  // but not loaded, otherwise show or hide the panel.
+  // What the dock button does, so T does the same three-way: parse the
+  // transcript if it is on disk but not loaded, fetch it if this lecture has
+  // never had one *and* the dock would otherwise be empty, otherwise show or
+  // hide the panel.
   const toggleTranscript = () => {
-    if (!lecture.transcript_path) {
-      handleDownloadTranscript();
-    } else if (cues.length === 0) {
+    if (lecture.transcript_path && cues.length === 0) {
       loadTranscript(lecture.transcript_path);
+    } else if (!lecture.transcript_path && !hasChapterState) {
+      handleDownloadTranscript();
     } else {
+      // There is a dock either way — chapters are the other half of it, so a
+      // lecture with chapters and no transcript still has a panel to hide.
       setPrefs({ transcriptVisible: !transcriptVisible });
     }
   };
@@ -1033,10 +1070,65 @@ export function LecturePlayer({
 
   // ── Render ───────────────────────────────────────────────────────────────
 
-  // Mounted whenever there is a transcript, shown when the preference says so:
-  // the panel slides in and out, and a slide needs both ends on screen.
+  // Mounted whenever the dock has something to show, shown when the preference
+  // says so: the panel slides in and out, and a slide needs both ends on
+  // screen. Chapters count as something to show on their own — a run can be in
+  // flight, or have failed, on a lecture whose transcript is not on disk.
   const hasTranscript = cues.length > 0;
-  const showTranscript = transcriptVisible && hasTranscript;
+  const hasChapterState =
+    chapterState.chapters.length > 0 ||
+    chapterState.status === "running" ||
+    chapterState.status === "error";
+  const hasDock = hasTranscript || hasChapterState;
+  const showDock = transcriptVisible && hasDock;
+
+  /** The chapter the playhead is in, and how far through it we are. */
+  const activeChapterIdx = chapterAt(chapterStarts, currentTime);
+  const activeChapter =
+    activeChapterIdx >= 0 ? chapterState.chapters[activeChapterIdx] : null;
+  const activeChapterEnd = activeChapter
+    ? chapterEnds(chapterStarts, duration)[activeChapterIdx]
+    : 0;
+  const chapterPct = activeChapter
+    ? Math.min(
+        100,
+        Math.max(
+          0,
+          ((currentTime - activeChapter.start_seconds) /
+            Math.max(1, activeChapterEnd - activeChapter.start_seconds)) *
+            100,
+        ),
+      )
+    : 0;
+
+  // One memoised bag, because `TranscriptPanel` is memo'd against a player that
+  // re-renders on every `timeupdate` — see the prop's own comment there.
+  const chaptersProps: ChaptersPanelProps = useMemo(
+    () => ({
+      chapters: chapterState.chapters,
+      activeIdx: activeChapterIdx,
+      duration,
+      status: chapterState.status,
+      error: chapterState.error,
+      since: chapterState.since,
+      busy: chapterState.busy,
+      downloaded: !!lecture.video_path,
+      onSeek: handleCueSeek,
+      onFind: chapterState.find,
+    }),
+    [
+      chapterState.chapters,
+      chapterState.status,
+      chapterState.error,
+      chapterState.since,
+      chapterState.busy,
+      chapterState.find,
+      activeChapterIdx,
+      duration,
+      lecture.video_path,
+      handleCueSeek,
+    ],
+  );
 
   return (
     // The dock side is a flex direction: `*-reverse` puts the panel before the
@@ -1220,10 +1312,29 @@ export function LecturePlayer({
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/85 via-black/45 to-transparent" />
 
             <div className="relative px-3 pb-1">
+              {/* Where you are in *this* chapter, not in the lecture — the
+                  scrub bar below already says that. It lives inside the scrim,
+                  so it goes when the bar does. White on the frame, like every
+                  other mark down here. */}
+              {activeChapter && (
+                <div className="flex select-none items-center gap-2.5 pb-1">
+                  <span className="min-w-0 shrink truncate text-[11.5px] font-medium text-white/90">
+                    {activeChapter.title}
+                  </span>
+                  <span className="relative h-px min-w-6 flex-1 overflow-hidden rounded-full bg-white/25">
+                    <span
+                      className="absolute inset-y-0 left-0 bg-white/80"
+                      style={{ width: `${chapterPct}%` }}
+                    />
+                  </span>
+                </div>
+              )}
+
               <SeekBar
                 value={Math.min(currentTime, duration)}
                 max={duration || 1}
                 previewSrc={mainSrc}
+                chapters={chapterStarts}
                 onSeek={(v) => {
                   setCurrentTime(v);
                   if (videoRef.current) videoRef.current.currentTime = v;
@@ -1301,25 +1412,25 @@ export function LecturePlayer({
                   />
                 )}
 
+                {/* The dock, not only the transcript: with chapters and no
+                    transcript on disk there is still a panel to show or hide,
+                    and the label says which of the two it is holding. */}
                 <ControlButton
                   label={
-                    lecture.transcript_path
-                      ? transcriptVisible
-                        ? "Hide transcript (T)"
-                        : "Show transcript (T)"
-                      : "Download transcript"
+                    !hasDock
+                      ? "Download transcript"
+                      : hasTranscript
+                        ? showDock
+                          ? "Hide transcript (T)"
+                          : "Show transcript (T)"
+                        : showDock
+                          ? "Hide chapters (T)"
+                          : "Show chapters (T)"
                   }
-                  active={!!lecture.transcript_path && transcriptVisible}
+                  active={showDock}
                   onClick={toggleTranscript}
                 >
-                  <FileText
-                    size={16}
-                    weight={
-                      lecture.transcript_path && transcriptVisible
-                        ? "fill"
-                        : "regular"
-                    }
-                  />
+                  <FileText size={16} weight={showDock ? "fill" : "regular"} />
                 </ControlButton>
 
                 <ControlButton
@@ -1356,18 +1467,20 @@ export function LecturePlayer({
         )}
       </div>
 
-      {/* Transcript panel — dragged to any edge, dragged wider from its divider */}
-      {hasTranscript && (
+      {/* The dock — chapters and transcript, dragged to any edge, dragged
+          wider from its divider */}
+      {hasDock && (
         <>
-          {showTranscript && (
-            <DockResizeHandle dock={dock} onPointerDown={startResize} />
-          )}
+          {showDock && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
           <TranscriptPanel
             cues={cues}
             activeCueIdx={activeCueIdx}
+            tab={dockTab}
+            onTabChange={(t) => setPrefs({ dockTab: t })}
+            chapters={chaptersProps}
             dock={dock}
             size={size}
-            open={showTranscript}
+            open={showDock}
             resizing={resizing}
             onSeek={handleCueSeek}
             onHeaderPointerDown={startDockDrag}

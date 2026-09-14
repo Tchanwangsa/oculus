@@ -1,8 +1,11 @@
 import { create } from "zustand";
 import type { SourceNum } from "@/lib/db";
 
-/** Which edge of the player the transcript panel is attached to. */
+/** Which edge of the player the docked panel is attached to. */
 export type Dock = "bottom" | "top" | "left" | "right";
+
+/** Which of the dock's two readings of the recording is in front. */
+export type DockTab = "chapters" | "transcript";
 
 export const isVertical = (dock: Dock) => dock === "bottom" || dock === "top";
 
@@ -83,6 +86,10 @@ export const clampOffset = (v: number, size: number) =>
  */
 export interface PlayerPrefs {
   dock: Dock;
+  /** The tab the dock opens on. A habit like the side it is docked to, not a
+   *  property of one recording: someone who reads chapters reads them for
+   *  every lecture, and re-picking the tab per lecture is the friction. */
+  dockTab: DockTab;
   height: number;
   width: number;
   speed: number;
@@ -108,6 +115,9 @@ export interface PlayerPrefs {
 
 const DEFAULTS: PlayerPrefs = {
   dock: "bottom",
+  // Transcript: every downloaded lecture has one, and chapters are a job that
+  // has to be asked for. Opening on a tab that is usually empty is worse.
+  dockTab: "transcript",
   height: DEFAULT_H,
   width: DEFAULT_W,
   speed: 1,
@@ -154,6 +164,7 @@ function load(): PlayerPrefs {
         p.dock === "bottom" || p.dock === "top" || p.dock === "left" || p.dock === "right"
           ? p.dock
           : DEFAULTS.dock,
+      dockTab: p.dockTab === "chapters" ? "chapters" : DEFAULTS.dockTab,
       height: num(p.height, DEFAULTS.height),
       width: num(p.width, DEFAULTS.width),
       speed:

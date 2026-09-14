@@ -11,8 +11,8 @@ writes the named chapters to the database. `oculus lecture candidates` is the
 first; `oculus lecture chapters` is the whole pipeline, and the app runs that
 same job through the `lecture_find_chapters` command. Which agent, model and
 reasoning level it runs on is configured in Settings → AI — see [A configured
-job](#a-configured-job). The player does not draw the chapters yet — see [What
-is not built](#what-is-not-built).
+job](#a-configured-job). The player reads them back three ways — see [Three
+readings in the player](#three-readings-in-the-player).
 
 ## Where
 
@@ -27,7 +27,13 @@ is not built](#what-is-not-built).
 | The app's trigger, its event, and the startup sweep | `chapters::app` in `app/src-tauri/src/chapters.rs` |
 | Which agent and model the job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
 | The Settings → AI row that picks them | `app/src/pages/settings/AiPage.tsx` |
-| The frontend binding and the event name | `app/src/lib/lectures.ts` |
+| The frontend binding, the event name, the derived ends | `app/src/lib/lectures.ts` |
+| Reading the rows and the job's state in the app | `getChapters` / `getChapterStatus` in `app/src/lib/db.ts` |
+| The player's chapter state, and the event it listens on | `app/src/hooks/useLectureChapters.ts` |
+| The chapter list, and every state it has | `app/src/components/lectures/ChaptersPanel.tsx` |
+| The dock's tab strip | `app/src/components/lectures/TranscriptPanel.tsx` |
+| The chapter strip and the scrub-bar ticks | `app/src/components/lectures/LecturePlayer.tsx` |
+| Which tab the dock opens on | `dockTab` in `app/src/stores/playerPrefsStore.ts` |
 | The one-turn headless run both share | `run_once` in `app/src-tauri/src/harness/mod.rs` |
 | ffmpeg lookup (bundled, dev copy, or system) | `app/src-tauri/src/echo360.rs` |
 | The frontend's VTT parser, whose timing half is mirrored | `app/src/lib/lectures.ts` |
@@ -213,8 +219,10 @@ Migration 29: `lecture_chapters` (`lecture_id`, `idx`, `start_seconds`,
 
 The frames stay on disk after a run — ~30 KB each, regenerable in seconds, and
 overwritten by the next run. Deleting them would be tidier by a megabyte and
-would throw away the one thing Stage 4 might want a picture of: a chapter's
-opening slide is already sitting at `frames/<start_seconds>.jpg`.
+would leave the run with nothing to show for itself afterwards: a chapter's
+opening slide sits at `frames/<start_seconds>.jpg`, which is what makes a
+boundary set checkable by eye. The player does not draw them — see [what is not
+built](#what-is-not-built).
 
 ## A configured job
 
@@ -247,12 +255,113 @@ and the message on a failure.
   refused up front — the only check worth making the caller wait for, since two
   runs would spend two subscription turns and race each other's write.
 
+## Three readings in the player
+
+Chapters are three different questions, so they are drawn three times over
+(`app/src/components/lectures/LecturePlayer.tsx`, and see
+[frontend.md](./frontend.md) for the player's own shape).
+
+**The dock is two tabs.** What was the transcript panel's header is now a
+`ViewTabs` strip — *Chapters*, *Transcript* — sitting on the border it already
+had, with the `DotsSixVertical` and the drag-to-dock gesture untouched. The
+tabs stop the pointerdown from reaching the header: `startDockDrag` captures
+the pointer on the element it fires from, which retargets the pointerup onto
+the header, and a click needs both ends on one target — without that the tab
+would never register one. Everything around the tabs still drags. There is no
+"In this video" heading over them; the dock is 200px wide at its narrowest and
+its subject is never in doubt. The Transcript tab is only offered when there
+are cues, since a tab that could only ever be empty is not a tab.
+
+**The list follows playback**
+(`app/src/components/lectures/ChaptersPanel.tsx`): every chapter collapsed to
+its title and length, the current one expanded with its summary, so the prose
+beside the video is about what is being said now. Clicking one seeks to its
+start. It deliberately does **not** reuse the transcript's follow machinery —
+that code is wound around a virtualizer and earns its two-stage handover and
+countdown ring on ~2500 rows, where twelve fit the panel with room over. The
+current card is brought into view with `scrollIntoView({ block: "nearest" })`
+and nothing else: no pill, no window, no ring. Coming back from the Chapters
+tab does count as reopening the transcript, though, because that list is
+unmounted while chapters are in front and would otherwise return scrolled to
+the top with its cue index unchanged.
+
+**A chapter's end is derived, in the reader.** `chapterEnds` in
+`app/src/lib/lectures.ts` is the whole of it — the next chapter's start, or the
+lecture's duration for the last. It is given the *player's* duration, which is
+the element's where a file is loaded rather than the catalogue's.
+
+**The strip and the ticks answer "how much of this bit is left".** Above the
+scrub bar, inside the controls scrim, the chapter's name and a hairline that
+fills across that chapter's span — not the lecture's, which the scrub bar
+already says. It lives in the scrim, so it fades with the control bar.
+Boundaries are notched into the `SeekBar` track as a 2px cut in the scrim's own
+black, which reads against the played fill and the unplayed track alike; a
+segmented bar was the alternative and costs the rounded ends and the growing
+hover height that make it read as one bar. Second 0 is the left edge, so it is
+not drawn. Those colours are fixed rather than semantic on purpose — the bar
+sits on the frame, where `background` is whatever the lecturer put on the
+slide.
+
+**Which tab is in front is a player preference**, `dockTab` beside the dock's
+side and size in `playerPrefsStore` — a habit like the side it is docked to,
+not a property of one recording. It defaults to the transcript: every
+downloaded lecture has one, and chapters have to be asked for.
+
+### Every state is a real one
+
+The panel never shows a control that does nothing, so the tab has five states
+and no placeholder among them:
+
+- **Not downloaded.** Chaptering watches the recording, so the tab says the
+  file has to be there. The download button is already on the frame and on the
+  control bar; this state does not grow a third.
+- **Nothing yet.** A **Find chapters** button, and what it costs: 8–11
+  minutes.
+- **`running`.** A spinner in `brand` — the accent the app spends on work in
+  flight — and a clock counting *up*. There is no intermediate progress to
+  report between the ffmpeg pass and the agent's one turn, and a bar filling
+  towards an estimate reaches the end and keeps waiting, which is exactly what
+  hung looks like. A run *this session* started has its start time in a
+  module-level map, because the player unmounts on every tab switch and the job
+  outlives it by eight minutes; a run already in flight when the app started
+  has no start time anywhere — `chaptered_at` is stamped by a terminal status
+  only — and is shown without a clock rather than with a wrong one.
+- **`error`.** `chapter_error` verbatim, because it is the agent's own
+  failure, and a retry.
+- **Chapters.** The list, with **Regenerate** in a footer. A regenerate that
+  fails leaves the chapters that were already there (`store::save_chapters` is
+  one transaction), so that failure is a line *beside* them rather than in
+  place of them.
+
+**Nothing is hand-editable.** Chapters are derived data an agent writes, like
+`pages` and `parse_status`, so the only two affordances are Find chapters and
+Regenerate — there is no boundary to drag and no title to type.
+
+**The button is disabled while a run is in flight, not apologetic after the
+fact.** Rust refuses a second call with "that lecture is already being
+chaptered", and an error message is the wrong place to learn that a button was
+never going to work.
+
+**The job's state is read from SQLite, not from the `lectures` row the player
+was handed.** In the side panel that row is a snapshot held by a store and in a
+list it is whatever the last `getLectures` returned; neither is re-read when a
+run lands eight minutes later. `useLectureChapters` owns the read, listens for
+`lecture-chapters`, and re-reads on it.
+
 ## What is not built
 
-Stage 4 does not exist.
+The stages are done; these are the things deliberately left out.
 
-- **No UI.** The lecture player still shows a transcript and a plain scrub bar
-  (`app/src/pages/subject/LecturePage.tsx`, see
-  [frontend.md](./frontend.md)). Nothing reads `lecture_chapters`, and nothing
-  calls `lecture_find_chapters` — the command is the door Stage 4's button
-  opens.
+- **Boundaries are not hand-editable.** See above: a chapter set is
+  regenerable derived data, and an edited one would be the only version of it
+  nothing could reproduce — plus a `save_chapters` that deletes and re-inserts
+  would silently eat the edit on the next run.
+- **No thumbnails.** Each chapter's opening frame is already on disk at
+  `lectures/<id>/frames/<start_seconds>.jpg`, and the list does not show it. A
+  strip of slide images in a 200px dock is a grid of grey rectangles, and the
+  frames are a run's leavings rather than a guarantee — a lecture chaptered by
+  the CLI on another machine, or one whose folder has been cleaned, has none.
+- **Chapters are not retrieval rows.** They are not embedded and not searched:
+  `pages` is the index ([retrieval.md](./retrieval.md)), and a chapter title is
+  a label on a span of video rather than a passage to match a question
+  against.

@@ -18,8 +18,13 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { isVertical, type Dock } from "@/stores/playerPrefsStore";
+import { ViewTabs, type ViewTab } from "@/components/ui/ViewTabs";
+import { isVertical, type Dock, type DockTab } from "@/stores/playerPrefsStore";
 import { fmtTime, type Cue } from "@/lib/lectures";
+import {
+  ChaptersPanel,
+  type ChaptersPanelProps,
+} from "@/components/lectures/ChaptersPanel";
 
 /** Border on the panel's inner edge — the side that faces the video. */
 const INNER_BORDER: Record<Dock, string> = {
@@ -41,9 +46,29 @@ const IDLE_RESYNC_MS = 8000;
 /** The countdown ring drawn on the pill, in px. Hairline, like every border. */
 const RING_STROKE = 1.5;
 
+/** The dock's two readings of the recording. No "In this video" label over
+ *  them: the panel can be 200px wide and its subject is never in doubt. */
+const TABS: ReadonlyArray<ViewTab<DockTab>> = [
+  { value: "chapters", label: "Chapters" },
+  { value: "transcript", label: "Transcript" },
+];
+
 interface TranscriptPanelProps {
   cues: Cue[];
   activeCueIdx: number;
+  /** Which tab is in front — a player preference, not a per-lecture state. */
+  tab: DockTab;
+  onTabChange: (tab: DockTab) => void;
+  /**
+   * Everything the Chapters tab draws, as one memoised bag.
+   *
+   * A bag rather than eight loose props, and a value rather than a rendered
+   * node: this component is `memo`'d against a player that re-renders four
+   * times a second on `timeupdate`, and a fresh element on every one of those
+   * would throw the memo away — which is the whole reason the virtualised list
+   * is not re-rendering constantly next to a decoding video.
+   */
+  chapters: ChaptersPanelProps;
   dock: Dock;
   size: number;
   /** Shown or hidden — the panel stays mounted either way and slides. */
@@ -76,6 +101,9 @@ interface TranscriptPanelProps {
 export const TranscriptPanel = memo(function TranscriptPanel({
   cues,
   activeCueIdx,
+  tab,
+  onTabChange,
+  chapters,
   dock,
   size,
   open,
@@ -103,6 +131,14 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   // the panel snaps. Only rapid toggling made it look like it worked — the
   // second toggle inherited the class the first one turned on.
   const sliding = !resizing;
+
+  // A lecture can have chapters and no transcript on disk, and a tab that
+  // could only ever be empty is not a tab — so the strip shows what this
+  // recording actually has. The preference survives it: the tab comes back the
+  // moment a transcript does.
+  const hasTranscript = cues.length > 0;
+  const tabs = hasTranscript ? TABS : TABS.filter((t) => t.value === "chapters");
+  const activeTab: DockTab = hasTranscript ? tab : "chapters";
 
   const listRef = useRef<HTMLDivElement>(null);
   /** Next follow-scroll jumps straight to the cue, band or no band. */
@@ -224,9 +260,12 @@ export const TranscriptPanel = memo(function TranscriptPanel({
 
   // Reopening lands on the playing cue rather than wherever the list was when
   // it closed — and only once the box has finished growing, since a scroll
-  // computed against a collapsing height ends up nowhere useful.
+  // computed against a collapsing height ends up nowhere useful. Coming back
+  // from the Chapters tab counts as reopening: the list is unmounted while that
+  // tab is in front, so it returns scrolled to the top with the cue index
+  // unchanged, which is the one case the follow effect below cannot see.
   useEffect(() => {
-    if (!open) return;
+    if (!open || activeTab !== "transcript") return;
     snapRef.current = true;
     const t = setTimeout(() => {
       if (followingRef.current && followIdx >= 0) {
@@ -236,7 +275,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
     return () => clearTimeout(t);
     // Only on open: the follow effect above owns every other reason to scroll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, activeTab]);
 
   // Arm the snap whenever following resumes, so Back to live and play both
   // land on the cue rather than easing towards it. A nudge only means anything
@@ -429,210 +468,231 @@ export const TranscriptPanel = memo(function TranscriptPanel({
       )}
     >
       <div style={inner} className="flex h-full flex-col min-h-0 min-w-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <div
-              onPointerDown={onHeaderPointerDown}
-              className="px-2 h-8 flex items-center gap-1 border-b border-border shrink-0 cursor-grab active:cursor-grabbing select-none text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <DotsSixVertical size={12} className="opacity-50" />
-              <span className="text-[11px] font-semibold text-foreground">
-                Transcript
+        {/* The header is the drag handle *and* the tab strip, so the tabs have
+            to keep the pointerdown to themselves: `startDockDrag` captures the
+            pointer on the element it fires from, which retargets the pointerup
+            onto the header — and a click needs both to share a target, so the
+            tab would never register one. Everything around them still drags,
+            and the dots is the handle that says so. */}
+        <div
+          onPointerDown={onHeaderPointerDown}
+          className="px-2 h-9 flex items-center gap-1.5 border-b border-border shrink-0 cursor-grab active:cursor-grabbing select-none"
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* Lifted onto the tabs' text, which sits above their own centre
+                  by half of the underline's padding. */}
+              <span className="mb-2 flex items-center text-muted-foreground hover:text-foreground transition-colors">
+                <DotsSixVertical size={12} className="opacity-50" />
               </span>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent>Drag to dock left, right, top or bottom</TooltipContent>
-        </Tooltip>
-
-        <div className="px-1.5 pt-1.5 shrink-0">
-          <div className="relative">
-            <MagnifyingGlass
-              size={12}
-              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+            </TooltipTrigger>
+            <TooltipContent>Drag to dock left, right, top or bottom</TooltipContent>
+          </Tooltip>
+          <div className="min-w-0" onPointerDown={(e) => e.stopPropagation()}>
+            <ViewTabs
+              tabs={tabs}
+              value={activeTab}
+              onChange={onTabChange}
+              className="gap-3"
             />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setQuery("");
-                  e.currentTarget.blur();
-                }
+          </div>
+        </div>
+
+        {activeTab === "chapters" ? (
+          <ChaptersPanel {...chapters} />
+        ) : (
+          <>
+          <div className="px-1.5 pt-1.5 shrink-0">
+            <div className="relative">
+              <MagnifyingGlass
+                size={12}
+                className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setQuery("");
+                    e.currentTarget.blur();
+                  }
+                }}
+                placeholder="Search transcript"
+                spellCheck={false}
+                className={cn(
+                  "w-full h-6 pl-6 rounded-full bg-surface text-[11px] text-foreground",
+                  "placeholder:text-muted-foreground focus:outline-none",
+                  "focus:ring-1 focus:ring-brand/40 transition-shadow",
+                  searching ? "pr-14" : "pr-2",
+                )}
+              />
+              {searching && (
+                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                  <span className="text-[10px] tabular-nums text-muted-foreground">
+                    {rows.length}
+                  </span>
+                  <button
+                    onClick={() => setQuery("")}
+                    aria-label="Clear search"
+                    className="p-0.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  >
+                    <X size={10} weight="bold" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="relative flex-1 min-h-0">
+            <div
+              ref={listRef}
+              // Intent, not the `scroll` event: our own follow-scroll fires scroll
+              // events too, and telling the two apart after the fact is guesswork.
+              // A wheel, a touch drag, or a press on the scrollbar (which lands on
+              // the scroller itself, never on a cue) is unambiguously the user.
+              onWheel={(e) => {
+                if (e.deltaY !== 0) handleUserScroll();
               }}
-              placeholder="Search transcript"
-              spellCheck={false}
+              onTouchMove={handleUserScroll}
+              onScroll={handleScroll}
+              onPointerDown={(e) => {
+                if (e.target === e.currentTarget) handleUserScroll();
+              }}
+              className="absolute inset-0 overflow-y-auto px-1.5 py-2"
+            >
+              <div
+                style={{ height: virtualizer.getTotalSize(), position: "relative" }}
+              >
+                {items.map((item) => {
+                  const cueIdx = rows[item.index];
+                  const cue = cues[cueIdx];
+                  const active = cueIdx === activeCueIdx;
+                  return (
+                    <button
+                      key={item.key}
+                      data-index={item.index}
+                      ref={measure}
+                      onClick={() => onSeek(cue.start)}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        transform: `translateY(${item.start}px)`,
+                      }}
+                      className={cn(
+                        "text-left text-[11px] px-2 py-1 rounded flex gap-2 items-start",
+                        active
+                          ? "bg-brand/12 text-brand"
+                          : "text-muted-foreground hover:text-foreground hover:bg-surface",
+                      )}
+                    >
+                      <span className="tabular-nums text-[10px] shrink-0 pt-px w-10 opacity-60">
+                        {fmtTime(Math.floor(cue.start))}
+                      </span>
+                      <span className="flex-1">
+                        <Highlight text={cue.text} needle={needle} />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Scroll fades. A gradient rather than a `backdrop-filter`: a blur
+                layer over a scrolling virtualised list that sits next to a
+                decoding video is exactly the compositing the player spends its
+                effort avoiding.
+
+                Two things keep a gradient from looking like a cut. It holds
+                solid `background` for its first few pixels rather than letting
+                text through immediately — the top one butts against the opaque
+                search row, and half-visible text a pixel under solid white
+                reads as clipped, not faded — then takes the rest of its height
+                to dissolve, so the hold never thickens into a white band. And
+                it ends at `background/0`, not `transparent`: `transparent` is
+                *transparent black*, so interpolating to it drags the middle of
+                the ramp grey and leaves a dirty smear across the text. */}
+            <div
+              aria-hidden
               className={cn(
-                "w-full h-6 pl-6 rounded-full bg-surface text-[11px] text-foreground",
-                "placeholder:text-muted-foreground focus:outline-none",
-                "focus:ring-1 focus:ring-brand/40 transition-shadow",
-                searching ? "pr-14" : "pr-2",
+                "pointer-events-none absolute inset-x-0 top-0 h-10 z-10",
+                "bg-gradient-to-b from-background from-15%",
+                "via-background/50 via-50% to-background/0",
+                "transition-opacity duration-150",
+                edges.above ? "opacity-100" : "opacity-0",
               )}
             />
-            {searching && (
-              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-                <span className="text-[10px] tabular-nums text-muted-foreground">
-                  {rows.length}
-                </span>
-                <button
-                  onClick={() => setQuery("")}
-                  aria-label="Clear search"
-                  className="p-0.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                >
-                  <X size={10} weight="bold" />
-                </button>
+            <div
+              aria-hidden
+              className={cn(
+                "pointer-events-none absolute inset-x-0 bottom-0 h-10 z-10",
+                "bg-gradient-to-t from-background from-15%",
+                "via-background/50 via-50% to-background/0",
+                "transition-opacity duration-150",
+                edges.below ? "opacity-100" : "opacity-0",
+              )}
+            />
+
+            {searching && rows.length === 0 && (
+              <div className="pointer-events-none absolute inset-x-0 top-6 text-center text-[11px] text-muted-foreground">
+                No matches
               </div>
             )}
-          </div>
-        </div>
 
-        <div className="relative flex-1 min-h-0">
-          <div
-            ref={listRef}
-            // Intent, not the `scroll` event: our own follow-scroll fires scroll
-            // events too, and telling the two apart after the fact is guesswork.
-            // A wheel, a touch drag, or a press on the scrollbar (which lands on
-            // the scroller itself, never on a cue) is unambiguously the user.
-            onWheel={(e) => {
-              if (e.deltaY !== 0) handleUserScroll();
-            }}
-            onTouchMove={handleUserScroll}
-            onScroll={handleScroll}
-            onPointerDown={(e) => {
-              if (e.target === e.currentTarget) handleUserScroll();
-            }}
-            className="absolute inset-0 overflow-y-auto px-1.5 py-2"
-          >
+            {/* Scrolled away from the playing cue — offer the way back. */}
             <div
-              style={{ height: virtualizer.getTotalSize(), position: "relative" }}
-            >
-              {items.map((item) => {
-                const cueIdx = rows[item.index];
-                const cue = cues[cueIdx];
-                const active = cueIdx === activeCueIdx;
-                return (
-                  <button
-                    key={item.key}
-                    data-index={item.index}
-                    ref={measure}
-                    onClick={() => onSeek(cue.start)}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${item.start}px)`,
-                    }}
-                    className={cn(
-                      "text-left text-[11px] px-2 py-1 rounded flex gap-2 items-start",
-                      active
-                        ? "bg-brand/12 text-brand"
-                        : "text-muted-foreground hover:text-foreground hover:bg-surface",
-                    )}
-                  >
-                    <span className="tabular-nums text-[10px] shrink-0 pt-px w-10 opacity-60">
-                      {fmtTime(Math.floor(cue.start))}
-                    </span>
-                    <span className="flex-1">
-                      <Highlight text={cue.text} needle={needle} />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Scroll fades. A gradient rather than a `backdrop-filter`: a blur
-              layer over a scrolling virtualised list that sits next to a
-              decoding video is exactly the compositing the player spends its
-              effort avoiding.
-
-              Two things keep a gradient from looking like a cut. It holds
-              solid `background` for its first few pixels rather than letting
-              text through immediately — the top one butts against the opaque
-              search row, and half-visible text a pixel under solid white
-              reads as clipped, not faded — then takes the rest of its height
-              to dissolve, so the hold never thickens into a white band. And
-              it ends at `background/0`, not `transparent`: `transparent` is
-              *transparent black*, so interpolating to it drags the middle of
-              the ramp grey and leaves a dirty smear across the text. */}
-          <div
-            aria-hidden
-            className={cn(
-              "pointer-events-none absolute inset-x-0 top-0 h-10 z-10",
-              "bg-gradient-to-b from-background from-15%",
-              "via-background/50 via-50% to-background/0",
-              "transition-opacity duration-150",
-              edges.above ? "opacity-100" : "opacity-0",
-            )}
-          />
-          <div
-            aria-hidden
-            className={cn(
-              "pointer-events-none absolute inset-x-0 bottom-0 h-10 z-10",
-              "bg-gradient-to-t from-background from-15%",
-              "via-background/50 via-50% to-background/0",
-              "transition-opacity duration-150",
-              edges.below ? "opacity-100" : "opacity-0",
-            )}
-          />
-
-          {searching && rows.length === 0 && (
-            <div className="pointer-events-none absolute inset-x-0 top-6 text-center text-[11px] text-muted-foreground">
-              No matches
-            </div>
-          )}
-
-          {/* Scrolled away from the playing cue — offer the way back. */}
-          <div
-            className={cn(
-              "pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center transition-opacity duration-200",
-              showBackToLive ? "opacity-100" : "opacity-0",
-            )}
-          >
-            <button
-              ref={pillRef}
-              onClick={onBackToLive}
-              tabIndex={showBackToLive ? 0 : -1}
-              aria-hidden={!showBackToLive}
               className={cn(
-                "pointer-events-auto relative h-6 pl-2 pr-2.5 rounded-full flex items-center gap-1",
-                "bg-brand text-brand-foreground text-[11px] font-medium",
-                "shadow-md shadow-black/15 hover:bg-brand-hover transition-colors",
-                !showBackToLive && "pointer-events-none",
+                "pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center transition-opacity duration-200",
+                showBackToLive ? "opacity-100" : "opacity-0",
               )}
             >
-              {/* Time left before the list re-syncs on its own — the outline
-                  drains over the eight seconds, so the pill going bare is the
-                  warning that it is about to jump back. */}
-              {pill.w > 0 && (
-                <svg
-                  aria-hidden
-                  viewBox={`0 0 ${pill.w} ${pill.h}`}
-                  className="pointer-events-none absolute inset-0 h-full w-full text-brand-foreground/70"
-                >
-                  <rect
-                    ref={ringRef}
-                    x={RING_STROKE / 2}
-                    y={RING_STROKE / 2}
-                    width={ringW}
-                    height={ringH}
-                    rx={ringH / 2}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={RING_STROKE}
-                    strokeDasharray={ringLen}
-                  />
-                </svg>
-              )}
-              {liveAbove ? (
-                <ArrowLineUp size={11} weight="bold" />
-              ) : (
-                <ArrowLineDown size={11} weight="bold" />
-              )}
-              Back to live
-            </button>
+              <button
+                ref={pillRef}
+                onClick={onBackToLive}
+                tabIndex={showBackToLive ? 0 : -1}
+                aria-hidden={!showBackToLive}
+                className={cn(
+                  "pointer-events-auto relative h-6 pl-2 pr-2.5 rounded-full flex items-center gap-1",
+                  "bg-brand text-brand-foreground text-[11px] font-medium",
+                  "shadow-md shadow-black/15 hover:bg-brand-hover transition-colors",
+                  !showBackToLive && "pointer-events-none",
+                )}
+              >
+                {/* Time left before the list re-syncs on its own — the outline
+                    drains over the eight seconds, so the pill going bare is the
+                    warning that it is about to jump back. */}
+                {pill.w > 0 && (
+                  <svg
+                    aria-hidden
+                    viewBox={`0 0 ${pill.w} ${pill.h}`}
+                    className="pointer-events-none absolute inset-0 h-full w-full text-brand-foreground/70"
+                  >
+                    <rect
+                      ref={ringRef}
+                      x={RING_STROKE / 2}
+                      y={RING_STROKE / 2}
+                      width={ringW}
+                      height={ringH}
+                      rx={ringH / 2}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={RING_STROKE}
+                      strokeDasharray={ringLen}
+                    />
+                  </svg>
+                )}
+                {liveAbove ? (
+                  <ArrowLineUp size={11} weight="bold" />
+                ) : (
+                  <ArrowLineDown size={11} weight="bold" />
+                )}
+                Back to live
+              </button>
+            </div>
           </div>
-        </div>
+          </>
+        )}
       </div>
     </div>
   );
