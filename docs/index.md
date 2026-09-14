@@ -23,6 +23,7 @@ live in the root `CLAUDE.md`, not here.
 | [harness.md](./harness.md) | Chat as a CLI agent: the Claude Code and Codex bridges, containment, the timeline |
 | [llm.md](./llm.md) | The dormant BYOK layer: provider config, keychain keys, streaming, spend limits |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
+| [projects.md](./projects.md) | Assignments broken into tasks: the board, and the CLI the agent plans through |
 | [frontend.md](./frontend.md) | Routes, layouts, stores, hooks, the UI system |
 | [cli.md](./cli.md) | The `oculus` binary — headless sync from a terminal |
 | [cli-reference.md](./cli-reference.md) | Every command and flag — generated from the binary, not hand-kept |
@@ -43,11 +44,19 @@ live in the root `CLAUDE.md`, not here.
 ## Status honesty
 
 Built: Canvas SSO + sync, Ed Discussion sync, Echo360 download + player, the
-two-tier PDF pipeline, page-image retrieval, the chat agent over it (BYOK:
-local Ollama, OpenRouter, OpenCode Go, or any OpenAI-compatible URL), and an
-in-app browser — external links open as tabs in Oculus's own tab strip,
-signed in to Canvas. When a
-doc or UI string implies more than this, the doc is wrong — fix it.
+two-tier PDF pipeline, page-image retrieval, chat as a CLI agent over it
+(Claude Code or Codex, driven as a subprocess — see
+[harness.md](./harness.md)), projects: assignments broken into tasks, on a
+board the agent can write through the CLI ([projects.md](./projects.md)), and
+an in-app browser — external links open as tabs in Oculus's own tab strip,
+signed in to Canvas. When a doc or UI string implies more than this, the doc is
+wrong — fix it.
+
+Dormant rather than built: the **BYOK API layer** — provider config, keychain
+keys, streaming, spend limits — which the CLI-agent bridges replaced. Nothing
+routes to it and it is the planned third bridge, so it is described in
+[llm.md](./llm.md) in the present tense; that is a description of code that
+exists, not of a feature you can use.
 
 Removed: **automations and the Inbox** — the trigger/condition/action canvas
 that delivered sync digests. It worked, but it was a detour from the core, so

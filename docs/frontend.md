@@ -10,16 +10,19 @@ this page is the structure.
 | --- | --- |
 | Router + event bridge | `app/src/App.tsx` |
 | Shell: sidebar + top tab strip | `app/src/layouts/AppLayout.tsx`, `app/src/components/sidebar/`, `app/src/components/tabs/TopTabBar.tsx` |
-| App menu (⌘T / ⌘W and friends) | `app/src-tauri/src/menu.rs` |
+| App menu (⌘K / ⌘T / ⌘W and friends) | `app/src-tauri/src/menu.rs` |
+| ⌘K palette (search + go to) | `app/src/components/palette/CommandPalette.tsx`, `app/src/stores/paletteStore.ts` |
 | Per-subject layout (underline tabs) | `app/src/layouts/SubjectLayout.tsx` |
 | Subject tab pages | `app/src/pages/subject/` |
 | Chat (a CLI agent's thread list, timeline, composer) | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/harnessStore.ts`, `app/src/lib/harness.ts` |
 | Calendar (month / week / upcoming) | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/`, `app/src/lib/calendar.ts` |
+| Projects (index, one board, a subject's tab) | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/subject/ProjectsPage.tsx`, `app/src/components/projects/`, `app/src/stores/projectsStore.ts`, `app/src/lib/projects.ts` |
+| Overlap packing, shared by the week grid and the project timeline | `app/src/lib/lanes.ts` |
 | Provider/model pickers (settings + composer) | `app/src/components/llm/` |
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
 | Parse backend, memory budget + sidecar health | `app/src/pages/settings/LibraryPage.tsx` |
-| Peek panel (file/lecture preview) | `app/src/components/peek/` |
+| Side panel (file/lecture preview) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser (route, tab mirror, API) | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/stores/browserStore.ts`, `app/src/lib/browser.ts`, `app/src-tauri/src/browser.rs` |
 | Viewers | `app/src/components/files/PDFViewer.tsx`, `app/src/components/files/FileViewer.tsx`, `app/src/components/lectures/LecturePlayer.tsx` |
 | shadcn components (source, editable) | `app/src/components/ui/` |
@@ -30,12 +33,20 @@ this page is the structure.
 
 ## Routes
 
-`createHashRouter` in `app/src/App.tsx`: `/chat`, `/calendar`, `/subjects`,
-`/subjects/:subjectId` (SubjectLayout → overview / modules / downloads /
-lectures / announcements / assignments / discussion), `/subjects/:subjectId/file`
-and `/lecture` (peek promoted to a full Notion-style page, outside
-SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
-(`/lectures`, a subject's `files` tab) redirect.
+`createHashRouter` in `app/src/App.tsx`: `/chat`, `/calendar`, `/projects` and
+`/projects/:projectId`, `/subjects`, `/subjects/:subjectId` (SubjectLayout →
+overview / modules / downloads / lectures / announcements / assignments /
+discussion / projects), `/subjects/:subjectId/file` and `/lecture` (the side
+panel promoted to a full Notion-style page, outside SubjectLayout on purpose),
+`/sync`, and `/settings/*`. Legacy routes (`/lectures`, a subject's `files`
+tab) redirect.
+
+A project lives at the top level rather than under its subject even when it has
+one, because it can have none: the subject's Projects tab and the index are two
+filtered views of one list, and both link to the same `/projects/:projectId`.
+Its name rides in the route's query (`?n=`, `projectHref`) for the tab strip's
+sake — `tabInfo` titles a tab from the path alone and has no project list to
+look one up in, the same trade `/lecture` makes with `?t=`.
 
 ## How it connects
 
@@ -63,7 +74,29 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
 - In the app it is the **frontend** that owns scrape-table writes (the Rust
   engine only emits events); the CLI writes the same rows itself via
   `app/src-tauri/src/store.rs`. Change a table's shape and both writers must
-  move together, plus the migration in `app/src-tauri/src/lib.rs`.
+  move together, plus the migration in `app/src-tauri/src/lib.rs`. The
+  `projects` tables are the same pair, one layer up:
+  `app/src/lib/projects.ts` in the app, `app/src-tauri/src/projects.rs`
+  headless ([projects.md](./projects.md)).
+- **A project write refreshes through an event, not through the store.** Every
+  write in `app/src/lib/projects.ts` fires `PROJECTS_UPDATED_EVENT` on
+  `window`; `projectsStore`'s write wrappers deliberately do not re-read, and a
+  component showing project data subscribes to that event and calls `reload` —
+  the contract the calendar already has with `CALENDAR_UPDATED_EVENT`.
+  Re-reading in the wrappers *as well* cost one drag two task reads plus a list
+  read and let the two paths land out of order, but the real reason is that
+  there is a second writer with no access to this store at all: the chat agent
+  runs `oculus project` / `oculus task` in its own process. `useBackendEvents`
+  watches the harness stream for a finished tool call whose command names one
+  of those and fires the very same event, so an agent's write and a click
+  arrive by one door and nothing can work for one and not the other.
+- **`packLanes` (`app/src/lib/lanes.ts`) is shared by the week grid and the
+  project timeline.** It came out of
+  `app/src/components/calendar/WeekView.tsx` when the timeline needed the same
+  overlap packing, and it is generic over the item rather than typed to
+  `CalEvent` because the two callers measure a span in different units — a
+  class in milliseconds, a task bar in pixels — and the packing never needs to
+  know which.
 - **`sync_runs` is the only sync clock.** A subject's `last_synced_at` is not
   stored — `getSubjects` in `app/src/lib/db.ts` (and the CLI's
   `store::subjects`) derives it from the latest *completed* run whose
@@ -86,6 +119,16 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   card. The bar's track is inset from both ends (`::-webkit-scrollbar-track`)
   so the thumb stops clear of the card's rounded corners instead of being
   clipped into a stub.
+- **`MD_COMPONENTS` is sized for a document; chat overrides it in the
+  cascade.** One markdown renderer serves the file viewer, the calendar popover
+  and the chat timeline (`app/src/components/markdown/MdComponents.tsx`), and
+  its sizes are baked in as utilities. A reply is a smaller register than a
+  lecture page, so the timeline wraps its renderer in `.chat-md` and
+  `app/src/index.css` scales the type down under that class alone. That block
+  is the one rule in the file that is deliberately **unlayered** — layer order
+  beats specificity, so the same rules inside `@layer base` would lose to the
+  very utilities they exist to override. Base *resets* still belong in the
+  layer; this is the inverse case.
 - `TopTabBar`'s tabs are **uniform and fixed-width, Chrome-style**: every tab
   is `TAB_W` however long its title, and only once the strip is full do they
   shrink together to share it, down to `TAB_MIN_W` before it scrolls. The
@@ -109,18 +152,67 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   `ProviderMark.tsx` beside them — and `SubjectSelect.tsx`, which scopes the
   thread to one subject or leaves it library-wide. `@` in the textarea opens a
   file menu narrowed to that subject and writes the picked file's library path
-  into the message; nothing is read or attached in the frontend. See
-  [harness.md](./harness.md#the-model-picker) and
-  [subject scope and `@`](./harness.md#subject-scope-and-).
-- Files and lectures open in the **peek panel** (`peekStore` +
-  `app/src/components/peek/PeekPanel.tsx`); "expand" navigates to the
-  full-page route. The top tab strip is `tabStore` +
+  into the message; nothing is read or attached in the frontend. A message
+  typed while the agent is working is **queued by Rust**, not sent — the box
+  keeps taking input and grows a stop button beside its send — and it is
+  drawn as a dashed bubble at the end of the thread until it goes out. See
+  [harness.md](./harness.md#the-model-picker),
+  [subject scope and `@`](./harness.md#subject-scope-and-) and
+  [one turn at a time](./harness.md#one-turn-at-a-time).
+- Files and lectures open in the **side panel** (`sidePanelStore` +
+  `app/src/components/panel/SidePanel.tsx`); "expand" navigates to the
+  full-page route. It is **docked, not overlaid**: `AppLayout`'s content card
+  is a flex row with the pane stack on the left and the panel against its
+  right edge, so the page beside it is genuinely narrower. That is what keeps
+  the in-app browser honest — `BrowserPage` measures its own slot and re-places
+  the native webview when the slot resizes, where an overlay could only ever
+  trip the "covered" check and hide it. ⌥⌘S folds the panel away, after ⌘B for
+  the sidebar and ⌥⌘B for the chat's conversations column; all three test
+  `e.code`, because ⌥ rewrites the character the key produces on macOS. The
+  frame stays mounted at zero width when nothing is open, so opening and
+  closing animate as a width transition rather than a mount (nothing can
+  animate a mount); the contents lag the store by that one animation so a
+  closing panel still has something to slide out, and they are pinned to the
+  panel's right edge at its rest width so the wipe costs no reflow inside.
+  The grip is `ResizeHandle`, a zero-width flex sibling *outside* the panel —
+  it survives the fold, so dragging it back out is the second way in — and
+  `useResizablePanel` takes a `side`, since a right-docked panel widens as the
+  pointer moves left.
+  The panel's *contents* are per tab and its *size* is not: each tab keeps
+  what it opened and switching tabs swaps the contents, while dragging it
+  wider in one tab widens it everywhere. `open()` takes no tab id on purpose —
+  background panes are `inert` (see `app/src/components/tabs/TabPane.tsx`), so
+  a click can only come from the tab in front, which is what lets every list
+  row in the app call `openFileSmart` with nothing but a file. A list
+  re-fetching a row it has open uses `sync()` instead, which does name its tab
+  and no-ops unless that tab still holds the same item. The top tab strip is `tabStore` +
   `app/src/components/tabs/TopTabBar.tsx`, Notion-style. It replaces the
   native title bar, so the strip and the empty space after the last tab carry
   `data-tauri-drag-region` to keep the window movable — which only works
   because `app/src-tauri/capabilities/default.json` grants
   `core:window:allow-start-dragging`; `core:default` does not include it, and
   without it the attribute silently does nothing.
+- **The ⌘K palette searches titles, not pages.** `CommandPalette.tsx` matches
+  subjects, files, lectures and the app's own routes, from SQLite, on every
+  keystroke — `searchLibraryFiles` / `searchLibraryLectures` in
+  `app/src/lib/db.ts`. It deliberately does *not* reach the semantic index:
+  that is an embedding round-trip through the sidecar
+  ([retrieval.md](./retrieval.md)) and belongs to a question you ask Chat, not
+  to a field you are still typing in. The two searches share one matching
+  rule — every typed word must appear somewhere in the haystack, in any order,
+  so "algorithms graph" finds `graph-algorithms.pdf` — and the haystack
+  flattens `-`/`_` to spaces and appends the subject code, because a file is
+  on disk as a slug but reads as a title (`humanizeSlug`) and "comp30026
+  workshop" should be one query rather than a filter plus a query. Ties break
+  towards this term's coursework and then towards what was opened last, which
+  is what makes the empty field a list of where you just were. Enter goes
+  there in the current tab and ⌘↵ in a new one, the rule the sidebar's Recent
+  rows already follow; a file opens as its **full page**, not in the side
+  panel, because the panel closes itself the moment the route is not its
+  subject's.
+  The store exists only because the two ways in are far apart: the palette
+  hears the menu event itself, and the sidebar's Search row is the visible
+  handle that teaches the shortcut.
 - **The sidebar's Recent group is the router's trail, not the strip's.**
   `app/src/stores/recentTabsStore.ts` records a path on every navigation —
   from the same effect in `TopTabBar` that tracks the active tab, the one
@@ -167,9 +259,11 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   page rounds its own bottom corners to the card's inner radius, since the
   card cannot clip it.
 - The calendar reads its own tables and never the scraper: `loadCalendar` in
-  `app/src/lib/calendar.ts` pulls `calendar_events` plus `lectures` in one go
-  and the page filters in memory, so month and week paging is arithmetic rather
-  than queries. See [calendar.md](./calendar.md) for where the rows come from.
+  `app/src/lib/calendar.ts` pulls `calendar_events`, `lectures`, `local_events`
+  and the open `project_tasks` in one go and the page filters in memory, so
+  month and week paging is arithmetic rather than queries. See
+  [calendar.md](./calendar.md) for where the rows come from and why the tasks
+  are read live instead of copied.
 - **Tables are full-bleed, with their own header and footer.** `SyncPage`
   gives its body no padding: `SyncHistoryTable` and `PipelineTable`
   (`app/src/components/sync/`) each own a `h-full` column — a fixed column
@@ -211,12 +305,13 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   front both arrows stay enabled and drive the page's own history through
   Rust instead — what a native page has ahead of it isn't knowable from
   outside.
-- **Tab shortcuts are menu items, not key handlers.** macOS hands the menu
-  bar every ⌘-key before a webview sees it, so ⌘T (new tab) and ⌘W (close
-  tab) live in `app/src-tauri/src/menu.rs` and reach `TopTabBar` as
-  `menu-new-tab` / `menu-close-tab` events. That routing is a feature: they
-  work while a browser tab's native page holds focus and the app's own
-  webview is receiving no keys at all. It is also why the menu is built by
+- **Window shortcuts are menu items, not key handlers.** macOS hands the menu
+  bar every ⌘-key before a webview sees it, so ⌘T (new tab), ⌘W (close tab)
+  and ⌘K (the palette) live in `app/src-tauri/src/menu.rs` and reach the
+  frontend as `menu-new-tab` / `menu-close-tab` / `menu-search` events. That
+  routing is a feature: they work while a browser tab's native page holds
+  focus and the app's own webview is receiving no keys at all — which for the
+  palette is the point, since ⌘K is how you get back out of a browser tab. It is also why the menu is built by
   hand — Tauri's default spends ⌘W on Close Window, which moves to ⇧⌘W here
   — and why the Edit submenu must stay: without it ⌘C/⌘V stop working in
   every text field.
@@ -310,12 +405,15 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   *not* `display: none`, which is where a browser feels entitled to stop
   playback) on unmount, so a lecture keeps playing while you are in another tab
   and picks up on screen where it actually is when you come back — expanding
-  the peek into its own tab included. This is a DOM node in the visible webview, not a
+  the side panel into its own tab included. This is a DOM node in the visible webview, not a
   hidden WebView; the suspension problem that keeps scraping in Rust does not
   apply. Because the element outlives the player, so does the progress writing:
   the module saves every 5s of playback and immediately on pause, seek, end and
   `pagehide`, then fires `LECTURE_PROGRESS_EVENT` for mounted lists to refresh
-  on. **Playback belongs to a tab.** The module records which tab the
+  on. The side panel's player has no list to call back into, so its
+  `onRefresh` fires `LECTURES_CHANGED_EVENT` (`app/src/lib/lectures.ts`) and
+  whichever list is mounted re-fetches — the same shape, one level up.
+  **Playback belongs to a tab.** The module records which tab the
   player was mounted in, and that is what separates "switched away" from
   "left": going to another tab leaves the lecture playing behind a tab you can
   return to, while closing that tab or navigating it elsewhere would leave it
@@ -326,7 +424,9 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   tells a tab switch from a departure by whether the tab that owns playback is
   still the active one when the navigation starts (the strip activates the
   destination tab *before* it navigates). A paused lecture never prompts, and
-  the peek's own close button is an outright stop.
+  the side panel's own close button is an outright stop — which is why the
+  stop hangs off that control and not off an unmount effect, since the panel
+  unmounts its body whenever another tab comes forward.
 - **Two streams, one lecture, one clock.** A capture can be a Presenter screen
   *and* a room camera ([sync.md](./sync.md)), so `lecturePlayback.ts` keeps one
   element **per source** and nominates one of them the **leader**: it carries
@@ -383,7 +483,7 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   until it is on disk, since hiding them would mean the feature only ever
   appears to someone who already found the download somewhere else.
 - **The two-frame geometry is fractions of the video area, not pixels**
-  (`app/src/hooks/useSourceLayout.ts`) — the player is a peek panel one moment
+  (`app/src/hooks/useSourceLayout.ts`) — the player is a side panel one moment
   and a fullscreen overlay the next, and an inset pinned at "320px from the
   left" means something different in each. The PIP's height is never stored:
   the box carries `aspect-ratio`, read from the inset picture's own
@@ -392,7 +492,10 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   kept right in three places. A fraction is not a size, though, so the width
   also has a floor in pixels (160×90, the height reaching the width through
   that same aspect) applied where the area is measured: the same 26% is a
-  legible inset over a fullscreen lecture and a postage stamp in a peek panel.
+  legible inset over a fullscreen lecture and a postage stamp in the side
+  panel. Docking the panel needed no new case here for exactly that reason: a
+  docked width is just another area size, and the pixel floor already covers
+  it.
   The cap still wins on an area narrower than the floor itself. The inset's
   four resize handles fade with the control bar rather than on frame hover
   alone — white pips left on the picture after the bar has gone read as
@@ -430,9 +533,11 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   overlay, so the furniture comes back on a still-fullscreen window; leaving
   the window's (green button, ⌃⌘F — heard through `onResized`) leaves both.
   Entering the window's on its own does *not* raise the overlay. It is
-  **off in the peek panel**
-  (`allowFullscreen={false}`) — a peek is a panel over a page that stays
-  mounted behind it; expand promotes the lecture to its own tab first.
+  **off in the side panel**
+  (`allowFullscreen={false}`) — the panel is furniture beside a page that
+  stays mounted, and an element-fullscreen player inside it would have to
+  escape a Radix portal to do anything; expand promotes the lecture to its own
+  tab first.
 - **The player's furniture moves out of the way of the slide.** Captions are
   a draggable overlay (`app/src/components/lectures/CaptionOverlay.tsx`)
   because a lecture slide usually has text where a bottom-centred caption
@@ -558,5 +663,5 @@ SubjectLayout on purpose), `/sync`, and `/settings/*`. Legacy routes
   and raw Canvas `/courses/…/files/<id>` / `/pages/<slug>` URLs against the
   subject's `files` rows (by `canvas_id`, path, or `source_url` — the scrape
   records the slug a page was fetched under, since Canvas keeps serving a
-  renamed page's old URL) and opens the local copy in the same peek; only
+  renamed page's old URL) and opens the local copy in the same panel; only
   unresolvable links open externally, marked with an arrow-square-out icon.
