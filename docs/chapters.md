@@ -8,9 +8,11 @@ recording cut at its real topic boundaries, each one named.
 Two halves are built: a **detector** that finds the moments worth cutting at,
 and a **naming job** that drives a CLI coding agent over those moments and
 writes the named chapters to the database. `oculus lecture candidates` is the
-first; `oculus lecture chapters` is the whole pipeline. The app does not
-trigger either yet and the player does not draw them — see
-[What is not built](#what-is-not-built).
+first; `oculus lecture chapters` is the whole pipeline, and the app runs that
+same job through the `lecture_find_chapters` command. Which agent, model and
+reasoning level it runs on is configured in Settings → AI — see [A configured
+job](#a-configured-job). The player does not draw the chapters yet — see [What
+is not built](#what-is-not-built).
 
 ## Where
 
@@ -20,7 +22,12 @@ trigger either yet and the player does not draw them — see
 | The prompt, the reply parser, the validator | `app/src-tauri/src/chapters.rs` |
 | Writing the rows and the job's status | `app/src-tauri/src/store.rs` |
 | `lecture_chapters` + the three `lectures` columns (migration 29) | `app/src-tauri/src/lib.rs` |
+| The job itself — detect, grab, ask, validate, write | `run` in `app/src-tauri/src/chapters.rs` |
 | `oculus lecture candidates`, `oculus lecture chapters` | `app/src-tauri/src/bin/oculus.rs` |
+| The app's trigger, its event, and the startup sweep | `chapters::app` in `app/src-tauri/src/chapters.rs` |
+| Which agent and model the job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
+| The Settings → AI row that picks them | `app/src/pages/settings/AiPage.tsx` |
+| The frontend binding and the event name | `app/src/lib/lectures.ts` |
 | The one-turn headless run both share | `run_once` in `app/src-tauri/src/harness/mod.rs` |
 | ffmpeg lookup (bundled, dev copy, or system) | `app/src-tauri/src/echo360.rs` |
 | The frontend's VTT parser, whose timing half is mirrored | `app/src/lib/lectures.ts` |
@@ -189,9 +196,11 @@ Migration 29: `lecture_chapters` (`lecture_id`, `idx`, `start_seconds`,
   `files.parse_status` (migration 3); only a terminal status stamps
   `chaptered_at`. `chapter_error` carries the failure message, because a
   status column cannot and the player has to be able to say what went wrong.
-  It is cleared on success. A run killed mid-turn leaves `running` behind with
-  no `chaptered_at`, which is the same stale-status shape the parse pipeline
-  has and the same thing Stage 3 will have to sweep.
+  It is cleared on success. A run killed mid-turn would leave `running` behind
+  with no `chaptered_at` — the same stale-status shape the parse pipeline has —
+  so `store::reconcile_chapter_status` sweeps it back to NULL at startup, next
+  to the sweep `harness::app::reconcile` makes over threads. Without it one
+  crash leaves the lecture claiming a job is in flight forever.
 - Writing goes through `store::save_chapters`, one transaction that deletes the
   old set and inserts the new one, so a regenerate that fails partway leaves
   the chapters that were already there. `store::set_chapter_status` is a
@@ -207,17 +216,43 @@ overwritten by the next run. Deleting them would be tidier by a megabyte and
 would throw away the one thing Stage 4 might want a picture of: a chapter's
 opening slide is already sitting at `frames/<start_seconds>.jpg`.
 
+## A configured job
+
+Nothing about which agent runs this is hardcoded any more. The job's provider,
+model and reasoning level come from the per-job model registry
+([harness.md](./harness.md#per-job-models)) — one `settings` row, one
+`ModelPicker` row in Settings → AI — and both doors read the same value:
+`oculus lecture chapters` uses it when no flag says otherwise, and
+`--provider` / `--model` / `--effort` override it for that one run. Out of the
+box it is Codex on `gpt-5.6-luna` at `xhigh`: a long look at fifty slide frames
+and an hour of transcript is exactly what a reasoning level is for.
+
+**The app's door is `lecture_find_chapters`.** It resolves the selection, runs
+the *same* `chapters::run` the CLI does — there is one job, not two that drift
+— and returns as soon as the run is claimed, because the turn takes eight to
+eleven minutes and nothing can wait on that. Progress is the `chapter_status`
+column, claimed before the ffmpeg pass rather than before the agent turn, since
+detection is fifteen seconds a student can see happening. The end arrives as
+its own event, `lecture-chapters`, carrying the lecture, `ready` or `error`,
+and the message on a failure.
+
+- **A dedicated event, not `lectures-changed`.** That one fires on every
+  playback-progress save, so a result eight minutes in the making would be
+  indistinguishable from a scrub.
+- **Not the harness event stream either.** A headless run reports on thread id
+  0, so the hop `useBackendEvents` makes for `oculus project` writes
+  ([projects.md](./projects.md)) does not apply: the app started this job, so
+  it already knows whose it is and when it ended.
+- **One run per lecture.** A second call while `chapter_status` is `running` is
+  refused up front — the only check worth making the caller wait for, since two
+  runs would spend two subscription turns and race each other's write.
+
 ## What is not built
 
-Stages 3 and 4 do not exist.
+Stage 4 does not exist.
 
-- **No trigger in the app.** Nothing runs the job from the lecture page or
-  after a sync; the CLI is the only door.
-- **No model configuration.** The command's defaults (`codex`,
-  `gpt-5.6-luna`, `xhigh`) are literals in its `clap` struct. Which provider
-  runs which job, at what reasoning level, belongs in a settings registry
-  shared with every other model-backed job — see [harness.md](./harness.md) —
-  and no such registry exists yet.
 - **No UI.** The lecture player still shows a transcript and a plain scrub bar
   (`app/src/pages/subject/LecturePage.tsx`, see
-  [frontend.md](./frontend.md)). Nothing reads `lecture_chapters`.
+  [frontend.md](./frontend.md)). Nothing reads `lecture_chapters`, and nothing
+  calls `lecture_find_chapters` — the command is the door Stage 4's button
+  opens.

@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+
 import type { Lecture, SourceNum } from "@/lib/db";
 
 // ── VTT parsing ───────────────────────────────────────────────────────────────
@@ -100,6 +102,35 @@ export interface DlProgress {
  *  a finished download). The panel's player has no list to call back into, so
  *  it says so here and whichever list is mounted refreshes itself. */
 export const LECTURES_CHANGED_EVENT = "oculus:lectures-changed";
+
+// ── Chapters ─────────────────────────────────────────────────────────────────
+
+/** Rust's own event (`chapters::app::LECTURE_CHAPTERS_EVENT`), not a window
+ *  one: a chaptering run ends in the backend. It is separate from
+ *  `LECTURES_CHANGED_EVENT` because that one fires on every playback-progress
+ *  save, and a result eight minutes in the making would be lost in it. */
+export const LECTURE_CHAPTERS_EVENT = "lecture-chapters";
+
+/** What the event carries: which lecture, how it ended, and why if it failed.
+ *  `status` is the `chapter_status` column's own vocabulary. */
+export interface ChapterRunFinished {
+  lectureId: string;
+  status: "ready" | "error";
+  chapters: number;
+  error: string | null;
+}
+
+/**
+ * Chapter a recording with the agent the `lectureChapters` job is configured
+ * with (Settings → AI), the same job `oculus lecture chapters` runs.
+ *
+ * Returns as soon as the run is claimed — it takes eight to eleven minutes, so
+ * nothing waits on it. While it runs the lecture's `chapter_status` is
+ * `running`; the end arrives as `LECTURE_CHAPTERS_EVENT`.
+ */
+export function findLectureChapters(lectureId: string, force = false): Promise<void> {
+  return invoke("lecture_find_chapters", { lectureId, force });
+}
 
 /** The standalone full-page player route (panel → expand). `t` titles the tab.
  *  Takes the three columns it reads rather than a whole row, so the ⌘K palette

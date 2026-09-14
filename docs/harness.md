@@ -29,7 +29,8 @@ old chat page and store are gone.
 | Live state, event folding | `app/src/stores/harnessStore.ts` |
 | Page, thread list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` |
 | The `@` menu's candidate files | `searchMentionFiles` in `app/src/lib/db.ts` |
-| Health in Settings → AI | `app/src/pages/settings/AiPage.tsx` |
+| Health and the per-job model rows in Settings → AI | `app/src/pages/settings/AiPage.tsx` |
+| Which agent, model and level each headless job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
 | `oculus agent` | `app/src-tauri/src/bin/oculus.rs` |
 
 ## How it connects
@@ -132,8 +133,9 @@ old chat page and store are gone.
   thread and no rows — `oculus agent` was its only user, as the smallest
   end-to-end proof of a bridge, and the chaptering job in
   [chapters.md](./chapters.md) is the first real one. That job is worth reading
-  as the shape of a *headless* agent job here: it picks its own provider,
-  model and reasoning level (deliberately not chat's defaults), it collects
+  as the shape of a *headless* agent job here: it names its own provider,
+  model and reasoning level from the registry below rather than chat's
+  selection, it collects
   the `AssistantMessage` text and parses it itself, and the database write is
   Rust's — the agent replies with JSON and never goes near a table, because
   chapters are derived data rather than the student's own planning. Thread id
@@ -262,10 +264,12 @@ conversation over its protocol — Claude's `stream-json` carries no title
 event and `app-server` sends none — so a thread is born titled with the first
 line of its first message and renamed once the first exchange is done.
 `Harness::name_thread` runs that naming turn *outside* the thread: its own
-short-lived Claude process on the cheapest model, or a throwaway thread on
-the shared Codex server. Sending it down the thread's own session would put a
-question the student never asked into the timeline and spend the thread's
-context on it. It runs on the thread's own provider, so one CLI is enough.
+short-lived Claude process, or a throwaway thread on the shared Codex server.
+Sending it down the thread's own session would put a question the student
+never asked into the timeline and spend the thread's context on it. Which CLI
+and model it costs is the `threadNaming` row of the registry below — a cheap
+model by default, and no longer whichever provider the thread happens to be
+on.
 
 The claim is the guard. `store::claim_naming` hands back the exchange only if
 it also wins the race to flip `title_generated` from 0 to 1, so two turns
@@ -585,6 +589,38 @@ mid-thread respawns the Claude process and restarts the Codex thread, which
 `Harness::send` decides by comparing the level a live session was started with
 against the one being asked for.
 
+## Per-job models
+
+"Nothing is defaulted out of sight" is not only about the composer. The app
+hands work to an agent that nobody is talking to — naming a thread, chaptering
+a lecture ([chapters.md](./chapters.md)) — and each of those **names its own
+agent, model and reasoning level** too, in a row of Settings → AI that is the
+*same* `ModelPicker` the composer uses. What the row shows is what the CLI is
+told, and there is no per-provider default hiding behind it.
+
+The registry is one JSON value in `settings` under `job_models`:
+`harness::jobs` (`app/src-tauri/src/harness/jobs.rs`) reads it, because the
+jobs themselves run in Rust, and `getJobModels` / `setJobModels` in
+`app/src/lib/db.ts` write it, beside `getLlmSettings` and shaped like it —
+tolerant on read, so a half-written or older value costs a job its
+configuration rather than its run. Both sides carry the defaults and have to
+agree on them: either can be the one resolving an unconfigured job.
+
+- **Chapters** default to Codex on `gpt-5.6-luna` at `xhigh`; the CLI's
+  `--provider` / `--model` / `--effort` still override the configured
+  selection for one run, and with no flag `oculus lecture chapters` runs what
+  the row says.
+- **Thread naming** was `TITLE_MODEL_CLAUDE`, a constant in `mod.rs`, and is
+  now a row like any other, defaulting to Claude on Haiku 4.5 at `low`. It
+  costs the rule that naming followed the thread's own provider: a thread now
+  gets named by whichever CLI the row names, whatever it was itself run on.
+  That is the point of the registry — the student has said who pays for the
+  naming turn — and a namer whose CLI is not installed fails the way a missing
+  CLI always has, leaving the first-line title rather than hanging a thread.
+- **Adding a job** is a `Job` variant with a key and a default in `jobs.rs`, a
+  matching entry in `JOBS` and `DEFAULT_JOB_MODELS` in `db.ts`, and nothing
+  else: the Settings section renders whatever is in that list.
+
 ## Subject scope and `@`
 
 The composer carries two more controls than a bare prompt box, both in
@@ -629,8 +665,8 @@ whole path was dropped rather than ported.
 
 Built: the two bridges with recorded fixtures and replay tests, `oculus
 agent` as the headless proof, tables and lifecycle, the page, subject scope
-and the `@` file menu, the message queue, stopping a turn, and going back
-(edit, retry, rewind). Not yet: approvals and native questions routed to the UI, steering
+and the `@` file menu, the message queue, stopping a turn, going back
+(edit, retry, rewind), and the per-job model registry above. Not yet: approvals and native questions routed to the UI, steering
 mid-turn (bb's `turn/steer` and a second stdin line — the queue is the
 waiting-room version of it, not steering), the plan/todo card, branching (rewind
 deliberately does not), and a third bridge for the API path when BYOK

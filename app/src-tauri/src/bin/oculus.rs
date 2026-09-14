@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use app_lib::agents;
 use app_lib::projects;
@@ -692,20 +692,20 @@ struct LectureChaptersArgs {
     /// Lecture id, as `oculus list -l` prints it; a unique prefix is enough
     #[arg(value_name = "LECTURE_ID")]
     id: String,
-    // These three defaults are this command's own, and deliberately not
-    // `oculus agent`'s: chaptering is a long look at slides and a transcript,
-    // which is what the reasoning level is for. Stage 3 moves them into a
-    // settings registry shared with every other model-backed job — until then
-    // they live here, in one place, rather than being spread across callers.
-    /// Which CLI to drive
-    #[arg(short, long, value_parser = ["claude", "codex"], default_value = "codex")]
-    provider: String,
-    /// Model to request (provider-specific name or alias)
-    #[arg(short, long, default_value = "gpt-5.6-luna")]
-    model: String,
-    /// Reasoning effort (low, medium, high, xhigh, max)
-    #[arg(long, default_value = "xhigh")]
-    effort: String,
+    // None of the three has a default here any more: the job's agent, model
+    // and level are configured in Settings → AI and read from the `job_models`
+    // registry (`app/src-tauri/src/harness/jobs.rs`), so the app and the CLI
+    // run the same thing. A flag overrides that selection for one run.
+    /// Which CLI to drive (default: the configured one)
+    #[arg(short, long, value_parser = ["claude", "codex"])]
+    provider: Option<String>,
+    /// Model to request (default: the configured one)
+    #[arg(short, long)]
+    model: Option<String>,
+    /// Reasoning effort — low, medium, high, xhigh, max (default: the
+    /// configured one)
+    #[arg(long)]
+    effort: Option<String>,
     /// Re-run over a lecture that already has chapters, replacing them
     #[arg(long)]
     force: bool,
@@ -2757,166 +2757,119 @@ impl Ctx {
     /// there is no write door for a model here. Rust parses the reply,
     /// validates it against the candidate set, and writes the rows.
     ///
-    /// This is the first caller of `harness::run_once` outside `oculus agent`.
+    /// The job itself is `chapters::run`, which the app's
+    /// `lecture_find_chapters` command runs too — this function is the flags,
+    /// the resolved selection and the printing around it, and nothing else.
     fn lecture_chapters(&self, args: &LectureChaptersArgs) -> Result<(), String> {
-        use app_lib::harness::{self, HarnessEvent, Provider};
+        use app_lib::harness::{jobs, Provider};
 
-        let provider = Provider::parse(&args.provider).ok_or("unknown provider")?;
         let pool = self.db().ok_or("lectures live in the database")?;
-        let (id, title, duration, video, transcript) = self.one_lecture(&pool, &args.id)?;
+        let (id, title, ..) = self.one_lecture(&pool, &args.id)?;
 
-        let existing = self.rt.block_on(store::chapters(&pool, &id))?;
-        if !existing.is_empty() && !args.force {
-            return Err(format!(
-                "{title} already has {} chapter(s) — `--force` re-runs and replaces them",
-                existing.len()
-            ));
-        }
-        let video = video.ok_or_else(|| {
-            format!("{title} is not downloaded — `oculus run -l --videos` fetches it")
-        })?;
-        let video = PathBuf::from(&video);
-        if !video.exists() {
-            return Err(format!("{} is on record but missing from disk", video.display()));
-        }
-        let ffmpeg = app_lib::echo360::find_ffmpeg(None)
-            .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
-
-        // Detection is seconds and nothing is cached, so this is the same pass
-        // `oculus lecture candidates` makes; see `app_lib::chapters`.
-        let diffs = app_lib::chapters::sample_diffs(&ffmpeg, &video)?;
-        let gaps = transcript
-            .as_deref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(|vtt| app_lib::chapters::cue_gaps(&vtt))
-            .unwrap_or_default();
-        let found = app_lib::chapters::candidates(&diffs, &gaps, duration as u32);
-        if found.is_empty() {
-            return Err(format!("no boundary candidates in {title} — nothing to chapter"));
+        // `chapters::run` guards this too — it has to, the app calls it — but
+        // the shared message cannot name a flag only this door has, and an
+        // error that does not say how to get past it is half an error.
+        if !args.force {
+            let existing = self.rt.block_on(store::chapters(&pool, &id))?;
+            if !existing.is_empty() {
+                return Err(format!(
+                    "{title} already has {} chapter(s) — `--force` re-runs and replaces them",
+                    existing.len()
+                ));
+            }
         }
 
-        // Second 0 is never a detected candidate — the first change is
-        // typically twenty seconds in — but a lecture always starts somewhere,
-        // so the opening is prepended as an always-available boundary and
-        // accepted as one by the validator.
-        let mut boundaries: Vec<u32> = vec![0];
-        boundaries.extend(found.iter().map(|c| c.seconds));
-        let mut with_opening = vec![app_lib::chapters::Candidate {
-            seconds: 0,
-            score: 0.0,
-            diff: 0.0,
-            pause: false,
-        }];
-        with_opening.extend(found.iter().cloned());
+        // The configured selection is the default; a flag replaces the part of
+        // it that was named. Nothing is hardcoded on this side any more — the
+        // app runs the same job off the same row.
+        let mut selection = self
+            .rt
+            .block_on(jobs::selection(&pool, jobs::Job::LectureChapters));
+        if let Some(p) = &args.provider {
+            selection.provider = Provider::parse(p).ok_or("unknown provider")?;
+        }
+        if let Some(m) = &args.model {
+            selection.model = m.clone();
+        }
+        if let Some(e) = &args.effort {
+            selection.reasoning_effort = Some(e.clone());
+        }
 
-        let dir = app_lib::echo360::lecture_dir(&self.data_dir, &id);
-        if !self.json {
+        let quiet = self.json;
+        if !quiet {
             println!(
-                "{}  {}  {}",
-                paint(&title, BOLD),
-                paint(&clock(duration as u32), DIM),
-                paint(&format!("{} candidate(s)", found.len()), DIM)
+                "{}",
+                paint(
+                    &format!(
+                        "{} · {}{}",
+                        selection.provider.label(),
+                        selection.model,
+                        match selection.effort() {
+                            Some(e) => format!(" · {e} reasoning"),
+                            None => String::new(),
+                        }
+                    ),
+                    DIM
+                )
             );
         }
-        app_lib::chapters::extract_frames(&ffmpeg, &video, &boundaries, &dir.join("frames"))?;
 
-        // An Echo360 title is a room booking rather than a topic, so the
-        // subject's own folder — where the deck is — is worth naming.
-        let course_dir = self
-            .rt
-            .block_on(
-                sqlx::query_scalar::<_, String>(
-                    "SELECT s.code FROM lectures l JOIN subjects s ON s.id = l.subject_id
-                      WHERE l.id = ?1",
-                )
-                .bind(&id)
-                .fetch_optional(&pool),
-            )
-            .ok()
-            .flatten()
-            .map(|code| format!("../courses/{}", app_lib::paths::safe_dir(&code)));
-
-        let prompt = app_lib::chapters::prompt(&app_lib::chapters::Job {
-            title: &title,
-            duration_secs: duration as u32,
-            // Every agent turn runs from the library's `agents/` folder, so
-            // this is the path the agent can paste straight into a read.
-            lecture_dir: &format!("../lectures/{id}"),
-            course_dir: course_dir.as_deref(),
-            candidates: &with_opening,
-        });
-
-        self.rt
-            .block_on(store::set_chapter_status(&pool, &id, Some("running"), None))?;
-
-        let reply = Arc::new(Mutex::new(String::new()));
-        let collect = reply.clone();
         // Assistant text is not echoed: the reply *is* the chapter JSON, and
         // it is printed properly below. The tool rows are the interesting part
         // while the turn runs.
         let printer = AgentPrinter::new(false);
-        let quiet = self.json;
-        let opts = harness::SendOptions {
-            model: Some(args.model.clone()),
-            reasoning_effort: Some(args.effort.clone()),
-            subject_id: None,
-            scope: None,
-        };
-        let outcome = harness::run_once(&self.data_dir, provider, &opts, &prompt, move |ev| {
-            if let HarnessEvent::AssistantMessage { text } = ev {
-                collect.lock().unwrap().push_str(text);
-            }
-            if !quiet {
-                printer.print(ev);
-            }
-        });
-
-        let reply = reply.lock().unwrap().clone();
-        let parsed = outcome
-            .and_then(|()| app_lib::chapters::parse_chapters(&reply))
-            .and_then(|chapters| {
-                app_lib::chapters::validate(&chapters, &boundaries, duration as u32)
-                    .map(|()| chapters)
-            });
-        let chapters = match parsed {
-            Ok(c) => c,
-            Err(e) => {
-                // The failure is kept on the row, not just printed: a player
-                // showing "chaptering failed" needs to say why and offer a
-                // retry, and a bare status cannot carry a message.
-                self.rt
-                    .block_on(store::set_chapter_status(&pool, &id, Some("error"), Some(&e)))?;
-                return Err(e);
-            }
-        };
-        self.rt.block_on(store::save_chapters(&pool, &id, &chapters))?;
+        let outcome = app_lib::chapters::run(
+            self.rt.handle(),
+            &pool,
+            &app_lib::chapters::Run {
+                data_dir: &self.data_dir,
+                lecture_id: &id,
+                selection: &selection,
+                force: args.force,
+            },
+            |title, duration, candidates| {
+                if !quiet {
+                    println!(
+                        "{}  {}  {}",
+                        paint(title, BOLD),
+                        paint(&clock(duration), DIM),
+                        paint(&format!("{candidates} candidate(s)"), DIM)
+                    );
+                }
+            },
+            move |ev| {
+                if !quiet {
+                    printer.print(ev);
+                }
+            },
+        )?;
 
         if self.json {
             #[derive(Serialize)]
             struct Out<'a> {
                 lecture: &'a str,
                 title: &'a str,
-                duration_seconds: i64,
+                duration_seconds: u32,
                 provider: &'a str,
                 model: &'a str,
-                effort: &'a str,
+                effort: Option<&'a str>,
                 candidates: usize,
                 chapters: &'a [app_lib::chapters::Chapter],
             }
             return self.emit(&Out {
                 lecture: &id,
-                title: &title,
-                duration_seconds: duration,
-                provider: provider.as_str(),
-                model: &args.model,
-                effort: &args.effort,
-                candidates: found.len(),
-                chapters: &chapters,
+                title: &outcome.title,
+                duration_seconds: outcome.duration_seconds,
+                provider: selection.provider.as_str(),
+                model: &selection.model,
+                effort: selection.effort(),
+                candidates: outcome.candidates,
+                chapters: &outcome.chapters,
             });
         }
 
         println!();
-        for chapter in &chapters {
+        for chapter in &outcome.chapters {
             println!(
                 "  {}  {}",
                 paint(&clock(chapter.start_seconds), DIM),
@@ -2927,7 +2880,11 @@ impl Ctx {
         println!(
             "{}",
             paint(
-                &format!("{} chapter(s) written for {title}", chapters.len()),
+                &format!(
+                    "{} chapter(s) written for {}",
+                    outcome.chapters.len(),
+                    outcome.title
+                ),
                 DIM
             )
         );

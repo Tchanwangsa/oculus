@@ -27,6 +27,7 @@ pub mod claude;
 pub mod codex;
 pub mod discover;
 pub mod event;
+pub mod jobs;
 pub mod store;
 
 use std::collections::{HashMap, VecDeque};
@@ -277,12 +278,10 @@ impl Queue {
 
 // ── Naming a thread ──────────────────────────────────────────────────────────
 
-/// The model a Claude naming turn runs on. Naming is a one-line job on a
-/// clipped exchange, so it is always the cheapest model in the catalogue
-/// rather than whatever the thread itself is using. Codex is left on the
-/// student's own default: it lists its models at runtime and has no cheap one
-/// this side can name without asking.
-const TITLE_MODEL_CLAUDE: &str = "claude-haiku-4-5";
+// Naming is a one-line job on a clipped exchange, so it runs on something
+// cheap rather than on whatever the thread itself is using — but *which*
+// cheap thing is a configured job now (`jobs::Job::ThreadNaming`), not a
+// constant here. See `jobs.rs`.
 
 /// Long enough for a cold `claude` start on a slow disk, short enough that a
 /// wedged CLI does not leave a thread thinking it is being named.
@@ -596,14 +595,22 @@ impl Harness {
     /// no title event, and `app-server` sends none either — so a name that
     /// the model wrote has to be asked for, and it costs one turn. It is
     /// asked once, after the first exchange (`store::claim_naming`), on the
-    /// thread's own provider so a student who only has one CLI still gets
-    /// names, and on the cheapest model that provider has.
+    /// agent, model and level the `threadNaming` job is configured with
+    /// (`jobs.rs`) — not on the thread's own. Naming is a job like the
+    /// chaptering one, and a student who has picked a namer in Settings has
+    /// said which CLI should pay for it.
     ///
     /// It runs outside the thread: its own short-lived Claude process, or a
     /// throwaway thread on the shared Codex server. Sending it down the
     /// thread's own session would put a question the student never asked into
     /// the timeline, and would spend the thread's context on it.
-    pub fn name_thread(&self, provider: Provider, first_message: &str, reply: &str) -> Result<String, String> {
+    pub fn name_thread(
+        &self,
+        sel: &jobs::JobSelection,
+        first_message: &str,
+        reply: &str,
+    ) -> Result<String, String> {
+        let provider = sel.provider;
         let prompt = naming_prompt(first_message, reply);
         let (tx, rx) = mpsc::channel::<HarnessEvent>();
         let sink: Sink = Arc::new(move |ev| {
@@ -622,8 +629,8 @@ impl Harness {
                         cwd,
                         library: self.data_dir.clone(),
                         resume: None,
-                        model: Some(TITLE_MODEL_CLAUDE.into()),
-                        effort: None,
+                        model: Some(sel.model.clone()),
+                        effort: sel.reasoning_effort.clone(),
                         // Nothing here needs a tool, and `default` auto-allows
                         // none — with prompts routed to `none` a stray call is
                         // refused rather than hanging the turn.
@@ -642,8 +649,8 @@ impl Harness {
                 let server = self.codex_server()?;
                 let opts = CodexThreadOpts {
                     cwd,
-                    model: None,
-                    reasoning_effort: None,
+                    model: Some(sel.model.clone()),
+                    reasoning_effort: sel.reasoning_effort.clone(),
                     instructions: NAMING_INSTRUCTIONS.into(),
                 };
                 let tid = server.start_thread(&opts, sink)?;
@@ -842,9 +849,13 @@ pub mod app {
                     if thread_id > 0 && matches!(&ev, HarnessEvent::TurnFinished { status } if status == "completed") {
                         match rt.block_on(store::claim_naming(p, thread_id)) {
                             Ok(Some(seed)) => {
+                                // Read here rather than in the naming thread:
+                                // the pool is already open on this loop, and
+                                // the read is one indexed row.
+                                let sel = rt.block_on(jobs::selection(p, jobs::Job::ThreadNaming));
                                 let (namer, bus) = (namer.clone(), bus.clone());
                                 std::thread::spawn(move || {
-                                    match namer.name_thread(provider, &seed.first_message, &seed.reply) {
+                                    match namer.name_thread(&sel, &seed.first_message, &seed.reply) {
                                         Ok(title) => {
                                             let _ = bus.send((thread_id, provider, HarnessEvent::ThreadTitled { title }));
                                         }

@@ -1,5 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 
+import type { Provider } from "@/lib/harness";
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface Subject {
@@ -390,6 +392,83 @@ export async function getLlmSettings(): Promise<LlmSettings> {
 
 export async function setLlmSettings(settings: LlmSettings): Promise<void> {
   await setSetting(LLM_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+// ── Per-job models ───────────────────────────────────────────────────────────
+//
+// Every model-backed job that is not a chat turn — chaptering a lecture,
+// naming a thread — names its own agent, model and reasoning level, the way
+// the composer does for a send. One JSON value here, read back in Rust by
+// `harness::jobs` since the jobs themselves run there.
+
+/** A job's key in the stored object. Mirrors `Job` in
+ *  `app/src-tauri/src/harness/jobs.rs`; adding one is a key here, a variant
+ *  there, and a row in `JOBS` below. */
+export type JobId = "lectureChapters" | "threadNaming";
+
+/** What one job runs on. `reasoningEffort` is null only for a model that
+ *  takes no level — never "whatever the agent defaults to". */
+export interface JobSelection {
+  provider: Provider;
+  model: string;
+  reasoningEffort: string | null;
+}
+
+export type JobModels = Record<JobId, JobSelection>;
+
+/** The jobs Settings → AI lists, in the order it lists them. */
+export const JOBS: { id: JobId; label: string; description: string }[] = [
+  {
+    id: "lectureChapters",
+    label: "Lecture chapters",
+    description:
+      "Reads a recording's slide frames and transcript and names its topics. One long turn, eight to eleven minutes.",
+  },
+  {
+    id: "threadNaming",
+    label: "Chat thread names",
+    description:
+      "One line naming a conversation from its first exchange, once, after the first reply.",
+  },
+];
+
+/** Mirrors `default_selection` in `app/src-tauri/src/harness/jobs.rs` — both
+ *  sides have to agree on what an unconfigured job runs, because either can
+ *  be the one that resolves it. */
+export const DEFAULT_JOB_MODELS: JobModels = {
+  lectureChapters: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
+  threadNaming: { provider: "claude", model: "claude-haiku-4-5", reasoningEffort: "low" },
+};
+
+const JOB_MODELS_KEY = "job_models";
+
+/** Tolerant like `getLlmSettings`: a job whose stored row is missing, gutted
+ *  or from an older build falls back to its default rather than leaving a
+ *  picker with nothing selected. */
+export async function getJobModels(): Promise<JobModels> {
+  const raw = await getSetting(JOB_MODELS_KEY);
+  if (!raw) return structuredClone(DEFAULT_JOB_MODELS);
+  try {
+    const parsed = JSON.parse(raw);
+    const out = structuredClone(DEFAULT_JOB_MODELS);
+    for (const job of JOBS) {
+      const row = parsed?.[job.id];
+      if (!row || typeof row.model !== "string" || !row.model.trim()) continue;
+      if (row.provider !== "claude" && row.provider !== "codex") continue;
+      out[job.id] = {
+        provider: row.provider,
+        model: row.model,
+        reasoningEffort: typeof row.reasoningEffort === "string" ? row.reasoningEffort : null,
+      };
+    }
+    return out;
+  } catch {
+    return structuredClone(DEFAULT_JOB_MODELS);
+  }
+}
+
+export async function setJobModels(models: JobModels): Promise<void> {
+  await setSetting(JOB_MODELS_KEY, JSON.stringify(models));
 }
 
 // ── Chats ────────────────────────────────────────────────────────────────────

@@ -218,6 +218,22 @@ pub async fn reconcile_parse_status(pool: &SqlitePool, data_dir: &Path) -> Resul
     Ok(updated)
 }
 
+/// Runs that were killed mid-job: `running` with no `chaptered_at`, and
+/// nothing left to finish them. Called at startup, the sibling of
+/// `reconcile_parse_status` above and of `harness::store::reconcile` — a
+/// status column that only a live process can clear needs a sweep behind it,
+/// or one crash leaves the button saying "chaptering" forever.
+pub async fn reconcile_chapter_status(pool: &SqlitePool) -> Result<u64, String> {
+    sqlx::query(
+        "UPDATE lectures SET chapter_status = NULL, chapter_error = NULL
+          WHERE chapter_status = 'running'",
+    )
+    .execute(pool)
+    .await
+    .map(|r| r.rows_affected())
+    .map_err(|e| e.to_string())
+}
+
 // ── Calendar ─────────────────────────────────────────────────────────────────
 
 /// Replace a subject's calendar rows with what Canvas just returned.

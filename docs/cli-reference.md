@@ -864,20 +864,15 @@ Arguments:
 
 Options:
   -p, --provider <PROVIDER>
-          Which CLI to drive
+          Which CLI to drive (default: the configured one)
 
-          [default: codex]
           [possible values: claude, codex]
 
   -m, --model <MODEL>
-          Model to request (provider-specific name or alias)
-
-          [default: gpt-5.6-luna]
+          Model to request (default: the configured one)
 
       --effort <EFFORT>
-          Reasoning effort (low, medium, high, xhigh, max)
-
-          [default: xhigh]
+          Reasoning effort — low, medium, high, xhigh, max (default: the configured one)
 
       --force
           Re-run over a lecture that already has chapters, replacing them

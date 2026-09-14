@@ -31,6 +31,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 /// 160×90, one byte per pixel — the frame geometry the ffmpeg command below
 /// asks for, and therefore exactly how many bytes one frame occupies on the
@@ -810,6 +811,318 @@ pub fn validate(
         previous = Some(chapter.start_seconds);
     }
     Ok(())
+}
+
+// ── Running the whole job ────────────────────────────────────────────────────
+//
+// Detection, frames, the agent turn, validation and the write, in one place so
+// that the CLI and the app run the *same* job rather than two that drift. The
+// callers differ only in where they get the selection from (a flag, or the
+// `lectureChapters` row of the model registry) and what they do while it runs
+// (print, or emit an event at the end).
+
+/// One chaptering run.
+pub struct Run<'a> {
+    pub data_dir: &'a Path,
+    /// A full lecture id. Prefix matching is the CLI's door, not this one's.
+    pub lecture_id: &'a str,
+    /// Which agent, model and level to drive. Nothing is defaulted here: the
+    /// caller has already resolved it (`harness::jobs`).
+    pub selection: &'a crate::harness::jobs::JobSelection,
+    /// Replace an existing chapter set instead of refusing to touch it.
+    pub force: bool,
+}
+
+/// What a finished run has to say for itself.
+pub struct Outcome {
+    pub title: String,
+    pub duration_seconds: u32,
+    /// How many boundaries the detector offered, second 0 not counted.
+    pub candidates: usize,
+    pub chapters: Vec<Chapter>,
+}
+
+/// Detect, grab, ask, validate, write.
+///
+/// Blocking from end to end and eight to eleven minutes long — the agent turn
+/// is nearly all of it — so both callers run it off the thread that has to
+/// stay responsive: the CLI is that thread, and the app spawns one.
+///
+/// `on_detected` fires once the candidate set exists, with the lecture's title,
+/// its duration and how many boundaries were found; `on_event` sees every
+/// harness event of the turn, which is how the CLI draws the agent's tool rows.
+///
+/// The status column tracks the run from the moment the work starts: `running`
+/// until a terminal answer, then `error` with the message on it, or `ready`
+/// stamped by `store::save_chapters`. The guards above it — no video, chapters
+/// already there — fail before anything is claimed, so a refusal never leaves
+/// a status behind.
+pub fn run(
+    rt: &tokio::runtime::Handle,
+    pool: &sqlx::SqlitePool,
+    job: &Run,
+    on_detected: impl Fn(&str, u32, usize),
+    on_event: impl Fn(&crate::harness::HarnessEvent) + Send + Sync + 'static,
+) -> Result<Outcome, String> {
+    use crate::harness::{self, HarnessEvent};
+    use sqlx::Row;
+
+    let id = job.lecture_id;
+    let row = rt
+        .block_on(
+            sqlx::query(
+                "SELECT l.title, l.duration_seconds, l.video_path, l.transcript_path, s.code
+                   FROM lectures l LEFT JOIN subjects s ON s.id = l.subject_id
+                  WHERE l.id = ?1",
+            )
+            .bind(id)
+            .fetch_optional(pool),
+        )
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no lecture {id}"))?;
+    let title: String = row.get("title");
+    let duration = row.get::<i64, _>("duration_seconds").max(0) as u32;
+    let video: Option<String> = row.get("video_path");
+    let transcript: Option<String> = row.get("transcript_path");
+    let code: Option<String> = row.get("code");
+
+    let existing = rt.block_on(crate::store::chapters(pool, id))?;
+    if !existing.is_empty() && !job.force {
+        return Err(format!(
+            "{title} already has {} chapter(s) — re-running replaces them",
+            existing.len()
+        ));
+    }
+    let video = video.ok_or_else(|| {
+        format!("{title} is not downloaded — `oculus run -l --videos` fetches it")
+    })?;
+    let video = PathBuf::from(&video);
+    if !video.exists() {
+        return Err(format!("{} is on record but missing from disk", video.display()));
+    }
+    let ffmpeg = crate::echo360::find_ffmpeg(None)
+        .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
+
+    // Claimed before the decode rather than before the turn: detection is
+    // fifteen seconds a student can see happening, and a button that only
+    // lights up once the agent starts reads as a button that did nothing.
+    rt.block_on(crate::store::set_chapter_status(pool, id, Some("running"), None))?;
+
+    let outcome = (|| -> Result<Outcome, String> {
+        // Detection is seconds and nothing is cached, so this is the same pass
+        // `oculus lecture candidates` makes; see the module docs.
+        let diffs = sample_diffs(&ffmpeg, &video)?;
+        let gaps = transcript
+            .as_deref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|vtt| cue_gaps(&vtt))
+            .unwrap_or_default();
+        let found = candidates(&diffs, &gaps, duration);
+        if found.is_empty() {
+            return Err(format!("no boundary candidates in {title} — nothing to chapter"));
+        }
+        on_detected(&title, duration, found.len());
+
+        // Second 0 is never a detected candidate — the first change is
+        // typically twenty seconds in — but a lecture always starts somewhere,
+        // so the opening is prepended as an always-available boundary and
+        // accepted as one by the validator.
+        let mut boundaries: Vec<u32> = vec![0];
+        boundaries.extend(found.iter().map(|c| c.seconds));
+        let mut with_opening = vec![Candidate {
+            seconds: 0,
+            score: 0.0,
+            diff: 0.0,
+            pause: false,
+        }];
+        with_opening.extend(found.iter().cloned());
+
+        let dir = crate::echo360::lecture_dir(job.data_dir, id);
+        extract_frames(&ffmpeg, &video, &boundaries, &dir.join("frames"))?;
+
+        // An Echo360 title is a room booking rather than a topic, so the
+        // subject's own folder — where the deck is — is worth naming.
+        let course_dir = code
+            .as_deref()
+            .map(|c| format!("../courses/{}", crate::paths::safe_dir(c)));
+
+        let text = prompt(&Job {
+            title: &title,
+            duration_secs: duration,
+            // Every agent turn runs from the library's `agents/` folder, so
+            // this is the path the agent can paste straight into a read.
+            lecture_dir: &format!("../lectures/{id}"),
+            course_dir: course_dir.as_deref(),
+            candidates: &with_opening,
+        });
+
+        let reply = Arc::new(Mutex::new(String::new()));
+        let collect = reply.clone();
+        let opts = harness::SendOptions {
+            model: Some(job.selection.model.clone()),
+            reasoning_effort: job.selection.reasoning_effort.clone(),
+            subject_id: None,
+            scope: None,
+        };
+        let turn = harness::run_once(
+            job.data_dir,
+            job.selection.provider,
+            &opts,
+            &text,
+            move |ev| {
+                if let HarnessEvent::AssistantMessage { text } = ev {
+                    collect.lock().unwrap().push_str(text);
+                }
+                on_event(ev);
+            },
+        );
+
+        let reply = reply.lock().unwrap().clone();
+        let chapters = turn
+            .and_then(|()| parse_chapters(&reply))
+            .and_then(|chapters| validate(&chapters, &boundaries, duration).map(|()| chapters))?;
+        rt.block_on(crate::store::save_chapters(pool, id, &chapters))?;
+        Ok(Outcome {
+            title: title.clone(),
+            duration_seconds: duration,
+            candidates: found.len(),
+            chapters,
+        })
+    })();
+
+    if let Err(e) = &outcome {
+        // The failure is kept on the row, not just reported: a player showing
+        // "chaptering failed" needs to say why and offer a retry, and a bare
+        // status cannot carry a message.
+        rt.block_on(crate::store::set_chapter_status(pool, id, Some("error"), Some(e)))?;
+    }
+    outcome
+}
+
+// ── Tauri ────────────────────────────────────────────────────────────────────
+
+pub mod app {
+    use super::*;
+    use tauri::{AppHandle, Emitter};
+
+    /// What the webview gets when a run ends, and the only chapter event there
+    /// is. Deliberately not `lectures-changed`: that one fires on every
+    /// progress save while a recording plays, and a result eight minutes in the
+    /// making would be indistinguishable from a scrub.
+    pub const LECTURE_CHAPTERS_EVENT: &str = "lecture-chapters";
+
+    #[derive(serde::Serialize, Clone)]
+    #[serde(rename_all = "camelCase")]
+    struct Finished {
+        lecture_id: String,
+        /// How *this* request ended, in the column's own vocabulary. They
+        /// agree except on a refusal — a lecture that already has chapters
+        /// reports `error` here and keeps its `ready` row, because nothing
+        /// was touched.
+        status: &'static str,
+        chapters: usize,
+        error: Option<String>,
+    }
+
+    /// Chapter a lecture with the agent the `lectureChapters` job is
+    /// configured with.
+    ///
+    /// The job is eight to eleven minutes of ffmpeg and one very long agent
+    /// turn, so the command starts it on a thread of its own and returns as
+    /// soon as the run is claimed. Progress is the `chapter_status` column —
+    /// `running` from here, then `ready` or `error` — and the end is
+    /// [`LECTURE_CHAPTERS_EVENT`]. Nothing goes through the harness event
+    /// stream: a headless run reports on thread id 0, and the app started this
+    /// one, so it already knows whose it is.
+    #[tauri::command]
+    pub async fn lecture_find_chapters(
+        app: AppHandle,
+        lecture_id: String,
+        force: Option<bool>,
+    ) -> Result<(), String> {
+        let pool = crate::llm::open_pool().await?;
+        // The only check worth making the caller wait for: a second run over
+        // the same lecture would spend a second subscription turn and race the
+        // first one's write.
+        let running: Option<String> =
+            sqlx::query_scalar("SELECT chapter_status FROM lectures WHERE id = ?1")
+                .bind(&lecture_id)
+                .fetch_optional(&pool)
+                .await
+                .map_err(|e| e.to_string())?
+                .flatten();
+        if running.as_deref() == Some("running") {
+            return Err("that lecture is already being chaptered".into());
+        }
+        drop(pool);
+
+        let data_dir = crate::paths::data_dir();
+        let force = force.unwrap_or(false);
+        std::thread::spawn(move || {
+            // Its own runtime, so the pool this run's queries use belongs to
+            // the thread that blocks on them — the shape the harness consumer
+            // thread has for the same reason.
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => return eprintln!("[oculus] chapters: {e}"),
+            };
+            let pool = match rt.block_on(crate::llm::open_pool()) {
+                Ok(p) => p,
+                Err(e) => return eprintln!("[oculus] chapters: {e}"),
+            };
+            let selection = rt.block_on(crate::harness::jobs::selection(
+                &pool,
+                crate::harness::jobs::Job::LectureChapters,
+            ));
+            let outcome = run(
+                rt.handle(),
+                &pool,
+                &Run {
+                    data_dir: &data_dir,
+                    lecture_id: &lecture_id,
+                    selection: &selection,
+                    force,
+                },
+                |title, _, n| eprintln!("[oculus] chapters: {title} — {n} candidate(s)"),
+                |_| {},
+            );
+            let finished = match &outcome {
+                Ok(o) => Finished {
+                    lecture_id: lecture_id.clone(),
+                    status: "ready",
+                    chapters: o.chapters.len(),
+                    error: None,
+                },
+                Err(e) => {
+                    eprintln!("[oculus] chapters: {e}");
+                    Finished {
+                        lecture_id: lecture_id.clone(),
+                        status: "error",
+                        chapters: 0,
+                        error: Some(e.clone()),
+                    }
+                }
+            };
+            app.emit(LECTURE_CHAPTERS_EVENT, finished).ok();
+        });
+        Ok(())
+    }
+
+    /// Startup: a run killed mid-turn left `running` on the row with no
+    /// `chaptered_at`, and nothing is going to finish it — the same sweep
+    /// `harness::app::reconcile` makes over threads.
+    pub fn reconcile(app: &AppHandle) {
+        let _ = app;
+        tauri::async_runtime::spawn(async {
+            if let Ok(pool) = crate::llm::open_pool().await {
+                if let Ok(n) = crate::store::reconcile_chapter_status(&pool).await {
+                    if n > 0 {
+                        eprintln!("[oculus] chapters: cleared {n} interrupted run(s)");
+                    }
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]

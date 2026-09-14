@@ -30,6 +30,7 @@ export const REASONING_LABELS: Record<string, string> = {
   high: "High",
   xhigh: "Extra High",
   max: "Max",
+  ultra: "Ultra",
 };
 
 export function reasoningLabel(level: string): string {

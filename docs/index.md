@@ -24,7 +24,7 @@ live in the root `CLAUDE.md`, not here.
 | [llm.md](./llm.md) | The dormant BYOK layer: provider config, keychain keys, streaming, spend limits |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [projects.md](./projects.md) | Assignments broken into tasks: the board, and the CLI the agent plans through |
-| [chapters.md](./chapters.md) | Splitting a lecture recording at its topic boundaries — the detector, and what is not built yet |
+| [chapters.md](./chapters.md) | Splitting a lecture recording at its topic boundaries — the detector, the agent job, and what is not built yet |
 | [frontend.md](./frontend.md) | Routes, layouts, stores, hooks, the UI system |
 | [cli.md](./cli.md) | The `oculus` binary — headless sync from a terminal |
 | [cli-reference.md](./cli-reference.md) | Every command and flag — generated from the binary, not hand-kept |
@@ -53,9 +53,11 @@ an in-app browser — external links open as tabs in Oculus's own tab strip,
 signed in to Canvas. When a doc or UI string implies more than this, the doc is
 wrong — fix it.
 
-Part-built: **lecture chapters**. The boundary detector and its CLI exist
-(`oculus lecture candidates`); nothing names, stores or displays a chapter.
-[chapters.md](./chapters.md) says what each remaining stage would be.
+Part-built: **lecture chapters**. Boundaries are detected, named by a CLI
+agent and stored, from the command line (`oculus lecture chapters`) or from
+the app, on the agent and model that job is configured with in Settings → AI.
+Nothing draws them yet — the player still shows a plain scrub bar.
+[chapters.md](./chapters.md) says what the remaining stage would be.
 
 Dormant rather than built: the **BYOK API layer** — provider config, keychain
 keys, streaming, spend limits — which the CLI-agent bridges replaced. Nothing

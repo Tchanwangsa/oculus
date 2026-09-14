@@ -80,6 +80,9 @@ pub fn run() {
             // ── CLI agents (Claude Code / Codex bridges) ────────────────
             app.manage(harness::app::init(app.handle()));
             harness::app::reconcile(app.handle());
+            // A chaptering run killed mid-turn leaves `running` on the
+            // lecture row; nothing else will ever clear it.
+            chapters::app::reconcile(app.handle());
             // ── Session restore on startup ──────────────────────────────
             // No WebView dance: we replay the persisted session cookie via a
             // server-side ureq ping. Valid → connected instantly. Rejected →
@@ -984,6 +987,7 @@ ALTER TABLE lectures ADD COLUMN chapter_error  TEXT;
             harness::app::harness_edit_queued,
             harness::app::harness_interrupt,
             harness::app::harness_delete_thread,
+            chapters::app::lecture_find_chapters,
             sidecar::sidecar_health,
             sidecar::sidecar_set_limits,
             storage::storage_report,
