@@ -727,11 +727,145 @@ export async function searchMentionFiles(
   );
 }
 
+/**
+ * One file by its library path (`courses/<subject>/…`, what `relative_path`
+ * holds and what the chat's `@` menu and `oculus read` both speak).
+ *
+ * The path carries the subject folder, so it is specific on its own — no
+ * subject id is needed and none is asked for, which is what lets a path
+ * lifted out of an agent's tool call resolve without knowing where it came
+ * from. `LIMIT 1` guards the theoretical tie rather than expressing a choice.
+ */
+export async function getFileByRelativePath(
+  relativePath: string,
+): Promise<DbFile | null> {
+  const db = await getDb();
+  const rows = await db.select<DbFile[]>(
+    `SELECT * FROM files WHERE relative_path = $1 LIMIT 1`,
+    [relativePath],
+  );
+  return rows[0] ?? null;
+}
+
 export async function getFilesForSubject(subjectId: number): Promise<DbFile[]> {
   const db = await getDb();
   return db.select<DbFile[]>(
     `SELECT * FROM files WHERE subject_id = $1 ORDER BY relative_path ASC`,
     [subjectId]
+  );
+}
+
+// ── Palette search ───────────────────────────────────────────────────────────
+
+/**
+ * What the command palette matches a typed word against.
+ *
+ * Slugs are the reason this is not just `filename`: an announcement is on disk
+ * as `2026-07-14-welcome-to-comp30022.md` but reads as "Welcome to COMP30022"
+ * (`humanizeSlug`), so the separators are flattened to spaces and each word
+ * becomes matchable on its own. The subject code rides along in the same
+ * string, which is what makes "comp30026 workshop" one query rather than a
+ * filter plus a query.
+ */
+const FILE_HAYSTACK = `replace(replace(f.filename, '-', ' '), '_', ' ') || ' ' || s.code`;
+const LECTURE_HAYSTACK = `l.title || ' ' || s.code`;
+
+/** At most this many words are honoured; the rest are noise from a pasted line. */
+const MAX_TERMS = 6;
+
+function likeEscape(s: string): string {
+  return s.replace(/[%_\\]/g, (c) => `\\${c}`);
+}
+
+/** The typed words, escaped for LIKE. Empty when nothing has been typed — every
+ *  row matches then, and the ordering alone decides what is worth showing. */
+function terms(query: string): string[] {
+  return query.trim().split(/\s+/).filter(Boolean).slice(0, MAX_TERMS).map(likeEscape);
+}
+
+/**
+ * Builds `AND`-ed substring predicates plus the rank expression the two
+ * searches share.
+ *
+ * Every word must appear *somewhere* in the haystack, in any order, so
+ * "algorithms graph" finds `graph-algorithms.pdf`. The rank is whether some
+ * word in the haystack *starts* with the first term — a leading space is
+ * prepended so the first word counts as one — which floats a real title match
+ * above an incidental substring.
+ */
+function matchSql(
+  haystack: string,
+  query: string,
+): { where: string; rank: string; params: string[] } {
+  const words = terms(query);
+  const where = words.length
+    ? words.map((_, i) => `${haystack} LIKE $${i + 1} ESCAPE '\\'`).join(" AND ")
+    : "1";
+  const params = [...words.map((w) => `%${w}%`), `% ${words[0] ?? ""}%`];
+  const rank = `((' ' || ${haystack}) LIKE $${params.length} ESCAPE '\\')`;
+  return { where, rank, params };
+}
+
+/** A file the palette can open, labelled with the subject it came from. */
+export interface LibraryFileHit extends DbFile {
+  subject_code: string;
+}
+
+/** A lecture the palette can open. Enough of a `Lecture` to build its route. */
+export interface LibraryLectureHit {
+  id: string;
+  subject_id: number;
+  subject_code: string;
+  title: string;
+  date: string;
+}
+
+/**
+ * Files matching a palette query, best first.
+ *
+ * Unlike the chat's `@` menu this offers *every* file, parsed or not: the
+ * palette opens a file for a person to read, and a PDF still awaiting the
+ * sidecar renders perfectly well. Ties break towards this term's coursework and
+ * then towards what was opened most recently, so an empty query is the handful
+ * of files you were last in.
+ */
+export async function searchLibraryFiles(
+  query: string,
+  limit = 8,
+): Promise<LibraryFileHit[]> {
+  const db = await getDb();
+  const { where, rank, params } = matchSql(FILE_HAYSTACK, query);
+  return db.select<LibraryFileHit[]>(
+    `SELECT f.*, s.code AS subject_code
+     FROM files f
+     JOIN subjects s ON s.id = f.subject_id
+     WHERE ${where}
+     ORDER BY ${rank} DESC,
+              s.is_current DESC,
+              f.last_accessed_at DESC,
+              f.filename ASC
+     LIMIT $${params.length + 1}`,
+    [...params, limit],
+  );
+}
+
+/** Lectures matching a palette query — same ranking, newest capture first. */
+export async function searchLibraryLectures(
+  query: string,
+  limit = 4,
+): Promise<LibraryLectureHit[]> {
+  const db = await getDb();
+  const { where, rank, params } = matchSql(LECTURE_HAYSTACK, query);
+  return db.select<LibraryLectureHit[]>(
+    `SELECT l.id, l.subject_id, s.code AS subject_code, l.title, l.date
+     FROM lectures l
+     JOIN subjects s ON s.id = l.subject_id
+     WHERE ${where}
+     ORDER BY ${rank} DESC,
+              s.is_current DESC,
+              l.date DESC
+     LIMIT $${params.length + 1}`,
+    [...params, limit],
   );
 }
 

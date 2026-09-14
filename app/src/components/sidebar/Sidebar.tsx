@@ -4,10 +4,13 @@ import {
   CalendarBlank,
   ArrowsClockwise,
   CircleNotch,
+  Kanban,
+  MagnifyingGlass,
   SidebarSimple,
   GearSix,
 } from "@phosphor-icons/react";
 import { anyRunning, useHarnessStore } from "@/stores/harnessStore";
+import { usePaletteStore } from "@/stores/paletteStore";
 import { cn } from "@/lib/utils";
 import NavItem from "./NavItem";
 import SubjectsNavGroup from "./SubjectsNavGroup";
@@ -106,13 +109,14 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             </TooltipTrigger>
             <TooltipContent side="bottom" align="end" className="flex flex-col items-start gap-0.5">
               Close sidebar
-              <span className="text-[11px] text-background/60">⌘\</span>
+              <span className="text-[11px] text-background/60">⌘B</span>
             </TooltipContent>
           </Tooltip>
         </div>
 
         {/* Pinned top-level nav — outside the scroller, so it never slides away. */}
         <div className="px-2 pb-1.5 shrink-0">
+          <SearchItem />
           <NavItem
             to="/chat"
             icon={Chat}
@@ -120,6 +124,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
             badge={agentBusy ? <CircleNotch size={12} className="shrink-0 animate-spin text-muted-foreground" /> : null}
           />
           <NavItem to="/calendar" icon={CalendarBlank} label="Calendar" />
+          <NavItem to="/projects" icon={Kanban} label="Projects" />
         </div>
 
         <Rule />
@@ -152,6 +157,33 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </div>
       </div>
     </aside>
+  );
+}
+
+/**
+ * The ⌘K palette's visible handle, shaped like a nav row but a button: search
+ * is the one thing at the top of this list that is not a place. The shortcut
+ * rides on the row rather than in a tooltip — it is what the row is teaching.
+ */
+function SearchItem() {
+  const setOpen = usePaletteStore((s) => s.setOpen);
+  return (
+    <button
+      type="button"
+      onClick={() => setOpen(true)}
+      className={cn(
+        "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12.5px]",
+        "text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground transition-colors",
+      )}
+    >
+      <MagnifyingGlass size={16} className="shrink-0" />
+      <span className="flex-1 min-w-0 overflow-hidden whitespace-nowrap text-clip text-left">
+        Search
+      </span>
+      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
+        ⌘K
+      </span>
+    </button>
   );
 }
 

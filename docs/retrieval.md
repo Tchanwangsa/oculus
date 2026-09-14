@@ -60,7 +60,9 @@ Benchmarked 2026-08-15 on real course decks (152-page corpus, then re-run at
   which is also how quality markdown (finished after a scrape returned)
   reaches the database.
 - Two callers rank against the same store: the app's chat page and
-  `oculus search`. `search_in` takes a set of subject ids because the CLI
+  `oculus search`. The ⌘K palette is **not** a third one — it matches titles
+  in SQLite so it can answer every keystroke; see
+  [frontend.md](./frontend.md). `search_in` takes a set of subject ids because the CLI
   accepts prefix codes, which can match the same subject in two terms;
   `search` is the single-subject wrapper the Tauri command uses. Both embed
   the query once and the subject filter is SQL, so neither pays per course.
