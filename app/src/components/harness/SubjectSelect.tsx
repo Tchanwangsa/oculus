@@ -6,6 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { displayCode, displayName } from "@/lib/format";
 import type { Subject } from "@/lib/db";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,11 @@ export function SubjectSelect({
   disabled?: boolean;
 }) {
   const active = subjects.find((s) => s.id === value) ?? null;
+  // Only this term's subjects — a new thread is about what is being studied
+  // now, and the full list is long enough to bury it. A thread already scoped
+  // to a past subject still shows its own row, or the trigger would read as
+  // General.
+  const listed = subjects.filter((s) => s.is_current || s.id === value);
   return (
     <Select
       value={value == null ? GENERAL : String(value)}
@@ -52,24 +58,35 @@ export function SubjectSelect({
         size="sm"
         aria-label="Subject"
         title={active ? displayName(active.name, active.code) : "Every subject"}
-        className={cn("h-7 text-xs", className)}
+        className={cn("h-7 gap-1.5 text-xs", className)}
       >
-        {/* The rows carry the code *and* the full name so the menu can be
-            read; the trigger takes the code alone, the way the model picker
-            beside it takes the model's name and drops the vendor. */}
-        <SelectValue>{active ? displayCode(active.code) : "General"}</SelectValue>
+        {/* Icon plus code, the way the sidebar names a subject; the full name
+            is the tooltip on both the trigger and the rows. */}
+        <SelectValue>
+          {active ? (
+            <span className="flex items-center gap-1.5">
+              <SubjectIcon code={active.code} size={12} />
+              {displayCode(active.code)}
+            </span>
+          ) : (
+            "General"
+          )}
+        </SelectValue>
       </SelectTrigger>
-      <SelectContent className="max-h-72">
+      <SelectContent className="max-h-56 min-w-[9rem]">
         <SelectItem value={GENERAL} className="text-xs">
           General
         </SelectItem>
-        {subjects.length > 0 && <SelectSeparator />}
-        {subjects.map((s) => (
-          <SelectItem key={s.id} value={String(s.id)} className="text-xs">
+        {listed.length > 0 && <SelectSeparator />}
+        {listed.map((s) => (
+          <SelectItem
+            key={s.id}
+            value={String(s.id)}
+            title={displayName(s.name, s.code)}
+            className="gap-1.5 text-xs"
+          >
+            <SubjectIcon code={s.code} size={12} />
             <span>{displayCode(s.code)}</span>
-            <span className="truncate text-muted-foreground/70">
-              {displayName(s.name, s.code)}
-            </span>
           </SelectItem>
         ))}
       </SelectContent>

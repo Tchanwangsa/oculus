@@ -21,8 +21,9 @@ old chat page and store are gone.
 | Claude Code bridge (`claude -p`, stream-json) | `app/src-tauri/src/harness/claude.rs` |
 | Codex bridge (`codex app-server`, JSON-RPC) | `app/src-tauri/src/harness/codex.rs` |
 | Finding the binaries from a GUI app | `app/src-tauri/src/harness/discover.rs` |
-| Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–25 in `app/src-tauri/src/lib.rs` |
+| Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–26 and 28 in `app/src-tauri/src/lib.rs` |
 | Instructions appended to the provider's prompt | `app/src-tauri/templates/HARNESS.template.md` |
+| The library's own `AGENTS.md`, which Codex reads on its own | `app/src-tauri/templates/AGENTS.template.md` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Frontend types, reads, commands | `app/src/lib/harness.ts` |
 | Live state, event folding | `app/src/stores/harnessStore.ts` |
@@ -40,10 +41,13 @@ old chat page and store are gone.
   `turn/completed`, `thread/tokenUsage/updated`…) both become
   `HarnessEvent`: session started, user message, turn started, assistant and
   thinking deltas and their completed blocks, tool started / output / finished,
-  usage, rate limits, turn finished, error, exited. Tool calls carry a
-  provider-neutral `ToolKind` plus the raw name; `classify` in `event.rs` is
-  the one table both bridges share, and it knows an `oculus …` command from
-  any other Bash.
+  usage, rate limits, turn finished, error, exited. Three variants have no
+  provider behind them — `ThreadTitled`, the answer to the naming turn below,
+  and `Queued`/`Unqueued`/`Rewound`, which are the queue and the rewind below —
+  because they are persisted and forwarded by the same path as the rest. Tool
+  calls carry a provider-neutral `ToolKind` plus the raw name; `classify` in
+  `event.rs` is the one table both bridges share, and it knows an `oculus …`
+  command from any other Bash.
 - **Claude is a process per thread; Codex is one server for all of them.**
   A Claude thread is one long-lived `claude -p --input-format stream-json`
   process that takes user turns on stdin and is resumed by session id
@@ -64,6 +68,20 @@ old chat page and store are gone.
   rules; `courses/` heals on the next sync, the database does not. The
   module docs in `claude.rs` say what each part buys and what broke without
   it. Bash writes are refused by both sandboxes at the OS level.
+- **The agent can now write to the database, and that does not loosen the rule
+  above.** `oculus project` and `oculus task` put a plan into the tables the
+  app's board draws ([projects.md](./projects.md)), so a breakdown the student
+  agrees to is rows rather than a markdown file in `agents/`. The CLI is the
+  door in both directions and `oculus.db` stays on the deny list: the binary
+  is what knows that a column id must exist, that `done_at` follows the
+  destination column's kind, and that a whole breakdown belongs in one
+  transaction — none of which a `sqlite3` a model reached for would honour.
+  Both templates say so. The board picks the write up because
+  `useBackendEvents` watches this event stream for a finished tool call whose
+  command names one of those and fires `PROJECTS_UPDATED_EVENT`; it matches on
+  the command text rather than `classify`'s `ToolKind`, since `is_oculus_cli`
+  only word-matches the first few words and `cd … && oculus task add` reads as
+  plain Bash.
 - **The prompt is appended, not replaced.** `HARNESS.template.md`, rendered
   with the real data-dir path and the course folders on disk, goes in as
   `--append-system-prompt` (Claude) or `developerInstructions` (Codex). It
@@ -103,7 +121,13 @@ old chat page and store are gone.
 - **Interrupt is a control message, not a kill.** Claude takes a
   `control_request` of subtype `interrupt` on stdin; Codex takes
   `turn/interrupt` with the active turn id. The process stays up either way,
-  and the turn closes with status `interrupted`.
+  and the turn closes with status `interrupted`. What that costs to get right
+  is [Stopping a turn](#stopping-a-turn) below.
+- **A thread runs one turn at a time, and the manager is what makes that
+  true.** Both CLIs accept a second message mid-turn; neither does anything
+  good with it, and the two do different wrong things, which is why the wait
+  is here rather than left to them. See [One turn at a
+  time](#one-turn-at-a-time).
 - **Every raw line is kept.** `agents/threads/<id>.ndjson` gets each provider
   line as it arrives (id 0 is the shared Codex server and headless runs). It
   is how a translation bug is diagnosed without re-running an agent, and the
@@ -120,6 +144,28 @@ old chat page and store are gone.
   turn parameter. And the server's stderr is every MCP server in the user's
   own `~/.codex/config.toml` failing to sign in; only a tail is kept, for
   the exit message.
+- **Not every notification is about a thread.**
+  `account/rateLimits/updated` is about the subscription, and the shared
+  server sends it with no `threadId` on it — so the route lookup that every
+  other notification needs silently ate it, and Codex showed a context ring
+  with no plan windows behind it while the fixture test passed. Account-scoped
+  methods are translated and dispatched *before* the lookup
+  (`translate_account`), into a sink that belongs to the harness rather than
+  to a session, and reach the webview on thread id 0. That is also why
+  `harness-event` carries the provider: an event with no thread has no row to
+  read it off. Claude needs none of this — its processes are one per thread,
+  so its windows arrive on a thread's own stream.
+- **The windows can be asked for, not only waited for.** The push comes with
+  a model call, so on its own the meter shows the last turn's numbers —
+  after a night, a window that has since reset. `account/rateLimits/read`
+  answers the same object with no turn and no quota, so the bridge reads it
+  when the server starts and again when the Chat page opens
+  (`harness_refresh_rate_limits`), and the answer goes out on the account
+  sink exactly like the push. The page-open read never starts the server: a
+  visit is not a reason to spawn a CLI, and a server that has just started
+  has already seeded itself. Claude has no equivalent over `stream-json` —
+  its control protocol has a `get_usage` request, but the bridge does not
+  speak it — so there the stored snapshot stands until the next turn.
 - **Claude specifics.** `result.usage` sums every request in the turn — that
   is spend, not context — so context tokens come from the last `assistant`
   message's usage instead. Tool inputs are never taken from the streamed
@@ -128,6 +174,96 @@ old chat page and store are gone.
   deltas do not repeat. `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` are
   stripped from the child env because a dev app started from inside a
   Claude Code session inherits them and the CLI refuses to nest.
+
+## The thread list
+
+The conversations column groups threads under the subject they were scoped
+to, General included, and each row is the agent's monochrome mark beside the
+thread's name (`app/src/components/harness/ThreadList.tsx`). The model is not
+on the row: it can change per send, the composer already shows it, and the
+list answers "which conversation", not "on what". A group's header carries a
+`+` that opens a new thread already scoped to that subject — the shortest
+path to the scope choice below, made from the one place it is already
+answered.
+
+**The column is the reader's to size, and to put away.** It drags wider from
+the seam and folds to nothing from the button beside *New thread* or with
+⌘⌥B (`useResizablePanel` in `app/src/hooks/useResizablePanel.ts`, driven from
+`ChatPage`); both the width and the fold are remembered in `localStorage`.
+Folded means gone, not narrowed to a rail — the app's own sidebar pattern — so
+the way back in is a button in the chat header, with dragging the seam out as
+the second. Two details are load-bearing. The panel keeps its width while
+folded and the inner box is laid out at *that* width throughout, so the fold
+clips the list rather than reflowing every row on its way out; and the grip
+sits on the seam with a negative margin cancelling its own width, because a
+handle that occupied 4px of layout would shift the timeline sideways by its own
+thickness. Dragging below half the minimum folds the panel instead of pinning
+it at the minimum, and dragging back out resumes from zero so the seam stays
+under the pointer.
+
+The shortcut is ⌘B's neighbour and needs two things that are easy to get
+wrong. `AppLayout`'s ⌘B now returns early on ⌥, or the one chord would close
+both the sidebar and this panel. And the test is on `e.code`, not `e.key`:
+macOS lets ⌥ rewrite the character a key produces, so ⌥B arrives as `∫` and a
+`key === "b"` comparison never fires.
+
+**A row is a row, not a label.** Every pixel of it opens the thread: the
+padding and the provider mark sit *inside* the button and the flex row is left
+to stretch it, the way the app's own sidebar rows are built. With the padding
+on the wrapping div instead, the hit target was the title's 16px line box
+inside a 28px row while the hover fill covered the whole row — so a click on a
+row that had lit up under the pointer landed on the div and did nothing, most
+often when switching threads quickly, which is when you stop settling on the
+text. The right-hand strip is the one exception and is meant to be: the delete
+control, and a spinner in its place while a turn runs.
+
+**Switching does not blank the timeline.** `open` in `harnessStore` leaves the
+rows of the thread being left on screen for the few milliseconds the read
+takes, and returns early rather than re-reading the thread already open.
+Clearing `items` first put the page in the state that *is* the empty composer
+— no rows and nothing running — so every switch flashed the "Ask Oculus
+anything" hero and re-mounted the composer under it before the rows landed.
+
+A group folds away: the label and the caret beside it are one control, and the
+right-hand slot holds the thread count until hover swaps it for the `+`. The
+caret sits with the name because that is whose state it reports — beside the
+`+` it read as a second button acting on the group. Open, it waits for the
+pointer; folded, it stays, since then it is the only thing saying so. Which
+groups are folded is kept in `localStorage`, and what is stored is the
+*collapsed* keys, so a subject scoped for the first time arrives expanded. Two
+edges are handled where they would otherwise mislead: a folded group shows a
+spinner in place of its count while a thread inside it is running, since the
+row that would say so is folded away; and its `+` expands the group before
+opening the new thread, which would otherwise be started out of sight.
+
+The column reserves its scrollbar gutter whether or not it overflows, through
+`overflow-y: scroll` rather than `auto`. With classic scrollbars on, a bar that
+appears only once the list is long enough takes its width out of every row, so
+threads arriving and leaving jogged the whole column sideways. The modern
+spelling, `scrollbar-gutter: stable`, is a **no-op in this WebKit** — measured
+in a bare `WKWebView`: `CSS.supports` returns true and the property computes to
+`stable`, and the content box is the same width with it as without. Always-on
+overflow is the one that reserves; nothing is drawn in the gutter while the
+list fits.
+
+**The name is the model's own, and it costs a turn.** Neither CLI names a
+conversation over its protocol — Claude's `stream-json` carries no title
+event and `app-server` sends none — so a thread is born titled with the first
+line of its first message and renamed once the first exchange is done.
+`Harness::name_thread` runs that naming turn *outside* the thread: its own
+short-lived Claude process on the cheapest model, or a throwaway thread on
+the shared Codex server. Sending it down the thread's own session would put a
+question the student never asked into the timeline and spend the thread's
+context on it. It runs on the thread's own provider, so one CLI is enough.
+
+The claim is the guard. `store::claim_naming` hands back the exchange only if
+it also wins the race to flip `title_generated` from 0 to 1, so two turns
+finishing at once cannot both pay for a name, and a naming turn that fails
+leaves the first-line title rather than retrying on every message. The answer
+comes back as a `ThreadTitled` event on the ordinary stream — written by the
+consumer thread, forwarded to the webview — and `clean_title` refuses
+anything that reads like prose instead of a name, because the fallback is
+better than a sentence.
 
 ## The timeline
 
@@ -141,16 +277,266 @@ unfolded at full strength, with a spinner on the open call, streaming text
 under it, and "Working…" when nothing is streaming. A tool row is
 `[icon] [verb] [title]` with a chevron on hover and a detail card — the
 command or the arguments, then the output — behind it; reasoning is a row
-titled "Thought" with the text behind it. Command output is the one thing
+titled "Thought" with the text behind it.
+
+**A library path opens the file, in a tool row or in the answer itself.** When that title is a library path —
+`courses/<subject>/…`, optionally with the `../` the agent carries because
+every thread runs from `agents/` — it is a link into the side panel rather
+than text to retype into the ⌘K palette (`libraryPath` / `openLibraryPath` in
+`app/src/lib/openFile.ts`). It is matched on *shape*, not resolved, so a
+timeline of a hundred tool rows costs no queries; the lookup
+(`getFileByRelativePath`) happens on the click, and a path with no row falls
+back to the system viewer, since a file that never made it through a sync is
+still a file on disk. This is why a row is a div holding two controls rather
+than one button wrapping another — a path is a link and the rest of the row
+is a disclosure, and nesting those would be both invalid and unreachable from
+a keyboard. The same matcher gates markdown links in the agent's prose
+(`MdComponents`): a `courses/…` href becomes a button into the panel, because
+the anchor everything else uses carries `target="_blank"` and the webview has
+nowhere to take such a path but a blank new tab. Web URLs stay anchors — those
+are caught in `AppLayout`'s capture phase and routed to an in-app browser tab. Command output is the one thing
 outside markdown set in monospace, through `CodeText` in
 `app/src/components/markdown/MdComponents.tsx`, which is where the font
 lives.
 
-The composer is bb's: Enter sends, Shift+Enter breaks a line, the send
-button becomes stop while a turn runs, and a footer line carries context
-used, spend, and the account's rate-limit windows (Claude's 5-hour and
-weekly; Codex's primary and secondary). A thread keeps its provider; the
-model can change per send, which on Claude means the next process.
+**Every message has a row of actions under it**, and it is under rather than
+beside for one reason: a control floating next to a bubble has to be placed
+against text of unknown width, while a row below it is just a row. The row's
+height is always taken and only its contents fade in on hover, so a thread at
+rest is still only what was said, and the pointer crossing a message never
+pushes the rest of the thread down a line.
+
+- A **question** carries when it was asked, then Copy, Edit and Rewind.
+- An **answer** carries Copy and Retry — Retry asks the question above it
+  again, unchanged, which is the same move as an edit that changed nothing
+  ([going back](#going-back)).
+- A **queued** message says `Queued` where the time goes, and offers Edit and
+  Remove; it is the same bubble, dashed ([one turn at a
+  time](#one-turn-at-a-time)).
+
+Copy answers for itself by turning into a tick for a moment: this app has no
+toasts, and a copy button that does nothing visible is indistinguishable from
+one that failed. It goes through `copyText` in `app/src/lib/utils.ts`, which
+keeps the old `execCommand` path as a fallback — `navigator.clipboard` needs
+a secure context, which the dev server is and the packaged app's custom
+scheme is not always.
+
+A question long enough to bury the answer under it **folds**: past about ten
+lines the bubble clips under a fade with *Show more* inside it, so a thread of
+pasted briefs still reads as a list of exchanges. Whether one is long enough is
+measured from the rendered node rather than counted from the text — how many
+lines a paste becomes is the column's decision, and the column changes width
+with the panel (`useOverflows` in `app/src/components/harness/Timeline.tsx`).
+
+Editing a question happens in the bubble rather than back in the composer —
+the thread is where the question is — and the box is that bubble grown to the
+column's width with its Cancel and Send inside it.
+
+Whether the editing actions are offered at all depends on whether the thread
+is busy, which changes twice a turn — so the two message rows read that from
+the store themselves rather than taking it as a prop, which would re-render
+every committed row, markdown and all, at both ends of every turn.
+
+**The questions are the index.** A rail of ticks sits in the left gutter, one
+per question asked (`app/src/components/harness/ThreadMap.tsx`); clicking a
+tick scrolls to that question and hovering names it. *Every* question on
+screen is drawn longer and in the accent, not just one — a viewport holding
+three of them and marking one says the other two are somewhere else. They are
+in order, so what is in frame is a contiguous range; when none is on screen —
+a long reply filling the view — the question that reply answers is lit
+instead, so the rail always says where you are. The ticks are *evenly spaced in one block*,
+not placed proportionally to where their message sits in the scroll — placed
+that way they spread over the whole viewport and a thread read as two
+far-apart clusters of dashes rather than as one index. Even spacing gives up
+"how far apart", which the scrollbar already says, and keeps the count and the
+position, which is what the rail is for. It reads geometry and never the
+stream: where each question starts is measured off the DOM (the user bubble
+carries a `data-msg-id`) into a ref, so a turn growing the thread twenty times
+a second re-renders nothing here. The rail hides itself when the window is too
+narrow to have a gutter beside the 760px column.
+
+**Nothing on screen re-renders per token.** The stream is the load here — a
+provider sends tens of deltas a second and the thread they land in is the
+most expensive thing the app draws, so the page is arranged so that the two
+meet as rarely as possible. Three parts, measured over a real 38-row thread
+in the preview harness:
+
+- **Deltas are buffered, not applied.** `harnessStore` holds assistant text,
+  reasoning and tool output in a module-level buffer and folds it into `live`
+  on a 48ms timer, so the page renders ~20 times a second however fast the
+  CLI talks. Every other event — the ones that commit a row — flushes the
+  buffer first, so text can never arrive after the row it belongs to.
+- **Committed rows are memoised, and the turn subscribes where it is drawn.**
+  A row Rust wrote will not change again, so `Timeline` memoises all of them
+  and `ChatPage` subscribes slice by slice rather than to the store whole.
+  The two things that do move mid-turn read the store themselves: `LiveTail`
+  (streaming text, reasoning, "Working…") and the one tool row whose output
+  is still arriving. Parsed tool `meta` is cached per row object in
+  `parseToolMeta` — a single thread can carry 300KB of command output — and
+  the KaTeX plugins are only loaded over text that has a maths delimiter.
+- **Following the stream watches for growth.** A `scrollTo` per delta forced a
+  layout of the whole thread and yanked the page down whenever the reader
+  had scrolled up; a `ResizeObserver` on the column scrolls only while the
+  bottom is already where they are.
+
+Together: 400 deltas over that thread went from 402 React commits and 6.2s of
+render (15ms each — a dropped frame per token) to 34 commits and 55ms, and
+opening the thread from 53ms of render to 39ms.
+
+The composer is bb's: Enter sends, Shift+Enter breaks a line. A thread keeps
+its provider; the model can change per send, which on Claude means the next
+process. While a turn runs the box still takes a message — it is queued, not
+sent — so the control row carries two buttons and not one: stop is always
+reachable, and send appears beside it as soon as there is something to queue.
+
+**Usage is a wheel, not a footer.** The line under the box that spelled out
+context, spend and every rate-limit window is now
+`app/src/components/harness/UsageMeter.tsx` — a 16px ring in the control row
+beside the send button, opening a popover of bars: this thread's context,
+then the account's windows (Claude's 5-hour and weekly; Codex's primary and
+secondary) with when each one resets. Three decisions are load-bearing. The
+ring is context and nothing else: it is the number that moves every turn, it
+is thread-local like the composer it sits in, and a ring that silently
+switched to whichever number was worst could not be read at that size. Spend
+is gone — these are subscription CLIs, so the dollars the provider reports
+price tokens nobody is billed for, and a number that is never charged is
+noise beside two that bind. And the control row is one height throughout
+(24px, the picker's): a send button larger than the picker beside it reads as
+the box's subject rather than its verb.
+
+## One turn at a time
+
+A message typed while the agent is working does not reach the CLI. It waits
+in `Queue` (`app/src-tauri/src/harness/mod.rs`), and Rust sends it the moment
+the running turn closes. This is not caution — it is the only way the thread
+reads in order, and both CLIs were measured getting it wrong in their own
+way:
+
+- **Claude queues it itself** and starts a second turn the instant the first
+  `result` is out. The rows are fine, but the *turn* boundary is not: the
+  composer went idle between them, the spinner stopped, and stop had nothing
+  to stop for as long as the gap lasted.
+- **Codex folds it into the running turn.** A second `turn/start` comes back
+  with the *same* turn id — no error, no new turn — so the question lands in
+  the timeline above the answer to the previous one, there is one
+  `turn/completed` for both, and the reply to the first question can look
+  like it never came. This is what "the message just disappears" was.
+
+So the queue is the manager's. A pending message is **not part of the
+conversation**: no row is written for it, it is held in memory rather than
+the database, and that is exactly why it can still be rewritten or dropped
+before it goes out. The webview draws it as a dashed bubble at the end of the
+thread (`Pending` in `app/src/components/harness/Timeline.tsx`), folded from
+the `Queued`/`Unqueued`
+events — an edit arrives as `Queued` again under the same id, so one variant
+covers "new" and "changed". `harness_queued` is how a reloaded page finds out
+what Rust is still holding.
+
+Two things had to be true for the queue not to strand a message. A thread is
+released for its next turn by `TurnFinished` and nothing else, so both bridges
+now promise exactly one per message they accept: Claude keeps an `expecting`
+flag from a message going in until the `result` that closes it, so a process
+that dies in between — a model name the CLI rejects kills it before the first
+stream event — still closes the turn; and Codex takes the turn id from the
+`turn/start` response rather than waiting for the `turn/started` notification,
+which arrives a second later, after its MCP servers and hooks have warmed. In
+that second an interrupt had no turn to name and a dead server had no turn to
+fail.
+
+## Stopping a turn
+
+Stop means nothing more goes out. The running turn is interrupted *and*
+whatever was queued behind it is dropped — and handed back to the composer,
+since the student typed those words and never saw them sent
+(`harness_interrupt` returns them; `restore` in
+`app/src/stores/harnessStore.ts` carries them to the box).
+
+What the turn leaves behind took a recording of each CLI to get right; both
+are in `fixtures/harness/`, and the two tests replay them.
+
+- **The half-written answer is kept.** Claude sends it as an ordinary
+  `assistant` line before the `result`, so it was already a row. Codex sends
+  nothing: the deltas simply stop and the `item/completed` that carries the
+  whole text never comes — so the bridge accumulates the streamed text and
+  commits it itself when `turn/completed` says `interrupted`. Without that,
+  stopping a turn wiped everything the agent had said off the screen, because
+  live text has no row behind it.
+- **A stopped turn is not an error.** Claude's closing `result` calls itself
+  one: `is_error: true`, `subtype: "error_during_execution"`, `stop_reason:
+  null`, and an `errors` array holding the CLI's own diagnostic —
+  `[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null`.
+  That string was reaching the timeline as a red row every time stop was
+  pressed. `terminal_reason: "aborted_streaming"` is the only field that says
+  what really happened, so that and the flag the bridge sets when it asks are
+  what decide; the diagnostic is dropped and the turn closes `interrupted`.
+  The same line reports zeros for every token and cost, which used to blank
+  the thread's usage, so it is skipped too.
+- **The stop is a row.** `TurnFinished { interrupted }` writes an
+  `interrupted` item — the one row kind with nothing in it — and the timeline
+  draws it as a quiet centred line, *You stopped the response*. The answer
+  above it breaks off mid-sentence on purpose; without the line the thread
+  reads as an agent that gave up, and it has to survive a reload for the same
+  reason.
+
+## Going back
+
+Three actions share one move — the thread is truncated at a row, and that row
+and everything after it stop being rows (`store::truncate_from`, announced as
+a `Rewound` event so a second window is not left showing rows that are gone).
+What differs is what happens next:
+
+| | What it does | Command |
+| --- | --- | --- |
+| **Edit** | Truncate, then send the new text as the next turn | `harness_edit_resend` |
+| **Retry** | Truncate at the question above the answer, then send it again unchanged | `harness_edit_resend` |
+| **Rewind** | Truncate, and hand the question's words back to the composer. Nothing is sent | `harness_rewind` |
+
+Rewind is Claude Code's, **without the branching**: there is one thread, so
+going back means the rest is gone rather than parked on a side branch that
+something then has to draw, name and let you switch between. Its whole point
+is that it does not send — it is for picking the conversation up yourself,
+which is why the words land in the composer, through the same `restore` path
+stop uses, instead of going straight to the agent.
+
+**The agent goes back with the thread.** Both CLIs can be told to forget a
+turn, on the same control channel the stop button uses, and both were asked in
+a round-trip before this was built:
+
+| | How | What it names |
+| --- | --- | --- |
+| Claude | `control_request` / `rewind_conversation` | the uuid of the user message |
+| Codex | `thread/revert` | the id of the turn to revert before |
+
+Neither will say that identifier twice, so it is learned once — when the turn
+goes out — and kept on the question's row as `anchor` (migration 28), arriving
+as a `TurnAnchor` event like everything else the bridges learn. Codex says its
+turn id in the `turn/start` reply. Claude says nothing: its `stream-json`
+output never echoes the message we sent, so the uuid is read out of the CLI's
+own transcript at `~/.claude/projects/<slug>/<session>.jsonl`. That file is a
+tree rather than a list — every row names its `parentUuid` — so the question
+is found by walking up from the turn's first answer, past the attachments the
+CLI threads in, never stopping on a `user` row that is a tool result
+(`anchor_for`). The folder is not announced either: `memory_paths` on the
+`init` line would give it away but is null whenever auto-memory is off, which
+is how this bridge runs it, so the slug is rebuilt the way the CLI builds it —
+every character of the working directory that is not a letter or a digit
+becomes `-`, measured against real folders rather than assumed.
+
+The provider is rewound *before* the rows go, and a thread whose process has
+exited is resumed for it without a turn: the control channel is live as soon
+as the session is, so nothing is spent on the model.
+
+**When it cannot reach the agent.** A question asked before migration 28 has
+no anchor to name, and a session the CLI has since dropped cannot be resumed.
+The rows still go — refusing to edit would be worse — but `Rewound` carries
+`context: false` and the timeline says *the agent still remembers what was
+removed here*, so the mismatch is read there rather than discovered later in
+an answer that refers to an exchange no longer on screen. Neither provider
+puts files back: Claude splits that into a separate `rewind_files`, and
+Codex's schema says outright that reverting them is the client's job.
+
+All three are offered only while the thread is idle: rewriting rows under a
+running turn would delete ones it is still writing.
 
 ## The model picker
 
@@ -193,7 +579,13 @@ against the one being asked for.
 The composer carries two more controls than a bare prompt box, both in
 `app/src/components/harness/Composer.tsx`.
 
-**A subject, or General.** `SubjectSelect.tsx` scopes the thread. It is not a
+**A subject, or General.** `SubjectSelect.tsx` scopes the thread, sitting
+above the box rather than in the control row under it, and only while the
+thread is new — the choice is made once, before the first message, and an
+open thread cannot change it, so a dead control under every later message
+would spend the row on nothing. The menu lists this term's subjects only
+(plus whatever a thread is already scoped to), as icon and code; past
+subjects are reachable from the sidebar, not from here. It is not a
 sandbox — every thread runs from `agents/` and reads all of `../courses/`
 either way — it says which subject the questions are about, so "what's due
 this week" has an answer. Picking one appends a short section to the
@@ -226,7 +618,15 @@ whole path was dropped rather than ported.
 
 Built: the two bridges with recorded fixtures and replay tests, `oculus
 agent` as the headless proof, tables and lifecycle, the page, subject scope
-and the `@` file menu. Not yet:
-approvals and native questions routed to the UI, steering mid-turn (bb's
-`turn/steer` and a second stdin line), the plan/todo card, forking, and a
-third bridge for the API path when BYOK returns.
+and the `@` file menu, the message queue, stopping a turn, and going back
+(edit, retry, rewind). Not yet: approvals and native questions routed to the UI, steering
+mid-turn (bb's `turn/steer` and a second stdin line — the queue is the
+waiting-room version of it, not steering), the plan/todo card, branching (rewind
+deliberately does not), and a third bridge for the API path when BYOK
+returns.
+
+The plan/todo card is still outstanding despite projects being built, because
+the two are different things: that card would draw the provider's *own*
+in-turn todo list (`ToolKind::Plan`, collapsed today), which lives and dies
+with the turn, where a project is the student's, persists, and is edited on a
+board long after the thread has moved on.

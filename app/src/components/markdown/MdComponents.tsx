@@ -1,5 +1,6 @@
 import type { Components } from "react-markdown";
 import { ArrowSquareOut } from "@phosphor-icons/react";
+import { libraryPath, openLibraryPath } from "@/lib/openFile";
 import { cn } from "@/lib/utils";
 
 /**
@@ -32,14 +33,35 @@ export const MD_COMPONENTS: Components = {
   p: (p: any) => (
     <p className="text-sm text-foreground/90 leading-relaxed my-3" {...p} />
   ),
-  a: ({ href, children, ...p }: any) => (
-    <a href={href} className="text-brand hover:underline" target="_blank" rel="noreferrer" {...p}>
-      {children}
-      {/^https?:/.test(href ?? "") && (
-        <ArrowSquareOut size={12} className="inline shrink-0 ml-0.5 mb-0.5 opacity-60" />
-      )}
-    </a>
-  ),
+  // A link the agent wrote to a file in the library opens in the side panel,
+  // the way the same path does in a tool row — `target="_blank"` would hand a
+  // `courses/…` href to the webview, which has nowhere to take it but a blank
+  // new tab. Web URLs keep the anchor: `AppLayout` catches those in the
+  // capture phase and routes them to an in-app browser tab (⌘-click to the
+  // real browser), so the markup here stays a plain link on purpose.
+  a: ({ href, children, ...p }: any) => {
+    const lib = libraryPath(href);
+    if (lib) {
+      return (
+        <button
+          type="button"
+          onClick={() => openLibraryPath(lib)}
+          className="text-left text-brand hover:underline"
+          {...p}
+        >
+          {children}
+        </button>
+      );
+    }
+    return (
+      <a href={href} className="text-brand hover:underline" target="_blank" rel="noreferrer" {...p}>
+        {children}
+        {/^https?:/.test(href ?? "") && (
+          <ArrowSquareOut size={12} className="inline shrink-0 ml-0.5 mb-0.5 opacity-60" />
+        )}
+      </a>
+    );
+  },
   ul: (p: any) => (
     <ul className="list-disc pl-5 my-3 space-y-1 text-sm text-foreground/90" {...p} />
   ),
@@ -47,8 +69,11 @@ export const MD_COMPONENTS: Components = {
     <ol className="list-decimal pl-5 my-3 space-y-1 text-sm text-foreground/90" {...p} />
   ),
   li: (p: any) => <li className="leading-relaxed" {...p} />,
+  // No blanket italic: a pulled quote can run several lines, and italic set at
+  // paragraph length is slow to read whatever the face. The rule and the muted
+  // ink already mark it as quoted; `em` inside it still italicises normally.
   blockquote: (p: any) => (
-    <blockquote className="border-l-2 border-border pl-4 my-3 text-sm text-muted-foreground italic" {...p} />
+    <blockquote className="border-l-2 border-border pl-4 my-3 text-sm text-muted-foreground" {...p} />
   ),
   code: ({ className, children, ...p }: any) => {
     const isBlock = /language-/.test(className ?? "") || String(children).includes("\n");

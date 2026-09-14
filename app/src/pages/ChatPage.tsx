@@ -1,15 +1,25 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { SidebarSimple } from "@phosphor-icons/react";
 import { Composer } from "@/components/harness/Composer";
 import { ThreadList } from "@/components/harness/ThreadList";
+import { ThreadMap } from "@/components/harness/ThreadMap";
 import { Timeline } from "@/components/harness/Timeline";
+import { Button } from "@/components/ui/button";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
 import {
   getHarnessRateLimits,
+  harnessRefreshRateLimits,
   harnessDeleteThread,
+  harnessEditQueued,
+  harnessEditResend,
   harnessInterrupt,
+  harnessRewind,
   harnessSend,
+  harnessUnqueue,
   parseUsage,
 } from "@/lib/harness";
-import { liveFor, useHarnessStore } from "@/stores/harnessStore";
+import { useHarnessStore } from "@/stores/harnessStore";
 
 const SUGGESTIONS = [
   "What's due this week?",
@@ -18,35 +28,104 @@ const SUGGESTIONS = [
   "Write a memory about how I like my notes",
 ];
 
+/** How close to the bottom still counts as reading the bottom. */
+const STICK_PX = 80;
+
+/** The conversations column. Narrower than ~160 and thread names are all
+ *  ellipsis; wider than ~420 and it is eating the timeline it exists to open. */
+const LIST = { defaultWidth: 224, minWidth: 160, maxWidth: 420, storageKey: "oculus-chat-list-width" };
+
+/**
+ * Follow the stream, but only from the bottom. A `scrollTo` on every delta
+ * forced a layout of the whole thread per token *and* yanked the page back
+ * down whenever the reader scrolled up mid-turn; growth is watched instead,
+ * and the scroll only happens while the bottom is where they already are.
+ */
+function useStickToBottom(activeId: number | null, live: boolean) {
+  const outer = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+
+  // A thread you have just opened starts at its end, whatever the last one
+  // was scrolled to.
+  useEffect(() => {
+    pinned.current = true;
+  }, [activeId]);
+
+  useEffect(() => {
+    const el = outer.current;
+    const content = inner.current;
+    if (!el || !content) return;
+    const onScroll = () => {
+      pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    const ro = new ResizeObserver(() => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(content);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+    };
+  }, [live]);
+
+  return { outer, inner };
+}
+
 /**
  * Chat is a CLI agent — Claude Code or Codex — running from the library's
  * `agents/` folder (`docs/harness.md`). This page is the thread list, the
  * timeline of what the agent said and did, and one composer that sits under
  * the hero on an empty thread and docks at the bottom once there is one.
+ *
+ * It subscribes slice by slice rather than to the store whole: a turn in
+ * flight writes to `live` many times a second, and a page that re-rendered
+ * on all of it rebuilt the thread list, the composer and every committed row
+ * per token. What actually changes mid-turn — the streaming tail, the running
+ * tool's output — subscribes to the store where it is drawn.
  */
 export default function ChatPage() {
   const store = useHarnessStore;
-  const {
-    threads, activeId, items, live, rateLimits, provider, model, reasoning,
-    subjects, subjectId,
-  } = useHarnessStore();
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const threads = useHarnessStore((s) => s.threads);
+  const activeId = useHarnessStore((s) => s.activeId);
+  const items = useHarnessStore((s) => s.items);
+  const rateLimits = useHarnessStore((s) => s.rateLimits);
+  const provider = useHarnessStore((s) => s.provider);
+  const model = useHarnessStore((s) => s.model);
+  const reasoning = useHarnessStore((s) => s.reasoning);
+  const subjects = useHarnessStore((s) => s.subjects);
+  const subjectId = useHarnessStore((s) => s.subjectId);
+  const running = useHarnessStore((s) => (s.activeId != null && s.live[s.activeId]?.running) || false);
+  const restore = useHarnessStore((s) => s.restore);
+  // Which threads are busy, as a primitive: selecting the live map itself
+  // would put this page back on the token-by-token path the split above
+  // exists to leave.
+  const runningKey = useHarnessStore((s) =>
+    Object.keys(s.live)
+      .filter((id) => s.live[Number(id)].running)
+      .join(","),
+  );
+  const runningIds = useMemo(
+    () => new Set(runningKey ? runningKey.split(",").map(Number) : []),
+    [runningKey],
+  );
 
   const thread = threads.find((t) => t.id === activeId) ?? null;
-  const turn = liveFor(activeId, live);
   const activeProvider = thread?.provider ?? provider;
   const activeModel = thread ? thread.model : model;
   // An open thread shows the scope it was created with; only a new one reads
   // the composer's own selection.
   const activeSubject = thread ? thread.subject_id : subjectId;
+  const usage = useMemo(() => parseUsage(thread), [thread]);
 
   useEffect(() => {
     store.getState().loadThreads();
     store.getState().loadSubjects();
   }, [store]);
 
-  // Rate limits are per provider account; the stored snapshot fills the
-  // footer until a live turn reports fresher ones.
+  // Rate limits are per provider account; the stored snapshot draws the bars
+  // straight away, before anything is asked of the provider.
   useEffect(() => {
     if (rateLimits[activeProvider]) return;
     getHarnessRateLimits(activeProvider).then((w) => {
@@ -54,34 +133,161 @@ export default function ChatPage() {
     });
   }, [activeProvider, rateLimits, store]);
 
+  // Then replace it with numbers from now. Codex answers a read off its
+  // running server; Claude has no equivalent, so there the snapshot stands
+  // until the next turn reports. The answer arrives as a `rate_limits` event,
+  // which lands in `rateLimits` — so this watches the provider and nothing
+  // else, or it would ask again for every answer it got.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [items.length, turn.streaming, turn.thinking, turn.running]);
+    void harnessRefreshRateLimits(activeProvider).catch(() => {});
+  }, [activeProvider]);
 
-  async function send(text: string) {
-    const s = store.getState();
-    const id = s.activeId;
-    if (id == null) s.beginNew();
-    try {
-      const newId = await harnessSend(id, activeProvider, text, {
-        model: activeModel,
-        reasoningEffort: s.reasoning,
-        subjectId: s.subjectId,
-      });
-      if (id == null) {
-        // The rows for this thread were written under the new id while we
-        // waited; open it so they show, then keep listening live.
-        await s.loadThreads();
-        await store.getState().open(newId);
+  // The questions asked, in order — the rail's landmarks. Derived from the
+  // committed rows, so it moves when a turn commits and not per token.
+  const markers = useMemo(
+    () => items.filter((i) => i.kind === "user").map((i) => ({ id: i.id, text: i.content ?? "" })),
+    [items],
+  );
+
+  const empty = items.length === 0 && !running;
+  const scroll = useStickToBottom(activeId, !empty);
+  const list = useResizablePanel(LIST);
+
+  // ⌘⌥B folds the conversations column away, alongside the ⌘B that does the
+  // same for the app's sidebar — which is why that one now ignores ⌥.
+  //
+  // `e.code`, not `e.key`: on macOS ⌥ rewrites the character the key produces,
+  // so ⌥B arrives as `∫` and a `key === "b"` test never fires. `code` is the
+  // physical key and is the only spelling of this that works.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.altKey || !(e.metaKey || e.ctrlKey) || e.code !== "KeyB") return;
+      e.preventDefault();
+      list.toggle();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [list.toggle]);
+
+  const send = useCallback(
+    async (text: string) => {
+      const s = store.getState();
+      const id = s.activeId;
+      if (id == null) s.beginNew();
+      try {
+        const newId = await harnessSend(id, activeProvider, text, {
+          model: activeModel,
+          reasoningEffort: s.reasoning,
+          subjectId: s.subjectId,
+        });
+        if (id == null) {
+          // The rows for this thread were written under the new id while we
+          // waited; open it so they show, then keep listening live.
+          await s.loadThreads();
+          await store.getState().open(newId);
+        }
+      } catch (e) {
+        // The failure also arrives as an error row through the event path.
+        console.error("harness send failed", e);
+        if (id == null) await s.loadThreads();
       }
-    } catch (e) {
-      // The failure also arrives as an error row through the event path.
-      console.error("harness send failed", e);
-      if (id == null) await s.loadThreads();
-    }
-  }
+    },
+    [store, activeProvider, activeModel],
+  );
 
-  const empty = items.length === 0 && !turn.running;
+  const onOpen = useCallback((id: number) => store.getState().open(id), [store]);
+  const onNew = useCallback(
+    (subject?: number | null) => {
+      const s = store.getState();
+      s.open(null);
+      // A `+` on a group header means "new thread, in this subject"; the
+      // plain New thread button leaves the composer's scope alone.
+      if (subject !== undefined) s.setSubject(subject);
+    },
+    [store],
+  );
+  const onDelete = useCallback(
+    (id: number) => {
+      harnessDeleteThread(id)
+        .then(() => store.getState().removed(id))
+        .catch(() => {});
+    },
+    [store],
+  );
+  const onSubject = useCallback((id: number | null) => store.getState().setSubject(id), [store]);
+  const onProvider = useCallback((p: typeof provider) => store.getState().setProvider(p), [store]);
+  const onModel = useCallback(
+    (m: string | null) => {
+      const s = store.getState();
+      const open = s.threads.find((t) => t.id === s.activeId);
+      if (open) store.setState({ threads: s.threads.map((t) => (t.id === open.id ? { ...t, model: m } : t)) });
+      else s.setModel(m);
+    },
+    [store],
+  );
+  const onReasoning = useCallback((r: string | null) => store.getState().setReasoning(r), [store]);
+  // Stop means nothing more goes out: the running turn is cut short and
+  // anything queued behind it is dropped. Those messages were typed and never
+  // sent, so they come back into the composer rather than disappearing.
+  const onStop = useCallback(() => {
+    const id = store.getState().activeId;
+    if (id == null) return;
+    harnessInterrupt(id)
+      .then((dropped) => {
+        if (!dropped.length) return;
+        store.setState((s) => ({
+          restore: { text: dropped.join("\n\n"), n: (s.restore?.n ?? 0) + 1 },
+        }));
+      })
+      .catch(() => {});
+  }, [store]);
+  const onRestored = useCallback(() => store.getState().restored(), [store]);
+
+  // Asking the same question differently. The thread rewinds to that row —
+  // it and everything after it stop being rows — and the new text goes as the
+  // next turn. Rust rewinds the agent's own session to match before it
+  // deletes anything (`docs/harness.md`).
+  const questions = useMemo(() => {
+    const resend = (itemId: number, text: string) => {
+      const s = store.getState();
+      if (s.activeId == null) return;
+      harnessEditResend(s.activeId, itemId, text, {
+        model: s.threads.find((t) => t.id === s.activeId)?.model,
+        reasoningEffort: s.reasoning,
+      }).catch((e) => console.error("harness edit failed", e));
+    };
+    return {
+      edit: resend,
+      // Retry is the same move with the same words: the question is asked
+      // again, and the answer it got is no longer part of the thread.
+      retry: resend,
+      // Rewind sends nothing. The thread goes back to before the question and
+      // the words land in the composer, for the student to carry on from.
+      rewind: (itemId: number) => {
+        const id = store.getState().activeId;
+        if (id == null) return;
+        harnessRewind(id, itemId)
+          .then((text) =>
+            store.setState((s) => ({ restore: { text, n: (s.restore?.n ?? 0) + 1 } })),
+          )
+          .catch((e) => console.error("harness rewind failed", e));
+      },
+    };
+  }, [store]);
+
+  const pending = useMemo(
+    () => ({
+      editQueued: (queueId: string, text: string) => {
+        const id = store.getState().activeId;
+        if (id != null) harnessEditQueued(id, queueId, text).catch(() => {});
+      },
+      unqueue: (queueId: string) => {
+        const id = store.getState().activeId;
+        if (id != null) harnessUnqueue(id, queueId).catch(() => {});
+      },
+    }),
+    [store],
+  );
 
   const composer = (
     <Composer
@@ -91,19 +297,18 @@ export default function ChatPage() {
       providerLocked={thread != null}
       subjects={subjects}
       subjectId={activeSubject}
-      onSubject={(id) => store.getState().setSubject(id)}
+      onSubject={onSubject}
       subjectLocked={thread != null}
-      running={turn.running}
-      usage={parseUsage(thread)}
+      running={running}
+      usage={usage}
       rateLimits={rateLimits[activeProvider] ?? []}
-      onProvider={(p) => store.getState().setProvider(p)}
-      onModel={(m) => {
-        if (thread) store.setState({ threads: threads.map((t) => (t.id === thread.id ? { ...t, model: m } : t)) });
-        else store.getState().setModel(m);
-      }}
-      onReasoning={(r) => store.getState().setReasoning(r)}
+      restore={restore}
+      onRestored={onRestored}
+      onProvider={onProvider}
+      onModel={onModel}
+      onReasoning={onReasoning}
       onSend={send}
-      onStop={() => activeId != null && harnessInterrupt(activeId).catch(() => {})}
+      onStop={onStop}
       autoFocus
     />
   );
@@ -112,16 +317,42 @@ export default function ChatPage() {
     <div className="flex h-full">
       <ThreadList
         threads={threads}
+        subjects={subjects}
         activeId={activeId}
-        live={live}
-        onOpen={(id) => store.getState().open(id)}
-        onNew={() => store.getState().open(null)}
-        onDelete={(id) => harnessDeleteThread(id).then(() => store.getState().removed(id)).catch(() => {})}
+        runningIds={runningIds}
+        width={list.width}
+        restWidth={list.restWidth}
+        collapsed={list.collapsed}
+        animate={!list.dragging}
+        onToggle={list.toggle}
+        onOpen={onOpen}
+        onNew={onNew}
+        onDelete={onDelete}
       />
+      {/* The grip sits *on* the seam rather than in it: `w-1` with a matching
+          negative margin either side costs no layout width, so dragging it does
+          not shift the timeline by its own thickness. Folded, it stays put at
+          the card's left edge — dragging it out is the second way back in. */}
+      <ResizeHandle onMouseDown={list.onMouseDown} dragging={list.dragging} className="-mx-0.5" />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-6">
-          <span className="font-display text-[13px] font-semibold text-foreground">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle px-6">
+          {/* Folded, the panel leaves nothing behind, so the way back in lives
+              here — the same trade the app's own sidebar makes with the button
+              in the tab strip. */}
+          {list.collapsed && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Show conversations"
+              title="Show conversations (⌘⌥B)"
+              className="-ml-2 shrink-0 text-muted-foreground"
+              onClick={list.toggle}
+            >
+              <SidebarSimple size={14} />
+            </Button>
+          )}
+          <span className="min-w-0 flex-1 truncate font-display text-[13px] font-semibold text-foreground">
             {thread?.title ?? "Chat"}
           </span>
         </div>
@@ -131,9 +362,8 @@ export default function ChatPage() {
             <div className="mx-auto flex min-h-full w-full max-w-[760px] flex-col items-center justify-center gap-7 pb-16">
               <div className="flex flex-col items-center gap-4">
                 <h1 className="text-display text-foreground">Ask Oculus anything</h1>
-                <p className="max-w-md text-center text-[13px] leading-relaxed text-muted-foreground">
-                  A coding agent with your whole library in front of it — pages, slides, transcripts,
-                  Ed threads — and a memory it keeps between sessions.
+                <p className="max-w-md text-center text-xs leading-relaxed text-muted-foreground">
+                  A personal university agent with your whole library in front of it — pages, slides, transcripts, Ed threads.
                 </p>
               </div>
               <div className="w-full">{composer}</div>
@@ -143,7 +373,7 @@ export default function ChatPage() {
                     key={s}
                     type="button"
                     onClick={() => send(s)}
-                    className="rounded-full border border-border bg-card px-3.5 py-1.5 text-[12px] text-muted-foreground transition-colors hover:border-surface-overlay hover:bg-accent hover:text-foreground"
+                    className="rounded-full border border-border bg-card px-3 py-1 text-[11.5px] text-muted-foreground transition-colors hover:border-surface-overlay hover:bg-accent hover:text-foreground"
                   >
                     {s}
                   </button>
@@ -153,10 +383,19 @@ export default function ChatPage() {
           </div>
         ) : (
           <>
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
-              <div className="mx-auto w-full max-w-[760px]">
-                <Timeline items={items} live={turn} />
+            <div className="relative min-h-0 flex-1">
+              <div ref={scroll.outer} className="h-full overflow-y-auto px-6 py-6">
+                <div ref={scroll.inner} className="mx-auto w-full max-w-[760px]">
+                  <Timeline
+                    items={items}
+                    threadId={activeId}
+                    running={running}
+                    questions={questions}
+                    pending={pending}
+                  />
+                </div>
               </div>
+              <ThreadMap scrollRef={scroll.outer} contentRef={scroll.inner} markers={markers} />
             </div>
             <div className="shrink-0 px-6 pb-4 pt-2">
               <div className="mx-auto max-w-[760px]">{composer}</div>

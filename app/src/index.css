@@ -5,6 +5,14 @@
    neighbouring cut. One file, every weight. */
 @import "@fontsource-variable/inter";
 
+/* The italic cut has to be imported separately — Fontsource's default entry is
+   the upright only. Without it WebKit fakes italics by shearing the roman
+   glyphs, which slants far harder than a real italic and mangles the letters
+   that actually change shape (a, e, f), so a quoted paragraph turns into a
+   wall of leaning text. Manrope has no italic upstream, so headings still
+   synthesise — they're short and rarely italic. */
+@import "@fontsource-variable/inter/wght-italic.css";
+
 /* Manrope carries the headings. Its wider, rounder forms and near-geometric
    caps give a title its own voice next to Inter's UI text — the two read as
    display vs. interface rather than as two competing sans faces. Variable, so
@@ -353,4 +361,48 @@ p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
   height: 100%;
   overflow-y: auto;
   scrollbar-gutter: stable both-edges;
+}
+
+/* Chat's markdown, scaled to a reply.
+ *
+ * `MD_COMPONENTS` is sized for a document — the file viewer reads a whole
+ * lecture page through it — and those sizes are baked into the components as
+ * utilities. A chat reply is a different register, so the timeline wraps its
+ * renderer in `.chat-md` and this block pulls the type down there and nowhere
+ * else.
+ *
+ * Deliberately *unlayered*, and the one place in this file that should be:
+ * layer order beats specificity, so the same rules inside `@layer base` would
+ * lose to the very utilities they exist to override. Every base reset still
+ * belongs in the layer — this is the inverse case, an override, not a
+ * default. */
+.chat-md {
+  font-size: 13px;
+}
+.chat-md :is(p, ul, ol, blockquote, table, li) {
+  font-size: inherit;
+}
+.chat-md :is(p, ul, ol, blockquote) {
+  margin-block: 0.6rem;
+}
+.chat-md h3 {
+  font-size: 14px;
+  margin-block: 1rem 0.4rem;
+}
+.chat-md h4 {
+  font-size: 13px;
+  margin-block: 0.85rem 0.35rem;
+}
+.chat-md :is(code, pre code) {
+  font-size: 12px;
+}
+.chat-md th {
+  font-size: 11px;
+}
+/* First and last blocks sit flush: the row around them owns the gap. */
+.chat-md > :first-child {
+  margin-block-start: 0;
+}
+.chat-md > :last-child {
+  margin-block-end: 0;
 }

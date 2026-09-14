@@ -3,6 +3,7 @@ import { FileText, PaperPlaneTilt, Stop } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ModelPicker, type PickerProvider } from "@/components/harness/ModelPicker";
+import { UsageMeter } from "@/components/harness/UsageMeter";
 import { SubjectSelect } from "@/components/harness/SubjectSelect";
 import { fileTitle } from "@/lib/openFile";
 import { displayCode } from "@/lib/format";
@@ -25,6 +26,13 @@ import { cn } from "@/lib/utils";
  *  runs on. */
 const MAX_MENTION = 60;
 
+/** The empty box is exactly one line tall. Both halves of the autosize below
+ *  measure against this, so it has to stay the textarea's own line-height. */
+const LINE_H = 16;
+
+/** Roughly ten lines. Past that the box stops growing and scrolls. */
+const MAX_H = 160;
+
 /**
  * The `@…` token the caret is sitting in, or null.
  *
@@ -41,10 +49,26 @@ export function mentionQuery(
 }
 
 /**
- * One box: the text, then a row of pickers and the send/stop button, then a
- * footer line with what the thread has cost so far. Enter sends, Shift+Enter
- * breaks a line — bb's keys. While a turn runs the send button becomes stop
- * and the text stays put; steering mid-turn is not wired yet.
+ * One box: the text, then a row carrying the model picker on the left and the
+ * usage wheel and send/stop button on the right. Enter sends, Shift+Enter
+ * breaks a line — bb's keys.
+ *
+ * While a turn runs the box still takes a message: it is *queued* rather than
+ * sent (Rust holds it — `Queue` in `app/src-tauri/src/harness/mod.rs`) and it
+ * appears as a pending bubble at the end of the thread. Stop then keeps its
+ * word — nothing more goes out — and hands back what was waiting, which
+ * arrives here as `restore` and lands in the box rather than being lost.
+ * So while a turn runs there are two buttons and not one: stop is always
+ * reachable, and send appears beside it as soon as there is something to
+ * queue.
+ *
+ * The row's controls are all one height (24px). A send button larger than the
+ * picker beside it reads as the box's subject rather than its verb.
+ *
+ * Scope sits *above* the box rather than in the control row, and only while
+ * the thread is new: it is a choice made once, before the first message, and
+ * an open thread cannot change it. Showing a dead control under every message
+ * for the rest of the thread spends the row on nothing.
  *
  * `@` opens a file menu, narrowed to the thread's subject. Picking a file
  * writes its **library path** into the message — nothing is read here and no
@@ -64,6 +88,8 @@ export function Composer({
   running,
   usage,
   rateLimits,
+  restore,
+  onRestored,
   onProvider,
   onModel,
   onReasoning,
@@ -86,6 +112,10 @@ export function Composer({
   running: boolean;
   usage: ThreadUsage | null;
   rateLimits: RateWindow[];
+  /** Messages stop dropped out of the queue, handed back to be typed over.
+   *  The counter is what is watched: the same text twice is two restores. */
+  restore?: { text: string; n: number } | null;
+  onRestored?: () => void;
   onProvider: (p: Provider) => void;
   onModel: (m: string | null) => void;
   onReasoning: (level: string | null) => void;
@@ -108,6 +138,16 @@ export function Composer({
   useEffect(() => {
     if (autoFocus) ref.current?.focus();
   }, [autoFocus]);
+
+  // What stop gave back. It is put *before* anything already typed, because
+  // it was typed first, and the box is focused so the next key carries on
+  // where the student left off.
+  useEffect(() => {
+    if (!restore) return;
+    setText((t) => [restore.text, t].filter(Boolean).join("\n\n"));
+    ref.current?.focus();
+    onRestored?.();
+  }, [restore, onRestored]);
 
   // Codex lists its own models (`model/list`), fetched once the picker is
   // for Codex; Claude's are the CLI's aliases.
@@ -171,8 +211,8 @@ export function Composer({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.style.height = "20px";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    el.style.height = `${LINE_H}px`;
+    el.style.height = `${Math.min(el.scrollHeight, MAX_H)}px`;
     if (caretAfterPick.current != null) {
       el.focus();
       el.setSelectionRange(caretAfterPick.current, caretAfterPick.current);
@@ -196,16 +236,29 @@ export function Composer({
 
   const send = () => {
     const t = text.trim();
-    if (!t || running) return;
+    if (!t) return;
     setText("");
     setMention(null);
+    // Whether this goes out now or waits behind the running turn is Rust's
+    // call, not this box's: it owns the queue and the order.
     onSend(t);
   };
 
   return (
     <div className="relative flex flex-col gap-1.5">
+      {!subjectLocked && (
+        <div className="flex items-center px-0.5">
+          <SubjectSelect
+            subjects={subjects}
+            value={subjectId}
+            onChange={onSubject}
+            className="h-6 max-w-[200px] rounded-full border-border/70 bg-card px-2 text-[11px] text-muted-foreground shadow-none hover:bg-accent hover:text-foreground"
+          />
+        </div>
+      )}
+
       {menuOpen && (
-        <div className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-md">
+        <div className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-64 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover py-1 shadow-md">
           {files.map((f, i) => (
             <button
               key={f.id}
@@ -232,7 +285,7 @@ export function Composer({
         </div>
       )}
 
-      <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card px-4 py-3.5 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
+      <div className="flex flex-col gap-4 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
         <Textarea
           ref={ref}
           value={text}
@@ -273,22 +326,14 @@ export function Composer({
           }}
           rows={1}
           placeholder={
-            running
-              ? "Working… stop to send another message"
-              : "Ask about your subjects, or give the agent a task… @ for a file"
+            running ? "Working… your next message waits its turn" : "What would you like to work on?"
           }
-          className="min-h-[20px] max-h-[200px] w-full resize-none rounded-none border-0 bg-transparent p-0 text-sm leading-5 shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
-          style={{ height: "20px" }}
+          className="min-h-[16px] max-h-[160px] w-full resize-none rounded-none border-0 bg-transparent p-0 text-[13px]! leading-[16px] shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
+          style={{ height: `${LINE_H}px` }}
         />
         <div className="flex items-center gap-1">
-          <SubjectSelect
-            subjects={subjects}
-            value={subjectId}
-            onChange={onSubject}
-            disabled={subjectLocked}
-            className="h-6 max-w-[200px] border-0 bg-transparent px-1.5 text-[11px] text-muted-foreground shadow-none hover:bg-accent disabled:opacity-100 dark:bg-transparent"
-          />
           <ModelPicker
+            className="-ml-1.5"
             providers={pickerProviders}
             provider={provider}
             providerLocked={providerLocked}
@@ -299,44 +344,25 @@ export function Composer({
             onReasoning={onReasoning}
           />
           <div className="flex-1" />
-          {running ? (
-            <Button size="icon-sm" variant="ghost" className="shrink-0" aria-label="Stop" onClick={onStop}>
-              <Stop size={14} weight="fill" />
+          <UsageMeter usage={usage} rateLimits={rateLimits} />
+          {running && (
+            <Button size="icon-xs" variant="ghost" className="shrink-0" aria-label="Stop" onClick={onStop}>
+              <Stop weight="fill" />
             </Button>
-          ) : (
-            <Button size="icon-sm" disabled={!text.trim()} onClick={send} className="shrink-0" aria-label="Send">
-              <PaperPlaneTilt size={14} />
+          )}
+          {(!running || text.trim()) && (
+            <Button
+              size="icon-xs"
+              disabled={!text.trim()}
+              onClick={send}
+              className="shrink-0"
+              aria-label={running ? "Queue" : "Send"}
+            >
+              <PaperPlaneTilt />
             </Button>
           )}
         </div>
       </div>
-      <Footer usage={usage} rateLimits={rateLimits} />
-    </div>
-  );
-}
-
-function fmtTokens(n: number) {
-  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
-}
-
-/** Context used, spend, and the account's windows — one quiet line. */
-function Footer({ usage, rateLimits }: { usage: ThreadUsage | null; rateLimits: RateWindow[] }) {
-  const parts: string[] = [];
-  if (usage?.contextTokens) {
-    parts.push(
-      usage.contextWindow
-        ? `${fmtTokens(usage.contextTokens)} / ${fmtTokens(usage.contextWindow)} context`
-        : `${fmtTokens(usage.contextTokens)} context tokens`,
-    );
-  }
-  if (usage?.costUsd) parts.push(`$${usage.costUsd.toFixed(2)}`);
-  for (const w of rateLimits) parts.push(`${w.label} ${Math.round(w.used_percent)}%`);
-  if (parts.length === 0) return null;
-  return (
-    <div className={cn("flex min-h-4 items-center gap-3 px-4 text-[11px] tabular-nums text-muted-foreground")}>
-      {parts.map((p, i) => (
-        <span key={i}>{p}</span>
-      ))}
     </div>
   );
 }
