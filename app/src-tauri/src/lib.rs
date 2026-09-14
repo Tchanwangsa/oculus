@@ -18,6 +18,7 @@ pub mod okta;
 mod media;
 pub mod mineru;
 pub mod paths;
+pub mod projects;
 pub mod retrieval;
 mod scrape;
 pub mod store;
@@ -766,6 +767,82 @@ CREATE INDEX IF NOT EXISTS idx_harness_items_thread ON harness_items(thread_id, 
                             // keeps a renamed subject's folder name right.
                             sql: r#"
 ALTER TABLE harness_threads ADD COLUMN subject_id INTEGER REFERENCES subjects(id) ON DELETE SET NULL;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                        tauri_plugin_sql::Migration {
+                            version: 27,
+                            description: "projects: per-subject boards, tasks and subtasks",
+                            // A project is a piece of work you are doing — an
+                            // assignment, a revision plan — broken into tasks
+                            // and one level of subtask, and read back as a
+                            // board, a table, a backlog or a timeline.
+                            //
+                            // `subject_id` is nullable and clears rather than
+                            // cascades, for the same reason as `local_events`
+                            // (migration 22) and `harness_threads` (25): this
+                            // is the user's own planning, and dropping a
+                            // course must not take it away. NULL is
+                            // "Personal". The Canvas-owned tables cascade
+                            // because their rows are the course's; these are
+                            // not.
+                            //
+                            // `columns` is a JSON array of {id, name, kind}
+                            // on the project rather than a table of its own.
+                            // Columns are renamed per project and their shape
+                            // is still moving, which is the same call
+                            // `automations.graph` made in migration 18: JSON
+                            // for the part that keeps changing, real columns
+                            // for the part that gets queried.
+                            //
+                            // `position` is REAL so dragging a card writes one
+                            // row instead of renumbering a column — the new
+                            // position is the midpoint between its neighbours.
+                            //
+                            // Project → tasks *is* ON DELETE CASCADE: a
+                            // project genuinely owns its tasks, where a
+                            // subject merely scopes them.
+                            //
+                            // `source` ('manual' | 'agent') because the chat
+                            // agent will write tasks through the CLI, and the
+                            // board should be able to say which ones you did
+                            // not write.
+                            sql: r#"
+CREATE TABLE IF NOT EXISTS projects (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_id  INTEGER REFERENCES subjects(id) ON DELETE SET NULL,
+    name        TEXT    NOT NULL,
+    brief       TEXT,
+    status      TEXT    NOT NULL DEFAULT 'active',
+    starts_at   TEXT,
+    due_at      TEXT,
+    columns     TEXT    NOT NULL,
+    position    REAL    NOT NULL DEFAULT 0,
+    source      TEXT    NOT NULL DEFAULT 'manual',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS project_tasks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_id   INTEGER REFERENCES project_tasks(id) ON DELETE CASCADE,
+    title       TEXT    NOT NULL,
+    body        TEXT,
+    column_id   TEXT    NOT NULL,
+    position    REAL    NOT NULL,
+    starts_at   TEXT,
+    due_at      TEXT,
+    estimate_minutes INTEGER,
+    done_at     TEXT,
+    source      TEXT    NOT NULL DEFAULT 'manual',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_tasks_project ON project_tasks(project_id, column_id, position);
+CREATE INDEX IF NOT EXISTS idx_project_tasks_due     ON project_tasks(due_at);
+CREATE INDEX IF NOT EXISTS idx_projects_subject      ON projects(subject_id);
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },

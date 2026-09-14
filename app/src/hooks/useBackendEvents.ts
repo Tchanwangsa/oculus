@@ -15,6 +15,7 @@ import type { ParseJob } from "@/stores/parseStore";
 import { embedFile } from "@/lib/retrieval";
 import { isPdfBacked } from "@/lib/fileTypes";
 import { CALENDAR_UPDATED_EVENT } from "@/lib/calendar";
+import { notifyProjectsUpdated } from "@/lib/projects";
 import { getDb } from "@/lib/db";
 import { useHarnessStore } from "@/stores/harnessStore";
 import type { HarnessEnvelope } from "@/lib/harness";
@@ -71,9 +72,42 @@ export function useBackendEvents() {
     // ── CLI agents ──────────────────────────────────────────────────────────
     // App-level, not page-level: a thread keeps running while you are on
     // another page, and the sidebar's spinner needs to know.
+    //
+    // The second half of this listener is the one hop that keeps an open board
+    // honest. `oculus project` / `oculus task` write the same tables the board
+    // reads, but from a *separate process* with its own connection — nothing
+    // in this webview's pool notices a row the agent wrote. So when a tool call
+    // whose command names a project or a task finishes, the board is told to
+    // re-read. `tool_finished` carries only the call's id, not its command, so
+    // the ids worth watching are remembered from `tool_started`.
+    //
+    // The test is the command text alone, not `kind === "oculus_cli"`:
+    // `is_oculus_cli` in app/src-tauri/src/harness/event.rs only word-matches
+    // the first few words, so `cd … && oculus task add` classifies as plain
+    // Bash and a kind gate would drop exactly the write this hop exists for.
+    // The trade is deliberate and one-sided — a false positive (an agent
+    // grepping for the words "oculus task") costs one re-read of a handful of
+    // rows, a false negative costs a board that is silently wrong.
+    const planningCalls = new Set<string>();
+    const WRITES_PLANNING = /\boculus\s+(project|task)\b/;
     unsubs.push(
       listen<HarnessEnvelope>("harness-event", (e) => {
         useHarnessStore.getState().apply(e.payload);
+        const ev = e.payload.event;
+        if (ev.type === "tool_started") {
+          // `title` is the whole command for a Bash-shaped tool, which is what
+          // makes matching on it possible at all.
+          if (WRITES_PLANNING.test(ev.title)) {
+            planningCalls.add(`${e.payload.threadId}:${ev.id}`);
+          }
+        } else if (ev.type === "tool_finished") {
+          // Regardless of `ok`, for the same reason: a failed write is atomic
+          // and changes nothing, but a command that timed out may still have
+          // landed.
+          if (planningCalls.delete(`${e.payload.threadId}:${ev.id}`)) {
+            notifyProjectsUpdated();
+          }
+        }
       }),
     );
 

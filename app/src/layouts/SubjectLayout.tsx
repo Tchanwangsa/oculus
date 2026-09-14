@@ -10,6 +10,7 @@ import {
   ChatsCircle,
   DownloadSimple,
   House,
+  Kanban,
   Megaphone,
   PencilLine,
   Stack,
@@ -33,6 +34,7 @@ const TABS = [
   { to: "announcements", label: "Announcements", icon: Megaphone,      end: false },
   { to: "assignments",   label: "Assignments",   icon: PencilLine,     end: false },
   { to: "discussion",    label: "Discussion",    icon: ChatsCircle,    end: false },
+  { to: "projects",      label: "Projects",      icon: Kanban,         end: false },
 ] as const;
 
 /**

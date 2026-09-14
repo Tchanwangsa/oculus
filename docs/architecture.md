@@ -29,6 +29,7 @@ separate killable model workers rather than retaining their weights itself.
 | Media HTTP server (lecture video streaming) | `app/src-tauri/src/media.rs` |
 | In-app browser (one page WebView per tab, in the main window) | `app/src-tauri/src/browser.rs` |
 | CLI-agent harness (Claude Code / Codex bridges) | `app/src-tauri/src/harness/mod.rs` |
+| Projects and tasks, written headlessly | `app/src-tauri/src/projects.rs` |
 | LLM provider client (keys, streaming, spend limits; dormant) | `app/src-tauri/src/llm.rs` |
 | Sidecar HTTP service | `sidecar/main.py` |
 | Model-worker lifecycle + memory accounting | `sidecar/model_workers.py`, `sidecar/worker_client.py`, `sidecar/memory_governor.py` |
@@ -85,7 +86,7 @@ live. Inside it:
 ## The database
 
 Schema lives in the tauri-plugin-sql migrations in `app/src-tauri/src/lib.rs`
-(24 versions and counting). Ownership is split deliberately:
+(28 versions and counting). Ownership is split deliberately:
 
 - **In the app**, the *frontend* writes the scrape tables: it listens for
   scrape events and upserts through `app/src/lib/db.ts`.
@@ -98,6 +99,16 @@ The `pages` table (markdown + embedding blob per PDF page) is the retrieval
 substrate — see [retrieval.md](./retrieval.md). `calendar_events` is the one
 table a sync *replaces* rather than upserts into, so a cancelled class can
 disappear — see [calendar.md](./calendar.md).
+
+Not everything in here is scraped. `harness_threads` / `harness_items` are the
+chat timeline ([harness.md](./harness.md)), and `projects` / `project_tasks`
+(migration 27) are the student's own planning — boards, tasks and one level of
+subtask ([projects.md](./projects.md)). Those two, plus `local_events`, hold
+rows nothing upstream has a copy of, which is why each of them scopes a subject
+with a **nullable** `subject_id` that clears rather than cascades: dropping a
+course must not take the user's own work with it. They have the same two
+writers as the scrape tables — `app/src/lib/projects.ts` in the app,
+`app/src-tauri/src/projects.rs` headless.
 
 ## How it connects
 

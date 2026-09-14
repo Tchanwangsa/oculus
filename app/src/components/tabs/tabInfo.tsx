@@ -6,6 +6,7 @@ import {
   Chat,
   GearSix,
   Globe,
+  Kanban,
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
@@ -57,6 +58,18 @@ export function tabInfo(
     return { title: "Chat", icon: <Chat size={size} /> };
   if (pathname.startsWith("/calendar"))
     return { title: "Calendar", icon: <CalendarBlank size={size} /> };
+  // A project is titled by itself, the way a lecture is: the name rides in the
+  // query (`projectHref`), since this function has no project list to look one
+  // up in and is called on every render of the strip.
+  const proj = /^\/projects\/(\d+)/.exec(pathname);
+  if (proj) {
+    return {
+      title: new URLSearchParams(search).get("n") || "Project",
+      icon: <Kanban size={size} />,
+    };
+  }
+  if (pathname.startsWith("/projects"))
+    return { title: "Projects", icon: <Kanban size={size} /> };
   if (pathname.startsWith("/sync"))
     return { title: "Sync", icon: <ArrowsClockwise size={size} /> };
   if (pathname.startsWith("/settings"))
