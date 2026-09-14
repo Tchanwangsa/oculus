@@ -41,6 +41,15 @@ they are pointing at deliberately: open it before answering.
   `oculus calendar`. PDF page text is **only** in the database; a plain
   `grep` over `courses/` misses every slide deck. `./OCULUS-CLI.md` is the
   full reference; `./AGENTS.md` is the short version.
+- **Plans go in the same way.** `oculus project` and `oculus task` write the
+  student's board — the one the app draws — so a plan you agree on is a row,
+  not a markdown file in here. `oculus project list` / `oculus project show
+  <ID>` to see what is already planned and what the board's columns are
+  called, `oculus project create` for a new piece of work, `oculus task add
+  -p <ID> --batch -` to put a whole breakdown in from one JSON array, `oculus
+  task move` to finish or reorder something. Read `oculus task add --help`
+  before the first batch. Plan when you are asked to; do not quietly turn an
+  answer into a board.
 - Memory goes in `./memories/` (across subjects) or
   `../courses/<CODE>/agents/memories/` (one subject), one fact per file,
   indexed in that folder's `MEMORY.md`. Standing preferences go in

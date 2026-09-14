@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use app_lib::agents;
+use app_lib::projects;
 use app_lib::store;
 use app_lib::sync::{self, Engine, FileEvent, Progress, Reporter};
 use clap::{Args, CommandFactory, Parser, Subcommand};
@@ -29,8 +30,9 @@ struct Cli {
     memory_cap: Option<u64>,
     /// Print machine-readable JSON instead of formatted text
     ///
-    /// Honoured by status, list, search, grep, read, files and calendar. On
-    /// failure the JSON is `{"error": "..."}` on stderr and the exit code is 1.
+    /// Honoured by every command that prints: status, list, search, grep,
+    /// read, files, calendar, project and task. On failure the JSON is
+    /// `{"error": "..."}` on stderr and the exit code is 1.
     #[arg(long, global = true)]
     json: bool,
     #[command(subcommand)]
@@ -104,6 +106,16 @@ enum Command {
     Read(ReadArgs),
     Files(FilesArgs),
     Calendar(CalendarArgs),
+    /// Plan work: projects, their boards, and what is on them
+    Project {
+        #[command(subcommand)]
+        action: ProjectAction,
+    },
+    /// Add, move, finish and delete the tasks on a project's board
+    Task {
+        #[command(subcommand)]
+        action: TaskAction,
+    },
     Docs(DocsArgs),
     Agent(AgentArgs),
 }
@@ -366,6 +378,266 @@ struct CalendarArgs {
     past: bool,
 }
 
+// ── Planning: projects and tasks ─────────────────────────────────────────────
+//
+// The write half of the agent's surface. `search`, `grep` and `read` answer
+// "what does the library say"; these answer "what am I doing about it" — a
+// project is a piece of work, its board is columns of tasks, and a task may
+// have one level of subtask under it.
+//
+// The database is the only door: the app's board reads these same rows live,
+// which is why nothing here asks for `oculus.db` to be opened directly.
+
+#[derive(Subcommand)]
+enum ProjectAction {
+    List(ProjectListArgs),
+    Show(ProjectShowArgs),
+    Create(ProjectCreateArgs),
+    Update(ProjectUpdateArgs),
+}
+
+/// List projects and how far along they are.
+///
+/// Active projects only, unless `--archived`. Each line starts with the id
+/// every other project and task command takes, and ends with finished/total
+/// tasks.
+#[derive(Args)]
+struct ProjectListArgs {
+    /// Only this subject's projects; prefix codes are fine (COMP30026)
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    subject: Option<String>,
+    /// Only projects belonging to no subject
+    #[arg(long, conflicts_with = "subject")]
+    personal: bool,
+    /// Archived projects instead of active ones
+    #[arg(long)]
+    archived: bool,
+}
+
+/// Show one project: its brief, its board, and every task on it.
+///
+/// Tasks are printed under their column in the board's own order, subtasks
+/// indented under their parent. The bracketed name after each column heading
+/// is the column **id** — that is what `--column` takes.
+#[derive(Args)]
+struct ProjectShowArgs {
+    /// Project id, as `oculus project list` prints it
+    #[arg(value_name = "ID")]
+    id: i64,
+}
+
+/// Create a project.
+///
+/// It opens with the app's default board — `backlog`, `todo`, `doing`, `done`
+/// — and no tasks; `oculus task add --batch` is how a breakdown goes in. Rows
+/// written by this binary are marked `source: agent`, so the board can show
+/// what it did not write itself.
+///
+/// Prints the new project's id.
+#[derive(Args)]
+struct ProjectCreateArgs {
+    /// What the project is called
+    #[arg(value_name = "NAME")]
+    name: String,
+    /// Scope it to a subject; prefix codes are fine (COMP30026), and the
+    /// current term wins a tie. Omit for a personal project.
+    #[arg(short = 's', long, value_name = "SUBJECT_CODE")]
+    subject: Option<String>,
+    /// When the whole thing is due, ISO 8601 (2026-09-20T23:59:00Z)
+    #[arg(long, value_name = "ISO")]
+    due: Option<String>,
+    /// When work on it starts, ISO 8601
+    #[arg(long, value_name = "ISO")]
+    starts: Option<String>,
+    /// A paragraph of what it is — the assignment brief, the plan
+    #[arg(long, value_name = "TEXT")]
+    brief: Option<String>,
+}
+
+/// Change a project's name, dates, brief or status.
+///
+/// Only the flags you pass are written; everything else is left alone. Pass an
+/// **empty string** to clear a field: `--due ""` takes the due date off.
+///
+/// `--status archived` is how a project leaves the board without being
+/// deleted; its tasks stay and `--status active` brings it back.
+#[derive(Args)]
+struct ProjectUpdateArgs {
+    /// Project id
+    #[arg(value_name = "ID")]
+    id: i64,
+    /// Rename it
+    #[arg(long, value_name = "NAME")]
+    name: Option<String>,
+    /// Due date, ISO 8601, or "" to clear
+    #[arg(long, value_name = "ISO")]
+    due: Option<String>,
+    /// Start date, ISO 8601, or "" to clear
+    #[arg(long, value_name = "ISO")]
+    starts: Option<String>,
+    /// Replace the brief, or "" to clear it
+    #[arg(long, value_name = "TEXT")]
+    brief: Option<String>,
+    /// active or archived
+    #[arg(long, value_parser = ["active", "archived"])]
+    status: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum TaskAction {
+    List(TaskListArgs),
+    Add(TaskAddArgs),
+    Update(TaskUpdateArgs),
+    Move(TaskMoveArgs),
+    Rm(TaskRmArgs),
+}
+
+/// List a project's tasks.
+///
+/// Grouped by column in the board's order, subtasks under their parent. A task
+/// sitting in a `done` column carries the time it landed there.
+#[derive(Args)]
+struct TaskListArgs {
+    /// Which project
+    #[arg(short = 'p', long, value_name = "ID")]
+    project: i64,
+    /// Only this board column (its id, e.g. todo)
+    #[arg(short = 'c', long, value_name = "ID")]
+    column: Option<String>,
+    /// Only tasks due before this ISO 8601 timestamp. Compared as text, so
+    /// pass the same shape the dates were written in (UTC, usually).
+    #[arg(long, value_name = "ISO")]
+    due_before: Option<String>,
+}
+
+/// Add one task, or a whole breakdown in one call.
+///
+/// A task lands at the end of its column; without `--column` that is the
+/// project's first one. The column id is checked against the project's board
+/// and an unknown one is refused, listing the ids the board does have — a task
+/// filed under a column that does not exist is drawn by nothing, in any view.
+/// Landing in a `done` column marks the task finished, exactly as moving it
+/// there would.
+///
+/// `--parent` makes the task a subtask. Subtasks are one level deep: a subtask
+/// cannot itself be given children.
+///
+/// BREAKDOWNS: `--batch -` reads a JSON array of tasks from stdin (or a file,
+/// `--batch tasks.json`) and writes them in one call — use it for anything
+/// past two or three:
+///
+///   [{"title":"Read the brief","column":"todo","due":"2026-09-20T23:59:00Z"},
+///   {"title":"Outline","key":"outline"}, {"title":"Draft intro","parent":"outline"}]
+///
+/// Per task: `title` (required), `column`, `body`, `due`, `starts`,
+/// `estimate` (minutes), `parent`, `key`. `parent` is either an existing
+/// task's id (a number) or the `key` of an **earlier task in the same batch**,
+/// which is how a parent and its subtasks go in together. `key` is never
+/// stored. An unknown field is an error rather than a silent no-op.
+///
+/// The batch is **all or nothing**: one transaction, so a bad item — unknown
+/// column, a parent that is already a subtask, a date that is not a date —
+/// writes none of them and says which item failed. Fix it and re-send; it can
+/// never leave half a breakdown on the board.
+///
+/// Prints the new task ids in the order they were given.
+#[derive(Args)]
+struct TaskAddArgs {
+    /// Which project
+    #[arg(short = 'p', long, value_name = "ID")]
+    project: i64,
+    /// The task's title. Omit when using --batch.
+    #[arg(value_name = "TITLE")]
+    title: Option<String>,
+    /// Board column id (default: the project's first column)
+    #[arg(short = 'c', long, value_name = "ID")]
+    column: Option<String>,
+    /// Make this a subtask of that task id
+    #[arg(long, value_name = "TASK_ID")]
+    parent: Option<i64>,
+    /// Due date, ISO 8601
+    #[arg(long, value_name = "ISO")]
+    due: Option<String>,
+    /// Start date, ISO 8601
+    #[arg(long, value_name = "ISO")]
+    starts: Option<String>,
+    /// How long you think it will take, in minutes
+    #[arg(long, value_name = "MIN")]
+    estimate: Option<i64>,
+    /// Notes on the task
+    #[arg(long, value_name = "TEXT")]
+    body: Option<String>,
+    /// Read a JSON array of tasks from stdin (-) or a file
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["title", "column", "parent", "due", "starts", "estimate", "body"])]
+    batch: Option<String>,
+}
+
+/// Change a task's title, notes, dates or estimate.
+///
+/// Only the flags you pass are written. Pass an **empty string** to clear a
+/// field: `--due ""`, `--estimate ""`.
+///
+/// Where a task *sits* is not here: column, order and done-ness are one fact,
+/// and `oculus task move` is their only writer — it is the command that reads
+/// the board to learn whether the destination column means finished.
+#[derive(Args)]
+struct TaskUpdateArgs {
+    /// Task id
+    #[arg(value_name = "ID")]
+    id: i64,
+    /// Rename it
+    #[arg(long, value_name = "TEXT")]
+    title: Option<String>,
+    /// Replace the notes, or "" to clear
+    #[arg(long, value_name = "TEXT")]
+    body: Option<String>,
+    /// Due date, ISO 8601, or "" to clear
+    #[arg(long, value_name = "ISO")]
+    due: Option<String>,
+    /// Start date, ISO 8601, or "" to clear
+    #[arg(long, value_name = "ISO")]
+    starts: Option<String>,
+    /// Minutes, or "" to clear
+    #[arg(long, value_name = "MIN")]
+    estimate: Option<String>,
+}
+
+/// Move a task to another column, or reorder it within one.
+///
+/// This is also how a task is finished: landing in a column whose kind is
+/// `done` stamps it, and leaving one clears that again. The column's *kind*
+/// decides, not its name — which is why there is no `--done` flag anywhere.
+///
+/// Without `--after` or `--before` the task goes to the end of the column.
+/// Both name tasks already in the destination column: `--after 12` puts it
+/// straight below task 12, `--before 12` straight above it.
+#[derive(Args)]
+struct TaskMoveArgs {
+    /// Task id
+    #[arg(value_name = "ID")]
+    id: i64,
+    /// Destination column id (e.g. done)
+    #[arg(short = 'c', long, value_name = "ID")]
+    column: String,
+    /// Put it directly below this task
+    #[arg(long, value_name = "TASK_ID")]
+    after: Option<i64>,
+    /// Put it directly above this task
+    #[arg(long, value_name = "TASK_ID")]
+    before: Option<i64>,
+}
+
+/// Delete a task, and its subtasks with it.
+///
+/// There is no undo, and nothing else cleans these up — a task that is merely
+/// finished belongs in a `done` column (`oculus task move`), not deleted.
+#[derive(Args)]
+struct TaskRmArgs {
+    /// Task id
+    #[arg(value_name = "ID")]
+    id: i64,
+}
+
 /// Write the agent-facing docs into the library
 ///
 /// Fills `agents/` in the data directory: `OCULUS-CLI.md`, rendered from this
@@ -419,6 +691,19 @@ fn main() {
         Some(Command::Read(args)) => ctx.read(&args),
         Some(Command::Files(args)) => ctx.files(&args),
         Some(Command::Calendar(args)) => ctx.calendar(&args),
+        Some(Command::Project { action }) => match action {
+            ProjectAction::List(a) => ctx.project_list(&a),
+            ProjectAction::Show(a) => ctx.project_show(&a),
+            ProjectAction::Create(a) => ctx.project_create(&a),
+            ProjectAction::Update(a) => ctx.project_update(&a),
+        },
+        Some(Command::Task { action }) => match action {
+            TaskAction::List(a) => ctx.task_list(&a),
+            TaskAction::Add(a) => ctx.task_add(&a),
+            TaskAction::Update(a) => ctx.task_update(&a),
+            TaskAction::Move(a) => ctx.task_move(&a),
+            TaskAction::Rm(a) => ctx.task_rm(&a),
+        },
         Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
     };
@@ -1934,6 +2219,381 @@ impl Ctx {
         Ok(())
     }
 
+    // ── projects and tasks ───────────────────────────────────────────────────
+
+    fn planning_db(&self) -> Result<SqlitePool, String> {
+        self.db().ok_or_else(|| "projects live in the database".to_string())
+    }
+
+    /// One subject id from a code.
+    ///
+    /// Prefix codes are fine — the same match `run` and `calendar` use — but a
+    /// project points at exactly one subject, and a bare code legitimately
+    /// matches the same course in two terms. So a tie is broken in favour of
+    /// the **current** term, which is the one a student naming a course
+    /// without a term means; a tie that survives that is reported with the
+    /// full codes rather than guessed.
+    fn one_subject(&self, pool: &SqlitePool, code: &str) -> Result<i64, String> {
+        let subjects = self.rt.block_on(store::subjects(pool))?;
+        let matched = filter_subjects(&subjects, &[code.to_string()], false)?;
+        if matched.len() == 1 {
+            return Ok(matched[0].id);
+        }
+        let current: Vec<&store::SubjectRow> =
+            matched.iter().filter(|s| s.is_current).collect();
+        if current.len() == 1 {
+            return Ok(current[0].id);
+        }
+        let codes: Vec<&str> = matched.iter().map(|s| s.code.as_str()).collect();
+        Err(format!(
+            "{code} matched {} subjects ({}) — pass the full code",
+            matched.len(),
+            codes.join(", ")
+        ))
+    }
+
+    fn project_list(&self, args: &ProjectListArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        let filter = if args.personal {
+            projects::SubjectFilter::Personal
+        } else if let Some(code) = &args.subject {
+            projects::SubjectFilter::Subject(self.one_subject(&pool, code)?)
+        } else {
+            projects::SubjectFilter::Any
+        };
+        let status = if args.archived { "archived" } else { "active" };
+        let rows = self.rt.block_on(projects::projects(&pool, filter, status))?;
+
+        #[derive(Serialize)]
+        struct Entry<'a> {
+            #[serde(flatten)]
+            project: &'a projects::Project,
+            tasks_total: i64,
+            tasks_done: i64,
+        }
+        let mut entries: Vec<Entry> = Vec::with_capacity(rows.len());
+        for p in &rows {
+            let (total, done) = self.rt.block_on(projects::task_counts(&pool, p.id))?;
+            entries.push(Entry { project: p, tasks_total: total, tasks_done: done });
+        }
+
+        if self.json {
+            return self.emit(&entries);
+        }
+        if entries.is_empty() {
+            println!("{}", paint(&format!("no {status} projects"), DIM));
+            return Ok(());
+        }
+        for e in &entries {
+            println!(
+                "{} {:<34} {} {} {}",
+                paint(&format!("{:>4}", e.project.id), DIM),
+                truncate(&e.project.name, 34),
+                paint(
+                    &format!("{:<12}", truncate(e.project.subject_code.as_deref().unwrap_or("personal"), 12)),
+                    DIM
+                ),
+                paint(&format!("{:>7}", format!("{}/{}", e.tasks_done, e.tasks_total)), DIM),
+                match &e.project.due_at {
+                    Some(d) => paint(&format!("  due {d}"), YELLOW),
+                    None => String::new(),
+                }
+            );
+        }
+        Ok(())
+    }
+
+    fn project_show(&self, args: &ProjectShowArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        let project = self
+            .rt
+            .block_on(projects::project(&pool, args.id))?
+            .ok_or_else(|| format!("project {} does not exist", args.id))?;
+        let tasks = self.rt.block_on(projects::tasks(&pool, args.id))?;
+
+        if self.json {
+            return self.emit(&serde_json::json!({ "project": project, "tasks": tasks }));
+        }
+        println!(
+            "{} {}{}",
+            paint(&format!("#{}", project.id), DIM),
+            paint(&project.name, BOLD),
+            match &project.subject_code {
+                Some(c) => paint(&format!("  {c}"), DIM),
+                None => String::new(),
+            }
+        );
+        let mut meta: Vec<String> = vec![project.status.clone()];
+        if let Some(d) = &project.starts_at {
+            meta.push(format!("starts {d}"));
+        }
+        if let Some(d) = &project.due_at {
+            meta.push(format!("due {d}"));
+        }
+        println!("{}", paint(&meta.join("  ·  "), DIM));
+        if let Some(brief) = project.brief.as_deref().filter(|b| !b.trim().is_empty()) {
+            println!("\n{brief}");
+        }
+        println!();
+        if tasks.is_empty() {
+            println!(
+                "{}",
+                paint(
+                    &format!("no tasks yet — oculus task add -p {} --batch -", project.id),
+                    DIM
+                )
+            );
+            return Ok(());
+        }
+        print_board(&project, &tasks);
+        Ok(())
+    }
+
+    fn project_create(&self, args: &ProjectCreateArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        let subject_id = match &args.subject {
+            Some(code) => Some(self.one_subject(&pool, code)?),
+            None => None,
+        };
+        let input = projects::NewProject {
+            name: args.name.trim().to_string(),
+            subject_id,
+            brief: args.brief.clone(),
+            starts_at: args.starts.as_deref().map(projects::check_iso8601).transpose()?,
+            due_at: args.due.as_deref().map(projects::check_iso8601).transpose()?,
+            source: AGENT_SOURCE.to_string(),
+        };
+        if input.name.is_empty() {
+            return Err("a project needs a name".to_string());
+        }
+        let id = self.rt.block_on(projects::create_project(&pool, &input))?;
+        let created = self
+            .rt
+            .block_on(projects::project(&pool, id))?
+            .ok_or("the project was written but could not be read back")?;
+        if self.json {
+            return self.emit(&created);
+        }
+        println!("{} {}", paint(&format!("project {id}"), BOLD), created.name);
+        Ok(())
+    }
+
+    fn project_update(&self, args: &ProjectUpdateArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        let patch = projects::ProjectPatch {
+            name: args.name.clone(),
+            subject_id: None,
+            brief: nullable_text(args.brief.as_ref()),
+            status: args.status.clone(),
+            starts_at: nullable_date(args.starts.as_ref())?,
+            due_at: nullable_date(args.due.as_ref())?,
+        };
+        if patch.name.is_none()
+            && patch.brief.is_none()
+            && patch.status.is_none()
+            && patch.starts_at.is_none()
+            && patch.due_at.is_none()
+        {
+            return Err("nothing to change: pass --name, --due, --starts, --brief or --status".into());
+        }
+        self.rt.block_on(projects::update_project(&pool, args.id, &patch))?;
+        let updated = self
+            .rt
+            .block_on(projects::project(&pool, args.id))?
+            .ok_or_else(|| format!("project {} does not exist", args.id))?;
+        if self.json {
+            return self.emit(&updated);
+        }
+        println!("{} {}", paint(&format!("project {}", updated.id), BOLD), updated.name);
+        Ok(())
+    }
+
+    fn task_list(&self, args: &TaskListArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        let project = self
+            .rt
+            .block_on(projects::project(&pool, args.project))?
+            .ok_or_else(|| format!("project {} does not exist", args.project))?;
+        let mut tasks = self.rt.block_on(projects::tasks(&pool, args.project))?;
+
+        if let Some(column) = &args.column {
+            if !project.columns.iter().any(|c| &c.id == column) {
+                let known: Vec<&str> = project.columns.iter().map(|c| c.id.as_str()).collect();
+                return Err(format!(
+                    "project {} has no column \"{column}\" (has: {})",
+                    project.id,
+                    known.join(", ")
+                ));
+            }
+            tasks.retain(|t| &t.column_id == column);
+        }
+        if let Some(before) = &args.due_before {
+            let before = projects::check_iso8601(before)?;
+            tasks.retain(|t| t.due_at.as_deref().is_some_and(|d| d < before.as_str()));
+        }
+
+        if self.json {
+            return self.emit(&tasks);
+        }
+        if tasks.is_empty() {
+            println!("{}", paint("no matching tasks", DIM));
+            return Ok(());
+        }
+        print_board(&project, &tasks);
+        Ok(())
+    }
+
+    fn task_add(&self, args: &TaskAddArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        let mut items: Vec<projects::NewTask> = match &args.batch {
+            Some(source) => {
+                let text = if source == "-" {
+                    let mut buffer = String::new();
+                    std::io::Read::read_to_string(&mut std::io::stdin(), &mut buffer)
+                        .map_err(|e| format!("reading the batch from stdin: {e}"))?;
+                    buffer
+                } else {
+                    std::fs::read_to_string(source)
+                        .map_err(|e| format!("reading {source}: {e}"))?
+                };
+                if text.trim().is_empty() {
+                    return Err("--batch got an empty input".to_string());
+                }
+                serde_json::from_str(&text)
+                    .map_err(|e| format!("--batch wants a JSON array of tasks: {e}"))?
+            }
+            None => {
+                let title = args
+                    .title
+                    .clone()
+                    .ok_or("give a TITLE, or --batch - to read a JSON array of tasks from stdin")?;
+                vec![projects::NewTask {
+                    title,
+                    column: args.column.clone(),
+                    parent: args.parent.map(projects::ParentRef::Id),
+                    body: args.body.clone(),
+                    due: args.due.clone(),
+                    starts: args.starts.clone(),
+                    estimate: args.estimate,
+                    key: None,
+                }]
+            }
+        };
+
+        // Dates are validated here and stored verbatim — the library keeps
+        // every timestamp exactly as its source wrote it.
+        let many = items.len() > 1;
+        for (n, item) in items.iter_mut().enumerate() {
+            let at = |e: String| if many { format!("task {}: {e}", n + 1) } else { e };
+            if let Some(due) = &item.due {
+                item.due = Some(projects::check_iso8601(due).map_err(at)?);
+            }
+            if let Some(starts) = &item.starts {
+                item.starts = Some(projects::check_iso8601(starts).map_err(at)?);
+            }
+        }
+
+        let ids = self
+            .rt
+            .block_on(projects::create_tasks(&pool, args.project, &items, AGENT_SOURCE))?;
+        let mut created: Vec<projects::Task> = Vec::with_capacity(ids.len());
+        for id in &ids {
+            if let Some(task) = self.rt.block_on(projects::task(&pool, *id))? {
+                created.push(task);
+            }
+        }
+        if self.json {
+            return self.emit(&created);
+        }
+        for task in &created {
+            println!(
+                "{} {}",
+                paint(&format!("task {}", task.id), BOLD),
+                truncate(&task.title, 60)
+            );
+        }
+        Ok(())
+    }
+
+    fn task_update(&self, args: &TaskUpdateArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        let patch = projects::TaskPatch {
+            title: args.title.clone().filter(|t| !t.trim().is_empty()),
+            body: nullable_text(args.body.as_ref()),
+            parent_id: None,
+            starts_at: nullable_date(args.starts.as_ref())?,
+            due_at: nullable_date(args.due.as_ref())?,
+            estimate_minutes: nullable_minutes(args.estimate.as_ref())?,
+        };
+        if patch.title.is_none()
+            && patch.body.is_none()
+            && patch.starts_at.is_none()
+            && patch.due_at.is_none()
+            && patch.estimate_minutes.is_none()
+        {
+            return Err("nothing to change: pass --title, --body, --due, --starts or --estimate".into());
+        }
+        self.rt.block_on(projects::update_task(&pool, args.id, &patch))?;
+        self.print_task(&pool, args.id, None)
+    }
+
+    fn task_move(&self, args: &TaskMoveArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        self.rt.block_on(projects::move_task(
+            &pool,
+            args.id,
+            &args.column,
+            args.after,
+            args.before,
+        ))?;
+        self.print_task(&pool, args.id, Some(&args.column))
+    }
+
+    fn task_rm(&self, args: &TaskRmArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        let rows = self.rt.block_on(projects::delete_task(&pool, args.id))?;
+        if self.json {
+            return self.emit(&serde_json::json!({ "deleted": args.id, "rows": rows }));
+        }
+        println!(
+            "deleted task {}{}",
+            args.id,
+            match rows {
+                1 => String::new(),
+                n => format!(" and {} subtask(s)", n - 1),
+            }
+        );
+        Ok(())
+    }
+
+    /// Read one task back and report it — what `task update` and `task move`
+    /// print, so a caller always sees the row as it now stands rather than the
+    /// arguments it sent.
+    fn print_task(&self, pool: &SqlitePool, id: i64, moved_to: Option<&str>) -> Result<(), String> {
+        let task = self
+            .rt
+            .block_on(projects::task(pool, id))?
+            .ok_or_else(|| format!("task {id} does not exist"))?;
+        if self.json {
+            return self.emit(&task);
+        }
+        let where_ = match moved_to {
+            Some(column) => format!(" → {column}"),
+            None => String::new(),
+        };
+        println!(
+            "{}{} {}{}",
+            paint(&format!("task {}", task.id), BOLD),
+            paint(&where_, DIM),
+            truncate(&task.title, 56),
+            match &task.done_at {
+                Some(at) => paint(&format!("  done {at}"), GREEN),
+                None => String::new(),
+            }
+        );
+        Ok(())
+    }
+
     // ── shared loaders ───────────────────────────────────────────────────────
 
     /// Every library file for the given subjects (all of them when empty),
@@ -2471,6 +3131,93 @@ fn filter_subjects(
         return Err(format!("no subject matched {}", codes.join(", ")));
     }
     Ok(picked)
+}
+
+// ── Planning helpers ─────────────────────────────────────────────────────────
+
+/// Rows this binary writes are the agent's, not the board's — `source` is what
+/// lets the app show which cards it did not put there itself.
+const AGENT_SOURCE: &str = "agent";
+
+/// A nullable text field on a patch: absent leaves it alone, `--flag ""`
+/// clears it. One convention for every patch flag here, so an agent never has
+/// to guess how to take a date off.
+fn nullable_text(value: Option<&String>) -> Option<Option<String>> {
+    value.map(|v| Some(v.clone()).filter(|v| !v.trim().is_empty()))
+}
+
+/// The same for a date, which is checked but never rewritten: the library
+/// stores every timestamp exactly as its source gave it, zone included.
+fn nullable_date(value: Option<&String>) -> Result<Option<Option<String>>, String> {
+    match value {
+        None => Ok(None),
+        Some(v) if v.trim().is_empty() => Ok(Some(None)),
+        Some(v) => Ok(Some(Some(projects::check_iso8601(v)?))),
+    }
+}
+
+fn nullable_minutes(value: Option<&String>) -> Result<Option<Option<i64>>, String> {
+    match value {
+        None => Ok(None),
+        Some(v) if v.trim().is_empty() => Ok(Some(None)),
+        Some(v) => v
+            .trim()
+            .parse::<i64>()
+            .map(|n| Some(Some(n)))
+            .map_err(|_| format!("--estimate takes whole minutes, or \"\" to clear (got {v:?})")),
+    }
+}
+
+/// Print tasks under their columns, in the board's own order.
+///
+/// The column headings carry the column **id** as well as its name, because
+/// the id is what every `--column` takes and the name is the user's to change.
+/// A subtask is printed under its parent when they share a column and
+/// indented on its own when they do not — a `--column` listing must not
+/// silently drop rows.
+fn print_board(project: &projects::Project, tasks: &[projects::Task]) {
+    for column in &project.columns {
+        let here: Vec<&projects::Task> =
+            tasks.iter().filter(|t| t.column_id == column.id).collect();
+        if here.is_empty() {
+            continue;
+        }
+        println!(
+            "{} {}",
+            paint(&column.name, BOLD),
+            paint(&format!("[{}]", column.id), DIM)
+        );
+        for task in here.iter().filter(|t| t.parent_id.is_none()) {
+            print_task_line(task, 0);
+            for child in here.iter().filter(|c| c.parent_id == Some(task.id)) {
+                print_task_line(child, 1);
+            }
+        }
+        for orphan in here
+            .iter()
+            .filter(|t| t.parent_id.is_some() && !here.iter().any(|p| Some(p.id) == t.parent_id))
+        {
+            print_task_line(orphan, 1);
+        }
+    }
+}
+
+fn print_task_line(task: &projects::Task, depth: usize) {
+    let mut trail = String::new();
+    if let Some(due) = &task.due_at {
+        trail.push_str(&format!("  due {due}"));
+    }
+    if let Some(minutes) = task.estimate_minutes {
+        trail.push_str(&format!("  {minutes}m"));
+    }
+    println!(
+        "  {}{} {} {}{}",
+        "    ".repeat(depth),
+        paint(&format!("{:>4}", task.id), DIM),
+        if task.done_at.is_some() { paint("\u{2713}", GREEN) } else { " ".to_string() },
+        truncate(&task.title, 54 - depth * 4),
+        paint(&trail, DIM)
+    );
 }
 
 // ── Terminal reporter ────────────────────────────────────────────────────────

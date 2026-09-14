@@ -5,14 +5,25 @@ app, with no window involved. Useful for terminal syncs, cron jobs, and
 debugging. `app/README.md` carries the full command reference; this page is
 how it fits the architecture.
 
-Two halves. `run`, `index` and `auth` **write** — they are the app's engine
-without the window. `search`, `grep`, `read`, `files` and `calendar` only
-**read**, and exist so a coding agent, or a person at a prompt, can query the
-library without the UI and without a protocol in between: one binary, one
-`--json` flag, no per-agent registration and no tool schemas resident in a
-context window. `docs` documents that half to the agents that use it, and
-`agent` runs one of those agents for a single turn through the app's own
-bridges — the headless proof that a bridge works, with nothing recorded
+Three kinds of command, and the difference between two of them matters.
+`run`, `index` and `auth` **write the library**: they are the app's engine
+without the window, and everything they write is a copy of something the
+university already has, so a bad run is repaired by running it again.
+`search`, `grep`, `read`, `files` and `calendar` only **read**, and exist so a
+coding agent, or a person at a prompt, can query the library without the UI and
+without a protocol in between: one binary, one `--json` flag, no per-agent
+registration and no tool schemas resident in a context window. `project` and
+`task` **write the user's own content** — the projects, boards and tasks the
+app draws ([projects.md](./projects.md)) — which is a different kind of write
+from a scrape: nothing upstream has a copy, and `oculus task rm` is gone for
+good where a deleted course file comes back on the next sync. That is why
+those commands refuse an unknown column instead of guessing, why a whole
+breakdown goes in as one transaction, and why the destructive one says in its
+own `--help` that there is no undo.
+
+Two commands stand outside that split. `docs` documents the whole agent-facing
+surface to the agents that use it, and `agent` runs one of those agents for a
+single turn through the app's own bridges — the headless proof that a bridge works, with nothing recorded
 (see [harness.md](./harness.md)). Its `--subject` takes a course code and
 appends the same scope the app's picker does, which is how that section of
 the instructions gets read without opening the window.
@@ -26,7 +37,8 @@ the instructions gets read without opening the window.
 | Shared path resolution | `app/src-tauri/src/paths.rs` |
 | Agent docs: templates, stubs, linking | `app/src-tauri/src/agents.rs` |
 | `agent`: the bridges it drives | `app/src-tauri/src/harness/mod.rs` |
-| Headless DB writes | `app/src-tauri/src/store.rs` |
+| Headless DB writes (scrape tables) | `app/src-tauri/src/store.rs` |
+| Headless DB writes (projects and tasks) | `app/src-tauri/src/projects.rs` |
 | Repo copy of the reference, regenerated at bundle time | `app/scripts/gen-cli-docs.mjs` |
 | Build scripts (`cli`, `cli:install`, `docs:cli`) | `app/package.json` |
 
@@ -100,6 +112,41 @@ the instructions gets read without opening the window.
   out whether `search` will work before trying it.
 - These commands never start the sidecar and never scrape. A read command on
   a machine where the app has never run reports what is missing and stops.
+
+## The planning half
+
+- **`project` and `task` are the agent's write surface**, and the database is
+  the only door: the app's board reads these same rows live, which is why
+  nothing here asks for `oculus.db` to be opened directly. Nine subcommands —
+  `project list|show|create|update` and `task list|add|update|move|rm` —
+  all honouring `--json`. The rules they enforce, and why, are in
+  [projects.md](./projects.md); what is CLI-shaped about them is below.
+- **A breakdown goes in as one `--batch`, not a command per task.** `oculus
+  task add -p <ID> --batch -` reads a JSON array from stdin (or a file) and
+  writes it in a single transaction, so a rejected item rolls the whole thing
+  back rather than leaving half a plan on the board. An item names its parent
+  either by an existing task id or by the `key` of an **earlier item in the
+  same array**, which is how a parent and its subtasks go in together; `key` is
+  never stored. That contract is the one thing here an agent writes by hand, so
+  it is spelled out in `oculus task add --help` and asserted by a test that
+  parses the documented JSON.
+- **An unknown column is refused, with the ids the board does have.** `--column`
+  is free text an agent typed, and a task filed under a column the project
+  lacks is not misfiled but invisible — every view renders columns. Naming the
+  real ids in the error means the next attempt does not cost a second command
+  to find out what the board is called.
+- **`task move` is the only command that changes where a task sits** — its
+  column, its order and whether it is finished are one fact, and `task update`
+  deliberately cannot touch them. Finishing something is moving it into a
+  `done` column, not a flag.
+- **A project points at exactly one subject, so `-s` breaks ties differently
+  here.** Prefix matching is the same as `run` and `calendar`, but a bare code
+  legitimately matches the same course in two terms; `one_subject` resolves
+  that in favour of the **current** term, and a tie that survives that is
+  reported with the full codes rather than guessed. Omitting `-s` makes a
+  personal project rather than an ambiguous one.
+- **Everything this binary writes is marked `source: agent`**, so the board can
+  show which rows it did not write itself.
 
 ## Docs for the agents that use it
 

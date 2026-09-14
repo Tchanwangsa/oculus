@@ -36,8 +36,10 @@ reads both halves.
   edits elsewhere are both off-limits and lost.
 - Keep memories as markdown under `agents/` — not `.claude/`, not `.codex/` —
   so every agent that works here shares one store. See Memory below.
-- Never touch `oculus.db` directly. Read through the CLI; writing tasks,
-  events and notes will come through the CLI later.
+- Never touch `oculus.db` directly. The CLI is the door in both directions:
+  `oculus search|grep|read|files|calendar` read it, and `oculus project` /
+  `oculus task` write the student's plan into it — the same rows the app draws
+  its board from, so a task you add appears there.
 
 ## Memory
 
@@ -88,7 +90,14 @@ oculus grep "sprint retrospective" -s COMP30026   # regex over markdown AND pdf 
 oculus read 13.pdf --pages 30-35                  # parsed page markdown
 oculus files COMP30026 --type pdf                 # what is there to read
 oculus calendar COMP30026 -d 14                   # classes and due dates
+oculus project list -s COMP30026                  # what is planned, and how far along
+oculus task add -p 3 --batch -                    # a whole breakdown in one call
 ```
+
+Planning is a write, so it has its own rules: a task belongs to a project, a
+project's board names its own columns (`oculus project show <ID>` prints their
+ids), and a breakdown goes in as one `--batch` JSON array rather than one
+command per task. `oculus task add --help` is the contract.
 
 Pass this folder's own subject code to `-s`: the CLI has no notion of the
 working directory, so without it you get the whole library back. `search`

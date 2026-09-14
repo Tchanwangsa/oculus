@@ -22,6 +22,8 @@ Commands:
   read      Print the text of one library file
   files     List the files in the library
   calendar  Class times and assignment due dates
+  project   Plan work: projects, their boards, and what is on them
+  task      Add, move, finish and delete the tasks on a project's board
   docs      Write the agent-facing docs into the library
   agent     Run one prompt through a CLI agent (Claude Code or Codex)
   help      Print this message or the help of the given subcommand(s)
@@ -33,8 +35,9 @@ Options:
       --json
           Print machine-readable JSON instead of formatted text
 
-          Honoured by status, list, search, grep, read, files and calendar. On failure
-          the JSON is `{"error": "..."}` on stderr and the exit code is 1.
+          Honoured by every command that prints: status, list, search, grep, read,
+          files, calendar, project and task. On failure the JSON is `{"error": "..."}`
+          on stderr and the exit code is 1.
 
   -h, --help
           Print help (see a summary with '-h')
@@ -450,6 +453,346 @@ Options:
       --past
           Include events that have already happened
 
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus project`
+
+```
+Plan work: projects, their boards, and what is on them
+
+Usage: oculus project <COMMAND>
+
+Commands:
+  list    List projects and how far along they are
+  show    Show one project: its brief, its board, and every task on it
+  create  Create a project
+  update  Change a project's name, dates, brief or status
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus project list`
+
+```
+List projects and how far along they are.
+
+Active projects only, unless `--archived`. Each line starts with the id every other
+project and task command takes, and ends with finished/total tasks.
+
+Usage: oculus project list [OPTIONS]
+
+Options:
+  -s, --subject <SUBJECT_CODE>
+          Only this subject's projects; prefix codes are fine (COMP30026)
+
+      --personal
+          Only projects belonging to no subject
+
+      --archived
+          Archived projects instead of active ones
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus project show`
+
+```
+Show one project: its brief, its board, and every task on it.
+
+Tasks are printed under their column in the board's own order, subtasks indented under
+their parent. The bracketed name after each column heading is the column **id** — that
+is what `--column` takes.
+
+Usage: oculus project show <ID>
+
+Arguments:
+  <ID>
+          Project id, as `oculus project list` prints it
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus project create`
+
+```
+Create a project.
+
+It opens with the app's default board — `backlog`, `todo`, `doing`, `done` — and no
+tasks; `oculus task add --batch` is how a breakdown goes in. Rows written by this binary
+are marked `source: agent`, so the board can show what it did not write itself.
+
+Prints the new project's id.
+
+Usage: oculus project create [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          What the project is called
+
+Options:
+  -s, --subject <SUBJECT_CODE>
+          Scope it to a subject; prefix codes are fine (COMP30026), and the current term
+          wins a tie. Omit for a personal project
+
+      --due <ISO>
+          When the whole thing is due, ISO 8601 (2026-09-20T23:59:00Z)
+
+      --starts <ISO>
+          When work on it starts, ISO 8601
+
+      --brief <TEXT>
+          A paragraph of what it is — the assignment brief, the plan
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus project update`
+
+```
+Change a project's name, dates, brief or status.
+
+Only the flags you pass are written; everything else is left alone. Pass an **empty
+string** to clear a field: `--due ""` takes the due date off.
+
+`--status archived` is how a project leaves the board without being deleted; its tasks
+stay and `--status active` brings it back.
+
+Usage: oculus project update [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+          Project id
+
+Options:
+      --name <NAME>
+          Rename it
+
+      --due <ISO>
+          Due date, ISO 8601, or "" to clear
+
+      --starts <ISO>
+          Start date, ISO 8601, or "" to clear
+
+      --brief <TEXT>
+          Replace the brief, or "" to clear it
+
+      --status <STATUS>
+          active or archived
+
+          [possible values: active, archived]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus task`
+
+```
+Add, move, finish and delete the tasks on a project's board
+
+Usage: oculus task <COMMAND>
+
+Commands:
+  list    List a project's tasks
+  add     Add one task, or a whole breakdown in one call
+  update  Change a task's title, notes, dates or estimate
+  move    Move a task to another column, or reorder it within one
+  rm      Delete a task, and its subtasks with it
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus task list`
+
+```
+List a project's tasks.
+
+Grouped by column in the board's order, subtasks under their parent. A task sitting in a
+`done` column carries the time it landed there.
+
+Usage: oculus task list [OPTIONS] --project <ID>
+
+Options:
+  -p, --project <ID>
+          Which project
+
+  -c, --column <ID>
+          Only this board column (its id, e.g. todo)
+
+      --due-before <ISO>
+          Only tasks due before this ISO 8601 timestamp. Compared as text, so pass the
+          same shape the dates were written in (UTC, usually)
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus task add`
+
+```
+Add one task, or a whole breakdown in one call.
+
+A task lands at the end of its column; without `--column` that is the project's first
+one. The column id is checked against the project's board and an unknown one is refused,
+listing the ids the board does have — a task filed under a column that does not exist is
+drawn by nothing, in any view. Landing in a `done` column marks the task finished,
+exactly as moving it there would.
+
+`--parent` makes the task a subtask. Subtasks are one level deep: a subtask cannot
+itself be given children.
+
+BREAKDOWNS: `--batch -` reads a JSON array of tasks from stdin (or a file, `--batch
+tasks.json`) and writes them in one call — use it for anything past two or three:
+
+[{"title":"Read the brief","column":"todo","due":"2026-09-20T23:59:00Z"},
+{"title":"Outline","key":"outline"}, {"title":"Draft intro","parent":"outline"}]
+
+Per task: `title` (required), `column`, `body`, `due`, `starts`, `estimate` (minutes),
+`parent`, `key`. `parent` is either an existing task's id (a number) or the `key` of an
+**earlier task in the same batch**, which is how a parent and its subtasks go in
+together. `key` is never stored. An unknown field is an error rather than a silent
+no-op.
+
+The batch is **all or nothing**: one transaction, so a bad item — unknown column, a
+parent that is already a subtask, a date that is not a date — writes none of them and
+says which item failed. Fix it and re-send; it can never leave half a breakdown on the
+board.
+
+Prints the new task ids in the order they were given.
+
+Usage: oculus task add [OPTIONS] --project <ID> [TITLE]
+
+Arguments:
+  [TITLE]
+          The task's title. Omit when using --batch
+
+Options:
+  -p, --project <ID>
+          Which project
+
+  -c, --column <ID>
+          Board column id (default: the project's first column)
+
+      --parent <TASK_ID>
+          Make this a subtask of that task id
+
+      --due <ISO>
+          Due date, ISO 8601
+
+      --starts <ISO>
+          Start date, ISO 8601
+
+      --estimate <MIN>
+          How long you think it will take, in minutes
+
+      --body <TEXT>
+          Notes on the task
+
+      --batch <FILE>
+          Read a JSON array of tasks from stdin (-) or a file
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus task update`
+
+```
+Change a task's title, notes, dates or estimate.
+
+Only the flags you pass are written. Pass an **empty string** to clear a field: `--due
+""`, `--estimate ""`.
+
+Where a task *sits* is not here: column, order and done-ness are one fact, and `oculus
+task move` is their only writer — it is the command that reads the board to learn
+whether the destination column means finished.
+
+Usage: oculus task update [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+          Task id
+
+Options:
+      --title <TEXT>
+          Rename it
+
+      --body <TEXT>
+          Replace the notes, or "" to clear
+
+      --due <ISO>
+          Due date, ISO 8601, or "" to clear
+
+      --starts <ISO>
+          Start date, ISO 8601, or "" to clear
+
+      --estimate <MIN>
+          Minutes, or "" to clear
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus task move`
+
+```
+Move a task to another column, or reorder it within one.
+
+This is also how a task is finished: landing in a column whose kind is `done` stamps it,
+and leaving one clears that again. The column's *kind* decides, not its name — which is
+why there is no `--done` flag anywhere.
+
+Without `--after` or `--before` the task goes to the end of the column. Both name tasks
+already in the destination column: `--after 12` puts it straight below task 12,
+`--before 12` straight above it.
+
+Usage: oculus task move [OPTIONS] --column <ID> <ID>
+
+Arguments:
+  <ID>
+          Task id
+
+Options:
+  -c, --column <ID>
+          Destination column id (e.g. done)
+
+      --after <TASK_ID>
+          Put it directly below this task
+
+      --before <TASK_ID>
+          Put it directly above this task
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus task rm`
+
+```
+Delete a task, and its subtasks with it.
+
+There is no undo, and nothing else cleans these up — a task that is merely finished
+belongs in a `done` column (`oculus task move`), not deleted.
+
+Usage: oculus task rm <ID>
+
+Arguments:
+  <ID>
+          Task id
+
+Options:
   -h, --help
           Print help (see a summary with '-h')
 ```
