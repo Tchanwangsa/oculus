@@ -24,6 +24,7 @@ Commands:
   calendar  Class times and assignment due dates
   project   Plan work: projects, their boards, and what is on them
   task      Add, move, finish and delete the tasks on a project's board
+  lecture   Look inside a downloaded lecture recording
   docs      Write the agent-facing docs into the library
   agent     Run one prompt through a CLI agent (Claude Code or Codex)
   help      Print this message or the help of the given subcommand(s)
@@ -793,6 +794,50 @@ Arguments:
           Task id
 
 Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus lecture`
+
+```
+Look inside a downloaded lecture recording
+
+Usage: oculus lecture <COMMAND>
+
+Commands:
+  candidates  Find where a recording plausibly changes topic
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus lecture candidates`
+
+```
+Find where a recording plausibly changes topic
+
+Samples the video one frame a second and reports the moments the picture changes hard
+enough to be a new slide, thinned so no two are within 90 seconds. A transcript silence
+near a change nudges its score up; it never creates a boundary on its own.
+
+Detection is a single ffmpeg decode — a few seconds for an hour of video — so nothing is
+stored and re-running always reflects the file on disk. This is the raw candidate set:
+no titles and no summaries, which are a later stage's job.
+
+Usage: oculus lecture candidates [OPTIONS] <LECTURE_ID>
+
+Arguments:
+  <LECTURE_ID>
+          Lecture id, as `oculus list -l` prints it; a unique prefix is enough
+
+Options:
+      --frames
+          Also write one JPEG per candidate into the lecture's `frames/` folder, so the
+          boundaries can be checked by eye
+
   -h, --help
           Print help (see a summary with '-h')
 ```

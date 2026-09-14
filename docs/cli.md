@@ -21,6 +21,11 @@ those commands refuse an unknown column instead of guessing, why a whole
 breakdown goes in as one transaction, and why the destructive one says in its
 own `--help` that there is no undo.
 
+`lecture` is a third kind again: it **writes nothing** and reads no upstream
+copy either — it decodes a recording already on disk and reports what it found
+(see [chapters.md](./chapters.md)), which is why it has no cache to invalidate
+and re-running it is the whole story.
+
 Two commands stand outside that split. `docs` documents the whole agent-facing
 surface to the agents that use it, and `agent` runs one of those agents for a
 single turn through the app's own bridges — the headless proof that a bridge works, with nothing recorded

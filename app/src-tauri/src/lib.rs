@@ -4,6 +4,7 @@ mod auth;
 pub mod browser;
 pub mod calendar;
 pub mod canvas;
+pub mod chapters;
 pub mod echo360;
 pub mod ed;
 mod files;

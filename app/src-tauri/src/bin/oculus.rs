@@ -116,6 +116,11 @@ enum Command {
         #[command(subcommand)]
         action: TaskAction,
     },
+    /// Look inside a downloaded lecture recording
+    Lecture {
+        #[command(subcommand)]
+        action: LectureAction,
+    },
     Docs(DocsArgs),
     Agent(AgentArgs),
 }
@@ -638,6 +643,38 @@ struct TaskRmArgs {
     id: i64,
 }
 
+// ── Lectures: what is inside a recording ───────────────────────────────────
+//
+// `run -l` puts recordings on disk; this reads one back. Nothing here touches
+// the database or the network — it decodes the file that is already there.
+
+#[derive(Subcommand)]
+enum LectureAction {
+    Candidates(LectureCandidatesArgs),
+}
+
+/// Find where a recording plausibly changes topic
+///
+/// Samples the video one frame a second and reports the moments the picture
+/// changes hard enough to be a new slide, thinned so no two are within 90
+/// seconds. A transcript silence near a change nudges its score up; it never
+/// creates a boundary on its own.
+///
+/// Detection is a single ffmpeg decode — a few seconds for an hour of video
+/// — so nothing is stored and re-running always reflects the file on disk.
+/// This is the raw candidate set: no titles and no summaries, which are a
+/// later stage's job.
+#[derive(Args)]
+struct LectureCandidatesArgs {
+    /// Lecture id, as `oculus list -l` prints it; a unique prefix is enough
+    #[arg(value_name = "LECTURE_ID")]
+    id: String,
+    /// Also write one JPEG per candidate into the lecture's `frames/` folder,
+    /// so the boundaries can be checked by eye
+    #[arg(long)]
+    frames: bool,
+}
+
 /// Write the agent-facing docs into the library
 ///
 /// Fills `agents/` in the data directory: `OCULUS-CLI.md`, rendered from this
@@ -703,6 +740,9 @@ fn main() {
             TaskAction::Update(a) => ctx.task_update(&a),
             TaskAction::Move(a) => ctx.task_move(&a),
             TaskAction::Rm(a) => ctx.task_rm(&a),
+        },
+        Some(Command::Lecture { action }) => match action {
+            LectureAction::Candidates(a) => ctx.lecture_candidates(&a),
         },
         Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
@@ -1272,6 +1312,7 @@ impl Ctx {
         if self.json {
             #[derive(Serialize)]
             struct Lecture<'a> {
+                id: &'a str,
                 subject: &'a str,
                 title: &'a str,
                 date: &'a str,
@@ -1286,6 +1327,7 @@ impl Ctx {
                 .collect::<Result<_, String>>()?;
             for (code, lectures) in &rows {
                 out.extend(lectures.iter().map(|l| Lecture {
+                    id: &l.id,
                     subject: code,
                     title: &l.title,
                     date: &l.date,
@@ -1307,8 +1349,13 @@ impl Ctx {
                     if l.has_video { "video" } else { "     " },
                     if l.has_transcript { " transcript" } else { "" }
                 );
+                // The id leads, dimmed, the way `project list` prints an id
+                // — it is the only handle `oculus lecture` takes, and the
+                // first eight characters of a UUID are enough for the prefix
+                // match that command already does.
                 println!(
-                    "  {:<11} {mins:>4}m  {} {}",
+                    "  {} {:<11} {mins:>4}m  {} {}",
+                    paint(&l.id.chars().take(8).collect::<String>(), DIM),
                     l.date.chars().take(10).collect::<String>(),
                     paint(&format!("{marks:<22}"), DIM),
                     l.title
@@ -2566,6 +2613,144 @@ impl Ctx {
         Ok(())
     }
 
+    // ── lecture ──────────────────────────────────────────────────────────────
+
+    /// Where a recording changes topic, from the recording itself.
+    ///
+    /// No cache to check and nothing written unless `--frames` is passed: one
+    /// decode pass is cheaper than a table to invalidate. See
+    /// `app_lib::chapters` for why the thresholds are constants.
+    fn lecture_candidates(&self, args: &LectureCandidatesArgs) -> Result<(), String> {
+        let pool = self.db().ok_or("lectures live in the database")?;
+        let (id, title, duration, video, transcript) = self.one_lecture(&pool, &args.id)?;
+
+        let video = video.ok_or_else(|| {
+            format!("{title} is not downloaded — `oculus run -l --videos` fetches it")
+        })?;
+        let video = PathBuf::from(&video);
+        if !video.exists() {
+            return Err(format!(
+                "{} is on record but missing from disk",
+                video.display()
+            ));
+        }
+        // The CLI has no resource dir, so this finds the dev copy under
+        // src-tauri/binaries or a system ffmpeg — the same search the
+        // downloader uses.
+        let ffmpeg = app_lib::echo360::find_ffmpeg(None)
+            .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
+
+        let diffs = app_lib::chapters::sample_diffs(&ffmpeg, &video)?;
+        // A missing or unreadable transcript costs the pause bonus and nothing
+        // else, so it is not worth failing over.
+        let gaps = transcript
+            .as_deref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .map(|vtt| app_lib::chapters::cue_gaps(&vtt))
+            .unwrap_or_default();
+        let found = app_lib::chapters::candidates(&diffs, &gaps, duration as u32);
+
+        let frames = if args.frames {
+            let dir = app_lib::echo360::lecture_dir(&self.data_dir, &id).join("frames");
+            let seconds: Vec<u32> = found.iter().map(|c| c.seconds).collect();
+            Some(app_lib::chapters::extract_frames(&ffmpeg, &video, &seconds, &dir)?)
+        } else {
+            None
+        };
+
+        if self.json {
+            #[derive(Serialize)]
+            struct Out<'a> {
+                lecture: &'a str,
+                title: &'a str,
+                duration_seconds: i64,
+                sampled_seconds: usize,
+                candidates: &'a [app_lib::chapters::Candidate],
+                #[serde(skip_serializing_if = "Option::is_none")]
+                frames: Option<Vec<String>>,
+            }
+            return self.emit(&Out {
+                lecture: &id,
+                title: &title,
+                duration_seconds: duration,
+                sampled_seconds: diffs.len() + 1,
+                candidates: &found,
+                frames: frames
+                    .as_ref()
+                    .map(|f| f.iter().map(|p| p.to_string_lossy().into_owned()).collect()),
+            });
+        }
+
+        println!("{}  {}", paint(&title, BOLD), paint(&clock(duration as u32), DIM));
+        if found.is_empty() {
+            println!("{}", paint("no boundaries — one continuous slide?", DIM));
+            return Ok(());
+        }
+        for c in &found {
+            println!(
+                "  {}  {}{}",
+                clock(c.seconds),
+                paint(&format!("{:>7.1}", c.score), DIM),
+                if c.pause { paint("  pause", DIM) } else { String::new() }
+            );
+        }
+        println!(
+            "{}",
+            paint(&format!("{} candidate(s)", found.len()), DIM)
+        );
+        if let Some(frames) = &frames {
+            if let Some(first) = frames.first().and_then(|p| p.parent()) {
+                println!("{}", paint(&format!("frames in {}", first.display()), DIM));
+            }
+        }
+        Ok(())
+    }
+
+    /// One lecture row from an id, or a unique prefix of one. Lecture ids are
+    /// UUIDs nobody types in full, and a prefix that matches two lectures is
+    /// reported rather than guessed — the same rule `one_subject` follows.
+    #[allow(clippy::type_complexity)]
+    fn one_lecture(
+        &self,
+        pool: &SqlitePool,
+        id: &str,
+    ) -> Result<(String, String, i64, Option<String>, Option<String>), String> {
+        let rows = self
+            .rt
+            .block_on(
+                sqlx::query(
+                    "SELECT id, title, duration_seconds, video_path, transcript_path
+                     FROM lectures WHERE id = ?1 OR id LIKE ?2 ORDER BY id",
+                )
+                .bind(id)
+                .bind(format!("{id}%"))
+                .fetch_all(pool),
+            )
+            .map_err(|e| e.to_string())?;
+        let row = match rows.len() {
+            0 => {
+                return Err(format!(
+                    "no lecture {id} — `oculus list -l` prints the id of every lecture on record"
+                ))
+            }
+            1 => &rows[0],
+            n => {
+                let found: Vec<String> = rows.iter().map(|r| r.get::<String, _>("id")).collect();
+                return Err(format!(
+                    "{id} matched {n} lectures ({}) — pass more of the id",
+                    found.join(", ")
+                ));
+            }
+        };
+        Ok((
+            row.get("id"),
+            row.get("title"),
+            row.get("duration_seconds"),
+            row.get("video_path"),
+            row.get("transcript_path"),
+        ))
+    }
+
     /// Read one task back and report it — what `task update` and `task move`
     /// print, so a caller always sees the row as it now stands rather than the
     /// arguments it sent.
@@ -3175,6 +3360,11 @@ fn nullable_minutes(value: Option<&String>) -> Result<Option<Option<i64>>, Strin
 /// A subtask is printed under its parent when they share a column and
 /// indented on its own when they do not — a `--column` listing must not
 /// silently drop rows.
+/// `HH:MM:SS`, so an offset can be read off against a player's own readout.
+fn clock(secs: u32) -> String {
+    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+}
+
 fn print_board(project: &projects::Project, tasks: &[projects::Task]) {
     for column in &project.columns {
         let here: Vec<&projects::Task> =

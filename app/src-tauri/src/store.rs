@@ -276,6 +276,9 @@ pub async fn replace_calendar_events(
 
 #[derive(Debug)]
 pub struct LectureRow {
+    /// Echo360's media id, and the name of the folder under `lectures/`. The
+    /// CLI's only handle on one lecture, so `list -l` has to print it.
+    pub id: String,
     pub title: String,
     pub date: String,
     pub duration_seconds: i64,
@@ -340,7 +343,7 @@ pub async fn set_lecture_path(
 
 pub async fn lectures(pool: &SqlitePool, subject_id: i64) -> Result<Vec<LectureRow>, String> {
     let rows = sqlx::query(
-        "SELECT title, date, duration_seconds, video_path, transcript_path
+        "SELECT id, title, date, duration_seconds, video_path, transcript_path
          FROM lectures WHERE subject_id = ?1 ORDER BY date ASC",
     )
     .bind(subject_id)
@@ -351,6 +354,7 @@ pub async fn lectures(pool: &SqlitePool, subject_id: i64) -> Result<Vec<LectureR
     Ok(rows
         .iter()
         .map(|r| LectureRow {
+            id: r.get("id"),
             title: r.get("title"),
             date: r.get("date"),
             duration_seconds: r.get("duration_seconds"),

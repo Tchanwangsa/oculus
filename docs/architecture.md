@@ -72,7 +72,10 @@ live. Inside it:
   `.pages.json`, and `<stem>_images/` siblings the parser writes
 - `lectures/<uuid>/` — downloaded Echo360 media: `source1.mp4` (the Presenter
   screen), `source2.mp4` (the room camera, when the capture has one and it has
-  been asked for) and `transcript.vtt`
+  been asked for) and `transcript.vtt`. A `frames/` subfolder appears only when
+  `oculus lecture candidates --frames` is asked for one — a JPEG per detected
+  topic boundary, regenerable in seconds and nothing's source of truth (see
+  [chapters.md](./chapters.md))
 - `agents/` — the docs a coding agent reads, the `AGENTS.md` every course
   folder symlinks, and the memory layer it writes back (`TASTE.md`,
   `memories/`); written by `oculus docs` and, for everything but the CLI
