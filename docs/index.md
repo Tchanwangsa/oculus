@@ -53,11 +53,16 @@ an in-app browser — external links open as tabs in Oculus's own tab strip,
 signed in to Canvas. When a doc or UI string implies more than this, the doc is
 wrong — fix it.
 
-Part-built: **lecture chapters**. Boundaries are detected, named by a CLI
-agent and stored, from the command line (`oculus lecture chapters`) or from
-the app, on the agent and model that job is configured with in Settings → AI.
-Nothing draws them yet — the player still shows a plain scrub bar.
-[chapters.md](./chapters.md) says what the remaining stage would be.
+Built: **lecture chapters**. Boundaries are detected, named by a CLI agent and
+stored from the command line (`oculus lecture chapters`) or the app, then read
+as a dock list, a current-chapter strip and scrub-bar ticks in the player.
+
+Part-built: **lecture recap**. The backend job segments a recording at its
+visual changes, asks a CLI agent for short windowed notes and stores each
+validated window (`oculus lecture recap`). Its model is configured in Settings
+→ AI, but the player tab that reads those rows is the next stage.
+[chapters.md](./chapters.md#lecture-recap) describes the shared pipeline and
+the remaining UI boundary.
 
 Dormant rather than built: the **BYOK API layer** — provider config, keychain
 keys, streaming, spend limits — which the CLI-agent bridges replaced. Nothing

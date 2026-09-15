@@ -20,6 +20,7 @@ mod media;
 pub mod mineru;
 pub mod paths;
 pub mod projects;
+pub mod recap;
 pub mod retrieval;
 mod scrape;
 pub mod store;
@@ -83,6 +84,9 @@ pub fn run() {
             // A chaptering run killed mid-turn leaves `running` on the
             // lecture row; nothing else will ever clear it.
             chapters::app::reconcile(app.handle());
+            // Recap windows commit as they finish, but an interrupted run's
+            // `running` marker still needs the same startup repair.
+            recap::app::reconcile(app.handle());
             // ── Session restore on startup ──────────────────────────────
             // No WebView dance: we replay the persisted session cookie via a
             // server-side ureq ping. Valid → connected instantly. Rejected →
@@ -955,6 +959,34 @@ ALTER TABLE harness_threads ADD COLUMN lecture_id TEXT REFERENCES lectures(id) O
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 31,
+                            description: "lecture recap: slide-level notes and job status",
+                            // Recap notes are derived from the recording and
+                            // transcript, so they cascade with the lecture and
+                            // a regenerate replaces them. There is no stored
+                            // end: each note lasts until the next starts.
+                            //
+                            // Windows are deliberately absent from the table.
+                            // They are only an execution detail; `idx` is the
+                            // durable play order across separately committed
+                            // windows, which lets partial work stay visible.
+                            sql: r#"
+CREATE TABLE IF NOT EXISTS lecture_recap (
+    lecture_id    TEXT    NOT NULL REFERENCES lectures(id) ON DELETE CASCADE,
+    idx           INTEGER NOT NULL,
+    start_seconds INTEGER NOT NULL,
+    label         TEXT    NOT NULL,
+    body          TEXT    NOT NULL,
+    PRIMARY KEY (lecture_id, idx)
+);
+
+ALTER TABLE lectures ADD COLUMN recap_status TEXT;
+ALTER TABLE lectures ADD COLUMN recapped_at  TEXT;
+ALTER TABLE lectures ADD COLUMN recap_error TEXT;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -1014,6 +1046,7 @@ ALTER TABLE harness_threads ADD COLUMN lecture_id TEXT REFERENCES lectures(id) O
             harness::app::harness_delete_thread,
             chapters::app::lecture_find_chapters,
             chapters::app::lecture_grab_frame,
+            recap::app::lecture_write_recap,
             sidecar::sidecar_health,
             sidecar::sidecar_set_limits,
             storage::storage_report,

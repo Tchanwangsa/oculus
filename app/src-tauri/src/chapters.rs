@@ -266,6 +266,21 @@ pub fn candidates(
     gaps: &[(u32, f32)],
     duration_secs: u32,
 ) -> Vec<Candidate> {
+    candidates_with_spacing(diffs, gaps, duration_secs, MIN_SPACING)
+}
+
+/// The shared detector with a caller-selected thinning radius.
+///
+/// Chapters use 90 seconds because they are topic spans; recap notes use a
+/// denser radius because they follow visual changes. Keeping the radius at
+/// this boundary lets both jobs share the measured decode, collapse and score
+/// pipeline without pretending they want the same output density.
+pub fn candidates_with_spacing(
+    diffs: &[(u32, f32)],
+    gaps: &[(u32, f32)],
+    duration_secs: u32,
+    min_spacing: u32,
+) -> Vec<Candidate> {
     // Loud frames, with a run collapsed onto its first second. The run keeps
     // the largest magnitude it contained: a build-up that peaks two frames in
     // is still as strong as its peak.
@@ -308,7 +323,7 @@ pub fn candidates(
         })
         .collect();
 
-    // Strongest first, then drop anything within MIN_SPACING of something
+    // Strongest first, then drop anything within the caller's radius of something
     // already kept.
     scored.sort_by(|a, b| {
         b.score
@@ -320,7 +335,7 @@ pub fn candidates(
     for candidate in scored {
         if kept
             .iter()
-            .all(|k| k.seconds.abs_diff(candidate.seconds) >= MIN_SPACING)
+            .all(|k| k.seconds.abs_diff(candidate.seconds) >= min_spacing)
         {
             kept.push(candidate);
         }

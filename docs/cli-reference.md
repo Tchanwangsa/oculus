@@ -808,6 +808,7 @@ Usage: oculus lecture <COMMAND>
 Commands:
   candidates  Find where a recording plausibly changes topic
   chapters    Name a recording's chapters with a CLI agent, and store them
+  recap       Write a slide-by-slide recap of a recording with a CLI agent
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -876,6 +877,44 @@ Options:
 
       --force
           Re-run over a lecture that already has chapters, replacing them
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus lecture recap`
+
+```
+Write a slide-by-slide recap of a recording with a CLI agent
+
+Splits the lecture at its visual changes, groups those segments into roughly ten-minute
+windows, and asks a coding agent to describe what the slide shows and what the lecturer
+says over it. Each window is validated and written before the next starts, so a long run
+has useful partial results if a later window fails.
+
+Unlike chapter naming, this needs the transcript: a recap is about the explanation as
+well as the slide. The recording and transcript must both have been downloaded first.
+
+Usage: oculus lecture recap [OPTIONS] <LECTURE_ID>
+
+Arguments:
+  <LECTURE_ID>
+          Lecture id, as `oculus list -l` prints it; a unique prefix is enough
+
+Options:
+  -p, --provider <PROVIDER>
+          Which CLI to drive (default: the configured one)
+
+          [possible values: claude, codex]
+
+  -m, --model <MODEL>
+          Model to request (default: the configured one)
+
+      --effort <EFFORT>
+          Reasoning effort — low, medium, high, xhigh, max (default: the configured one)
+
+      --force
+          Re-run over a lecture that already has recap notes, replacing them
 
   -h, --help
           Print help (see a summary with '-h')

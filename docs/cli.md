@@ -24,12 +24,13 @@ own `--help` that there is no undo.
 `lecture` reads no upstream copy at all: it decodes a recording already on disk
 (see [chapters.md](./chapters.md)), which is why it has no cache to invalidate
 and re-running it is the whole story. `lecture candidates` writes nothing at
-all. `lecture chapters` writes **derived** rows — not a copy of anything
-upstream and not the user's own work either, but something regenerable from
-the file on disk — so it is deleted and remade rather than repaired, and
-`--force` is the door for that. It is also the only command that spends a
-model's quota, which is why it leaves a lecture that already has chapters
-alone unless asked.
+all. `lecture chapters` and `lecture recap` write **derived** rows — not a
+copy of anything upstream and not the user's own work either, but something
+regenerable from the recording — so `--force` is the door for replacing them.
+These are also the commands that spend a model's quota, which is why each
+leaves an existing result alone unless asked. A recap additionally requires
+the transcript on disk: its notes describe what was said over a slide, not
+only what the frame shows.
 
 Two commands stand outside that split. `docs` documents the whole agent-facing
 surface to the agents that use it, and `agent` runs one of those agents for a
@@ -87,6 +88,12 @@ the instructions gets read without opening the window.
   dates) into `calendar_events` after the scrape — the CLI has no sync options
   to gate it with, so it always runs. See [calendar.md](./calendar.md).
 - Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`).
+- Lecture ids match on a unique prefix, as printed by `oculus list -l`.
+  `lecture recap` resolves that prefix, then runs the configured
+  `Job::LectureRecap`; `--provider`, `--model` and `--effort` override one run
+  without changing the registry. Its roughly ten-minute windows run in
+  sequence and commit independently, so an error can leave the completed
+  windows from this run visible. See [chapters.md](./chapters.md#lecture-recap).
 
 ## The query half
 

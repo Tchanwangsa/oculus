@@ -71,6 +71,10 @@ mod cli_tests {
             assert!(markdown.contains(&heading), "missing {heading}");
         }
         assert!(markdown.contains("### `oculus auth login`"), "nested commands");
+        assert!(
+            markdown.contains("### `oculus lecture recap`"),
+            "lecture recap command"
+        );
         assert!(!markdown.contains('\u{1b}'), "no ANSI escapes in a file");
     }
 
@@ -80,6 +84,35 @@ mod cli_tests {
         let markdown = render_cli_docs();
         assert_eq!(markdown.matches("--memory-cap <MEMORY_CAP>").count(), 1);
         assert_eq!(markdown.matches("      --json").count(), 1);
+    }
+
+    #[test]
+    fn lecture_recap_accepts_one_run_overrides() {
+        let cli = Cli::try_parse_from([
+            "oculus",
+            "lecture",
+            "recap",
+            "a1b2c3d4",
+            "--force",
+            "--provider",
+            "codex",
+            "--model",
+            "gpt-example",
+            "--effort",
+            "medium",
+        ])
+        .expect("recap flags");
+        let Some(Command::Lecture {
+            action: LectureAction::Recap(args),
+        }) = cli.command
+        else {
+            panic!("lecture recap command");
+        };
+        assert_eq!(args.id, "a1b2c3d4");
+        assert_eq!(args.provider.as_deref(), Some("codex"));
+        assert_eq!(args.model.as_deref(), Some("gpt-example"));
+        assert_eq!(args.effort.as_deref(), Some("medium"));
+        assert!(args.force);
     }
 }
 
@@ -652,6 +685,7 @@ struct TaskRmArgs {
 enum LectureAction {
     Candidates(LectureCandidatesArgs),
     Chapters(LectureChaptersArgs),
+    Recap(LectureRecapArgs),
 }
 
 /// Find where a recording plausibly changes topic
@@ -707,6 +741,40 @@ struct LectureChaptersArgs {
     #[arg(long)]
     effort: Option<String>,
     /// Re-run over a lecture that already has chapters, replacing them
+    #[arg(long)]
+    force: bool,
+}
+
+/// Write a slide-by-slide recap of a recording with a CLI agent
+///
+/// Splits the lecture at its visual changes, groups those segments into
+/// roughly ten-minute windows, and asks a coding agent to describe what the
+/// slide shows and what the lecturer says over it. Each window is validated
+/// and written before the next starts, so a long run has useful partial
+/// results if a later window fails.
+///
+/// Unlike chapter naming, this needs the transcript: a recap is about the
+/// explanation as well as the slide. The recording and transcript must both
+/// have been downloaded first.
+#[derive(Args)]
+struct LectureRecapArgs {
+    /// Lecture id, as `oculus list -l` prints it; a unique prefix is enough
+    #[arg(value_name = "LECTURE_ID")]
+    id: String,
+    // The job registry supplies the defaults shared with the app. A flag
+    // replaces only the named part for this run, exactly as chapter naming
+    // does above.
+    /// Which CLI to drive (default: the configured one)
+    #[arg(short, long, value_parser = ["claude", "codex"])]
+    provider: Option<String>,
+    /// Model to request (default: the configured one)
+    #[arg(short, long)]
+    model: Option<String>,
+    /// Reasoning effort — low, medium, high, xhigh, max (default: the
+    /// configured one)
+    #[arg(long)]
+    effort: Option<String>,
+    /// Re-run over a lecture that already has recap notes, replacing them
     #[arg(long)]
     force: bool,
 }
@@ -780,6 +848,7 @@ fn main() {
         Some(Command::Lecture { action }) => match action {
             LectureAction::Candidates(a) => ctx.lecture_candidates(&a),
             LectureAction::Chapters(a) => ctx.lecture_chapters(&a),
+            LectureAction::Recap(a) => ctx.lecture_recap(&a),
         },
         Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
@@ -2889,6 +2958,168 @@ impl Ctx {
                 &format!(
                     "{} chapter(s) written for {}",
                     outcome.chapters.len(),
+                    outcome.title
+                ),
+                DIM
+            )
+        );
+        Ok(())
+    }
+
+    /// Write a recording's slide-by-slide recap with a CLI agent.
+    ///
+    /// `recap::run` is the one implementation shared with the app. It owns
+    /// the file checks, segmentation, retries, per-window transactions and
+    /// status changes; this door only resolves the lecture and model flags
+    /// and turns its progress into terminal output.
+    fn lecture_recap(&self, args: &LectureRecapArgs) -> Result<(), String> {
+        use app_lib::harness::{jobs, Provider};
+
+        let pool = self.db().ok_or("lectures live in the database")?;
+        let (id, title, ..) = self.one_lecture(&pool, &args.id)?;
+
+        // Give the CLI-specific escape hatch in the early error. The runner
+        // repeats this guard because the app calls it directly too.
+        if !args.force {
+            let existing = self.rt.block_on(store::recap(&pool, &id))?;
+            if !existing.is_empty() {
+                return Err(format!(
+                    "{title} already has {} recap note(s) — `--force` re-runs and replaces them",
+                    existing.len()
+                ));
+            }
+        }
+
+        let mut selection = self
+            .rt
+            .block_on(jobs::selection(&pool, jobs::Job::LectureRecap));
+        if let Some(p) = &args.provider {
+            selection.provider = Provider::parse(p).ok_or("unknown provider")?;
+        }
+        if let Some(m) = &args.model {
+            selection.model = m.clone();
+        }
+        if let Some(e) = &args.effort {
+            selection.reasoning_effort = Some(e.clone());
+        }
+
+        let quiet = self.json;
+        if !quiet {
+            println!(
+                "{}",
+                paint(
+                    &format!(
+                        "{} · {}{}",
+                        selection.provider.label(),
+                        selection.model,
+                        match selection.effort() {
+                            Some(e) => format!(" · {e} reasoning"),
+                            None => String::new(),
+                        }
+                    ),
+                    DIM
+                )
+            );
+        }
+
+        // The reply text is machine-shaped JSON and becomes the notes below;
+        // tool rows remain useful while each sequential window is running.
+        let printer = AgentPrinter::new(false);
+        let outcome = app_lib::recap::run(
+            self.rt.handle(),
+            &pool,
+            &app_lib::recap::Run {
+                data_dir: &self.data_dir,
+                lecture_id: &id,
+                selection: &selection,
+                force: args.force,
+            },
+            |step| {
+                if quiet {
+                    return;
+                }
+                match step {
+                    app_lib::recap::Step::Segmented {
+                        title,
+                        duration,
+                        segments,
+                    } => println!(
+                        "{}  {}  {}",
+                        paint(title, BOLD),
+                        paint(&clock(duration), DIM),
+                        paint(&format!("{segments} segment(s)"), DIM)
+                    ),
+                    app_lib::recap::Step::Window {
+                        done,
+                        total,
+                        start,
+                        end,
+                    } => println!(
+                        "{}",
+                        paint(
+                            &format!(
+                                "window {done} of {total} — {}–{}",
+                                clock(start),
+                                clock(end)
+                            ),
+                            DIM
+                        )
+                    ),
+                    _ => {}
+                }
+            },
+            move |ev| {
+                if !quiet {
+                    printer.print(ev);
+                }
+            },
+        )?;
+
+        if self.json {
+            #[derive(Serialize)]
+            struct Out<'a> {
+                lecture: &'a str,
+                title: &'a str,
+                duration_seconds: u32,
+                provider: &'a str,
+                model: &'a str,
+                effort: Option<&'a str>,
+                segments: usize,
+                windows: usize,
+                notes: &'a [app_lib::recap::RecapNote],
+            }
+            return self.emit(&Out {
+                lecture: &id,
+                title: &outcome.title,
+                duration_seconds: outcome.duration_seconds,
+                provider: selection.provider.as_str(),
+                model: &selection.model,
+                effort: selection.effort(),
+                segments: outcome.segments,
+                windows: outcome.windows,
+                notes: &outcome.notes,
+            });
+        }
+
+        println!();
+        for note in &outcome.notes {
+            let label = match note.label.trim() {
+                "" => "Recap",
+                label => label,
+            };
+            println!(
+                "  {}  {}",
+                paint(&clock(note.start_seconds), DIM),
+                paint(label, BOLD)
+            );
+            println!("            {}", paint(&note.body, DIM));
+        }
+        println!(
+            "{}",
+            paint(
+                &format!(
+                    "{} recap note(s) written for {}",
+                    outcome.notes.len(),
                     outcome.title
                 ),
                 DIM

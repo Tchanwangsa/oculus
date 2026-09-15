@@ -234,6 +234,20 @@ pub async fn reconcile_chapter_status(pool: &SqlitePool) -> Result<u64, String> 
     .map_err(|e| e.to_string())
 }
 
+/// Recap runs that were killed mid-job. The windows already written remain
+/// visible, but `running` cannot survive the process that owned it or the
+/// player would wait forever for progress that can no longer arrive.
+pub async fn reconcile_recap_status(pool: &SqlitePool) -> Result<u64, String> {
+    sqlx::query(
+        "UPDATE lectures SET recap_status = NULL, recap_error = NULL
+          WHERE recap_status = 'running'",
+    )
+    .execute(pool)
+    .await
+    .map(|r| r.rows_affected())
+    .map_err(|e| e.to_string())
+}
+
 // ── Calendar ─────────────────────────────────────────────────────────────────
 
 /// Replace a subject's calendar rows with what Canvas just returned.
@@ -458,6 +472,131 @@ pub async fn chapters(
         .collect())
 }
 
+/// Atomically claim a recap run and clear the previous derived set.
+///
+/// The conditional update is the one shared gate for the app and CLI. Two
+/// callers may race to this transaction, but only the first can change a row
+/// that is not already `running`; the loser spends no model turn. Clearing the
+/// old notes is in the same transaction, so a failed delete cannot strand the
+/// lecture in `running`.
+pub async fn claim_recap(pool: &SqlitePool, lecture_id: &str) -> Result<bool, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let claimed = sqlx::query(
+        "UPDATE lectures
+            SET recap_status = 'running', recap_error = NULL, recapped_at = NULL
+          WHERE id = ?1 AND (recap_status IS NULL OR recap_status <> 'running')",
+    )
+        .bind(lecture_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected()
+        == 1;
+    if !claimed {
+        tx.rollback().await.map_err(|e| e.to_string())?;
+        return Ok(false);
+    }
+    sqlx::query("DELETE FROM lecture_recap WHERE lecture_id = ?1")
+        .bind(lecture_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// The recap job's status, terminal timestamp and failure message.
+///
+/// `recapped_at` records the most recent terminal transition, including an
+/// error after some windows were saved. Starting or reconciling a run clears
+/// it; every non-error transition clears the previous failure message.
+pub async fn set_recap_status(
+    pool: &SqlitePool,
+    lecture_id: &str,
+    status: Option<&str>,
+    error: Option<&str>,
+) -> Result<(), String> {
+    let terminal = matches!(status, Some("ready") | Some("error"));
+    sqlx::query(
+        "UPDATE lectures
+            SET recap_status = ?1,
+                recap_error  = ?2,
+                recapped_at   = CASE WHEN ?3 THEN datetime('now') ELSE NULL END
+          WHERE id = ?4",
+    )
+    .bind(status)
+    .bind(error)
+    .bind(i64::from(terminal))
+    .bind(lecture_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Append one validated recap window atomically.
+///
+/// Windows commit independently by design. `idx` continues from the rows
+/// already present, which keeps play order stable while allowing the panel to
+/// show completed windows during a long run. The caller marks the lecture
+/// `ready` only after every window has landed.
+pub async fn save_recap_window(
+    pool: &SqlitePool,
+    lecture_id: &str,
+    notes: &[crate::recap::RecapNote],
+) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let first_idx: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(idx) + 1, 0) FROM lecture_recap WHERE lecture_id = ?1",
+    )
+    .bind(lecture_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    for (offset, note) in notes.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO lecture_recap (lecture_id, idx, start_seconds, label, body)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(lecture_id)
+        .bind(first_idx + offset as i64)
+        .bind(i64::from(note.start_seconds))
+        .bind(&note.label)
+        .bind(&note.body)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// A lecture's recap notes in play order, including complete windows from a
+/// run that is still in progress or ended with an error.
+pub async fn recap(
+    pool: &SqlitePool,
+    lecture_id: &str,
+) -> Result<Vec<crate::recap::RecapNote>, String> {
+    let rows = sqlx::query(
+        "SELECT start_seconds, label, body FROM lecture_recap
+          WHERE lecture_id = ?1 ORDER BY idx",
+    )
+    .bind(lecture_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .map(|r| crate::recap::RecapNote {
+            start_seconds: r.get::<i64, _>("start_seconds").max(0) as u32,
+            label: r.get("label"),
+            body: r.get("body"),
+        })
+        .collect())
+}
+
 pub async fn lectures(pool: &SqlitePool, subject_id: i64) -> Result<Vec<LectureRow>, String> {
     let rows = sqlx::query(
         "SELECT id, title, date, duration_seconds, video_path, transcript_path
@@ -525,4 +664,104 @@ pub async fn add_log(pool: &SqlitePool, level: &str, message: &str, run_id: Opti
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    use super::*;
+
+    async fn recap_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::query(
+            "CREATE TABLE lectures (
+                id TEXT PRIMARY KEY,
+                recap_status TEXT,
+                recapped_at TEXT,
+                recap_error TEXT
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("lecture schema");
+        sqlx::query(
+            "CREATE TABLE lecture_recap (
+                lecture_id TEXT NOT NULL REFERENCES lectures(id) ON DELETE CASCADE,
+                idx INTEGER NOT NULL,
+                start_seconds INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                body TEXT NOT NULL,
+                PRIMARY KEY (lecture_id, idx)
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("recap schema");
+        sqlx::query("INSERT INTO lectures (id) VALUES ('lecture-1')")
+            .execute(&pool)
+            .await
+            .expect("lecture row");
+        pool
+    }
+
+    #[tokio::test]
+    async fn recap_windows_append_in_play_order_and_claim_clears_for_a_fresh_run() {
+        let pool = recap_pool().await;
+        let first = vec![crate::recap::RecapNote {
+            start_seconds: 0,
+            label: "Opening".into(),
+            body: "The lecture begins.".into(),
+        }];
+        let second = vec![
+            crate::recap::RecapNote {
+                start_seconds: 40,
+                label: "Definition".into(),
+                body: "A definition appears.".into(),
+            },
+            crate::recap::RecapNote {
+                start_seconds: 75,
+                label: String::new(),
+                body: "The example continues.".into(),
+            },
+        ];
+
+        save_recap_window(&pool, "lecture-1", &first).await.unwrap();
+        save_recap_window(&pool, "lecture-1", &second).await.unwrap();
+        let saved = recap(&pool, "lecture-1").await.unwrap();
+        assert_eq!(
+            saved.iter().map(|n| n.start_seconds).collect::<Vec<_>>(),
+            vec![0, 40, 75]
+        );
+
+        assert!(claim_recap(&pool, "lecture-1").await.unwrap());
+        assert!(recap(&pool, "lecture-1").await.unwrap().is_empty());
+        assert!(!claim_recap(&pool, "lecture-1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn recap_status_stamps_only_terminal_runs_and_reconciles_running() {
+        let pool = recap_pool().await;
+        set_recap_status(&pool, "lecture-1", Some("running"), None)
+            .await
+            .unwrap();
+        assert_eq!(reconcile_recap_status(&pool).await.unwrap(), 1);
+
+        set_recap_status(&pool, "lecture-1", Some("error"), Some("bad window"))
+            .await
+            .unwrap();
+        let row = sqlx::query(
+            "SELECT recap_status, recapped_at, recap_error FROM lectures WHERE id = 'lecture-1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.get::<String, _>("recap_status"), "error");
+        assert!(row.get::<Option<String>, _>("recapped_at").is_some());
+        assert_eq!(row.get::<String, _>("recap_error"), "bad window");
+    }
 }

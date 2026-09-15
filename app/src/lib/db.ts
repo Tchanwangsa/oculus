@@ -404,7 +404,7 @@ export async function setLlmSettings(settings: LlmSettings): Promise<void> {
 /** A job's key in the stored object. Mirrors `Job` in
  *  `app/src-tauri/src/harness/jobs.rs`; adding one is a key here, a variant
  *  there, and a row in `JOBS` below. */
-export type JobId = "lectureChapters" | "threadNaming";
+export type JobId = "lectureChapters" | "lectureRecap" | "threadNaming";
 
 /** What one job runs on. `reasoningEffort` is null only for a model that
  *  takes no level — never "whatever the agent defaults to". */
@@ -425,6 +425,12 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
       "Reads a recording's slide frames and transcript and names its topics. One long turn, eight to eleven minutes.",
   },
   {
+    id: "lectureRecap",
+    label: "Lecture recap",
+    description:
+      "Writes a short note for each visual change, using the slide frame and what was said over it.",
+  },
+  {
     id: "threadNaming",
     label: "Chat thread names",
     description:
@@ -437,6 +443,7 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
  *  be the one that resolves it. */
 export const DEFAULT_JOB_MODELS: JobModels = {
   lectureChapters: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
+  lectureRecap: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" },
   threadNaming: { provider: "claude", model: "claude-haiku-4-5", reasoningEffort: "low" },
 };
 

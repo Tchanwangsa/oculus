@@ -14,6 +14,11 @@ reasoning level it runs on is configured in Settings → AI — see [A configure
 job](#a-configured-job). The player reads them back three ways — see [Three
 readings in the player](#three-readings-in-the-player).
 
+The same visual pipeline now has a second backend job: `oculus lecture recap`
+writes short slide-level notes about what is shown and said. It deliberately
+has a different density and write lifetime from chapters; see
+[Lecture recap](#lecture-recap). Its player tab is not built yet.
+
 ## Where
 
 | Piece | Location |
@@ -23,8 +28,11 @@ readings in the player](#three-readings-in-the-player).
 | Writing the rows and the job's status | `app/src-tauri/src/store.rs` |
 | `lecture_chapters` + the three `lectures` columns (migration 29) | `app/src-tauri/src/lib.rs` |
 | The job itself — detect, grab, ask, validate, write | `run` in `app/src-tauri/src/chapters.rs` |
-| `oculus lecture candidates`, `oculus lecture chapters` | `app/src-tauri/src/bin/oculus.rs` |
+| Recap segmentation, windows, prompt, validation and job | `app/src-tauri/src/recap.rs` |
+| `lecture_recap` + the three `lectures` columns (migration 31) | `app/src-tauri/src/lib.rs` |
+| `oculus lecture candidates`, `oculus lecture chapters`, `oculus lecture recap` | `app/src-tauri/src/bin/oculus.rs` |
 | The app's trigger, its two events, and the startup sweep | `chapters::app` in `app/src-tauri/src/chapters.rs` |
+| The recap command, progress/finish events, and startup sweep | `recap::app` in `app/src-tauri/src/recap.rs` |
 | The phases a run reports, and where each one fires | `Step` in `app/src-tauri/src/chapters.rs` |
 | Which agent and model the job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
 | The Settings → AI row that picks them | `app/src/pages/settings/AiPage.tsx` |
@@ -303,6 +311,53 @@ because the decode would write to the row hundreds of times.
   is all-or-nothing on purpose (one bad boundary rolls the set back), and
   drip-feeding half-validated chapters into the panel would fight that
   directly.
+
+## Lecture recap
+
+Chapters answer "what part of the lecture is this?"; recap notes answer "what
+was on screen, and what was just said?" They therefore share the expensive
+evidence pipeline but not its final shape. `app/src-tauri/src/recap.rs` reuses
+`sample_diffs`, collapse and pause scoring, and the same offset-probed frame
+grab that avoids the room's AV splash. Chapter candidates are thinned at 90
+seconds. Recap starts from the same candidates thinned at 25 seconds, then
+merges a segment shorter than roughly 25 seconds into a neighbour and splits a
+segment longer than roughly three minutes at its longest transcript pause.
+Second 0 remains the first boundary in both jobs.
+
+**A recap is windowed before it reaches the agent.** Consecutive segments are
+grouped into roughly ten-minute windows, snapped to a chapter boundary when a
+chapter set exists. Windows run in sequence. Each prompt carries that span of
+the transcript inline and names the frame paths; unlike chapter naming, none
+of the transcript is optional reading. That is why the job refuses a lecture
+without both its downloaded recording and transcript and points back to the
+lecture download command.
+
+The reply is one markdown body and optional short label per retained segment.
+Validation is per window: every start must be a segment start in that window,
+strictly increasing, with the first segment present, and the agent may merge
+adjacent segments but never invent a split. A bad window gets one retry. The
+model is selected through `Job::LectureRecap` in
+`app/src-tauri/src/harness/jobs.rs`; the CLI's `--provider`, `--model` and
+`--effort` flags replace that selection for one run.
+
+**Windows are also the commit boundary.** Migration 31 adds
+`lecture_recap(lecture_id, idx, start_seconds, label, body)` plus
+`recap_status`, `recapped_at` and `recap_error` on `lectures`. A fresh run
+atomically claims the lecture and clears the prior set; that shared gate stops
+the app and CLI from spending two agent turns on the same lecture. Then
+`store::save_recap_window` commits each validated window independently. If
+window seven fails, windows one through six from the new run stay visible and
+the lecture ends in `error`; this is intentionally different from the
+all-or-nothing chapter write. There is no stored window or end second — windows
+are job-time batching, and each note ends at the next note's start. A startup
+sweep clears a stale `running` left by an interrupted process.
+
+`oculus lecture recap <ID>` is the built reader-independent door. It accepts
+the same unique lecture-id prefix and one-run model overrides as chaptering,
+prints each window before its agent tool rows, and requires `--force` before
+replacing an existing recap. No duration estimate is documented yet: the two
+reference lectures have not been measured with this job, and the player tab
+that will consume these rows is not built.
 
 ## Three readings in the player
 
