@@ -299,10 +299,12 @@ function release(source: SourceNum) {
  * Point the elements at `lecture` and lay them out to match `plan`, whose
  * **first entry is the leader** — the frame whose audio you hear.
  *
- * This is a reconcile, not a series of commands: the player re-states what it
- * wants on screen whenever anything changes (a different lecture, a layout, a
- * swapped source, a tab) and everything else follows. Which means the two
- * awkward moments are handled in one place:
+ * This is a reconcile, not a series of commands: the player in front re-states
+ * what it wants on screen whenever anything changes (a different lecture, a
+ * layout, a swapped source, its pane coming forward) and everything else
+ * follows. Only a player on screen calls this — `tabId` is the tab it is
+ * mounted in, which is what makes `ownerTab` mean something. Which means the
+ * two awkward moments are handled in one place:
  *
  *   * **a source joins** — it loads and `syncFollowers` walks it onto the
  *     leader's clock within a tick;

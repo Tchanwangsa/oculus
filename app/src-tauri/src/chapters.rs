@@ -103,7 +103,16 @@ pub struct Candidate {
 ///
 /// The returned second is the frame's own timestamp (`fps=1` places frame *n*
 /// at *n* seconds), so the first entry is at second 1.
-pub fn sample_diffs(ffmpeg: &Path, video: &Path) -> Result<Vec<(u32, f32)>, String> {
+///
+/// `on_frame` sees that second as the frame is diffed. It is the only place in
+/// the whole job that can say how far along a decode is — the pass is fifteen
+/// seconds of nothing otherwise — so it fires per frame and the *caller* does
+/// the throttling; [`run`] emits four times a second, not four hundred.
+pub fn sample_diffs(
+    ffmpeg: &Path,
+    video: &Path,
+    mut on_frame: impl FnMut(u32),
+) -> Result<Vec<(u32, f32)>, String> {
     let mut child = Command::new(ffmpeg)
         .args(["-v", "error", "-nostdin", "-i"])
         .arg(video)
@@ -147,6 +156,7 @@ pub fn sample_diffs(ffmpeg: &Path, video: &Path) -> Result<Vec<(u32, f32)>, Stri
         }
         if index > 0 {
             diffs.push((index, mean_abs_diff(&previous, &current)));
+            on_frame(index);
         }
         std::mem::swap(&mut previous, &mut current);
         index += 1;
@@ -345,33 +355,52 @@ pub fn candidates(
 ///
 /// The file keeps the **boundary** second in its name, not the offset one:
 /// that is the timestamp every other part of this refers to.
+///
+/// `on_grab` fires with how many are written so far — five probes and a JPEG
+/// per boundary is ten seconds on a long lecture, and it is countable, so the
+/// panel says `12 / 50` rather than spinning.
 pub fn extract_frames(
     ffmpeg: &Path,
     video: &Path,
     secs: &[u32],
     out_dir: &Path,
+    mut on_grab: impl FnMut(usize),
 ) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let mut written = Vec::with_capacity(secs.len());
     for &second in secs {
-        let at = best_offset(ffmpeg, video, second);
         let out = out_dir.join(format!("{second}.jpg"));
-        let status = Command::new(ffmpeg)
-            .args(["-v", "error", "-nostdin", "-y", "-ss", &at.to_string(), "-i"])
-            .arg(video)
-            .args(["-frames:v", "1", "-vf", "scale=768:-2", "-q:v", "3"])
-            .arg(&out)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|e| format!("could not run ffmpeg: {e}"))?;
-        if !status.success() || !out.exists() {
-            return Err(format!("no frame at {at}s"));
-        }
+        grab_frame(ffmpeg, video, second, &out)?;
         written.push(out);
+        on_grab(written.len());
     }
     Ok(written)
+}
+
+/// One probed JPEG of `second`, written to `out`.
+///
+/// Shared with the live grab the chat dock takes of the playhead's moment
+/// (`app::lecture_grab_frame`) rather than copied: the probing above is the
+/// defence against handing a model the room's AV splash screen or a black
+/// frame, and a grab the *student* asked about wants it for exactly the same
+/// reason. The offset it picks stays out of the filename — the second asked
+/// for is the one everything else refers to.
+pub fn grab_frame(ffmpeg: &Path, video: &Path, second: u32, out: &Path) -> Result<(), String> {
+    let at = best_offset(ffmpeg, video, second);
+    let status = Command::new(ffmpeg)
+        .args(["-v", "error", "-nostdin", "-y", "-ss", &at.to_string(), "-i"])
+        .arg(video)
+        .args(["-frames:v", "1", "-vf", "scale=768:-2", "-q:v", "3"])
+        .arg(out)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| format!("could not run ffmpeg: {e}"))?;
+    if !status.success() || !out.exists() {
+        return Err(format!("no frame at {at}s"));
+    }
+    Ok(())
 }
 
 /// Which second to actually grab `boundary`'s frame from.
@@ -603,10 +632,11 @@ Reply with JSON and nothing else, in play order:\n\n\
     )
 }
 
-/// `HH:MM:SS`. The CLI has its own copy for its own output; this one is the
-/// prompt's, and the two must agree with the frame filenames, which are plain
-/// seconds — so both are always printed.
-fn hms(secs: u32) -> String {
+/// `HH:MM:SS`. The CLI has its own copy for its own output; this one is what
+/// every prompt about a recording uses — this module's and the lecture brief
+/// in `harness::instructions` — and it must agree with the frame filenames,
+/// which are plain seconds, so both are always printed.
+pub(crate) fn hms(secs: u32) -> String {
     format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
 }
 
@@ -833,6 +863,37 @@ pub struct Run<'a> {
     pub force: bool,
 }
 
+/// Where a run has got to, for a caller that draws progress.
+///
+/// The job is one long bar of nothing otherwise: eight to eleven minutes with
+/// a single `ready` at the end of it. These are the moments the job genuinely
+/// changes what it is doing — everything *inside* the agent turn arrives on
+/// `on_event` instead, because the turn's own tool calls are the only honest
+/// account of those nine minutes.
+///
+/// Two of them are countable and one is not, which is the whole reason this is
+/// an enum rather than a percentage: a decode knows how many frames are left,
+/// an agent does not.
+pub enum Step<'a> {
+    /// The decode pass has reached `second` of a `duration`-second recording.
+    /// Fires often; [`run`] throttles it before the caller sees it.
+    Decoding { second: u32, duration: u32 },
+    /// The candidate set exists — the lecture's title, its length, and how
+    /// many boundaries were found.
+    Detected {
+        title: &'a str,
+        duration: u32,
+        candidates: usize,
+    },
+    /// `done` of `total` boundary frames are on disk.
+    Grabbing { done: usize, total: usize },
+    /// The prompt is with the agent. From here until the reply, `on_event` is
+    /// the only thing that knows anything.
+    Asking,
+    /// The reply parsed and validated; the rows are going in.
+    Writing,
+}
+
 /// What a finished run has to say for itself.
 pub struct Outcome {
     pub title: String,
@@ -848,9 +909,12 @@ pub struct Outcome {
 /// is nearly all of it — so both callers run it off the thread that has to
 /// stay responsive: the CLI is that thread, and the app spawns one.
 ///
-/// `on_detected` fires once the candidate set exists, with the lecture's title,
-/// its duration and how many boundaries were found; `on_event` sees every
-/// harness event of the turn, which is how the CLI draws the agent's tool rows.
+/// `on_step` follows the pipeline through its phases ([`Step`]); `on_event`
+/// sees every harness event of the turn, which is how the CLI draws the
+/// agent's tool rows and how the app's panel says what the agent is reading.
+/// The split is deliberate: the phases are this function's own, the turn's
+/// detail belongs to the harness and neither caller should have to guess at
+/// one from the other.
 ///
 /// The status column tracks the run from the moment the work starts: `running`
 /// until a terminal answer, then `error` with the message on it, or `ready`
@@ -861,7 +925,7 @@ pub fn run(
     rt: &tokio::runtime::Handle,
     pool: &sqlx::SqlitePool,
     job: &Run,
-    on_detected: impl Fn(&str, u32, usize),
+    on_step: impl Fn(Step),
     on_event: impl Fn(&crate::harness::HarnessEvent) + Send + Sync + 'static,
 ) -> Result<Outcome, String> {
     use crate::harness::{self, HarnessEvent};
@@ -911,7 +975,18 @@ pub fn run(
     let outcome = (|| -> Result<Outcome, String> {
         // Detection is seconds and nothing is cached, so this is the same pass
         // `oculus lecture candidates` makes; see the module docs.
-        let diffs = sample_diffs(&ffmpeg, &video)?;
+        //
+        // One frame is one second of the recording, so the decode reports
+        // itself four times a second rather than per frame: a 107-minute
+        // lecture would otherwise send 6400 events through a Tauri channel to
+        // move a percentage that only has a hundred places to be.
+        let mut last = std::time::Instant::now();
+        let diffs = sample_diffs(&ffmpeg, &video, |second| {
+            if last.elapsed() >= std::time::Duration::from_millis(250) {
+                last = std::time::Instant::now();
+                on_step(Step::Decoding { second, duration });
+            }
+        })?;
         let gaps = transcript
             .as_deref()
             .and_then(|p| std::fs::read_to_string(p).ok())
@@ -921,7 +996,11 @@ pub fn run(
         if found.is_empty() {
             return Err(format!("no boundary candidates in {title} — nothing to chapter"));
         }
-        on_detected(&title, duration, found.len());
+        on_step(Step::Detected {
+            title: &title,
+            duration,
+            candidates: found.len(),
+        });
 
         // Second 0 is never a detected candidate — the first change is
         // typically twenty seconds in — but a lecture always starts somewhere,
@@ -938,7 +1017,10 @@ pub fn run(
         with_opening.extend(found.iter().cloned());
 
         let dir = crate::echo360::lecture_dir(job.data_dir, id);
-        extract_frames(&ffmpeg, &video, &boundaries, &dir.join("frames"))?;
+        let total = boundaries.len();
+        extract_frames(&ffmpeg, &video, &boundaries, &dir.join("frames"), |done| {
+            on_step(Step::Grabbing { done, total })
+        })?;
 
         // An Echo360 title is a room booking rather than a topic, so the
         // subject's own folder — where the deck is — is worth naming.
@@ -956,13 +1038,13 @@ pub fn run(
             candidates: &with_opening,
         });
 
+        on_step(Step::Asking);
         let reply = Arc::new(Mutex::new(String::new()));
         let collect = reply.clone();
         let opts = harness::SendOptions {
             model: Some(job.selection.model.clone()),
             reasoning_effort: job.selection.reasoning_effort.clone(),
-            subject_id: None,
-            scope: None,
+            ..Default::default()
         };
         let turn = harness::run_once(
             job.data_dir,
@@ -981,6 +1063,7 @@ pub fn run(
         let chapters = turn
             .and_then(|()| parse_chapters(&reply))
             .and_then(|chapters| validate(&chapters, &boundaries, duration).map(|()| chapters))?;
+        on_step(Step::Writing);
         rt.block_on(crate::store::save_chapters(pool, id, &chapters))?;
         Ok(Outcome {
             title: title.clone(),
@@ -1010,6 +1093,49 @@ pub mod app {
     /// progress save while a recording plays, and a result eight minutes in the
     /// making would be indistinguishable from a scrub.
     pub const LECTURE_CHAPTERS_EVENT: &str = "lecture-chapters";
+
+    /// Where the run has got to, emitted throughout. Separate from
+    /// [`LECTURE_CHAPTERS_EVENT`] because the two have different lifetimes: a
+    /// finish is a fact the panel re-reads the database on, a step is a line it
+    /// paints and forgets.
+    pub const LECTURE_CHAPTER_PROGRESS_EVENT: &str = "lecture-chapter-progress";
+
+    /// One step of a run in flight.
+    ///
+    /// Everything here is display: nothing is persisted, and a panel that
+    /// missed the last one is only ever one event behind. That is why a run
+    /// already in flight when the app started shows no step until its next one
+    /// — there is no column to read it from, and inventing one would mean
+    /// writing to the row four times a second during the decode.
+    #[derive(serde::Serialize, Clone)]
+    #[serde(rename_all = "camelCase")]
+    struct Progress {
+        lecture_id: String,
+        /// `decoding` | `frames` | `agent` | `naming` | `writing`.
+        phase: &'static str,
+        /// The one line under the phase — a tool's own title while the agent
+        /// works, and nothing at all for a phase that speaks for itself.
+        detail: Option<String>,
+        /// What that tool was, so the panel can use the timeline's verbs
+        /// ("Reading", "Looking up") rather than a second vocabulary.
+        kind: Option<crate::harness::ToolKind>,
+        /// Countable phases only; the agent turn has no denominator.
+        done: Option<u32>,
+        total: Option<u32>,
+    }
+
+    impl Progress {
+        fn at(lecture_id: &str, phase: &'static str) -> Progress {
+            Progress {
+                lecture_id: lecture_id.to_string(),
+                phase,
+                detail: None,
+                kind: None,
+                done: None,
+                total: None,
+            }
+        }
+    }
 
     #[derive(serde::Serialize, Clone)]
     #[serde(rename_all = "camelCase")]
@@ -1074,6 +1200,76 @@ pub mod app {
                 &pool,
                 crate::harness::jobs::Job::LectureChapters,
             ));
+            // One emitter for both halves of the report: the pipeline's own
+            // phases arrive as `Step`, the nine minutes inside the agent turn
+            // arrive as harness events, and the panel should not be able to
+            // tell which of the two it is drawing.
+            let emit = {
+                let app = app.clone();
+                move |p: Progress| {
+                    app.emit(LECTURE_CHAPTER_PROGRESS_EVENT, p).ok();
+                }
+            };
+
+            let step = {
+                let id = lecture_id.clone();
+                let emit = emit.clone();
+                move |s: Step| {
+                    let p = match s {
+                        Step::Decoding { second, duration } => Progress {
+                            done: Some(second),
+                            // A lecture whose row has no duration still gets a
+                            // phase; it just cannot have a fraction.
+                            total: (duration > 0).then_some(duration),
+                            ..Progress::at(&id, "decoding")
+                        },
+                        Step::Detected { title, candidates, .. } => {
+                            eprintln!("[oculus] chapters: {title} — {candidates} candidate(s)");
+                            Progress {
+                                done: Some(0),
+                                total: Some(candidates as u32 + 1),
+                                ..Progress::at(&id, "frames")
+                            }
+                        }
+                        Step::Grabbing { done, total } => Progress {
+                            done: Some(done as u32),
+                            total: Some(total as u32),
+                            ..Progress::at(&id, "frames")
+                        },
+                        Step::Asking => Progress::at(&id, "agent"),
+                        Step::Writing => Progress::at(&id, "writing"),
+                    };
+                    emit(p);
+                }
+            };
+
+            // The reply *is* the chapter JSON, so the first delta of it is the
+            // agent having made up its mind — a real phase change, and the one
+            // that would otherwise leave the panel sitting on whichever file
+            // happened to be read last for a minute or more.
+            let naming = std::sync::atomic::AtomicBool::new(false);
+            let event = {
+                let id = lecture_id.clone();
+                move |ev: &crate::harness::HarnessEvent| {
+                    use crate::harness::HarnessEvent as E;
+                    let p = match ev {
+                        E::ToolStarted { kind, title, .. } => Progress {
+                            detail: Some(title.clone()),
+                            kind: Some(*kind),
+                            ..Progress::at(&id, "agent")
+                        },
+                        E::AssistantDelta { .. } | E::AssistantMessage { .. } => {
+                            if naming.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                return;
+                            }
+                            Progress::at(&id, "naming")
+                        }
+                        _ => return,
+                    };
+                    emit(p);
+                }
+            };
+
             let outcome = run(
                 rt.handle(),
                 &pool,
@@ -1083,8 +1279,8 @@ pub mod app {
                     selection: &selection,
                     force,
                 },
-                |title, _, n| eprintln!("[oculus] chapters: {title} — {n} candidate(s)"),
-                |_| {},
+                step,
+                event,
             );
             let finished = match &outcome {
                 Ok(o) => Finished {
@@ -1106,6 +1302,56 @@ pub mod app {
             app.emit(LECTURE_CHAPTERS_EVENT, finished).ok();
         });
         Ok(())
+    }
+
+    /// One JPEG of the moment the playhead is at, for a message sent from
+    /// the lecture player's dock ([`docs/harness.md`]).
+    ///
+    /// **It returns the path the *agent* can read**, not one the webview can
+    /// open: `../lectures/<id>/frames/live/<seconds>.jpg`, relative to
+    /// `agents/`, which every thread runs from. The page never opens the file
+    /// — it puts this string in the message, and the CLI opens it.
+    ///
+    /// Frames live in their own `live/` subfolder so a message's grab can
+    /// never collide with a chaptering run's, which are named by boundary
+    /// second in the folder above. They are overwritten freely: the same
+    /// second asked for twice is the same frame.
+    ///
+    /// The probing is [`grab_frame`]'s, so a message sent while the screen
+    /// share is between slides still attaches something with lecture content
+    /// on it rather than a black frame. Four probes and a grab is ~200 ms.
+    #[tauri::command]
+    pub async fn lecture_grab_frame(lecture_id: String, seconds: u32) -> Result<String, String> {
+        let pool = crate::llm::open_pool().await?;
+        let row: Option<(String, Option<String>)> =
+            sqlx::query_as("SELECT title, video_path FROM lectures WHERE id = ?1")
+                .bind(&lecture_id)
+                .fetch_optional(&pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        let (title, video) = row.ok_or_else(|| format!("no lecture {lecture_id}"))?;
+        // The same refusal `run` makes, for the same reason: there is no
+        // frame to take, and naming the download is more use than a missing
+        // file's path.
+        let video = video.ok_or_else(|| {
+            format!("{title} is not downloaded — `oculus run -l --videos` fetches it")
+        })?;
+        let video = PathBuf::from(video);
+        if !video.exists() {
+            return Err(format!("{} is on record but missing from disk", video.display()));
+        }
+        let ffmpeg = crate::echo360::find_ffmpeg(None)
+            .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
+
+        let dir = crate::echo360::lecture_dir(&crate::paths::data_dir(), &lecture_id)
+            .join("frames")
+            .join("live");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let out = dir.join(format!("{seconds}.jpg"));
+        tokio::task::spawn_blocking(move || grab_frame(&ffmpeg, &video, seconds, &out))
+            .await
+            .map_err(|e| e.to_string())??;
+        Ok(format!("../lectures/{lecture_id}/frames/live/{seconds}.jpg"))
     }
 
     /// Startup: a run killed mid-turn left `running` on the row with no

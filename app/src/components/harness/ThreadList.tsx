@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { CaretRight, CircleNotch, Plus, SidebarSimple, Trash, X } from "@phosphor-icons/react";
+import { CaretRight, CircleNotch, Plus, SidebarSimple, Trash, VideoCamera, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { ProviderMark } from "@/components/harness/ProviderMark";
 import type { HarnessThread } from "@/lib/harness";
@@ -262,6 +262,19 @@ export const ThreadList = memo(function ThreadList({
                                 rather than sitting on it as a second colour. */}
                             <ProviderMark provider={t.provider} className="size-3.5 shrink-0 opacity-70" />
                             <span className="min-w-0 flex-1 truncate">{t.title || "Untitled"}</span>
+                            {/* A thread opened in the lecture player's dock is
+                                grouped under its subject like any other — it is
+                                the same conversation and the same list — so the
+                                one thing the row has to add is which kind of
+                                scope it was given. The app's lecture icon,
+                                because that is what it means everywhere else. */}
+                            {t.lecture_id && (
+                              <VideoCamera
+                                size={11}
+                                className="shrink-0 opacity-60"
+                                aria-label="Lecture thread"
+                              />
+                            )}
                           </button>
                           {/* The one strip of the row that is not the thread: its
                               own controls, and a spinner in their place while a

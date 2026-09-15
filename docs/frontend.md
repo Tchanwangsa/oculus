@@ -24,7 +24,7 @@ this page is the structure.
 | Parse backend, memory budget + sidecar health | `app/src/pages/settings/LibraryPage.tsx` |
 | Side panel (file/lecture preview) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser (route, tab mirror, API) | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/stores/browserStore.ts`, `app/src/lib/browser.ts`, `app/src-tauri/src/browser.rs` |
-| Viewers | `app/src/components/files/PDFViewer.tsx`, `app/src/components/files/FileViewer.tsx`, `app/src/components/lectures/LecturePlayer.tsx` |
+| Viewers | `app/src/components/files/PDFViewer.tsx`, `app/src/components/files/FileViewer.tsx`, `app/src/components/lectures/LecturePlayer.tsx`, `app/src/components/lectures/ChaptersPanel.tsx` |
 | shadcn components (source, editable) | `app/src/components/ui/` |
 | Table chrome: view tabs, footer pagination | `app/src/components/ui/ViewTabs.tsx`, `app/src/components/ui/TablePagination.tsx` |
 | Zustand stores | `app/src/stores/` |
@@ -103,7 +103,14 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   `subject_codes` include the subject, so the subject list can never disagree
   with the history table and interrupted runs never count as a sync.
 - `SubjectLayout` resolves the subject once and hands it to tab pages via
-  outlet context — tab pages must not re-fetch it.
+  outlet context — tab pages must not re-fetch it. Its underline tabs are a
+  **sideways scroller**, not a row that gets clipped: eight tabs already crowd
+  the centred column and the card is narrower still with the side panel docked
+  open, so the row scrolls with its bar hidden, a fade over each live edge (the
+  sidebar's affordance) and the active tab scrolled into view. The `-mb-px`
+  that lands the active underline on the header's border sits on the scroller,
+  not on the tabs: `overflow-x` clips on both axes, so inside it the underline
+  would go with it.
 - **The shell is furniture around a floating document.** `AppLayout` puts the
   sidebar and `TopTabBar` straight onto the window ground and renders content
   as an inset rounded card, so neither needs a divider of its own. Two
@@ -185,7 +192,17 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   a click can only come from the tab in front, which is what lets every list
   row in the app call `openFileSmart` with nothing but a file. A list
   re-fetching a row it has open uses `sync()` instead, which does name its tab
-  and no-ops unless that tab still holds the same item. The top tab strip is `tabStore` +
+  and no-ops unless that tab still holds the same item.
+  Two rules keep a folded or stale panel from eating clicks. **The shell's
+  navigation shuts it** — `navigateActive` calls `closeActivePanel`, so a
+  sidebar row, a Recent entry or a ⌘K result leaves the peek behind with the
+  page it was opened from (a lecture peek is stopped on the way out, the
+  pairing the panel's × makes); opening a *new* tab does not, since the tab
+  left behind keeps its own page and its own peek. And **the panel unfolds on
+  a count of `open` calls**, not on the item changing: re-opening the row that
+  is already showing leaves the item identical, and that click has to unfold a
+  folded panel too, or the file you last looked at is the one file you cannot
+  re-open. The top tab strip is `tabStore` +
   `app/src/components/tabs/TopTabBar.tsx`, Notion-style. It replaces the
   native title bar, so the strip and the empty space after the last tab carry
   `data-tauri-drag-region` to keep the window movable — which only works
@@ -230,8 +247,11 @@ look one up in, the same trade `/lecture` makes with `?t=`.
 - **External links open in the in-app browser, not in Safari.** One
   capture-phase click handler in `app/src/layouts/AppLayout.tsx` catches
   every `<a href="http…">` in the app — markdown links included — and hands
-  it to `browser_open_url`, so no call site needs to know; ⌘-click still
-  hands the URL to the real browser.
+  it to `openExternal` (`app/src/lib/browser.ts`), so no call site needs to
+  know; ⌘-click still hands the URL to the real browser. The handler has
+  already cancelled the link's own navigation by then, so `openExternal`
+  owns getting it somewhere: a tab that fails to open falls back to the real
+  browser and says why in the console, rather than leaving the link inert.
 - **Browser tabs are tabs in the same strip, and their route never moves.**
   A browser tab's path is `/browse/<id>`, where the id names a native page
   WebView that Rust owns (`app/src-tauri/src/browser.rs` — an iframe cannot
@@ -244,15 +264,19 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   strip lacks opens in front, a strip tab whose page is gone closes. Page
   navigations change the tab's URL in Rust and nothing else, which is what
   killed the first version's loop (page load → router → re-layout → title →
-  router again). Two rules in `tabStore.trackNavigation` keep a browser tab
-  pinned to its page: navigating away from it (the sidebar) opens a new tab
-  instead, and history landing on a page already open elsewhere switches to
-  that tab. While a browser tab is in front the strip's arrows drive the
-  page's history, not the router's.
+  router again). A browser tab is kept pinned to its page on the way
+  *in*, by `navigateActive` (`app/src/lib/tabRouters.ts`): a shell click that
+  would take it anywhere else opens a tab of its own instead. While a browser
+  tab is in front the strip's arrows drive the page's history, not the
+  router's.
 - **A native page cannot interleave with the DOM.** Anything drawn over the
   slot — a sidebar popover, a tooltip reaching in, a dialog — would render
   beneath the page, so `BrowserPage` watches `document.body` for portals
-  whose rect lands on the slot and hides the page until they are gone. The
+  whose rect lands on the slot and hides the page until they are gone. A tab
+  going to the background hides it for the same reason, and that one needs
+  saying out loud: panes stay mounted, so leaving a browser tab is no longer
+  an unmount — `BrowserPage` takes the page down when `useTabActive` goes
+  false, or it would stay parked over whichever tab came forward. The
   slot is reported as insets from the window edges (CSS pixels times the
   page zoom from `--app-zoom`), re-measured by a `ResizeObserver` when the
   sidebar toggles or the zoom changes; window resizes are Rust's alone. The
@@ -413,6 +437,12 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   on. The side panel's player has no list to call back into, so its
   `onRefresh` fires `LECTURES_CHANGED_EVENT` (`app/src/lib/lectures.ts`) and
   whichever list is mounted re-fetches — the same shape, one level up.
+  **Only the player in front is the player.** Panes stay mounted, so a second
+  lecture tab behind this one is a second player over the same elements —
+  `LecturePlayer` adopts them, and listens for the space bar, only while
+  `useTabActive` is true. With both of them live, one keypress toggled play
+  twice and nothing happened, and every tab switch re-seated the picture in
+  whichever pane had mounted last. Same lesson as the browser page above.
   **Playback belongs to a tab.** The module records which tab the
   player was mounted in, and that is what separates "switched away" from
   "left": going to another tab leaves the lecture playing behind a tab you can
@@ -420,13 +450,22 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   playing with nothing owning it. Both of those ask first —
   `confirmLeavingLecture` (`app/src/stores/leaveLectureStore.ts`) raises one
   dialog mounted in `AppLayout`, saying the place is already saved — and stop
-  playback on confirm. The navigation case is a `useBlocker` in the player; it
-  tells a tab switch from a departure by whether the tab that owns playback is
-  still the active one when the navigation starts (the strip activates the
-  destination tab *before* it navigates). A paused lecture never prompts, and
-  the side panel's own close button is an outright stop — which is why the
-  stop hangs off that control and not off an unmount effect, since the panel
-  unmounts its body whenever another tab comes forward.
+  playback on confirm. Both ask **at the door, before anything is committed**
+  — the tab strip's × and `navigateActive` in `app/src/lib/tabRouters.ts` —
+  and they tell a tab switch from a departure by asking whether the tab being
+  acted on is the one that owns playback (the strip activates the destination
+  tab *before* it navigates, so a switch is already "some other tab" here).
+  The navigation case used to be a `useBlocker` inside the player, and that was
+  the wrong shape: a router blocker is answered by whichever component holds
+  that blocker's key, so a block nobody answers drops the navigation with
+  **nothing on screen** — a sidebar click that silently does nothing, in a tab
+  that can then never navigate again. Asked at the door there is no blocked
+  router to strand. The history arrows are deliberately *not* guarded: an
+  arrow has no destination to weigh up, and going back from a lecture is as
+  likely to be going back to it. A paused lecture never prompts, and the side
+  panel's own close button is an outright stop — which is why the stop hangs
+  off that control and not off an unmount effect, since the panel unmounts its
+  body whenever another tab comes forward.
 - **Two streams, one lecture, one clock.** A capture can be a Presenter screen
   *and* a room camera ([sync.md](./sync.md)), so `lecturePlayback.ts` keeps one
   element **per source** and nominates one of them the **leader**: it carries
@@ -567,7 +606,7 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   of its own; the dock side and size are player preferences (below).
 - **Player preferences are the person's, not the lecture's.**
   `app/src/stores/playerPrefsStore.ts` holds speed, captions on/off,
-  transcript shown/hidden, the transcript's dock side and size, and the
+  transcript shown/hidden, the dock's tab, side and size, and the
   two-source arrangement (layout, which stream is in the main frame, the PIP
   box, the stacked split), as one global set persisted under a single
   `localStorage` key — set 1.5×, a left-docked transcript and a camera inset
@@ -577,6 +616,35 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   element*, not just the value: `playbackRate` and `volume` are per-element and
   reset on load, so a source switch has to re-apply both to the decoder that
   just took over the audio.
+- **The dock is three readings of one recording.** The panel's header is a
+  `ViewTabs` strip — Chapters, Transcript, Chat — and which one is in front is
+  a player preference (`dockTab`) like the side it is docked to. The
+  drag-to-dock gesture is unchanged; the tabs keep the pointerdown to
+  themselves, since `startDockDrag` captures the pointer and a click needs both
+  of its ends on one target. The chapter list is not the transcript's follow
+  machinery: twelve rows fit the panel, so the current card is a
+  `scrollIntoView` and nothing else, where ~2500 cues earn a virtualizer, a
+  two-stage handover and a countdown ring. See [chapters.md](./chapters.md);
+  Chat is [harness.md](./harness.md).
+- **Chat is the tab every recording has, and that is why the dock is
+  unconditional.** Transcript is dropped from the strip when there are no cues
+  on disk, and Chapters can only show a job's state — but a conversation needs
+  neither a file nor a run, so `hasDock` is gone from
+  `app/src/components/lectures/LecturePlayer.tsx` and the panel is always
+  mounted. Two things followed. The control bar's dock button names **the tab
+  in front** (`tabInFront`, exported from `TranscriptPanel` so the strip and
+  the button cannot disagree) instead of guessing from what the recording has;
+  and T's third branch — fetch a transcript for a lecture whose dock would
+  otherwise be empty — now fires on the *preference* being Transcript, since no
+  such lecture is left and that is still the only place the player offers to
+  fetch one.
+- **The dock has a floor per tab.** 220px suits a cue and a chapter title; an
+  agent's reply is markdown with fenced code in it and a composer underneath,
+  so `useTranscriptDock` raises the minimum while Chat is in front (300 wide,
+  260 tall). It is a floor on the *drawn* size and never rewrites the
+  preference, so leaving the tab hands the transcript back the panel it had.
+  The rows themselves are untouched: they are the Chat page's, and there is one
+  timeline.
 - **The transcript follows playback until the reader takes it over.** The
   list auto-scrolls to keep the playing cue in the middle band, then hands
   control over — a brand pill fades in at the bottom of the panel to go *Back

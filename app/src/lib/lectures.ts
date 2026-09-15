@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { Lecture, SourceNum } from "@/lib/db";
+import type { ToolKind } from "@/lib/harness";
 
 // ── VTT parsing ───────────────────────────────────────────────────────────────
 
@@ -120,6 +121,39 @@ export interface ChapterRunFinished {
   error: string | null;
 }
 
+/** Rust's step report while a run is in flight
+ *  (`chapters::app::LECTURE_CHAPTER_PROGRESS_EVENT`). Separate from the finish
+ *  above because the two have different lifetimes: a finish is a fact worth
+ *  re-reading the database on, a step is a line the panel paints and forgets. */
+export const LECTURE_CHAPTER_PROGRESS_EVENT = "lecture-chapter-progress";
+
+/** Which part of the job is running. `agent` and `naming` are both the one
+ *  turn — `naming` is the reply arriving, which is the agent having made up
+ *  its mind about the whole lecture. */
+export type ChapterPhase = "decoding" | "frames" | "agent" | "naming" | "writing";
+
+/** What the run is doing right now. `done`/`total` are only ever set for the
+ *  two countable phases; the agent turn has no denominator and is not given a
+ *  fake one. `detail` is a tool's own title, `kind` what that tool was. */
+export interface ChapterRunProgress {
+  lectureId: string;
+  phase: ChapterPhase;
+  detail: string | null;
+  kind: ToolKind | null;
+  done: number | null;
+  total: number | null;
+}
+
+/** The phase, in the panel's words. The detail line underneath says what is
+ *  actually being read; this says which of the five stages we are in. */
+export const CHAPTER_PHASE_LABEL: Record<ChapterPhase, string> = {
+  decoding: "Watching the recording",
+  frames: "Grabbing slide frames",
+  agent: "Reading the slides",
+  naming: "Naming the chapters",
+  writing: "Saving chapters",
+};
+
 /**
  * Chapter a recording with the agent the `lectureChapters` job is configured
  * with (Settings → AI), the same job `oculus lecture chapters` runs.
@@ -130,6 +164,23 @@ export interface ChapterRunFinished {
  */
 export function findLectureChapters(lectureId: string, force = false): Promise<void> {
   return invoke("lecture_find_chapters", { lectureId, force });
+}
+
+/**
+ * One JPEG of the moment the playhead is at, for a message sent from the
+ * player's dock.
+ *
+ * **What comes back is the path the agent reads, not one the webview can
+ * open**: `../lectures/<id>/frames/live/<seconds>.jpg`, relative to `agents/`,
+ * which every thread runs from. The page never opens the file — it puts this
+ * string in the message and the CLI opens it.
+ *
+ * ~200 ms: the grab probes a few offsets first, the same defence against a
+ * black frame or the room's AV splash that a chaptering run's frames get
+ * (docs/chapters.md). A lecture with no downloaded recording is refused.
+ */
+export function lectureGrabFrame(lectureId: string, seconds: number): Promise<string> {
+  return invoke<string>("lecture_grab_frame", { lectureId, seconds: Math.max(0, Math.floor(seconds)) });
 }
 
 /**

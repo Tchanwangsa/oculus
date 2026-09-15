@@ -94,7 +94,17 @@ pub enum HarnessEvent {
     },
     /// The user's message, echoed once it is on its way to the provider —
     /// so the timeline has one shape for both sides of the conversation.
-    UserMessage { text: String },
+    ///
+    /// `text` is what the student typed. A message sent from the lecture
+    /// player's dock can also carry the moment it was sent at — `at`, the
+    /// playhead's second — which becomes the row's `meta` and the "at 3:40"
+    /// on the bubble. It is skipped when absent so the recorded fixtures the
+    /// bridge tests replay, and the frontend's own type, stay as they were.
+    UserMessage {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<i64>,
+    },
     /// The provider began working on the last user message.
     TurnStarted,
     /// Live assistant text; the frontend appends. Superseded by the

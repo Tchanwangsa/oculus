@@ -120,6 +120,29 @@ export type ToolKind =
   | "read" | "edit" | "write" | "bash" | "search" | "oculus_cli"
   | "task" | "web" | "plan" | "other";
 
+/**
+ * "Ran", "Read", "Edited" — past tense once done, present while running.
+ *
+ * Here rather than in the timeline's row because the chapter panel says the
+ * same thing about the same events while a lecture is being chaptered
+ * (docs/chapters.md), and two tables would drift into two vocabularies for one
+ * `ToolKind`.
+ */
+export function toolVerb(kind: ToolKind, done: boolean): string {
+  switch (kind) {
+    case "read": return done ? "Read" : "Reading";
+    case "edit": return done ? "Edited" : "Editing";
+    case "write": return done ? "Wrote" : "Writing";
+    case "bash": return done ? "Ran" : "Running";
+    case "search": return done ? "Searched" : "Searching";
+    case "oculus_cli": return done ? "Looked up" : "Looking up";
+    case "task": return done ? "Ran subagent" : "Running subagent";
+    case "web": return done ? "Fetched" : "Fetching";
+    case "plan": return done ? "Updated plan" : "Updating plan";
+    default: return done ? "Used" : "Using";
+  }
+}
+
 export interface RateWindow {
   label: string;
   used_percent: number;
@@ -129,7 +152,12 @@ export interface RateWindow {
 /** `HarnessEvent` in `app/src-tauri/src/harness/event.rs`, serde-tagged on `type`. */
 export type HarnessEvent =
   | { type: "session_started"; provider_session_id: string; model: string | null; cwd: string }
-  | { type: "user_message"; text: string }
+  /** `at` is the playhead's second for a message sent from the lecture dock.
+   *  It rides the event rather than only the row Rust wrote, because the
+   *  bubble is drawn from the live event first — without it a message showed
+   *  its moment only after a reload. Rust skips the field when there is no
+   *  moment, so it is optional on the way in too. */
+  | { type: "user_message"; text: string; at?: number | null }
   | { type: "turn_started" }
   | { type: "assistant_delta"; text: string }
   | { type: "thinking_delta"; text: string }
@@ -185,6 +213,11 @@ export interface HarnessThread {
    *  when the thread is created — both CLIs bind the appended instructions at
    *  session start, so it cannot change under a live session. */
   subject_id: number | null;
+  /** The recording this conversation is about, for a thread opened in the
+   *  lecture player's dock; null for every other thread. Fixed at creation
+   *  like the subject beside it — and it is what *sets* that subject, which
+   *  Rust reads off the lecture's own row rather than from the payload. */
+  lecture_id: string | null;
   /** The model's own name for the thread once it has been asked for; until
    *  then, the first line of the first message. */
   title: string | null;
@@ -287,6 +320,27 @@ export function parseToolMeta(item: HarnessItem): ToolMeta {
   return meta;
 }
 
+/**
+ * The playhead second a question was asked at, or null for a question asked
+ * anywhere but the lecture dock.
+ *
+ * It is in the user row's `meta` (`{"at": 220}`) rather than in its content,
+ * because the moment rides the prompt and never becomes the message — a
+ * timeline that read the attachment back as the question would be a timeline
+ * of something nobody asked. No cache: `parseToolMeta`'s exists because a
+ * single tool row can carry 300KB of output, where this is one number on a
+ * memoised row.
+ */
+export function messageAt(item: HarnessItem): number | null {
+  if (!item.meta) return null;
+  try {
+    const at = (JSON.parse(item.meta) as { at?: unknown }).at;
+    return typeof at === "number" ? at : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Reads ────────────────────────────────────────────────────────────────────
 
 export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
@@ -294,6 +348,19 @@ export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
   return db.select<HarnessThread[]>(
     `SELECT * FROM harness_threads ORDER BY updated_at DESC, id DESC LIMIT $1`,
     [limit],
+  );
+}
+
+/** One lecture's threads, newest first — the dock's history list. A separate
+ *  query rather than a filter over `getHarnessThreads`, which caps at the
+ *  most recent hundred threads across the whole library and would drop a
+ *  lecture's older conversations out of its own list. */
+export async function getLectureThreads(lectureId: string, limit = 100): Promise<HarnessThread[]> {
+  const db = await getDb();
+  return db.select<HarnessThread[]>(
+    `SELECT * FROM harness_threads WHERE lecture_id = $1
+      ORDER BY updated_at DESC, id DESC LIMIT $2`,
+    [lectureId, limit],
   );
 }
 
@@ -323,6 +390,19 @@ export interface SendOptions {
   /** Only read when the send creates the thread; an open thread keeps its
    *  own scope. */
   subjectId?: number | null;
+  /** The lecture a dock thread is about. Only read when the send creates the
+   *  thread, and it decides the thread's subject — Rust takes that from the
+   *  lecture's row, so `subjectId` is not consulted alongside it. */
+  lectureId?: string | null;
+  /** The moment, built by the player at send time: the timestamp, the last
+   *  minute of transcript, the chapter, and the frame path from
+   *  `lectureGrabFrame`. It is appended to the prompt the CLI receives, after
+   *  the student's text — it never becomes the message's content, so the
+   *  timeline still shows only what was typed. */
+  context?: string | null;
+  /** The playhead's second when the message was sent. Lands on the user
+   *  row's `meta` as `{ at }`, which is what lets the bubble say "at 3:40". */
+  at?: number | null;
 }
 
 export function harnessSend(

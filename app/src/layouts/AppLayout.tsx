@@ -7,7 +7,7 @@ import { SidePanel } from "@/components/panel/SidePanel";
 import CommandPalette from "@/components/palette/CommandPalette";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LeaveLectureDialog } from "@/components/lectures/LeaveLectureDialog";
-import { browser, isWebUrl } from "@/lib/browser";
+import { isWebUrl, openExternal } from "@/lib/browser";
 import { useBrowserTabs } from "@/hooks/useBrowserTabs";
 import { useTabStore } from "@/stores/tabStore";
 
@@ -72,12 +72,11 @@ export default function AppLayout() {
         | null;
       const href = anchor?.getAttribute("href");
       if (!isWebUrl(href)) return;
+      // Past this point the link has no default navigation left, so
+      // `openExternal` owns getting it somewhere — including the real browser
+      // if the in-app tab cannot be opened.
       e.preventDefault();
-      if (e.metaKey || e.ctrlKey) {
-        browser.external(href).catch(() => {});
-        return;
-      }
-      browser.open(href).catch(() => {});
+      void openExternal(href, e.metaKey || e.ctrlKey);
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);

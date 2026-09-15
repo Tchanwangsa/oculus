@@ -4,6 +4,7 @@ import { ArrowClockwise, ArrowSquareOut } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { browser, normalizeAddress, type Viewport } from "@/lib/browser";
 import { useBrowserStore } from "@/stores/browserStore";
+import { useTabActive } from "@/components/tabs/TabContext";
 
 /**
  * The `/browse/:id` route: an address bar across the top of the content
@@ -75,6 +76,7 @@ function coveredBy(slot: HTMLElement): boolean {
 export default function BrowserPage() {
   const params = useParams();
   const id = Number(params.id);
+  const active = useTabActive();
   const tab = useBrowserStore((s) => s.tabs.find((t) => t.id === id));
   const slotRef = useRef<HTMLDivElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
@@ -82,13 +84,21 @@ export default function BrowserPage() {
   const editingRef = useRef(false);
   const coveredRef = useRef(false);
 
-  // Put this tab's page in the slot. Only this page: Rust places what it is
-  // told and nothing else, so whatever else is on screen stays put.
+  // Put this tab's page in the slot, and take it down again when the tab goes
+  // to the background: panes stay mounted now, so switching tabs is not an
+  // unmount and the cleanup below no longer fires for it — without this the
+  // page would sit parked over whatever tab came forward. Only this page:
+  // Rust places what it is told and nothing else, so whatever else is on
+  // screen stays put.
   useEffect(() => {
     const slot = slotRef.current;
-    if (!slot || !Number.isInteger(id) || coveredRef.current) return;
+    if (!slot || !Number.isInteger(id)) return;
+    if (!active || coveredRef.current) {
+      browser.hideTab(id).catch(() => {});
+      return;
+    }
     browser.place(id, measure(slot)).catch(() => {});
-  }, [id]);
+  }, [id, active]);
 
   // Leaving the slot takes the page with it — on unmount for an app tab, and
   // on an id change, which is the same slot handed to another tab. Keyed on
@@ -122,6 +132,9 @@ export default function BrowserPage() {
       const covered = coveredBy(slot);
       if (covered === coveredRef.current) return;
       coveredRef.current = covered;
+      // A background tab's page is down either way; the effect above puts it
+      // back when the tab returns, reading the flag this just set.
+      if (!active) return;
       (covered ? browser.hideTab(id) : browser.place(id, measure(slot))).catch(
         () => {},
       );
@@ -139,7 +152,7 @@ export default function BrowserPage() {
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [id]);
+  }, [id, active]);
 
   // The address bar shows the tab's URL unless it is being typed in.
   useEffect(() => {

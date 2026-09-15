@@ -2677,7 +2677,7 @@ impl Ctx {
         let ffmpeg = app_lib::echo360::find_ffmpeg(None)
             .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
 
-        let diffs = app_lib::chapters::sample_diffs(&ffmpeg, &video)?;
+        let diffs = app_lib::chapters::sample_diffs(&ffmpeg, &video, |_| {})?;
         // A missing or unreadable transcript costs the pause bonus and nothing
         // else, so it is not worth failing over.
         let gaps = transcript
@@ -2690,7 +2690,7 @@ impl Ctx {
         let frames = if args.frames {
             let dir = app_lib::echo360::lecture_dir(&self.data_dir, &id).join("frames");
             let seconds: Vec<u32> = found.iter().map(|c| c.seconds).collect();
-            Some(app_lib::chapters::extract_frames(&ffmpeg, &video, &seconds, &dir)?)
+            Some(app_lib::chapters::extract_frames(&ffmpeg, &video, &seconds, &dir, |_| {})?)
         } else {
             None
         };
@@ -2827,14 +2827,20 @@ impl Ctx {
                 selection: &selection,
                 force: args.force,
             },
-            |title, duration, candidates| {
-                if !quiet {
-                    println!(
-                        "{}  {}  {}",
-                        paint(title, BOLD),
-                        paint(&clock(duration), DIM),
-                        paint(&format!("{candidates} candidate(s)"), DIM)
-                    );
+            // The terminal's progress is the agent's tool rows below; of the
+            // pipeline's own steps only the candidate set is worth a line, and
+            // a decode percentage redrawn over itself would have to know
+            // whether stdout is a tty.
+            |step| {
+                if let app_lib::chapters::Step::Detected { title, duration, candidates } = step {
+                    if !quiet {
+                        println!(
+                            "{}  {}  {}",
+                            paint(title, BOLD),
+                            paint(&clock(duration), DIM),
+                            paint(&format!("{candidates} candidate(s)"), DIM)
+                        );
+                    }
                 }
             },
             move |ev| {
@@ -3076,8 +3082,8 @@ impl Ctx {
         let opts = harness::SendOptions {
             model: args.model.clone(),
             reasoning_effort: args.effort.clone(),
-            subject_id: None,
             scope: args.subject.clone(),
+            ..Default::default()
         };
         let json = self.json;
         let printer = AgentPrinter::new(true);

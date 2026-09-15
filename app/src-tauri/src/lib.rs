@@ -930,6 +930,31 @@ ALTER TABLE lectures ADD COLUMN chapter_error  TEXT;
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 30,
+                            description: "harness: the lecture a thread is scoped to",
+                            // A conversation held in the lecture player's
+                            // dock, about the recording being watched. NULL
+                            // is every other thread.
+                            //
+                            // SET NULL rather than CASCADE, for the reason
+                            // `subject_id` (migration 25) clears: the
+                            // conversation is the student's own and the
+                            // lecture merely scopes it, so deleting a
+                            // recording must not take the conversation away.
+                            //
+                            // Set at thread creation only, like the subject
+                            // beside it — both CLIs bind the appended
+                            // instructions at session start, so a re-scope
+                            // would be a lie until the process was restarted.
+                            // The thread's `subject_id` is filled from the
+                            // lecture's own row rather than from the
+                            // payload, so the two can never disagree.
+                            sql: r#"
+ALTER TABLE harness_threads ADD COLUMN lecture_id TEXT REFERENCES lectures(id) ON DELETE SET NULL;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -988,6 +1013,7 @@ ALTER TABLE lectures ADD COLUMN chapter_error  TEXT;
             harness::app::harness_interrupt,
             harness::app::harness_delete_thread,
             chapters::app::lecture_find_chapters,
+            chapters::app::lecture_grab_frame,
             sidecar::sidecar_health,
             sidecar::sidecar_set_limits,
             storage::storage_report,

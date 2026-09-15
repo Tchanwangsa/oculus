@@ -25,6 +25,10 @@ import {
   ChaptersPanel,
   type ChaptersPanelProps,
 } from "@/components/lectures/ChaptersPanel";
+import {
+  LectureChatPanel,
+  type LectureChatPanelProps,
+} from "@/components/lectures/LectureChatPanel";
 
 /** Border on the panel's inner edge — the side that faces the video. */
 const INNER_BORDER: Record<Dock, string> = {
@@ -46,12 +50,25 @@ const IDLE_RESYNC_MS = 8000;
 /** The countdown ring drawn on the pill, in px. Hairline, like every border. */
 const RING_STROKE = 1.5;
 
-/** The dock's two readings of the recording. No "In this video" label over
- *  them: the panel can be 200px wide and its subject is never in doubt. */
+/** The dock's three readings of the recording. No "In this video" label over
+ *  them: the panel is narrow and its subject is never in doubt. */
 const TABS: ReadonlyArray<ViewTab<DockTab>> = [
   { value: "chapters", label: "Chapters" },
   { value: "transcript", label: "Transcript" },
+  { value: "chat", label: "Chat" },
 ];
+
+/**
+ * Which tab is really in front. The stored preference, unless it is the
+ * transcript on a recording that has none on disk — the strip drops that tab
+ * rather than offering one that could only ever be empty, and the preference
+ * survives so it comes back the moment a transcript does. Exported because the
+ * control bar's dock button names the same tab, and two copies of this would
+ * be two answers to one question.
+ */
+export function tabInFront(tab: DockTab, hasTranscript: boolean): DockTab {
+  return !hasTranscript && tab === "transcript" ? "chapters" : tab;
+}
 
 interface TranscriptPanelProps {
   cues: Cue[];
@@ -69,6 +86,11 @@ interface TranscriptPanelProps {
    * is not re-rendering constantly next to a decoding video.
    */
   chapters: ChaptersPanelProps;
+  /** Everything the Chat tab draws, as a second memoised bag beside
+   *  `chapters` and for the same reason — read that prop's comment. Nothing
+   *  time-varying is in it: the playhead arrives as a ref the chip ticks
+   *  itself off. */
+  chat: LectureChatPanelProps;
   dock: Dock;
   size: number;
   /** Shown or hidden — the panel stays mounted either way and slides. */
@@ -104,6 +126,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   tab,
   onTabChange,
   chapters,
+  chat,
   dock,
   size,
   open,
@@ -135,10 +158,13 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   // A lecture can have chapters and no transcript on disk, and a tab that
   // could only ever be empty is not a tab — so the strip shows what this
   // recording actually has. The preference survives it: the tab comes back the
-  // moment a transcript does.
+  // moment a transcript does. Chat is never filtered out: it needs neither a
+  // transcript nor a job that has been run, so it is the one tab every
+  // recording always has — which is also what makes the dock itself
+  // unconditional (`hasDock` in `LecturePlayer`).
   const hasTranscript = cues.length > 0;
-  const tabs = hasTranscript ? TABS : TABS.filter((t) => t.value === "chapters");
-  const activeTab: DockTab = hasTranscript ? tab : "chapters";
+  const tabs = hasTranscript ? TABS : TABS.filter((t) => t.value !== "transcript");
+  const activeTab: DockTab = tabInFront(tab, hasTranscript);
 
   const listRef = useRef<HTMLDivElement>(null);
   /** Next follow-scroll jumps straight to the cue, band or no band. */
@@ -498,7 +524,9 @@ export const TranscriptPanel = memo(function TranscriptPanel({
           </div>
         </div>
 
-        {activeTab === "chapters" ? (
+        {activeTab === "chat" ? (
+          <LectureChatPanel {...chat} />
+        ) : activeTab === "chapters" ? (
           <ChaptersPanel {...chapters} />
         ) : (
           <>

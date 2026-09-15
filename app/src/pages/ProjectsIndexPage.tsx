@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { NewProjectButton } from "@/components/projects/NewProjectButton";
 import { ProjectGroups } from "@/components/projects/ProjectList";
 import { projectHref } from "@/components/projects/projectHref";
 import { useSubjects } from "@/hooks/useSubjects";
@@ -49,12 +50,20 @@ export default function ProjectsIndexPage() {
   return (
     <div className="page-scroll">
       <div className="mx-auto max-w-3xl px-6 py-6">
-        <h1 className="text-[22px] font-semibold leading-none tracking-tight text-foreground">
-          Projects
-        </h1>
-        <p className="mt-1.5 text-[13px] text-muted-foreground">
-          Keep your tasks for upcoming deadlines planned and organised.
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-[22px] font-semibold leading-none tracking-tight text-foreground">
+              Projects
+            </h1>
+            <p className="mt-1.5 text-[13px] text-muted-foreground">
+              Keep your tasks for upcoming deadlines planned and organised.
+            </p>
+          </div>
+          {/* The way into a subject that has no projects yet: the groups below
+              only draw once they have something in them, so a subject's first
+              project has no heading to start it from. */}
+          <NewProjectButton subjects={subjects} onCreate={create} />
+        </div>
         <div className="mt-5 mb-6 border-t border-border" />
 
         <ProjectGroups

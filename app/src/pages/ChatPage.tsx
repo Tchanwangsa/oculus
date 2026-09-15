@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { SidebarSimple } from "@phosphor-icons/react";
 import { Composer } from "@/components/harness/Composer";
 import { ThreadList } from "@/components/harness/ThreadList";
@@ -7,6 +7,7 @@ import { Timeline } from "@/components/harness/Timeline";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
+import { useStickToBottom } from "@/hooks/useStickToBottom";
 import {
   getHarnessRateLimits,
   harnessRefreshRateLimits,
@@ -19,7 +20,7 @@ import {
   harnessUnqueue,
   parseUsage,
 } from "@/lib/harness";
-import { useHarnessStore } from "@/stores/harnessStore";
+import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
 
 const SUGGESTIONS = [
   "What's due this week?",
@@ -28,50 +29,9 @@ const SUGGESTIONS = [
   "Write a memory about how I like my notes",
 ];
 
-/** How close to the bottom still counts as reading the bottom. */
-const STICK_PX = 80;
-
 /** The conversations column. Narrower than ~160 and thread names are all
  *  ellipsis; wider than ~420 and it is eating the timeline it exists to open. */
 const LIST = { defaultWidth: 224, minWidth: 160, maxWidth: 420, storageKey: "oculus-chat-list-width" };
-
-/**
- * Follow the stream, but only from the bottom. A `scrollTo` on every delta
- * forced a layout of the whole thread per token *and* yanked the page back
- * down whenever the reader scrolled up mid-turn; growth is watched instead,
- * and the scroll only happens while the bottom is where they already are.
- */
-function useStickToBottom(activeId: number | null, live: boolean) {
-  const outer = useRef<HTMLDivElement>(null);
-  const inner = useRef<HTMLDivElement>(null);
-  const pinned = useRef(true);
-
-  // A thread you have just opened starts at its end, whatever the last one
-  // was scrolled to.
-  useEffect(() => {
-    pinned.current = true;
-  }, [activeId]);
-
-  useEffect(() => {
-    const el = outer.current;
-    const content = inner.current;
-    if (!el || !content) return;
-    const onScroll = () => {
-      pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    const ro = new ResizeObserver(() => {
-      if (pinned.current) el.scrollTop = el.scrollHeight;
-    });
-    ro.observe(content);
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      ro.disconnect();
-    };
-  }, [live]);
-
-  return { outer, inner };
-}
 
 /**
  * Chat is a CLI agent — Claude Code or Codex — running from the library's
@@ -89,7 +49,7 @@ export default function ChatPage() {
   const store = useHarnessStore;
   const threads = useHarnessStore((s) => s.threads);
   const activeId = useHarnessStore((s) => s.activeId);
-  const items = useHarnessStore((s) => s.items);
+  const items = useHarnessStore((s) => itemsFor(s.activeId, s.items));
   const rateLimits = useHarnessStore((s) => s.rateLimits);
   const provider = useHarnessStore((s) => s.provider);
   const model = useHarnessStore((s) => s.model);
@@ -173,7 +133,6 @@ export default function ChatPage() {
     async (text: string) => {
       const s = store.getState();
       const id = s.activeId;
-      if (id == null) s.beginNew();
       try {
         const newId = await harnessSend(id, activeProvider, text, {
           model: activeModel,

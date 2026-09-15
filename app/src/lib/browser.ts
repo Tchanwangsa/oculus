@@ -97,3 +97,36 @@ export const browser = {
   reload: (id: number) => invoke("browser_reload", { id }),
   close: (id: number) => invoke("browser_close_tab", { id }),
 };
+
+/**
+ * Where every external link in the app ends up — the capture-phase handler in
+ * `AppLayout` calls this, and so does anything that opens a URL on purpose.
+ *
+ * It has a fallback because the click that got here was already
+ * `preventDefault`-ed: if opening the in-app tab fails there is no default
+ * navigation left to happen, and a swallowed rejection made the link look
+ * inert with nothing said about why. So a failed tab hands the URL to the
+ * real browser and says what went wrong in the console — the link always goes
+ * somewhere.
+ *
+ * `system` is the ⌘-click path: skip the in-app tab and leave for the real
+ * browser directly.
+ */
+export async function openExternal(url: string, system = false): Promise<void> {
+  if (!system) {
+    try {
+      await browser.open(url);
+      return;
+    } catch (e) {
+      console.error(
+        `[oculus] in-app tab failed for ${url} — opening it in the real browser instead`,
+        e,
+      );
+    }
+  }
+  try {
+    await browser.external(url);
+  } catch (e) {
+    console.error(`[oculus] could not open ${url} anywhere`, e);
+  }
+}

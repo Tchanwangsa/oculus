@@ -20,21 +20,41 @@ struct ToolMeta {
     output: Option<String>,
 }
 
+/// Start a thread. `lecture_id` is the recording a dock conversation is about
+/// (migration 30); every other thread passes None.
+///
+/// **A lecture thread's subject is the lecture's, not the payload's.** The
+/// player has no subject picker — the recording already answers that question
+/// — so trusting a `subject_id` sent alongside a lecture would be trusting the
+/// webview to repeat a fact the database already holds, and a stale one would
+/// point the appended instructions at the wrong course folder. So it is read
+/// off the `lectures` row here and the payload's is ignored.
 pub async fn create_thread(
     pool: &SqlitePool,
     provider: Provider,
     model: Option<&str>,
     subject_id: Option<i64>,
+    lecture_id: Option<&str>,
     first_message: &str,
 ) -> Result<i64, String> {
+    let subject_id = match lecture_id {
+        Some(id) => sqlx::query_scalar::<_, Option<i64>>("SELECT subject_id FROM lectures WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("no lecture {id}"))?,
+        None => subject_id,
+    };
     let title = title_from(first_message);
     let res = sqlx::query(
-        "INSERT INTO harness_threads (provider, model, subject_id, title, status)
-         VALUES (?1, ?2, ?3, ?4, 'idle')",
+        "INSERT INTO harness_threads (provider, model, subject_id, lecture_id, title, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'idle')",
     )
     .bind(provider.as_str())
     .bind(model)
     .bind(subject_id)
+    .bind(lecture_id)
     .bind(title)
     .execute(pool)
     .await
@@ -68,13 +88,32 @@ pub struct ThreadRow {
     /// leave a thread pointing at a folder that no longer exists; None is
     /// the general thread, or a subject that has since been removed.
     pub subject_code: Option<String>,
+    /// The recording a dock conversation is about, joined the same way and
+    /// for the same reason. None is every thread outside the player — and a
+    /// lecture thread whose recording has since been deleted, which clears
+    /// the column rather than taking the conversation with it.
+    pub lecture: Option<LectureRef>,
+}
+
+/// What a lecture thread's instructions have to name: the recording, and
+/// whether there is a transcript beside it to read.
+pub struct LectureRef {
+    pub id: String,
+    pub title: String,
+    /// Whether `transcript.vtt` is actually on disk. The column holds the
+    /// path it was written to, which a cleared transcript folder
+    /// (`echo360_clear_transcripts`) leaves behind — and the instructions
+    /// must not point the agent at a file that is gone.
+    pub has_transcript: bool,
 }
 
 pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
     let r = sqlx::query(
-        "SELECT t.id, t.provider, t.provider_session_id, t.model, s.code AS subject_code
+        "SELECT t.id, t.provider, t.provider_session_id, t.model, s.code AS subject_code,
+                l.id AS lecture_id, l.title AS lecture_title, l.transcript_path
          FROM harness_threads t
          LEFT JOIN subjects s ON s.id = t.subject_id
+         LEFT JOIN lectures l ON l.id = t.lecture_id
          WHERE t.id = ?1",
     )
     .bind(id)
@@ -83,12 +122,20 @@ pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
     .map_err(|e| e.to_string())?
     .ok_or_else(|| format!("no thread {id}"))?;
     let provider: String = r.get("provider");
+    let lecture = r.get::<Option<String>, _>("lecture_id").map(|lid| LectureRef {
+        id: lid,
+        title: r.get("lecture_title"),
+        has_transcript: r
+            .get::<Option<String>, _>("transcript_path")
+            .is_some_and(|p| std::path::Path::new(&p).exists()),
+    });
     Ok(ThreadRow {
         id: r.get("id"),
         provider: Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?,
         provider_session_id: r.get("provider_session_id"),
         model: r.get("model"),
         subject_code: r.get("subject_code"),
+        lecture,
     })
 }
 
@@ -165,9 +212,15 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             .map_err(|e| e.to_string())?;
             Ok(None)
         }
-        HarnessEvent::UserMessage { text } => {
+        HarnessEvent::UserMessage { text, at } => {
             set_status(pool, thread_id, "running").await?;
-            insert_item(pool, thread_id, "user", None, Some(text), None).await.map(Some)
+            // `content` is what the student typed and nothing else — the
+            // moment the message was sent at rides the prompt, not the row
+            // (`SendOptions::context` in `super`). The second it was sent at
+            // is a fact *about* the message, so it goes in `meta`, which is
+            // what lets the bubble say "at 3:40".
+            let meta = at.map(|at| serde_json::json!({ "at": at }).to_string());
+            insert_item(pool, thread_id, "user", None, Some(text), meta).await.map(Some)
         }
         HarnessEvent::TurnStarted => set_status(pool, thread_id, "running").await.map(|_| None),
         HarnessEvent::TurnAnchor { anchor } => {

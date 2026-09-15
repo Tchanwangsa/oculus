@@ -1,10 +1,27 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { isVertical, usePlayerPrefs, type Dock } from "@/stores/playerPrefsStore";
+import { isVertical, usePlayerPrefs, type Dock, type DockTab } from "@/stores/playerPrefsStore";
 
 export { isVertical, type Dock };
 
 const MIN_H = 88;
 const MIN_W = 220;
+/**
+ * …and a floor under that floor while Chat is the tab in front.
+ *
+ * A chapter row and a transcript cue are a line of text and read fine in
+ * 220px; an agent's reply is markdown with lists, tables and fenced code in
+ * it, and a composer with a model picker and a send button under that. At the
+ * transcript's minimum the code blocks were a horizontal scroller two words
+ * wide and the control row wrapped. The floor is raised rather than the rows
+ * restyled, because the rows are the Chat page's and there is one timeline.
+ *
+ */
+const CHAT_MIN_H = 260;
+const CHAT_MIN_W = 300;
+
+const minSize = (tab: DockTab, vertical: boolean) =>
+  vertical ? (tab === "chat" ? CHAT_MIN_H : MIN_H) : tab === "chat" ? CHAT_MIN_W : MIN_W;
+
 /** Room the video stack always keeps for itself. */
 const KEEP_H = 140;
 const KEEP_W = 300;
@@ -36,9 +53,16 @@ function nearestEdge(rect: DOMRect, x: number, y: number): Dock {
  */
 export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>) {
   const dock = usePlayerPrefs((s) => s.dock);
+  const dockTab = usePlayerPrefs((s) => s.dockTab);
   const height = usePlayerPrefs((s) => s.height);
   const width = usePlayerPrefs((s) => s.width);
   const setPrefs = usePlayerPrefs((s) => s.set);
+
+  // The drag reads the floor out of a ref rather than taking it as a
+  // dependency: the pointer listeners are registered once, and re-binding
+  // three of them because a tab changed is churn for a number.
+  const tabRef = useRef(dockTab);
+  tabRef.current = dockTab;
 
   /** Edge highlighted under the pointer mid-drag; null when not dragging. */
   const [dropTarget, setDropTarget] = useState<Dock | null>(null);
@@ -66,22 +90,28 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
     drag.current = { x: e.clientX, y: e.clientY, moved: false };
   }, []);
 
+  /**
+   * The size actually drawn: the preference, with the tab's floor under it.
+   *
+   * A width stored from the transcript's own minimum would otherwise leave
+   * Chat in a 220px panel until someone dragged it out. The preference is
+   * never rewritten, so leaving the tab hands the transcript back exactly the
+   * panel it had — and a drag starts from what is on screen, not from the
+   * smaller number behind it.
+   */
+  const drawn = Math.max(minSize(dockTab, isVertical(dock)), isVertical(dock) ? height : width);
+
   const startResize = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       e.preventDefault();
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-      resize.current = {
-        dock,
-        x: e.clientX,
-        y: e.clientY,
-        size: isVertical(dock) ? height : width,
-      };
+      resize.current = { dock, x: e.clientX, y: e.clientY, size: drawn };
       setResizing(true);
       document.body.style.cursor = isVertical(dock) ? "row-resize" : "col-resize";
       document.body.style.userSelect = "none";
     },
-    [dock, height, width],
+    [dock, drawn],
   );
 
   useEffect(() => {
@@ -98,23 +128,19 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
       if (resize.current && rect) {
         const r = resize.current;
         if (isVertical(r.dock)) {
+          const min = minSize(tabRef.current, true);
           const dy = e.clientY - r.y;
           // Bottom dock grows upward, top dock downward.
           const next = r.size + (r.dock === "bottom" ? -dy : dy);
           setPrefs({
-            height: Math.min(
-              Math.max(MIN_H, next),
-              Math.max(MIN_H, rect.height - KEEP_H),
-            ),
+            height: Math.min(Math.max(min, next), Math.max(min, rect.height - KEEP_H)),
           });
         } else {
+          const min = minSize(tabRef.current, false);
           const dx = e.clientX - r.x;
           const next = r.size + (r.dock === "right" ? -dx : dx);
           setPrefs({
-            width: Math.min(
-              Math.max(MIN_W, next),
-              Math.max(MIN_W, rect.width - KEEP_W),
-            ),
+            width: Math.min(Math.max(min, next), Math.max(min, rect.width - KEEP_W)),
           });
         }
         return;
@@ -189,7 +215,7 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
     dock,
     height,
     width,
-    size: isVertical(dock) ? height : width,
+    size: drawn,
     resizing,
     dropTarget,
     startDockDrag,

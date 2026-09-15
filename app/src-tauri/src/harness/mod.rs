@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 
 use claude::{ClaudeSession, ClaudeSpawn};
 use codex::{CodexServer, CodexSpawn, CodexThreadOpts, ModelInfo};
-pub use event::{HarnessEvent, Provider};
+pub use event::{HarnessEvent, Provider, ToolKind};
 
 /// Where a bridge hands its events. Called from the bridge's reader thread,
 /// in stream order; must not block on the bridge.
@@ -61,7 +61,12 @@ pub fn thread_cwd(data_dir: &Path) -> PathBuf {
 /// writes only to `agents/` — it says which subject the questions are about,
 /// so "what's due this week" has an answer. A general thread passes None and
 /// gets the library-wide instructions unchanged.
-pub fn instructions(data_dir: &Path, scope: Option<&str>) -> String {
+///
+/// `lecture` is the recording a dock conversation is about, and it is
+/// appended after the subject section rather than instead of it: a lecture
+/// thread is still scoped to that lecture's course, and the agent still reads
+/// the whole library.
+pub fn instructions(data_dir: &Path, scope: Option<&str>, lecture: Option<&LectureBrief>) -> String {
     let mut courses: Vec<String> = std::fs::read_dir(data_dir.join("courses"))
         .map(|rd| {
             rd.flatten()
@@ -80,12 +85,65 @@ pub fn instructions(data_dir: &Path, scope: Option<&str>) -> String {
     let base = INSTRUCTIONS_TEMPLATE
         .replace("{{DATA_DIR}}", &data_dir.display().to_string())
         .replace("{{COURSES}}", &courses);
-    match scope {
+    let mut out = match scope {
         None => base,
         Some(code) => format!(
             "{base}\n\n## This conversation\n\n             It is scoped to **{code}** — the folder `../courses/{code}/`. Unless the              student names another subject, answer from that folder, and pass `{code}`              as the subject to the CLI. Read its `AGENTS.md` for the layout, and its              `agents/memories/` for what you have already learned about it; a fact worth              keeping from this conversation belongs there rather than in `./memories/`.\n"
         ),
+    };
+    if let Some(lec) = lecture {
+        out.push_str(&lecture_section(lec, scope));
     }
+    out
+}
+
+/// What the agent is told about the recording the student is watching.
+///
+/// Paths are given the way every other path in this brief is — relative to
+/// `agents/`, which every thread runs from — so the agent can paste one
+/// straight into a read rather than reconstructing the library root.
+///
+/// The chapter list is **inlined** while the transcript is only named. The
+/// chapters are a dozen short lines and asking for them would cost a tool
+/// call the student waits through; the transcript is twenty thousand words
+/// and the agent should open the part it needs, which is the same call
+/// `chapters::prompt` makes about the same two files.
+fn lecture_section(lec: &LectureBrief, scope: Option<&str>) -> String {
+    let dir = format!("../lectures/{}", lec.id);
+    let mut s = format!(
+        "\n## The lecture being watched\n\n\
+         The student is watching **{}**. Its recording folder is `{dir}/`.\n\n",
+        lec.title
+    );
+    if lec.has_transcript {
+        s.push_str(&format!(
+            "- `{dir}/transcript.vtt` — the whole transcript, WebVTT, with timestamps.\n"
+        ));
+    }
+    if let Some(code) = scope {
+        s.push_str(&format!(
+            "- `../courses/{code}/` — the course folder: the slide deck for this lecture, \
+             and everything else the subject has.\n"
+        ));
+    }
+    if !lec.chapters.is_empty() {
+        s.push_str("\nIts chapters:\n\n");
+        for c in &lec.chapters {
+            s.push_str(&format!(
+                "- {} — {} ({})\n",
+                crate::chapters::hms(c.start_seconds),
+                c.title,
+                c.summary
+            ));
+        }
+    }
+    s.push_str(
+        "\nThe student is watching this lecture, and a message may carry the moment it was \
+         sent at — a timestamp, the last minute of transcript, and a frame of the video — \
+         appended under a heading after their own words. When it is there, \"this\", \"that \
+         slide\" and \"what he just said\" mean that moment.\n",
+    );
+    s
 }
 
 /// Append-only file of raw provider lines for one thread.
@@ -130,6 +188,40 @@ pub struct SendOptions {
     /// up here so the instructions can name a folder that exists.
     #[serde(skip)]
     pub scope: Option<String>,
+    /// The recording a dock conversation is about. Read only when the send
+    /// creates the thread, like `subject_id` — and unlike it, it also
+    /// *decides* the subject, which Rust reads off the lecture's own row
+    /// (`store::create_thread`).
+    pub lecture_id: Option<String>,
+    /// That lecture, resolved from the thread row for the same reason
+    /// `scope` is: the instructions name a folder and a chapter list, and
+    /// both come from the database rather than from the webview.
+    #[serde(skip)]
+    pub lecture: Option<LectureBrief>,
+    /// The moment, built by the player at send time: the timestamp, the last
+    /// minute of transcript, the chapter, the frame path. Appended to the
+    /// prompt the CLI receives, **after** the student's text — it is context
+    /// for the question, not the question. It never becomes the row's
+    /// content: the timeline shows what was typed.
+    pub context: Option<String>,
+    /// The playhead's second when the message was sent. Goes on the user
+    /// row's `meta` so the bubble can say "at 3:40"; see
+    /// [`HarnessEvent::UserMessage`].
+    pub at: Option<i64>,
+}
+
+/// What a lecture thread's appended instructions say about the recording.
+/// Assembled from the thread's row and `store::chapters` before the send
+/// reaches a bridge.
+#[derive(Clone)]
+pub struct LectureBrief {
+    pub id: String,
+    pub title: String,
+    pub has_transcript: bool,
+    /// Inlined rather than left for the agent to fetch: a chapter list is a
+    /// dozen short lines, and a turn spent reading it back is a turn the
+    /// student waits through.
+    pub chapters: Vec<crate::chapters::Chapter>,
 }
 
 /// Every reasoning level either CLI accepts, mirrored by `REASONING_LABELS`
@@ -552,7 +644,7 @@ impl Harness {
                         model: opts.model.clone(),
                         effort: opts.reasoning_effort.clone(),
                         permission_mode: "acceptEdits".into(),
-                        system_append: instructions(&self.data_dir, opts.scope.as_deref()),
+                        system_append: instructions(&self.data_dir, opts.scope.as_deref(), opts.lecture.as_ref()),
                         env: discover::child_env(),
                         raw_log,
                     },
@@ -569,7 +661,7 @@ impl Harness {
                     cwd,
                     model: opts.model.clone(),
                     reasoning_effort: opts.reasoning_effort.clone(),
-                    instructions: instructions(&self.data_dir, opts.scope.as_deref()),
+                    instructions: instructions(&self.data_dir, opts.scope.as_deref(), opts.lecture.as_ref()),
                 };
                 let tid = match resume {
                     Some(id) => {
@@ -938,6 +1030,28 @@ pub mod app {
         }
     }
 
+    /// The lecture section of a thread's instructions, assembled off its row.
+    ///
+    /// Read on every send rather than carried on the thread, for the same
+    /// reason the subject's folder name is joined rather than stored: the
+    /// chapters can land eight minutes after the conversation started, and a
+    /// brief built once at creation would never grow them. A lecture with no
+    /// chapters simply has none in the brief.
+    ///
+    /// It has to be resolved before *any* session is spawned, including the
+    /// one a rewind brings back up — both CLIs bind the appended instructions
+    /// at session start, so a session opened without it would keep answering
+    /// without it for the rest of the thread.
+    async fn lecture_brief(pool: &SqlitePool, row: &store::ThreadRow) -> Option<LectureBrief> {
+        let l = row.lecture.as_ref()?;
+        Some(LectureBrief {
+            id: l.id.clone(),
+            title: l.title.clone(),
+            has_transcript: l.has_transcript,
+            chapters: crate::store::chapters(pool, &l.id).await.unwrap_or_default(),
+        })
+    }
+
     async fn start_turn(
         harness: &Arc<Harness>,
         thread_id: i64,
@@ -960,17 +1074,31 @@ pub mod app {
                 harness.close(thread_id);
             }
         }
-        // The row, not the payload, decides both: an open thread keeps the
-        // model it was last set to and the subject it was created with.
+        // The row, not the payload, decides all three: an open thread keeps
+        // the model it was last set to, the subject it was created with, and
+        // the lecture it was opened over.
+        let lecture = lecture_brief(&pool, &row).await;
         let opts = SendOptions {
             model: opts.model.or(row.model),
             scope: row.subject_code,
+            lecture,
             ..opts
         };
         let resume = row.provider_session_id;
-        sink(HarnessEvent::UserMessage { text: text.to_string() });
+        // The row is what the student typed. The moment they sent it at is a
+        // fact about the message and rides on the event; the moment's own
+        // text rides the prompt below and is never a row, or the timeline
+        // would read back a transcript excerpt as the question.
+        sink(HarnessEvent::UserMessage {
+            text: text.to_string(),
+            at: opts.at,
+        });
+        let text = match &opts.context {
+            Some(c) => format!("{text}\n\n---\n\n## The moment this was sent at\n\n{c}"),
+            None => text.to_string(),
+        };
 
-        let (h, text, sink) = (harness.clone(), text.to_string(), sink.clone());
+        let (h, sink) = (harness.clone(), sink.clone());
         tokio::task::spawn_blocking(move || {
             h.send(thread_id, provider, resume.as_deref(), &opts, &text, sink)
         })
@@ -1043,8 +1171,15 @@ pub mod app {
                 id
             }
             None => {
-                store::create_thread(&pool, provider, opts.model.as_deref(), opts.subject_id, &text)
-                    .await?
+                store::create_thread(
+                    &pool,
+                    provider,
+                    opts.model.as_deref(),
+                    opts.subject_id,
+                    opts.lecture_id.as_deref(),
+                    &text,
+                )
+                .await?
             }
         };
 
@@ -1092,7 +1227,7 @@ pub mod app {
         if !state.queue.lock().unwrap().try_claim(thread_id) {
             return Err("stop the current turn before editing a question".into());
         }
-        let context = rewind_provider(&state, thread_id, &row, &question, &opts).await;
+        let context = rewind_provider(&state, &pool, thread_id, &row, &question, &opts).await;
         if let Err(e) = store::truncate_from(&pool, thread_id, item_id).await {
             // Nothing was sent, so nothing will close the turn this claimed.
             state.queue.lock().unwrap().next(thread_id);
@@ -1126,6 +1261,7 @@ pub mod app {
     /// from an answer that refers to it.
     async fn rewind_provider(
         state: &State<'_, HarnessState>,
+        pool: &SqlitePool,
         thread_id: i64,
         row: &store::ThreadRow,
         question: &store::Question,
@@ -1139,9 +1275,13 @@ pub mod app {
         };
         let (h, provider) = (state.harness.clone(), row.provider);
         let sink = state.sink(thread_id, provider);
+        // A rewind will resume a thread whose process has gone, and that
+        // spawn binds the instructions for every turn after it — so the
+        // lecture brief is resolved here too, not only on a send.
         let opts = SendOptions {
             model: opts.model.clone().or_else(|| row.model.clone()),
             scope: row.subject_code.clone(),
+            lecture: lecture_brief(pool, row).await,
             ..opts.clone()
         };
         tokio::task::spawn_blocking(move || {
@@ -1178,7 +1318,7 @@ pub mod app {
             model: row.model.clone(),
             ..Default::default()
         };
-        let context = rewind_provider(&state, thread_id, &row, &question, &opts).await;
+        let context = rewind_provider(&state, &pool, thread_id, &row, &question, &opts).await;
         store::truncate_from(&pool, thread_id, item_id).await?;
         state.sink(thread_id, row.provider)(HarnessEvent::Rewound {
             from_item_id: item_id,
@@ -1368,13 +1508,62 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("courses/COMP30026_2026_SM2")).unwrap();
 
-        let general = instructions(&root, None);
+        let general = instructions(&root, None, None);
         assert!(general.contains("`COMP30026_2026_SM2`"), "the course list is filled in");
         assert!(!general.contains("This conversation"), "no scope section on a general thread");
 
-        let scoped = instructions(&root, Some("COMP30026_2026_SM2"));
+        let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None);
         assert!(scoped.starts_with(&general), "the scope is appended to the same brief");
         assert!(scoped.contains("`../courses/COMP30026_2026_SM2/`"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The lecture is a third layer on the same brief, not a replacement for
+    /// either of the two under it: a thread opened in the player's dock still
+    /// reads the whole library and is still about that lecture's subject. It
+    /// names the recording folder as the agent would have to type it — from
+    /// `agents/` — and carries the chapters inline, so the first question
+    /// does not cost a turn spent reading them back.
+    #[test]
+    fn a_lecture_thread_keeps_both_briefs_and_names_the_recording() {
+        let root = std::env::temp_dir().join("oculus-harness-lecture");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("courses/COMP30026_2026_SM2")).unwrap();
+
+        let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None);
+        let lecture = LectureBrief {
+            id: "abc-123".into(),
+            title: "Lecture 14".into(),
+            has_transcript: true,
+            chapters: vec![crate::chapters::Chapter {
+                start_seconds: 1382,
+                title: "Resolution".into(),
+                summary: "Unification, worked".into(),
+            }],
+        };
+        let full = instructions(&root, Some("COMP30026_2026_SM2"), Some(&lecture));
+
+        assert!(full.starts_with(&scoped), "the lecture is appended to the subject's brief");
+        assert!(full.contains("`../lectures/abc-123/`"), "the folder as the agent would type it");
+        assert!(full.contains("`../lectures/abc-123/transcript.vtt`"));
+        assert!(full.contains("00:23:02 — Resolution"), "chapters are inline");
+        assert!(full.contains("the moment it was sent at"));
+
+        let no_transcript = instructions(
+            &root,
+            Some("COMP30026_2026_SM2"),
+            Some(&LectureBrief {
+                has_transcript: false,
+                chapters: vec![],
+                ..lecture
+            }),
+        );
+        // The library brief names `lectures/<id>/transcript.vtt` as a shape,
+        // so what must be absent is this lecture's own path.
+        assert!(
+            !no_transcript.contains("`../lectures/abc-123/transcript.vtt`"),
+            "a transcript that is not on disk is not named"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

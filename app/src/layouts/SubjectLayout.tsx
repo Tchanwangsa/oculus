@@ -1,8 +1,9 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   NavLink,
   Navigate,
   Outlet,
+  useLocation,
   useOutletContext,
   useParams,
 } from "react-router-dom";
@@ -108,7 +109,7 @@ export default function SubjectLayout() {
             </p>
           </div>
 
-          <nav className="flex items-center gap-1">
+          <TabStrip>
             {TABS.map((tab) => {
               const newCount = newCountForTab(newCounts, subject.id, tab.to);
               return (
@@ -118,9 +119,7 @@ export default function SubjectLayout() {
                   end={tab.end}
                   className={({ isActive }) =>
                     cn(
-                      // -1px bottom margin so the active underline sits on the
-                      // header's border rather than above it.
-                      "-mb-px flex items-center gap-1.5 border-b-2 px-2 pb-2 pt-1 text-[12px] font-medium transition-colors",
+                      "flex shrink-0 items-center gap-1.5 border-b-2 px-2 pb-2 pt-1 text-[12px] font-medium transition-colors",
                       isActive
                         ? "border-primary text-foreground"
                         : "border-transparent text-muted-foreground hover:text-foreground",
@@ -141,7 +140,7 @@ export default function SubjectLayout() {
                 </NavLink>
               );
             })}
-          </nav>
+          </TabStrip>
         </div>
       </header>
 
@@ -153,6 +152,97 @@ export default function SubjectLayout() {
         <Outlet context={subject satisfies Subject} />
       </div>
     </div>
+  );
+}
+
+/**
+ * The tab row, as a strip that scrolls sideways rather than one that gets cut
+ * off. Eight tabs already crowd the centred column, and the card is narrower
+ * still whenever the side panel is docked open — so the row is a scroller with
+ * its bar hidden and a fade over each live edge, which is the affordance the
+ * sidebar's own scroller uses.
+ *
+ * `-mb-px` sits on the scroller rather than on each tab: `overflow-x` makes
+ * this a scroll container, and a scroll container clips on *both* axes, so a
+ * negative bottom margin inside it would take the active underline with it.
+ * On the container itself the margin is outside the clip, and the underline
+ * still lands on the header's border instead of above it.
+ */
+function TabStrip({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  const { pathname } = useLocation();
+
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setEdges((prev) =>
+      prev.left === left && prev.right === right ? prev : { left, right },
+    );
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    // The strip's own width is what changes — the side panel opening, the
+    // sidebar folding — so watch the scroller rather than its contents.
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      ro.disconnect();
+    };
+  }, [measure]);
+
+  // A tab reached from anywhere but the strip — ⌘K, a card on the overview,
+  // a restored tab — may be sitting off the end; the strip follows it.
+  useEffect(() => {
+    ref.current
+      ?.querySelector('[aria-current="page"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [pathname]);
+
+  return (
+    /* `flex` rather than a plain block: it stops the scroller's -1px bottom
+       margin collapsing out through the wrapper, so the underline's overlap
+       with the header border is the same 1px it always was. */
+    <div className="relative flex">
+      <nav
+        ref={ref}
+        className={cn(
+          "-mb-px flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden",
+          // The bar would take a 6px gutter out of a 30px-tall row and jog
+          // every tab upward; the fades carry the affordance instead.
+          "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        )}
+      >
+        {children}
+      </nav>
+      <StripFade side="left" show={edges.left} />
+      <StripFade side="right" show={edges.right} />
+    </div>
+  );
+}
+
+/** Fade over one end of the strip, shown only while there is more that way.
+ *  A plain gradient over the card's ground, for the reason `ScrollFade` in the
+ *  sidebar is one: a backdrop layer here would cost a compositing layer. */
+function StripFade({ side, show }: { side: "left" | "right"; show: boolean }) {
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        "pointer-events-none absolute inset-y-0 w-8 transition-opacity duration-150",
+        side === "left"
+          ? "left-0 bg-gradient-to-r from-card via-card/85 to-transparent"
+          : "right-0 bg-gradient-to-l from-card via-card/85 to-transparent",
+        show ? "opacity-100" : "opacity-0",
+      )}
+    />
   );
 }
 

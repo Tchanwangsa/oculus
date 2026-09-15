@@ -53,11 +53,14 @@ export function SidePanel() {
   const { setCollapsed } = panel;
 
   // Opening something has to overrule a panel that was left folded, or the
-  // click would look like it did nothing at all.
-  const key = item ? itemKey(item) : null;
+  // click would look like it did nothing at all. Counted rather than watched
+  // for a change: re-opening the row that is already showing leaves the item
+  // identical, and that click has to unfold the panel too — which is the one
+  // way a folded panel could swallow clicks indefinitely.
+  const opens = useSidePanelStore((s) => s.opens);
   useEffect(() => {
-    if (key) setCollapsed(false);
-  }, [key, setCollapsed]);
+    if (opens > 0) setCollapsed(false);
+  }, [opens, setCollapsed]);
 
   // What is on screen, which outlives what is in the store by one exit: a
   // panel whose contents vanished the instant it closed would collapse on an

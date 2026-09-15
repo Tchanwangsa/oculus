@@ -19,7 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format";
-import { parseToolMeta, type HarnessItem, type ToolKind } from "@/lib/harness";
+import { fmtTime } from "@/lib/lectures";
+import { messageAt, parseToolMeta, type HarnessItem, type ToolKind } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/harnessStore";
 import { cn, copyText } from "@/lib/utils";
 import { ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
@@ -195,10 +196,16 @@ function CopyAction({ text }: { text: string }) {
  */
 function MessageActions({
   when,
+  at,
   side,
   children,
 }: {
   when?: string;
+  /** The playhead second a dock question was asked at. Beside the wall clock
+   *  rather than in the bubble: it is a fact *about* the message, the same
+   *  kind of thing as when it was asked, and the bubble holds only what was
+   *  typed. */
+  at?: number | null;
   side: "left" | "right";
   children: React.ReactNode;
 }) {
@@ -210,6 +217,11 @@ function MessageActions({
       )}
     >
       {when && <span className="px-1.5 tabular-nums">{when}</span>}
+      {at != null && (
+        <span className="-ml-1 pr-1.5 tabular-nums" title="The moment this message carried">
+          at {fmtTime(at)}
+        </span>
+      )}
       {children}
     </div>
   );
@@ -259,6 +271,7 @@ function QuestionBubble({
   text,
   pending,
   when,
+  at,
   onSubmit,
   onRemove,
   onRewind,
@@ -269,6 +282,8 @@ function QuestionBubble({
   text: string;
   pending?: boolean;
   when?: string;
+  /** The playhead second this question carried, for a dock message. */
+  at?: number | null;
   /** Absent while the thread is busy — a rewind under a running turn would
    *  delete rows it is still writing. */
   onSubmit?: (text: string) => void;
@@ -362,7 +377,7 @@ function QuestionBubble({
           )}
         </div>
       </div>
-      <MessageActions when={pending ? "Queued" : when} side="right">
+      <MessageActions when={pending ? "Queued" : when} at={pending ? null : at} side="right">
         <CopyAction text={text} />
         {onSubmit && <Action label="Edit" icon={PencilSimple} onClick={() => setEditing(text)} />}
         {onRewind && <Action label="Rewind to here" icon={ArrowCounterClockwise} onClick={onRewind} />}
@@ -391,6 +406,7 @@ const User = memo(function User({
       msgId={item.id}
       text={text}
       when={fmtClock(sqliteUtcToMs(item.created_at))}
+      at={messageAt(item)}
       onSubmit={live ? (next) => actions.edit(item.id, next) : undefined}
       onRewind={live ? () => actions.rewind(item.id) : undefined}
     />

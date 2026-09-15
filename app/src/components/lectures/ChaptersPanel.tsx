@@ -4,7 +4,13 @@ import { CircleNotch } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { Chapter } from "@/lib/db";
-import { chapterEnds, fmtTime } from "@/lib/lectures";
+import {
+  CHAPTER_PHASE_LABEL,
+  chapterEnds,
+  fmtTime,
+  type ChapterRunProgress,
+} from "@/lib/lectures";
+import { toolVerb } from "@/lib/harness";
 import type { ChapterStatus } from "@/hooks/useLectureChapters";
 
 /**
@@ -33,6 +39,8 @@ export interface ChaptersPanelProps {
   error: string | null;
   /** When this session claimed the run, for the elapsed clock. */
   since: number | null;
+  /** What the run is doing right now, or null before it has said. */
+  progress: ChapterRunProgress | null;
   /** A run is in flight — the only thing standing between two turns being
    *  spent on one lecture, since Rust refuses the second call outright. */
   busy: boolean;
@@ -63,6 +71,7 @@ export const ChaptersPanel = memo(function ChaptersPanel({
   status,
   error,
   since,
+  progress,
   busy,
   downloaded,
   onSeek,
@@ -87,7 +96,7 @@ export const ChaptersPanel = memo(function ChaptersPanel({
           </Empty>
         ) : status === "running" ? (
           <Empty>
-            <Running since={since} />
+            <Running since={since} progress={progress} />
           </Empty>
         ) : status === "error" ? (
           <Empty>
@@ -167,7 +176,7 @@ export const ChaptersPanel = memo(function ChaptersPanel({
           failure belongs beside them rather than in place of them. */}
       <div className="shrink-0 border-t border-border px-2 py-1.5">
         {status === "running" ? (
-          <Running since={since} compact />
+          <Running since={since} progress={progress} compact />
         ) : (
           <div className="flex items-center gap-2">
             <Button
@@ -200,14 +209,54 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Eight to eleven minutes of ffmpeg and one very long agent turn, with no
- * progress to report in between — so the clock is the whole message. It counts
- * up rather than filling a bar towards an estimate, because a bar that reaches
- * the end and keeps waiting is exactly what "hung" looks like.
+ * The step under the phase: what the job is touching right this second.
  *
- * In-flight is `brand`, the accent the app spends on work in progress.
+ * A tool call is the agent's own account of the nine minutes and is said in
+ * the timeline's words (`toolVerb`) rather than a second vocabulary. The two
+ * countable phases say how far through they are — a real fraction of a decode
+ * that is happening, not an estimate of a turn that has not answered yet.
  */
-function Running({ since, compact }: { since: number | null; compact?: boolean }) {
+function stepDetail(p: ChapterRunProgress): string | null {
+  const title = p.detail?.trim();
+  if (title) return p.kind ? `${toolVerb(p.kind, false)} ${title}` : title;
+  if (p.kind) return toolVerb(p.kind, false);
+  if (p.done !== null && p.total) {
+    // Clamped because the two numbers come from different places: the decode
+    // counts frames off the file, the total is the catalogue's duration, and
+    // Echo360's figure runs a few seconds short of the recording.
+    const done = Math.min(p.done, p.total);
+    return p.phase === "decoding"
+      ? `${fmtTime(done)} of ${fmtTime(p.total)}`
+      : `${done} of ${p.total}`;
+  }
+  return null;
+}
+
+/**
+ * Eight to eleven minutes of ffmpeg and one very long agent turn, reported as
+ * the step it is on: the phase in `brand`, and under it the file being read or
+ * the second being decoded.
+ *
+ * **Still no bar.** The clock counts up and there is no fill towards an
+ * estimate, because a bar that reaches the end and keeps waiting is exactly
+ * what hung looks like — the turn is most of the run and nothing can say how
+ * far through it is. What changed is that the *steps* are real: they come off
+ * the same event stream the chat timeline draws, and a job that has gone quiet
+ * now looks different from one that is working.
+ *
+ * A run already in flight at app launch has neither a start time nor a step
+ * until its next one — nothing about it is persisted — so both are optional
+ * and the spinner alone is a valid state.
+ */
+function Running({
+  since,
+  progress,
+  compact,
+}: {
+  since: number | null;
+  progress: ChapterRunProgress | null;
+  compact?: boolean;
+}) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (since === null) return;
@@ -218,22 +267,34 @@ function Running({ since, compact }: { since: number | null; compact?: boolean }
   // A run already in flight when the app started has no start time anywhere:
   // `chaptered_at` is stamped by a terminal status only.
   const elapsed = since === null ? null : Math.max(0, Math.floor((now - since) / 1000));
+  const phase = progress ? CHAPTER_PHASE_LABEL[progress.phase] : "Finding chapters";
+  const detail = progress ? stepDetail(progress) : null;
 
   return (
     <div
       className={cn(
-        "flex items-center gap-2 text-[11px] text-brand",
-        !compact && "flex-col gap-1.5",
+        "flex w-full min-w-0 flex-col gap-0.5 text-[11px] text-brand",
+        !compact && "items-center text-center",
       )}
     >
-      <span className="flex items-center gap-1.5">
-        <CircleNotch size={12} className="animate-spin" />
-        Finding chapters
+      <span className="flex max-w-full items-center gap-1.5">
+        <CircleNotch size={12} className="shrink-0 animate-spin" />
+        <span className="truncate">{phase}</span>
         {elapsed !== null && (
-          <span className="tabular-nums text-muted-foreground">{fmtTime(elapsed)}</span>
+          <span className="shrink-0 tabular-nums text-muted-foreground">
+            {fmtTime(elapsed)}
+          </span>
         )}
       </span>
-      <span className="text-muted-foreground">Usually 8–11 minutes.</span>
+      {/* The agent's file names run long and the dock is 200px at its
+          narrowest, so the line truncates and keeps the whole of it in the
+          tooltip. */}
+      {detail && (
+        <span className="block max-w-full truncate text-muted-foreground" title={detail}>
+          {detail}
+        </span>
+      )}
+      {!compact && <span className="text-muted-foreground">Usually 8–11 minutes.</span>}
     </div>
   );
 }

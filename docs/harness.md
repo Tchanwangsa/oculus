@@ -21,7 +21,7 @@ old chat page and store are gone.
 | Claude Code bridge (`claude -p`, stream-json) | `app/src-tauri/src/harness/claude.rs` |
 | Codex bridge (`codex app-server`, JSON-RPC) | `app/src-tauri/src/harness/codex.rs` |
 | Finding the binaries from a GUI app | `app/src-tauri/src/harness/discover.rs` |
-| Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–26 and 28 in `app/src-tauri/src/lib.rs` |
+| Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–26, 28 and 30 in `app/src-tauri/src/lib.rs` |
 | Instructions appended to the provider's prompt | `app/src-tauri/templates/HARNESS.template.md` |
 | The library's own `AGENTS.md`, which Codex reads on its own | `app/src-tauri/templates/AGENTS.template.md` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
@@ -31,6 +31,9 @@ old chat page and store are gone.
 | The `@` menu's candidate files | `searchMentionFiles` in `app/src/lib/db.ts` |
 | Health and the per-job model rows in Settings → AI | `app/src/pages/settings/AiPage.tsx` |
 | Which agent, model and level each headless job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
+| The lecture brief a dock thread is scoped to | `instructions` in `app/src-tauri/src/harness/mod.rs` |
+| The frame grab a message's moment carries | `lecture_grab_frame` in `app/src-tauri/src/chapters.rs`, `app/src/lib/lectures.ts` |
+| The lecture player's dock chat, and its composer | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx` |
 | `oculus agent` | `app/src-tauri/src/bin/oculus.rs` |
 
 ## How it connects
@@ -136,8 +139,10 @@ old chat page and store are gone.
   as the shape of a *headless* agent job here: it names its own provider,
   model and reasoning level from the registry below rather than chat's
   selection, it collects
-  the `AssistantMessage` text and parses it itself, and the database write is
-  Rust's — the agent replies with JSON and never goes near a table, because
+  the `AssistantMessage` text and parses it itself, its `on_event` closure is
+  what the lecture panel draws a live "what it is doing" line from — the same
+  `ToolStarted` titles the timeline uses, in a job with no timeline — and the
+  database write is Rust's — the agent replies with JSON and never goes near a table, because
   chapters are derived data rather than the student's own planning. Thread id
   0's raw log (`agents/threads/0.ndjson`) is where such a run's provider lines
   land, alongside the shared Codex server's.
@@ -230,10 +235,10 @@ often when switching threads quickly, which is when you stop settling on the
 text. The right-hand strip is the one exception and is meant to be: the delete
 control, and a spinner in its place while a turn runs.
 
-**Switching does not blank the timeline.** `open` in `harnessStore` leaves the
-rows of the thread being left on screen for the few milliseconds the read
-takes, and returns early rather than re-reading the thread already open.
-Clearing `items` first put the page in the state that *is* the empty composer
+**Switching does not blank the timeline.** `open` in `harnessStore` hands the
+rows of the thread being left to the one arriving, for the few milliseconds the
+read takes, and returns early rather than re-reading the thread already open.
+Arriving with no rows put the page in the state that *is* the empty composer
 — no rows and nothing running — so every switch flashed the "Ask Oculus
 anything" hero and re-mounted the composer under it before the rows landed.
 
@@ -397,6 +402,17 @@ in the preview harness:
 Together: 400 deltas over that thread went from 402 React commits and 6.2s of
 render (15ms each — a dropped frame per token) to 34 commits and 55ms, and
 opening the thread from 53ms of render to 39ms.
+
+**Rows are keyed by thread.** `items` in `app/src/stores/harnessStore.ts` is a
+map of thread id to rows, not one timeline: two views — the Chat page and the
+lecture player's dock — can hold different threads at the same time, and a
+single "what is on screen" would have dropped the rows of whichever one was not
+active. `live`, `queued` and `contextDrift` were already per thread and the
+event fold already routed by thread id, so only the push changed: it asks
+whether a thread's rows are held rather than whether they are the open ones.
+The map keeps every thread opened this session — which is what makes coming
+back to one instant — and only deleting a thread or a view calling `release`
+shrinks it, since a single thread can carry 300KB of tool output.
 
 The composer is bb's: Enter sends, Shift+Enter breaks a line. A thread keeps
 its provider; the model can change per send, which on Claude means the next
@@ -661,12 +677,150 @@ query and packed the result into the request — because its model could only
 see what the prompt carried. A CLI agent can open the file itself, so that
 whole path was dropped rather than ported.
 
+## Lecture scope, and the moment
+
+A thread can also be scoped to one **recording** —
+`harness_threads.lecture_id` (migration 30), for the conversation the lecture
+player's dock holds beside the video. It is the subject scope's shape with a
+narrower subject and one thing it cannot do: NULL clears rather than cascades
+for the reason `subject_id` does — the conversation is the student's own and
+the lecture merely scopes it — and it is fixed at creation, because both CLIs
+bind the appended instructions at session start.
+
+**Rust reads the subject off the lecture's row, not off the payload.** The
+player has no subject picker — the recording answers that question already —
+so a `subjectId` sent alongside a lecture would be the webview repeating a
+fact the database holds, and a stale one would point the brief at the wrong
+course folder. `store::create_thread` looks it up; a lecture thread's
+`subject_id` and `lecture_id` cannot disagree.
+
+**The lecture section is appended after the subject one**, both from
+`instructions()`. It names the recording folder as `../lectures/<id>/` — every
+thread runs from `agents/`, so that is the path the agent can paste straight
+into a read — its `transcript.vtt` when one is actually on disk, the course
+folder where the deck is, and **the chapter list inline**. The chapters are
+inlined and the transcript is not, for the split
+[chapters.md](./chapters.md) makes about the same two files: a dozen short
+lines cost nothing and a tool call to fetch them is a turn the student waits
+through, where twenty thousand words of transcript is something the agent
+should open the part of that it needs. The list is read on every send rather
+than built once, so a lecture chaptered after the conversation started gets
+its chapters on the next turn — and the brief is resolved before *any* session
+is spawned, the one a rewind brings back up included, since a session opened
+without it would answer without it for the rest of the thread.
+
+The section closes with the sentence the dock depends on: the student is
+watching this lecture, and a message may carry the moment it was sent at — a
+timestamp, the last minute of transcript, and a frame.
+
+**The moment rides the prompt; it never becomes the message.**
+`SendOptions.context` is appended to what the CLI receives, after the
+student's text, under a `---` and a heading. The row stores what was typed and
+nothing else — a timeline that read back a transcript excerpt as the question
+would be a timeline of something nobody asked. What does go on the row is
+`at`, the playhead's second, in the user item's `meta`, so the bubble can say
+"at 3:40"; it travels the way every other fact does, on
+`HarnessEvent::UserMessage`, so `store::apply` is the one place that writes
+it. `harness_edit_resend` and the rewind path carry both like any other
+option.
+
+**`lecture_grab_frame` is the picture half of that moment.** One JPEG of the
+playhead's second into `lectures/<id>/frames/live/<seconds>.jpg` — its own
+subfolder, so a message's grab can never collide with a chaptering run's
+frames in the folder above, and overwritten freely. It reuses that job's
+probe-and-grab rather than a bare ffmpeg call, because the splash-screen
+defence ([chapters.md](./chapters.md)) is exactly as load-bearing for a frame
+the *student* asked about. What it returns is the path the **agent** can read,
+`../lectures/<id>/frames/live/<seconds>.jpg`: the webview never opens the file
+— it puts the string in the message. A lecture with no downloaded recording is
+refused the way `chapters::run` refuses one.
+
+## The dock's chat
+
+The player's dock reads a recording three ways, and the third is a
+conversation about it ([frontend.md](./frontend.md) for the dock itself). It is
+the Claude Code side panel's shape at a third of the width: the thread's name,
+a history button, a new-thread button, the timeline, a composer.
+
+**Available on every recording, which is what makes the dock unconditional.**
+Chapters need a job to have been run and Transcript needs a file on disk; a
+conversation needs neither, so the Chat tab is never filtered out of the strip
+and there is no lecture whose dock is empty.
+
+**The timeline is the page's, unchanged.** `Timeline` takes the same
+`questions` and `pending` actions here, so edit, retry, rewind and the queued
+bubble all work in the dock; the stick-to-bottom scroll is the one piece that
+was lifted out of `ChatPage.tsx` into `app/src/hooks/useStickToBottom.ts`, so
+"has the reader scrolled away" has one answer rather than two. What the dock
+does not draw is the question rail — it hides itself below a 760px column
+anyway — and the usage wheel, which is a number for the page's composer to
+carry.
+
+**The panel owns its thread id; the store's `activeId` stays the Chat page's.**
+That is what the per-thread `items` map above is for. `load` puts the dock's
+rows in it and `release` takes them out when the tab or the lecture changes,
+because a dock walked through twenty lectures would otherwise hold twenty
+timelines. Which thread each lecture is on lives in a module-level `Map`, for
+the reason `startedAt` does in `useLectureChapters`: the player unmounts on
+every app-tab switch, and a conversation that reset to the newest thread under
+someone who had deliberately gone back to an older one is a worse lie than no
+memory at all. `null` is a real answer in that map — it is *New thread* having
+been pressed — so the key's presence, not its value, is what says the choice
+has been made. A lecture not in it opens on its most recent thread
+(`getLectureThreads`), or on the empty composer.
+
+**The history popover borrows `ProviderMark` and nothing else.**
+`ThreadList` is the page's column — groups, a fold, delete confirms — and is
+built for it; this list answers one question, so it is the thread's name, its
+agent's mark and how long ago it was. The same threads also appear on the Chat
+page under their subject, with the app's lecture icon on the row, so nothing
+lives only in the dock. Opening one there works; it simply has no playhead to
+attach.
+
+**The composer is a sibling of the page's, not a variant of it.** The two
+boxes carry different things because they answer different questions. The page's
+opens a conversation, so it has the subject select and the `@` file menu; the
+dock's has neither, because the lecture fixes the subject and the agent has
+already been handed the recording folder (a file is typed as a path). What it
+adds is the moment: a toggle and a chip, on by default. Threading a `compact`
+flag and four "not here" props through one component would have left the shared
+one harder to read than both of them are apart. The model picker *is* shared,
+and it is the same session-wide selection the page's composer sets — every send
+still names an explicit model and level.
+
+**The chip must not re-render the dock.** `TranscriptPanel` is memoised against
+a player that re-renders four times a second on `timeupdate`, and the whole
+reason the virtualised transcript stays smooth beside a decoding video is that
+nothing time-varying reaches it. So the playhead travels as a **ref** whose
+identity never changes: the chip ticks itself off it once a second — the shape
+`Running`'s elapsed clock uses in `ChaptersPanel` — and the send reads it there
+rather than from a prop that would be a frame behind. The Chat tab's props are
+a second memoised bag beside `chapters`, built over stable values only.
+
+**The moment is built by the player at send time**
+(`buildMoment` in `LecturePlayer.tsx`): the second itself, the chapter the
+playhead is in, the transcript cues of the minute before inlined as plain text,
+and the path from `lectureGrabFrame`. It goes out as `SendOptions.context` with
+the second as `SendOptions.at` — appended to the prompt, never the message, as
+above. A minute of transcript is a few hundred words where the file is twenty
+thousand, which is why this one is inlined and the file is only named. **A
+frame that cannot be grabbed drops its line and the message still goes**: a
+lecture whose video was never downloaded is refused by `lecture_grab_frame`,
+and losing the question over a missing picture would be the wrong half to lose.
+Sending does not touch playback.
+
+The chip shows the timestamp it will send and tracks the playhead until the
+send; what freezes is the row. `at` rides `HarnessEvent::UserMessage` as well
+as the row Rust writes, so the bubble says "at 3:40" from the moment it appears
+rather than after a reload, in the body font with `tabular-nums` beside the
+time the question was asked.
+
 ## Stages
 
 Built: the two bridges with recorded fixtures and replay tests, `oculus
 agent` as the headless proof, tables and lifecycle, the page, subject scope
 and the `@` file menu, the message queue, stopping a turn, going back
-(edit, retry, rewind), and the per-job model registry above. Not yet: approvals and native questions routed to the UI, steering
+(edit, retry, rewind), the per-job model registry above, and the lecture player's dock chat. Not yet: approvals and native questions routed to the UI, steering
 mid-turn (bb's `turn/steer` and a second stdin line — the queue is the
 waiting-room version of it, not steering), the plan/todo card, branching (rewind
 deliberately does not), and a third bridge for the API path when BYOK

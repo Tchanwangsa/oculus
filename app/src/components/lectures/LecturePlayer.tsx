@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useBlocker, useInRouterContext } from "react-router-dom";
 import {
   ArrowsIn,
   ArrowsOut,
@@ -30,17 +29,13 @@ import {
 } from "@/lib/db";
 import {
   LECTURE_PROGRESS_EVENT,
-  isLecturePlaying,
-  ownsPlayback,
   parkLectureVideos,
   playbackClaim,
-  stopLecturePlayback,
   syncLectureSources,
   videoForSource,
   type SourcePlan,
 } from "@/lib/lecturePlayback";
-import { useTabStore } from "@/stores/tabStore";
-import { confirmLeavingLecture } from "@/stores/leaveLectureStore";
+import { useTabActive, useTabId } from "@/components/tabs/TabContext";
 import {
   parseVtt,
   chapterAt,
@@ -48,13 +43,15 @@ import {
   fmtDuration,
   fmtTime,
   fmtLectureDate,
+  lectureGrabFrame,
   type Cue,
 } from "@/lib/lectures";
 import { useLectureChapters } from "@/hooks/useLectureChapters";
 import type { ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
+import type { LectureChatPanelProps } from "@/components/lectures/LectureChatPanel";
 import { useTranscriptDock } from "@/hooks/useTranscriptDock";
 import { PIP_CORNERS, useSourceLayout, type PipCorner } from "@/hooks/useSourceLayout";
-import { usePlayerPrefs } from "@/stores/playerPrefsStore";
+import { usePlayerPrefs, type DockTab } from "@/stores/playerPrefsStore";
 import {
   LayoutControl,
   SOURCES,
@@ -70,7 +67,22 @@ import {
   DockDropPreview,
   DockResizeHandle,
   TranscriptPanel,
+  tabInFront,
 } from "@/components/lectures/TranscriptPanel";
+
+/** How much transcript the moment carries: the minute before the playhead,
+ *  which is what "I zoned out, what was that" reaches for. Longer and the
+ *  excerpt starts to be the conversation rather than its context. */
+const MOMENT_TRANSCRIPT_S = 60;
+
+/** What the dock button calls the tab it would show or hide. The button used
+ *  to guess from what the recording had; with three tabs, and Chat on every
+ *  recording, the only honest answer is the one in front. */
+const DOCK_TAB_NOUN: Record<DockTab, string> = {
+  chapters: "chapters",
+  transcript: "transcript",
+  chat: "chat",
+};
 
 /**
  * Is a panel on screen right now?
@@ -381,45 +393,6 @@ function StackDivider({
   );
 }
 
-/**
- * Asks before a navigation walks away from a playing lecture.
- *
- * Switching tabs leaves the lecture playing behind a tab you can get back to.
- * Navigating *this* tab somewhere else does not — the lecture would be playing
- * with nothing on screen owning it — so that one asks first.
- *
- * The check is which tab is active at the moment of the navigation: the strip
- * sets the destination tab active before it navigates, so a tab switch is
- * already "some other tab" here, while a sidebar click from the lecture's own
- * tab is still this one.
- *
- * Its own component so the player can mount it only where a router exists.
- */
-function LeaveGuard() {
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      isLecturePlaying() &&
-      ownsPlayback(useTabStore.getState().activeId) &&
-      currentLocation.pathname + currentLocation.search !==
-        nextLocation.pathname + nextLocation.search,
-  );
-
-  useEffect(() => {
-    if (blocker.state !== "blocked") return;
-    confirmLeavingLecture(
-      () => {
-        stopLecturePlayback();
-        blocker.proceed();
-      },
-      // Either way the blocker has to be released, or the router stays stuck
-      // on a navigation nobody is going to answer twice.
-      () => blocker.reset(),
-    );
-  }, [blocker]);
-
-  return null;
-}
-
 interface LecturePlayerProps {
   lecture: Lecture;
   /** Fired after anything persisted changes (progress, downloads). */
@@ -448,6 +421,17 @@ export function LecturePlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   /**
+   * The playhead, for anything that must not re-render with it.
+   *
+   * `TranscriptPanel` is memoised against this component, which re-renders
+   * four times a second on `timeupdate`; the dock's chat composer needs the
+   * second the message will carry, and a prop would throw that memo away on
+   * every frame and put the virtualised transcript back beside a decoding
+   * video. The chip ticks itself off this once a second and the send reads it
+   * here (`LectureChatPanel`).
+   */
+  const atRef = useRef(0);
+  /**
    * The file's own length, which is not always the catalogue's. Echo360 reports
    * a lesson duration from its scheduling data, and the recording it hands over
    * runs a little past it — enough that the clock read `1:55:00 / 1:54:46` at
@@ -468,8 +452,20 @@ export function LecturePlayer({
   // restart. The per-lecture bit is the playback position, and that is in the
   // DB (`lectures.progress_seconds`).
   const speed = usePlayerPrefs((s) => s.speed);
-  /** Playback belongs to the tab the player is mounted in; see below. */
-  const activeTabId = useTabStore((s) => s.activeId);
+  /**
+   * Which tab this player is *in*, and whether that tab is the one in front.
+   *
+   * Every tab stays mounted (`app/src/components/tabs/TabPane.tsx`), so being
+   * rendered is not being looked at, and there is one `<video>` per source for
+   * the whole app — so a second lecture tab behind this one is a second player
+   * pointed at the same element. Both of them answering the space bar toggled
+   * play twice and left it exactly where it was, which is why pausing
+   * sometimes did nothing at all; both of them claiming on a tab switch left
+   * the picture in whichever pane happened to mount last. A player that is not
+   * on screen does neither.
+   */
+  const tabId = useTabId();
+  const onScreen = useTabActive();
   const volume = usePlayerPrefs((s) => s.volume);
   const muted = usePlayerPrefs((s) => s.muted);
   const captionsEnabled = usePlayerPrefs((s) => s.captionsEnabled);
@@ -762,6 +758,7 @@ export function LecturePlayer({
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
 
   useEffect(() => {
+    if (!onScreen) return;
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
@@ -815,7 +812,7 @@ export function LecturePlayer({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleToggleFullscreen]);
+  }, [handleToggleFullscreen, onScreen]);
 
   // ── Downloads ────────────────────────────────────────────────────────────
 
@@ -841,17 +838,23 @@ export function LecturePlayer({
   };
 
   // What the dock button does, so T does the same three-way: parse the
-  // transcript if it is on disk but not loaded, fetch it if this lecture has
-  // never had one *and* the dock would otherwise be empty, otherwise show or
-  // hide the panel.
+  // transcript if it is on disk but not loaded, fetch it if the transcript is
+  // the tab being asked for and this lecture has never had one, otherwise show
+  // or hide the panel.
+  //
+  // That middle branch used to read "and the dock would otherwise be empty",
+  // which no longer describes any lecture — Chat is on all of them. It is the
+  // *preference* that is tested and not the tab in front, because a recording
+  // with no transcript has that tab dropped from the strip while the
+  // preference survives (`tabInFront`): someone who reads transcripts pressing
+  // T is asking for the transcript, and this is the only place the player
+  // offers to fetch one.
   const toggleTranscript = () => {
     if (lecture.transcript_path && cues.length === 0) {
       loadTranscript(lecture.transcript_path);
-    } else if (!lecture.transcript_path && !hasChapterState) {
+    } else if (!lecture.transcript_path && dockTab === "transcript") {
       handleDownloadTranscript();
     } else {
-      // There is a dock either way — chapters are the other half of it, so a
-      // lecture with chapters and no transcript still has a panel to hide.
       setPrefs({ transcriptVisible: !transcriptVisible });
     }
   };
@@ -872,6 +875,7 @@ export function LecturePlayer({
     if (!v) return;
     const t = v.currentTime;
     setCurrentTime(t);
+    atRef.current = t;
 
     let idx = -1;
     for (let i = cues.length - 1; i >= 0; i--) {
@@ -954,7 +958,10 @@ export function LecturePlayer({
 
   useEffect(() => {
     const mainHost = mainHostRef.current;
-    if (!mainHost || !mainSrc) {
+    // Behind another tab there is nothing to adopt into: the elements stay with
+    // whoever has them (playing, if they were — see the cleanup below), and
+    // this player picks them back up when its pane comes forward.
+    if (!mainHost || !mainSrc || !onScreen) {
       videoRef.current = null;
       setLeaderEl(null);
       return;
@@ -970,7 +977,7 @@ export function LecturePlayer({
       plan.push({ source: otherSource, src: secondSrc, host: secondHost });
     }
 
-    const v = syncLectureSources(lecture, plan, activeTabId);
+    const v = syncLectureSources(lecture, plan, tabId);
     // Kept for the cleanup: parking is "put these back if they are still
     // mine", never "put back whatever is out there". Another player may have
     // taken them over in between — expanding the panel into a tab is exactly
@@ -1045,20 +1052,7 @@ export function LecturePlayer({
       parkLectureVideos(claim);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lecture.id, urls[1], urls[2], layout, mainSource, activeTabId]);
-
-  // ── Leaving ──────────────────────────────────────────────────────────────
-
-  // The guard is a child, and a conditional one, because `useBlocker` is only
-  // legal inside a router: the routers in this app are one per tab and live
-  // below the shell (`app/src/components/tabs/TabPane.tsx`), while the side
-  // panel is shell furniture mounted outside every one of them. Calling the
-  // hook here unconditionally threw "useBlocker must be used within a data
-  // router" the moment a lecture opened in the panel. It is also the right
-  // condition rather than a workaround: a panel player has no navigation that
-  // could unmount it — the panel stays put while the page behind it moves —
-  // so there is nothing there to guard against.
-  const inRouter = useInRouterContext();
+  }, [lecture.id, urls[1], urls[2], layout, mainSource, onScreen, tabId]);
 
   // Progress is written by the module, including while nothing is mounted;
   // the list this player sits in still wants to hear about it.
@@ -1070,17 +1064,17 @@ export function LecturePlayer({
 
   // ── Render ───────────────────────────────────────────────────────────────
 
-  // Mounted whenever the dock has something to show, shown when the preference
-  // says so: the panel slides in and out, and a slide needs both ends on
-  // screen. Chapters count as something to show on their own — a run can be in
-  // flight, or have failed, on a lecture whose transcript is not on disk.
+  // The dock is always mounted and shown when the preference says so — it
+  // slides in and out, and a slide needs both ends on screen.
+  //
+  // It used to be conditional: a lecture with no transcript on disk and no
+  // chaptering run had nothing to put in the panel. Chat has no such
+  // precondition — no file, no job — so every recording has a dock now, and
+  // the tab strip is the only thing that varies with what the recording has.
   const hasTranscript = cues.length > 0;
-  const hasChapterState =
-    chapterState.chapters.length > 0 ||
-    chapterState.status === "running" ||
-    chapterState.status === "error";
-  const hasDock = hasTranscript || hasChapterState;
-  const showDock = transcriptVisible && hasDock;
+  const showDock = transcriptVisible;
+  /** The tab the dock is actually showing — what T shows or hides. */
+  const frontTab = tabInFront(dockTab, hasTranscript);
 
   /** The chapter the playhead is in, and how far through it we are. */
   const activeChapterIdx = chapterAt(chapterStarts, currentTime);
@@ -1111,6 +1105,7 @@ export function LecturePlayer({
       status: chapterState.status,
       error: chapterState.error,
       since: chapterState.since,
+      progress: chapterState.progress,
       busy: chapterState.busy,
       downloaded: !!lecture.video_path,
       onSeek: handleCueSeek,
@@ -1121,6 +1116,7 @@ export function LecturePlayer({
       chapterState.status,
       chapterState.error,
       chapterState.since,
+      chapterState.progress,
       chapterState.busy,
       chapterState.find,
       activeChapterIdx,
@@ -1128,6 +1124,64 @@ export function LecturePlayer({
       lecture.video_path,
       handleCueSeek,
     ],
+  );
+
+  /**
+   * The moment a message from the dock carries, built here because this is
+   * where the playhead, the cues and the chapters already are.
+   *
+   * It goes out as `SendOptions.context` — appended to the prompt the CLI
+   * receives, never stored as the message (`docs/harness.md`) — with the
+   * second itself as `SendOptions.at`, which is what the bubble reads back.
+   * The transcript is inlined rather than pointed at: a minute of cues is a
+   * few hundred words, where the whole file is twenty thousand and the agent
+   * has the path for that in its instructions.
+   *
+   * **A frame that cannot be grabbed drops its line and nothing else.** A
+   * lecture whose video has never been downloaded is refused by
+   * `lecture_grab_frame`, and losing the message over a missing picture would
+   * be the wrong half to lose.
+   */
+  const buildMoment = useCallback(
+    async (at: number): Promise<string> => {
+      const parts: string[] = [
+        `The student is at ${fmtTime(at, true)} of this recording (second ${at}).`,
+      ];
+
+      const idx = chapterAt(chapterStarts, at);
+      const chapter = idx >= 0 ? chapterState.chapters[idx] : null;
+      if (chapter) {
+        parts.push(
+          `That is inside chapter ${idx + 1}, "${chapter.title}", which starts at ${fmtTime(chapter.start_seconds, true)}.`,
+        );
+      }
+
+      const from = Math.max(0, at - MOMENT_TRANSCRIPT_S);
+      const said = cues
+        .filter((c) => c.start >= from && c.start <= at)
+        .map((c) => c.text)
+        .join(" ")
+        .trim();
+      if (said) {
+        parts.push(
+          `What was said between ${fmtTime(from, true)} and ${fmtTime(at, true)}:\n\n${said}`,
+        );
+      }
+
+      const frame = await lectureGrabFrame(lecture.id, at).catch(() => null);
+      if (frame) parts.push(`A frame of the screen at that second: \`${frame}\``);
+
+      return parts.join("\n\n");
+    },
+    [lecture.id, cues, chapterStarts, chapterState.chapters],
+  );
+
+  // The Chat tab's bag, beside `chaptersProps` and memoised for the same
+  // reason. Everything in it is stable across a `timeupdate`: the playhead
+  // travels by ref, not by value.
+  const chatProps: LectureChatPanelProps = useMemo(
+    () => ({ lectureId: lecture.id, atRef, buildMoment }),
+    [lecture.id, buildMoment],
   );
 
   return (
@@ -1145,8 +1199,6 @@ export function LecturePlayer({
         dock === "left" && "flex-row-reverse",
       )}
     >
-      {inRouter && <LeaveGuard />}
-
       {/* Video + controls stack */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
         {/* Video area — the controls live over the frame, YouTube-style */}
@@ -1412,20 +1464,15 @@ export function LecturePlayer({
                   />
                 )}
 
-                {/* The dock, not only the transcript: with chapters and no
-                    transcript on disk there is still a panel to show or hide,
-                    and the label says which of the two it is holding. */}
+                {/* The dock, not only the transcript, and the label names the
+                    tab in front rather than guessing from what the recording
+                    has — with three tabs and Chat on every one of them, what
+                    the button hides is whatever you were reading. */}
                 <ControlButton
                   label={
-                    !hasDock
+                    !lecture.transcript_path && dockTab === "transcript"
                       ? "Download transcript"
-                      : hasTranscript
-                        ? showDock
-                          ? "Hide transcript (T)"
-                          : "Show transcript (T)"
-                        : showDock
-                          ? "Hide chapters (T)"
-                          : "Show chapters (T)"
+                      : `${showDock ? "Hide" : "Show"} ${DOCK_TAB_NOUN[frontTab]} (T)`
                   }
                   active={showDock}
                   onClick={toggleTranscript}
@@ -1467,29 +1514,26 @@ export function LecturePlayer({
         )}
       </div>
 
-      {/* The dock — chapters and transcript, dragged to any edge, dragged
-          wider from its divider */}
-      {hasDock && (
-        <>
-          {showDock && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
-          <TranscriptPanel
-            cues={cues}
-            activeCueIdx={activeCueIdx}
-            tab={dockTab}
-            onTabChange={(t) => setPrefs({ dockTab: t })}
-            chapters={chaptersProps}
-            dock={dock}
-            size={size}
-            open={showDock}
-            resizing={resizing}
-            onSeek={handleCueSeek}
-            onHeaderPointerDown={startDockDrag}
-            following={following}
-            onScrollAway={handleScrollAway}
-            onBackToLive={handleBackToLive}
-          />
-        </>
-      )}
+      {/* The dock — chapters, transcript and chat, dragged to any edge,
+          dragged wider from its divider */}
+      {showDock && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
+      <TranscriptPanel
+        cues={cues}
+        activeCueIdx={activeCueIdx}
+        tab={dockTab}
+        onTabChange={(t) => setPrefs({ dockTab: t })}
+        chapters={chaptersProps}
+        chat={chatProps}
+        dock={dock}
+        size={size}
+        open={showDock}
+        resizing={resizing}
+        onSeek={handleCueSeek}
+        onHeaderPointerDown={startDockDrag}
+        following={following}
+        onScrollAway={handleScrollAway}
+        onBackToLive={handleBackToLive}
+      />
 
       {dropTarget && (
         <DockDropPreview dock={dropTarget} height={height} width={width} />

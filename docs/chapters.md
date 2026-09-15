@@ -24,10 +24,12 @@ readings in the player](#three-readings-in-the-player).
 | `lecture_chapters` + the three `lectures` columns (migration 29) | `app/src-tauri/src/lib.rs` |
 | The job itself — detect, grab, ask, validate, write | `run` in `app/src-tauri/src/chapters.rs` |
 | `oculus lecture candidates`, `oculus lecture chapters` | `app/src-tauri/src/bin/oculus.rs` |
-| The app's trigger, its event, and the startup sweep | `chapters::app` in `app/src-tauri/src/chapters.rs` |
+| The app's trigger, its two events, and the startup sweep | `chapters::app` in `app/src-tauri/src/chapters.rs` |
+| The phases a run reports, and where each one fires | `Step` in `app/src-tauri/src/chapters.rs` |
 | Which agent and model the job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
 | The Settings → AI row that picks them | `app/src/pages/settings/AiPage.tsx` |
-| The frontend binding, the event name, the derived ends | `app/src/lib/lectures.ts` |
+| The frontend binding, the two event names, the derived ends | `app/src/lib/lectures.ts` |
+| The tool verbs the running panel borrows from the timeline | `toolVerb` in `app/src/lib/harness.ts` |
 | Reading the rows and the job's state in the app | `getChapters` / `getChapterStatus` in `app/src/lib/db.ts` |
 | The player's chapter state, and the event it listens on | `app/src/hooks/useLectureChapters.ts` |
 | The chapter list, and every state it has | `app/src/components/lectures/ChaptersPanel.tsx` |
@@ -125,7 +127,10 @@ titles and formulas legible, which is the size a model will need.
   a detailed frame depends on the deck, while a blank or a splash loses to a
   real slide by a wide margin in any deck. A probe costs ~40 ms, so the whole
   thing adds well under a second per candidate. The file keeps the **boundary**
-  second in its name, not the offset one.
+  second in its name, not the offset one. The chat dock's live grab of the
+  playhead's moment shares that probing (`grab_frame`, and
+  [harness.md](./harness.md)) — a frame the student asked about can land on a
+  dropout exactly as easily as a boundary's can.
 
 ## Naming them is an agent job
 
@@ -255,22 +260,69 @@ and the message on a failure.
   refused up front — the only check worth making the caller wait for, since two
   runs would spend two subscription turns and race each other's write.
 
+## Saying what it is doing
+
+Nine minutes of spinner is indistinguishable from nine minutes of hung, and the
+job is not actually opaque: it decodes a countable number of frames, grabs a
+countable number of stills, and then spends most of the run inside an agent
+turn that says out loud which file it is opening. All of that was already
+flowing and being dropped — `run_once` takes an `on_event` closure, and the app
+passed `|_| {}`.
+
+**Two reporters, because there are two kinds of thing to report.** The
+pipeline's own phases come out of `chapters::run` as `Step` — `Decoding`,
+`Detected`, `Grabbing`, `Asking`, `Writing` — and the agent turn's detail comes
+out of the harness as `HarnessEvent`, the same stream the chat timeline draws.
+Folding them into one callback would mean `run` inventing a vocabulary for
+events that already have one; keeping them apart means the CLI can take the
+phases and ignore the rest, which is exactly what it does (its progress is the
+agent's printed tool rows).
+
+**One event out, `lecture-chapter-progress`, separate from
+`lecture-chapters`.** The two have different lifetimes: a finish is a fact the
+panel re-reads SQLite on, a step is a line it paints and forgets. Nothing about
+a step is persisted — there is no column for it, and there should not be one,
+because the decode would write to the row hundreds of times.
+
+- **The decode reports four times a second, not four hundred.** One sampled
+  frame is one second of recording, so a 107-minute lecture would otherwise
+  push 6400 events through to move a percentage that has a hundred places to
+  be. `sample_diffs` fires per frame and `run` throttles; the callback is where
+  the throttle *isn't*, so a future caller that wants every frame can have it.
+- **The agent's steps are its tool calls.** `ToolStarted` carries a `ToolKind`
+  and a one-line title already — "1386.jpg", a `Grep` pattern, a command — so
+  the panel says "Reading 1386.jpg" using `toolVerb`, which moved from the
+  timeline's `WorkRow` into `app/src/lib/harness.ts` so both callers share one
+  vocabulary for one enum.
+- **The first delta of the reply is its own phase.** The reply *is* the chapter
+  JSON, so the moment text starts arriving the agent has made up its mind about
+  the whole lecture; without that the panel would sit on whichever file
+  happened to be read last for a minute or more. It fires once per run, on an
+  `AtomicBool`.
+- **What is deliberately not streamed is the chapters themselves.** `validate`
+  is all-or-nothing on purpose (one bad boundary rolls the set back), and
+  drip-feeding half-validated chapters into the panel would fight that
+  directly.
+
 ## Three readings in the player
 
 Chapters are three different questions, so they are drawn three times over
 (`app/src/components/lectures/LecturePlayer.tsx`, and see
 [frontend.md](./frontend.md) for the player's own shape).
 
-**The dock is two tabs.** What was the transcript panel's header is now a
-`ViewTabs` strip — *Chapters*, *Transcript* — sitting on the border it already
-had, with the `DotsSixVertical` and the drag-to-dock gesture untouched. The
+**Chapters are one of the dock's tabs.** What was the transcript panel's
+header is a `ViewTabs` strip — *Chapters*, *Transcript*, *Chat*
+([harness.md](./harness.md)) — sitting on the border it already had, with the
+`DotsSixVertical` and the drag-to-dock gesture untouched. The
 tabs stop the pointerdown from reaching the header: `startDockDrag` captures
 the pointer on the element it fires from, which retargets the pointerup onto
 the header, and a click needs both ends on one target — without that the tab
 would never register one. Everything around the tabs still drags. There is no
 "In this video" heading over them; the dock is 200px wide at its narrowest and
 its subject is never in doubt. The Transcript tab is only offered when there
-are cues, since a tab that could only ever be empty is not a tab.
+are cues, since a tab that could only ever be empty is not a tab; Chat needs
+neither a file nor a run and so is always offered, which is what makes the dock
+itself unconditional.
 
 **The list follows playback**
 (`app/src/components/lectures/ChaptersPanel.tsx`): every chapter collapsed to
@@ -318,14 +370,17 @@ and no placeholder among them:
 - **Nothing yet.** A **Find chapters** button, and what it costs: 8–11
   minutes.
 - **`running`.** A spinner in `brand` — the accent the app spends on work in
-  flight — and a clock counting *up*. There is no intermediate progress to
-  report between the ffmpeg pass and the agent's one turn, and a bar filling
-  towards an estimate reaches the end and keeps waiting, which is exactly what
-  hung looks like. A run *this session* started has its start time in a
-  module-level map, because the player unmounts on every tab switch and the job
-  outlives it by eight minutes; a run already in flight when the app started
-  has no start time anywhere — `chaptered_at` is stamped by a terminal status
-  only — and is shown without a clock rather than with a wrong one.
+  flight — the phase it is on, the step under it, and a clock counting *up*.
+  See [Saying what it is doing](#saying-what-it-is-doing). There is still no
+  bar: a fill towards an estimate reaches the end and keeps waiting, which is
+  exactly what hung looks like, and the agent turn — most of the run — cannot
+  say how far through itself it is. A run *this session* started has its start
+  time in a module-level map, because the player unmounts on every tab switch
+  and the job outlives it by eight minutes; a run already in flight when the
+  app started has no start time anywhere — `chaptered_at` is stamped by a
+  terminal status only — and is shown without a clock rather than with a wrong
+  one. Its steps are in a second map for the same reason and with the same
+  gap.
 - **`error`.** `chapter_error` verbatim, because it is the agent's own
   failure, and a retry.
 - **Chapters.** The list, with **Regenerate** in a footer. A regenerate that

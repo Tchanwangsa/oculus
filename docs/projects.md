@@ -135,6 +135,16 @@ from outside are these.
   this needed the same packing, and made generic over the item because the two
   measure a span differently (a class in epoch milliseconds, a task bar in
   pixels) and the packing never needs to know which.
+- **The index draws a group only once it has something in it**, plus Personal,
+  which is always offered because it is where a subject-less project goes and
+  it cannot be discovered otherwise. That keeps a term's worth of empty
+  headings off the page, but it also means a group's own inline composer can
+  only ever add to a subject that already has projects — so the page carries a
+  second door beside the title
+  (`app/src/components/projects/NewProjectButton.tsx`), where the group is a
+  field you fill in rather than a heading you have to find first. It is how a
+  subject's *first* project gets started from the index at all; the subject's
+  own Projects tab is the other way in, and needs no picker.
 - **The calendar reads tasks live rather than copying rows.** See
   [calendar.md](./calendar.md) — a task re-dated, finished or deleted on its
   board would otherwise leave a row on the grid that nothing cleans up, since

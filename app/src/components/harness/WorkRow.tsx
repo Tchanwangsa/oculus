@@ -16,7 +16,7 @@ import {
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import { CodeText } from "@/components/markdown/MdComponents";
-import { parseToolMeta, type HarnessItem, type ToolKind } from "@/lib/harness";
+import { parseToolMeta, toolVerb, type HarnessItem, type ToolKind } from "@/lib/harness";
 import { libraryPath, openLibraryPath } from "@/lib/openFile";
 import { cn } from "@/lib/utils";
 
@@ -39,22 +39,6 @@ export const TOOL_ICON: Record<ToolKind, Icon> = {
   plan: ListChecks,
   other: Wrench,
 };
-
-/** "Ran", "Read", "Edited" — past tense once done, present while running. */
-function verb(kind: ToolKind, done: boolean): string {
-  switch (kind) {
-    case "read": return done ? "Read" : "Reading";
-    case "edit": return done ? "Edited" : "Editing";
-    case "write": return done ? "Wrote" : "Writing";
-    case "bash": return done ? "Ran" : "Running";
-    case "search": return done ? "Searched" : "Searching";
-    case "oculus_cli": return done ? "Looked up" : "Looking up";
-    case "task": return done ? "Ran subagent" : "Running subagent";
-    case "web": return done ? "Fetched" : "Fetching";
-    case "plan": return done ? "Updated plan" : "Updating plan";
-    default: return done ? "Used" : "Using";
-  }
-}
 
 export function RowShell({
   icon: IconC,
@@ -192,7 +176,7 @@ export const ToolRow = memo(function ToolRow({
   return (
     <RowShell
       icon={TOOL_ICON[kind]}
-      title={verb(kind, done)}
+      title={toolVerb(kind, done)}
       em={item.content ?? undefined}
       dim={dim && done}
       expandable={entries.length > 0 || output.length > 0}
