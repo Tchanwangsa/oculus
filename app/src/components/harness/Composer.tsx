@@ -2,23 +2,19 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FileText, PaperPlaneTilt, Stop } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ModelPicker, type PickerProvider } from "@/components/harness/ModelPicker";
+import { ModelPicker } from "@/components/harness/ModelPicker";
 import { UsageMeter } from "@/components/harness/UsageMeter";
 import { SubjectSelect } from "@/components/harness/SubjectSelect";
 import { fileTitle } from "@/lib/openFile";
 import { displayCode } from "@/lib/format";
 import { searchMentionFiles, type MentionFile, type Subject } from "@/lib/db";
 import {
-  CLAUDE_MODELS,
-  PROVIDERS,
-  codexAsModels,
   defaultSelection,
-  harnessCodexModels,
-  type CodexModel,
   type Provider,
   type RateWindow,
   type ThreadUsage,
 } from "@/lib/harness";
+import { useProviderModels } from "@/hooks/useProviderModels";
 import { cn } from "@/lib/utils";
 
 /** How much of an `@` token to look at. Long enough for a real filename,
@@ -132,7 +128,6 @@ export function Composer({
   const ref = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [codexModels, setCodexModels] = useState<CodexModel[] | null>(null);
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
   const [files, setFiles] = useState<MentionFile[]>([]);
   const [index, setIndex] = useState(0);
@@ -158,13 +153,6 @@ export function Composer({
     onRestored?.();
   }, [restore, onRestored]);
 
-  // Codex lists its own models (`model/list`), fetched once the picker is
-  // for Codex; Claude's are the CLI's aliases.
-  useEffect(() => {
-    if (provider !== "codex" || codexModels) return;
-    harnessCodexModels().then(setCodexModels).catch(() => setCodexModels([]));
-  }, [provider, codexModels]);
-
   useEffect(() => {
     if (!mention) {
       setFiles([]);
@@ -184,14 +172,14 @@ export function Composer({
   // A subject change re-scopes what `@` may reach, so the open list is stale.
   useEffect(() => setMention(null), [subjectId]);
 
-  const pickerProviders: PickerProvider[] = PROVIDERS.map((p) =>
-    p.id === "claude"
-      ? { ...p, models: CLAUDE_MODELS }
-      : { ...p, models: codexAsModels(codexModels ?? []), loading: codexModels === null },
-  );
+  // Only the provider the picker is on is worth asking a CLI about: a
+  // composer that is on Claude should not spawn the others for lists nobody
+  // has opened the menu to see.
+  const { providers: pickerProviders } = useProviderModels(provider);
 
-  // No turn goes out without a model and a level, so an empty selection —
-  // Codex before its CLI has answered — is filled the moment a list exists.
+  // No turn goes out without a model and a level, so an empty selection — a
+  // fetched catalogue before its CLI has answered — is filled the moment a
+  // list exists.
   const active = pickerProviders.find((p) => p.id === provider);
   useEffect(() => {
     if (model || !active || active.loading || active.models.length === 0) return;

@@ -1,17 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsClockwise, CircleNotch } from "@phosphor-icons/react";
 import {
-  CLAUDE_MODELS,
-  PROVIDERS,
-  codexAsModels,
   defaultSelection,
-  harnessCodexModels,
   harnessHealth,
   type BridgeHealth,
-  type CodexModel,
   type Provider,
 } from "@/lib/harness";
-import { ModelPicker, type PickerProvider } from "@/components/harness/ModelPicker";
+import { ModelPicker } from "@/components/harness/ModelPicker";
+import { useProviderModels } from "@/hooks/useProviderModels";
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_JOB_MODELS,
@@ -44,7 +40,7 @@ function CliAgentsSection() {
   return (
     <Section
       title="CLI agents"
-      description="Chat runs Claude Code or Codex from your own machine, signed in as you — no API key, no per-token billing."
+      description="Chat runs Claude Code, Codex or opencode from your own machine, signed in as you — no API key, no per-token billing."
     >
       <div className="divide-y divide-border-subtle">
         {(health ?? []).map((h) => (
@@ -89,7 +85,6 @@ function CliAgentsSection() {
  */
 function JobModelsSection() {
   const [jobs, setJobs] = useState<JobModels | null>(null);
-  const [codex, setCodex] = useState<CodexModel[] | null>(null);
   /** What is already in the database, so the save effect below can tell an
    *  edit from the load that started it. */
   const saved = useRef<string | null>(null);
@@ -103,24 +98,12 @@ function JobModelsSection() {
       });
   }, []);
 
-  // Codex lists its own models over its CLI, and a row set to Codex has to
-  // show the model's name rather than its id — so the ask happens only when a
-  // job is actually on Codex, not merely because this page was opened.
-  const wantsCodex = !!jobs && JOBS.some((j) => jobs[j.id].provider === "codex");
-  useEffect(() => {
-    if (!wantsCodex || codex) return;
-    harnessCodexModels().then(setCodex).catch(() => setCodex([]));
-  }, [wantsCodex, codex]);
-
-  const models = useCallback(
-    (p: Provider) => (p === "claude" ? CLAUDE_MODELS : codexAsModels(codex ?? [])),
-    [codex],
-  );
-  const providers: PickerProvider[] = PROVIDERS.map((p) => ({
-    ...p,
-    models: models(p.id),
-    loading: p.id === "codex" && codex === null,
-  }));
+  // An agent whose catalogue comes from its CLI is asked only when a job is
+  // actually set to it — a row has to show its model's name rather than its
+  // id — and not merely because this page was opened. Switching a row is what
+  // asks, since `needed` changes with it.
+  const needed = useMemo(() => (jobs ? JOBS.map((j) => jobs[j.id].provider) : []), [jobs]);
+  const { providers, modelsFor } = useProviderModels(needed);
 
   const edit = (id: JobId, patch: Partial<JobSelection>) =>
     setJobs((prev) => (prev ? { ...prev, [id]: { ...prev[id], ...patch } } : prev));
@@ -140,23 +123,23 @@ function JobModelsSection() {
   }, [jobs]);
 
   /** A row sits without a model only while a provider's list is still coming
-   *  — Codex's is fetched, not compiled in — so it is filled the moment one
-   *  exists, exactly as the composer fills an empty selection. */
+   *  — every catalogue but Claude's is fetched — so it is filled the moment
+   *  one exists, exactly as the composer fills an empty selection. */
   useEffect(() => {
     if (!jobs) return;
     for (const job of JOBS) {
       const row = jobs[job.id];
       if (row.model) continue;
-      const pick = defaultSelection(models(row.provider));
+      const pick = defaultSelection(modelsFor(row.provider));
       if (pick.model) edit(job.id, { model: pick.model, reasoningEffort: pick.reasoning });
     }
-  }, [jobs, models]);
+  }, [jobs, modelsFor]);
 
   /** Switching agent takes the model and the level with it: a Claude model id
    *  means nothing to Codex. Claude's list is compiled in so the new selection
-   *  is immediate; Codex's arrives with its list, above. */
+   *  is immediate; a fetched one arrives with its list, above. */
   const switchProvider = (id: JobId, provider: Provider) => {
-    const pick = defaultSelection(models(provider));
+    const pick = defaultSelection(modelsFor(provider));
     edit(id, { provider, model: pick.model ?? "", reasoningEffort: pick.reasoning });
   };
 

@@ -4,24 +4,19 @@ import { ClockCounterClockwise, NotePencil } from "@phosphor-icons/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ProviderMark } from "@/components/harness/ProviderMark";
 import { Timeline } from "@/components/harness/Timeline";
-import { type PickerProvider } from "@/components/harness/ModelPicker";
 import { LectureChatComposer } from "@/components/lectures/LectureChatComposer";
+import { useProviderModels } from "@/hooks/useProviderModels";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { fmtAgo, sqliteUtcToMs } from "@/lib/format";
 import {
-  CLAUDE_MODELS,
-  PROVIDERS,
-  codexAsModels,
   defaultSelection,
   getLectureThreads,
-  harnessCodexModels,
   harnessEditQueued,
   harnessEditResend,
   harnessInterrupt,
   harnessRewind,
   harnessSend,
   harnessUnqueue,
-  type CodexModel,
   type HarnessThread,
   type Provider,
 } from "@/lib/harness";
@@ -96,7 +91,6 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   /** This lecture's threads, for the history popover and for the title before
    *  the store's own list has been read. */
   const [threads, setThreads] = useState<HarnessThread[]>([]);
-  const [codexModels, setCodexModels] = useState<CodexModel[] | null>(null);
   const [moment, setMoment] = useState(true);
   /** Words a stop handed back. Local rather than the store's `restore`, which
    *  is one field with no thread on it: a stop in the dock would otherwise
@@ -170,19 +164,13 @@ export const LectureChatPanel = memo(function LectureChatPanel({
     };
   }, [store, threadId]);
 
-  useEffect(() => {
-    if (activeProvider !== "codex" || codexModels) return;
-    harnessCodexModels().then(setCodexModels).catch(() => setCodexModels([]));
-  }, [activeProvider, codexModels]);
+  // The dock's picker shows the thread's own agent, so that is the one whose
+  // CLI is worth asking for a catalogue.
+  const { providers: pickerProviders } = useProviderModels(activeProvider);
 
-  const pickerProviders: PickerProvider[] = PROVIDERS.map((p) =>
-    p.id === "claude"
-      ? { ...p, models: CLAUDE_MODELS }
-      : { ...p, models: codexAsModels(codexModels ?? []), loading: codexModels === null },
-  );
-
-  // No turn goes out without a model and a level, so an empty selection —
-  // Codex before its CLI has answered — is filled the moment a list exists.
+  // No turn goes out without a model and a level, so an empty selection — a
+  // fetched catalogue before its CLI has answered — is filled the moment a
+  // list exists.
   const active = pickerProviders.find((p) => p.id === activeProvider);
   useEffect(() => {
     if (model || !active || active.loading || active.models.length === 0) return;

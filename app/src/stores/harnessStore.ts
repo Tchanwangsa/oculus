@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import {
-  CLAUDE_MODELS,
-  defaultSelection,
+  defaultSelectionFor,
   getHarnessItems,
   getHarnessThreads,
   harnessQueued,
@@ -152,10 +151,11 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   provider: "claude",
   subjectId: null,
   subjects: [],
-  // Claude's catalogue is static, so the composer can open already pointing
-  // at a real model. Codex's arrives from its CLI; the composer fills both in
-  // the moment that list lands (`Composer.tsx`).
-  ...defaultSelection(CLAUDE_MODELS),
+  // A provider whose catalogue is compiled in — Claude's is the only one —
+  // lets the composer open already pointing at a real model. A fetched one
+  // (Codex, opencode) opens on nothing and is filled the moment its list
+  // lands (`useProviderModels`).
+  ...defaultSelectionFor("claude"),
 
   loadThreads: async () => {
     const threads = await getHarnessThreads();
@@ -214,15 +214,13 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     if (id in get().items) set((s) => ({ queued: { ...s.queued, [id]: waiting } }));
   },
 
-  // The two agents share no model ids and no level vocabulary, so switching
-  // agent replaces both rather than carrying a selection that cannot apply.
-  // Codex has no static catalogue, so its selection is empty for the beat
-  // before its CLI answers and the composer fills it in.
-  setProvider: (provider) =>
-    set({
-      provider,
-      ...(provider === "claude" ? defaultSelection(CLAUDE_MODELS) : { model: null, reasoning: null }),
-    }),
+  // No two agents share model ids or a level vocabulary, so switching agent
+  // replaces both rather than carrying a selection that cannot apply. What
+  // decides whether there is a new selection to give is whether that
+  // provider's catalogue is compiled in or fetched — not which provider it is
+  // (`defaultSelectionFor`). A fetched one is empty for the beat before its
+  // CLI answers, and the picker fills it in.
+  setProvider: (provider) => set({ provider, ...defaultSelectionFor(provider) }),
   restored: () => set({ restore: null }),
   setModel: (model) => set({ model }),
   setReasoning: (reasoning) => set({ reasoning }),

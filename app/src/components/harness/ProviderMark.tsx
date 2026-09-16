@@ -1,8 +1,8 @@
-import type { SVGProps } from "react";
+import type { ComponentType, SVGProps } from "react";
 import type { Provider } from "@/lib/harness";
 
 /**
- * Vendor marks for the two CLI agents the harness drives. Both are
+ * Vendor marks for the CLI agents the harness drives. All of them are
  * `currentColor` monochrome — the same treatment bb gives them under its
  * per-provider `icons` folders — so they sit in the quiet palette like any
  * other icon and never fight the indigo accent. The caller sizes them with a
@@ -37,12 +37,45 @@ export function CodexMark(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/**
+ * opencode ships a lowercase wordmark rather than a glyph, and a word is
+ * illegible at the 14px this is drawn at — so its mark is a neutral terminal
+ * prompt, which is what the agent is. Same idiom as the two above: one
+ * `currentColor` path, no stroke, filling its viewBox to the same weight, so
+ * the three sit together in a row of controls without one reading as a logo.
+ */
+export function OpencodeMark(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      fillRule="evenodd"
+      aria-hidden
+      {...props}
+    >
+      <path d="M3.6 1.5h12.8a2.1 2.1 0 0 1 2.1 2.1v12.8a2.1 2.1 0 0 1-2.1 2.1H3.6a2.1 2.1 0 0 1-2.1-2.1V3.6a2.1 2.1 0 0 1 2.1-2.1Zm0 1.5a.6.6 0 0 0-.6.6v12.8c0 .33.27.6.6.6h12.8a.6.6 0 0 0 .6-.6V3.6a.6.6 0 0 0-.6-.6H3.6Zm2.8 3.2L10.2 10l-3.8 3.8L5 12.4 7.4 10 5 7.6 6.4 6.2Zm5.2 6.1h3.6a.75.75 0 0 1 0 1.5h-3.6a.75.75 0 0 1 0-1.5Z" />
+    </svg>
+  );
+}
+
+/**
+ * Every provider's mark, exhaustively.
+ *
+ * A `Record<Provider, …>` rather than a ternary on purpose: a ternary answered
+ * "not Claude" with the Codex mark, so a third agent would have drawn itself
+ * as Codex with nothing to catch it. Adding a provider to the union is a
+ * compile error here until its mark exists.
+ */
+const MARKS: Record<Provider, ComponentType<SVGProps<SVGSVGElement>>> = {
+  claude: ClaudeCodeMark,
+  codex: CodexMark,
+  opencode: OpencodeMark,
+};
+
 /** The mark for a provider — the tab strip, the trigger and the model rows
  *  all use it, so a thread's agent is readable at a glance. */
 export function ProviderMark({ provider, className }: { provider: Provider; className?: string }) {
-  return provider === "claude" ? (
-    <ClaudeCodeMark className={className} />
-  ) : (
-    <CodexMark className={className} />
-  );
+  const Mark = MARKS[provider];
+  return <Mark className={className} />;
 }

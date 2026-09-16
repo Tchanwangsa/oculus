@@ -10,12 +10,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDb, getSetting } from "@/lib/db";
 
-export type Provider = "claude" | "codex";
-
-export const PROVIDERS: { id: Provider; label: string }[] = [
-  { id: "claude", label: "Claude Code" },
-  { id: "codex", label: "Codex" },
-];
+export type Provider = "claude" | "codex" | "opencode";
 
 /** The reasoning levels a turn may ask for. `claude --effort` takes exactly
  *  these; Codex declares its own per model (`CodexModel.reasoningEfforts`),
@@ -115,6 +110,74 @@ export const CLAUDE_MODELS: HarnessModel[] = [
     defaultReasoningEffort: "low",
   },
 ];
+
+/** One CLI agent the harness can drive: its id, the name a person reads, and
+ *  where its catalogue comes from. */
+export interface ProviderInfo {
+  id: Provider;
+  label: string;
+  /** The models this provider has without being asked. Claude Code answers no
+   *  model-list call over `stream-json`, so its catalogue is compiled in
+   *  above; `null` says the CLI has to be asked, which is what
+   *  `fetchModels` below does. Everything that used to test
+   *  `provider === "claude"` — the composer's opening selection, what a
+   *  provider switch clears — is really asking this question. */
+  staticModels: HarnessModel[] | null;
+  /** Ask the CLI for its catalogue. Present exactly when `staticModels` is
+   *  null, and already adapted to the picker's shape, so a call site never
+   *  names a provider to know which command to invoke
+   *  (`useProviderModels` in `app/src/hooks/useProviderModels.ts`). */
+  fetchModels?: () => Promise<HarnessModel[]>;
+}
+
+/**
+ * Every provider, in the order the picker lists them. **The one place a
+ * provider is declared**: the marks (`ProviderMark.tsx`), the picker's rows,
+ * the job registry's read in `db.ts` and the composer's selection all come off
+ * this list rather than off a hardcoded pair, so adding a fourth agent is an
+ * entry here plus its mark.
+ *
+ * opencode brands itself lowercase, so the label is not title-cased.
+ */
+export const PROVIDERS: ProviderInfo[] = [
+  { id: "claude", label: "Claude Code", staticModels: CLAUDE_MODELS },
+  {
+    id: "codex",
+    label: "Codex",
+    staticModels: null,
+    fetchModels: () => harnessCodexModels().then(codexAsModels),
+  },
+  {
+    id: "opencode",
+    label: "opencode",
+    staticModels: null,
+    fetchModels: () => harnessOpencodeModels().then(opencodeAsModels),
+  },
+];
+
+export function providerInfo(provider: Provider): ProviderInfo | undefined {
+  return PROVIDERS.find((p) => p.id === provider);
+}
+
+/** Narrow a string that came out of the database — or out of an older build —
+ *  to a provider. Driven off `PROVIDERS` so it can never go stale against the
+ *  union: a stored row naming a provider this build has is kept, and one
+ *  naming a provider it does not is dropped. */
+export function isProvider(value: unknown): value is Provider {
+  return typeof value === "string" && PROVIDERS.some((p) => p.id === value);
+}
+
+/** The selection a fresh composer opens on for one provider. A provider whose
+ *  catalogue is fetched has nothing to open on until its CLI answers — the
+ *  picker fills it in the moment the list lands — so the answer there is an
+ *  empty selection rather than a guess. */
+export function defaultSelectionFor(provider: Provider): {
+  model: string | null;
+  reasoning: string | null;
+} {
+  const models = providerInfo(provider)?.staticModels;
+  return models ? defaultSelection(models) : { model: null, reasoning: null };
+}
 
 export type ToolKind =
   | "read" | "edit" | "write" | "bash" | "search" | "oculus_cli"
@@ -288,6 +351,40 @@ export function codexAsModels(models: CodexModel[]): HarnessModel[] {
     reasoningEfforts: m.reasoningEfforts,
     defaultReasoningEffort: m.defaultReasoningEffort,
     isDefault: m.isDefault,
+  }));
+}
+
+/**
+ * One row of `opencode models`. The id is that CLI's own spelling,
+ * `providerID/id` (`anthropic/claude-sonnet-4-5`) — free-form, and passed back
+ * to the CLI untouched, so nothing here parses or prettifies it.
+ *
+ * opencode calls a model's reasoning levels its **variants**; they are the
+ * same thing `claude --effort` and Codex's `reasoningEfforts` name, so the
+ * adapter below maps them onto the one field the picker reads. Everything but
+ * the id and the name is optional on the way in, the way `getJobModels` is
+ * tolerant of a stored row: a bridge that reports no variants for a model
+ * costs that model its level row, not the list its rows.
+ */
+export interface OpencodeModel {
+  id: string;
+  displayName: string;
+  description?: string;
+  variants?: string[];
+  defaultVariant?: string | null;
+  isDefault?: boolean;
+}
+
+/** `opencode models` in the shape `CLAUDE_MODELS` has, so the picker renders
+ *  all three catalogues without a special case. */
+export function opencodeAsModels(models: OpencodeModel[]): HarnessModel[] {
+  return models.map((m) => ({
+    id: m.id,
+    label: m.displayName || m.id,
+    description: m.description ?? "",
+    reasoningEfforts: m.variants ?? [],
+    defaultReasoningEffort: m.defaultVariant ?? m.variants?.[0] ?? null,
+    isDefault: m.isDefault ?? false,
   }));
 }
 
@@ -485,4 +582,8 @@ export function harnessRefreshRateLimits(provider: Provider): Promise<void> {
 
 export function harnessCodexModels(): Promise<CodexModel[]> {
   return invoke<CodexModel[]>("harness_codex_models");
+}
+
+export function harnessOpencodeModels(): Promise<OpencodeModel[]> {
+  return invoke<OpencodeModel[]>("harness_opencode_models");
 }

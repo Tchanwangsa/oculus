@@ -1,6 +1,11 @@
 import Database from "@tauri-apps/plugin-sql";
 
-import type { Provider } from "@/lib/harness";
+// `harness.ts` imports `getDb`/`getSetting` back from here, so these two are a
+// cycle. It is safe only because `isProvider` is *called* inside a function
+// body: hoist the check to module scope — the tempting
+// `new Set(PROVIDERS.map(…))` — and whichever module evaluates second reads
+// `PROVIDERS` in its TDZ and throws at import time.
+import { isProvider, type Provider } from "@/lib/harness";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -319,7 +324,11 @@ export async function getJobModels(): Promise<JobModels> {
     for (const job of JOBS) {
       const row = parsed?.[job.id];
       if (!row || typeof row.model !== "string" || !row.model.trim()) continue;
-      if (row.provider !== "claude" && row.provider !== "codex") continue;
+      // Off `PROVIDERS`, never a hardcoded pair: spelled out, the test was
+      // already one provider behind the union, and a job saved on the new
+      // agent would have been dropped back to its default on the next read
+      // with nothing to say it had been.
+      if (!isProvider(row.provider)) continue;
       out[job.id] = {
         provider: row.provider,
         model: row.model,

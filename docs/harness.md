@@ -615,9 +615,18 @@ One control does agent, model and reasoning level —
 menu is a strip of provider marks (underlined when active), the models of the
 active provider, and a row of levels under a rule. Choosing a model closes
 the menu, choosing a level does not — the level is the fine adjustment after
-the coarse one. The marks are the two `currentColor` SVGs in
+the coarse one. The marks are the `currentColor` SVGs in
 `app/src/components/harness/ProviderMark.tsx`, monochrome like bb's so they
-sit in the palette rather than fighting the indigo.
+sit in the palette rather than fighting the indigo. They are held in a
+`Record<Provider, …>` rather than picked by a ternary, so a provider added to
+the union is a compile error until its mark exists — the ternary that used to
+be there answered "not Claude" with the Codex mark.
+
+Every picker in the app assembles its list through one hook,
+`app/src/hooks/useProviderModels.ts`, which names no provider: which
+catalogues are compiled in and which are fetched from a CLI is a property of
+the `PROVIDERS` entry in `app/src/lib/harness.ts`. That file is the one place
+a provider is declared.
 
 Three things about it are deliberate:
 
