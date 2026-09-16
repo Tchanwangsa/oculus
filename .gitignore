@@ -1,4 +1,5 @@
-# Python
+# Python — the sidecar left the repo in f875bb1; these stay only so an
+# orphaned `sidecar/.venv` from an older checkout is never committed.
 __pycache__/
 *.py[cod]
 .venv/

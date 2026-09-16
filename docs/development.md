@@ -16,9 +16,10 @@ bun run ffmpeg        # fetches the ffmpeg binary into src-tauri/binaries/
 bun run pdfium        # fetches libpdfium into src-tauri/binaries/
 ```
 
-**There is no Python step any more.** `sidecar/` and its `uv sync` are not part
-of building or running the app; the directory survives only as the source Plan
-B forks into its own repo.
+**There is no Python step any more**, and no `sidecar/` directory: it left the
+tree in `f875bb1`, which is the commit the separate local-server repo forks
+from. If you have an orphaned `sidecar/.venv` from an older checkout it is
+1.2 GB of nothing — delete it.
 
 Both fetch steps also run from `beforeDevCommand` / `beforeBuildCommand`, so
 `bun run tauri dev` sets them up on its own; they are listed here because a
@@ -98,5 +99,5 @@ API limits.
 - User data lives in `~/Library/Application Support/com.tchan.oculus`
   (cookie, `oculus.db`, `courses/`, `lectures/`). Deleting it is a full
   reset, including auth.
-- `data/`, `*.db`, `sidecar/.venv/`, `app/src-tauri/binaries/` are
-  gitignored; never commit them.
+- `data/`, `*.db` and `app/src-tauri/binaries/` are gitignored; never commit
+  them.

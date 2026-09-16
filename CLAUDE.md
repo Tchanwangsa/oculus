@@ -9,10 +9,11 @@ Echo360) into a searchable personal knowledge base. Two processes:
 
 PDF parsing (MinerU) and page embedding (Voyage) are cloud calls made
 in-process from Rust, behind seams in `app/src-tauri/src/parse/` and
-`app/src-tauri/src/embed/`. **The Python sidecar is gone from the app.**
-`sidecar/` survives in the repo only as the source a separate local-server
-repo forks from; nothing in `app/` reaches it, and it is not part of building
-or running anything here.
+`app/src-tauri/src/embed/`. **The Python sidecar is gone** — code and
+directory. The last commit holding `sidecar/` is `f875bb1`, which is where the
+separate local-server repo forks from; Rust comments that cite `sidecar/*.py`
+are provenance for ported behaviour and point there. Do not re-add a Python
+process, a `uv` step or a local inference tier to this repo.
 
 Ingestion and retrieval are built. Chat is a **CLI agent** — Claude Code,
 Codex or opencode, driven as a subprocess from the library's `agents/` folder
@@ -74,8 +75,9 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   `bunx`, not `npx`.
 - Rust builds with plain cargo (via `bun run tauri dev/build`, or
   `bun run cli` for the `oculus` binary).
-- **No Python toolchain.** There is no `uv sync` step and no `.venv` in the
-  build; `sidecar/pyproject.toml` and its pins belong to the separate repo now.
+- **No Python toolchain.** There is no `uv` step, no `.venv`, and no
+  `sidecar/` — the pins that used to live in `sidecar/pyproject.toml` belong to
+  the separate repo now, and are at `f875bb1` if you need them.
 - `libpdfium` and `ffmpeg` are fetched, not vendored — `bun run pdfium` and
   `bun run ffmpeg` into the gitignored `app/src-tauri/binaries/`. The pdfium
   release tag is pinned to the Chromium revision `pdfium-render` binds
@@ -206,5 +208,5 @@ docked side panel for files and lectures, top tab strip).
 
 - Single branch: `master`. Commit messages follow the existing
   `feat:`/`fix:`/`refactor(scope):` style — read `git log --oneline` and match.
-- `data/`, `*.db`, `sidecar/.venv/`, and `app/src-tauri/binaries/` are
+- `data/`, `*.db`, and `app/src-tauri/binaries/` are
   gitignored user-state or fetched artifacts — never commit them.

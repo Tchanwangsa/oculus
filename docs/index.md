@@ -36,7 +36,6 @@ live in the root `CLAUDE.md`, not here.
 | `app/src/` | React 19 frontend (Vite, Tailwind v4, shadcn/ui) |
 | `app/src-tauri/src/` | Rust: Tauri commands, scrape engine, parsing, embedding, retrieval |
 | `app/src-tauri/src/bin/oculus.rs` | The headless CLI over the same engine |
-| `sidecar/` | The retired Python process. Nothing in the app reaches it; it is kept only as the source Plan B forks into its own repo |
 | `docs/` | These pages |
 | `.agents/skills/` | Shared skills: `read-docs`, `write-docs`, `check-doc-drift` |
 | `.claude/skills/` | Symlink to `.agents/skills/` for Claude Code |
@@ -67,13 +66,15 @@ configured in Settings → AI. [chapters.md](./chapters.md#lecture-recap)
 describes the shared pipeline; the tab is in
 [The recap tab](./chapters.md#the-recap-tab).
 
-Removed: the **Python sidecar**. PDF parsing and page embedding both run in
-Rust now, against MinerU and Voyage ([parsing.md](./parsing.md),
-[retrieval.md](./retrieval.md)); the supervisor, the loopback port, the
-whole-tree memory governor and the local-parser choice went with it. There is
-no local tier and no fallback: a PDF with no cloud parse simply has no
-markdown, and the UI says so. `sidecar/` is still in the repo as the source
-Plan B forks from, and nothing in the app imports it.
+Removed: the **Python sidecar**, code and directory both. PDF parsing and page
+embedding run in Rust now, against MinerU and Voyage
+([parsing.md](./parsing.md), [retrieval.md](./retrieval.md)); the supervisor,
+the loopback port, the whole-tree memory governor and the local-parser choice
+went with it. There is no local tier and no fallback: a PDF with no cloud parse
+simply has no markdown, and the UI says so. **The last commit holding
+`sidecar/` is `f875bb1`** — 32 files, 6,652 lines, every pin and measurement
+intact — which is where the separate local-server repo forks from. Same pattern
+as automations at `d64dc11`: moved, not lost.
 
 Removed: the **BYOK API layer** — provider config, keychain keys, an
 OpenAI-compatible streaming client, spend limits and its own agent tool loop —

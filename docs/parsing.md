@@ -251,9 +251,9 @@ the same error one batch at a time.
   MinerU is ~100× faster than docling-with-enrichment and more correct (1% vs
   18% KaTeX render failures on the benchmark deck).
 - **Local quality parsing is gone with the Python**, and with it the whole-tree
-  memory governor, the 8 GB budget and the formula-batch cap. Those pins and
-  their measurements live in the sidecar's own repo now; the shape of the
-  problem they solved does not exist in this process.
+  memory governor, the 8 GB budget and the formula-batch cap. The shape of the
+  problem they solved does not exist in this process. Those pins and their
+  measurements are at `f875bb1`, the last commit holding `sidecar/`.
 - **Office-derived PDFs (`*.pptx.pdf`) have never been parsed in this
   library**, so that path has no fixture and is unproven in practice.
   LibreOffice conversion is Rust already (`app/src-tauri/src/sync.rs`) and was
@@ -271,5 +271,6 @@ cd data/parse-fixtures && shasum -a 256 -c MANIFEST.sha256
 
 They are a local harness deliberately: neither the fixtures nor tests over them
 belong in the repo. The differential tests that pinned `render.rs` against the
-Python **are** in the repo (`parse/mineru/render.rs`), and are now the only
-record of what that code did.
+Python **are** in the repo (`app/src-tauri/src/parse/mineru/render.rs`), and
+are now the working record of what that code did — the code itself is at
+`f875bb1`, which every `sidecar/*.py` citation in Rust refers to.

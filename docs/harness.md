@@ -791,8 +791,8 @@ pointing at a folder that is gone.
 
 **`@` picks a file.** The menu lists files narrowed to the thread's subject,
 ordered by prefix match then by what was opened recently, and only ones the
-agent can actually read — markdown as written, everything else once the
-sidecar has parsed it, the same predicate retrieval uses. Choosing one writes
+agent can actually read — markdown as written, everything else once it has
+been parsed, the same predicate retrieval uses. Choosing one writes
 its **library path** into the message and nothing else. No content is
 attached and nothing is retrieved here: the agent already has the library in
 front of it and its own tools for opening a file, and a path is what it was

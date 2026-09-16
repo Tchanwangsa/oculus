@@ -44,7 +44,7 @@ const WATCHED = /^app\//;
 // All citations in docs/ are written repo-relative. A backticked span is
 // treated as a path claim only if it names a real source tree and contains
 // no glob, placeholder, or brace expansion.
-const LOOKS_LIKE_PATH = /^(app|sidecar|docs|\.agents|\.claude)\/[\w@./[\]-]*$/;
+const LOOKS_LIKE_PATH = /^(app|docs|\.agents|\.claude)\/[\w@./[\]-]*$/;
 
 function isCheckable(s) {
   if (!LOOKS_LIKE_PATH.test(s)) return false;
