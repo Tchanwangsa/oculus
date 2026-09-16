@@ -8,6 +8,7 @@ import {
   MagnifyingGlass,
   SidebarSimple,
   GearSix,
+  House,
 } from "@phosphor-icons/react";
 import { anyRunning, useHarnessStore } from "@/stores/harnessStore";
 import { usePaletteStore } from "@/stores/paletteStore";
@@ -117,6 +118,7 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {/* Pinned top-level nav — outside the scroller, so it never slides away. */}
         <div className="px-2 pb-1.5 shrink-0">
           <SearchItem />
+          <NavItem to="/" icon={House} label="Home" />
           <NavItem
             to="/chat"
             icon={Chat}

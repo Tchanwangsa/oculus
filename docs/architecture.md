@@ -90,7 +90,8 @@ live. Inside it:
 ## The database
 
 Schema lives in the tauri-plugin-sql migrations in `app/src-tauri/src/lib.rs`
-(29 versions and counting). Ownership is split deliberately:
+— append-only and numbered, so the highest `version` in that list is the
+current schema. Ownership is split deliberately:
 
 - **In the app**, the *frontend* writes the scrape tables: it listens for
   scrape events and upserts through `app/src/lib/db.ts`.

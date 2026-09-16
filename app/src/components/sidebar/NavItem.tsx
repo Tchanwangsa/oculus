@@ -19,6 +19,8 @@ interface NavItemProps {
  */
 export default function NavItem({ to, icon: Icon, label, badge }: NavItemProps) {
   // `NavLink`'s default, not its `end`: /settings lights for /settings/canvas.
+  // The prefix half is `${to}/` rather than `to`, so Home (`to="/"`) tests for
+  // "//" and matches nothing — it lights on the exact path and no other.
   const here = useActivePath().split("?")[0];
   const isActive = here === to || here.startsWith(`${to}/`);
 

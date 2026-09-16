@@ -1040,6 +1040,11 @@ export interface Lecture {
   has_source2: number;
   transcript_path: string | null;
   progress_seconds: number;
+  /** When it was last watched, `datetime('now')` (UTC, no zone marker) — the
+   *  same idiom as `files.last_accessed_at`, so the two recency stamps compare
+   *  directly. NULL is never watched; `progress_seconds` says how far in you
+   *  got and this says when, which is what Home's Continue ranks on. */
+  last_watched_at: string | null;
   completed: number;
   synced_at: string;
   /** The chaptering job's state: `null` (never run), `running`, `ready`,
@@ -1121,15 +1126,23 @@ export async function updateLectureTranscriptPath(id: string, path: string): Pro
   await db.execute(`UPDATE lectures SET transcript_path = $1 WHERE id = $2`, [path, id]);
 }
 
+/** Both writers stamp `last_watched_at`: saving a position *is* the record of
+ *  watching, and there is no other moment to hang it off. */
 export async function updateLectureProgress(id: string, seconds: number): Promise<void> {
   const db = await getDb();
-  await db.execute(`UPDATE lectures SET progress_seconds = $1 WHERE id = $2`, [seconds, id]);
+  await db.execute(
+    `UPDATE lectures SET progress_seconds = $1, last_watched_at = datetime('now')
+     WHERE id = $2`,
+    [seconds, id],
+  );
 }
 
 export async function markLectureComplete(id: string): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `UPDATE lectures SET completed = 1, progress_seconds = duration_seconds WHERE id = $1`,
+    `UPDATE lectures SET completed = 1, progress_seconds = duration_seconds,
+                         last_watched_at = datetime('now')
+     WHERE id = $1`,
     [id]
   );
 }
@@ -1279,6 +1292,62 @@ export async function getAllLectures(): Promise<
        FROM lectures l
        JOIN subjects s ON s.id = l.subject_id
       ORDER BY l.date ASC`,
+  );
+}
+
+// ── Recency (Home's "Continue where you left off") ───────────────────────────
+
+/**
+ * Lectures you are in the middle of, most recently watched first.
+ *
+ * Three filters make "in the middle of" mean something: not `completed`,
+ * `last_watched_at` actually set (migration 32 backfilled nothing, so an old
+ * row that was watched before the column existed stays out rather than
+ * claiming a stamp it never had), and past the same five-second "actually
+ * started" threshold `progressLabel` in `app/src/lib/lectures.ts` uses — a
+ * second of a recording opened and closed again is not somewhere you left off.
+ * The 5 is repeated rather than imported because it is a SQL predicate here
+ * and a label's branch there; they must agree, and this comment is the link.
+ *
+ * Joins `subjects` for the code, the way `getAllLectures` does, so a row can be
+ * labelled and routed without a second query.
+ */
+export async function getRecentlyWatchedLectures(
+  limit = 8,
+): Promise<(Lecture & { subject_code: string })[]> {
+  const db = await getDb();
+  return db.select<(Lecture & { subject_code: string })[]>(
+    `SELECT l.*, s.code AS subject_code
+       FROM lectures l
+       JOIN subjects s ON s.id = l.subject_id
+      WHERE l.completed = 0
+        AND l.last_watched_at IS NOT NULL
+        AND l.progress_seconds > 5
+      ORDER BY l.last_watched_at DESC
+      LIMIT $1`,
+    [limit],
+  );
+}
+
+/**
+ * Files you opened recently, newest first — `LibraryFileHit`, the same shape
+ * the palette returns, so a row opens through `openFileSmart` with nothing
+ * added.
+ *
+ * `last_accessed_at` is stamped by `markFileAccessed` with the same
+ * `datetime('now')` as a lecture's `last_watched_at`, which is what lets Home
+ * rank the two against each other.
+ */
+export async function getRecentlyAccessedFiles(limit = 8): Promise<LibraryFileHit[]> {
+  const db = await getDb();
+  return db.select<LibraryFileHit[]>(
+    `SELECT f.*, s.code AS subject_code
+       FROM files f
+       JOIN subjects s ON s.id = f.subject_id
+      WHERE f.last_accessed_at IS NOT NULL
+      ORDER BY f.last_accessed_at DESC
+      LIMIT $1`,
+    [limit],
   );
 }
 

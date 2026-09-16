@@ -3,7 +3,7 @@ import { CaretRight, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { navigateActive } from "@/lib/tabRouters";
 import { useSubjects } from "@/hooks/useSubjects";
-import { useRecentTabsStore } from "@/stores/recentTabsStore";
+import { recentKey, useRecentTabsStore } from "@/stores/recentTabsStore";
 import { useActivePath, useTabStore } from "@/stores/tabStore";
 import { tabInfo } from "@/components/tabs/tabInfo";
 
@@ -13,15 +13,19 @@ const OPEN_KEY = "oculus-recent-nav-open";
 const SHOWN = 5;
 
 /**
- * The Recent group: the last few pages you had open, named exactly as their
+ * The Recent group: the last few pages you settled on, named exactly as their
  * tabs are (`tabInfo`). Clicking one goes there in the current tab; ⌘-click
  * opens it in a new one, as the tab strip's own affordances do.
+ *
+ * Rows do not move while you work — the ordering rules live in
+ * `recentTabsStore`.
  */
 export default function RecentNavGroup() {
   const recents = useRecentTabsStore((s) => s.recents);
   const forget = useRecentTabsStore((s) => s.forget);
   const addTab = useTabStore((s) => s.addTab);
   const here = useActivePath();
+  const hereKey = recentKey(here);
   const { subjects } = useSubjects();
   const [open, setOpen] = useState(
     () => localStorage.getItem(OPEN_KEY) !== "false",
@@ -74,7 +78,7 @@ export default function RecentNavGroup() {
             // Browser tabs never enter the trail, so there is none to pass.
             const { title, icon } = tabInfo(entry.path, subjects, [], 15);
             return (
-              <div key={entry.path} className="group/recent relative">
+              <div key={entry.key} className="group/recent relative">
                 <button
                   type="button"
                   title={title}
@@ -84,10 +88,12 @@ export default function RecentNavGroup() {
                   }}
                   className={cn(
                     "flex w-full items-center gap-2.5 rounded-md pl-2 pr-7 py-1.5 text-[12.5px] transition-colors",
-                    // Matched on path *and* query: two files of one subject
-                    // share a pathname and differ only in `?path=`, so a
-                    // pathname match would light both rows.
-                    entry.path === here
+                    // Matched on the entry's identity, not its path: one
+                    // row stands for a whole subject, so it lights from any
+                    // of its tabs — while two files of that subject, which
+                    // differ only in `?path=`, stay two rows and light one at
+                    // a time.
+                    entry.key === hereKey
                       ? "bg-sidebar-item-active text-foreground font-medium"
                       : "text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground",
                   )}
@@ -99,7 +105,7 @@ export default function RecentNavGroup() {
                     so appearing on hover can't re-lay out the row. */}
                 <button
                   type="button"
-                  onClick={() => forget(entry.path)}
+                  onClick={() => forget(entry.key)}
                   aria-label={`Remove ${title} from recent`}
                   className={cn(
                     "absolute right-1 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-md",

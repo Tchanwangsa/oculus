@@ -987,6 +987,33 @@ ALTER TABLE lectures ADD COLUMN recap_error TEXT;
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 32,
+                            description: "lectures: when the recording was last watched",
+                            // `progress_seconds` says how far in you got and
+                            // nothing said *when*. Ranking "continue where you
+                            // left off" needs the when: the only other
+                            // orderable column is `synced_at`, which is when
+                            // Echo360 was scraped and has nothing to do with
+                            // watching.
+                            //
+                            // Written by the app's player alone —
+                            // `updateLectureProgress` / `markLectureComplete`
+                            // in `app/src/lib/db.ts`, stamped with
+                            // `datetime('now')` so it compares directly with
+                            // `files.last_accessed_at`. The CLI never plays a
+                            // recording, so `store.rs` has no writer for it.
+                            //
+                            // Nullable with no default on purpose: NULL means
+                            // never watched, and backfilling every
+                            // already-watched lecture to "now" would put the
+                            // whole catalogue at the top of Continue on first
+                            // launch.
+                            sql: r#"
+ALTER TABLE lectures ADD COLUMN last_watched_at TEXT;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

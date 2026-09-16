@@ -1,23 +1,6 @@
-import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/useNow";
-import {
-  fmtEventTime,
-  isPast,
-  sameDay,
-  shortLocation,
-  startOfDay,
-  type CalEvent,
-} from "@/lib/calendar";
-import { EventMark } from "./EventMark";
-import { EventPopover } from "./EventPopover";
-
-const KIND_LABEL: Record<CalEvent["kind"], string> = {
-  class: "class",
-  due: "due",
-  lecture: "recording",
-  note: "note",
-  task: "task",
-};
+import { sameDay, startOfDay, type CalEvent } from "@/lib/calendar";
+import { EventRow } from "./EventRow";
 
 /**
  * Everything ahead, in order, grouped by day — the view that answers "what's
@@ -64,53 +47,14 @@ export function AgendaView({
               {sameDay(day, now) && " · Today"}
             </h2>
             <div className="overflow-hidden rounded-lg border border-border divide-y divide-border-subtle">
-              {items.map((e) => {
-                const color = colors.get(e.subjectId) ?? "";
-                // Today's list still carries the classes you have already sat
-                // through — greyed, so "what's left today" reads at a glance.
-                const gone = isPast(e, now);
-                return (
-                  <EventPopover key={e.id} event={e} color={color}>
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-surface"
-                    >
-                      <EventMark
-                        kind={e.kind}
-                        color={gone ? "var(--color-chart-other)" : color}
-                        size={12}
-                      />
-                      <span className="w-28 shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                        {fmtEventTime(e)}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={cn(
-                            "block truncate text-[12px]",
-                            gone ? "text-muted-foreground" : "text-foreground",
-                          )}
-                        >
-                          {e.title}
-                        </span>
-                        <span className="block truncate text-[11px] text-muted-foreground">
-                          {e.subjectCode}
-                          {/* A task names the project it belongs to: which
-                              piece of work this is part of is what tells you
-                              what to do about it. */}
-                          {e.kind === "task" && e.projectName ? (
-                            ` · task · ${e.projectName}`
-                          ) : e.kind === "due" ? (
-                            <span className="font-medium text-foreground/70"> · due</span>
-                          ) : (
-                            ` · ${KIND_LABEL[e.kind]}`
-                          )}
-                          {e.location ? ` · ${shortLocation(e.location)}` : ""}
-                        </span>
-                      </span>
-                    </button>
-                  </EventPopover>
-                );
-              })}
+              {items.map((e) => (
+                <EventRow
+                  key={e.id}
+                  event={e}
+                  color={colors.get(e.subjectId) ?? ""}
+                  now={now}
+                />
+              ))}
             </div>
           </section>
         ))}

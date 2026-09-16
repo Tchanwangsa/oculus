@@ -1,5 +1,6 @@
 import { Navigate, Outlet, type RouteObject } from "react-router-dom";
 import SubjectLayout from "@/layouts/SubjectLayout";
+import HomePage from "@/pages/HomePage";
 import ChatPage from "@/pages/ChatPage";
 import CalendarPage from "@/pages/CalendarPage";
 import ProjectsIndexPage from "@/pages/ProjectsIndexPage";
@@ -41,7 +42,7 @@ export const routes: RouteObject[] = [
     path: "/",
     element: <PaneRoot />,
     children: [
-      { index: true, element: <Navigate to="/chat" replace /> },
+      { index: true, element: <HomePage /> },
       { path: "chat", element: <ChatPage /> },
       { path: "calendar", element: <CalendarPage /> },
       { path: "projects", element: <ProjectsIndexPage /> },

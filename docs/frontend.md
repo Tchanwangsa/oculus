@@ -14,6 +14,7 @@ this page is the structure.
 | ⌘K palette (search + go to) | `app/src/components/palette/CommandPalette.tsx`, `app/src/stores/paletteStore.ts` |
 | Per-subject layout (underline tabs) | `app/src/layouts/SubjectLayout.tsx` |
 | Subject tab pages | `app/src/pages/subject/` |
+| Home (the launcher: composer, Today, Continue, Projects) | `app/src/pages/HomePage.tsx`, `app/src/components/home/` |
 | Chat (a CLI agent's thread list, timeline, composer) | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/harnessStore.ts`, `app/src/lib/harness.ts` |
 | Calendar (month / week / upcoming) | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/`, `app/src/lib/calendar.ts` |
 | Projects (index, one board, a subject's tab) | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/subject/ProjectsPage.tsx`, `app/src/components/projects/`, `app/src/stores/projectsStore.ts`, `app/src/lib/projects.ts` |
@@ -33,7 +34,10 @@ this page is the structure.
 
 ## Routes
 
-`createHashRouter` in `app/src/App.tsx`: `/chat`, `/calendar`, `/projects` and
+The route table is `app/src/routes.tsx`, and each tab builds its own memory
+router over it (`app/src/components/tabs/TabPane.tsx`) — the shell is above all
+of them, so there is no one router to name. `/` is **Home**; it used to
+redirect to `/chat`. Then `/chat`, `/calendar`, `/projects`,
 `/projects/:projectId`, `/subjects`, `/subjects/:subjectId` (SubjectLayout →
 overview / modules / downloads / lectures / announcements / assignments /
 discussion / projects), `/subjects/:subjectId/file` and `/lecture` (the side
@@ -150,6 +154,26 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   plus the column between tabs (`SEPARATOR_W`), so that column is always
   rendered — coloured or transparent — and the gap between pills must never
   become a flex `gap`, which neither rect measures.
+- **Home is a launcher, and owns no state of its own.** `/` lands on
+  `app/src/pages/HomePage.tsx`, which is a composer over three recency
+  sections (`app/src/components/home/`). Each section reads for itself, hides
+  itself entirely when it has nothing — a quiet day is a shorter page, not a
+  column of empty states — and shares one `useNow()` clock the page owns, so
+  six rows are not six minute timers. Today renders the calendar's own
+  `app/src/components/calendar/EventRow.tsx` rather than a second row that
+  merely looks like it, and Continue opens a lecture, file or thread the way
+  that item's own list opens it, so Home adds no second path into anything.
+  Because every tab stays mounted, each section re-reads on the front edge of
+  its tab as well as on its events (`useHomeSection` in
+  `app/src/components/home/useHomeSection.ts`) — a backgrounded launcher
+  showing hour-old recency is the one way this page can lie. Playback's own
+  `LECTURE_PROGRESS_EVENT` is deliberately not among those events: it fires
+  every five seconds of a recording, and the front edge catches what it missed.
+- **Home's composer always starts a new thread.** It sends with a null thread
+  id and then leaves for `/chat`; continuing a conversation is a row in
+  Continue, not a second inbox here. That is why nothing on it is
+  `providerLocked` or `subjectLocked` — those exist to stop an *open* thread
+  changing the agent it was bound with, and there is no open thread on Home.
 - `ChatPage` renders **one** composer in one of two places: centred under the
   hero while the chat is empty, docked at the bottom once there is a
   transcript. It is a single element moved between branches, not two, so the
@@ -257,16 +281,32 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   The store exists only because the two ways in are far apart: the palette
   hears the menu event itself, and the sidebar's Search row is the visible
   handle that teaches the shortcut.
-- **The sidebar's Recent group is the router's trail, not the strip's.**
-  `app/src/stores/recentTabsStore.ts` records a path on every navigation —
-  from the same effect in `TopTabBar` that tracks the active tab, the one
-  place that sees every move — and `app/src/components/sidebar/RecentNavGroup.tsx`
-  lists the last five. Only the path is stored: the title and icon come from
-  `tabInfo` (`app/src/components/tabs/tabInfo.tsx`), shared with the tab
-  strip, so a recent page is named exactly as its tab is and a renamed
-  subject follows on its own. Browser tabs stay out — `/browse/<id>` names a
-  native page whose id dies with it. A row is active on path *and* query, or
-  two files of one subject would both light up.
+- **The sidebar's Recent group is the router's trail, not the strip's**, and
+  it is deliberately a *still* list. `app/src/stores/recentTabsStore.ts` is
+  fed by each pane's navigation effect (`app/src/components/tabs/TabPane.tsx`
+  — the one place that sees every move a router makes) and
+  `app/src/components/sidebar/RecentNavGroup.tsx` lists the first five. Three
+  rules, all of them Notion's, are what stop it shuffling under you while you
+  work:
+  - **A visit lands only after you settle.** `recordRecentTab` holds the path
+    for a couple of seconds, per pane, and the pane's next move cancels it —
+    so a subject you clicked through to reach a lecture, or a redirect like
+    `/settings` → `/settings/canvas`, never becomes a row.
+  - **A row is of a *thing*, not of a path** (`recentKey`). A subject's eight
+    section tabs share one row that follows you between them, as do settings'
+    pages; a file, a lecture, a project and a task are pages of their own and
+    get their own. Without it one subject filled the group with rows all
+    called "INFO30006".
+  - **A page already in the trail never moves.** Returning to it refreshes
+    when it was last seen, in place; only a new page is inserted, at the top.
+    Eviction then has to go by *least recently seen* rather than by position,
+    since the bottom row is no longer the stalest.
+
+  Only the path is stored: the title and icon come from `tabInfo`
+  (`app/src/components/tabs/tabInfo.tsx`), shared with the tab strip, so a
+  recent page is named exactly as its tab is and a renamed subject follows on
+  its own. Browser tabs stay out — `/browse/<id>` names a native page whose id
+  dies with it — and so does Home, which every empty tab starts on.
 - **A subject's sidebar row lights on the subject, not on everything under
   it** (`end` on the `NavLink` in `SubjectsNavGroup`). A lecture or a file is
   a page of its own with its own tab, and lighting the subject row for it

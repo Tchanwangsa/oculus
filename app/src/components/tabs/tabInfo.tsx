@@ -6,6 +6,7 @@ import {
   Chat,
   GearSix,
   Globe,
+  House,
   Kanban,
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
@@ -54,6 +55,8 @@ export function tabInfo(
       ),
     };
   }
+  // Exact, not a prefix: every other route starts with "/" too.
+  if (pathname === "/") return { title: "Home", icon: <House size={size} /> };
   if (pathname.startsWith("/chat"))
     return { title: "Chat", icon: <Chat size={size} /> };
   if (pathname.startsWith("/calendar"))

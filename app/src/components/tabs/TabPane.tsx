@@ -3,7 +3,7 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { routes } from "@/routes";
 import { TabContext } from "@/components/tabs/TabContext";
 import { registerTabRouter, unregisterTabRouter } from "@/lib/tabRouters";
-import { recordRecentTab } from "@/stores/recentTabsStore";
+import { cancelRecentTab, recordRecentTab } from "@/stores/recentTabsStore";
 import { useTabStore, type AppTab } from "@/stores/tabStore";
 
 /**
@@ -69,11 +69,15 @@ export default function TabPane({
         canForward: at.current < stack.current.length - 1,
       });
       // The sidebar's Recent trail is the router's, and every router is a
-      // pane now — so each one records its own moves.
-      recordRecentTab(path);
+      // pane now — so each one records its own moves. Handing it this pane's
+      // id is what lets it drop a page we only passed through: the next move
+      // here cancels the one before it, while another pane's moves are its
+      // own.
+      recordRecentTab(id, path);
     });
     return () => {
       unsubscribe();
+      cancelRecentTab(id);
       unregisterTabRouter(id);
     };
   }, [id, router]);
@@ -81,8 +85,8 @@ export default function TabPane({
   useEffect(() => {
     // Only the pane that mounts in front: a reload brings the whole strip back
     // at once, and the trail must not be rewritten as the strip's order.
-    if (seed.active) recordRecentTab(seed.path);
-  }, [seed]);
+    if (seed.active) recordRecentTab(id, seed.path);
+  }, [id, seed]);
 
   const context = useMemo(() => ({ id, active }), [id, active]);
 
