@@ -158,6 +158,10 @@ export function LectureChatComposer({
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-card px-2 py-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
+      {/* `overflow-x-hidden`: same one-line box as the main composer, and the
+          same reason — with macOS showing scrollbars rather than overlaying
+          them, WebKit paints a horizontal bar across a 16px-tall field that
+          has nothing to scroll sideways. */}
       <Textarea
         ref={ref}
         value={text}
@@ -170,7 +174,7 @@ export function LectureChatComposer({
         }}
         rows={1}
         placeholder={running ? "Working…" : "Ask about this lecture"}
-        className="min-h-[16px] w-full resize-none rounded-none border-0 bg-transparent p-0 text-[12px]! leading-[16px] shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
+        className="min-h-[16px] w-full resize-none overflow-x-hidden overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[12px]! leading-[16px] shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
         style={{ height: `${LINE_H}px`, maxHeight: MAX_H }}
       />
       <div className="flex items-center gap-1">

@@ -326,6 +326,11 @@ export function Composer({
       )}
 
       <div className="flex flex-col gap-4 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
+        {/* `overflow-x-hidden` below is load-bearing, not tidying. The box is
+            one line tall and a textarea soft-wraps, so there is never anything
+            to scroll sideways — but with macOS set to always show scrollbars
+            rather than overlay them, WebKit reserves and paints a horizontal
+            bar anyway, and in a 16px-tall box it lands across the text. */}
         <Textarea
           ref={ref}
           value={text}
@@ -368,7 +373,7 @@ export function Composer({
           placeholder={
             running ? "Working… your next message waits its turn" : "What would you like to work on?"
           }
-          className="min-h-[16px] max-h-[160px] w-full resize-none rounded-none border-0 bg-transparent p-0 text-[13px]! leading-[16px] shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
+          className="min-h-[16px] max-h-[160px] w-full resize-none overflow-x-hidden overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[13px]! leading-[16px] shadow-none focus-visible:border-0 focus-visible:ring-0 dark:bg-transparent"
           style={{ height: `${LINE_H}px` }}
         />
         <div className="flex items-center gap-1">
