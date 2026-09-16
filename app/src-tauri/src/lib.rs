@@ -26,6 +26,7 @@ pub mod sync;
 pub mod sidecar;
 mod storage;
 mod subjects;
+pub mod embed;
 pub mod voyage;
 
 use std::sync::{Arc, Mutex};

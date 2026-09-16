@@ -14,9 +14,24 @@
 cd app
 bun install
 bun run ffmpeg        # fetches the ffmpeg binary into src-tauri/binaries/
+bun run pdfium        # fetches libpdfium into src-tauri/binaries/
 cd ../sidecar
 uv sync               # creates .venv (~1.2GB — that is the floor, mostly torch)
 ```
+
+Both fetch steps also run from `beforeDevCommand` / `beforeBuildCommand`, so
+`bun run tauri dev` sets them up on its own; they are listed here because a
+`cargo test` or a `bun run cli` on a fresh checkout does not go through Tauri.
+
+`libpdfium` is the page rasterizer behind `app/src-tauri/src/embed/raster.rs` —
+a native C++ library with no crates.io source, so `app/scripts/fetch-pdfium.mjs`
+downloads a prebuilt one from bblanchon/pdfium-binaries. Its release tag is
+pinned to the Chromium revision `pdfium-render`'s feature flag binds against: a
+lib from another revision fails at *bind* time, not at compile time, so the two
+move together. Neither binary is committed — `app/src-tauri/binaries/` is
+gitignored. At runtime the library is found relative to the executable
+(`Contents/Frameworks/` in the bundled `.app`, an ancestor `binaries/` in dev),
+and `OCULUS_PDFIUM_LIB` overrides that with an explicit path.
 
 ## Running
 

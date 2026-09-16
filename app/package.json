@@ -9,6 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "ffmpeg": "node scripts/fetch-ffmpeg.mjs",
+    "pdfium": "node scripts/fetch-pdfium.mjs",
     "tauri": "tauri",
     "cli": "rm -f src-tauri/target/release/oculus && cargo build --release --manifest-path src-tauri/Cargo.toml --bin oculus",
     "cli:install": "bun run cli && mkdir -p \"$HOME/.local/bin\" && ln -sf \"$PWD/src-tauri/target/release/oculus\" \"$HOME/.local/bin/oculus\" && \"$PWD/src-tauri/target/release/oculus\" docs",
