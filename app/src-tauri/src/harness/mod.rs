@@ -1105,7 +1105,7 @@ pub mod app {
             let mut pool: Option<SqlitePool> = None;
             for (thread_id, provider, ev) in rx {
                 if pool.is_none() {
-                    pool = rt.block_on(crate::retrieval::open_pool()).ok();
+                    pool = rt.block_on(crate::store::open_pool()).ok();
                 }
                 let mut item_id = None;
                 if let Some(p) = &pool {
@@ -1245,7 +1245,7 @@ pub mod app {
         text: &str,
         sink: Sink,
     ) -> Result<(), String> {
-        let pool = crate::retrieval::open_pool().await?;
+        let pool = crate::store::open_pool().await?;
         let row = store::thread(&pool, thread_id).await?;
         if row.provider != provider {
             return Err(format!("thread {thread_id} is a {} thread", row.provider.label()));
@@ -1358,7 +1358,7 @@ pub mod app {
         let provider = Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?;
         let mut opts = options.unwrap_or_default();
         opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
-        let pool = crate::retrieval::open_pool().await?;
+        let pool = crate::store::open_pool().await?;
 
         let id = match thread_id {
             Some(id) => {
@@ -1415,7 +1415,7 @@ pub mod app {
     ) -> Result<(), String> {
         let mut opts = options.unwrap_or_default();
         opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
-        let pool = crate::retrieval::open_pool().await?;
+        let pool = crate::store::open_pool().await?;
         let row = store::thread(&pool, thread_id).await?;
         // The id comes from the webview and everything from it on is about to
         // be deleted, so it is checked against the row it names.
@@ -1506,7 +1506,7 @@ pub mod app {
         thread_id: i64,
         item_id: i64,
     ) -> Result<String, String> {
-        let pool = crate::retrieval::open_pool().await?;
+        let pool = crate::store::open_pool().await?;
         let row = store::thread(&pool, thread_id).await?;
         let question = store::user_item(&pool, thread_id, item_id).await?;
         if state.queue.lock().unwrap().is_busy(thread_id) {
@@ -1544,7 +1544,7 @@ pub mod app {
         queue_id: String,
     ) -> Result<(), String> {
         if state.queue.lock().unwrap().remove(thread_id, &queue_id) {
-            let pool = crate::retrieval::open_pool().await?;
+            let pool = crate::store::open_pool().await?;
             let row = store::thread(&pool, thread_id).await?;
             state.sink(thread_id, row.provider)(HarnessEvent::Unqueued { id: queue_id });
         }
@@ -1563,7 +1563,7 @@ pub mod app {
     ) -> Result<(), String> {
         let edited = state.queue.lock().unwrap().edit(thread_id, &queue_id, &text);
         if let Some(msg) = edited {
-            let pool = crate::retrieval::open_pool().await?;
+            let pool = crate::store::open_pool().await?;
             let row = store::thread(&pool, thread_id).await?;
             state.sink(thread_id, row.provider)(HarnessEvent::Queued {
                 id: msg.id,
@@ -1584,7 +1584,7 @@ pub mod app {
     ) -> Result<Vec<String>, String> {
         let cleared = state.queue.lock().unwrap().clear(thread_id);
         if !cleared.is_empty() {
-            let pool = crate::retrieval::open_pool().await?;
+            let pool = crate::store::open_pool().await?;
             let row = store::thread(&pool, thread_id).await?;
             let sink = state.sink(thread_id, row.provider);
             for m in &cleared {
@@ -1602,7 +1602,7 @@ pub mod app {
     pub async fn harness_delete_thread(state: State<'_, HarnessState>, thread_id: i64) -> Result<(), String> {
         state.harness.close(thread_id);
         state.queue.lock().unwrap().forget(thread_id);
-        let pool = crate::retrieval::open_pool().await?;
+        let pool = crate::store::open_pool().await?;
         store::delete_thread(&pool, thread_id).await
     }
 
@@ -1610,7 +1610,7 @@ pub mod app {
     pub fn reconcile(app: &AppHandle) {
         let _ = app;
         tauri::async_runtime::spawn(async {
-            if let Ok(pool) = crate::retrieval::open_pool().await {
+            if let Ok(pool) = crate::store::open_pool().await {
                 if let Ok(n) = store::reconcile(&pool).await {
                     if n > 0 {
                         eprintln!("[oculus] harness: marked {n} interrupted thread(s) idle");

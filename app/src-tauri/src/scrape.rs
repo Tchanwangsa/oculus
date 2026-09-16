@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::ipc::IpcPort;
 use crate::sync::{Engine, FileEvent, FileStart, Progress, Reporter, Subject, SyncOptions};
 
 #[derive(serde::Deserialize)]
@@ -39,7 +38,6 @@ pub async fn scrape_content(
     app: AppHandle,
     subjects: Vec<ScrapeSubject>,
     options: Option<SyncOptions>,
-    port: tauri::State<'_, IpcPort>,
     cancel: tauri::State<'_, ScrapeCancel>,
 ) -> Result<(), String> {
     if subjects.is_empty() {
@@ -61,7 +59,6 @@ pub async fn scrape_content(
 
     let flag = Arc::clone(&cancel.0);
     flag.store(false, Ordering::SeqCst);
-    let ipc_port = port.0;
 
     eprintln!("[oculus] scrape: {} subject(s)", targets.len());
 
@@ -73,7 +70,6 @@ pub async fn scrape_content(
             cancel: Arc::clone(&flag),
         };
         let engine = Engine::new(&data_dir, Box::new(reporter))
-            .with_ipc_port(ipc_port)
             .with_options(options.unwrap_or_default());
         let count = engine.scrape(&targets);
         let cancelled = flag.load(Ordering::SeqCst);
@@ -142,10 +138,16 @@ pub fn parse_file(
     if !data_dir.join(&pdf_rel).is_file() {
         return Err(format!("not on disk: {pdf_rel}"));
     }
-    let port = app.state::<IpcPort>().0;
+    // `subject_code` is still in the command's signature because the frontend
+    // sends it; nothing downstream needs it now that the parse is in-process
+    // and no longer addressed by course folder.
+    let _ = subject_code;
+    // Off the command thread: `parse_pdf` blocks for the whole cloud round
+    // trip, and this call has always returned immediately with the caller
+    // following `parse-status` events.
     std::thread::spawn(move || {
-        match crate::sync::parse_pdf(&data_dir, &relative_path, subject_id, &subject_code, port) {
-            Ok(mode) => eprintln!("[oculus] parse_file {relative_path}: {mode}"),
+        match crate::sync::parse_pdf(&data_dir, &relative_path, subject_id) {
+            Ok(summary) => eprintln!("[oculus] parse_file {relative_path}: {summary}"),
             Err(e) => eprintln!("[oculus] parse_file {relative_path}: {e}"),
         }
     });
@@ -170,8 +172,7 @@ pub fn rescrape_file(
             app: app.clone(),
             cancel: Arc::new(AtomicBool::new(false)),
         }),
-    )
-    .with_ipc_port(app.state::<IpcPort>().0);
+    );
 
     engine
         .refetch_file(&Subject { id: subject_id, code: subject_code }, canvas_id)?

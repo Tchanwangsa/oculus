@@ -1,7 +1,8 @@
 //! MinerU cloud credential storage.
 //!
 //! The token never enters SQLite or the WebView. Rust reads it from the macOS
-//! keychain and places it directly in loopback `/parse-pdf` requests.
+//! keychain and hands it straight to the in-process cloud client
+//! (`parse::mineru::client`), so it no longer crosses a socket at all.
 
 use std::time::Duration;
 
@@ -67,16 +68,14 @@ fn probe(key: &str) -> Result<Verdict, String> {
     }
 }
 
-/// Tell the sidecar to stop treating cloud parsing as locked out. Best effort:
-/// a sidecar that is down has no latch to clear, and one that restarts starts
-/// clean anyway.
-fn clear_sidecar_rejection() {
-    let url = format!(
-        "http://127.0.0.1:{}/mineru-token-reset",
-        crate::sidecar::SIDECAR_PORT
-    );
-    let _ = ureq::post(&url).timeout(Duration::from_secs(2)).call();
-}
+// There is no rejection latch to clear any more, and nothing replaces the
+// `/mineru-token-reset` POST that used to be here. The sidecar held one
+// because a refused token is the same refusal for every queued file and it had
+// no way to be told the user had fixed it. The in-process client keeps no such
+// state: it reads the keychain at construction (`MinerUCloud::from_config`), so
+// the very next parse uses whatever is stored now. The only latch left is the
+// daily quota one in `parse::mineru::ledger`, which is about MinerU's
+// allowance rather than the token and clears itself when the day rolls over.
 
 /// Store a token, but only one MinerU has agreed to. Returns `"ok"` when it
 /// was checked against MinerU and `"unverified"` when MinerU was unreachable
@@ -89,7 +88,6 @@ pub fn mineru_set_api_key(key: String) -> Result<String, String> {
     }
     let verdict = probe(key)?;
     keychain()?.set_password(key).map_err(|e| e.to_string())?;
-    clear_sidecar_rejection();
     Ok(match verdict {
         Verdict::Good => "ok".into(),
         Verdict::Unverified => "unverified".into(),
@@ -107,7 +105,6 @@ pub fn mineru_delete_api_key() -> Result<(), String> {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(error) => Err(error.to_string()),
     };
-    clear_sidecar_rejection();
     removed
 }
 

@@ -1181,7 +1181,7 @@ pub mod app {
         lecture_id: String,
         force: Option<bool>,
     ) -> Result<(), String> {
-        let pool = crate::retrieval::open_pool().await?;
+        let pool = crate::store::open_pool().await?;
         // The only check worth making the caller wait for: a second run over
         // the same lecture would spend a second subscription turn and race the
         // first one's write.
@@ -1207,7 +1207,7 @@ pub mod app {
                 Ok(rt) => rt,
                 Err(e) => return eprintln!("[oculus] chapters: {e}"),
             };
-            let pool = match rt.block_on(crate::retrieval::open_pool()) {
+            let pool = match rt.block_on(crate::store::open_pool()) {
                 Ok(p) => p,
                 Err(e) => return eprintln!("[oculus] chapters: {e}"),
             };
@@ -1337,7 +1337,7 @@ pub mod app {
     /// on it rather than a black frame. Four probes and a grab is ~200 ms.
     #[tauri::command]
     pub async fn lecture_grab_frame(lecture_id: String, seconds: u32) -> Result<String, String> {
-        let pool = crate::retrieval::open_pool().await?;
+        let pool = crate::store::open_pool().await?;
         let row: Option<(String, Option<String>)> =
             sqlx::query_as("SELECT title, video_path FROM lectures WHERE id = ?1")
                 .bind(&lecture_id)
@@ -1375,7 +1375,7 @@ pub mod app {
     pub fn reconcile(app: &AppHandle) {
         let _ = app;
         tauri::async_runtime::spawn(async {
-            if let Ok(pool) = crate::retrieval::open_pool().await {
+            if let Ok(pool) = crate::store::open_pool().await {
                 if let Ok(n) = crate::store::reconcile_chapter_status(&pool).await {
                     if n > 0 {
                         eprintln!("[oculus] chapters: cleared {n} interrupted run(s)");

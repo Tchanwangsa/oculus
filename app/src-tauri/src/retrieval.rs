@@ -20,8 +20,7 @@ use std::time::Duration;
 use base64::Engine;
 use half::f16;
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::{Row, SqlitePool};
+use sqlx::Row;
 use tauri::{AppHandle, Manager};
 
 use crate::sidecar::SIDECAR_PORT;
@@ -102,35 +101,10 @@ pub struct IndexStats {
 
 // ── Plumbing ─────────────────────────────────────────────────────────────────
 
-fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(dir.join("oculus.db"))
-}
-
-/// Our own pool over the file tauri-plugin-sql already manages. WAL means a
-/// second reader is harmless, and our writes are occasional (once per file
-/// embedded), so a busy timeout is enough to stay out of the plugin's way.
-pub async fn pool(path: &Path) -> Result<SqlitePool, String> {
-    let opts = SqliteConnectOptions::new()
-        .filename(path)
-        .create_if_missing(false)
-        .busy_timeout(Duration::from_secs(15));
-    SqlitePoolOptions::new()
-        .max_connections(2)
-        .connect_with(opts)
-        .await
-        .map_err(|e| format!("open {}: {e}", path.display()))
-}
-
-/// Open the shared database the same way the CLI does — no AppHandle, so
-/// later phases can run headless.
-pub async fn open_pool() -> Result<SqlitePool, String> {
-    let path = crate::paths::db_path(&crate::paths::data_dir());
-    if !path.exists() {
-        return Err(format!("no database at {}", path.display()));
-    }
-    crate::retrieval::pool(&path).await
-}
+// The pool helpers this module used to own now live in `store.rs`, which
+// outlives both it and `sidecar.rs`; re-exported here only so the call sites
+// below read unchanged.
+use crate::store::{db_path, pool};
 
 fn decode_vector(b64: &str) -> Result<Vec<f32>, String> {
     let raw = base64::engine::general_purpose::STANDARD
@@ -154,7 +128,7 @@ fn sidecar_url(path: &str) -> String {
 /// POST JSON to the sidecar and deserialise the reply.
 ///
 /// `ureq`'s own json helpers are behind a feature this crate does not enable,
-/// so we serialise by hand the way `ipc.rs` and `lectures.rs` already do.
+/// so we serialise by hand the way `lectures.rs` already does.
 fn post_json<T: for<'de> Deserialize<'de>>(
     path: &str,
     body: serde_json::Value,
@@ -182,9 +156,10 @@ fn sibling(pdf_path: &str, suffix: &str) -> PathBuf {
 ///
 /// Idempotent: the sidecar skips a PDF whose sidecar file already matches the
 /// current model and dimension, and the upsert makes a re-run a no-op.
-/// `ipc_port`/`relative_path` let the sidecar stream per-page embed progress
-/// back through the app's IPC server; pass `0` and `""` to run silently (the
-/// CLI does — it has no IPC server).
+/// `ipc_port` is dead weight now — the loopback server that received those
+/// callbacks went with the in-process parse, and every caller passes 0. It
+/// stays only because this whole function does, until the embedding layer is
+/// removed. `relative_path` is what those callbacks keyed on.
 pub async fn ingest(
     db_file: &Path,
     file_id: i64,
@@ -422,8 +397,10 @@ pub async fn embed_file(
         return Err(format!("not on disk: {}", pdf.display()));
     }
     let db = db_path(&app)?;
-    let ipc_port = app.state::<crate::ipc::IpcPort>().0;
-    ingest(&db, file_id, pdf.to_string_lossy().to_string(), force.unwrap_or(false), ipc_port, relative_path).await
+    // 0 disables the sidecar's progress callback. The loopback server that
+    // used to receive it is gone with the in-process parse; embed progress
+    // never had a listener on it anyway.
+    ingest(&db, file_id, pdf.to_string_lossy().to_string(), force.unwrap_or(false), 0, relative_path).await
 }
 
 #[tauri::command]

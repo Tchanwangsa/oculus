@@ -194,8 +194,10 @@ indexing either. Both measurements used cached weights and no cloud upload.
   by `uv sync`); with no venv it disables parsing and says so. It reclaims
   port 9547 from orphans before spawning, and installs its own exit handlers
   because Ctrl-C / `tauri dev` rebuilds bypass Tauri's Exit event.
-- Progress flows back by the sidecar POSTing to the app's IPC port
-  (`_notify_tauri` in `sidecar/main.py` → `app/src-tauri/src/ipc.rs`).
+- Progress used to flow back by the sidecar POSTing to a loopback server of
+  the app's (`_notify_tauri` in `sidecar/main.py`). That server is gone with
+  the in-process parse; the port the sidecar is handed is 0 and the POST goes
+  nowhere. See [architecture.md](./architecture.md).
 - The Qwen embedding model is loaded on demand, not at sidecar startup, so a
   quality parse that reaches the heavy-work queue first gets maximum headroom.
 - Oculus receives real progress once per 64-page outer parse chunk, so between

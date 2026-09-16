@@ -65,7 +65,7 @@ fn saved_parse_settings() -> ParseSettings {
         return ParseSettings::default();
     }
     let mut settings: ParseSettings = tauri::async_runtime::block_on(async move {
-        let pool = crate::retrieval::pool(&database).await.ok()?;
+        let pool = crate::store::pool(&database).await.ok()?;
         let row = sqlx::query("SELECT value FROM settings WHERE key = 'parse'")
             .fetch_optional(&pool)
             .await

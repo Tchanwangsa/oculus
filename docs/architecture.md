@@ -1,22 +1,28 @@
 # Architecture
 
 Three application layers, one data directory. The Python layer supervises
-separate killable model workers rather than retaining their weights itself.
+separate killable model workers rather than retaining their weights itself;
+it is being dismantled, and **PDF parsing has already left it** — that runs
+in Rust now, behind the seam in `app/src-tauri/src/parse/`.
 
 ```
 ┌───────────────────────────── Tauri app ─────────────────────────────┐
 │  React frontend (WebView)  ⇄  Rust core (commands + events)         │
 │        app/src/                  app/src-tauri/src/                 │
-└───────────────┬───────────────────────────▲─────────────────────────┘
-                │ HTTP :9547                │ HTTP (ephemeral IPC port)
-                ▼                           │
-        Python sidecar  ────────────────────┘
-        sidecar/main.py   (parse progress callbacks)
-          ├─ quality_worker.py ─ MinerU render children
-          ├─ embed_worker.py   ─ Qwen model
-          ├─ parse_worker.py   ─ one-shot fast parse
-          └─ MinerU HTTPS API  ─ opt-in cloud queue
+│                                     │                               │
+│                                  parse/  ── MinerU HTTPS API        │
+│                             (in-process, emits parse-status)        │
+└───────────────┬─────────────────────────────────────────────────────┘
+                │ HTTP :9547
+                ▼
+        Python sidecar
+        sidecar/main.py   (embeddings only; parsing has moved out)
+          └─ embed_worker.py ─ Qwen model
 ```
+
+Nothing calls back *into* the app any more. The sidecar used to POST parse
+progress to a loopback server of ours on an ephemeral port; parsing is in this
+process, so progress is emitted directly and the server is gone.
 
 ## Where
 
@@ -25,7 +31,9 @@ separate killable model workers rather than retaining their weights itself.
 | App entry / migrations / startup | `app/src-tauri/src/lib.rs` |
 | Data-dir + path resolution (no Tauri handle needed) | `app/src-tauri/src/paths.rs` |
 | Sidecar supervisor (spawn, port reclaim, shutdown) | `app/src-tauri/src/sidecar.rs` |
-| IPC callback server (sidecar → app) | `app/src-tauri/src/ipc.rs` |
+| PDF parse seam (trait, artifacts, errors, config) | `app/src-tauri/src/parse/mod.rs` |
+| MinerU cloud client (in-process, batched) | `app/src-tauri/src/parse/mineru/client.rs` |
+| `parse-status` events | `app/src-tauri/src/parse/events.rs` |
 | Media HTTP server (lecture video streaming) | `app/src-tauri/src/media.rs` |
 | In-app browser (one page WebView per tab, in the main window) | `app/src-tauri/src/browser.rs` |
 | CLI-agent harness (Claude Code / Codex / opencode bridges) | `app/src-tauri/src/harness/mod.rs` |
@@ -47,11 +55,14 @@ separate killable model workers rather than retaining their weights itself.
   `sidecar/main.py` with the project's `.venv` python, reclaims the port from
   orphans first, and installs exit handlers because Ctrl-C and `tauri dev`
   rebuild SIGTERMs bypass Tauri's Exit event.
-- **Sidecar → Rust**: the sidecar POSTs parse-status updates to a tiny HTTP
-  server in `app/src-tauri/src/ipc.rs`, bound on an ephemeral port passed to
-  the sidecar at spawn. This server used to be a much larger surface (cookie
-  proxy, WebView host) — the scraper is Rust now, so status callbacks are all
-  that is left.
+- **Sidecar → Rust**: nothing. That direction used to be a tiny HTTP server of
+  ours on an ephemeral port, first as a cookie proxy and WebView host for the
+  JS scraper, then — once the scraper became Rust — for parse-status callbacks
+  alone. Parsing is in-process now, so `app/src-tauri/src/parse/events.rs`
+  emits `parse-status` straight to the frontend and the loopback server is
+  deleted. The handle it emits through is bound once at startup rather than
+  threaded through the call path, which is also what lets the CLI run the same
+  parse code with nothing to emit to.
 - **Media playback**: WebKit's media pipeline refuses `<video>` sources on
   custom URL schemes — an `asset://` URL fetches fine but the media element
   fails instantly with error code 4 (observed on macOS 26). So lecture video
@@ -124,11 +135,21 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   process groups; killing a model also kills its render descendants without
   dropping HTTP or the queue. See [sidecar.md](./sidecar.md) for admission,
   retry and the 5 GB tunable floor.
-- Parse settings are in SQLite under `parse`; Rust loads them at spawn and
-  the frontend updates `/limits` live through Rust. MinerU's token follows a
-  separate path: Rust keychain → loopback parse body → cloud client. It never
-  enters SQLite, health, or progress events. Cloud is off by default.
-- The startup sequence in `app/src-tauri/src/lib.rs` is: start IPC server →
+- Parse settings are in SQLite under `parse`; the seam reads which backend to
+  use out of that row (`parse_config` in `app/src-tauri/src/parse/mod.rs`), and
+  the sidecar reads its own memory limits from the same blob. MinerU's token
+  never joins them: keychain → in-process client, and it no longer crosses a
+  socket at all. It is not in SQLite, in health, or in a progress event.
+- **Parsing blocks for minutes, and every caller is built around that.** The
+  sidecar answered as soon as a fast pass had produced *some* markdown; there
+  is one tier now, so a parse spans the whole cloud round trip. Concurrency
+  belongs to the batcher (`app/src-tauri/src/parse/mineru/batch.rs`: a
+  five-second/twenty-file window, eight batches in flight), so a scrape hands
+  each PDF to a detached thread and reports itself finished.
+- **A finished parse writes its own page records.** `pages.markdown` — what
+  `oculus grep` searches — used to be a side effect of the embed path, which
+  would have taken it down with the embedding layer.
+- The startup sequence in `app/src-tauri/src/lib.rs` is: bind parse events →
   spawn sidecar → clean partial lecture downloads → seed WebKit's cookie jar
   with the Canvas session → verify the persisted session in a background
   thread (optimistic until proven rejected) → start the in-app keep-alive

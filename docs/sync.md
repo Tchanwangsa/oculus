@@ -114,13 +114,29 @@ One Rust engine scrapes three services. It runs identically inside the app
   The frontend's two-stage view of it (`download → parse`), the `parse-status`
   event vocabulary and the background sweep that picks up what was missed are
   in [frontend.md](./frontend.md).
-- **Parse requests are queued, not spawned per file.** Each new PDF used to
-  get its own detached thread, so a first sync of a full library fired every
-  deck at the sidecar at once — which FastAPI happily ran 40-wide, at ~2 GB
-  each. Two workers (`PARSE_WORKERS` in `app/src-tauri/src/sync.rs`) now drain
-  a channel, matching the sidecar's own cap; the rest wait without holding a
-  thread and a socket. Still fire-and-forget: the workers outlive the scrape
-  and drain when the engine drops.
+- **The parse is in this process, and it takes minutes.** `parse_pdf` in
+  `app/src-tauri/src/sync.rs` goes through the seam in
+  `app/src-tauri/src/parse/mod.rs` rather than POSTing to a sidecar port. The
+  sidecar used to return in seconds — as soon as a fast pass had produced some
+  markdown — and finish the real parse on its own thread. There is no fast tier
+  now, so the call spans the entire cloud round trip, and there is no timeout
+  here either: the client's own 60-minute poll deadline is the single limit, so
+  nothing shorter can abandon work it is still doing.
+- **Fire-and-forget is one detached thread per PDF**, and the bounded worker
+  pool that used to be here is gone. The pool existed because every parse was
+  an HTTP request and a full library meant a hundred simultaneous POSTs at ~2 GB
+  each. Concurrency is the batcher's now
+  (`app/src-tauri/src/parse/mineru/batch.rs` — a five-second/twenty-file window,
+  eight batches in flight), and a second gate would only stop files reaching the
+  window they are meant to share. Each thread spends its wait parked on a
+  condvar: no socket, no request in flight.
+- **Finishing a parse writes its own page records**, into `pages` via
+  `store::upsert_pages`. That write used to live on the embed path, which made
+  the markdown `oculus grep` searches a side effect of building the vector
+  index. Hitting an *already*-parsed file folds its `.pages.json` in too, but
+  only when the file has no page rows at all — the library holds files parsed
+  before this write existed, and that is the repair path for them. See
+  [retrieval.md](./retrieval.md).
 - `app/src-tauri/src/md.rs` converts Canvas HTML bodies to markdown by
   refusing to descend into cruft nodes rather than stripping them first —
   same output as the old DOM-mutating converter, no mutable tree.

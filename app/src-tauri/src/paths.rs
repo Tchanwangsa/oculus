@@ -235,31 +235,6 @@ pub fn doc_pdf_rel(rel: &str) -> Option<String> {
         .then(|| format!("{rel}.pdf"))
 }
 
-/// Which tier last parsed this PDF: `"quality"`, `"fast"`, or `None`.
-///
-/// Read from the sidecar's `{stem}.pages.json`, which is written only after a
-/// parse finishes. The `{stem}_images/` directory is NOT a usable signal — both
-/// tiers create it, and an interrupted run leaves one behind, which used to
-/// read as "quality done" and pin the file to fast markdown forever.
-pub fn parse_mode(pdf: &std::path::Path) -> Option<&'static str> {
-    if !pdf.with_extension("md").exists() {
-        return None;
-    }
-    let stem = pdf.file_stem()?.to_str()?;
-    let record = pdf.parent()?.join(format!("{stem}.pages.json"));
-
-    let mode = std::fs::read_to_string(&record)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v["mode"].as_str().map(str::to_string));
-
-    match mode.as_deref() {
-        Some("quality") => Some("quality"),
-        // Markdown with no readable record: report the weaker tier so the
-        // quality pass is still considered outstanding.
-        _ => Some("fast"),
-    }
-}
 
 pub fn category_from_path(path: &str) -> &'static str {
     match path {

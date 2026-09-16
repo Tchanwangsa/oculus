@@ -9,11 +9,57 @@
 //! not exist yet, we do not invent one; the caller reports that and keeps
 //! scraping to disk.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
+use tauri::{AppHandle, Manager};
 
 use crate::sync::Course;
+
+// ── The connection pool ──────────────────────────────────────────────────────
+//
+// These three lived in `retrieval.rs` while retrieval was the only thing in
+// Rust that touched the database on its own. It is not any more — the parse
+// path writes page records now — and `retrieval.rs` is deleted with the
+// embedding layer, so leaving them there would mean rescuing them out of a
+// module that is on its way out. This is the module that outlives both it and
+// `sidecar.rs`, and it is already the DB-access module; the helpers belong
+// here and every caller now says `store::`.
+
+/// Our own pool over the file tauri-plugin-sql already manages. WAL means a
+/// second reader is harmless, and our writes are occasional (once per file
+/// parsed), so a busy timeout is enough to stay out of the plugin's way.
+pub async fn pool(path: &Path) -> Result<SqlitePool, String> {
+    let opts = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(false)
+        .busy_timeout(Duration::from_secs(15));
+    SqlitePoolOptions::new()
+        .max_connections(2)
+        .connect_with(opts)
+        .await
+        .map_err(|e| format!("open {}: {e}", path.display()))
+}
+
+/// Where the app's database is, asked of Tauri rather than recomputed. The
+/// answer is the same one `paths::db_path(paths::data_dir())` gives; this is
+/// for the command layer, which already has a handle.
+pub fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("oculus.db"))
+}
+
+/// Open the shared database the same way the CLI does — no AppHandle, so this
+/// works headless.
+pub async fn open_pool() -> Result<SqlitePool, String> {
+    let path = crate::paths::db_path(&crate::paths::data_dir());
+    if !path.exists() {
+        return Err(format!("no database at {}", path.display()));
+    }
+    pool(&path).await
+}
 
 pub async fn open(data_dir: &Path) -> Result<SqlitePool, String> {
     let path = crate::paths::db_path(data_dir);
@@ -23,7 +69,7 @@ pub async fn open(data_dir: &Path) -> Result<SqlitePool, String> {
             path.display()
         ));
     }
-    crate::retrieval::pool(&path).await
+    pool(&path).await
 }
 
 // ── Subjects ─────────────────────────────────────────────────────────────────
@@ -162,6 +208,61 @@ pub async fn file_id(
         .map_err(|e| e.to_string())
 }
 
+/// Write one file's page records.
+///
+/// This used to happen on the *embed* path only (`retrieval::ingest`), which
+/// meant `pages.markdown` — the table `oculus grep` reads — was a side effect
+/// of building the vector index. With embeddings going away, finishing a parse
+/// has to write its own page records or the tool the user actually reaches for
+/// would quietly go blank.
+///
+/// The conflict clause is deliberately **not** a `COALESCE`: an empty incoming
+/// markdown must leave good text alone. A page that yields nothing (a slide
+/// that is one full-bleed image) normalises to `""` in `ParseOutput`, and a
+/// re-parse that produced fewer pages than the last one would otherwise wipe
+/// the text the last one found.
+///
+/// Nothing here touches `embedding` / `embed_model` / `embed_dim` /
+/// `embedded_at`. Those stay the embedder's until it stops writing them, and
+/// the columns stay in the schema either way.
+pub async fn upsert_pages(
+    pool: &SqlitePool,
+    file_id: i64,
+    pages: &[crate::parse::ParsePage],
+) -> Result<usize, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let mut with_text = 0usize;
+    for page in pages {
+        if !page.markdown.is_empty() {
+            with_text += 1;
+        }
+        sqlx::query(
+            r#"INSERT INTO pages (file_id, page_no, markdown)
+               VALUES (?1, ?2, ?3)
+               ON CONFLICT(file_id, page_no) DO UPDATE SET
+                 markdown = CASE WHEN excluded.markdown != '' THEN excluded.markdown ELSE pages.markdown END"#,
+        )
+        .bind(file_id)
+        .bind(i64::from(page.page_no))
+        .bind(&page.markdown)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("upsert page {}: {e}", page.page_no))?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(with_text)
+}
+
+/// How many page rows this file already has. Cheap enough to ask before
+/// deciding whether an already-parsed file needs its record folding in.
+pub async fn page_count(pool: &SqlitePool, file_id: i64) -> Result<i64, String> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM pages WHERE file_id = ?1")
+        .bind(file_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Every PDF-backed file on record (PDFs and Office documents with a derived
 /// sibling PDF), optionally narrowed to a set of subjects.
 pub async fn pdf_files(
@@ -185,9 +286,23 @@ pub async fn pdf_files(
         .collect())
 }
 
-/// Derive parse status from what the sidecar left on disk. Without the app's
+/// Derive parse status from what the parser left on disk. Without the app's
 /// event listener running, this is how a CLI run's parse results reach the
 /// database.
+///
+/// `parse::parse_mode` answers a binary question now — `Some("quality")` or
+/// `None` — where it used to have a third value. `None` **clears** the row
+/// rather than skipping it, and that is the whole point of the sweep in the
+/// other direction: `files.parse_status` also holds the transient states the
+/// app writes from `parse-status` events (`queued`, `running`, `error`), and a
+/// run that is killed mid-parse leaves one of those behind with nothing left
+/// alive to finish it. The artifacts on disk are the only durable truth, so a
+/// row claiming anything the disk does not back is stale by definition. It is
+/// the same reconciliation `reconcile_chapter_status` performs.
+///
+/// Nothing in the live library actually changes value today: 166 rows say
+/// `quality` and have the record to prove it, 540 are already NULL, and the
+/// `fast` the old three-value reader could invent never made it to disk.
 pub async fn reconcile_parse_status(pool: &SqlitePool, data_dir: &Path) -> Result<u64, String> {
     let rows = sqlx::query("SELECT relative_path FROM files")
         .fetch_all(pool)
@@ -200,18 +315,28 @@ pub async fn reconcile_parse_status(pool: &SqlitePool, data_dir: &Path) -> Resul
         let Some(pdf_rel) = crate::paths::doc_pdf_rel(&rel) else {
             continue;
         };
-        let Some(status) = crate::paths::parse_mode(&data_dir.join(&pdf_rel)) else {
-            continue;
-        };
 
-        let res = sqlx::query(
-            "UPDATE files SET parse_status = ?1, parsed_at = datetime('now')
-             WHERE relative_path = ?2 AND (parse_status IS NULL OR parse_status != ?1)",
-        )
-        .bind(status)
-        .bind(&rel)
-        .execute(pool)
-        .await
+        let res = match crate::parse::parse_mode(&data_dir.join(&pdf_rel)) {
+            Some(status) => {
+                sqlx::query(
+                    "UPDATE files SET parse_status = ?1, parsed_at = datetime('now')
+                     WHERE relative_path = ?2 AND (parse_status IS NULL OR parse_status != ?1)",
+                )
+                .bind(status)
+                .bind(&rel)
+                .execute(pool)
+                .await
+            }
+            None => {
+                sqlx::query(
+                    "UPDATE files SET parse_status = NULL, parsed_at = NULL
+                     WHERE relative_path = ?1 AND parse_status IS NOT NULL",
+                )
+                .bind(&rel)
+                .execute(pool)
+                .await
+            }
+        }
         .map_err(|e| e.to_string())?;
         updated += res.rows_affected();
     }
@@ -763,5 +888,141 @@ mod tests {
         assert_eq!(row.get::<String, _>("recap_status"), "error");
         assert!(row.get::<Option<String>, _>("recapped_at").is_some());
         assert_eq!(row.get::<String, _>("recap_error"), "bad window");
+    }
+
+    // ── Page records ─────────────────────────────────────────────────────────
+
+    async fn pages_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        // The shape migration 12 created, embedding columns included: the
+        // parse path must leave them alone, not drop them.
+        sqlx::query(
+            "CREATE TABLE pages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_id     INTEGER NOT NULL,
+                page_no     INTEGER NOT NULL,
+                markdown    TEXT    NOT NULL DEFAULT '',
+                embedding   BLOB,
+                embed_model TEXT,
+                embed_dim   INTEGER,
+                embedded_at TEXT,
+                UNIQUE(file_id, page_no)
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("pages schema");
+        pool
+    }
+
+    fn page(page_no: u32, markdown: &str) -> crate::parse::ParsePage {
+        crate::parse::ParsePage { page_no, markdown: markdown.to_string() }
+    }
+
+    #[tokio::test]
+    async fn a_reparse_never_blanks_markdown_it_already_had() {
+        let pool = pages_pool().await;
+
+        let with_text = upsert_pages(&pool, 7, &[page(1, "one"), page(2, "two"), page(3, "")])
+            .await
+            .expect("first parse");
+        assert_eq!(with_text, 2);
+
+        // Pretend the embedder has been over it. Re-parsing must not disturb
+        // the vector columns — they stay the embedder's until it stops
+        // writing them.
+        sqlx::query("UPDATE pages SET embedding = X'00', embed_model = 'qwen' WHERE page_no = 1")
+            .execute(&pool)
+            .await
+            .expect("fake embedding");
+
+        // A second parse that came back thinner: page 2 now empty, page 1
+        // rewritten. The empty one must leave the good text standing — this is
+        // why the conflict clause is a CASE and not a COALESCE.
+        upsert_pages(&pool, 7, &[page(1, "one, better"), page(2, "")])
+            .await
+            .expect("second parse");
+
+        let rows = sqlx::query("SELECT page_no, markdown, embed_model FROM pages ORDER BY page_no")
+            .fetch_all(&pool)
+            .await
+            .expect("read back");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].get::<String, _>("markdown"), "one, better");
+        assert_eq!(rows[1].get::<String, _>("markdown"), "two");
+        assert_eq!(rows[2].get::<String, _>("markdown"), "");
+        assert_eq!(rows[0].get::<Option<String>, _>("embed_model").as_deref(), Some("qwen"));
+    }
+
+    // ── Parse status reconciliation ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn reconcile_follows_the_disk_in_both_directions() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let data_dir = std::env::temp_dir().join(format!("oculus-reconcile-{stamp}"));
+        let course = data_dir.join("courses/SUBJ/files");
+        std::fs::create_dir_all(&course).expect("scratch library");
+
+        let parsed = course.join("done.pdf");
+        std::fs::write(&parsed, b"%PDF").unwrap();
+        std::fs::write(
+            crate::parse::pages_path(&parsed),
+            r#"{"mode":"quality","parser_version":2,"page_count":1,"pages":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(course.join("gone.pdf"), b"%PDF").unwrap();
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::query(
+            "CREATE TABLE files (
+                relative_path TEXT PRIMARY KEY,
+                parse_status  TEXT,
+                parsed_at     TEXT
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("files schema");
+        sqlx::query(
+            "INSERT INTO files (relative_path, parse_status) VALUES
+               ('courses/SUBJ/files/done.pdf', NULL),
+               -- Left behind by a run that was killed mid-parse: only a live
+               -- process could ever have cleared this.
+               ('courses/SUBJ/files/gone.pdf', 'running')",
+        )
+        .execute(&pool)
+        .await
+        .expect("rows");
+
+        let updated = reconcile_parse_status(&pool, &data_dir).await.expect("reconcile");
+        assert_eq!(updated, 2);
+
+        let status = |rel: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT parse_status FROM files WHERE relative_path = ?1",
+                )
+                .bind(rel)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(status("courses/SUBJ/files/done.pdf").await.as_deref(), Some("quality"));
+        assert_eq!(status("courses/SUBJ/files/gone.pdf").await, None);
+
+        std::fs::remove_dir_all(&data_dir).ok();
     }
 }

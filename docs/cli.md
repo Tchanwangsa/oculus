@@ -79,11 +79,19 @@ the instructions gets read without opening the window.
   console, and a non-zero exit only reads as a crashed job. Safe to run by
   hand when you want to know whether the agent's path still works.
 - `run -s` scrapes, then parses and embeds each written PDF **one file at a
-  time**. The sidecar serializes local heavy work but batches cloud quality
-  independently. Both halves are idempotent; re-running is cheap.
-- The sidecar returns once its *fast* pass has markdown; the quality parse
-  finishes in the background after the command exits. `oculus index` folds
-  that improved text into the database without re-downloading anything.
+  time**. Both halves are idempotent; re-running is cheap.
+- **A parse finishes before the command moves on, and that is minutes per
+  file.** It used to return as soon as the sidecar's *fast* pass had markdown
+  and leave the real parse running in another process, so the good text only
+  appeared on some later `oculus index`. Parsing is in this process now
+  (`app/src-tauri/src/parse/mod.rs`), so the wait is the whole cloud round
+  trip — the page count rewrites itself on the line as pages arrive, which is
+  how you tell a long parse from a hung one.
+- `oculus status` reports the **parser**, not a sidecar process: the backend
+  name, whether it is usable, and its `parser_version` — the handshake that
+  decides whether artifacts written elsewhere can be read as this app's. It
+  asks the backend about itself locally and never calls MinerU, so it is
+  instant and costs no metered quota.
 - `run -s` also refreshes each subject's Canvas calendar (class times and due
   dates) into `calendar_events` after the scrape — the CLI has no sync options
   to gate it with, so it always runs. See [calendar.md](./calendar.md).
@@ -97,14 +105,13 @@ the instructions gets read without opening the window.
 
 ## The query half
 
-- **`search` needs the sidecar and says so.** The query is embedded by the
-  same Qwen3-VL model that embedded the page images — there is no text index
-  to fall back on — so semantic search only works while something is running
-  the sidecar, which in practice means the app is open. When it is down the
-  command **fails with exit 1 and names `oculus grep`** rather than returning
-  zero hits. That is deliberate: a caller handed an empty result concludes
-  the library has no answer and stops; a caller told why it is empty tries
-  the other door. An empty index fails the same way, naming `oculus index`.
+- **`search` fails loudly rather than returning zero hits.** The query is
+  embedded by the same Qwen3-VL model that embedded the page images — there is
+  no text index to fall back on — so it needs the sidecar running, which in
+  practice means the app is open. An empty index **fails with exit 1 and names
+  `oculus index`**. That is deliberate: a caller handed an empty result
+  concludes the library has no answer and stops; a caller told why it is empty
+  tries the other door, which is `oculus grep`.
 - `search` takes a *set* of subject ids, not one — a prefix code legitimately
   matches the same subject in two terms. `retrieval::search_in` is the
   multi-subject entry point; `retrieval::search` is the one-subject wrapper

@@ -11,7 +11,8 @@ dropped, on measurement.
 | Ingest + brute-force cosine search | `app/src-tauri/src/retrieval.rs` |
 | Embedder (model, dims, token budget) | `sidecar/embedder.py` |
 | Killable embedding worker + parent facade | `sidecar/embed_worker.py`, `sidecar/embedding_client.py`, `sidecar/embed_contract.py` |
-| Per-page markdown source | `sidecar/parser.py` (`.pages.json`) |
+| Per-page markdown source | `app/src-tauri/src/parse/mod.rs` (`.pages.json`) |
+| Who writes `pages.markdown` | `app/src-tauri/src/sync.rs` (the parse path) |
 | `pages` table schema | migrations in `app/src-tauri/src/lib.rs` |
 | Frontend query path | `app/src/lib/retrieval.ts`, `app/src/pages/ChatPage.tsx` |
 | Terminal query path | `app/src-tauri/src/bin/oculus.rs` (`oculus search`) |
@@ -55,10 +56,16 @@ Benchmarked 2026-08-15 on real course decks (152-page corpus, then re-run at
 
 - The page is the chunk. Slide-deck pages run ~90–760 chars of markdown, so
   there is no sub-chunking anywhere.
+- **`pages.markdown` is the parse's write, not the embedder's.** It used to
+  arrive only as a side effect of `retrieval::ingest`, which made the text
+  `oculus grep` searches depend on the vector index having been built. A
+  finished parse writes its own page records now (`store::upsert_pages`), and
+  an `oculus index` over an already-parsed file folds its `.pages.json` in if
+  nothing ever did. Ingest still upserts markdown alongside the vector, and
+  both sides use the same conflict rule: an empty incoming page never
+  overwrites text already stored.
 - Ingest is idempotent and decoupled from scraping: `run -s` embeds what it
-  parsed; `oculus index` re-parses/re-embeds files already on record —
-  which is also how quality markdown (finished after a scrape returned)
-  reaches the database.
+  parsed; `oculus index` re-embeds files already on record.
 - Two callers rank against the same store: the app's chat page and
   `oculus search`. The ⌘K palette is **not** a third one — it matches titles
   in SQLite so it can answer every keystroke; see

@@ -73,6 +73,15 @@ pub fn parsed_version(pdf: &Path) -> Option<u32> {
     Some(value.get("parser_version").and_then(|v| v.as_u64()).unwrap_or(1) as u32)
 }
 
+/// The record beside this PDF, read back as the type that wrote it.
+///
+/// Records written by the Python parser deserialise too — the wire shape is
+/// deliberately unchanged — which is what lets an already-parsed file be
+/// folded into the database without re-parsing it.
+pub fn read_record(pdf: &Path) -> Option<ParseOutput> {
+    serde_json::from_str(&fs::read_to_string(pages_path(pdf)).ok()?).ok()
+}
+
 /// True when this PDF's artifacts are current and it can be skipped.
 pub fn is_parsed(pdf: &Path) -> bool {
     parsed_version(pdf).is_some_and(|v| v >= PARSER_VERSION)
@@ -431,6 +440,27 @@ pub enum ParseError {
 }
 
 impl ParseError {
+    /// The machine-readable discriminant that travels with a failure event.
+    ///
+    /// The prose in `Display` is for a student and may be reworded at any time;
+    /// this is what the failure UI branches on, so it is a frozen vocabulary.
+    /// `app/src/lib/parseState.ts` matches `/credential|token/i` against it to
+    /// decide whether a failure is worth pointing at Settings, which is why
+    /// both credential variants keep that word in their name.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            ParseError::MissingCredentials => "missing_credentials",
+            ParseError::RejectedCredentials { .. } => "rejected_credentials",
+            ParseError::QuotaExhausted => "quota_exhausted",
+            ParseError::Offline(_) => "offline",
+            ParseError::TooLarge { .. } => "too_large",
+            ParseError::Document { .. } => "document",
+            ParseError::VersionMismatch { .. } => "version_mismatch",
+            ParseError::NotReady { .. } => "not_ready",
+            ParseError::Io(_) => "io",
+        }
+    }
+
     /// Could retrying *this file*, unchanged, ever succeed?
     ///
     /// False means retrying is pointless until something else changes: a new
@@ -660,6 +690,24 @@ pub fn parse_config() -> ParseConfig {
         Engine::Local => CredentialSource::None,
     };
     ParseConfig { engine, base_url, credentials }
+}
+
+/// The parser this install is configured for.
+///
+/// Every caller that is about to parse comes through here rather than naming a
+/// backend: the engine is a setting, and the one place that reads it is this
+/// function. Construction is where a missing token surfaces — `MinerUCloud`
+/// refuses to exist without one — so the caller gets `MissingCredentials`
+/// before a file has been touched.
+pub fn backend() -> Result<Box<dyn Parser>, ParseError> {
+    match parse_config().engine {
+        Engine::Cloud => Ok(Box::new(mineru::client::MinerUCloud::from_config()?)),
+        // The local parse server ships from its own repo and has no client in
+        // this process yet. Nothing selects it today (`engine` is absent on
+        // every install, which means `Cloud`), so this is a hand-edited
+        // setting pointing at something that is not here.
+        Engine::Local => Err(ParseError::NotReady { backend: "local".into() }),
+    }
 }
 
 /// One row, one connection, no pool.
@@ -902,3 +950,6 @@ mod tests {
 
 /// The one backend today. See `parse/mineru/mod.rs`.
 pub mod mineru;
+
+/// `parse-status`, the one event this path emits. See `parse/events.rs`.
+pub mod events;

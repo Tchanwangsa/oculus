@@ -8,7 +8,6 @@ pub mod echo360;
 pub mod ed;
 mod files;
 pub mod harness;
-mod ipc;
 pub mod keepalive;
 mod lectures;
 pub mod md;
@@ -32,7 +31,6 @@ use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 use auth::{auth_flag_path, saved_session_probe, AuthProbe, AuthState};
-use ipc::IpcPort;
 use lectures::Echo360Cache;
 use sidecar::SidecarProcess;
 use scrape::ScrapeCancel;
@@ -51,9 +49,12 @@ pub fn run() {
         .manage(ScrapeCancel::default())
         .manage(browser::BrowserState::default())
         .setup(|app| {
-            // ── IPC HTTP server ────────────────────────────────────────
-            let port = ipc::start_ipc_server(app.handle().clone());
-            app.manage(IpcPort(port));
+            // ── Parse progress ─────────────────────────────────────────
+            // Parsing is in-process, so `parse-status` is emitted directly
+            // rather than posted back over a loopback port. This is the one
+            // place the parse path learns there is a window to emit to; a
+            // headless run never calls it and every emit is a no-op.
+            parse::events::bind(app.handle().clone());
 
             // ── Media HTTP server ──────────────────────────────────────
             // WebKit won't play <video> from the asset protocol (see

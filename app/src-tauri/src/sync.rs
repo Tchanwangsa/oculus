@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use crate::agents;
 use crate::canvas::Canvas;
 use crate::md::{self, ImageMap};
+use crate::parse;
 use crate::paths;
 
 /// Types stored as-is. Everything downstream — the parsers, the page-image
@@ -197,9 +198,6 @@ pub struct Engine {
     pub ed: crate::ed::Ed,
     data_dir: PathBuf,
     reporter: Box<dyn Reporter>,
-    /// Port the sidecar posts parse status back to. 0 disables the callback
-    /// (the CLI has no IPC server; the parse still runs).
-    ipc_port: u16,
     parse_pdfs: bool,
     options: SyncOptions,
     /// Canvas file id → (modified_at, size) at last download, persisted as
@@ -207,9 +205,6 @@ pub struct Engine {
     /// the same pair and the artifact is on disk, the download is skipped —
     /// the byte-compare in `write` stays the arbiter whenever we do download.
     manifest: std::cell::RefCell<HashMap<String, (String, u64)>>,
-    /// Bounded dispatcher for sidecar parse requests, created on first use.
-    /// See `PARSE_WORKERS`.
-    parse_queue: std::cell::RefCell<Option<std::sync::mpsc::Sender<ParseJob>>>,
 }
 
 impl Engine {
@@ -223,11 +218,9 @@ impl Engine {
             ed: crate::ed::Ed::open(data_dir),
             data_dir: data_dir.to_path_buf(),
             reporter,
-            ipc_port: 0,
             parse_pdfs: true,
             options: SyncOptions::default(),
             manifest: std::cell::RefCell::new(manifest),
-            parse_queue: std::cell::RefCell::new(None),
         }
     }
 
@@ -236,11 +229,6 @@ impl Engine {
         if let Ok(json) = serde_json::to_string(&*self.manifest.borrow()) {
             let _ = std::fs::write(self.data_dir.join("file-manifest.json"), json);
         }
-    }
-
-    pub fn with_ipc_port(mut self, port: u16) -> Self {
-        self.ipc_port = port;
-        self
     }
 
     pub fn with_pdf_parsing(mut self, on: bool) -> Self {
@@ -1050,7 +1038,7 @@ impl Engine {
                 Ok(pdf) => {
                     paths::write_course_bytes(&self.data_dir, &c.code, &format!("files/{name}.pdf"), &pdf)?;
                     if self.parse_pdfs {
-                        self.trigger_parse(&rel, c.id, &c.code);
+                        self.trigger_parse(&rel, c.id);
                     }
                 }
                 Err(e) => {
@@ -1232,114 +1220,253 @@ impl Engine {
         });
 
         if self.parse_pdfs && rel_path.ends_with(".pdf") {
-            self.trigger_parse(&rel, c.id, &c.code);
+            self.trigger_parse(&rel, c.id);
         }
         Ok(rel)
     }
 
-    /// Hand the PDF to the Python sidecar without waiting. The app wants each
-    /// deck queued the moment it lands so the UI can show parse progress
-    /// alongside the download.
+    /// Start the parse without waiting for it. The app wants each deck queued
+    /// the moment it lands so the UI can show parse progress alongside the
+    /// download, and a scrape must finish reporting whatever the parser is
+    /// doing.
     ///
-    /// Queued, not spawned per file. Every new PDF used to get its own detached
-    /// thread, so a first sync of a 105-deck library opened 105 threads and
-    /// fired 105 simultaneous POSTs at the sidecar. FastAPI runs its sync
-    /// endpoints on a 40-slot threadpool, so 40 fast parses ran at once — and a
-    /// fast parse costs ~2 GB that the process never gives back
-    /// (`sidecar/parse_worker.py` has the measurements). That was the OOM.
-    /// The sidecar now bounds itself too; this keeps the caller's thread and
-    /// socket count flat instead of scaling with the library.
-    fn trigger_parse(&self, rel: &str, subject_id: i64, code: &str) {
-        let mut slot = self.parse_queue.borrow_mut();
-        let tx = slot.get_or_insert_with(spawn_parse_workers);
-        // A closed channel means the workers are gone; the parse is not worth
-        // failing a scrape over — `oculus index` re-runs it, idempotently.
-        let _ = tx.send(ParseJob {
-            data_dir: self.data_dir.clone(),
-            rel: rel.to_string(),
-            subject_id,
-            code: code.to_string(),
-            ipc_port: self.ipc_port,
-        });
-    }
-}
-
-/// Bounds the number of open parse requests. The sidecar's global heavy-work
-/// slot serializes the actual parser memory; more senders here would only wait
-/// on that slot while holding a thread and socket open.
-const PARSE_WORKERS: usize = 2;
-
-struct ParseJob {
-    data_dir: PathBuf,
-    rel: String,
-    subject_id: i64,
-    code: String,
-    ipc_port: u16,
-}
-
-/// Detached on purpose: `trigger_parse` has always been fire-and-forget, and a
-/// scrape must finish reporting without waiting on the parse tier. When the
-/// engine drops, the sender goes with it and the workers exit once the queue
-/// they are holding has drained.
-fn spawn_parse_workers() -> std::sync::mpsc::Sender<ParseJob> {
-    let (tx, rx) = std::sync::mpsc::channel::<ParseJob>();
-    let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
-    for _ in 0..PARSE_WORKERS {
-        let rx = std::sync::Arc::clone(&rx);
-        std::thread::spawn(move || loop {
-            // Bind the result so the guard drops before the parse runs —
-            // holding it across `parse_pdf` would serialise the workers.
-            let job = rx.lock().unwrap().recv();
-            let Ok(job) = job else { return };
-            match parse_pdf(&job.data_dir, &job.rel, job.subject_id, &job.code, job.ipc_port) {
-                Ok(mode) => eprintln!("[oculus] parse-pdf {}: {mode}", job.rel),
-                Err(e) => eprintln!("[oculus] parse-pdf {}: {e}", job.rel),
+    /// **One detached thread per PDF, and the bounded worker pool that used to
+    /// be here is gone** — not a regression, an inversion. The old pool existed
+    /// because every parse was an HTTP request into the sidecar, and 105 decks
+    /// meant 105 simultaneous POSTs, which FastAPI happily ran 40-wide at ~2 GB
+    /// each. That was the OOM. Parsing is in-process now and concurrency is the
+    /// batcher's: it coalesces up to twenty files into one submit and keeps at
+    /// most eight batches in flight (`parse/mineru/batch.rs`). A second gate
+    /// here would only stop files reaching the window they are supposed to
+    /// share, so twenty PDFs would go as twenty batches instead of one.
+    ///
+    /// Something still has to be off the scrape thread, because `parse_pdf`
+    /// blocks for the whole cloud round trip now — minutes, not the seconds the
+    /// sidecar's fast pass used to answer in. What each thread does with that
+    /// time is park on the batcher's condvar: no socket, no request in flight,
+    /// a stack and nothing else.
+    fn trigger_parse(&self, rel: &str, subject_id: i64) {
+        let data_dir = self.data_dir.clone();
+        let rel = rel.to_string();
+        // A thread we cannot start is not worth failing a scrape over — the
+        // file is on disk and `oculus index` re-runs the parse, idempotently.
+        let _ = std::thread::Builder::new().name("oculus-parse".into()).spawn(move || {
+            match parse_pdf(&data_dir, &rel, subject_id) {
+                Ok(summary) => eprintln!("[oculus] parse-pdf {rel}: {summary}"),
+                Err(e) => eprintln!("[oculus] parse-pdf {rel}: {e}"),
             }
         });
     }
-    tx
 }
 
-/// A fast parse of a large deck is not instant, and `ureq` has no default
-/// timeout — an unbounded wait here would hang a headless run forever.
-const PARSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+/// What a finished `parse_pdf` actually did.
+///
+/// The old return was the sidecar's `"mode"` string, read leniently enough that
+/// an unparseable response and a successful quality parse both came back as
+/// `"ok"`. There is nothing to be lenient about any more: either the artifacts
+/// are on disk and this says how much of them there is, or the call returned a
+/// typed `ParseError`.
+#[derive(Debug, Clone)]
+pub struct ParseSummary {
+    /// True when the PDF already had a current `.pages.json` and nothing was
+    /// sent anywhere. `pages` is then whatever the existing record holds.
+    pub skipped: bool,
+    pub pages: u32,
+    pub images: u32,
+    /// Page rows written to `pages` — how much of this parse `oculus grep` can
+    /// see. Zero with `skipped` false means the database could not be reached
+    /// or the file has no row yet; the artifacts are still on disk.
+    pub pages_recorded: usize,
+}
 
-/// Ask the sidecar to parse a PDF, blocking until markdown exists.
+impl std::fmt::Display for ParseSummary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.skipped {
+            write!(f, "already parsed ({} pages", self.pages)?;
+            if self.pages_recorded > 0 {
+                write!(f, ", {} records folded in", self.pages_recorded)?;
+            }
+            return write!(f, ")");
+        }
+        write!(f, "{} pages, {} images, {} recorded", self.pages, self.images, self.pages_recorded)
+    }
+}
+
+/// Parse a PDF, blocking until the artifacts are on disk.
 ///
-/// The sidecar returns once the *fast* pass is done and queues the slower
-/// quality pass on its own thread, so this is seconds, not minutes. Idempotent:
-/// an already-parsed PDF returns immediately.
+/// **This is minutes, not seconds.** The sidecar answered as soon as its fast
+/// pass had produced *some* markdown and finished the quality pass on its own
+/// thread; there is no fast tier now, so the call spans the entire round trip —
+/// batching window, upload, MinerU's queue, download, render. Every caller has
+/// to be somewhere that can wait that long.
 ///
-/// `rel_path` is the *library file* (what the database and all events key on);
-/// for Office documents the actual bytes parsed are its derived sibling PDF.
+/// There is no timeout here on purpose. `sync.rs` used to impose 20 minutes
+/// because `ureq` has no default and an unbounded wait would hang a headless
+/// run forever; the in-process client has its own `POLL_DEADLINE` of 60
+/// minutes, measured from the batch's first poll and returned as a typed
+/// `Offline`. Two limits that disagree means the shorter one silently
+/// abandons work the longer one is still doing, so **the client's deadline is
+/// the only one** — it is the one that knows what it is waiting for.
+///
+/// Idempotent: a PDF with a current record returns immediately.
+///
+/// `rel_path` is the *library file* (what the database and every event key on);
+/// for Office documents the bytes actually parsed are its derived sibling PDF.
 pub fn parse_pdf(
     data_dir: &Path,
     rel_path: &str,
     subject_id: i64,
-    subject_code: &str,
-    ipc_port: u16,
-) -> Result<String, String> {
-    let pdf_rel = paths::doc_pdf_rel(rel_path)
-        .ok_or_else(|| format!("{rel_path}: no PDF representation to parse"))?;
-    let body = serde_json::json!({
-        "pdf_path": data_dir.join(&pdf_rel).to_string_lossy(),
-        "subject_code": subject_code,
-        "relative_path": rel_path,
-        "subject_id": subject_id,
-        "ipc_port": ipc_port,
-        "mineru_token": crate::mineru::stored_api_key(),
-    });
-    let url = format!("http://127.0.0.1:{}/parse-pdf", crate::sidecar::SIDECAR_PORT);
-    let text = ureq::post(&url)
-        .timeout(PARSE_TIMEOUT)
-        .set("Content-Type", "application/json")
-        .send_string(&body.to_string())
-        .map_err(|e| format!("sidecar unavailable: {e}"))?
-        .into_string()
-        .map_err(|e| format!("unreadable sidecar response: {e}"))?;
+) -> Result<ParseSummary, parse::ParseError> {
+    parse_pdf_reporting(data_dir, rel_path, subject_id, &|_| {})
+}
 
-    let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-    Ok(v["mode"].as_str().unwrap_or("ok").to_string())
+/// `parse_pdf`, plus a callback for a caller that renders its own progress.
+///
+/// The app does not need this — it reads the `parse-status` events, which are
+/// emitted either way — but the CLI has no event listener and a multi-minute
+/// parse with a silent terminal looks like a hang.
+pub fn parse_pdf_reporting(
+    data_dir: &Path,
+    rel_path: &str,
+    subject_id: i64,
+    on_progress: &dyn Fn(parse::Progress),
+) -> Result<ParseSummary, parse::ParseError> {
+    match run_parse(data_dir, rel_path, subject_id, on_progress) {
+        Ok(summary) => Ok(summary),
+        Err(error) => {
+            parse::events::failed(rel_path, subject_id, &error);
+            Err(error)
+        }
+    }
+}
+
+fn run_parse(
+    data_dir: &Path,
+    rel_path: &str,
+    subject_id: i64,
+    on_progress: &dyn Fn(parse::Progress),
+) -> Result<ParseSummary, parse::ParseError> {
+    // Both of these are local facts about this machine, not something a backend
+    // said, so they take the local-failure variant: retryable, not latching —
+    // a missing file must never stop the rest of the library parsing.
+    let pdf_rel = paths::doc_pdf_rel(rel_path).ok_or_else(|| {
+        parse::ParseError::Io(format!("{rel_path} has no PDF representation to parse"))
+    })?;
+    let pdf = data_dir.join(&pdf_rel);
+    if !pdf.is_file() {
+        return Err(parse::ParseError::Io(format!("not on disk: {}", pdf.display())));
+    }
+
+    if parse::parse_mode(&pdf).is_some() {
+        // Skipping the parse is not skipping the page records. The library
+        // holds files parsed long before this write existed — by the Python
+        // parser, and only ever reaching `pages` if the embedder happened to
+        // run over them afterwards — so an artifact on disk is no promise the
+        // database can see it. Re-reading the record costs a file read and,
+        // when there is genuinely nothing to do, one `COUNT(*)`.
+        let record = parse::read_record(&pdf);
+        let pages = record.as_ref().map(|r| r.page_count).unwrap_or(0);
+        let pages_recorded = match record {
+            Some(record) => backfill_pages(data_dir, rel_path, subject_id, &record)
+                .unwrap_or_else(|e| {
+                    eprintln!("[oculus] parse-pdf {rel_path}: page records not backfilled: {e}");
+                    0
+                }),
+            None => 0,
+        };
+        // Still terminal-status the file: a sweep that kicked an
+        // already-parsed row is waiting to hear that it is done.
+        parse::events::parsed(rel_path, subject_id);
+        return Ok(ParseSummary { skipped: true, pages, images: 0, pages_recorded });
+    }
+
+    parse::events::queued(rel_path, subject_id);
+
+    let parser = parse::backend()?;
+    parse::preflight(parser.as_ref())?;
+
+    let staging = parse::ImageStaging::begin(&pdf)?;
+    let output = parser.parse(&pdf, staging.dir(), staging.rel(), &|progress| {
+        parse::events::running(rel_path, subject_id, progress);
+        on_progress(progress);
+    })?;
+    // Artifacts land before anything else hears about it: `.pages.json` is the
+    // only evidence a parse finished, and it is written last and atomically.
+    output.write(&pdf, staging)?;
+
+    // Page records are best-effort *after* the artifacts. A database that is
+    // locked, missing or has no row for this file yet must not turn a parse
+    // that succeeded into a failure — the markdown is on disk, and
+    // `oculus index` folds it in on the next pass.
+    let pages_recorded = match record_pages(data_dir, rel_path, subject_id, &output) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("[oculus] parse-pdf {rel_path}: page records not written: {e}");
+            0
+        }
+    };
+
+    parse::events::parsed(rel_path, subject_id);
+    Ok(ParseSummary {
+        skipped: false,
+        pages: output.page_count,
+        images: output.image_count,
+        pages_recorded,
+    })
+}
+
+/// Fold an *already-parsed* file's record in, but only if nothing has.
+///
+/// Deliberately not the same call as `record_pages`: a parse that just ran has
+/// the freshest text and always writes, while this one is repairing history and
+/// must not touch a file whose rows are already there. The guard is what makes
+/// `oculus index` safe to run over the whole library.
+fn backfill_pages(
+    data_dir: &Path,
+    rel_path: &str,
+    subject_id: i64,
+    record: &parse::ParseOutput,
+) -> Result<usize, String> {
+    tauri::async_runtime::block_on(async move {
+        let pool = crate::store::open(data_dir).await?;
+        let result = async {
+            let Some(file_id) = crate::store::file_id(&pool, subject_id, rel_path).await? else {
+                return Ok(0);
+            };
+            if crate::store::page_count(&pool, file_id).await? > 0 {
+                return Ok(0);
+            }
+            crate::store::upsert_pages(&pool, file_id, &record.pages).await
+        }
+        .await;
+        pool.close().await;
+        result
+    })
+}
+
+/// Fold a finished parse into the `pages` table.
+///
+/// This write used to live on the embed path (`retrieval::ingest`), so
+/// `pages.markdown` — what `oculus grep` searches — only ever appeared as a
+/// side effect of building the vector index. It belongs to the parse, and now
+/// that the parse is in this process it happens here.
+fn record_pages(
+    data_dir: &Path,
+    rel_path: &str,
+    subject_id: i64,
+    output: &parse::ParseOutput,
+) -> Result<usize, String> {
+    tauri::async_runtime::block_on(async move {
+        let pool = crate::store::open(data_dir).await?;
+        let result = match crate::store::file_id(&pool, subject_id, rel_path).await? {
+            Some(file_id) => crate::store::upsert_pages(&pool, file_id, &output.pages).await,
+            // A parse can outrun the row: the frontend writes `files` from
+            // scrape events, and a CLI run may have no database write at all.
+            None => Ok(0),
+        };
+        pool.close().await;
+        result
+    })
 }
 
 // ── Office → PDF conversion ──────────────────────────────────────────────────

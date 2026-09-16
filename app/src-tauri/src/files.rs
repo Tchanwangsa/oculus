@@ -65,7 +65,7 @@ pub fn scan_parsed_files(
         .into_iter()
         .filter_map(|rel| {
             let pdf_rel = crate::paths::doc_pdf_rel(&rel)?;
-            crate::paths::parse_mode(&base.join(&pdf_rel)).map(|mode| (rel, mode.to_string()))
+            crate::parse::parse_mode(&base.join(&pdf_rel)).map(|mode| (rel, mode.to_string()))
         })
         .collect())
 }

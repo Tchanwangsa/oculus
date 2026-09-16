@@ -799,7 +799,7 @@ pub mod app {
         lecture_id: String,
         force: Option<bool>,
     ) -> Result<(), String> {
-        let pool = crate::retrieval::open_pool().await?;
+        let pool = crate::store::open_pool().await?;
         let running: Option<String> =
             sqlx::query_scalar("SELECT recap_status FROM lectures WHERE id = ?1")
                 .bind(&lecture_id)
@@ -819,7 +819,7 @@ pub mod app {
                 Ok(runtime) => runtime,
                 Err(error) => return eprintln!("[oculus] recap: {error}"),
             };
-            let pool = match rt.block_on(crate::retrieval::open_pool()) {
+            let pool = match rt.block_on(crate::store::open_pool()) {
                 Ok(pool) => pool,
                 Err(error) => return eprintln!("[oculus] recap: {error}"),
             };
@@ -929,7 +929,7 @@ pub mod app {
     pub fn reconcile(app: &AppHandle) {
         let _ = app;
         tauri::async_runtime::spawn(async {
-            if let Ok(pool) = crate::retrieval::open_pool().await {
+            if let Ok(pool) = crate::store::open_pool().await {
                 if let Ok(count) = crate::store::reconcile_recap_status(&pool).await {
                     if count > 0 {
                         eprintln!("[oculus] recap: cleared {count} interrupted run(s)");

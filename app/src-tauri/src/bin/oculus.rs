@@ -968,11 +968,18 @@ impl Ctx {
             /// caller deciding what to do about it.
             detail: Option<String>,
         }
+        /// What the configured parse backend says about itself. There is no
+        /// process to report on any more — parsing happens in this one — so
+        /// this is the seam's own `Health`, plus why it could not be reached
+        /// when it could not be. `parser_version` stays visible because it is
+        /// the version handshake: a backend stamping a different number writes
+        /// artifacts this binary cannot read as its own.
         #[derive(Serialize)]
-        struct Sidecar {
-            running: bool,
-            pid: Option<i64>,
-            parser_version: Option<i64>,
+        struct ParserStatus {
+            backend: String,
+            ready: bool,
+            parser_version: Option<u32>,
+            detail: Option<String>,
         }
         #[derive(Serialize)]
         struct Counts {
@@ -1018,24 +1025,30 @@ impl Ctx {
             }
         };
 
-        // Report the pid: a sidecar that outlived its app answers /health
-        // perfectly while serving stale code, and this is the only way to see
-        // that from outside.
-        let health: Option<serde_json::Value> = ureq::get(&format!(
-            "http://127.0.0.1:{}/health",
-            app_lib::sidecar::SIDECAR_PORT
-        ))
-        .timeout(std::time::Duration::from_millis(500))
-        .call()
-        .ok()
-        // ureq's json helpers are behind a feature this crate does not enable.
-        .and_then(|r| r.into_string().ok())
-        .and_then(|s| serde_json::from_str(&s).ok());
-
-        let sidecar = Sidecar {
-            running: health.is_some(),
-            pid: health.as_ref().and_then(|h| h["pid"].as_i64()),
-            parser_version: health.as_ref().and_then(|h| h["parser_version"].as_i64()),
+        // Local only: constructing the backend reads the settings row and the
+        // keychain, and `preflight` asks it about itself. Nothing goes over
+        // the network, so `status` stays instant and costs no cloud quota.
+        let parser = match app_lib::parse::backend() {
+            Ok(backend) => match app_lib::parse::preflight(backend.as_ref()) {
+                Ok(health) => ParserStatus {
+                    backend: health.backend,
+                    ready: health.ready,
+                    parser_version: Some(health.parser_version),
+                    detail: None,
+                },
+                Err(e) => ParserStatus {
+                    backend: backend.health().backend,
+                    ready: false,
+                    parser_version: Some(backend.health().parser_version),
+                    detail: Some(e.to_string()),
+                },
+            },
+            Err(e) => ParserStatus {
+                backend: app_lib::parse::parse_config().engine.as_str().to_string(),
+                ready: false,
+                parser_version: None,
+                detail: Some(e.to_string()),
+            },
         };
 
         let pool = self.db();
@@ -1076,7 +1089,7 @@ impl Ctx {
                 data_dir: String,
                 canvas: &'a Service,
                 ed: &'a Service,
-                sidecar: &'a Sidecar,
+                parser: &'a ParserStatus,
                 subjects: &'a Option<Counts>,
                 files: &'a Option<FileCounts>,
                 index: &'a Option<app_lib::retrieval::IndexStats>,
@@ -1085,7 +1098,7 @@ impl Ctx {
                 data_dir: self.data_dir.display().to_string(),
                 canvas: &canvas_status,
                 ed: &ed_status,
-                sidecar: &sidecar,
+                parser: &parser,
                 subjects: &subjects,
                 files: &files,
                 index: &index,
@@ -1096,18 +1109,12 @@ impl Ctx {
         println!("{}   {}", paint("canvas", DIM), describe(&canvas_status));
         println!("{}       {}", paint("ed", DIM), describe(&ed_status));
         println!(
-            "{}  {}",
-            paint("sidecar", DIM),
-            match sidecar.running {
-                true => paint(
-                    &format!(
-                        "running (pid {}, parser v{})",
-                        sidecar.pid.unwrap_or(0),
-                        sidecar.parser_version.unwrap_or(1)
-                    ),
-                    GREEN
-                ),
-                false => paint("not running — PDFs will not be parsed", YELLOW),
+            "{}   {}",
+            paint("parser", DIM),
+            match (&parser.detail, parser.parser_version) {
+                (None, Some(v)) => paint(&format!("{} (v{v})", parser.backend), GREEN),
+                (Some(why), _) => paint(why, YELLOW),
+                (None, None) => paint("unknown", DIM),
             }
         );
         if let Some(c) = &subjects {
@@ -1723,22 +1730,21 @@ impl Ctx {
 
     /// Parse each PDF and fold it into the retrieval index.
     ///
-    /// Serial by design: the sidecar has one shared heavy-work slot, so
-    /// concurrent requests would queue there anyway — and one at a time is the
-    /// only way the log stays readable. Both halves are idempotent, so
-    /// re-running this over an already-indexed library is cheap.
+    /// Serial by design: one at a time is the only way the log stays readable,
+    /// and both halves are idempotent, so re-running this over an
+    /// already-indexed library is cheap.
+    ///
+    /// **Each file now blocks for its whole cloud round trip — minutes, not
+    /// the seconds the sidecar's fast pass answered in.** That is the point
+    /// rather than a cost: this call used to return as soon as *some* markdown
+    /// existed and leave the real parse running in another process, so the
+    /// text only appeared on some later `oculus index`. It finishes the parse
+    /// now. The per-page callback below is what keeps the terminal from
+    /// looking hung while it does.
     fn index_pdfs(&self, pool: &SqlitePool, pdfs: &[(i64, String)], embed: bool) -> Result<(), String> {
         if pdfs.is_empty() {
             return Ok(());
         }
-        if !sidecar_healthy() {
-            println!(
-                "{}",
-                paint("sidecar not running — PDFs left unparsed and unindexed", YELLOW)
-            );
-            return Ok(());
-        }
-
         println!();
         println!(
             "{} {} PDF(s)",
@@ -1764,14 +1770,26 @@ impl Ctx {
                 continue;
             }
             let name = rel.rsplit('/').next().unwrap_or(rel);
-            print!("  {:<52} ", truncate(name, 52));
+            let label = format!("  {:<52} ", truncate(name, 52));
+            print!("{label}");
             let _ = std::io::stdout().flush();
 
-            let code = rel.split('/').nth(1).unwrap_or("");
-            match app_lib::sync::parse_pdf(&self.data_dir, rel, *subject_id, code, 0) {
-                Ok(mode) => print!("{}", paint(&format!("{mode:<6}"), DIM)),
+            // Rewrite the one line in place as pages arrive. `\x1b[K` clears
+            // whatever the longer previous count left behind.
+            let outcome =
+                app_lib::sync::parse_pdf_reporting(&self.data_dir, rel, *subject_id, &|p| {
+                    let seen = match p.total_pages {
+                        0 => format!("{} pages", p.pages_done),
+                        total => format!("{}/{total} pages", p.pages_done),
+                    };
+                    print!("\r{label}{}\x1b[K", paint(&seen, DIM));
+                    let _ = std::io::stdout().flush();
+                });
+            print!("\r{label}\x1b[K");
+            match outcome {
+                Ok(summary) => print!("{}", paint(&summary.to_string(), DIM)),
                 Err(e) => {
-                    println!("{}", paint(&e, RED));
+                    println!("{}", paint(&e.to_string(), RED));
                     failed += 1;
                     continue;
                 }
@@ -1822,10 +1840,6 @@ impl Ctx {
                 paint("warning", YELLOW)
             );
         }
-        // The sidecar returns as soon as the fast pass has produced markdown
-        // and runs the slower, better parse afterwards. That text lands on the
-        // next `oculus index`.
-        println!("{}", paint("quality parses continue in the sidecar", DIM));
         Ok(())
     }
 
@@ -1868,15 +1882,6 @@ impl Ctx {
         };
         let codes: HashMap<i64, String> =
             subjects.iter().map(|s| (s.id, s.code.clone())).collect();
-
-        if !sidecar_healthy() {
-            return Err(
-                "the sidecar is not running, so semantic search is unavailable.\n       \
-                 Open the Oculus app to start it, or search the same text literally:\n         \
-                 oculus grep \"<pattern>\""
-                    .to_string(),
-            );
-        }
 
         let db_file = app_lib::paths::db_path(&self.data_dir);
         let stats = self.rt.block_on(app_lib::retrieval::stats(&db_file))?;
@@ -3468,16 +3473,6 @@ fn help_block(cmd: &clap::Command, path: &str, globals: bool) -> String {
     let help = cmd.render_long_help().to_string();
     let body: Vec<&str> = help.lines().map(|l| l.trim_end()).collect();
     format!("```\n{}\n```\n", body.join("\n").trim_end())
-}
-
-fn sidecar_healthy() -> bool {
-    ureq::get(&format!(
-        "http://127.0.0.1:{}/health",
-        app_lib::sidecar::SIDECAR_PORT
-    ))
-    .timeout(std::time::Duration::from_millis(500))
-    .call()
-    .is_ok()
 }
 
 fn truncate(s: &str, max: usize) -> String {
