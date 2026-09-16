@@ -163,14 +163,25 @@ not settings**; changing either of the first two is a re-parse of everything.
     cargo test --lib parse::mineru::local::tests::a_real_mineru -- --ignored --nocapture
   ```
 
-  **Start `mineru-api` somewhere other than this repo.** It writes every parse
-  it serves into an `output/` folder beside its own working directory — a task
-  UUID per request, holding the markdown, both content lists and every
-  extracted image — and it never cleans up. Started from the repo root, that is
-  11 MB of JPEGs after two documents. `output/` is gitignored unanchored so
-  they cannot be committed from wherever it lands, but nothing deletes them:
-  that is yours to sweep. Oculus reads the ZIP from the response and never
-  looks at that folder.
+  **Point `MINERU_API_OUTPUT_ROOT` somewhere disposable before starting it.**
+  `mineru-api` writes every parse it serves into a folder per request — a task
+  UUID holding the markdown, both content lists and every extracted image —
+  under `./output`, resolved against *its own working directory*. Started from
+  a checkout, that is 11 MB of stray files after two documents.
+
+  **Oculus cannot redirect it**, which is why this lives in a start line rather
+  than in the client: `/file_parse` accepts no `output_dir` field, so the only
+  lever is the environment of whoever runs the server. `output/` is gitignored
+  here, unanchored, so a server started in the wrong place cannot get its spill
+  committed — but that protects this repo, not a user's home directory.
+
+  It is also not quite a leak. A completed task's folder is swept after
+  `MINERU_API_TASK_RETENTION_SECONDS` (default 24 h, checked every 5 min), so a
+  server left running tidies up after itself. That ledger is a dict in memory,
+  though: stop the server before the retention window closes and whatever is
+  still on disk is orphaned for good, because the next server has no idea those
+  folders were ever tasks. Oculus reads the ZIP off the response and never
+  looks at the folder either way.
 
 ## The version pin
 
@@ -182,8 +193,11 @@ Oculus documents pins below 4:
 
 ```bash
 uv tool install -U "mineru[core]>=3.4,<4"
-mineru-api --host 127.0.0.1 --port 8000
+MINERU_API_OUTPUT_ROOT="$HOME/.cache/mineru-api" \
+  mineru-api --host 127.0.0.1 --port 8000
 ```
+
+That environment variable is not decoration — see the bullet on it above.
 
 `uv` is assumed to be present already — Oculus does not install a package
 manager on someone's machine. Installing directly rather than in a container is

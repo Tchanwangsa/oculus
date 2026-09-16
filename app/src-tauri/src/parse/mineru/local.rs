@@ -925,7 +925,8 @@ mod tests {
     ///
     /// ```text
     /// uv tool install -U "mineru[core]>=3.4,<4"
-    /// mineru-api --host 127.0.0.1 --port 8000
+    /// MINERU_API_OUTPUT_ROOT="$HOME/.cache/mineru-api" \
+    ///   mineru-api --host 127.0.0.1 --port 8000
     /// cargo test --lib parse::mineru::local::tests::a_real_mineru -- --ignored --nocapture
     /// ```
     ///
