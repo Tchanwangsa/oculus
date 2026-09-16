@@ -17,7 +17,13 @@ interface LibraryCounts {
 
 export default function SettingsLibraryPage() {
   const [library, setLibrary] = useState<LibraryCounts | null>(null);
-  const [hasToken, setHasToken] = useState(false);
+  // `null` is "not answered yet", and it is a state the UI must keep separate
+  // from `false`. These two used to load in one `Promise.all`, so a failure in
+  // *either* left this at its initial `false` — and the page then told someone
+  // with a perfectly good token, in red, that they had none and nothing could
+  // be parsed. A check that did not happen is not a negative answer.
+  const [hasToken, setHasToken] = useState<boolean | null>(null);
+  const [tokenCheckError, setTokenCheckError] = useState<string | null>(null);
   const [token, setToken] = useState("");
   const [tokenNote, setTokenNote] = useState<{ kind: "error" | "warn"; text: string } | null>(null);
   const [checkingToken, setCheckingToken] = useState(false);
@@ -32,18 +38,36 @@ export default function SettingsLibraryPage() {
   const latch = useParseStore((state) => state.latch);
   const clearLatch = useParseStore((state) => state.clearLatch);
 
+  // Two independent questions, loaded independently. Neither can answer for
+  // the other, and neither failing may be reported as the other's answer.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getPdfPipelineRows(), invoke<boolean>("mineru_has_api_key")])
-      .then(([rows, tokenPresent]) => {
+
+    getPdfPipelineRows()
+      .then((rows) => {
         if (cancelled) return;
         setLibrary({
           tracked: rows.length,
           parsed: rows.filter((row) => row.parse_status === "quality").length,
         });
-        setHasToken(tokenPresent);
       })
-      .catch((error) => console.error("library settings failed", error));
+      .catch((error) => console.error("library counts failed", error));
+
+    invoke<boolean>("mineru_has_api_key")
+      .then((present) => {
+        if (cancelled) return;
+        setHasToken(present);
+        setTokenCheckError(null);
+      })
+      .catch((error) => {
+        console.error("MinerU token check failed", error);
+        if (cancelled) return;
+        // Shown, not swallowed. The console is not somewhere a student looks,
+        // and this is the whole reason the page was lying.
+        setHasToken(null);
+        setTokenCheckError(String(error));
+      });
+
     return () => {
       cancelled = true;
     };
@@ -87,7 +111,7 @@ export default function SettingsLibraryPage() {
     }
   };
 
-  const tokenExpired = hasToken && Boolean(latch && tokenish(latch.kind, latch.message));
+  const tokenExpired = hasToken === true && Boolean(latch && tokenish(latch.kind, latch.message));
 
   return (
     <>
@@ -116,7 +140,7 @@ export default function SettingsLibraryPage() {
                   Stored in your Mac keychain, never in the library database.
                 </p>
               </div>
-              {hasToken && !tokenExpired ? (
+              {hasToken === true && !tokenExpired ? (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-success">Connected</span>
                   <Button variant="outline" size="xs" onClick={() => void deleteToken()}>
@@ -164,10 +188,17 @@ export default function SettingsLibraryPage() {
                 new one — there is no local parser to fall back to.
               </p>
             ) : null}
-            {!hasToken && !tokenExpired ? (
+            {hasToken === false && !tokenExpired ? (
               <p className="mt-2 text-[11px] text-warning">
                 Without a token no PDF can be parsed, so none of them are searchable or can be
                 mentioned in chat.
+              </p>
+            ) : null}
+            {hasToken === null ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                {tokenCheckError
+                  ? `Could not check whether a token is saved: ${tokenCheckError}`
+                  : "Checking for a saved token…"}
               </p>
             ) : null}
             <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
