@@ -1,11 +1,11 @@
 //! The seam every embedder plugs into.
 //!
-//! Embedding used to live behind the Python sidecar's HTTP port, with a torch
-//! runtime and a 1.2 GB model snapshot behind it. It is a trait now: Voyage
-//! implements it in-process, and a local embedder — should one ever ship —
-//! implements the same one. Nothing here may assume the cloud; anything
-//! cloud-shaped (an API root, a key, a rate limit) arrives as configuration or
-//! as a parameter.
+//! Embedding used to live behind the Python sidecar's HTTP port, with a 1.2 GB
+//! torch runtime and a 4 GB model snapshot (`Qwen3-VL-Embedding-2B`, bf16)
+//! behind it. It is a trait now: Voyage implements it in-process, and a local
+//! embedder — should one ever ship — implements the same one. Nothing here may
+//! assume the cloud; anything cloud-shaped (an API root, a key, a rate limit)
+//! arrives as configuration or as a parameter.
 //!
 //! What the seam owns is the *contract*, not the embedding: the on-disk
 //! artifact, the space every vector in the `pages` table must belong to, the
@@ -735,6 +735,26 @@ pub fn embed_config() -> EmbedConfig {
     EmbedConfig { engine, base_url, credentials }
 }
 
+/// The embedder this app's settings select.
+///
+/// The parser seam's `backend()`, one field over. Every call site that is about
+/// to embed goes through here rather than naming a client, which is what keeps
+/// `Engine::Local` a setting rather than a rewrite.
+pub fn backend() -> Result<Box<dyn Embedder>, EmbedError> {
+    let config = embed_config();
+    match config.engine {
+        Engine::Cloud => Ok(Box::new(voyage::client::VoyageCloud::with_config(&config)?)),
+        // The local embedder ships from its own repo and has no client in this
+        // process yet. Nothing selects it today (`engine` is absent on every
+        // install, which means `Cloud`), so reaching this is a hand-edited
+        // setting pointing at something that is not here. It is `NotReady`
+        // rather than a fallback to the cloud on purpose: silently embedding
+        // into a space the user did not choose is exactly what `Health::check`
+        // exists to prevent.
+        Engine::Local => Err(EmbedError::NotReady { backend: "local".into() }),
+    }
+}
+
 /// One row, one connection, no pool — the same reasoning as
 /// `parse::stored_settings`: this reader needs a single `SELECT` a few times
 /// per run, and the pool helpers live in `store.rs`, which is async-first.
@@ -1038,3 +1058,4 @@ mod tests {
 /// `embed/raster.rs`.
 pub mod commands;
 pub mod raster;
+pub mod voyage;

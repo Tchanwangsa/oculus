@@ -259,6 +259,18 @@ pub fn page_count(pdf: &Path) -> Result<u32, RasterError> {
     Ok(count as u32)
 }
 
+/// Is the renderer usable at all — i.e. did libpdfium bind?
+///
+/// `RasterError::Library` is the one failure in this module that condemns
+/// every file rather than one, and `embed::EmbedError` — which is
+/// `ParseError`'s vocabulary on purpose — has no variant that is both latching
+/// and fixable-by-the-user. So the embedder asks this in its `health()`
+/// instead, and `embed::preflight` refuses the run **once**, before a single
+/// file, rather than failing two hundred of them with the same message.
+pub fn available() -> Result<(), RasterError> {
+    pdfium().map(|_| ())
+}
+
 fn load_error(error: PdfiumError) -> RasterError {
     match &error {
         PdfiumError::PdfiumLibraryInternalError(
