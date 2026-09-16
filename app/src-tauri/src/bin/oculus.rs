@@ -704,6 +704,10 @@ struct LectureCandidatesArgs {
     /// so the boundaries can be checked by eye
     #[arg(long)]
     frames: bool,
+    /// Which captured stream to read — 1 or 2. Default: source 1, unless it
+    /// turns out to be dead, in which case source 2 if it is downloaded
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=2))]
+    source: Option<u8>,
 }
 
 /// Name a recording's chapters with a CLI agent, and store them
@@ -739,6 +743,10 @@ struct LectureChaptersArgs {
     /// Re-run over a lecture that already has chapters, replacing them
     #[arg(long)]
     force: bool,
+    /// Which captured stream to read — 1 or 2. Default: source 1, unless it
+    /// turns out to be dead, in which case source 2 if it is downloaded
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=2))]
+    source: Option<u8>,
 }
 
 /// Write a slide-by-slide recap of a recording with a CLI agent
@@ -773,6 +781,10 @@ struct LectureRecapArgs {
     /// Re-run over a lecture that already has recap notes, replacing them
     #[arg(long)]
     force: bool,
+    /// Which captured stream to read — 1 or 2. Default: source 1, unless it
+    /// turns out to be dead, in which case source 2 if it is downloaded
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=2))]
+    source: Option<u8>,
 }
 
 /// Write the agent-facing docs into the library
@@ -2825,7 +2837,6 @@ impl Ctx {
         let ffmpeg = app_lib::echo360::find_ffmpeg(None)
             .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
 
-        let diffs = app_lib::chapters::sample_diffs(&ffmpeg, &video, |_| {})?;
         // A missing or unreadable transcript costs the pause bonus and nothing
         // else, so it is not worth failing over.
         let gaps = transcript
@@ -2833,12 +2844,29 @@ impl Ctx {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .map(|vtt| app_lib::chapters::cue_gaps(&vtt))
             .unwrap_or_default();
-        let found = app_lib::chapters::candidates(&diffs, &gaps, duration as u32);
+        let dir = app_lib::echo360::lecture_dir(&self.data_dir, &id);
+        // Which stream holds the slides is measured, not assumed; `--source`
+        // overrules it. See `app_lib::chapters::detect`.
+        let detected = app_lib::chapters::detect(
+            &ffmpeg,
+            &dir,
+            &video,
+            &gaps,
+            duration as u32,
+            args.source,
+            |_| {},
+        )?;
+        let found = &detected.candidates;
 
         let frames = if args.frames {
-            let dir = app_lib::echo360::lecture_dir(&self.data_dir, &id).join("frames");
             let seconds: Vec<u32> = found.iter().map(|c| c.seconds).collect();
-            Some(app_lib::chapters::extract_frames(&ffmpeg, &video, &seconds, &dir, |_| {})?)
+            Some(app_lib::chapters::extract_frames(
+                &ffmpeg,
+                &detected.video,
+                &seconds,
+                &dir.join("frames"),
+                |_| {},
+            )?)
         } else {
             None
         };
@@ -2849,6 +2877,7 @@ impl Ctx {
                 lecture: &'a str,
                 title: &'a str,
                 duration_seconds: i64,
+                source: u8,
                 sampled_seconds: usize,
                 candidates: &'a [app_lib::chapters::Candidate],
                 #[serde(skip_serializing_if = "Option::is_none")]
@@ -2858,20 +2887,26 @@ impl Ctx {
                 lecture: &id,
                 title: &title,
                 duration_seconds: duration,
-                sampled_seconds: diffs.len() + 1,
-                candidates: &found,
+                source: detected.source,
+                sampled_seconds: detected.diffs.len() + 1,
+                candidates: found,
                 frames: frames
                     .as_ref()
                     .map(|f| f.iter().map(|p| p.to_string_lossy().into_owned()).collect()),
             });
         }
 
-        println!("{}  {}", paint(&title, BOLD), paint(&clock(duration as u32), DIM));
+        println!(
+            "{}  {}  {}",
+            paint(&title, BOLD),
+            paint(&clock(duration as u32), DIM),
+            paint(&format!("source {}", detected.source), DIM)
+        );
         if found.is_empty() {
             println!("{}", paint("no boundaries — one continuous slide?", DIM));
             return Ok(());
         }
-        for c in &found {
+        for c in found {
             println!(
                 "  {}  {}{}",
                 clock(c.seconds),
@@ -2974,6 +3009,7 @@ impl Ctx {
                 lecture_id: &id,
                 selection: &selection,
                 force: args.force,
+                source: args.source,
             },
             // The terminal's progress is the agent's tool rows below; of the
             // pipeline's own steps only the candidate set is worth a line, and
@@ -3007,6 +3043,7 @@ impl Ctx {
                 provider: &'a str,
                 model: &'a str,
                 effort: Option<&'a str>,
+                source: u8,
                 candidates: usize,
                 chapters: &'a [app_lib::chapters::Chapter],
             }
@@ -3017,6 +3054,7 @@ impl Ctx {
                 provider: selection.provider.as_str(),
                 model: &selection.model,
                 effort: selection.effort(),
+                source: outcome.source,
                 candidates: outcome.candidates,
                 chapters: &outcome.chapters,
             });
@@ -3112,6 +3150,7 @@ impl Ctx {
                 lecture_id: &id,
                 selection: &selection,
                 force: args.force,
+                source: args.source,
             },
             |step| {
                 if quiet {
@@ -3163,6 +3202,7 @@ impl Ctx {
                 provider: &'a str,
                 model: &'a str,
                 effort: Option<&'a str>,
+                source: u8,
                 segments: usize,
                 windows: usize,
                 notes: &'a [app_lib::recap::RecapNote],
@@ -3174,6 +3214,7 @@ impl Ctx {
                 provider: selection.provider.as_str(),
                 model: &selection.model,
                 effort: selection.effort(),
+                source: outcome.source,
                 segments: outcome.segments,
                 windows: outcome.windows,
                 notes: &outcome.notes,

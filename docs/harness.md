@@ -1033,8 +1033,8 @@ course folder. `store::create_thread` looks it up; a lecture thread's
 thread runs from `agents/`, so that is the path the agent can paste straight
 into a read — its `transcript.vtt` when one is actually on disk, the course
 folder where the deck is, and **the chapter list inline**. The chapters are
-inlined and the transcript is not, for the split
-[chapters.md](./chapters.md) makes about the same two files: a dozen short
+inlined and the transcript is not, on the same argument the chaptering job
+makes about its own two files ([chapters.md](./chapters.md)): a dozen short
 lines cost nothing and a tool call to fetch them is a turn the student waits
 through, where twenty thousand words of transcript is something the agent
 should open the part of that it needs. The list is read on every send rather

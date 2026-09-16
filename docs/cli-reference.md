@@ -847,6 +847,10 @@ Options:
           Also write one JPEG per candidate into the lecture's `frames/` folder, so the
           boundaries can be checked by eye
 
+      --source <N>
+          Which captured stream to read — 1 or 2. Default: source 1, unless it turns out
+          to be dead, in which case source 2 if it is downloaded
+
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -885,6 +889,10 @@ Options:
       --force
           Re-run over a lecture that already has chapters, replacing them
 
+      --source <N>
+          Which captured stream to read — 1 or 2. Default: source 1, unless it turns out
+          to be dead, in which case source 2 if it is downloaded
+
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -922,6 +930,10 @@ Options:
 
       --force
           Re-run over a lecture that already has recap notes, replacing them
+
+      --source <N>
+          Which captured stream to read — 1 or 2. Default: source 1, unless it turns out
+          to be dead, in which case source 2 if it is downloaded
 
   -h, --help
           Print help (see a summary with '-h')

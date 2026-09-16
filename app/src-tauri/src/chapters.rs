@@ -6,7 +6,7 @@
 //! It decides nothing about titles, summaries or storage; it produces a list of
 //! seconds and how confident each one is.
 //!
-//! **The picture is the signal, not the words.** These recordings are 720p
+//! **The picture is the signal, not the words.** The stream this reads is 720p
 //! screen capture of a slide deck: no camera, no grain, no lighting drift. A
 //! held slide is *dead still* — frame-to-frame mean absolute difference sits at
 //! p50 ≈ 0.008 — and a slide change is a cliff (p99 ≈ 13, max ≈ 175). That
@@ -15,6 +15,15 @@
 //! sets whose first twelve entries are *identical*, and 19 vs 18 boundaries
 //! overall. Only at 12 does the detector start dropping real changes. The
 //! threshold barely matters, so there is no knob for it.
+//!
+//! **That holds for a slide capture and for nothing else.** An Echo360 capture
+//! publishes up to two streams, and the argument above is about the one
+//! pointed at the projector. A room camera never holds still: measured across
+//! five lectures it sits at p50 ≈ 1.4 with a maximum of 20, against the slide
+//! capture's p50 ≈ 0.01 and maxima past 175. No empty middle, so no threshold
+//! to put in it; no cliff, so nothing to find. A camera is outside this
+//! detector's design rather than a harder case for it, and [`detect`] answers
+//! that by choosing the right stream rather than by tuning.
 //!
 //! **Transcript pauses are a tiebreak, never a gate.** Only a quarter to a
 //! third of slide changes have a ≥2 s silence anywhere near them, so requiring
@@ -65,6 +74,16 @@ const PAUSE_BONUS: f32 = 3.0;
 /// No two boundaries closer than this. A chapter shorter than a minute and a
 /// half is a slide, not a topic.
 const MIN_SPACING: u32 = 90;
+
+/// At most this many candidates in a whole recording means the stream is dead,
+/// not that the lecture was quiet.
+///
+/// Sits in an empty middle, exactly as [`DIFF_THRESHOLD`] does: the lecture
+/// whose projector capture failed gives *one* candidate across 44 minutes, and
+/// a healthy capture gives 16 to 22. Nothing has been observed in between, so
+/// this is a which-file decision rather than a knob — moving it anywhere in
+/// that gap changes no answer.
+const DEAD_SOURCE: usize = 2;
 
 /// Offsets past a boundary to consider when grabbing its frame, in the order
 /// they are preferred. A couple of seconds clears the cut itself; the later
@@ -216,11 +235,11 @@ pub fn cue_gaps(vtt: &str) -> Vec<(u32, f32)> {
             continue;
         };
         let mut halves = line.split(" --> ");
-        let start = halves.next().map(str::trim).map(vtt_secs).unwrap_or(-1.0);
+        let start = halves.next().map(str::trim).and_then(vtt_secs).unwrap_or(-1.0);
         let end = halves
             .next()
             .and_then(|h| h.split_whitespace().next())
-            .map(vtt_secs)
+            .and_then(vtt_secs)
             .unwrap_or(-1.0);
         if start < 0.0 {
             continue;
@@ -233,20 +252,82 @@ pub fn cue_gaps(vtt: &str) -> Vec<(u32, f32)> {
     gaps
 }
 
-fn vtt_secs(stamp: &str) -> f32 {
+/// Seconds out of a WebVTT timestamp, `HH:MM:SS.mmm` or `MM:SS.mmm`.
+///
+/// `None` is a malformed stamp, and each reader decides what that is worth:
+/// [`cue_gaps`] keeps going with a sentinel it then filters on, and
+/// [`parse_transcript`] drops the block. One parser rather than two, because a
+/// transcript that reads one way for the detector and another way for the
+/// outline would put a chapter's start on a second the outline never printed.
+fn vtt_secs(stamp: &str) -> Option<f32> {
     let parts: Vec<&str> = stamp.trim().split(':').collect();
     let number = |s: &str| s.trim().parse::<f32>().ok();
     match parts.len() {
-        3 => match (number(parts[0]), number(parts[1]), number(parts[2])) {
-            (Some(h), Some(m), Some(s)) => h * 3600.0 + m * 60.0 + s,
-            _ => -1.0,
-        },
-        2 => match (number(parts[0]), number(parts[1])) {
-            (Some(m), Some(s)) => m * 60.0 + s,
-            _ => -1.0,
-        },
-        _ => -1.0,
+        3 => Some(number(parts[0])? * 3600.0 + number(parts[1])? * 60.0 + number(parts[2])?),
+        2 => Some(number(parts[0])? * 60.0 + number(parts[1])?),
+        _ => None,
     }
+}
+
+/// One WebVTT cue, with tags removed and whitespace folded.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TranscriptCue {
+    pub start: f32,
+    pub end: f32,
+    pub text: String,
+}
+
+/// Parse WebVTT timing *and* text into plain cues.
+///
+/// [`cue_gaps`] above reads the same file for the same two timestamp shapes and
+/// throws the words away, because a pause bonus does not care what was said.
+/// This one keeps them: the words are what [`outline`] merges with the slide
+/// changes, and what the agent actually reads. Cue identifiers and VTT settings
+/// are ignored, simple tags are stripped, and a malformed block is skipped
+/// rather than poisoning the rest of the transcript.
+pub fn parse_transcript(vtt: &str) -> Vec<TranscriptCue> {
+    let normalised = vtt.replace("\r\n", "\n");
+    normalised
+        .split("\n\n")
+        .filter_map(|block| {
+            let lines: Vec<&str> = block.lines().collect();
+            let timing_at = lines.iter().position(|line| line.contains(" --> "))?;
+            let mut halves = lines[timing_at].split(" --> ");
+            let start = halves.next().map(str::trim).and_then(vtt_secs)?;
+            let end = halves
+                .next()
+                .and_then(|half| half.split_whitespace().next())
+                .and_then(vtt_secs)?;
+            if start < 0.0 || end < start {
+                return None;
+            }
+            let text = plain_text(&lines[timing_at + 1..].join(" "));
+            if text.is_empty() {
+                return None;
+            }
+            Some(TranscriptCue { start, end, text })
+        })
+        .collect()
+}
+
+fn plain_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_tag = false;
+    for ch in text.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 // ── Scoring and thinning ─────────────────────────────────────────────────────
@@ -342,6 +423,94 @@ pub fn candidates_with_spacing(
     }
     kept.sort_by_key(|c| c.seconds);
     kept
+}
+
+// ── Which stream to read ────────────────────────────────────────────
+
+/// The stream a run read, and what came out of reading it.
+pub struct Detection {
+    /// Which of the capture's streams this is, for a caller that wants to say.
+    pub source: crate::echo360::SourceNum,
+    /// The file the diffs came from — and therefore the file any frame grab
+    /// has to use, or the pictures would be of the stream nobody read.
+    pub video: PathBuf,
+    /// The decode pass itself, for a caller that thins it its own way
+    /// (`recap` does).
+    pub diffs: Vec<(u32, f32)>,
+    /// [`candidates`] over those diffs, in play order.
+    pub candidates: Vec<Candidate>,
+}
+
+/// Decode the lecture's slide capture — whichever of its streams that is.
+///
+/// **Which source holds the slides is not consistent, even inside one
+/// subject.** Four MULT20015 lectures put them on source 1 and a fifth on
+/// source 2, because that week the projector capture failed and the only thing
+/// recording the screen was the second stream. So the answer is measured per
+/// lecture rather than remembered, and nothing is persisted: re-detecting is
+/// one decode and always reflects what is on disk, where a column would be a
+/// second place for the same fact to be wrong.
+///
+/// Source 1 is decoded first and kept unless it is *dead* — at most
+/// [`DEAD_SOURCE`] candidates in a whole recording. Only then is source 2
+/// decoded, so the normal case stays the single pass it has always been and
+/// the broken one costs about fifteen seconds more.
+///
+/// **Whichever gives more candidates is measurably the wrong question.** A room
+/// camera saturates the threshold — a quarter of every second clears it — and
+/// thinning then lays those down as a near-uniform grid, so on one measured
+/// lecture the camera beats the real slide deck 20 to 16 while carrying no
+/// topic boundaries at all. Only a dead source 1 is grounds to look at
+/// source 2.
+///
+/// `source` overrides all of it — `--source` on the CLI, and the app's picker
+/// — and when it is set nothing else is decoded.
+///
+/// `on_frame` is [`sample_diffs`]'s and fires for both passes, so a fallback
+/// restarts whatever progress the caller draws from it. That is what is
+/// actually happening.
+pub fn detect(
+    ffmpeg: &Path,
+    lecture_dir: &Path,
+    video: &Path,
+    gaps: &[(u32, f32)],
+    duration_secs: u32,
+    source: Option<crate::echo360::SourceNum>,
+    mut on_frame: impl FnMut(u32),
+) -> Result<Detection, String> {
+    // The file on disk, not the `video2_path` column: they are the same path
+    // by construction, and a stream that was downloaded but never recorded is
+    // still one this can read.
+    let second = crate::echo360::source_path(lecture_dir, 2);
+
+    let read = |path: PathBuf,
+                source: crate::echo360::SourceNum,
+                on_frame: &mut dyn FnMut(u32)|
+     -> Result<Detection, String> {
+        let diffs = sample_diffs(ffmpeg, &path, on_frame)?;
+        let candidates = candidates(&diffs, gaps, duration_secs);
+        Ok(Detection { source, video: path, diffs, candidates })
+    };
+
+    if source == Some(2) {
+        if !second.exists() {
+            return Err(format!(
+                "{} has no second source on disk — `oculus run -l --videos` fetches both",
+                lecture_dir.display()
+            ));
+        }
+        return read(second, 2, &mut on_frame);
+    }
+
+    let first = read(video.to_path_buf(), 1, &mut on_frame)?;
+    if source.is_none() && first.candidates.len() <= DEAD_SOURCE && second.exists() {
+        eprintln!(
+            "[oculus] source 1 gave {} candidate(s) — reading source 2 instead",
+            first.candidates.len()
+        );
+        return read(second, 2, &mut on_frame);
+    }
+    Ok(first)
 }
 
 // ── Frames for a later stage ─────────────────────────────────────────────────
@@ -555,60 +724,109 @@ pub struct Job<'a> {
     /// agent goes looking for the deck itself — measured, and it costs
     /// several turns of `find` before it gets there.
     pub course_dir: Option<&'a str>,
-    /// Boundaries to choose from, in play order, second 0 first.
-    pub candidates: &'a [Candidate],
+    /// How many slide changes the detector found. The list itself is not in
+    /// the prompt — it is in the outline, in place — but the count is worth
+    /// saying, because it tells the agent roughly how dense the markers it is
+    /// about to grep for will be.
+    pub detected: usize,
+    /// Whether the outline has any transcript in it at all. Chaptering
+    /// tolerates a lecture that arrived without one: the pause bonus is lost,
+    /// no cue start is in the allowed set, and the prompt should not send the
+    /// agent looking for words that are not there.
+    pub has_transcript: bool,
+}
+
+/// The transcript and the detected slide changes as one document, in play
+/// order.
+///
+/// Written to `<lecture dir>/outline.md` before the agent turn and named in the
+/// prompt in place of the raw VTT.
+///
+/// **A file, not prompt text.** A lecture is around 2500 cues, and handing over
+/// a path so the agent reads only the spans it wants is the whole reason this
+/// job drives a coding agent instead of calling a model API. What merging buys
+/// is not brevity but correlation: "the picture changed here" and "the subject
+/// turned here" arrive on adjacent lines instead of in two documents with
+/// timestamp arithmetic between them.
+///
+/// Every line is `second  timestamp  text`. Both are printed because both are
+/// load-bearing: the clock is what a person reads, and the bare second is what
+/// a chapter's `start` has to be exactly — a model asked to convert one to the
+/// other will sometimes round, and a rounded second is not in the allowed set.
+pub fn outline(title: &str, cues: &[TranscriptCue], changes: &[Candidate]) -> String {
+    fn line(out: &mut String, second: u32, text: &str) {
+        out.push_str(&format!("{second:>7}  {}  {text}\n", hms(second)));
+    }
+    fn marker(change: &Candidate) -> String {
+        format!(
+            "--- slide change · score {:.1}{} ---",
+            change.score,
+            if change.pause { " · pause" } else { "" }
+        )
+    }
+
+    let mut out = format!(
+        "# {title}\n\nEvery line is `second  timestamp  text`: a transcript cue, or a marker for a second where the slide changed. The two columns are the same moment; the first one is what a chapter start has to be.\n\n"
+    );
+    let mut marks = changes.iter().peekable();
+    for cue in cues {
+        let at = cue.start.max(0.0) as u32;
+        while marks.peek().is_some_and(|m| m.seconds <= at) {
+            let change = marks.next().expect("peeked");
+            line(&mut out, change.seconds, &marker(change));
+        }
+        line(&mut out, at, &cue.text);
+    }
+    // Anything after the last spoken word — and, when there is no transcript
+    // at all, every marker there is.
+    for change in marks {
+        line(&mut out, change.seconds, &marker(change));
+    }
+    out
 }
 
 /// The prompt for one chaptering turn.
 ///
-/// Deliberately short. It says what the lecture is, what a candidate is, where
-/// the transcript and the frames are, and what a good chapter looks like —
-/// then gets out of the way. Two things in it are lessons rather than
-/// decoration: the note that a candidate is *not* a chapter (candidate density
-/// varies threefold between lectures of the same length, so "one chapter per
-/// candidate" gives a boundary every two minutes on a busy deck), and the note
-/// about the room's AV splash screen (a dropout spanning the whole probe
-/// window survives frame selection, and a model that does not know what it is
-/// looking at will happily name a chapter after it).
+/// Deliberately short. It says what the lecture is, what the outline is, where
+/// the frames are, and what a good chapter looks like — then gets out of the
+/// way. Three things in it are lessons rather than decoration: the note that a
+/// slide change is *not* a chapter (candidate density varies threefold between
+/// lectures of the same length, so "one chapter per marker" gives a boundary
+/// every two minutes on a busy deck), the note about the room's AV splash
+/// screen (a dropout spanning the whole probe window survives frame selection,
+/// and a model that does not know what it is looking at will happily name a
+/// chapter after it), and the `grep` — named because the alternative is an
+/// agent reading 2500 lines to find twenty of them.
+///
+/// The candidate table this used to carry is gone: the markers are in the
+/// outline where they belong, next to the words they interrupt.
 pub fn prompt(job: &Job) -> String {
-    let mut list = String::new();
-    for c in job.candidates {
-        if c.seconds == 0 {
-            list.push_str("      0  00:00:00        —  the opening\n");
-            continue;
-        }
-        list.push_str(&format!(
-            "{:>7}  {}  {:>7.1}{}\n",
-            c.seconds,
-            hms(c.seconds),
-            c.score,
-            if c.pause { "  pause" } else { "" }
-        ));
-    }
-
     format!(
-        "Chapter a university lecture recording: choose its real topic boundaries from the \
-candidates below and name each one.\n\n\
+        "Chapter a university lecture recording: choose its real topic boundaries and name \
+each one.\n\n\
 Lecture: {title}\n\
 Duration: {clock} ({mins} minutes)\n\
 Recording folder: {dir}\n  \
-{dir}/transcript.vtt        the whole transcript, WebVTT, timestamped\n  \
-{dir}/frames/<second>.jpg   one slide grab per candidate, named by its second\n\
+{dir}/outline.md           what was said and where the slides changed, merged, in play order\n  \
+{dir}/frames/<second>.jpg  one grab per slide change, named by its second\n\
 {course}\n\
-Candidates (second, timestamp, score, and whether the lecturer paused there):\n\n\
-{list}\n\
-A candidate is a second where the picture changed hard enough to be a new \
-slide. The score is how hard, comparable only within this lecture. Most slide \
-changes are the same topic carrying on — so these are places you *may* cut, \
-not places you should.\n\n\
+The outline is the whole lecture as one document. Every line is `second  timestamp  text`: \
+either a transcript cue, or a `--- slide change ---` marker for a second where the picture \
+changed hard enough to be a new slide, carrying how hard it changed and whether the lecturer \
+paused there. {detected} slide changes were found — \
+`grep -n \"slide change\" {dir}/outline.md` lists them with the lines to read \
+around.{silent}\n\n\
+A slide change is a place you *may* cut, not a place you should: most of them are the same \
+topic carrying on. And a topic can turn where no slide changed at all, so a boundary may be \
+any line in the outline, marker or cue.\n\n\
 How to work\n\
-- Read the transcript across a candidate to see whether the subject actually \
-turns there. That is the evidence; the frames are corroboration. It is plain \
-WebVTT, so read the spans you want rather than the whole file.\n\
-- Open the frames you are unsure about. A title slide or a section divider \
-usually starts a chapter; the next bullet of the same argument does not. View \
-a handful as images — they are pictures of slides, so looking at them is the \
-point; do not hash them or reach for an OCR tool.\n\
+- Read the outline across a second you are considering and see whether the subject actually \
+turns there. That is the evidence; the frames are corroboration. It is a long file — read \
+the spans you want rather than all of it.\n\
+- Open the frames you are unsure about. A title slide or a section divider usually starts a \
+chapter; the next bullet of the same argument does not. View a handful as images — they are \
+pictures of slides, so looking at them is the point; do not hash them or reach for an OCR \
+tool.\n\
 - Some frames are the lecture theatre's own AV splash screen — a \
 room-control panel saying something like \"connect your laptop\" — and not a \
 slide at all. They survive when the recording dropped out for a while. Ignore \
@@ -623,7 +841,8 @@ into whichever neighbour it belongs to. But do not let that swallow a real \
 segment — a long stretch of housekeeping, a worked example or a Q&A is its own \
 chapter if it lasts.\n\
 - The first chapter starts at second 0.\n\
-- Every other start must be exactly one of the candidate seconds listed above.\n\
+- Every other start must be exactly one of the seconds in the outline's first column. Do not \
+round one, and do not pick a second between two lines.\n\
 - Titles name the topic in the lecturer's own vocabulary, two to six words, \
 sentence case: \"Grover's search\", \"Proving unsatisfiability by resolution\". \
 Never \"Introduction\", \"Part 2\", \"Continued\", \"Wrap-up\", and never the \
@@ -642,7 +861,12 @@ Reply with JSON and nothing else, in play order:\n\n\
         clock = hms(job.duration_secs),
         mins = job.duration_secs / 60,
         dir = job.lecture_dir,
-        list = list,
+        detected = job.detected,
+        silent = if job.has_transcript {
+            ""
+        } else {
+            " This recording has no transcript, so the outline is those markers and nothing else."
+        },
         max = MAX_CHAPTERS,
     )
 }
@@ -803,7 +1027,13 @@ fn clip(text: &str, chars: usize) -> String {
 /// whole task breakdown in `projects::create_tasks`. The error names the
 /// chapter, because "not a candidate boundary" on its own is unfixable.
 ///
-/// `boundaries` is the candidate set the agent was given, second 0 included.
+/// `boundaries` is every second the outline printed: second 0, the detected
+/// slide changes, and — when the lecture has a transcript — every cue start.
+/// **Wider than the candidate set, and still closed.** A lecture whose slide
+/// capture failed has one detected change and a perfectly good transcript, so
+/// a menu of one is the defect rather than the safeguard; but the agent still
+/// cannot invent a timestamp, because every second it may pick came off a
+/// file, so the all-or-nothing rollback below still means something.
 pub fn validate(
     chapters: &[Chapter],
     boundaries: &[u32],
@@ -835,7 +1065,7 @@ pub fn validate(
         }
         if !boundaries.contains(&chapter.start_seconds) {
             return Err(format!(
-                "{where_}{} is not one of the candidate boundaries",
+                "{where_}{} is not one of the seconds in the outline",
                 chapter.start_seconds
             ));
         }
@@ -876,6 +1106,9 @@ pub struct Run<'a> {
     pub selection: &'a crate::harness::jobs::JobSelection,
     /// Replace an existing chapter set instead of refusing to touch it.
     pub force: bool,
+    /// Read this stream instead of letting [`detect`] choose. `None` is the
+    /// normal case and the one the app takes unless the picker was used.
+    pub source: Option<crate::echo360::SourceNum>,
 }
 
 /// Where a run has got to, for a caller that draws progress.
@@ -915,6 +1148,9 @@ pub struct Outcome {
     pub duration_seconds: u32,
     /// How many boundaries the detector offered, second 0 not counted.
     pub candidates: usize,
+    /// Which stream it read them off. Worth reporting rather than assuming:
+    /// a 2 here is the only visible sign that source 1 was dead.
+    pub source: crate::echo360::SourceNum,
     pub chapters: Vec<Chapter>,
 }
 
@@ -995,19 +1231,33 @@ pub fn run(
         // itself four times a second rather than per frame: a 107-minute
         // lecture would otherwise send 6400 events through a Tauri channel to
         // move a percentage that only has a hundred places to be.
-        let mut last = std::time::Instant::now();
-        let diffs = sample_diffs(&ffmpeg, &video, |second| {
-            if last.elapsed() >= std::time::Duration::from_millis(250) {
-                last = std::time::Instant::now();
-                on_step(Step::Decoding { second, duration });
-            }
-        })?;
-        let gaps = transcript
+        // Read once, used three ways: the pauses that score a candidate, the
+        // words the outline is made of, and the cue starts the validator will
+        // accept. A missing or unreadable transcript costs all three and is
+        // not worth failing over — chaptering works off the picture alone.
+        let vtt = transcript
             .as_deref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .map(|vtt| cue_gaps(&vtt))
-            .unwrap_or_default();
-        let found = candidates(&diffs, &gaps, duration);
+            .and_then(|p| std::fs::read_to_string(p).ok());
+        let gaps = vtt.as_deref().map(cue_gaps).unwrap_or_default();
+        let cues = vtt.as_deref().map(parse_transcript).unwrap_or_default();
+
+        let dir = crate::echo360::lecture_dir(job.data_dir, id);
+        let mut last = std::time::Instant::now();
+        let detected = detect(
+            &ffmpeg,
+            &dir,
+            &video,
+            &gaps,
+            duration,
+            job.source,
+            |second| {
+                if last.elapsed() >= std::time::Duration::from_millis(250) {
+                    last = std::time::Instant::now();
+                    on_step(Step::Decoding { second, duration });
+                }
+            },
+        )?;
+        let found = detected.candidates;
         if found.is_empty() {
             return Err(format!("no boundary candidates in {title} — nothing to chapter"));
         }
@@ -1021,19 +1271,24 @@ pub fn run(
         // typically twenty seconds in — but a lecture always starts somewhere,
         // so the opening is prepended as an always-available boundary and
         // accepted as one by the validator.
-        let mut boundaries: Vec<u32> = vec![0];
-        boundaries.extend(found.iter().map(|c| c.seconds));
-        let mut with_opening = vec![Candidate {
-            seconds: 0,
-            score: 0.0,
-            diff: 0.0,
-            pause: false,
-        }];
-        with_opening.extend(found.iter().cloned());
+        let mut frames_at: Vec<u32> = vec![0];
+        frames_at.extend(found.iter().map(|c| c.seconds));
 
-        let dir = crate::echo360::lecture_dir(job.data_dir, id);
-        let total = boundaries.len();
-        extract_frames(&ffmpeg, &video, &boundaries, &dir.join("frames"), |done| {
+        // What the agent may actually start a chapter at. Frames are grabbed
+        // at the slide changes only — a frame per cue would be two and a half
+        // thousand JPEGs of the same slide — but a *boundary* may also be a
+        // cue start, which is what lets a lecture with a dead slide capture be
+        // chaptered from what was said.
+        let mut boundaries = frames_at.clone();
+        boundaries.extend(cues.iter().map(|c| c.start.max(0.0) as u32));
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        std::fs::write(dir.join("outline.md"), outline(&title, &cues, &found))
+            .map_err(|e| format!("{}: {e}", dir.join("outline.md").display()))?;
+
+        let total = frames_at.len();
+        extract_frames(&ffmpeg, &detected.video, &frames_at, &dir.join("frames"), |done| {
             on_step(Step::Grabbing { done, total })
         })?;
 
@@ -1050,7 +1305,8 @@ pub fn run(
             // this is the path the agent can paste straight into a read.
             lecture_dir: &format!("../lectures/{id}"),
             course_dir: course_dir.as_deref(),
-            candidates: &with_opening,
+            detected: found.len(),
+            has_transcript: !cues.is_empty(),
         });
 
         on_step(Step::Asking);
@@ -1084,6 +1340,7 @@ pub fn run(
             title: title.clone(),
             duration_seconds: duration,
             candidates: found.len(),
+            source: detected.source,
             chapters,
         })
     })();
@@ -1180,7 +1437,15 @@ pub mod app {
         app: AppHandle,
         lecture_id: String,
         force: Option<bool>,
+        source: Option<u8>,
     ) -> Result<(), String> {
+        // `None` is the normal call and means let the detector choose; a value
+        // only ever comes from the source picker, which only offers the two.
+        if let Some(n) = source {
+            if n != 1 && n != 2 {
+                return Err(format!("{n} is not a source — a capture has 1 and sometimes 2"));
+            }
+        }
         let pool = crate::store::open_pool().await?;
         // The only check worth making the caller wait for: a second run over
         // the same lecture would spend a second subscription turn and race the
@@ -1293,6 +1558,7 @@ pub mod app {
                     lecture_id: &lecture_id,
                     selection: &selection,
                     force,
+                    source,
                 },
                 step,
                 event,
@@ -1665,13 +1931,24 @@ mod tests {
     }
 
     #[test]
-    fn a_boundary_the_detector_never_offered_rejects_the_whole_set() {
+    fn a_boundary_the_outline_never_printed_rejects_the_whole_set() {
         let set = vec![chapter(0, "Opening"), chapter(701, "Middle"), chapter(2000, "End")];
         let error = validate(&set, &BOUNDS, 2400).unwrap_err();
         assert_eq!(
             error,
-            "chapter 2 (\"Middle\"): 701 is not one of the candidate boundaries"
+            "chapter 2 (\"Middle\"): 701 is not one of the seconds in the outline"
         );
+    }
+
+    #[test]
+    fn a_transcript_cue_start_is_a_boundary_too() {
+        // The widened set: the slide changes, plus wherever anybody spoke.
+        // This is what lets a lecture whose slide capture was black still be
+        // chaptered — the words are intact even when the picture is not.
+        let mut bounds = BOUNDS.to_vec();
+        bounds.push(701);
+        let set = vec![chapter(0, "Opening"), chapter(701, "Middle"), chapter(2000, "End")];
+        assert!(validate(&set, &bounds, 2400).is_ok());
     }
 
     #[test]
@@ -1725,27 +2002,67 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_carries_the_candidates_and_the_two_paths() {
-        let found = vec![
-            Candidate { seconds: 0, score: 0.0, diff: 0.0, pause: false },
-            Candidate { seconds: 742, score: 38.5, diff: 35.5, pause: true },
-        ];
-        let text = prompt(&Job {
+    fn the_prompt_names_the_outline_and_the_two_paths() {
+        let job = Job {
             title: "Lecture 7: Grover",
             duration_secs: 2534,
             lecture_dir: "../lectures/abc-123",
             course_dir: Some("../courses/MULT20015_2026_SM2"),
-            candidates: &found,
-        });
+            detected: 17,
+            has_transcript: true,
+        };
+        let text = prompt(&job);
         assert!(text.contains("Lecture 7: Grover"));
         assert!(text.contains("00:42:14"), "the duration as a clock");
-        assert!(text.contains("../lectures/abc-123/transcript.vtt"));
+        assert!(text.contains("\n  ../lectures/abc-123/outline.md"), "indented under the folder");
         assert!(text.contains("\n  ../lectures/abc-123/frames/<second>.jpg"), "indented under the folder");
         assert!(text.contains("../courses/MULT20015_2026_SM2/"));
-        assert!(text.contains("    742  00:12:22     38.5  pause"));
-        assert!(text.contains("the opening"), "second 0 is labelled, not scored");
+        assert!(text.contains("17 slide changes were found"));
+        assert!(
+            !text.contains("transcript.vtt"),
+            "the outline replaced the raw VTT, it did not join it"
+        );
         assert!(text.contains("never more than 12"));
         assert!(text.contains("connect your laptop"), "the AV splash warning");
+        assert!(!text.contains("no transcript"), "it has one");
+
+        let silent = prompt(&Job { has_transcript: false, ..job });
+        assert!(
+            silent.contains("no transcript, so the outline is those markers"),
+            "a lecture with no transcript should not be sent looking for words"
+        );
+    }
+
+    #[test]
+    fn the_outline_merges_the_slide_changes_into_the_transcript_in_play_order() {
+        let cues = vec![
+            TranscriptCue { start: 1.5, end: 4.0, text: "Good morning.".into() },
+            TranscriptCue { start: 725.0, end: 728.0, text: "An equal superposition.".into() },
+        ];
+        let changes = vec![
+            Candidate { seconds: 723, score: 42.1, diff: 39.1, pause: true },
+            // Past the last spoken word: it must still reach the file.
+            Candidate { seconds: 2400, score: 12.0, diff: 12.0, pause: false },
+        ];
+        let text = outline("Lecture 7: Grover", &cues, &changes);
+        let lines: Vec<&str> = text.lines().filter(|l| l.contains("00:")).collect();
+        assert_eq!(
+            lines,
+            vec![
+                "      1  00:00:01  Good morning.",
+                "    723  00:12:03  --- slide change · score 42.1 · pause ---",
+                "    725  00:12:05  An equal superposition.",
+                "   2400  00:40:00  --- slide change · score 12.0 ---",
+            ]
+        );
+        assert!(text.starts_with("# Lecture 7: Grover"));
+    }
+
+    #[test]
+    fn an_outline_with_no_transcript_is_still_the_slide_changes() {
+        let changes = vec![Candidate { seconds: 30, score: 9.0, diff: 9.0, pause: false }];
+        let text = outline("Silent", &[], &changes);
+        assert!(text.contains("     30  00:00:30  --- slide change · score 9.0 ---"), "{text}");
     }
 
     #[test]

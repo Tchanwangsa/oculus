@@ -161,9 +161,18 @@ export const CHAPTER_PHASE_LABEL: Record<ChapterPhase, string> = {
  * Returns as soon as the run is claimed — it takes eight to eleven minutes, so
  * nothing waits on it. While it runs the lecture's `chapter_status` is
  * `running`; the end arrives as `LECTURE_CHAPTERS_EVENT`.
+ *
+ * `source` overrides which of the capture's streams is read. Leave it out and
+ * Rust measures it (`chapters::detect`) — which is right often enough that the
+ * override exists for the lecture where it is not, and for `--source` on the
+ * CLI.
  */
-export function findLectureChapters(lectureId: string, force = false): Promise<void> {
-  return invoke("lecture_find_chapters", { lectureId, force });
+export function findLectureChapters(
+  lectureId: string,
+  force = false,
+  source?: SourceNum
+): Promise<void> {
+  return invoke("lecture_find_chapters", { lectureId, force, source });
 }
 
 // ── Recap ────────────────────────────────────────────────────────────────────
@@ -225,9 +234,16 @@ export const RECAP_PHASE_LABEL: Record<RecapPhase, string> = {
  * Returns as soon as the run is claimed. It needs both the recording *and* the
  * transcript — unlike chaptering, none of the transcript is optional reading —
  * and Rust refuses the run outright without them.
+ *
+ * `source` is `findLectureChapters`': the two jobs decode the same file and
+ * choose the stream the same way.
  */
-export function writeLectureRecap(lectureId: string, force = false): Promise<void> {
-  return invoke("lecture_write_recap", { lectureId, force });
+export function writeLectureRecap(
+  lectureId: string,
+  force = false,
+  source?: SourceNum
+): Promise<void> {
+  return invoke("lecture_write_recap", { lectureId, force, source });
 }
 
 /**

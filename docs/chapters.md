@@ -25,6 +25,8 @@ beside the chapter list.
 | Piece | Location |
 | --- | --- |
 | Detection: sampling, scoring, thinning, frame grabs | `app/src-tauri/src/chapters.rs` |
+| Which of the capture's streams to read | `detect` in `app/src-tauri/src/chapters.rs` |
+| The transcript parser and the merged outline | `parse_transcript` / `outline` in `app/src-tauri/src/chapters.rs` |
 | The prompt, the reply parser, the validator | `app/src-tauri/src/chapters.rs` |
 | Writing the rows and the job's status | `app/src-tauri/src/store.rs` |
 | `lecture_chapters` + the three `lectures` columns (migration 29) | `app/src-tauri/src/lib.rs` |
@@ -55,8 +57,11 @@ beside the chapter list.
 
 ## The pipeline
 
-Four steps, one ffmpeg process:
+Five steps, one ffmpeg process — two on the lecture whose slide capture failed:
 
+0. **Choose the stream.** A capture publishes up to two, and which one holds
+   the slides is not fixed; see [Which stream holds the
+   slides](#which-stream-holds-the-slides).
 1. **Sample.** One `fps=1,scale=160:90,format=gray` decode writes raw frames to
    a pipe. Each frame is diffed against the previous one *as it arrives* — a
    two-hour lecture is 7200 frames ≈ 100 MB, so nothing is collected. The
@@ -75,15 +80,63 @@ Four steps, one ffmpeg process:
 `lectures/<uuid>/frames/`, which is how a boundary set gets checked by eye. It
 is off by default because detection otherwise writes nothing at all.
 
+The naming job adds a sixth step before it asks anything: it writes
+`lectures/<uuid>/outline.md`, the transcript and the slide changes merged into
+one document in play order. See [The outline is the
+document](#the-outline-is-the-document).
+
+## Which stream holds the slides
+
+An Echo360 capture publishes up to two streams — `source1.mp4` and
+`source2.mp4` in the lecture folder — and **which of them points at the
+projector is not consistent, even inside one subject.** Four MULT20015
+lectures put the slides on source 1; a fifth has 44 minutes of black there,
+because the projector capture failed and the only thing that recorded the
+screen was the second stream. Chaptering that lecture used to find *one*
+candidate and hand the agent a menu of one.
+
+`chapters::detect` is the answer, and both jobs go through it:
+
+- Source 1 is decoded first and kept unless it is **dead** — at most two
+  candidates in a whole recording. The broken lecture gives 1; a healthy
+  capture gives 16 to 23. Nothing has been observed in between, so the bound is
+  a which-file decision sitting in an empty middle, not a knob.
+- Only a dead source 1 sends it to source 2, so the normal case is still the
+  one decode it has always been and the broken case costs ~15 s more.
+- Nothing is persisted. Re-detecting is one decode and always reflects what is
+  on disk, where a column would be a second place for the same fact to be
+  wrong — the same argument as [no candidates
+  table](#why-there-is-nothing-to-tune-and-nothing-to-cache).
+- `--source 1|2` on `lecture candidates`, `lecture chapters` and `lecture
+  recap` overrules all of it, and `findLectureChapters` /
+  `writeLectureRecap` take the same argument.
+
+Two things it deliberately does not do. **It never picks by candidate count** —
+on one measured lecture that chooses the room camera's 20 over the real slide
+deck's 16, because a camera saturates the threshold and thinning then lays the
+result down as a near-uniform grid. And **it never remembers the answer per
+subject**, because MULT20015 alone disagrees with itself.
+
 ## Why there is nothing to tune, and nothing to cache
 
-Four measurements on real lectures in this library are the whole design.
+Five measurements on real lectures in this library are the whole design.
 
 - **The picture is violently bimodal, so one threshold covers everything.**
-  These are 720p screen captures of a slide deck — no camera, no grain, no
-  lighting drift — so a held slide is *dead still*: frame-to-frame difference
-  sits at p50 ≈ 0.008 and p90 ≈ 0.08, while a slide change is a cliff at
-  p99 ≈ 13 and max ≈ 175. The threshold sits in the empty middle, at 6.
+  The stream this reads is a 720p screen capture of a slide deck — no camera,
+  no grain, no lighting drift — so a held slide is *dead still*: frame-to-frame
+  difference sits at p50 ≈ 0.008 and p90 ≈ 0.08, while a slide change is a
+  cliff at p99 ≈ 13 and max ≈ 175. The threshold sits in the empty middle, at 6.
+- **That is true of a slide capture and of nothing else.** A room camera never
+  holds still: across five lectures the camera stream sits at p50 ≈ 1.4 with a
+  maximum of 20, against the slide capture's p50 ≈ 0.01 and maxima past 175.
+  No empty middle to put a threshold in, no cliff to find. A camera is outside
+  this detector's design rather than a harder case for it — which is why the
+  fix for a dead slide capture is [choosing the right
+  stream](#which-stream-holds-the-slides) and not a second threshold. The same
+  measurement rules out finding whiteboard work: cropped to the board, a camera
+  gives p50 = 1.79 at a 1 s lag and p50 = 10.61 at 60 s, saturated at both.
+  Writing accumulates where this detector measures a first derivative, so the
+  lecturer stepping sideways outweighs ten seconds of ink.
 - **Which is why the threshold barely matters.** On one 42-minute lecture,
   threshold 2 gives 58 collapsed change-points and 19 boundaries after
   thinning; threshold 6 gives 42 and 18, and its first twelve boundaries are
@@ -108,12 +161,15 @@ titles and formulas legible, which is the size a model will need.
 
 ## Details worth not rediscovering
 
-- **The CLI mirrors the frontend's VTT timing, not its text.** `cue_gaps`
-  handles the same two timestamp shapes `parseVtt` does (`HH:MM:SS.mmm` and
-  `MM:SS.mmm`); cue text plays no part in detection, so none is parsed. The two
-  parsers are deliberately separate — one is in a React player, the other in a
-  headless binary — but the timestamp handling has to agree or a boundary would
-  land in a different place in each.
+- **The CLI mirrors the frontend's VTT timing.** `cue_gaps` handles the same
+  two timestamp shapes `parseVtt` does (`HH:MM:SS.mmm` and `MM:SS.mmm`). The
+  two parsers are deliberately separate — one is in a React player, the other
+  in a headless binary — but the timestamp handling has to agree or a boundary
+  would land in a different place in each. `cue_gaps` still throws the *words*
+  away, because a pause bonus does not care what was said; `parse_transcript`
+  beside it keeps them for the outline, off one shared timestamp reader, so a
+  cue start in a recap window and a cue start in an outline are the same
+  second. It used to live in `recap.rs`, which was its only caller.
 - **A lecture id is a UUID, so a unique prefix is accepted.** A prefix matching
   two lectures is reported with the full ids rather than guessed, the same rule
   `one_subject` follows for subject codes. `oculus list -l` prints the first
@@ -147,31 +203,37 @@ titles and formulas legible, which is the size a model will need.
 ## Naming them is an agent job
 
 `oculus lecture chapters <ID>` detects the candidates, grabs a frame for each,
-and hands the lot to a CLI coding agent through `harness::run_once` — one
+writes the outline, and hands the lot to a CLI coding agent through `harness::run_once` — one
 prompt, one turn, no thread, nothing in `harness_threads`. It is the first
 caller of that function outside `oculus agent` (see
 [harness.md](./harness.md)).
 
 **The prompt is small on purpose, and that is the whole argument for driving a
-coding agent rather than calling a model API.** It carries the candidate list,
-the lecture's title and duration, the path to `transcript.vtt`, the path to
-`frames/` and how those files are named — and then stops. The agent opens the
-five frames it is unsure about and reads the transcript across the boundaries
-it doubts; a prompt to an API would have to *carry* fifty frames to let a model
-look at five. Three things in the prompt are lessons rather than decoration:
+coding agent rather than calling a model API.** It carries the lecture's title
+and duration, the path to `outline.md`, the path to `frames/` and how those
+files are named — and then stops. The agent opens the five frames it is unsure
+about and reads the outline across the boundaries it doubts; a prompt to an API
+would have to *carry* fifty frames and 2500 cues to let a model look at five
+frames and read four spans. Four things in the prompt are lessons rather than
+decoration:
 
-- **A candidate is not a chapter.** Candidate density varies threefold between
+- **A slide change is not a chapter.** Candidate density varies threefold between
   lectures of the same length (two 107-minute recordings in this library give
-  15 and 49), so "one chapter per candidate" would cut a busy deck every two
+  15 and 49), so "one chapter per marker" would cut a busy deck every two
   minutes. The agent is asked for the number of things the lecture is actually
-  about — usually five to eight, never more than twelve — and the score field
-  is there to help it choose. It is also told that a chapter shorter than about
+  about — usually five to eight, never more than twelve — and each marker
+  carries its score to help it choose. The same sentence now says the converse
+  too: a topic can turn where no slide changed, and a boundary may be any line
+  in the outline. It is also told that a chapter shorter than about
   three minutes is a slide rather than a topic — without that line a 51-minute
   lecture split two adjacent slide titles into two chapters ninety seconds
   apart — and, in the same breath, that a long stretch of housekeeping or a
   worked example *is* a chapter if it lasts, because on its own the minimum
   read as licence to merge and the same lecture came back with its last eleven
   minutes folded into the chapter before them.
+- **`grep -n "slide change" outline.md` is named in the prompt.** The markers
+  are twenty lines in a file of two and a half thousand, and an agent that has
+  not been told how to find them will consider reading all of it.
 - **The room's AV splash screen is not a slide.** A dropout spanning the whole
   probe window survives frame selection, so a "connect your laptop" panel does
   reach the agent occasionally. A model looking at the image recognises one
@@ -180,6 +242,35 @@ look at five. Three things in the prompt are lessons rather than decoration:
 - **The subject's course folder is named.** An Echo360 title is a room booking
   ("MULT20015_2026_SM2 MO L105"), so without the folder the agent spends
   several turns hunting for the deck — measured on the first run.
+
+### The outline is the document
+
+Before the agent turn, `run` writes `lectures/<uuid>/outline.md`: the
+transcript and the detected slide changes as one document in play order, every
+line `second  timestamp  text`.
+
+```
+      1  00:00:01  Good morning.
+    723  00:12:03  --- slide change · score 42.1 · pause ---
+    725  00:12:05  An equal superposition.
+```
+
+**A file, not prompt text.** A lecture is around 2500 cues, and handing over a
+path so the agent reads only the spans it wants is the same argument the frames
+make. What merging buys is not brevity but correlation: "the picture changed
+here" and "the subject turned here" arrive on adjacent lines instead of in two
+documents with timestamp arithmetic in between. It replaces both halves of what
+the prompt used to name — the candidate table and `transcript.vtt` — so there is
+one document to read and no list to reconcile it against.
+
+Both columns are printed because both are load-bearing: the clock is what a
+person reads, and the bare second is what a chapter's `start` has to be
+*exactly*. A model asked to convert one to the other will sometimes round, and
+a rounded second is not in the allowed set.
+
+A lecture with no transcript still gets an outline — the markers alone — and
+the prompt says so, rather than sending the agent looking for words that are
+not there.
 
 **Rust writes the rows; there is no agent write door.** Unlike `oculus project`
 and `oculus task`, which put the *student's own* planning into the database
@@ -194,10 +285,23 @@ array, a fence, an object wrapping it, a float where an integer was asked for
 answer over its wrapper. What it is *not* tolerant of is the content.
 
 **One bad chapter rolls the whole set back.** `validate` checks that every
-boundary came from the candidate list (second 0 always counts — the detector's
-first candidate is typically twenty seconds in, so the opening is prepended
-before the agent ever sees the list), that starts are strictly increasing, that
-the first is 0, and that there are no more than twelve. A single failure means
+boundary is one of the seconds the outline printed — the detected slide
+changes, every transcript cue start, and second 0, which always counts because
+the detector's first candidate is typically twenty seconds in.
+
+That set is wider than it used to be, and the widening is the fix for the
+lecture this page keeps coming back to. The allowed set was the candidate list
+alone, so a recording whose slide capture was black offered a menu of one
+however intact its transcript was: the agent understood the lecture perfectly
+and had nowhere to cut. **It is still closed**, though — every second on the
+menu came off a real file — so the agent cannot invent a timestamp and the
+all-or-nothing rollback still means something. Frames are still grabbed at the
+slide changes only; a frame per cue would be two and a half thousand JPEGs of
+the same slide. A cue start is a place a chapter may *begin*, not a place
+anything gets photographed.
+
+`validate` also checks that starts are strictly increasing, that the first is
+0, and that there are no more than twelve. A single failure means
 nothing is written at all, and the error names the chapter the way
 `projects::create_tasks` names a task — `chapter 3 ("…"): …`. The reason is
 sharper here than for a task breakdown: drop the third of nine chapters and
@@ -210,6 +314,11 @@ Migration 29: `lecture_chapters` (`lecture_id`, `idx`, `start_seconds`,
 `title`, `summary`, cascading with the lecture) plus `chapter_status`,
 `chaptered_at` and `chapter_error` on `lectures`.
 
+- **`outline.md` and `frames/` are not stored, they are left.** Both sit in
+  `lectures/<uuid>/`, both are overwritten by the next run, and neither is
+  anything's source of truth — the same status the frames have always had. The
+  chosen source is not recorded anywhere either: re-detecting is one decode,
+  and a column would be a second place for it to be wrong.
 - **There is no `end_seconds`.** A chapter ends where the next one begins, and
   the last at the lecture's duration; the reader derives it. One fact in one
   column — the lesson migration 27 records about `column_id` / `position` /

@@ -24,13 +24,15 @@ const WINDOW_TARGET_SECS: u32 = 10 * 60;
 /// change, but a far-away one should not make a tiny or enormous turn.
 const WINDOW_SNAP_SECS: u32 = 3 * 60;
 
-/// One WebVTT cue, with tags removed and whitespace folded for prompt use.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TranscriptCue {
-    pub start: f32,
-    pub end: f32,
-    pub text: String,
-}
+/// One WebVTT cue, and the parser for them, both `chapters`'.
+///
+/// They were here first, when a recap was the only job that needed the words
+/// as well as the timings. Chaptering needs them now too — the outline it
+/// hands its agent is the transcript with the slide changes merged in — so the
+/// parser sits beside `chapters::cue_gaps`, which reads the same file for the
+/// same two timestamp shapes. One parser, so a cue start in a recap window and
+/// a cue start in an outline are the same second.
+pub use crate::chapters::{parse_transcript, TranscriptCue};
 
 /// One stored recap row. Its end is the next row's start (or the lecture's
 /// duration), so storing an end would duplicate a fact just as it would for a
@@ -68,67 +70,6 @@ pub struct Window {
 }
 
 // ── Transcript and segmentation ─────────────────────────────────────────────
-
-/// Parse WebVTT timing and text into plain cues suitable for an inline prompt.
-///
-/// The timing shapes agree with the player's parser and `chapters::cue_gaps`:
-/// both `HH:MM:SS.mmm` and `MM:SS.mmm` are accepted. Cue identifiers and VTT
-/// settings are ignored, simple WebVTT tags are stripped, and malformed blocks
-/// are skipped rather than poisoning the rest of the transcript.
-pub fn parse_transcript(vtt: &str) -> Vec<TranscriptCue> {
-    let normalised = vtt.replace("\r\n", "\n");
-    normalised
-        .split("\n\n")
-        .filter_map(|block| {
-            let lines: Vec<&str> = block.lines().collect();
-            let timing_at = lines.iter().position(|line| line.contains(" --> "))?;
-            let mut halves = lines[timing_at].split(" --> ");
-            let start = halves.next().map(str::trim).and_then(vtt_secs)?;
-            let end = halves
-                .next()
-                .and_then(|half| half.split_whitespace().next())
-                .and_then(vtt_secs)?;
-            if start < 0.0 || end < start {
-                return None;
-            }
-            let text = plain_text(&lines[timing_at + 1..].join(" "));
-            if text.is_empty() {
-                return None;
-            }
-            Some(TranscriptCue { start, end, text })
-        })
-        .collect()
-}
-
-fn vtt_secs(stamp: &str) -> Option<f32> {
-    let parts: Vec<&str> = stamp.trim().split(':').collect();
-    let number = |s: &str| s.trim().parse::<f32>().ok();
-    match parts.len() {
-        3 => Some(number(parts[0])? * 3600.0 + number(parts[1])? * 60.0 + number(parts[2])?),
-        2 => Some(number(parts[0])? * 60.0 + number(parts[1])?),
-        _ => None,
-    }
-}
-
-fn plain_text(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut in_tag = false;
-    for ch in text.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            _ if !in_tag => out.push(ch),
-            _ => {}
-        }
-    }
-    out.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&nbsp;", " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
 
 /// Dense, time-ordered recap segment starts, always beginning at second 0.
 ///
@@ -519,6 +460,11 @@ pub struct Run<'a> {
     pub lecture_id: &'a str,
     pub selection: &'a crate::harness::jobs::JobSelection,
     pub force: bool,
+    /// Read this stream instead of letting `chapters::detect` choose. Recap
+    /// carries it for the same reason chaptering does and with the same
+    /// meaning: the two jobs decode the same file and had the same blind spot,
+    /// so fixing one and leaving the other would only hide it.
+    pub source: Option<crate::echo360::SourceNum>,
 }
 
 pub enum Step<'a> {
@@ -532,6 +478,8 @@ pub enum Step<'a> {
 pub struct Outcome {
     pub title: String,
     pub duration_seconds: u32,
+    /// Which stream the segments were detected on.
+    pub source: crate::echo360::SourceNum,
     pub segments: usize,
     pub windows: usize,
     pub notes: Vec<RecapNote>,
@@ -614,15 +562,27 @@ pub fn run(
         // `claim_recap` made this a new, empty set. From here on, each accepted
         // window becomes visible immediately; if a later one fails, those rows
         // deliberately remain as the partial result of this run.
-        let mut last = std::time::Instant::now();
-        let diffs = crate::chapters::sample_diffs(&ffmpeg, &video, |second| {
-            if last.elapsed() >= std::time::Duration::from_millis(250) {
-                last = std::time::Instant::now();
-                on_step(Step::Decoding { second, duration });
-            }
-        })?;
         let gaps = crate::chapters::cue_gaps(&vtt);
-        let starts = segment_starts(&diffs, &gaps, &cues, duration);
+        let dir = crate::echo360::lecture_dir(job.data_dir, id);
+        let mut last = std::time::Instant::now();
+        // Which of the capture's streams actually holds the slides; see
+        // `chapters::detect`. Recap reads the raw diffs rather than the
+        // candidates because it thins them at its own radius.
+        let detected = crate::chapters::detect(
+            &ffmpeg,
+            &dir,
+            &video,
+            &gaps,
+            duration,
+            job.source,
+            |second| {
+                if last.elapsed() >= std::time::Duration::from_millis(250) {
+                    last = std::time::Instant::now();
+                    on_step(Step::Decoding { second, duration });
+                }
+            },
+        )?;
+        let starts = segment_starts(&detected.diffs, &gaps, &cues, duration);
         if starts.is_empty() {
             return Err(format!("no recap segments in {title}"));
         }
@@ -632,11 +592,14 @@ pub fn run(
             segments: starts.len(),
         });
 
-        let dir = crate::echo360::lecture_dir(job.data_dir, id);
         let total = starts.len();
-        crate::chapters::extract_frames(&ffmpeg, &video, &starts, &dir.join("frames"), |done| {
-            on_step(Step::Grabbing { done, total });
-        })?;
+        crate::chapters::extract_frames(
+            &ffmpeg,
+            &detected.video,
+            &starts,
+            &dir.join("frames"),
+            |done| on_step(Step::Grabbing { done, total }),
+        )?;
 
         let chapters = rt.block_on(crate::store::chapters(pool, id))?;
         let windows = windows(&starts, duration, &chapters);
@@ -730,6 +693,7 @@ pub fn run(
         Ok(Outcome {
             title: title.clone(),
             duration_seconds: duration,
+            source: detected.source,
             segments: starts.len(),
             windows: window_total,
             notes: all_notes,
@@ -798,7 +762,13 @@ pub mod app {
         app: AppHandle,
         lecture_id: String,
         force: Option<bool>,
+        source: Option<u8>,
     ) -> Result<(), String> {
+        if let Some(n) = source {
+            if n != 1 && n != 2 {
+                return Err(format!("{n} is not a source — a capture has 1 and sometimes 2"));
+            }
+        }
         let pool = crate::store::open_pool().await?;
         let running: Option<String> =
             sqlx::query_scalar("SELECT recap_status FROM lectures WHERE id = ?1")
@@ -899,6 +869,7 @@ pub mod app {
                     lecture_id: &lecture_id,
                     selection: &selection,
                     force,
+                    source,
                 },
                 step,
                 event,

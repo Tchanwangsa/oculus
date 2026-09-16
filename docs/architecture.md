@@ -91,12 +91,15 @@ live. Inside it:
 - `courses/<code>/…` — scraped files, mirrored to Canvas layout, plus `.md`,
   `.pages.json`, and `<stem>_images/` siblings the parser writes, and the
   `.emb.json` sibling the embedder writes beside them
-- `lectures/<uuid>/` — downloaded Echo360 media: `source1.mp4` (the Presenter
-  screen), `source2.mp4` (the room camera, when the capture has one and it has
-  been asked for) and `transcript.vtt`. A `frames/` subfolder appears only when
-  `oculus lecture candidates --frames` or `oculus lecture chapters` is run over
-  it — a JPEG per detected topic boundary, regenerable in seconds and nothing's
-  source of truth (see [chapters.md](./chapters.md))
+- `lectures/<uuid>/` — downloaded Echo360 media: `source1.mp4` and
+  `source2.mp4` (the second when the capture has one and it has been asked
+  for), plus `transcript.vtt`. Usually source 1 is the Presenter screen and
+  source 2 the room camera, but not always — which one a job reads is measured
+  rather than assumed (see [chapters.md](./chapters.md)). A `frames/`
+  subfolder and an `outline.md` appear only when `oculus lecture
+  candidates --frames` or `oculus lecture chapters` is run over it — a JPEG per
+  detected topic boundary and the transcript merged with the slide changes,
+  both regenerable in seconds and neither anything's source of truth
 - `agents/` — the docs a coding agent reads, the `AGENTS.md` every course
   folder symlinks, and the memory layer it writes back (`TASTE.md`,
   `memories/`); written by `oculus docs` and, for everything but the CLI
