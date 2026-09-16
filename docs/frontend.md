@@ -84,6 +84,16 @@ the one moment it shows.
   text and patches tool rows — see [harness.md](./harness.md). It is
   app-level rather than page-level because a thread keeps running on
   another page and the sidebar's Chat row spins while one does.
+- **`app/src/lib/tauriEvents.ts` is imported for its side effect only, before
+  `./App` in `app/src/main.tsx`, and is not dead code.** Tauri's injected
+  `unlisten` reads `listeners[eventId].handlerId` after checking only that the
+  *event* has a listener map, not that this id is still in it — so an unlisten
+  that lands before its own registration script has run throws, and because the
+  throw precedes the `plugin:event|unlisten` call the subscription leaks on the
+  Rust side too. StrictMode's mount/unmount/remount opens that window on every
+  listener in the app. The module swallows the miss so the IPC half still runs.
+  Import order is the contract: it has to be evaluated before the first
+  `listen()`.
 - In the app it is the **frontend** that owns scrape-table writes (the Rust
   engine only emits events); the CLI writes the same rows itself via
   `app/src-tauri/src/store.rs`. Change a table's shape and both writers must

@@ -59,7 +59,7 @@ export function useBrowserTabs() {
     });
     return () => {
       cancelled = true;
-      unlisten.then((off) => off());
+      unlisten.then((off) => off()).catch(() => {});
     };
   }, []);
 }

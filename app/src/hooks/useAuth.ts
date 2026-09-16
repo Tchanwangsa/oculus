@@ -54,7 +54,7 @@ export function useAuth() {
       listen("canvas-auth-expired", () => setStatus("expired")),
     ];
     return () => {
-      subs.forEach((p) => p.then((f) => f()));
+      subs.forEach((p) => p.then((f) => f()).catch(() => {}));
     };
   }, []);
 

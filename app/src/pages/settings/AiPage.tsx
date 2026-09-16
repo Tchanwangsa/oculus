@@ -301,7 +301,7 @@ export default function SettingsAiPage() {
       setTestOutput(testBuf.current);
     });
     return () => {
-      un.then((f) => f());
+      un.then((f) => f()).catch(() => {});
     };
   }, []);
 

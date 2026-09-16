@@ -326,7 +326,7 @@ export function useBackendEvents() {
     );
 
     return () => {
-      unsubs.forEach((u) => u.then((f) => f()));
+      unsubs.forEach((u) => u.then((f) => f()).catch(() => {}));
     };
   }, []);
 }

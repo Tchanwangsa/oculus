@@ -1,5 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+// Before ./App: the shim has to be in place ahead of the first `listen()`.
+import "./lib/tauriEvents";
 import "./index.css";
 import App from "./App";
 

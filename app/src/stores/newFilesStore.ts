@@ -93,6 +93,6 @@ export function watchNewFiles(): () => void {
   return () => {
     window.removeEventListener(FILE_ACCESSED_EVENT, refresh);
     clearTimeout(timer);
-    unsubs.forEach((u) => u.then((f) => f()));
+    unsubs.forEach((u) => u.then((f) => f()).catch(() => {}));
   };
 }

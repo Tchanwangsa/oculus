@@ -194,7 +194,7 @@ export default function SyncPage() {
       }
     });
     return () => {
-      sub.then((f) => f());
+      sub.then((f) => f()).catch(() => {});
     };
   }, []);
 
@@ -219,7 +219,7 @@ export default function SyncPage() {
       }),
     ];
     return () => {
-      subs.forEach((p) => p.then((f) => f()));
+      subs.forEach((p) => p.then((f) => f()).catch(() => {}));
     };
   }, [loadFromDb]);
 

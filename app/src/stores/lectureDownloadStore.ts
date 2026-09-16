@@ -115,6 +115,6 @@ export function watchLectureDownloads(): () => void {
     }
   });
   return () => {
-    unsub.then((f) => f());
+    unsub.then((f) => f()).catch(() => {});
   };
 }

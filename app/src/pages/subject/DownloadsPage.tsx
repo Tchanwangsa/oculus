@@ -77,7 +77,7 @@ export default function SubjectDownloadsPage() {
       if (subject_id === subject.id) reload();
     });
     return () => {
-      unsub.then((f) => f());
+      unsub.then((f) => f()).catch(() => {});
     };
   }, [subject.id, reload]);
 
