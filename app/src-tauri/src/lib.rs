@@ -1115,6 +1115,8 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             mineru::mineru_set_api_key,
             mineru::mineru_has_api_key,
             mineru::mineru_delete_api_key,
+            embed::commands::embed_settings,
+            embed::commands::embed_set_engine,
             voyage::voyage_set_api_key,
             voyage::voyage_has_api_key,
             voyage::voyage_delete_api_key,

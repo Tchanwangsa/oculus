@@ -1036,4 +1036,5 @@ mod tests {
 
 /// Page rasterization — the page *images* everything above embeds. See
 /// `embed/raster.rs`.
+pub mod commands;
 pub mod raster;

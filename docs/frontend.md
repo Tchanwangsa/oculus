@@ -23,6 +23,7 @@ this page is the structure.
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
 | Parse backend, memory budget + sidecar health | `app/src/pages/settings/LibraryPage.tsx` |
+| Embedding backend + the re-index it costs | `app/src/components/settings/EmbeddingSection.tsx`, `app/src/components/settings/ReindexConfirmDialog.tsx`, `app/src-tauri/src/embed/commands.rs` |
 | Side panel (file/lecture preview) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser (route, tab mirror, API) | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/stores/browserStore.ts`, `app/src/lib/browser.ts`, `app/src-tauri/src/browser.rs` |
 | Viewers | `app/src/components/files/PDFViewer.tsx`, `app/src/components/files/FileViewer.tsx`, `app/src/components/lectures/LecturePlayer.tsx`, `app/src/components/lectures/ChaptersPanel.tsx` |
@@ -69,6 +70,23 @@ the one moment it shows.
   is needed. The memory input has a 5 GB floor and recommends 8 GB. Health
   polling displays whole-tree memory, peak and recoveries inline, with no
   toasts. Backend changes affect new parse requests.
+- **Settings → Library also owns the embedding backend, and changing it is
+  destructive on purpose.** One engine is selected (`embed` in the `settings`
+  table, read by `embed_config()` in `app/src-tauri/src/embed/mod.rs`) and
+  search runs against that one — no fallback between engines, no two spaces
+  fused at query time. Vectors from two models share a table, a width and a dot
+  product and share no geometry, so a mixed index returns a confident ranking of
+  unrelated pages, which is worse than an error. `embed_set_engine` therefore
+  clears every stored vector, the per-file `embed_status` and the `.emb.json`
+  records on disk in the same call, in that order, writing the setting **last**
+  so a failure can cost a re-index but never leave the setting naming one space
+  while the table holds another. The page says so before the change, in the
+  numbers the index actually holds (`ReindexConfirmDialog`), and skips the
+  dialog entirely when there is nothing indexed to lose. The engine list, its
+  labels and the reason an engine is unavailable come from Rust, so the page
+  cannot offer what the backend would refuse. `Engine::Local` is real in the
+  seam and has no server to talk to yet, so it is listed and disabled with that
+  sentence under the control rather than hidden.
 - Choosing MinerU cloud or Automatic opts into uploading PDFs to MinerU's
   PRC-hosted service; Local only is the default. Token save/remove invokes
   Rust keychain commands, never DB writes. Automatic is cloud-first when a

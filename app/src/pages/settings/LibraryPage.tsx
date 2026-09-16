@@ -18,8 +18,8 @@ import {
   type ParseBackend,
   type ParseSettings,
 } from "@/lib/db";
-import { embeddingStats, type IndexStats } from "@/lib/retrieval";
 import { cn } from "@/lib/utils";
+import { EmbeddingSection } from "@/components/settings/EmbeddingSection";
 import { Section, StatRow } from "./section";
 
 interface SidecarHealth {
@@ -53,7 +53,6 @@ interface SidecarHealth {
 interface LibraryCounts {
   tracked: number;
   parsed: number;
-  indexed: number;
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -66,7 +65,6 @@ const BACKEND_LABELS: Record<ParseBackend, string> = {
 
 export default function SettingsLibraryPage() {
   const [library, setLibrary] = useState<LibraryCounts | null>(null);
-  const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
   const [sidecar, setSidecar] = useState<SidecarHealth | null>(null);
   const [sidecarDown, setSidecarDown] = useState(false);
   const [settings, setSettings] = useState<ParseSettings>(DEFAULT_PARSE_SETTINGS);
@@ -84,18 +82,15 @@ export default function SettingsLibraryPage() {
     let cancelled = false;
     Promise.all([
       getPdfPipelineRows(),
-      embeddingStats().catch(() => null),
       getParseSettings(),
       invoke<boolean>("mineru_has_api_key"),
     ])
-      .then(([rows, stats, parse, tokenPresent]) => {
+      .then(([rows, parse, tokenPresent]) => {
         if (cancelled) return;
         setLibrary({
           tracked: rows.length,
           parsed: rows.filter((row) => row.parse_status === "quality").length,
-          indexed: rows.filter((row) => row.embed_status === "done").length,
         });
-        setIndexStats(stats);
         setSettings(parse);
         latestSettings.current = parse;
         setMemoryGb(parse.memoryCapMb / 1024);
@@ -208,18 +203,13 @@ export default function SettingsLibraryPage() {
 
   return (
     <>
-      <Section title="Library" description="Where synced PDFs are in the parse and index pipeline.">
+      <Section title="Library" description="Where synced PDFs are in the parse pipeline.">
         <div>
           <StatRow label="PDFs tracked" value={library ? String(library.tracked) : "—"} />
           <StatRow
             label="Quality parsed"
             value={library ? `${library.parsed}/${library.tracked}` : "—"}
           />
-          <StatRow
-            label="Indexed for search"
-            value={library ? `${library.indexed}/${library.tracked}` : "—"}
-          />
-          <StatRow label="Pages embedded" value={indexStats ? String(indexStats.pages_embedded) : "—"} />
         </div>
       </Section>
 
@@ -368,6 +358,10 @@ export default function SettingsLibraryPage() {
           </p>
         </div>
       </Section>
+
+      <Separator className="my-7" />
+
+      <EmbeddingSection />
 
       <Separator className="my-7" />
 
