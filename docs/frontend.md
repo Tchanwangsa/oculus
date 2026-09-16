@@ -38,7 +38,7 @@ The route table is `app/src/routes.tsx`, and each tab builds its own memory
 router over it (`app/src/components/tabs/TabPane.tsx`) — the shell is above all
 of them, so there is no one router to name. `/` is **Home**; it used to
 redirect to `/chat`. Then `/chat`, `/calendar`, `/projects`,
-`/projects/:projectId`, `/subjects`, `/subjects/:subjectId` (SubjectLayout →
+`/projects/:projectId` and `/projects/:projectId/tasks/:taskId`, `/subjects`, `/subjects/:subjectId` (SubjectLayout →
 overview / modules / downloads / lectures / announcements / assignments /
 discussion / projects), `/subjects/:subjectId/file` and `/lecture` (the side
 panel promoted to a full Notion-style page, outside SubjectLayout on purpose),
@@ -51,6 +51,15 @@ filtered views of one list, and both link to the same `/projects/:projectId`.
 Its name rides in the route's query (`?n=`, `projectHref`) for the tab strip's
 sake — `tabInfo` titles a tab from the path alone and has no project list to
 look one up in, the same trade `/lecture` makes with `?t=`.
+
+**A task is a page too**, one level further down, and it carries its title in
+`?n=` for the same reason (`taskHref`). It sits under its project rather than
+at `/tasks/:id` because the page cannot draw anything without the project: a
+status is a column on *that* board, and `moveTask` has to be handed an id the
+board actually has. Both pages re-`navigate(…, { replace: true })` to their own
+href after a rename, so the tab you are looking at re-titles itself rather than
+waiting to be reopened — which is the cost of titling from the path, paid at
+the one moment it shows.
 
 ## How it connects
 

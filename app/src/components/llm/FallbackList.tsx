@@ -48,13 +48,23 @@ export function FallbackList({
         <div
           key={modelKey(m)}
           draggable
-          onDragStart={() => setDragFrom(i)}
+          onDragStart={(e) => {
+            // WebKit aborts a drag whose dragstart sets no data — no dragover
+            // and no drop ever fire, so the row simply cannot be moved. The
+            // payload itself is unused (the index is in state); the call is
+            // what keeps the drag alive. Same fix, same reason, in
+            // `app/src/components/projects/ProjectBoard.tsx`.
+            e.dataTransfer.setData("text/plain", modelKey(m));
+            e.dataTransfer.effectAllowed = "move";
+            setDragFrom(i);
+          }}
           onDragEnd={() => {
             setDragFrom(null);
             setDragOver(null);
           }}
           onDragOver={(e) => {
             e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
             setDragOver(i);
           }}
           onDrop={(e) => {

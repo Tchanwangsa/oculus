@@ -10,6 +10,7 @@ import {
   getTaskCounts,
   getTasks,
   moveTask,
+  unarchiveProject,
   updateProject,
   updateTask,
   type CreateProjectInput,
@@ -83,6 +84,9 @@ interface ProjectsState {
   createProject: (input: CreateProjectInput) => Promise<number>;
   updateProject: (id: number, patch: UpdateProjectInput) => Promise<void>;
   archiveProject: (id: number) => Promise<void>;
+  /** The way back from {@link archiveProject}. Nothing to clear afterwards —
+   *  the project becoming visible again is a plain re-read. */
+  unarchiveProject: (id: number) => Promise<void>;
   deleteProject: (id: number) => Promise<void>;
 
   createTask: (input: CreateTaskInput) => Promise<number>;
@@ -151,6 +155,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       if (!still || still.status !== "active") set({ activeId: null, tasks: [] });
     }
   },
+
+  unarchiveProject: async (id) => unarchiveProject(id),
 
   deleteProject: async (id) => {
     await deleteProject(id);

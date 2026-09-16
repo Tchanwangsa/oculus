@@ -5,6 +5,7 @@ import ChatPage from "@/pages/ChatPage";
 import CalendarPage from "@/pages/CalendarPage";
 import ProjectsIndexPage from "@/pages/ProjectsIndexPage";
 import ProjectPage from "@/pages/ProjectPage";
+import TaskPage from "@/pages/TaskPage";
 import SubjectsIndexPage from "@/pages/SubjectsIndexPage";
 import SubjectOverviewPage from "@/pages/subject/OverviewPage";
 import SubjectModulesPage from "@/pages/subject/ModulesPage";
@@ -48,6 +49,10 @@ export const routes: RouteObject[] = [
       { path: "projects", element: <ProjectsIndexPage /> },
       // One project, with its board / table / backlog views inside it.
       { path: "projects/:projectId", element: <ProjectPage /> },
+      // One task as a page of its own — a description, its metadata and its
+      // subtasks. Nested under the project because the page needs the
+      // project's columns to say what a status is.
+      { path: "projects/:projectId/tasks/:taskId", element: <TaskPage /> },
       { path: "subjects", element: <SubjectsIndexPage /> },
       // A file/lecture promoted to a full page (peek → expand). Outside
       // SubjectLayout: full pages take the whole content area, Notion-style.

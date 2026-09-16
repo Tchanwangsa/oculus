@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { CaretRight, Plus } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
@@ -8,6 +9,7 @@ import { displayCode } from "@/lib/format";
 import type { DbProject, DbProjectTask } from "@/lib/projects";
 import { InlineAdd } from "./InlineAdd";
 import { StatusPill } from "./StatusPill";
+import { taskHref } from "./taskHref";
 import { AgentMark, DueChip, SubtaskProgressBar, TaskGlyph } from "./TaskMarks";
 import {
   appendSlot,
@@ -136,14 +138,19 @@ function TaskRow({
         )}
 
         <TaskGlyph kind={columnOf(project, task.column_id)?.kind ?? null} size={depth ? 11 : 13} />
-        <span
+        {/* The title is the way into the task's own page, on a subtask row as
+            well as a parent's: a subtask is a task, with the same page. The
+            row's other controls stay where they are — a whole-row link would
+            have swallowed the status pill and the add-subtask button. */}
+        <Link
+          to={taskHref(project.id, task)}
           className={cn(
-            "truncate text-xs",
+            "truncate text-xs hover:underline",
             task.done_at ? "text-muted-foreground line-through" : "text-foreground",
           )}
         >
           {task.title}
-        </span>
+        </Link>
         <AgentMark source={task.source} />
         <span className="flex-1" />
         <AddSubtaskButton disabled={onAddSubtask == null} onClick={() => onAddSubtask?.()} />

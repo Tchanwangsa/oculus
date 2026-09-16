@@ -50,8 +50,15 @@ export function AgentMark({ source, className }: { source: string; className?: s
   );
 }
 
-/** A due date, reddened once it is behind you. Unset dates render nothing so
- *  the caller can decide what an empty cell looks like. */
+/**
+ * A due date, reddened once it is behind you. Unset dates render nothing so the
+ * caller can decide what an empty cell looks like.
+ *
+ * No `tabular-nums`: a date is not a column of digits — "15 Sep" and
+ * "3 Oct" cannot align whatever the figures do, because the month names are
+ * different widths — so all the tabular set buys here is the faintly
+ * mechanical look of even digits in running text.
+ */
 export function DueChip({ dueAt, className }: { dueAt: string | null; className?: string }) {
   const ms = sqliteUtcToMs(dueAt);
   if (ms == null) return null;
@@ -59,7 +66,7 @@ export function DueChip({ dueAt, className }: { dueAt: string | null; className?
   return (
     <span
       className={cn(
-        "shrink-0 text-[11px] tabular-nums",
+        "shrink-0 text-[11px]",
         overdue ? "text-destructive" : "text-muted-foreground",
         className,
       )}

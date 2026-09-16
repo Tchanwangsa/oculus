@@ -1014,6 +1014,52 @@ ALTER TABLE lectures ADD COLUMN last_watched_at TEXT;
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 33,
+                            description: "projects: custom tags, and the calendar event a project answers to",
+                            // Two facts a project's About page needs and
+                            // migration 27 had nowhere to put.
+                            //
+                            // `tags` is a JSON array of strings on the row,
+                            // not a `tags` + `project_tags` pair, and for the
+                            // same reason `columns` beside it is JSON: this is
+                            // the part that keeps changing, and nothing
+                            // queries it in SQL. A student has a handful of
+                            // projects, so "every tag I have used" is a scan
+                            // over tens of rows in the page rather than a
+                            // GROUP BY — and the day a tag needs a colour, a
+                            // description or a rename that fans out, that is
+                            // the day it earns a table. NOT NULL DEFAULT '[]'
+                            // so every reader parses the same shape and no
+                            // caller has to spell "untagged" twice.
+                            //
+                            // `event_id` is the calendar's own id for the
+                            // event this project answers to — the Canvas
+                            // deadline an assignment is submitted against, or
+                            // a local row. It holds a `CalEvent.id` as
+                            // `app/src/lib/calendar.ts` mints it, so a Canvas
+                            // row is its Canvas id and a local one is
+                            // `local_<n>`: one column addressing three tables,
+                            // because what is pinned is the thing on the grid
+                            // rather than a row in any one of them.
+                            //
+                            // **Deliberately not a foreign key.** A sync
+                            // deletes a subject's `calendar_events` rows and
+                            // re-inserts them (see `docs/calendar.md`), so a
+                            // REFERENCES … ON DELETE SET NULL would drop every
+                            // link on the floor halfway through the next sync
+                            // — the ids come back identical, but the cascade
+                            // would already have fired. The pointer is
+                            // resolved live against `loadCalendar()` instead,
+                            // and one that no longer resolves draws nothing:
+                            // the same call the calendar's task layer makes in
+                            // the other direction.
+                            sql: r#"
+ALTER TABLE projects ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE projects ADD COLUMN event_id TEXT;
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),

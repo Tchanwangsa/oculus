@@ -86,6 +86,14 @@ pub struct Project {
     pub starts_at: Option<String>,
     pub due_at: Option<String>,
     pub columns: Vec<Column>,
+    /// The user's own labels, parsed out of JSON at the boundary the way
+    /// `columns` is. Always a list — `[]` is untagged, never null.
+    pub tags: Vec<String>,
+    /// The calendar event this project answers to, as a `CalEvent.id`
+    /// (`app/src/lib/calendar.ts`). Read-only here: the CLI has no way to list
+    /// the grid, so pinning is the app's, and this is carried so
+    /// `oculus project show` can say a project already has one.
+    pub event_id: Option<String>,
     pub position: f64,
     pub source: String,
     pub created_at: String,
@@ -111,10 +119,35 @@ pub struct Task {
 }
 
 const PROJECT_SELECT: &str = r#"SELECT p.id, p.subject_id, s.code AS subject_code, p.name, p.brief,
-       p.status, p.starts_at, p.due_at, p.columns, p.position, p.source,
-       p.created_at, p.updated_at
+       p.status, p.starts_at, p.due_at, p.columns, p.tags, p.event_id, p.position,
+       p.source, p.created_at, p.updated_at
   FROM projects p
   LEFT JOIN subjects s ON s.id = p.subject_id"#;
+
+/// Trimmed, emptied out, deduplicated case-insensitively and capped — the same
+/// normalisation `normaliseTags` in `app/src/lib/projects.ts` applies, so a tag
+/// typed at the CLI and a tag typed on the About page store identically. First
+/// spelling wins.
+pub fn normalise_tags(tags: impl IntoIterator<Item = String>) -> Vec<String> {
+    /// A project is labelled, not catalogued.
+    const MAX_TAGS: usize = 24;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for raw in tags {
+        let tag = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        if tag.is_empty() {
+            continue;
+        }
+        if !seen.insert(tag.to_lowercase()) {
+            continue;
+        }
+        out.push(tag);
+        if out.len() >= MAX_TAGS {
+            break;
+        }
+    }
+    out
+}
 
 fn to_project(r: &sqlx::sqlite::SqliteRow) -> Project {
     // A board that will not parse is a board nothing can be drawn on, and the
@@ -124,6 +157,12 @@ fn to_project(r: &sqlx::sqlite::SqliteRow) -> Project {
         .ok()
         .filter(|c| !c.is_empty())
         .unwrap_or_else(default_columns);
+    // Same fallback as the board: a tag list that will not parse is not worth
+    // failing the whole read over.
+    let tags = r
+        .get::<Option<String>, _>("tags")
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default();
     Project {
         id: r.get("id"),
         subject_id: r.get("subject_id"),
@@ -134,6 +173,8 @@ fn to_project(r: &sqlx::sqlite::SqliteRow) -> Project {
         starts_at: r.get("starts_at"),
         due_at: r.get("due_at"),
         columns,
+        tags,
+        event_id: r.get("event_id"),
         position: r.get("position"),
         source: r.get("source"),
         created_at: r.get("created_at"),
@@ -255,6 +296,7 @@ pub struct NewProject {
     pub brief: Option<String>,
     pub starts_at: Option<String>,
     pub due_at: Option<String>,
+    pub tags: Vec<String>,
     /// `manual` | `agent` — the board says which ones you did not write.
     pub source: String,
 }
@@ -267,10 +309,12 @@ pub async fn create_project(pool: &SqlitePool, input: &NewProject) -> Result<i64
         .await
         .map_err(|e| e.to_string())?;
     let columns = serde_json::to_string(&default_columns()).map_err(|e| e.to_string())?;
+    let tags = serde_json::to_string(&normalise_tags(input.tags.iter().cloned()))
+        .map_err(|e| e.to_string())?;
     sqlx::query(
         r#"INSERT INTO projects
-             (subject_id, name, brief, status, starts_at, due_at, columns, position, source)
-           VALUES (?1, ?2, ?3, 'active', ?4, ?5, ?6, ?7, ?8)"#,
+             (subject_id, name, brief, status, starts_at, due_at, columns, tags, position, source)
+           VALUES (?1, ?2, ?3, 'active', ?4, ?5, ?6, ?7, ?8, ?9)"#,
     )
     .bind(input.subject_id)
     .bind(&input.name)
@@ -278,6 +322,7 @@ pub async fn create_project(pool: &SqlitePool, input: &NewProject) -> Result<i64
     .bind(&input.starts_at)
     .bind(&input.due_at)
     .bind(columns)
+    .bind(tags)
     .bind(next)
     .bind(&input.source)
     .execute(pool)
@@ -296,6 +341,9 @@ pub struct ProjectPatch {
     pub status: Option<String>,
     pub starts_at: Option<Option<String>>,
     pub due_at: Option<Option<String>>,
+    /// Replaces the whole set, like the frontend's — there is no add/remove
+    /// patch. `Some(vec![])` clears it.
+    pub tags: Option<Vec<String>>,
 }
 
 pub async fn update_project(
@@ -327,6 +375,9 @@ pub async fn update_project(
     if patch.due_at.is_some() {
         put("due_at");
     }
+    if patch.tags.is_some() {
+        put("tags");
+    }
     if sets.is_empty() {
         return Ok(());
     }
@@ -335,6 +386,9 @@ pub async fn update_project(
         sets.join(", "),
         sets.len() + 1
     );
+    // Held outside the builder: `q.bind(&tags_json)` borrows, so the string has
+    // to outlive every `q` reassignment below it.
+    let tags_json: String;
     let mut q = sqlx::query(&sql);
     if let Some(v) = &patch.name {
         q = q.bind(v);
@@ -353,6 +407,11 @@ pub async fn update_project(
     }
     if let Some(v) = &patch.due_at {
         q = q.bind(v);
+    }
+    if let Some(v) = &patch.tags {
+        tags_json = serde_json::to_string(&normalise_tags(v.iter().cloned()))
+            .map_err(|e| e.to_string())?;
+        q = q.bind(&tags_json);
     }
     let affected = q
         .bind(id)

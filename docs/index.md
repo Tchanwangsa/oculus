@@ -23,7 +23,7 @@ live in the root `CLAUDE.md`, not here.
 | [harness.md](./harness.md) | Chat as a CLI agent: the Claude Code and Codex bridges, containment, the timeline |
 | [llm.md](./llm.md) | The dormant BYOK layer: provider config, keychain keys, streaming, spend limits |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
-| [projects.md](./projects.md) | Assignments broken into tasks: the board, and the CLI the agent plans through |
+| [projects.md](./projects.md) | Assignments broken into tasks: the Overview, the board, a page per task, and the CLI the agent plans through |
 | [chapters.md](./chapters.md) | Splitting a lecture recording at its topic boundaries — the detector, the agent job, and what is not built yet |
 | [frontend.md](./frontend.md) | Routes, layouts, stores, hooks, the UI system |
 | [cli.md](./cli.md) | The `oculus` binary — headless sync from a terminal |
@@ -47,11 +47,15 @@ live in the root `CLAUDE.md`, not here.
 Built: Canvas SSO + sync, Ed Discussion sync, Echo360 download + player, the
 two-tier PDF pipeline, page-image retrieval, chat as a CLI agent over it
 (Claude Code or Codex, driven as a subprocess — see
-[harness.md](./harness.md)), projects: assignments broken into tasks, on a
-board the agent can write through the CLI ([projects.md](./projects.md)), and
-an in-app browser — external links open as tabs in Oculus's own tab strip,
-signed in to Canvas. When a doc or UI string implies more than this, the doc is
-wrong — fix it.
+[harness.md](./harness.md)), projects: assignments broken into tasks, each
+project opening on an Overview (a brief, tags, a pinned calendar event, what is
+next) with its tasks on a board, a table or a timeline behind a Tasks tab and a
+page per task, all of it writable by the agent through the CLI
+([projects.md](./projects.md)), a
+**home launcher** at `/` — the composer over today's agenda, what you were
+last in, and your projects — and an in-app browser: external links open as
+tabs in Oculus's own tab strip, signed in to Canvas. When a doc or UI string
+implies more than this, the doc is wrong — fix it.
 
 Built: **lecture chapters**. Boundaries are detected, named by a CLI agent and
 stored from the command line (`oculus lecture chapters`) or the app, then read

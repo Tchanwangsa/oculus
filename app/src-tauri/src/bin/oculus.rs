@@ -490,9 +490,12 @@ struct ProjectCreateArgs {
     /// A paragraph of what it is — the assignment brief, the plan
     #[arg(long, value_name = "TEXT")]
     brief: Option<String>,
+    /// Comma-separated labels for the About page (report,group,week-5)
+    #[arg(long, value_name = "TAGS")]
+    tags: Option<String>,
 }
 
-/// Change a project's name, dates, brief or status.
+/// Change a project's name, dates, brief, tags or status.
 ///
 /// Only the flags you pass are written; everything else is left alone. Pass an
 /// **empty string** to clear a field: `--due ""` takes the due date off.
@@ -519,6 +522,11 @@ struct ProjectUpdateArgs {
     /// active or archived
     #[arg(long, value_parser = ["active", "archived"])]
     status: Option<String>,
+    /// Replace every tag with this comma-separated list, or "" to clear them.
+    /// There is no add/remove: the whole set is written at once, the same way
+    /// the About page's editor writes it.
+    #[arg(long, value_name = "TAGS")]
+    tags: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -2483,6 +2491,15 @@ impl Ctx {
         if let Some(d) = &project.due_at {
             meta.push(format!("due {d}"));
         }
+        if !project.tags.is_empty() {
+            meta.push(project.tags.join(", "));
+        }
+        // Said, not resolved: the calendar is three tables and the CLI has no
+        // reader for the grid, so the most this can honestly report is that the
+        // project is pinned to something the app will draw.
+        if project.event_id.is_some() {
+            meta.push("pinned to a calendar event".to_string());
+        }
         println!("{}", paint(&meta.join("  ·  "), DIM));
         if let Some(brief) = project.brief.as_deref().filter(|b| !b.trim().is_empty()) {
             println!("\n{brief}");
@@ -2514,6 +2531,7 @@ impl Ctx {
             brief: args.brief.clone(),
             starts_at: args.starts.as_deref().map(projects::check_iso8601).transpose()?,
             due_at: args.due.as_deref().map(projects::check_iso8601).transpose()?,
+            tags: split_tags(args.tags.as_deref()),
             source: AGENT_SOURCE.to_string(),
         };
         if input.name.is_empty() {
@@ -2540,14 +2558,20 @@ impl Ctx {
             status: args.status.clone(),
             starts_at: nullable_date(args.starts.as_ref())?,
             due_at: nullable_date(args.due.as_ref())?,
+            // `--tags ""` clears rather than being ignored, matching the other
+            // "" flags here — so the empty list is `Some(vec![])`, not `None`.
+            tags: args.tags.as_deref().map(|t| split_tags(Some(t))),
         };
         if patch.name.is_none()
             && patch.brief.is_none()
             && patch.status.is_none()
             && patch.starts_at.is_none()
             && patch.due_at.is_none()
+            && patch.tags.is_none()
         {
-            return Err("nothing to change: pass --name, --due, --starts, --brief or --status".into());
+            return Err(
+                "nothing to change: pass --name, --due, --starts, --brief, --tags or --status".into(),
+            );
         }
         self.rt.block_on(projects::update_project(&pool, args.id, &patch))?;
         let updated = self
@@ -3697,6 +3721,15 @@ fn nullable_date(value: Option<&String>) -> Result<Option<Option<String>>, Strin
         Some(v) if v.trim().is_empty() => Ok(Some(None)),
         Some(v) => Ok(Some(Some(projects::check_iso8601(v)?))),
     }
+}
+
+/// A comma-separated `--tags` list. Splitting is all this does — trimming,
+/// deduplication and the cap are `projects::normalise_tags`'s, so the CLI and
+/// the About page cannot drift on what a tag list is.
+fn split_tags(value: Option<&str>) -> Vec<String> {
+    value
+        .map(|v| v.split(',').map(str::to_string).collect())
+        .unwrap_or_default()
 }
 
 fn nullable_minutes(value: Option<&String>) -> Result<Option<Option<i64>>, String> {

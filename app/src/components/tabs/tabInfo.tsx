@@ -4,6 +4,7 @@ import {
   BookOpen,
   CalendarBlank,
   Chat,
+  CheckSquare,
   GearSix,
   Globe,
   House,
@@ -61,6 +62,16 @@ export function tabInfo(
     return { title: "Chat", icon: <Chat size={size} /> };
   if (pathname.startsWith("/calendar"))
     return { title: "Calendar", icon: <CalendarBlank size={size} /> };
+  // A task's own page, tested *before* the project below it: `/projects/(\d+)`
+  // is a prefix match and would otherwise swallow the task route and title it
+  // with the project's `?n=`. A single item rather than a board, so a
+  // checkbox rather than the Kanban glyph.
+  if (/^\/projects\/\d+\/tasks\/\d+/.test(pathname)) {
+    return {
+      title: new URLSearchParams(search).get("n") || "Task",
+      icon: <CheckSquare size={size} />,
+    };
+  }
   // A project is titled by itself, the way a lecture is: the name rides in the
   // query (`projectHref`), since this function has no project list to look one
   // up in and is called on every render of the strip.

@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import type { DbProject } from "@/lib/projects";
 import { InlineAdd } from "./InlineAdd";
+import { taskHref } from "./taskHref";
 import { AgentMark, DueChip, SubtaskProgressBar, TaskGlyph } from "./TaskMarks";
 import {
   boardColumns,
@@ -15,11 +17,10 @@ import {
  * The project's columns side by side, cards in each — the backlog at the left
  * end, where a card's life starts.
  *
- * The Backlog view is not made redundant by that column: it is the same pile
- * read as a list, with a promote button per stub. Dragging a stub out of the
- * backlog column is the same `moveTask`, reached the way a board is normally
- * reached — which is the gesture a kanban board exists for, so leaving it out
- * cost more than the tidiness was worth.
+ * It is the only place a backlog stub is promoted now — there was a Backlog
+ * list beside this with a promote button per row, and it went once the drag
+ * below actually worked, because dragging a card out of the backlog into Todo
+ * is the same `moveTask` reached by the gesture a kanban board exists for.
  *
  * Dragging is hand-rolled HTML5 (`draggable` + dragstart/dragover/drop), the
  * same shape as `app/src/components/llm/FallbackList.tsx` — a board of tens of
@@ -76,6 +77,7 @@ export function ProjectBoard({
             key={column.id}
             onDragOver={(e) => {
               e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
               setOverColumn(column.id);
             }}
             onDrop={(e) => {
@@ -98,7 +100,10 @@ export function ProjectBoard({
               </span>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-1">
+            {/* `pt-1` is the drop indicator's room: the rule is drawn 4px above
+                its card, and on the first card of a column that lands outside
+                a scroller that clips on both axes. */}
+            <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-1 pt-1">
               {cards.length === 0 && (
                 <p className="px-1 py-3 text-[11px] text-muted-foreground/60">
                   Nothing here yet.
@@ -107,15 +112,30 @@ export function ProjectBoard({
 
               {cards.map((node) => {
                 const progress = subtaskProgress(node);
+                const landsHere =
+                  overTask === node.task.id && dragId != null && dragId !== node.task.id;
                 return (
                   <article
                     key={node.task.id}
                     draggable
-                    onDragStart={() => setDragId(node.task.id)}
+                    onDragStart={(e) => {
+                      // Load-bearing, and not obvious: WebKit — which is what
+                      // a Tauri WKWebView is — aborts a drag whose dragstart
+                      // sets no data, so without this call no dragover and no
+                      // drop ever fire and a card cannot be moved at all. The
+                      // payload is never read (the id is in state); setting
+                      // *something* is the whole point. Do not "clean it up".
+                      // `app/src/components/llm/FallbackList.tsx` carries the
+                      // same line for the same reason.
+                      e.dataTransfer.setData("text/plain", String(node.task.id));
+                      e.dataTransfer.effectAllowed = "move";
+                      setDragId(node.task.id);
+                    }}
                     onDragEnd={clear}
                     onDragOver={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
+                      e.dataTransfer.dropEffect = "move";
                       setOverColumn(column.id);
                       setOverTask(node.task.id);
                     }}
@@ -125,25 +145,42 @@ export function ProjectBoard({
                       drop(column.id, node.task.id);
                     }}
                     className={cn(
-                      "cursor-grab rounded-lg border bg-card px-2.5 py-2 transition-colors active:cursor-grabbing",
+                      "relative cursor-grab rounded-lg border border-border-subtle bg-card px-2.5 py-2 transition-colors active:cursor-grabbing",
                       dragId === node.task.id && "opacity-50",
-                      overTask === node.task.id && dragId != null && dragId !== node.task.id
-                        ? "border-brand"
-                        : "border-border-subtle",
                     )}
                   >
+                    {/* Where the card would land, rather than merely which
+                        card is under the pointer: `dropSlot` puts the dragged
+                        card *above* the one it is over, so the feedback is a
+                        rule in that gap. It sits in the column's gap-1.5 as an
+                        absolute child so showing it moves nothing. */}
+                    {landsHere && (
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute inset-x-0 -top-1 h-0.5 rounded-full bg-brand"
+                      />
+                    )}
+
                     <div className="flex items-start gap-1.5">
                       <TaskGlyph kind={column.kind} className="mt-0.5" />
-                      <span
+                      {/* The card is `draggable`, so the way into the task's
+                          page is its title rather than a wrapper around the
+                          whole card, which would fight the drag. And an
+                          <a href> is draggable in its own right in WebKit,
+                          so grabbing the title would start a link drag and
+                          hijack the card's dragstart — hence the opt-out. */}
+                      <Link
+                        to={taskHref(project.id, node.task)}
+                        draggable={false}
                         className={cn(
-                          "min-w-0 flex-1 text-xs leading-snug",
+                          "min-w-0 flex-1 text-xs leading-snug hover:underline",
                           node.task.done_at
                             ? "text-muted-foreground line-through"
                             : "text-foreground",
                         )}
                       >
                         {node.task.title}
-                      </span>
+                      </Link>
                       <AgentMark source={node.task.source} className="mt-0.5" />
                     </div>
 

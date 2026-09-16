@@ -1,19 +1,23 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { NewProjectButton } from "@/components/projects/NewProjectButton";
-import { ProjectGroups } from "@/components/projects/ProjectList";
+import { ArchivedProjects, ProjectGroups } from "@/components/projects/ProjectList";
 import { projectHref } from "@/components/projects/projectHref";
+import { useProjectActions } from "@/components/projects/useProjectActions";
 import { useSubjects } from "@/hooks/useSubjects";
 import { PROJECTS_UPDATED_EVENT } from "@/lib/projects";
 import { useProjectsStore } from "@/stores/projectsStore";
 
 /**
  * Every project you have on, grouped by the subject it belongs to, with the
- * subject-less ones under Personal.
+ * subject-less ones under Personal, and the ones you have put away at the
+ * bottom.
  *
- * Archived projects are deliberately absent: `getProjects` defaults to active,
- * and an archived project is something you reach by its own link rather than
- * something the list keeps carrying.
+ * The page asks for `status: "all"` and splits the result itself rather than
+ * reading the list twice: the store holds one list and one set of counts, so a
+ * second query would either overwrite the first or need a second store. Which
+ * makes this the only page that sees archived rows — the subject tab is a
+ * working view and deliberately stays on the default.
  */
 export default function ProjectsIndexPage() {
   const { subjects } = useSubjects();
@@ -25,9 +29,9 @@ export default function ProjectsIndexPage() {
   const createProject = useProjectsStore((s) => s.createProject);
 
   useEffect(() => {
-    // `{}` rather than no argument: the store's query is shared, and a subject
-    // tab or a board may have left it filtered.
-    void loadProjects({});
+    // Spelled out rather than left to the default: the store's query is shared,
+    // and a subject tab or a board may have left it filtered to one subject.
+    void loadProjects({ status: "all" });
   }, [loadProjects]);
 
   useEffect(() => {
@@ -35,6 +39,14 @@ export default function ProjectsIndexPage() {
     window.addEventListener(PROJECTS_UPDATED_EVENT, onUpdated);
     return () => window.removeEventListener(PROJECTS_UPDATED_EVENT, onUpdated);
   }, [loadProjects]);
+
+  const { active, archived } = useMemo(
+    () => ({
+      active: projects.filter((p) => p.status !== "archived"),
+      archived: projects.filter((p) => p.status === "archived"),
+    }),
+    [projects],
+  );
 
   const create = useCallback(
     (subjectId: number | null, name: string) => {
@@ -46,6 +58,8 @@ export default function ProjectsIndexPage() {
     },
     [createProject, navigate],
   );
+
+  const actions = useProjectActions();
 
   return (
     <div className="page-scroll">
@@ -67,11 +81,22 @@ export default function ProjectsIndexPage() {
         <div className="mt-5 mb-6 border-t border-border" />
 
         <ProjectGroups
-          projects={projects}
+          projects={active}
           counts={counts}
           subjects={subjects}
           onCreate={create}
+          actions={actions}
         />
+
+        {/* Only once there is something in it — the page's rule for every group
+            but Personal, and an empty "Archived" heading would be the one thing
+            on the page telling you about a state you are not in. */}
+        {archived.length > 0 && (
+          <>
+            <div className="my-6 border-t border-border" />
+            <ArchivedProjects projects={archived} counts={counts} actions={actions} />
+          </>
+        )}
       </div>
     </div>
   );

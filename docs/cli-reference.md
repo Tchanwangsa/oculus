@@ -469,7 +469,7 @@ Commands:
   list    List projects and how far along they are
   show    Show one project: its brief, its board, and every task on it
   create  Create a project
-  update  Change a project's name, dates, brief or status
+  update  Change a project's name, dates, brief, tags or status
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -552,6 +552,9 @@ Options:
       --brief <TEXT>
           A paragraph of what it is — the assignment brief, the plan
 
+      --tags <TAGS>
+          Comma-separated labels for the About page (report,group,week-5)
+
   -h, --help
           Print help (see a summary with '-h')
 ```
@@ -559,7 +562,7 @@ Options:
 ### `oculus project update`
 
 ```
-Change a project's name, dates, brief or status.
+Change a project's name, dates, brief, tags or status.
 
 Only the flags you pass are written; everything else is left alone. Pass an **empty
 string** to clear a field: `--due ""` takes the due date off.
@@ -590,6 +593,11 @@ Options:
           active or archived
 
           [possible values: active, archived]
+
+      --tags <TAGS>
+          Replace every tag with this comma-separated list, or "" to clear them. There
+          is no add/remove: the whole set is written at once, the same way the About
+          page's editor writes it
 
   -h, --help
           Print help (see a summary with '-h')

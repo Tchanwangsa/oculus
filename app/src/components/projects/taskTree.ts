@@ -73,11 +73,11 @@ export function columnOf(project: DbProject, columnId: string): ProjectColumn | 
 /**
  * The board's columns, backlog first.
  *
- * The backlog is on the board *and* has a view of its own, which is not a
- * duplicate: dragging a stub out of the backlog into Todo is the most natural
- * gesture a board has, and the Backlog view is for reading the pile rather
- * than working it. Two ways to make the same move, one of them the obvious
- * one.
+ * The backlog used to have a list view of its own beside the board, with a
+ * promote button per stub. It went when the board's drag started working:
+ * dragging a stub out of the backlog into Todo is the gesture a kanban board
+ * exists for, and a second screen for making the same move was a screen to
+ * keep in step for no gain.
  *
  * Leftmost because that is the direction of travel — a card's life runs left
  * to right across the board — and because `DEFAULT_COLUMNS` already opens that
@@ -88,10 +88,6 @@ export function boardColumns(project: DbProject): ProjectColumn[] {
   const backlog = project.columns.filter((c) => c.kind === "backlog");
   const rest = project.columns.filter((c) => c.kind !== "backlog");
   return [...backlog, ...rest];
-}
-
-export function backlogColumn(project: DbProject): ProjectColumn | null {
-  return project.columns.find((c) => c.kind === "backlog") ?? null;
 }
 
 /** Where a backlog stub goes when it is committed to: the first column that is

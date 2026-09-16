@@ -84,6 +84,13 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
 - **A silent sidecar is not a hung sidecar.** Python block-buffers stdout on
   a pipe; `/parse-status` on the sidecar HTTP port is authoritative, stdout
   is not.
+- **A drag needs `dataTransfer.setData()` or WebKit cancels it.** A
+  `dragstart` handler that sets no data aborts the drag silently — no
+  `dragover`, no `drop`, every handler correctly attached and nothing moves.
+  That is why `app/src/components/projects/ProjectBoard.tsx` and
+  `app/src/components/llm/FallbackList.tsx` each set a `text/plain` payload
+  nothing ever reads. It looks like dead code; deleting it breaks the feature
+  without breaking a type or a test.
 - **Retrieval embeds page images, not extracted text** — measured, not
   aesthetic. Image embeddings roughly double recall on formula/diagram pages.
   Don't switch to text embeddings or average the two; see `docs/retrieval.md`.
@@ -156,6 +163,17 @@ docked side panel for files and lectures, top tab strip).
   maths and any drag that mixes the two. Popups portal normally. Chrome that
   must match native furniture (the traffic-light gap) divides by
   `--app-zoom`.
+- **No native date/time inputs.** `<input type="date">` and `datetime-local`
+  are not styleable on macOS in any way that matters: WebKit draws them as
+  separate editable segments that grey themselves when it thinks they are
+  unfilled and light individually on hover, so one field reads as several
+  controls at several weights. Worse, the picker they open is the *OS's* — in
+  the OS's locale and calendar system, which on a machine set to Thailand
+  renders Buddhist-era years. And they cannot be committed on `change`, because
+  a half-typed field reports itself as empty. Use
+  `app/src/components/projects/DateTimeField.tsx` — shadcn's `Calendar` in a
+  popover — or build on it. A bare `type="time"` is tolerable: two segments and
+  no calendar.
 - **No toasts, no bottom progress bars** — background jobs surface in the
   sidebar only. **No placeholder UI** for unbuilt features: only ship
   wired-up controls.

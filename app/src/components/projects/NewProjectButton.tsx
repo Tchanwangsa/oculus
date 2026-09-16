@@ -1,8 +1,13 @@
 import { useMemo, useState } from "react";
-import { Check, Kanban, Plus } from "@phosphor-icons/react";
+import { CaretRight, Check, Kanban, Plus } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Popover,
   PopoverContent,
@@ -37,25 +42,39 @@ export function NewProjectButton({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [subjectId, setSubjectId] = useState<number | null>(null);
+  const [pastOpen, setPastOpen] = useState(false);
 
-  // Current subjects first: a project is nearly always for something you are
-  // enrolled in now, and past terms are kept only so an old one stays
-  // reachable.
-  const groups = useMemo(() => {
-    const ordered = [
-      ...subjects.filter((s) => s.is_current),
-      ...subjects.filter((s) => !s.is_current),
-    ];
-    return [
-      { id: null as number | null, label: "Personal", title: "Not scoped to a subject", subject: null as Subject | null },
-      ...ordered.map((s) => ({
-        id: s.id as number | null,
-        label: displayCode(s.code),
-        title: displayName(s.name, s.code),
-        subject: s,
-      })),
-    ];
+  // A project is nearly always for something you are enrolled in now, so the
+  // list is Personal and this term's subjects — and past terms, kept only so
+  // an old one stays reachable, fold away behind their own heading rather than
+  // padding the list you actually pick from. The chat scope picker goes
+  // further and drops them entirely; here they stay reachable, because a
+  // project *can* outlive the term it was set in.
+  const { listed, past } = useMemo(() => {
+    const row = (s: Subject) => ({
+      id: s.id as number | null,
+      label: displayCode(s.code),
+      title: displayName(s.name, s.code),
+      subject: s,
+    });
+    return {
+      listed: [
+        {
+          id: null as number | null,
+          label: "Personal",
+          title: "Not scoped to a subject",
+          subject: null as Subject | null,
+        },
+        ...subjects.filter((s) => s.is_current).map(row),
+      ],
+      past: subjects.filter((s) => !s.is_current).map(row),
+    };
   }, [subjects]);
+
+  // A selection inside the fold can never be hidden by it — otherwise creating
+  // a project for a past subject and opening the picker again shows Personal
+  // unticked and no tick anywhere.
+  const pastSelected = past.some((g) => g.id === subjectId);
 
   const commit = () => {
     const title = name.trim();
@@ -98,31 +117,48 @@ export function NewProjectButton({
           In
         </p>
         <div className="-mx-1 max-h-52 overflow-y-auto px-1">
-          {groups.map((g) => {
-            const selected = g.id === subjectId;
-            return (
-              <button
-                key={g.id ?? "personal"}
-                type="button"
-                title={g.title}
-                onClick={() => setSubjectId(g.id)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors",
-                  selected
-                    ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                {g.subject ? (
-                  <SubjectIcon code={g.subject.code} size={13} />
-                ) : (
-                  <Kanban size={13} className="shrink-0" />
-                )}
-                <span className="min-w-0 flex-1 truncate">{g.label}</span>
-                {selected && <Check size={12} weight="bold" className="shrink-0 text-brand" />}
-              </button>
-            );
-          })}
+          {listed.map((g) => (
+            <GroupRow
+              key={g.id ?? "personal"}
+              group={g}
+              selected={g.id === subjectId}
+              onPick={() => setSubjectId(g.id)}
+            />
+          ))}
+
+          {/* The Sync page's picker says "Past subjects (n)" behind the same
+              caret, so this reads as the same idea rather than a second one.
+              It does not repeat that picker's per-term headings: there you are
+              auditing several terms at once, here you are choosing one
+              destination out of a short list in a narrow popover. */}
+          {past.length > 0 && (
+            <Collapsible
+              open={pastOpen || pastSelected}
+              onOpenChange={setPastOpen}
+              className="mt-1"
+            >
+              <CollapsibleTrigger className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground">
+                <CaretRight
+                  size={9}
+                  className={cn(
+                    "shrink-0 transition-transform",
+                    (pastOpen || pastSelected) && "rotate-90",
+                  )}
+                />
+                Past subjects ({past.length})
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                {past.map((g) => (
+                  <GroupRow
+                    key={g.id ?? "personal"}
+                    group={g}
+                    selected={g.id === subjectId}
+                    onPick={() => setSubjectId(g.id)}
+                  />
+                ))}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
         </div>
 
         <Button
@@ -135,5 +171,39 @@ export function NewProjectButton({
         </Button>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** One destination: the Personal board, or a subject. Extracted only so the
+ *  open list and the folded one cannot drift apart. */
+function GroupRow({
+  group,
+  selected,
+  onPick,
+}: {
+  group: { label: string; title: string; subject: Subject | null };
+  selected: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={group.title}
+      onClick={onPick}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors",
+        selected
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+    >
+      {group.subject ? (
+        <SubjectIcon code={group.subject.code} size={13} />
+      ) : (
+        <Kanban size={13} className="shrink-0" />
+      )}
+      <span className="min-w-0 flex-1 truncate">{group.label}</span>
+      {selected && <Check size={12} weight="bold" className="shrink-0 text-brand" />}
+    </button>
   );
 }

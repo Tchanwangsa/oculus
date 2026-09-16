@@ -7,6 +7,7 @@ import { displayCode, displayName } from "@/lib/format";
 import type { Subject } from "@/lib/db";
 import type { DbProject, ProjectTaskCounts } from "@/lib/projects";
 import { InlineAdd } from "./InlineAdd";
+import { ProjectMenu } from "./ProjectMenu";
 import { AgentMark, DueChip, ProjectProgress } from "./TaskMarks";
 import { projectHref } from "./projectHref";
 
@@ -22,6 +23,27 @@ function loadCollapsed(): Set<string> {
   } catch {
     return new Set();
   }
+}
+
+/**
+ * What a row's overflow menu does, bound to the row it was opened on.
+ *
+ * One object rather than four props at every hop, because it is threaded three
+ * levels down — row, box, list — and none of the levels in between has an
+ * opinion about any of them. It is **optional** the whole way: a list that
+ * passes nothing draws no menu, which is a truer answer than a list that has
+ * to invent four handlers to say it has no actions to offer.
+ *
+ * Every callback takes the project, so a page can act on a row without the row
+ * closing over which page it is in.
+ */
+export interface ProjectRowActions {
+  /** The new name, trimmed and known to differ — {@link ProjectMenu} swallows
+   *  the no-op. */
+  onRename: (project: DbProject, name: string) => void;
+  onArchive: (project: DbProject) => void;
+  onUnarchive: (project: DbProject) => void;
+  onDelete: (project: DbProject) => void;
 }
 
 /**
@@ -65,35 +87,87 @@ function group(
   return out;
 }
 
-/** One project as a row: what it is called, what it is about, how far along it
- *  is, when it is due. */
+/**
+ * One project as a row: what it is called, what it is about, how far along it
+ * is, when it is due.
+ *
+ * The link covers the row's *contents* and the menu sits beside it as a
+ * sibling, not inside it. An anchor wrapping the whole row is the simpler
+ * markup and was the earlier shape, but a button nested in a link navigates
+ * when you click it — and there is no cancelling that from the button, since
+ * the anchor is the thing the browser acts on. So the hover surface moved up
+ * to the wrapper, which is what keeps the row lighting as one row while the
+ * pointer is on the menu.
+ */
 export function ProjectRow({
   project,
   counts,
+  actions,
+  quiet = false,
 }: {
   project: DbProject;
   counts: ProjectTaskCounts | undefined;
+  actions?: ProjectRowActions;
+  /** Drawn as something you have put away: the name steps back and the
+   *  progress meter gives up its bar. An archived project is a record, not
+   *  work in flight, and a half-filled bar on one reads as a project that
+   *  stalled. */
+  quiet?: boolean;
 }) {
   return (
-    <Link
-      to={projectHref(project)}
-      className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface"
-    >
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-[12px] text-foreground">{project.name}</span>
-          <AgentMark source={project.source} />
-        </span>
-        {project.brief && (
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-            {project.brief}
+    <div className="group/row flex items-center transition-colors hover:bg-surface">
+      <Link
+        to={projectHref(project)}
+        className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                "truncate text-[12px]",
+                quiet ? "text-muted-foreground" : "text-foreground",
+              )}
+            >
+              {project.name}
+            </span>
+            <AgentMark source={project.source} />
           </span>
+          {project.brief && (
+            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+              {project.brief}
+            </span>
+          )}
+        </span>
+        {quiet ? (
+          counts && counts.total > 0 ? (
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
+              {counts.done}/{counts.total}
+            </span>
+          ) : null
+        ) : (
+          <ProjectProgress counts={counts} />
         )}
-      </span>
-      <ProjectProgress counts={counts} />
-      <DueChip dueAt={project.due_at} />
-      <CaretRight size={11} className="shrink-0 text-muted-foreground/40" />
-    </Link>
+        <DueChip dueAt={project.due_at} />
+        <CaretRight size={11} className="shrink-0 text-muted-foreground/40" />
+      </Link>
+      {actions && (
+        <span className="shrink-0 pr-2 pl-0.5">
+          <ProjectMenu
+            project={project}
+            onRename={(name) => actions.onRename(project, name)}
+            onArchive={() => actions.onArchive(project)}
+            onUnarchive={() => actions.onUnarchive(project)}
+            onDelete={() => actions.onDelete(project)}
+            /* Faded rather than `hidden`, for two reasons: a display-none
+               button cannot be tabbed to, and a button that only exists on
+               hover would re-lay the row out as the pointer crosses it. It
+               stays up while its own popover is open, or the menu would be
+               anchored to something invisible. */
+            className="opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+          />
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -105,13 +179,20 @@ function RowBox({
   onCreate,
   addLabel,
   emptyCopy,
+  actions,
+  quiet = false,
   armed = false,
 }: {
   projects: DbProject[];
   counts: Map<number, ProjectTaskCounts>;
-  onCreate: (name: string) => void;
-  addLabel: string;
+  /** Omitted where the box is not somewhere new work starts — the archived
+   *  list is a record, and a composer in it would create an active project
+   *  under an "Archived" heading. */
+  onCreate?: (name: string) => void;
+  addLabel?: string;
   emptyCopy: string;
+  actions?: ProjectRowActions;
+  quiet?: boolean;
   /** Open the composer as a focused field rather than a button — what the
    *  group heading's `+` does from outside the box. The `key` below remounts
    *  it so arming works a second time. */
@@ -123,17 +204,25 @@ function RowBox({
         <p className="px-3 py-5 text-center text-xs text-muted-foreground">{emptyCopy}</p>
       )}
       {projects.map((p) => (
-        <ProjectRow key={p.id} project={p} counts={counts.get(p.id)} />
-      ))}
-      <div className="px-1.5 py-1">
-        <InlineAdd
-          key={armed ? "armed" : "idle"}
-          defaultEditing={armed}
-          label={addLabel}
-          placeholder="Project name"
-          onAdd={onCreate}
+        <ProjectRow
+          key={p.id}
+          project={p}
+          counts={counts.get(p.id)}
+          actions={actions}
+          quiet={quiet}
         />
-      </div>
+      ))}
+      {onCreate && (
+        <div className="px-1.5 py-1">
+          <InlineAdd
+            key={armed ? "armed" : "idle"}
+            defaultEditing={armed}
+            label={addLabel ?? "New project"}
+            placeholder="Project name"
+            onAdd={onCreate}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -144,6 +233,7 @@ export function ProjectGroups({
   counts,
   subjects,
   onCreate,
+  actions,
 }: {
   projects: DbProject[];
   /** Finished/total per project id, from the store — one grouped read for the
@@ -152,6 +242,7 @@ export function ProjectGroups({
   subjects: Subject[];
   /** `null` is the Personal group. */
   onCreate: (subjectId: number | null, name: string) => void;
+  actions?: ProjectRowActions;
 }) {
   const [folded, setFolded] = useState<Set<string>>(loadCollapsed);
   /** The group whose composer the heading's `+` has just opened. */
@@ -240,6 +331,7 @@ export function ProjectGroups({
               <RowBox
                 projects={g.projects}
                 counts={counts}
+                actions={actions}
                 armed={arming === g.key}
                 onCreate={(name) => onCreate(g.subjectId, name)}
                 addLabel="New project"
@@ -257,22 +349,99 @@ export function ProjectGroups({
   );
 }
 
+/**
+ * Whether the archived section is open, stored the *other* way round from
+ * {@link COLLAPSED_KEY}.
+ *
+ * That key stores which groups are folded so that anything new — a subject's
+ * first project — arrives open without having to be listed somewhere first.
+ * Here the wanted default is the opposite: archived is closed until you go
+ * looking, so what is worth storing is the one state that differs from the
+ * default. Absent means shut, which is what a first run should be.
+ */
+const ARCHIVED_OPEN_KEY = "oculus-projects-archived-open";
+
+/**
+ * The projects you have put away, under everything else.
+ *
+ * Drawn by its caller only when it has rows, on the index's own rule that a
+ * heading appears once there is something under it — an always-present
+ * "Archived (0)" would be the one empty heading on a page arranged to have
+ * none. Personal is the deliberate exception there, because it is the only way
+ * to discover where a subject-less project goes; archived has a way in already,
+ * which is having archived something.
+ */
+export function ArchivedProjects({
+  projects,
+  counts,
+  actions,
+}: {
+  projects: DbProject[];
+  counts: Map<number, ProjectTaskCounts>;
+  actions?: ProjectRowActions;
+}) {
+  const [open, setOpen] = useState(() => localStorage.getItem(ARCHIVED_OPEN_KEY) === "true");
+
+  useEffect(() => {
+    localStorage.setItem(ARCHIVED_OPEN_KEY, String(open));
+  }, [open]);
+
+  return (
+    <section>
+      <div className="mb-1.5 flex items-center gap-1.5 px-0.5">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 items-center gap-1.5 text-left transition-colors hover:opacity-70"
+        >
+          <span className="truncate font-display text-[13px] font-semibold tracking-tight text-muted-foreground">
+            Archived
+          </span>
+          <CaretRight
+            size={11}
+            className={cn(
+              "shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-90",
+            )}
+          />
+        </button>
+        <span className="text-[11px] tabular-nums text-muted-foreground/60">
+          {projects.length}
+        </span>
+      </div>
+      {open && (
+        <RowBox
+          projects={projects}
+          counts={counts}
+          actions={actions}
+          quiet
+          emptyCopy="Nothing archived."
+        />
+      )}
+    </section>
+  );
+}
+
 /** One subject's projects, ungrouped — the per-subject tab. */
 export function ProjectFlatList({
   projects,
   counts,
   subjectLabel,
   onCreate,
+  actions,
 }: {
   projects: DbProject[];
   counts: Map<number, ProjectTaskCounts>;
   subjectLabel: string;
   onCreate: (name: string) => void;
+  actions?: ProjectRowActions;
 }) {
   return (
     <RowBox
       projects={projects}
       counts={counts}
+      actions={actions}
       onCreate={onCreate}
       addLabel="New project"
       emptyCopy={`No projects for ${subjectLabel} yet — an assignment is usually the first one.`}

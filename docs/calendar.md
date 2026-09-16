@@ -17,6 +17,7 @@ copies — see the notes under "The five layers".
 | Headless writes (CLI) | `app/src-tauri/src/store.rs` |
 | Frontend reads + writes | `app/src/lib/db.ts` |
 | The task layer's read | `getAllOpenTasks` in `app/src/lib/projects.ts` |
+| The event a project is pinned to | `projects.event_id` (migration 33), `app/src/components/projects/EventLink.tsx` |
 | Event model, colours, date maths | `app/src/lib/calendar.ts` |
 | Minute clock for "now" markers | `app/src/hooks/useNow.ts` |
 | Page + views | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/` |
@@ -73,6 +74,22 @@ next.
   not still a task. The cost is a refresh signal rather than a table: the page
   listens for `PROJECTS_UPDATED_EVENT` as well as `CALENDAR_UPDATED_EVENT`, and
   every project write fires it (see [projects.md](./projects.md)).
+- **A project can be pinned to an event, and the pointer goes the other way.**
+  An assignment's project answers to a deadline Canvas already put on the grid,
+  so `projects.event_id` (migration 33) holds a `CalEvent.id` —
+  `app/src/lib/calendar.ts`'s own id, so one column addresses all three
+  tables: a Canvas row is its Canvas id, a local one is `local_<n>`. What is
+  pinned is the thing on the grid rather than a row in any one table, which is
+  the only way to spell it once. It is **deliberately not a foreign key**: the
+  Canvas write below deletes a subject's rows and re-inserts them, so a
+  `REFERENCES … ON DELETE SET NULL` would drop every link on the floor halfway
+  through a sync, even though the ids come back identical. So the pin is
+  resolved live against `loadCalendar()`, the mirror of what the task layer
+  does in the other direction — and a pin that no longer resolves says so and
+  offers to clear itself, rather than drawing nothing and leaving the user with
+  a link they set and cannot see. `task` rows are excluded from the picker: a
+  task event *is* a project's own row read back onto the grid, so pinning a
+  project to one would be a loop. See [projects.md](./projects.md).
 - **Deletability now has three answers, not two.** A local row is deletable
   because nothing else will ever clean it up. A Canvas row is not, since a sync
   would only write it straight back. And a **task** is not either, for a third
@@ -152,6 +169,12 @@ next.
   so an 11pm–12:30am class still starts at 11pm; only one that cannot fit at
   all rides up against the bottom edge
   (`app/src/components/calendar/WeekView.tsx`).
+- **The agenda's row is shared with Home.**
+  `app/src/components/calendar/EventRow.tsx` is the row the Agenda view and
+  Home's Today list both render, extracted when Home needed the same grammar —
+  the same move `EventMark` made one level down. It takes `now` as a prop
+  rather than calling `useNow()` itself: a list is one clock, and a row that
+  owned its own would put a minute timer behind every line.
 - **A deadline never has a class's shape**, and neither layer of self-imposed
   instant borrows one either. `app/src/components/calendar/EventMark.tsx` is
   the one vocabulary all three views draw from: a filled flag is a Canvas

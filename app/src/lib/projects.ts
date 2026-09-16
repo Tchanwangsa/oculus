@@ -12,7 +12,8 @@ import { getDb } from "@/lib/db";
  * two-writer pair as `store.rs` and `db.ts` for the scrape tables, and the
  * same obligation: change a table's shape and both writers move together.
  *
- * Schema is migration 27 in `app/src-tauri/src/lib.rs`.
+ * Schema is migration 27 in `app/src-tauri/src/lib.rs`, plus migration 33
+ * (`tags`, `event_id`).
  */
 
 // ── Columns ──────────────────────────────────────────────────────────────────
@@ -77,6 +78,23 @@ export interface DbProject {
   due_at: string | null;
   /** Parsed out of the stored JSON at the boundary — callers never see text. */
   columns: ProjectColumn[];
+  /**
+   * The user's own labels for this project, parsed out of JSON at the boundary
+   * the way {@link columns} is. Always an array — `[]` is untagged, never
+   * `null`, so nothing downstream has to spell the empty case twice.
+   */
+  tags: string[];
+  /**
+   * The calendar event this project answers to — a `CalEvent.id` as
+   * `app/src/lib/calendar.ts` mints it, so a Canvas deadline is its Canvas id
+   * and a local row is `local_<n>`.
+   *
+   * Resolved live against `loadCalendar()` rather than joined: a sync deletes
+   * and re-inserts a subject's Canvas rows, so nothing here can be a foreign
+   * key (see migration 33). An id that no longer resolves simply draws
+   * nothing.
+   */
+  event_id: string | null;
   position: number;
   /** 'manual' | 'agent' — who created it. */
   source: string;
@@ -112,8 +130,23 @@ export interface DbOpenTask extends DbProjectTask {
   project_subject_code: string | null;
 }
 
-/** The row as SQLite returns it, before `columns` is parsed. */
-type ProjectRow = Omit<DbProject, "columns"> & { columns: string };
+/** The row as SQLite returns it, before `columns` and `tags` are parsed. */
+type ProjectRow = Omit<DbProject, "columns" | "tags"> & {
+  columns: string;
+  tags: string | null;
+};
+
+/** The stored JSON array of tags, or `[]` — never a throw and never a `null`.
+ *  Non-strings are dropped rather than rendered as `[object Object]`. */
+function parseTags(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 function toProject(row: ProjectRow): DbProject {
   let columns: ProjectColumn[];
@@ -126,8 +159,37 @@ function toProject(row: ProjectRow): DbProject {
     // and take the whole list down with one bad row.
     columns = freshColumns();
   }
-  return { ...row, columns };
+  return { ...row, columns, tags: parseTags(row.tags) };
 }
+
+/**
+ * Tags as they are stored: trimmed, emptied out, deduplicated
+ * case-insensitively, and capped.
+ *
+ * Normalising on the way *in* rather than on every read is what makes "have I
+ * used this tag before" a string compare everywhere else — the composer's
+ * suggestions, the pill list and {@link allTags} would otherwise each need
+ * their own idea of whether `Draft` and `draft` are the same label. First
+ * spelling wins, so the case the user typed first is the one that sticks.
+ */
+export function normaliseTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    const tag = raw.trim().replace(/\s+/g, " ");
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+
+/** A project is labelled, not catalogued: past a couple of dozen the pills stop
+ *  fitting on a row and the tag has stopped being a tag. */
+const MAX_TAGS = 24;
 
 // ── Change notification ──────────────────────────────────────────────────────
 
@@ -180,8 +242,8 @@ export async function getProjects(opts: GetProjectsOptions = {}): Promise<DbProj
   }
   const rows = await db.select<ProjectRow[]>(
     `SELECT p.id, p.subject_id, s.code AS subject_code, p.name, p.brief, p.status,
-            p.starts_at, p.due_at, p.columns, p.position, p.source,
-            p.created_at, p.updated_at
+            p.starts_at, p.due_at, p.columns, p.tags, p.event_id, p.position,
+            p.source, p.created_at, p.updated_at
        FROM projects p
        LEFT JOIN subjects s ON s.id = p.subject_id
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
@@ -196,8 +258,8 @@ export async function getProject(id: number): Promise<DbProject | null> {
   const db = await getDb();
   const rows = await db.select<ProjectRow[]>(
     `SELECT p.id, p.subject_id, s.code AS subject_code, p.name, p.brief, p.status,
-            p.starts_at, p.due_at, p.columns, p.position, p.source,
-            p.created_at, p.updated_at
+            p.starts_at, p.due_at, p.columns, p.tags, p.event_id, p.position,
+            p.source, p.created_at, p.updated_at
        FROM projects p
        LEFT JOIN subjects s ON s.id = p.subject_id
       WHERE p.id = $1`,
@@ -305,6 +367,9 @@ export interface CreateProjectInput {
   startsAt?: string | null;
   dueAt?: string | null;
   columns?: ProjectColumn[];
+  tags?: string[];
+  /** A `CalEvent.id` — see {@link DbProject.event_id}. */
+  eventId?: string | null;
   source?: string;
 }
 
@@ -325,8 +390,9 @@ export async function createProject(input: CreateProjectInput): Promise<number> 
   );
   const res = await db.execute(
     `INSERT INTO projects
-       (subject_id, name, brief, status, starts_at, due_at, columns, position, source)
-     VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8)`,
+       (subject_id, name, brief, status, starts_at, due_at, columns, tags, event_id,
+      position, source)
+     VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8, $9, $10)`,
     [
       input.subjectId ?? null,
       input.name,
@@ -334,6 +400,8 @@ export async function createProject(input: CreateProjectInput): Promise<number> 
       input.startsAt ?? null,
       input.dueAt ?? null,
       JSON.stringify(input.columns ?? freshColumns()),
+      JSON.stringify(normaliseTags(input.tags ?? [])),
+      input.eventId ?? null,
       next,
       input.source ?? "manual",
     ],
@@ -351,6 +419,13 @@ export interface UpdateProjectInput {
   startsAt?: string | null;
   dueAt?: string | null;
   columns?: ProjectColumn[];
+  /** Replaces the whole set — there is no add/remove patch, because the editor
+   *  hands back the list it is showing and a partial patch would need a second
+   *  read to know what it was merging into. Normalised on the way in
+   *  ({@link normaliseTags}). */
+  tags?: string[];
+  /** A `CalEvent.id`, or `null` to unpin the project from its event. */
+  eventId?: string | null;
   position?: number;
 }
 
@@ -374,6 +449,8 @@ export async function updateProject(id: number, patch: UpdateProjectInput): Prom
   if (patch.startsAt !== undefined) put("starts_at", patch.startsAt);
   if (patch.dueAt !== undefined) put("due_at", patch.dueAt);
   if (patch.columns !== undefined) put("columns", JSON.stringify(patch.columns));
+  if (patch.tags !== undefined) put("tags", JSON.stringify(normaliseTags(patch.tags)));
+  if (patch.eventId !== undefined) put("event_id", patch.eventId);
   if (patch.position !== undefined) put("position", patch.position);
   if (!sets.length) return;
   args.push(id);
@@ -390,6 +467,41 @@ export async function updateProject(id: number, patch: UpdateProjectInput): Prom
  *  is the destructive one. */
 export async function archiveProject(id: number): Promise<void> {
   await updateProject(id, { status: "archived" });
+}
+
+/** The way back. Named rather than left as `updateProject(id, { status })` at
+ *  each call site, so the pair reads as one reversible act and neither side
+ *  has to know that "active" is the spelling. */
+export async function unarchiveProject(id: number): Promise<void> {
+  await updateProject(id, { status: "active" });
+}
+
+/**
+ * Every tag in use, across every project, active and archived.
+ *
+ * Read in SQL rather than off the list a page happens to be holding: the
+ * composer suggests tags you have used *anywhere*, and a subject's tab or an
+ * index filtered to active projects would otherwise offer a shrinking
+ * vocabulary depending on which page you were standing on. Ordered by how
+ * often a tag is used, then alphabetically, so the suggestions open on the
+ * labels you actually reach for. Deduplication is case-insensitive, matching
+ * {@link normaliseTags}; the most-used spelling is the one offered.
+ */
+export async function allTags(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.select<{ tags: string | null }[]>(`SELECT tags FROM projects`);
+  const counts = new Map<string, { tag: string; n: number }>();
+  for (const row of rows) {
+    for (const tag of parseTags(row.tags)) {
+      const key = tag.toLowerCase();
+      const seen = counts.get(key);
+      if (seen) seen.n += 1;
+      else counts.set(key, { tag, n: 1 });
+    }
+  }
+  return [...counts.values()]
+    .sort((a, b) => b.n - a.n || a.tag.localeCompare(b.tag))
+    .map((t) => t.tag);
 }
 
 /** Deletes the project and, by the migration's cascade, every task under it.
