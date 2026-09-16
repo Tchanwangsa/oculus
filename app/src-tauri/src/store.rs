@@ -59,6 +59,63 @@ pub async fn open_pool() -> Result<SqlitePool, String> {
     pool(&path).await
 }
 
+/// Read one `settings` row from a **synchronous** caller, from any context.
+///
+/// Both seams need to know which backend is selected before they have an async
+/// frame to await in: the parse queue and the CLI are plain threads, and
+/// `parse_config` / `embed_config` are called from inside clients that are not
+/// async at all.
+///
+/// The obvious spelling for that — `tauri::async_runtime::block_on` — is a
+/// **trap**, and it cost a real bug. It is correct on a plain thread and on a
+/// `spawn_blocking` worker, and it *panics* on a runtime worker thread:
+/// "Cannot start a runtime from within a runtime". An `async` Tauri command
+/// runs on exactly such a thread, so `embed_settings` aborted mid-task, its
+/// promise never settled, and Settings → Library sat on its loading state
+/// forever — every field a dash, no error to show, because an aborted task
+/// rejects nothing. The indexing and search paths were fine the whole time,
+/// which is what made it look like a data problem instead of a crash.
+///
+/// So this never touches the caller's runtime. The read happens on a thread of
+/// its own with a current-thread runtime and the caller joins it: one `SELECT`
+/// a few times per run makes the spawn free, and **one code path** means the
+/// behaviour cannot depend on who is calling. Never reintroduce a `block_on`
+/// here, and never make its safety a fact about the call site.
+///
+/// `None` covers every uninteresting case — no database yet, no such row,
+/// a read that failed — because every caller's answer to all three is the same
+/// default.
+pub fn setting_blocking(key: &str) -> Option<String> {
+    let database = crate::paths::db_path(&crate::paths::data_dir());
+    if !database.is_file() {
+        return None;
+    }
+    let key = key.to_string();
+
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
+        runtime.block_on(async move {
+            use sqlx::Connection;
+            let options = SqliteConnectOptions::new()
+                .filename(&database)
+                .create_if_missing(false)
+                .busy_timeout(Duration::from_secs(15));
+            let mut connection = sqlx::SqliteConnection::connect_with(&options).await.ok()?;
+            let row = sqlx::query("SELECT value FROM settings WHERE key = ?1")
+                .bind(&key)
+                .fetch_optional(&mut connection)
+                .await
+                .ok()
+                .flatten();
+            connection.close().await.ok();
+            row?.try_get::<String, _>("value").ok()
+        })
+    })
+    .join()
+    .ok()
+    .flatten()
+}
+
 pub async fn open(data_dir: &Path) -> Result<SqlitePool, String> {
     let path = crate::paths::db_path(data_dir);
     if !path.exists() {

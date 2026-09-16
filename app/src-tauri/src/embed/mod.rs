@@ -755,39 +755,38 @@ pub fn backend() -> Result<Box<dyn Embedder>, EmbedError> {
     }
 }
 
-/// One row, one connection, no pool — the same reasoning as
-/// `parse::stored_settings`: this reader needs a single `SELECT` a few times
-/// per run, and the pool helpers live in `store.rs`, which is async-first.
+/// The `embed` row, decoded — `parse::stored_settings` one field over, through
+/// the same context-safe reader.
 fn stored_settings() -> Option<StoredEmbedSettings> {
-    use sqlx::sqlite::SqliteConnectOptions;
-    use sqlx::{Connection, Row, SqliteConnection};
-
-    let database = crate::paths::db_path(&crate::paths::data_dir());
-    if !database.is_file() {
-        return None;
-    }
-
-    // Callers are synchronous (the index queue, the CLI), exactly as on the
-    // parse side.
-    tauri::async_runtime::block_on(async move {
-        let options = SqliteConnectOptions::new()
-            .filename(&database)
-            .create_if_missing(false)
-            .busy_timeout(std::time::Duration::from_secs(15));
-        let mut connection = SqliteConnection::connect_with(&options).await.ok()?;
-        let row = sqlx::query("SELECT value FROM settings WHERE key = 'embed'")
-            .fetch_optional(&mut connection)
-            .await
-            .ok()
-            .flatten();
-        connection.close().await.ok();
-        serde_json::from_str(&row?.get::<String, _>("value")).ok()
-    })
+    // `store::setting_blocking` rather than a `block_on` here: this is reached
+    // from `async` Tauri commands as well as from plain threads, and blocking
+    // the caller's runtime panics on the former. See its doc comment — that
+    // panic is what left this settings page permanently blank.
+    serde_json::from_str(&crate::store::setting_blocking("embed")?).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bug this reader exists to prevent, pinned in the context that hit
+    /// it: `embed_settings` is an `async` Tauri command, so it runs on a
+    /// runtime worker thread, and a `block_on` there panics the task without
+    /// rejecting the promise — Settings → Library rendered dashes forever.
+    ///
+    /// Reading a row is not what is under test; surviving the call is. The
+    /// assertion is deliberately weak (a config comes back at all) because
+    /// this must pass on a machine with no database.
+    #[test]
+    fn the_config_is_readable_from_inside_an_async_runtime() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let base = runtime.block_on(async { embed_config().base_url });
+        assert!(!base.is_empty(), "a backend always resolves to some API root");
+    }
 
     /// A scratch library folder. The record's temp+rename must be
     /// same-filesystem, so the tests use a real directory rather than faking

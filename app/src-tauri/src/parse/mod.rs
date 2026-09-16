@@ -711,41 +711,37 @@ pub fn backend() -> Result<Box<dyn Parser>, ParseError> {
     }
 }
 
-/// One row, one connection, no pool.
-///
-/// `store.rs` owns the pool helpers, and a pool is more than this reader
-/// needs: a single `SELECT` a few times per run, on a connection it opens and
-/// closes. Reach for `store::pool` here only if that stops being true.
+/// The `parse` row, decoded. One `SELECT`, through the one reader that is safe
+/// to call from a synchronous function no matter who is above it.
 fn stored_settings() -> Option<StoredParseSettings> {
-    use sqlx::sqlite::SqliteConnectOptions;
-    use sqlx::{Connection, Row, SqliteConnection};
-
-    let database = crate::paths::db_path(&crate::paths::data_dir());
-    if !database.is_file() {
-        return None;
-    }
-
-    // Callers are synchronous (the parse queue, the CLI), so the one async
-    // call this needs is driven on Tauri's runtime rather than infecting them.
-    tauri::async_runtime::block_on(async move {
-        let options = SqliteConnectOptions::new()
-            .filename(&database)
-            .create_if_missing(false)
-            .busy_timeout(std::time::Duration::from_secs(15));
-        let mut connection = SqliteConnection::connect_with(&options).await.ok()?;
-        let row = sqlx::query("SELECT value FROM settings WHERE key = 'parse'")
-            .fetch_optional(&mut connection)
-            .await
-            .ok()
-            .flatten();
-        connection.close().await.ok();
-        serde_json::from_str(&row?.get::<String, _>("value")).ok()
-    })
+    // Shared with the embed seam, and deliberately not a `block_on`: see
+    // `store::setting_blocking`. Nothing async reads this row today, but the
+    // safety of a helper must not be a fact about its callers.
+    serde_json::from_str(&crate::store::setting_blocking("parse")?).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bug this reader exists to prevent, pinned in the context that hit
+    /// it: `embed_settings` is an `async` Tauri command, so it runs on a
+    /// runtime worker thread, and a `block_on` there panics the task without
+    /// rejecting the promise — Settings → Library rendered dashes forever.
+    ///
+    /// Reading a row is not what is under test; surviving the call is. The
+    /// assertion is deliberately weak (a config comes back at all) because
+    /// this must pass on a machine with no database.
+    #[test]
+    fn the_config_is_readable_from_inside_an_async_runtime() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let base = runtime.block_on(async { parse_config().base_url });
+        assert!(!base.is_empty(), "a backend always resolves to some API root");
+    }
 
     /// A scratch library folder. The staging rename must be same-filesystem,
     /// so the tests use a real directory rather than faking paths.
