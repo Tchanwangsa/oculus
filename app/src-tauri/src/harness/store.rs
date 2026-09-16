@@ -100,6 +100,11 @@ pub struct ThreadRow {
 pub struct LectureRef {
     pub id: String,
     pub title: String,
+    /// The day it was recorded, `YYYY-MM-DD`. A lecture's own title is the
+    /// timetable's (`MULT20015_2026_SM2 TU L105`), so the date is the only
+    /// thing on the row that says *which* lecture this is — and which week's
+    /// slide deck goes with it.
+    pub date: String,
     /// Whether `transcript.vtt` is actually on disk. The column holds the
     /// path it was written to, which a cleared transcript folder
     /// (`echo360_clear_transcripts`) leaves behind — and the instructions
@@ -110,7 +115,8 @@ pub struct LectureRef {
 pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
     let r = sqlx::query(
         "SELECT t.id, t.provider, t.provider_session_id, t.model, s.code AS subject_code,
-                l.id AS lecture_id, l.title AS lecture_title, l.transcript_path
+                l.id AS lecture_id, l.title AS lecture_title, l.date AS lecture_date,
+                l.transcript_path
          FROM harness_threads t
          LEFT JOIN subjects s ON s.id = t.subject_id
          LEFT JOIN lectures l ON l.id = t.lecture_id
@@ -125,6 +131,7 @@ pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
     let lecture = r.get::<Option<String>, _>("lecture_id").map(|lid| LectureRef {
         id: lid,
         title: r.get("lecture_title"),
+        date: r.get::<String, _>("lecture_date").chars().take(10).collect(),
         has_transcript: r
             .get::<Option<String>, _>("transcript_path")
             .is_some_and(|p| std::path::Path::new(&p).exists()),

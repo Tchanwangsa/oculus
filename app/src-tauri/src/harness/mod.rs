@@ -108,22 +108,49 @@ pub fn instructions(data_dir: &Path, scope: Option<&str>, lecture: Option<&Lectu
 /// call the student waits through; the transcript is twenty thousand words
 /// and the agent should open the part it needs, which is the same call
 /// `chapters::prompt` makes about the same two files.
+///
+/// The rest of it is there because of what a real thread spent its turn
+/// doing (`agents/threads/26.ndjson`): four reads scrolling around a VTT
+/// whose every other line is a `NOTE CONF` the agent had no way to know was
+/// noise, two `oculus files` calls to discover which PDF the slide deck was,
+/// and two refusals from guessing that `grep` and `read` take a subject
+/// positionally the way `files` does. None of that is the model being slow —
+/// it is this brief naming a course folder and leaving the rest to be
+/// rediscovered every time. So: the recording's date, since the title is the
+/// timetable's and says nothing about which week; the shape of the VTT; and
+/// the two commands written out with their real flags.
 fn lecture_section(lec: &LectureBrief, scope: Option<&str>) -> String {
     let dir = format!("../lectures/{}", lec.id);
     let mut s = format!(
         "\n## The lecture being watched\n\n\
-         The student is watching **{}**. Its recording folder is `{dir}/`.\n\n",
-        lec.title
+         The student is watching **{}**, recorded **{}**. Its recording folder is \
+         `{dir}/`. Lecture titles here come from the timetable, so the date is what \
+         says which one this is.\n\n",
+        lec.title, lec.date
     );
     if lec.has_transcript {
         s.push_str(&format!(
-            "- `{dir}/transcript.vtt` — the whole transcript, WebVTT, with timestamps.\n"
+            "- `{dir}/transcript.vtt` — the whole transcript, WebVTT, with timestamps. \
+             It is long (an hour of speech) and every cue is followed by a `NOTE CONF` \
+             line of recogniser confidence numbers, which is noise — skip those. Do not \
+             read it from the top: find the span you want by its timestamp \
+             (`grep -n \"00:14:\" {dir}/transcript.vtt` gives you the line number, then \
+             read from there).\n"
         ));
     }
     if let Some(code) = scope {
         s.push_str(&format!(
             "- `../courses/{code}/` — the course folder: the slide deck for this lecture, \
              and everything else the subject has.\n"
+        ));
+        s.push_str(&format!(
+            "\nThe deck is not linked to the recording, so finding it is a step: \
+             `oculus files {code} --type pdf` lists them, and the date above is what \
+             picks the week out of `Lecture_1`, `Lecture_2`… Then `oculus grep \"<a phrase \
+             off the slide>\" -s {code}` says which deck and page it is on, and \
+             `oculus read <FILE> --pages N` prints that page. Note the flags: `oculus \
+             files` takes the subject code as a bare argument, every other command takes \
+             it as `-s`, and a file as its only argument.\n"
         ));
     }
     if !lec.chapters.is_empty() {
@@ -141,7 +168,10 @@ fn lecture_section(lec: &LectureBrief, scope: Option<&str>) -> String {
         "\nThe student is watching this lecture, and a message may carry the moment it was \
          sent at — a timestamp, the last minute of transcript, and a frame of the video — \
          appended under a heading after their own words. When it is there, \"this\", \"that \
-         slide\" and \"what he just said\" mean that moment.\n",
+         slide\" and \"what he just said\" mean that moment. It is usually enough on its \
+         own: read the frame and the transcript it carries before going looking for more, \
+         and go to the deck when the question needs the exact notation rather than as a \
+         matter of course.\n",
     );
     s
 }
@@ -217,6 +247,10 @@ pub struct SendOptions {
 pub struct LectureBrief {
     pub id: String,
     pub title: String,
+    /// `YYYY-MM-DD`, from the row. See [`store::LectureRef::date`]: the title
+    /// is the timetable's, so the date is what tells the agent which week —
+    /// and therefore which slide deck — it is being asked about.
+    pub date: String,
     pub has_transcript: bool,
     /// Inlined rather than left for the agent to fetch: a chapter list is a
     /// dozen short lines, and a turn spent reading it back is a turn the
@@ -1047,6 +1081,7 @@ pub mod app {
         Some(LectureBrief {
             id: l.id.clone(),
             title: l.title.clone(),
+            date: l.date.clone(),
             has_transcript: l.has_transcript,
             chapters: crate::store::chapters(pool, &l.id).await.unwrap_or_default(),
         })
@@ -1534,6 +1569,7 @@ mod tests {
         let lecture = LectureBrief {
             id: "abc-123".into(),
             title: "Lecture 14".into(),
+            date: "2026-09-08".into(),
             has_transcript: true,
             chapters: vec![crate::chapters::Chapter {
                 start_seconds: 1382,
@@ -1548,6 +1584,13 @@ mod tests {
         assert!(full.contains("`../lectures/abc-123/transcript.vtt`"));
         assert!(full.contains("00:23:02 — Resolution"), "chapters are inline");
         assert!(full.contains("the moment it was sent at"));
+        // The date is the only thing here that says which week's deck goes
+        // with the recording — the title is the timetable's.
+        assert!(full.contains("2026-09-08"), "the recording's date is named");
+        assert!(
+            full.contains("oculus files COMP30026_2026_SM2 --type pdf"),
+            "the deck hunt is written out with its real flags"
+        );
 
         let no_transcript = instructions(
             &root,
