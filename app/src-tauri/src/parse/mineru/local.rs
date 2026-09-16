@@ -75,10 +75,15 @@ const COPY_CHUNK: usize = 1024 * 1024;
 /// design) at a process loading models into the same RAM the app is using.
 ///
 /// So the queue sits on this side of the socket instead of in the server's
-/// accept backlog. One permit, because MinerU's own server works a document at
-/// a time regardless: a second request in flight buys no throughput and pays
-/// for the memory twice. Waiters are not FIFO — `Mutex` promises no such thing
-/// — which is fine for a queue whose order nobody can observe.
+/// accept backlog. One permit, and the number is measured rather than chosen:
+/// `mineru-api` logs `Request concurrency limited to 1` at boot and reports
+/// `max_concurrent_requests: 1` from `/health`, so a second request in flight
+/// would not be served any sooner — it would sit in that server's queue with a
+/// socket of ours parked on it for minutes, against no read timeout. What the
+/// permit prevents is a hundred of those, not an OOM: the sidecar could be
+/// made to run a hundred parses at once, and this server cannot. Waiters are
+/// not FIFO — `Mutex` promises no such thing — which is fine for a queue whose
+/// order nobody can observe.
 ///
 /// Poisoning is stepped over deliberately. A panic on some other parse thread
 /// must not be what makes this engine stop working for the rest of the session.
@@ -860,5 +865,138 @@ mod tests {
         served.join().ok();
 
         assert_eq!(peak.load(Ordering::SeqCst), 1, "both parses were in flight at once");
+    }
+
+    // ── The real thing ───────────────────────────────────────────────────────
+
+    /// A PDF that actually says something, for a server that actually reads it.
+    /// One text object per line, so each `Td` is absolute rather than stacking.
+    fn write_text_pdf(path: &Path, lines: &[&str]) {
+        use lopdf::content::{Content, Operation};
+        use lopdf::{dictionary, Document, Object, Stream};
+
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let font = document.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let resources = document.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font },
+        });
+
+        let mut operations = Vec::new();
+        for (n, line) in lines.iter().enumerate() {
+            operations.push(Operation::new("BT", vec![]));
+            operations.push(Operation::new("Tf", vec!["F1".into(), 28.into()]));
+            operations.push(Operation::new(
+                "Td",
+                vec![72.into(), (700 - 60 * n as i64).into()],
+            ));
+            operations.push(Operation::new("Tj", vec![Object::string_literal(*line)]));
+            operations.push(Operation::new("ET", vec![]));
+        }
+        let content = Content { operations };
+        let stream = document.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page = document.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => stream,
+            "Resources" => resources,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page.into()], "Count" => 1,
+            }),
+        );
+        let catalog = document.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        document.trailer.set("Root", catalog);
+        document.save(path).unwrap();
+    }
+
+    /// The only test here that speaks to a real MinerU, and the only one that
+    /// can tell you the flags above are spelled the way *that* server reads
+    /// them. Everything else in this module proves this client against a
+    /// fixture of our own assumptions, which is exactly the thing a live run
+    /// is for checking.
+    ///
+    /// Ignored, because it needs a server and takes as long as a parse takes:
+    ///
+    /// ```text
+    /// uv tool install -U "mineru[core]>=3.4,<4"
+    /// mineru-api --host 127.0.0.1 --port 8000
+    /// cargo test --lib parse::mineru::local::tests::a_real_mineru -- --ignored --nocapture
+    /// ```
+    ///
+    /// `OCULUS_MINERU_URL` moves the address; `OCULUS_MINERU_PDF` swaps in a
+    /// real document, which is worth doing — a generated page of Helvetica
+    /// proves the round trip and nothing at all about how a lecture deck
+    /// renders.
+    #[test]
+    #[ignore = "needs a MinerU 3.x server on 127.0.0.1:8000 — see the doc comment"]
+    fn a_real_mineru_answers_the_way_this_client_expects() {
+        let base =
+            std::env::var("OCULUS_MINERU_URL")
+                .unwrap_or_else(|_| crate::parse::LOCAL_BASE_URL.to_string());
+        assert_eq!(probe(&base), LocalHealth::Ready, "no healthy MinerU at {base}");
+
+        let dir = Dir::new("live");
+        let pdf = match std::env::var("OCULUS_MINERU_PDF") {
+            Ok(path) => PathBuf::from(path),
+            Err(_) => {
+                let path = dir.root.join("Live.pdf");
+                write_text_pdf(
+                    &path,
+                    &["Chapter One", "The quick brown fox", "jumps over the lazy dog."],
+                );
+                path
+            }
+        };
+
+        let images = dir.root.join("Live_images");
+        let output = MinerULocal::new(&base)
+            .parse(&pdf, &images, "Live_images", &|progress| {
+                eprintln!("  {}/{} pages", progress.pages_done, progress.total_pages);
+            })
+            .expect("the parse failed");
+
+        assert_eq!(output.backend.as_deref(), Some(BACKEND));
+        assert_eq!(output.parser_version, PARSER_VERSION);
+        assert_eq!(output.pages.len(), output.page_count as usize);
+        assert!(output.page_count > 0, "no pages");
+        // The contract is one record per page whatever the server said; the
+        // point of a live run is that at least one of them carries text, which
+        // is what proves `return_content_list` and `backend=pipeline` landed.
+        let written = output.pages.iter().filter(|p| !p.markdown.trim().is_empty()).count();
+        assert!(written > 0, "every page came back empty — check the form fields");
+        eprintln!(
+            "{} pages, {written} with markdown, {} images",
+            output.page_count, output.image_count
+        );
+
+        // The other half of a live run is reading the result. Quality is not
+        // assertable — whether a formula survived is a judgement — so the
+        // markdown is handed out rather than checked, and the images with it,
+        // since `Dir` deletes the scratch on the way out.
+        if let Ok(into) = std::env::var("OCULUS_MINERU_DUMP") {
+            let into = PathBuf::from(into);
+            fs::create_dir_all(&into).unwrap();
+            for page in &output.pages {
+                fs::write(
+                    into.join(format!("page-{:03}.md", page.page_no)),
+                    &page.markdown,
+                )
+                .unwrap();
+            }
+            if images.is_dir() {
+                let copied = into.join("Live_images");
+                fs::create_dir_all(&copied).unwrap();
+                for entry in fs::read_dir(&images).unwrap().flatten() {
+                    fs::copy(entry.path(), copied.join(entry.file_name())).unwrap();
+                }
+            }
+            eprintln!("dumped to {}", into.display());
+        }
     }
 }

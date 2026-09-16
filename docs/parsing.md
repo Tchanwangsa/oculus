@@ -142,6 +142,34 @@ not settings**; changing either of the first two is a re-parse of everything.
   that one number in a firewall rule beats two — which does not survive contact
   with a server this project does not build. A default nobody's server answers
   on is a setting every user must change before the engine works at all.
+- **Measured against MinerU 3.4.5 on this Mac**, not inferred. The ignored test
+  `a_real_mineru_answers_the_way_this_client_expects` in `mineru/local.rs` is
+  the only thing in this repo that can tell you the form fields are spelled the
+  way *that* server reads them; everything else proves the client against a
+  fixture of our own assumptions.
+
+  | Document | Pages, all with markdown | Wall clock | Images |
+  | --- | --- | --- | --- |
+  | 36-page slide deck | 36 | ~53 s | 86 |
+  | 18-page paper | 18 | ~54 s | 4 |
+
+  The server settles around **4.5 GB resident**. Headings survive as headings
+  and formulas come back delimited `$…$` — which is what `normalizeMath` on the
+  frontend expects — and those are what `return_content_list=true` and
+  `formula_enable=true` buy. Run it yourself with:
+
+  ```bash
+  OCULUS_MINERU_PDF=/path/to/deck.pdf OCULUS_MINERU_DUMP=/tmp/out \
+    cargo test --lib parse::mineru::local::tests::a_real_mineru -- --ignored --nocapture
+  ```
+
+  **Start `mineru-api` somewhere other than this repo.** It writes every parse
+  it serves into an `output/` folder beside its own working directory — a task
+  UUID per request, holding the markdown, both content lists and every
+  extracted image — and it never cleans up. Started from the repo root, that is
+  11 MB of untracked JPEGs after two documents, sitting where a careless `git
+  add -A` will take them. Oculus reads the ZIP from the response and never
+  looks at that folder.
 
 ## The version pin
 
@@ -264,10 +292,12 @@ the OOM. Each engine now answers for its own share of that. The cloud client
 parks its threads on the batcher's condvar until their window closes — no
 socket, no request in flight. The local client holds a single permit
 (`PARSE_GATE` in `mineru/local.rs`), so only one multipart POST is ever open
-against the user's server: that server is *this machine*, it works a document
-at a time regardless, and a request left open on it has no read timeout above
-it, so an ungated sync would be that same OOM again — same machine, same
-memory, only in somebody else's process. A gate back in `sync.rs` would serve neither
+against the user's server. That number is measured, not chosen: `mineru-api`
+reports `max_concurrent_requests: 1`, so a second request buys nothing — it
+queues inside that server while a socket of ours sits on it for minutes, with
+no read timeout above it. The permit is not what averts the sidecar's OOM,
+then; MinerU's own limit does that. It averts a hundred parked sockets waiting
+on a queue of one. A gate back in `sync.rs` would serve neither
 engine: it would only keep cloud files out of the window they are meant to
 share.
 
