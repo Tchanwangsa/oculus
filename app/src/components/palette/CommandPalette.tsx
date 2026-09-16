@@ -347,7 +347,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
 
       <div className="flex items-center gap-3 border-t border-border-subtle px-4 py-2 text-[11px] text-muted-foreground">
         <Hint keys="↵" label="Open" />
-        <Hint keys="⌘↵" label="Open in new tab" />
+        <Hint keys="⌘ ↵" label="Open in new tab" />
         <Hint keys="esc" label="Close" />
       </div>
     </div>
