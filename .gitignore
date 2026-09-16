@@ -22,3 +22,10 @@ data/
 
 # ffmpeg sidecar (fetched by app/scripts/fetch-ffmpeg.mjs)
 app/src-tauri/binaries/
+
+# A local MinerU's spill. `mineru-api` writes one folder per request — markdown,
+# both content lists, every extracted image — beside whatever directory it was
+# started in, and never cleans up. Unanchored on purpose: the trap is that it
+# lands wherever you happened to be. Oculus reads the ZIP off the response and
+# never looks at this. See docs/parsing.md.
+output/

@@ -167,8 +167,9 @@ not settings**; changing either of the first two is a re-parse of everything.
   it serves into an `output/` folder beside its own working directory — a task
   UUID per request, holding the markdown, both content lists and every
   extracted image — and it never cleans up. Started from the repo root, that is
-  11 MB of untracked JPEGs after two documents, sitting where a careless `git
-  add -A` will take them. Oculus reads the ZIP from the response and never
+  11 MB of JPEGs after two documents. `output/` is gitignored unanchored so
+  they cannot be committed from wherever it lands, but nothing deletes them:
+  that is yours to sweep. Oculus reads the ZIP from the response and never
   looks at that folder.
 
 ## The version pin
