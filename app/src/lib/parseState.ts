@@ -63,7 +63,7 @@ export const PARSE_SWEEP_NOTE = "Oculus retries outstanding files in the backgro
  * preferred but optional, so the backend's own sentence is the fallback: both
  * credential messages name the token, and no other one does.
  */
-function tokenish(kind: string | undefined, message: string): boolean {
+export function tokenish(kind: string | undefined, message: string): boolean {
   if (kind) return /credential|token/i.test(kind);
   return /token/i.test(message);
 }

@@ -36,8 +36,10 @@ const sinceArg = sinceIdx === -1 ? undefined : args[sinceIdx + 1];
 const git = (cmd) =>
   execSync(`git ${cmd}`, { cwd: REPO, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 
-// Source trees a doc page is expected to describe.
-const WATCHED = /^(app|sidecar)\//;
+// Source trees a doc page is expected to describe. `sidecar/` was dropped when
+// the Python process left the app: nothing there ships any more, so a change in
+// it is not a doc obligation.
+const WATCHED = /^app\//;
 
 // All citations in docs/ are written repo-relative. A backticked span is
 // treated as a path claim only if it names a real source tree and contains

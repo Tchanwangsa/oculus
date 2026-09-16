@@ -656,9 +656,10 @@ pub const CLOUD_BASE_URL: &str = "https://mineru.net/api/v4";
 pub const LOCAL_BASE_URL: &str = "http://127.0.0.1:9547";
 
 /// The `parse` row, as far as this seam cares about it. Every field is
-/// optional: the blob is shared with settings this module has no opinion on
-/// (`memoryCapMb`, the legacy `backend`), and those must survive being read
-/// here.
+/// optional: the blob still carries two dead keys from the Python sidecar
+/// (`memoryCapMb` and the legacy `backend`), left there deliberately rather
+/// than migrated out, and they must survive being read here. See the note in
+/// `app/src/lib/db.ts`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct StoredParseSettings {
@@ -712,12 +713,9 @@ pub fn backend() -> Result<Box<dyn Parser>, ParseError> {
 
 /// One row, one connection, no pool.
 ///
-/// `retrieval.rs` owns the pool helpers today and is deleted with the
-/// embedding layer, so leaning on them would only mean unpicking it again.
-/// This reader needs a single `SELECT` a few times per run; it opens its own
-/// connection and closes it. If a later stage finds it needs a shared pool,
-/// **this is where the pool helper should land** — it is the module that
-/// outlives both `sidecar.rs` and `retrieval.rs`.
+/// `store.rs` owns the pool helpers, and a pool is more than this reader
+/// needs: a single `SELECT` a few times per run, on a connection it opens and
+/// closes. Reach for `store::pool` here only if that stops being true.
 fn stored_settings() -> Option<StoredParseSettings> {
     use sqlx::sqlite::SqliteConnectOptions;
     use sqlx::{Connection, Row, SqliteConnection};
@@ -727,8 +725,8 @@ fn stored_settings() -> Option<StoredParseSettings> {
         return None;
     }
 
-    // Callers are synchronous (the parse queue, the CLI), and `sidecar.rs`
-    // already reaches the same row this way.
+    // Callers are synchronous (the parse queue, the CLI), so the one async
+    // call this needs is driven on Tauri's runtime rather than infecting them.
     tauri::async_runtime::block_on(async move {
         let options = SqliteConnectOptions::new()
             .filename(&database)

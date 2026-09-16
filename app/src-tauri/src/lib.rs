@@ -23,7 +23,6 @@ pub mod retrieval;
 mod scrape;
 pub mod store;
 pub mod sync;
-pub mod sidecar;
 mod storage;
 mod subjects;
 pub mod embed;
@@ -34,7 +33,6 @@ use tauri::{Emitter, Manager};
 
 use auth::{auth_flag_path, saved_session_probe, AuthProbe, AuthState};
 use lectures::Echo360Cache;
-use sidecar::SidecarProcess;
 use scrape::ScrapeCancel;
 use subjects::SubjectsState;
 
@@ -47,7 +45,6 @@ pub fn run() {
         .manage(AuthState(Arc::new(Mutex::new(false))))
         .manage(SubjectsState(Arc::new(Mutex::new(vec![]))))
         .manage(Echo360Cache(Arc::new(Mutex::new(std::collections::HashMap::new()))))
-        .manage(SidecarProcess(Arc::new(Mutex::new(None))))
         .manage(ScrapeCancel::default())
         .manage(browser::BrowserState::default())
         .setup(|app| {
@@ -62,12 +59,6 @@ pub fn run() {
             // WebKit won't play <video> from the asset protocol (see
             // media.rs); lecture playback streams from here instead.
             app.manage(media::start_media_server(paths::data_dir()));
-
-            // ── Python parsing sidecar ─────────────────────────────────
-            sidecar::spawn(app.handle());
-            // Ctrl-C and the SIGTERM `tauri dev` sends on rebuild bypass
-            // Tauri's Exit event, so cleanup needs its own path.
-            sidecar::install_exit_handlers(app.handle());
 
             // ── Cleanup orphaned partial lecture downloads ──────────────
             lectures::cleanup_partial_downloads(app.handle());
@@ -1135,8 +1126,6 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             chapters::app::lecture_find_chapters,
             chapters::app::lecture_grab_frame,
             recap::app::lecture_write_recap,
-            sidecar::sidecar_health,
-            sidecar::sidecar_set_limits,
             storage::storage_report,
             browser::browser_open_url,
             browser::browser_state,
@@ -1152,9 +1141,8 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // Don't let uvicorn outlive the window.
+            // Don't let a CLI agent outlive the window.
             if matches!(event, tauri::RunEvent::Exit) {
-                sidecar::shutdown(app_handle);
                 harness::app::shutdown(app_handle);
             }
         });

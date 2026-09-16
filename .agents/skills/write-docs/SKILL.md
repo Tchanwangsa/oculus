@@ -1,6 +1,6 @@
 ---
 name: write-docs
-description: Update the Oculus docs under docs/ after changing code. Use whenever you add, move, rename, or delete a feature, module, page, store, endpoint, or workflow in app/ or sidecar/, when a doc contradicts the code, or when asked to document how something works.
+description: Update the Oculus docs under docs/ after changing code. Use whenever you add, move, rename, or delete a feature, module, page, store, endpoint, or workflow in app/, when a doc contradicts the code, or when asked to document how something works.
 ---
 
 # Keep the docs true
@@ -18,7 +18,7 @@ new engineer's map, plus the measured facts that justify non-obvious
 decisions.
 
 Write:
-- Where a feature's UI, Rust commands, sidecar code, and schema live
+- Where a feature's UI, Rust commands, and schema live
 - How the processes connect, and which module owns which responsibility
 - Non-obvious constraints, gotchas, and why a shape is the way it is —
   especially anything *measured* (benchmarks, timings) that a refactor could

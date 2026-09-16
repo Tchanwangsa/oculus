@@ -55,11 +55,9 @@ the instructions gets read without opening the window.
 
 ## How it connects
 
-- `--memory-cap <MB>` is global, so `oculus --memory-cap 8192 index` and
-  `oculus index --memory-cap 8192` are equivalent. Minimum 5120. It calls
-  the running sidecar's `/limits` before the command, requires that sidecar
-  to be available, and is not saved to the app's preferences. The budget
-  covers the whole sidecar tree; at 5 GB local quality may not fit.
+- **`--json` is the only global flag.** `--memory-cap` went with the Python
+  sidecar it bounded: there is no local process to cap, and what governs a
+  parse now is MinerU's allowance rather than this machine's memory.
 - The CLI reads the same session cookie and writes the same `oculus.db` the
   app uses — a CLI sync shows up in the app and vice versa. But it **never
   creates the database** (schema stays with the app's migrations), so a
@@ -81,7 +79,7 @@ the instructions gets read without opening the window.
 - `run -s` scrapes, then parses and embeds each written PDF **one file at a
   time**. Both halves are idempotent; re-running is cheap.
 - **A parse finishes before the command moves on, and that is minutes per
-  file.** It used to return as soon as the sidecar's *fast* pass had markdown
+  file.** It used to return as soon as the old *fast* pass had markdown
   and leave the real parse running in another process, so the good text only
   appeared on some later `oculus index`. Parsing is in this process now
   (`app/src-tauri/src/parse/mod.rs`), so the wait is the whole cloud round
@@ -98,7 +96,7 @@ the instructions gets read without opening the window.
   is no migration between embedding spaces and there is not meant to be:
   `embed::is_embedded` compares model, dim and page coverage, so the files the
   local Qwen embedder wrote read as unfinished and rebuild on the next run.
-- `oculus status` reports the **parser**, not a sidecar process: the backend
+- `oculus status` reports the **parser**, not a local process: the backend
   name, whether it is usable, and its `parser_version` — the handshake that
   decides whether artifacts written elsewhere can be read as this app's. It
   asks the backend about itself locally and never calls MinerU, so it is
@@ -152,8 +150,8 @@ the instructions gets read without opening the window.
   document on stdout, and on failure `{"error": "..."}` on **stderr** with
   exit 1. `status --json` carries the index stats too, so a caller can find
   out whether `search` will work before trying it.
-- These commands never scrape and never start the sidecar — nothing in the CLI
-  talks to it any more. A read command on a machine where the app has never run
+- These commands never scrape and start nothing. A read command on a machine
+  where the app has never run
   reports what is missing and stops. `search` is the one exception to "reads
   cost nothing": it embeds one query, which spends a few tokens of the Voyage
   allowance.

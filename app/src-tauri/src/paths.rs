@@ -196,9 +196,10 @@ pub fn write_course_bytes(
 }
 
 /// Delete the parse/embed artifacts a PDF-backed file leaves beside its PDF
-/// (`{stem}.md`, `{stem}.pages.json`, `{stem}.emb.json`). The sidecar's skip
-/// checks are pure existence checks — without this, a re-scrape that finds
-/// changed bytes would keep serving the old parse and embeddings forever.
+/// (`{stem}.md`, `{stem}.pages.json`, `{stem}.emb.json`). Both skip checks —
+/// `parse_mode` and `embed::is_embedded` — read those records rather than the
+/// PDF's bytes, so without this a re-scrape that finds changed bytes would
+/// keep serving the old parse and embeddings forever.
 /// `library_rel` is the library file, data-dir-relative (`courses/…`).
 pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
     let Some(pdf_rel) = doc_pdf_rel(library_rel) else { return };

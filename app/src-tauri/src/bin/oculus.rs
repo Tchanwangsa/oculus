@@ -25,9 +25,6 @@ use tokio::runtime::Runtime;
     about = "Sync Canvas subjects and lectures into your local Oculus library"
 )]
 struct Cli {
-    /// Whole sidecar process-tree memory cap in MB (minimum 5120)
-    #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(5120..))]
-    memory_cap: Option<u64>,
     /// Print machine-readable JSON instead of formatted text
     ///
     /// Honoured by every command that prints: status, list, search, grep,
@@ -42,19 +39,6 @@ struct Cli {
 #[cfg(test)]
 mod cli_tests {
     use super::*;
-
-    #[test]
-    fn memory_cap_is_global_and_has_a_floor() {
-        for arguments in [
-            vec!["oculus", "--memory-cap", "8192", "index"],
-            vec!["oculus", "index", "--memory-cap", "5120"],
-        ] {
-            let cli = Cli::try_parse_from(arguments).expect("global memory cap");
-            assert!(cli.memory_cap.unwrap() >= 5120);
-            assert!(matches!(cli.command, Some(Command::Index(_))));
-        }
-        assert!(Cli::try_parse_from(["oculus", "--memory-cap", "4096"]).is_err());
-    }
 
     /// The reference is only trustworthy if it covers everything, so a new
     /// subcommand that nobody remembers to document still fails this.
@@ -78,11 +62,13 @@ mod cli_tests {
         assert!(!markdown.contains('\u{1b}'), "no ANSI escapes in a file");
     }
 
-    /// Global options are worth one paragraph, not fifteen.
+    /// Global options are worth one paragraph, not fifteen. `--json` is the
+    /// only one left now that `--memory-cap` has gone with the sidecar, so it
+    /// carries the rule on its own: a global flag repeated under every
+    /// subcommand would fail this.
     #[test]
     fn generated_docs_list_global_options_once() {
         let markdown = render_cli_docs();
-        assert_eq!(markdown.matches("--memory-cap <MEMORY_CAP>").count(), 1);
         assert_eq!(markdown.matches("      --json").count(), 1);
     }
 
@@ -118,7 +104,7 @@ mod cli_tests {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Session, library and sidecar status
+    /// Session, library and parse status
     Status,
     /// Sign in to Canvas, or sign out
     Auth {
@@ -258,7 +244,7 @@ struct RunArgs {
     /// Include subjects from past terms, not just the current one
     #[arg(long)]
     all: bool,
-    /// Skip the sidecar entirely: no PDF parsing and no embedding
+    /// Skip PDF processing entirely: no parsing and no embedding
     #[arg(long)]
     no_parse: bool,
     /// Parse PDFs but do not embed them into the retrieval index
@@ -286,13 +272,15 @@ struct RunArgs {
 // has never seen this binary, so it says what each command needs and what it
 // costs, not just what it does.
 
-/// Search the library by meaning (needs the sidecar).
+/// Search the library by meaning (needs network and an API key).
 ///
 /// The query is embedded by the same vision model that embedded every page
 /// image, so this finds a slide about Lagrange multipliers when you ask for
-/// "constrained optimisation". It needs the sidecar running (open the Oculus
-/// app); when it is not, this fails loudly and points at `oculus grep`, which
-/// searches the same text with no model.
+/// "constrained optimisation". Embedding happens in the cloud, so this needs
+/// a network connection and the Voyage key from Settings → Library; without
+/// either, and over an index that is empty or built by a retired model, it
+/// fails loudly and points at `oculus grep`, which searches the same text
+/// with no model at all.
 ///
 /// Only PDF and Office pages are ranked here — Canvas pages, announcements
 /// and Ed threads are markdown on disk and are covered by `oculus grep`.
@@ -312,16 +300,16 @@ struct SearchArgs {
     full: bool,
 }
 
-/// Search the library by pattern (no sidecar needed).
+/// Search the library by pattern (offline, no model).
 ///
 /// Covers both halves of the library: the markdown on disk (Canvas pages,
 /// announcements, assignments, Ed threads) and the page text extracted from
 /// PDFs, which lives only in the database — ripgrep over the library
 /// directory cannot see it, which is why this exists.
 ///
-/// Needs no sidecar and no model, so it is the fallback whenever `oculus
-/// search` reports the sidecar is down. The pattern is a regular expression
-/// by default and case-insensitive unless you ask otherwise.
+/// Needs no network and no model, so it is the fallback whenever `oculus
+/// search` cannot run. The pattern is a regular expression by default and
+/// case-insensitive unless you ask otherwise.
 #[derive(Args)]
 struct GrepArgs {
     /// Regular expression to look for
@@ -808,13 +796,6 @@ fn main() {
     restore_sigpipe();
     let cli = Cli::parse();
     let ctx = Ctx::new(cli.json);
-
-    if let Some(cap) = cli.memory_cap {
-        if let Err(error) = app_lib::sidecar::set_limits(Some(cap), None) {
-            eprintln!("{} {error}", paint("error:", RED));
-            std::process::exit(1);
-        }
-    }
 
     let result = match cli.command {
         None | Some(Command::Status) => ctx.status(),
@@ -1609,8 +1590,8 @@ impl Ctx {
     fn run_subjects(&self, args: &RunArgs) -> Result<(), String> {
         // No in-scrape parse triggering here: `index_pdfs` below is the CLI's
         // parse tier and it walks the same files serially. With both on, every
-        // PDF was handed to the sidecar twice — once by the engine's queue as
-        // it landed, once by `index_pdfs` — and the two could be mid-parse on
+        // PDF was submitted twice — once by the engine's queue as it landed,
+        // once by `index_pdfs` — and the two could be mid-parse on
         // the same `.md`/`.pages.json` at the same time. The app keeps the
         // in-scrape trigger; it has a UI that wants progress as files arrive.
         let engine = self.engine(false);
@@ -1674,7 +1655,7 @@ impl Ctx {
         let sink = reporter.sink();
         // The engine's fire-and-forget parse is for the app, which wants a
         // progress bar moving while it downloads. Here the index phase below
-        // owns the sidecar, one PDF at a time, so the two never overlap.
+        // owns the parsing, one PDF at a time, so the two never overlap.
         let engine = Engine::new(&self.data_dir, Box::new(reporter)).with_pdf_parsing(false);
 
         let started = std::time::Instant::now();
@@ -3483,7 +3464,7 @@ impl Ctx {
 const HELP_WIDTH: usize = 88;
 
 /// Documented once at the root instead of under every subcommand.
-const GLOBAL_ARGS: [&str; 2] = ["json", "memory_cap"];
+const GLOBAL_ARGS: [&str; 1] = ["json"];
 
 /// This binary's whole help tree as markdown.
 ///

@@ -118,11 +118,11 @@ impl Reporter for AppReporter {
     }
 }
 
-/// Resume the parse pipeline for one already-downloaded PDF. The sidecar
-/// skips whatever exists (fast parse if markdown is on disk, everything if
-/// the quality pass finished), so this continues where the file left off
-/// rather than starting over. Fire-and-forget: progress arrives as the same
-/// `parse-status` events a sync produces.
+/// Resume the parse pipeline for one already-downloaded PDF. `parse_mode`
+/// reads the `.pages.json` record, so a file that already parsed is skipped
+/// and one that never did is submitted — this costs nothing on a file that is
+/// already done. Fire-and-forget: progress arrives as the same `parse-status`
+/// events a sync produces.
 #[tauri::command]
 pub fn parse_file(
     app: AppHandle,

@@ -22,11 +22,9 @@ use crate::sync::Course;
 //
 // These three lived in `retrieval.rs` while retrieval was the only thing in
 // Rust that touched the database on its own. It is not any more — the parse
-// path writes page records now — and `retrieval.rs` is deleted with the
-// embedding layer, so leaving them there would mean rescuing them out of a
-// module that is on its way out. This is the module that outlives both it and
-// `sidecar.rs`, and it is already the DB-access module; the helpers belong
-// here and every caller now says `store::`.
+// path writes page records too — so helpers every module needs do not belong
+// inside one of them. This is the DB-access module and the one they all
+// already depend on; the helpers belong here and every caller says `store::`.
 
 /// Our own pool over the file tauri-plugin-sql already manages. WAL means a
 /// second reader is harmless, and our writes are occasional (once per file

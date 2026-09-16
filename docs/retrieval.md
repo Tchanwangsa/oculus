@@ -5,8 +5,8 @@ text. There is no graph and no vector index — both were considered and
 dropped, on measurement.
 
 Embedding runs in-process in Rust, behind a seam shaped exactly like the
-parser's. The Python sidecar and its local Qwen model are gone from this path;
-`voyage-multimodal-3.5` took their place.
+parser's (see [parsing.md](./parsing.md)). The Python sidecar and its local
+Qwen model are gone; `voyage-multimodal-3.5` took their place.
 
 ## Where
 

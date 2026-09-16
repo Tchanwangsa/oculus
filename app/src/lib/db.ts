@@ -216,46 +216,19 @@ export async function setSyncOptions(options: SyncOptions): Promise<void> {
 }
 
 // ── Parse settings ───────────────────────────────────────────────────────────
-
-export type ParseBackend = "local" | "cloud" | "auto";
-
-/** Mirrors the sidecar's live `/limits` state. The memory cap is for the whole
- * sidecar process tree, not each worker independently. */
-export interface ParseSettings {
-  memoryCapMb: number;
-  backend: ParseBackend;
-}
-
-export const DEFAULT_PARSE_SETTINGS: ParseSettings = {
-  memoryCapMb: 8192,
-  backend: "local",
-};
-
-const PARSE_SETTINGS_KEY = "parse";
-
-export async function getParseSettings(): Promise<ParseSettings> {
-  const raw = await getSetting(PARSE_SETTINGS_KEY);
-  if (!raw) return { ...DEFAULT_PARSE_SETTINGS };
-  try {
-    const parsed = JSON.parse(raw);
-    const cap = Number(parsed.memoryCapMb);
-    return {
-      memoryCapMb: Math.max(
-        5120,
-        Number.isSafeInteger(cap) && cap > 0 ? cap : DEFAULT_PARSE_SETTINGS.memoryCapMb,
-      ),
-      backend: ["local", "cloud", "auto"].includes(parsed.backend)
-        ? parsed.backend
-        : DEFAULT_PARSE_SETTINGS.backend,
-    } as ParseSettings;
-  } catch {
-    return { ...DEFAULT_PARSE_SETTINGS };
-  }
-}
-
-export async function setParseSettings(settings: ParseSettings): Promise<void> {
-  await setSetting(PARSE_SETTINGS_KEY, JSON.stringify(settings));
-}
+//
+// The `parse` settings row is **owned by Rust now** and has no reader here.
+// It used to carry `memoryCapMb` and a `local`/`cloud`/`auto` backend choice,
+// both of which described the Python sidecar: a memory cap over a process
+// tree that no longer exists, and a local parser that left with it. What
+// remains in the row is `engine`/`engineUrl`, read by `parse::parse_config`
+// in `app/src-tauri/src/parse/mod.rs`, which is where the seam belongs — the
+// thing that selects a backend and the thing that talks to it are one module.
+//
+// The stale keys are deliberately left in the blob rather than migrated out:
+// `StoredParseSettings` ignores what it does not name, so they cost nothing,
+// and a migration that rewrote every install's settings row to delete two
+// dead fields would be more risk than the tidiness is worth.
 
 // ── Per-job models ───────────────────────────────────────────────────────────
 //
@@ -761,8 +734,8 @@ export interface LibraryLectureHit {
  * Files matching a palette query, best first.
  *
  * Unlike the chat's `@` menu this offers *every* file, parsed or not: the
- * palette opens a file for a person to read, and a PDF still awaiting the
- * sidecar renders perfectly well. Ties break towards this term's coursework and
+ * palette opens a file for a person to read, and an unparsed PDF renders
+ * perfectly well. Ties break towards this term's coursework and
  * then towards what was opened most recently, so an empty query is the handful
  * of files you were last in.
  */

@@ -1,7 +1,6 @@
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { applyTheme, getStoredTheme } from "@/lib/theme";
-import { getDb, getParseSettings, reconcileStaleSyncRuns } from "@/lib/db";
+import { getDb, reconcileStaleSyncRuns } from "@/lib/db";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useQualitySweep } from "@/hooks/useQualitySweep";
 import { watchNewFiles } from "@/stores/newFilesStore";
@@ -27,15 +26,8 @@ export default function App() {
     // the schema is up to date before any page mounts.
     getDb()
       .then(async () => {
-        const [n, parse] = await Promise.all([
-          reconcileStaleSyncRuns(),
-          getParseSettings(),
-        ]);
+        const n = await reconcileStaleSyncRuns();
         if (n) console.warn(`marked ${n} interrupted sync run(s) failed`);
-        await invoke("sidecar_set_limits", {
-          memoryCapMb: parse.memoryCapMb,
-          backend: parse.backend,
-        }).catch(() => {});
       })
       .catch((e) => console.error("db init failed", e));
 

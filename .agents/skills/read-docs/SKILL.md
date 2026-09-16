@@ -1,6 +1,6 @@
 ---
 name: read-docs
-description: Orient in the Oculus repo using the docs under docs/. Use at the start of any task touching app/ or sidecar/ — before exploring the codebase manually — and when asked where a feature lives, how the processes connect, or what conventions apply.
+description: Orient in the Oculus repo using the docs under docs/. Use at the start of any task touching app/ — before exploring the codebase manually — and when asked where a feature lives, how the processes connect, or what conventions apply.
 ---
 
 # Read the docs first
@@ -8,10 +8,10 @@ description: Orient in the Oculus repo using the docs under docs/. Use at the st
 This repo keeps maintained, high-level documentation in `docs/` — plain
 Markdown, read with Read/Grep, no build step. Read the relevant page
 **before** spelunking through source: it tells you where each piece lives,
-how the three processes (React frontend, Rust core, Python sidecar) connect,
-and which measured facts the design rests on. That last part matters here —
-several decisions (image embeddings, MinerU, the dependency pins) look
-arbitrary from the code and are not.
+how the two processes (React frontend, Rust core) connect, and which measured
+facts the design rests on. That last part matters here — several decisions
+(image embeddings, MinerU, the render DPI, the batching window) look arbitrary
+from the code and are not.
 
 ## Doc map
 
@@ -21,7 +21,7 @@ arbitrary from the code and are not.
 | Process boundaries, IPC, data dir, `oculus.db` | `docs/architecture.md` |
 | Scraping Canvas / Ed Discussion / Echo360 | `docs/sync.md` |
 | Sign-in, session cookie, keep-alive, tokens | `docs/auth.md` |
-| PDF parsing, the sidecar, python deps | `docs/sidecar.md` |
+| PDF parsing, MinerU cloud, the parser seam | `docs/parsing.md` |
 | Embeddings, search, the `pages` table | `docs/retrieval.md` |
 | Chat: the CLI-agent bridges, containment, the timeline | `docs/harness.md` |
 | Class times, due dates, the calendar | `docs/calendar.md` |

@@ -65,7 +65,7 @@ One Rust engine scrapes three services. It runs identically inside the app
   `paths::write_course_bytes` is what decides new/updated/unchanged, so e.g.
   a changed submission status still lands. "Re-download" bypasses the skip.
 - **Changed bytes invalidate the parse.** An `updated` write purges the
-  sidecar artifacts (`.md`, `.pages.json`, `.emb.json` — see
+  parse/embed artifacts (`.md`, `.pages.json`, `.emb.json` — see
   `paths::purge_parse_artifacts`), and the app clears the file's stored
   pages and parse status, so the parse re-runs instead of the existence
   check pinning stale markdown.
@@ -116,8 +116,8 @@ One Rust engine scrapes three services. It runs identically inside the app
   in [frontend.md](./frontend.md).
 - **The parse is in this process, and it takes minutes.** `parse_pdf` in
   `app/src-tauri/src/sync.rs` goes through the seam in
-  `app/src-tauri/src/parse/mod.rs` rather than POSTing to a sidecar port. The
-  sidecar used to return in seconds — as soon as a fast pass had produced some
+  `app/src-tauri/src/parse/mod.rs` rather than POSTing to a loopback port. The
+  Python used to return in seconds — as soon as a fast pass had produced some
   markdown — and finish the real parse on its own thread. There is no fast tier
   now, so the call spans the entire cloud round trip, and there is no timeout
   here either: the client's own 60-minute poll deadline is the single limit, so

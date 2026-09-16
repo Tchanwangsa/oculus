@@ -12,13 +12,13 @@ Sync Canvas subjects and lectures into your local Oculus library
 Usage: oculus [OPTIONS] [COMMAND]
 
 Commands:
-  status    Session, library and sidecar status
+  status    Session, library and parse status
   auth      Sign in to Canvas, or sign out
   list      List subjects or lectures
   run       Scrape Canvas content or sync lectures
   index     Re-parse and re-embed PDFs already on record
-  search    Search the library by meaning (needs the sidecar)
-  grep      Search the library by pattern (no sidecar needed)
+  search    Search the library by meaning (needs network and an API key)
+  grep      Search the library by pattern (offline, no model)
   read      Print the text of one library file
   files     List the files in the library
   calendar  Class times and assignment due dates
@@ -30,9 +30,6 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
-      --memory-cap <MEMORY_CAP>
-          Whole sidecar process-tree memory cap in MB (minimum 5120)
-
       --json
           Print machine-readable JSON instead of formatted text
 
@@ -50,7 +47,7 @@ Options:
 ## `oculus status`
 
 ```
-Session, library and sidecar status
+Session, library and parse status
 
 Usage: oculus status
 
@@ -254,7 +251,7 @@ Options:
           Include subjects from past terms, not just the current one
 
       --no-parse
-          Skip the sidecar entirely: no PDF parsing and no embedding
+          Skip PDF processing entirely: no parsing and no embedding
 
       --no-embed
           Parse PDFs but do not embed them into the retrieval index
@@ -288,12 +285,14 @@ Options:
 ## `oculus search`
 
 ```
-Search the library by meaning (needs the sidecar).
+Search the library by meaning (needs network and an API key).
 
 The query is embedded by the same vision model that embedded every page image, so this
-finds a slide about Lagrange multipliers when you ask for "constrained optimisation". It
-needs the sidecar running (open the Oculus app); when it is not, this fails loudly and
-points at `oculus grep`, which searches the same text with no model.
+finds a slide about Lagrange multipliers when you ask for "constrained optimisation".
+Embedding happens in the cloud, so this needs a network connection and the Voyage key
+from Settings → Library; without either, and over an index that is empty or built by a
+retired model, it fails loudly and points at `oculus grep`, which searches the same text
+with no model at all.
 
 Only PDF and Office pages are ranked here — Canvas pages, announcements and Ed threads
 are markdown on disk and are covered by `oculus grep`.
@@ -323,15 +322,15 @@ Options:
 ## `oculus grep`
 
 ```
-Search the library by pattern (no sidecar needed).
+Search the library by pattern (offline, no model).
 
 Covers both halves of the library: the markdown on disk (Canvas pages, announcements,
 assignments, Ed threads) and the page text extracted from PDFs, which lives only in the
 database — ripgrep over the library directory cannot see it, which is why this exists.
 
-Needs no sidecar and no model, so it is the fallback whenever `oculus search` reports
-the sidecar is down. The pattern is a regular expression by default and case-insensitive
-unless you ask otherwise.
+Needs no network and no model, so it is the fallback whenever `oculus search` cannot
+run. The pattern is a regular expression by default and case-insensitive unless you ask
+otherwise.
 
 Usage: oculus grep [OPTIONS] <PATTERN>
 

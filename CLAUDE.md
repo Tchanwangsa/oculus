@@ -1,11 +1,18 @@
 # Oculus — agent instructions
 
 A Tauri 2 desktop app that turns UniMelb coursework (Canvas, Ed Discussion,
-Echo360) into a searchable personal knowledge base. Three processes:
+Echo360) into a searchable personal knowledge base. Two processes:
 
 - **Frontend** — React 19 + Vite + Tailwind v4, in `app/src/`
-- **Rust core** — Tauri backend, scrape engine, and the `oculus` CLI, in `app/src-tauri/`
-- **Python sidecar** — PDF parsing + page-image embeddings, in `sidecar/`
+- **Rust core** — Tauri backend, scrape engine, PDF parsing, page-image
+  embedding, and the `oculus` CLI, in `app/src-tauri/`
+
+PDF parsing (MinerU) and page embedding (Voyage) are cloud calls made
+in-process from Rust, behind seams in `app/src-tauri/src/parse/` and
+`app/src-tauri/src/embed/`. **The Python sidecar is gone from the app.**
+`sidecar/` survives in the repo only as the source a separate local-server
+repo forks from; nothing in `app/` reaches it, and it is not part of building
+or running anything here.
 
 Ingestion and retrieval are built. Chat is a **CLI agent** — Claude Code,
 Codex or opencode, driven as a subprocess from the library's `agents/` folder
@@ -29,7 +36,7 @@ structure by searching.
 | How the processes talk, the data dir, the database | `docs/architecture.md` |
 | Scraping Canvas / Ed / Echo360 | `docs/sync.md` |
 | Sign-in, session cookies, keep-alive | `docs/auth.md` |
-| PDF parsing, the Python sidecar | `docs/sidecar.md` |
+| PDF parsing, MinerU cloud, the parser seam | `docs/parsing.md` |
 | Embeddings, search, the `pages` table | `docs/retrieval.md` |
 | Chat: the CLI-agent bridges, containment, the timeline | `docs/harness.md` |
 | Class times, due dates, the calendar | `docs/calendar.md` |
@@ -67,10 +74,12 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   `bunx`, not `npx`.
 - Rust builds with plain cargo (via `bun run tauri dev/build`, or
   `bun run cli` for the `oculus` binary).
-- The sidecar is managed by **uv**: `cd sidecar && uv sync` creates the
-  `.venv` the Rust supervisor looks for. Dependency pins in
-  `sidecar/pyproject.toml` are deliberate — several are workarounds
-  (`docs/sidecar.md` lists them). Do not "clean up" pins without reading it.
+- **No Python toolchain.** There is no `uv sync` step and no `.venv` in the
+  build; `sidecar/pyproject.toml` and its pins belong to the separate repo now.
+- `libpdfium` and `ffmpeg` are fetched, not vendored — `bun run pdfium` and
+  `bun run ffmpeg` into the gitignored `app/src-tauri/binaries/`. The pdfium
+  release tag is pinned to the Chromium revision `pdfium-render` binds
+  against; a mismatch fails at *bind* time, not compile time.
 
 # Hard-won constraints (do not relearn these)
 
@@ -81,9 +90,19 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
 - **Canvas API tokens are blocked by the university** — the admin has
   disabled self-service access tokens, so the session cookie is the only auth
   path. Don't re-propose `Authorization: Bearer`. See `docs/auth.md`.
-- **A silent sidecar is not a hung sidecar.** Python block-buffers stdout on
-  a pipe; `/parse-status` on the sidecar HTTP port is authoritative, stdout
-  is not.
+- **A parse or an embed blocks for minutes, and that is not a hang.** Both
+  are cloud round trips with no timeout imposed from above: the MinerU client
+  owns a 60-minute poll deadline and the Voyage client paces itself against
+  the rate-limit tier it detected, where a 429 is routine rather than a
+  failure. A second deadline layered on top could only abandon work that was
+  still progressing. On a Voyage account with no payment method the ceiling is
+  10K tokens/minute — under three pages a minute — so a large deck genuinely
+  takes an hour. Watch the page counter, not the clock.
+- **There is no fallback beneath the cloud.** A missing token, a rejected
+  token, a spent quota or no network all mean that PDF has no markdown at all
+  — no local tier catches it. That is why `ParseError` carries
+  `kind`/`retryable`/`latching` and why the file row and the background sweep
+  both read them. Never add a silent fallback; see `docs/parsing.md`.
 - **A drag needs `dataTransfer.setData()` or WebKit cancels it.** A
   `dragstart` handler that sets no data aborts the drag silently — no
   `dragover`, no `drop`, every handler correctly attached and nothing moves.

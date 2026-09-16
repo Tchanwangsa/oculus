@@ -15,10 +15,10 @@ live in the root `CLAUDE.md`, not here.
 
 | Page | What it covers |
 | --- | --- |
-| [architecture.md](./architecture.md) | The three processes, how they talk, the data directory, `oculus.db` |
+| [architecture.md](./architecture.md) | The two processes, how they talk, the data directory, `oculus.db` |
 | [sync.md](./sync.md) | The scrape engine: Canvas modules, Ed threads, Echo360 lectures, HTML→md |
 | [auth.md](./auth.md) | Canvas session cookie, keep-alive, Ed `x-token`, Echo360 LTI |
-| [sidecar.md](./sidecar.md) | The Python process: fast/quality PDF parsing, lifecycle, endpoints |
+| [parsing.md](./parsing.md) | PDFs to markdown: the parser seam, MinerU cloud, the on-disk contract, failures |
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |
 | [harness.md](./harness.md) | Chat as a CLI agent: the Claude Code, Codex and opencode bridges, containment, the timeline |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
@@ -34,17 +34,17 @@ live in the root `CLAUDE.md`, not here.
 | Path | What it is |
 | --- | --- |
 | `app/src/` | React 19 frontend (Vite, Tailwind v4, shadcn/ui) |
-| `app/src-tauri/src/` | Rust: Tauri commands, scrape engine, retrieval, sidecar supervisor |
+| `app/src-tauri/src/` | Rust: Tauri commands, scrape engine, parsing, embedding, retrieval |
 | `app/src-tauri/src/bin/oculus.rs` | The headless CLI over the same engine |
-| `sidecar/` | Python (uv): PDF parsing (pymupdf4llm + MinerU) and Qwen3-VL embeddings |
+| `sidecar/` | The retired Python process. Nothing in the app reaches it; it is kept only as the source Plan B forks into its own repo |
 | `docs/` | These pages |
 | `.agents/skills/` | Shared skills: `read-docs`, `write-docs`, `check-doc-drift` |
 | `.claude/skills/` | Symlink to `.agents/skills/` for Claude Code |
 
 ## Status honesty
 
-Built: Canvas SSO + sync, Ed Discussion sync, Echo360 download + player, the
-two-tier PDF pipeline, page-image retrieval, chat as a CLI agent over it
+Built: Canvas SSO + sync, Ed Discussion sync, Echo360 download + player, cloud
+PDF parsing, page-image retrieval, chat as a CLI agent over it
 (Claude Code, Codex or opencode, driven as a subprocess — see
 [harness.md](./harness.md)), projects: assignments broken into tasks, each
 project opening on an Overview (a brief, tags, a pinned calendar event, what is
@@ -66,6 +66,14 @@ window (`oculus lecture recap`, or the player's own Recap tab). Its model is
 configured in Settings → AI. [chapters.md](./chapters.md#lecture-recap)
 describes the shared pipeline; the tab is in
 [The recap tab](./chapters.md#the-recap-tab).
+
+Removed: the **Python sidecar**. PDF parsing and page embedding both run in
+Rust now, against MinerU and Voyage ([parsing.md](./parsing.md),
+[retrieval.md](./retrieval.md)); the supervisor, the loopback port, the
+whole-tree memory governor and the local-parser choice went with it. There is
+no local tier and no fallback: a PDF with no cloud parse simply has no
+markdown, and the UI says so. `sidecar/` is still in the repo as the source
+Plan B forks from, and nothing in the app imports it.
 
 Removed: the **BYOK API layer** — provider config, keychain keys, an
 OpenAI-compatible streaming client, spend limits and its own agent tool loop —

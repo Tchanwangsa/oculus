@@ -57,7 +57,7 @@ export function isPdfBacked(filename: string): boolean {
 }
 
 /**
- * The sidecar's markdown output for a PDF-backed file. Artifacts are keyed on
+ * The parser's markdown output for a PDF-backed file. Artifacts are keyed on
  * the parsed PDF's stem, which for both plain PDFs ("a.pdf" → "a.md") and
  * Office docs ("deck.pptx" via "deck.pptx.pdf" → "deck.pptx.md") is the
  * library path with any trailing ".pdf" gone.

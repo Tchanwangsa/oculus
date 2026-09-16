@@ -89,9 +89,8 @@ function matchesAll(haystack: string, query: string): boolean {
  * lectures and the app's own pages.
  *
  * It matches **titles**, from SQLite, on every keystroke. Not the semantic page
- * index: that is an embedding round-trip through the sidecar (see
- * `docs/retrieval.md`) and belongs to a question you ask Chat, not to a field
- * you are still typing in.
+ * index: that is a cloud embedding round-trip (see `docs/retrieval.md`) and
+ * belongs to a question you ask Chat, not to a field you are still typing in.
  *
  * Enter goes there in the current tab and ⌘↵ in a new one — the rule the
  * sidebar's Recent rows already follow.

@@ -22,7 +22,7 @@ this page is the structure.
 | Agent/model/reasoning picker (settings rows + composer) | `app/src/components/harness/ModelPicker.tsx` |
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
-| Parse backend, memory budget + sidecar health | `app/src/pages/settings/LibraryPage.tsx` |
+| Library counts, the MinerU token + the privacy statement | `app/src/pages/settings/LibraryPage.tsx` |
 | Embedding backend + the re-index it costs | `app/src/components/settings/EmbeddingSection.tsx`, `app/src/components/settings/ReindexConfirmDialog.tsx`, `app/src-tauri/src/embed/commands.rs` |
 | Side panel (file/lecture preview) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser (route, tab mirror, API) | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/stores/browserStore.ts`, `app/src/lib/browser.ts`, `app/src-tauri/src/browser.rs` |
@@ -65,11 +65,11 @@ the one moment it shows.
 
 ## How it connects
 
-- Settings → Library owns parse preferences (`parse` in the `settings`
-  table). Saves update SQLite and `sidecar_set_limits` in order; no restart
-  is needed. The memory input has a 5 GB floor and recommends 8 GB. Health
-  polling displays whole-tree memory, peak and recoveries inline, with no
-  toasts. Backend changes affect new parse requests.
+- **Settings → Library states the parser rather than offering it.** MinerU
+  cloud is the only one, so there is no backend control and no memory budget —
+  both described the Python sidecar. What is left is the library counts, the
+  MinerU token, and the privacy boundary written as a fact: every PDF goes to
+  MinerU and its PRC-hosted OSS storage.
 - **Settings → Library also owns the embedding backend, and changing it is
   destructive on purpose.** One engine is selected (`embed` in the `settings`
   table, read by `embed_config()` in `app/src-tauri/src/embed/mod.rs`) and
@@ -87,13 +87,13 @@ the one moment it shows.
   cannot offer what the backend would refuse. `Engine::Local` is real in the
   seam and has no server to talk to yet, so it is listed and disabled with that
   sentence under the control rather than hidden.
-- Choosing MinerU cloud or Automatic opts into uploading PDFs to MinerU's
-  PRC-hosted service; Local only is the default. Token save/remove invokes
-  Rust keychain commands, never DB writes. Automatic is cloud-first when a
-  token is available, with local fallback; see [sidecar.md](./sidecar.md).
-  Saving checks the token against MinerU first, so a bad or expired one is
-  named at that moment; a token MinerU later refuses mid-parse shows as
-  Expired, read from health rather than polled.
+- Token save/remove invokes Rust keychain commands, never DB writes. Saving
+  checks the token against MinerU first, so a bad or expired one is named at
+  that moment, and it lifts the app-wide parse latch — the in-process client
+  keeps no rejection state of its own, so nothing else would
+  ([parsing.md](./parsing.md)). A token MinerU refuses mid-parse shows as
+  Expired, read from that latch in `parseStore` rather than polled: the state
+  is session-scoped, because the next parse reads the keychain afresh.
 - **Backend events are the write path.** `app/src/hooks/useBackendEvents.ts`
   (mounted once in `App.tsx`) listens for scrape/parse/auth Tauri events,
   upserts SQLite through `app/src/lib/db.ts`, and updates the stores. Pages
@@ -313,7 +313,7 @@ the one moment it shows.
   subjects, files, lectures and the app's own routes, from SQLite, on every
   keystroke — `searchLibraryFiles` / `searchLibraryLectures` in
   `app/src/lib/db.ts`. It deliberately does *not* reach the semantic index:
-  that is an embedding round-trip through the sidecar
+  that is a cloud embedding round-trip
   ([retrieval.md](./retrieval.md)) and belongs to a question you ask Chat, not
   to a field you are still typing in. The two searches share one matching
   rule — every typed word must appear somewhere in the haystack, in any order,

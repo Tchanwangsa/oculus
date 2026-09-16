@@ -104,9 +104,9 @@ pub struct IndexStats {
 
 // ── Plumbing ─────────────────────────────────────────────────────────────────
 
-// The pool helpers this module used to own now live in `store.rs`, which
-// outlives both it and `sidecar.rs`; re-exported here only so the call sites
-// below read unchanged.
+// The pool helpers this module used to own now live in `store.rs`, which the
+// parse path needs too; re-exported here only so the call sites below read
+// unchanged.
 use crate::store::{db_path, pool};
 
 /// The space this app searches in.

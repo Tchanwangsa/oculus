@@ -1202,9 +1202,9 @@ impl Engine {
     ) -> Result<String, String> {
         let (rel, size, action) = paths::write_course_bytes(&self.data_dir, &c.code, rel_path, data)?;
         // Changed bytes invalidate the old parse and embeddings. Purge the
-        // artifacts before the parse trigger below, or the sidecar's
-        // existence checks would skip the re-parse and keep serving stale
-        // markdown and vectors.
+        // artifacts before the parse trigger below, or the skip checks would
+        // read the stale records and keep serving the old markdown and
+        // vectors.
         if action == paths::WriteAction::Updated {
             paths::purge_parse_artifacts(&self.data_dir, &rel);
         }
