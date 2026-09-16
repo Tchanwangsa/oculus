@@ -27,12 +27,19 @@ const buttonVariants = cva(
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-brand underline-offset-4 hover:underline",
       },
+      // One notch below stock shadcn, whose `default` is `h-9` at 14px — a size
+      // drawn for a 16px-base web page. This app's body text is 14px and its
+      // furniture is h-6/h-8 throughout, so a 36px button was the tallest thing
+      // in most rows and read as oversized wherever it landed: a dialog's
+      // footer, a popover's Create, a page header's one action. `default` and
+      // `sm` now share a height and differ in padding, which is the optical
+      // weight the two were ever really used for.
       size: {
-        default: "h-9 px-4.5 py-2 has-[>svg]:px-3.5",
+        default: "h-8 px-4 py-1.5 has-[>svg]:px-3",
         xs: "h-6 gap-1 px-2.5 text-xs has-[>svg]:px-2 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-8 gap-1.5 px-3.5 has-[>svg]:px-3",
+        sm: "h-8 gap-1.5 px-3.5 text-[13px] has-[>svg]:px-3",
         lg: "h-11 px-6 text-[15px] has-[>svg]:px-5",
-        icon: "size-9",
+        icon: "size-8",
         "icon-xs": "size-6 [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8",
         "icon-lg": "size-10",

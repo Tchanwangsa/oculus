@@ -105,6 +105,22 @@ docked side panel for files and lectures, top tab strip).
 - **Buttons and chips are pills** (`rounded-full` in
   `app/src/components/ui/button.tsx`); rectangles are for segmented toolbars
   that override the radius at the call site.
+- **Two primitives are deliberately a notch below stock shadcn**, whose sizes
+  are drawn for a 16px-base web page while this app's body text is 14px and its
+  furniture is h-6/h-8 throughout. `button.tsx` has `default` at `h-8`, not
+  `h-9` — a 36px button was the tallest thing in most rows. `dialog.tsx` is
+  `p-5`/`rounded-xl` on `border-border-subtle` with a 16px title and 13px
+  description, instead of `p-6`/`rounded-lg` at 18/14. Every dialog in the app
+  overrides only `max-w`, so the scale lives in the primitive; don't "restore"
+  either to what `shadcn add` generates.
+- **`text-base md:text-sm` on a field is a trap, and it is why `input.tsx` and
+  `textarea.tsx` now carry one unconditional `text-[13px]`.** The pair is
+  shadcn's iOS fix — mobile Safari zooms the page when a focused field is under
+  16px — and this viewport is always past `md`, so the field was always 14px.
+  Worse, Tailwind emits variant utilities *after* plain ones, so `md:text-sm`
+  outranked every `text-xs`/`text-[13px]` a call site passed: the class sat in
+  the DOM and did nothing. The three `text-[13px]!` bangs in the composers were
+  written to beat it. Never reintroduce a `md:` size on a base field.
 - **Monospace is for code, and nothing else.** Timestamps, durations, counts,
   IDs, keys and badges all take the body font — reach for `tabular-nums` when
   digits need to hold a column, which is what mono was standing in for. The
