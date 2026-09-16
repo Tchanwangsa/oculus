@@ -24,6 +24,7 @@ import SettingsCanvasPage from "@/pages/settings/CanvasPage";
 import SettingsAiPage from "@/pages/settings/AiPage";
 import SettingsStoragePage from "@/pages/settings/StoragePage";
 import SettingsLibraryPage from "@/pages/settings/LibraryPage";
+import SettingsAppearancePage from "@/pages/settings/AppearancePage";
 
 /**
  * The route table, shared by every tab. Each tab builds its own memory router
@@ -89,6 +90,7 @@ export const routes: RouteObject[] = [
           { path: "ai", element: <SettingsAiPage /> },
           { path: "storage", element: <SettingsStoragePage /> },
           { path: "library", element: <SettingsLibraryPage /> },
+          { path: "appearance", element: <SettingsAppearancePage /> },
         ],
       },
       // Old top-level /lectures had no subject — send it to the picker.

@@ -6,6 +6,7 @@ const TABS = [
   { to: "ai",      label: "AI" },
   { to: "storage", label: "Storage" },
   { to: "library", label: "Library" },
+  { to: "appearance", label: "Appearance" },
 ] as const;
 
 /**
