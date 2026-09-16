@@ -28,7 +28,7 @@ separate killable model workers rather than retaining their weights itself.
 | IPC callback server (sidecar → app) | `app/src-tauri/src/ipc.rs` |
 | Media HTTP server (lecture video streaming) | `app/src-tauri/src/media.rs` |
 | In-app browser (one page WebView per tab, in the main window) | `app/src-tauri/src/browser.rs` |
-| CLI-agent harness (Claude Code / Codex bridges) | `app/src-tauri/src/harness/mod.rs` |
+| CLI-agent harness (Claude Code / Codex / opencode bridges) | `app/src-tauri/src/harness/mod.rs` |
 | Projects and tasks, written headlessly | `app/src-tauri/src/projects.rs` |
 | Lecture chapters: boundary detection and the naming job | `app/src-tauri/src/chapters.rs` |
 | Sidecar HTTP service | `sidecar/main.py` |

@@ -7,10 +7,11 @@ Echo360) into a searchable personal knowledge base. Three processes:
 - **Rust core** — Tauri backend, scrape engine, and the `oculus` CLI, in `app/src-tauri/`
 - **Python sidecar** — PDF parsing + page-image embeddings, in `sidecar/`
 
-Ingestion and retrieval are built. Chat is a **CLI agent** — Claude Code or
-Codex, driven as a subprocess from the library's `agents/` folder
-(`docs/harness.md`). The BYOK API layer it replaced has been deleted —
-nothing had routed to it for a while; its migrations stay, its code does not.
+Ingestion and retrieval are built. Chat is a **CLI agent** — Claude Code,
+Codex or opencode, driven as a subprocess from the library's `agents/` folder
+(`docs/harness.md`). The BYOK API layer it replaced has been deleted rather
+than woken up: opencode is the API path, reached as a third bridge instead of
+as a parallel world. Its migrations stay, its code does not.
 Automations and the Inbox were built and then removed — the last commit that
 has them is `d64dc11`, reachable from master's history; do not reintroduce
 pieces of them here without being asked.

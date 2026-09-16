@@ -534,8 +534,7 @@ the box's subject rather than its verb.
 A message typed while the agent is working does not reach the CLI. It waits
 in `Queue` (`app/src-tauri/src/harness/mod.rs`), and Rust sends it the moment
 the running turn closes. This is not caution — it is the only way the thread
-reads in order, and both CLIs were measured getting it wrong in their own
-way:
+reads in order, and each CLI was measured getting it wrong in its own way:
 
 - **Claude queues it itself** and starts a second turn the instant the first
   `result` is out. The rows are fine, but the *turn* boundary is not: the
@@ -546,6 +545,12 @@ way:
   the timeline above the answer to the previous one, there is one
   `turn/completed` for both, and the reply to the first question can look
   like it never came. This is what "the message just disappears" was.
+- **opencode would take it correctly** — `delivery: "queue"` on
+  `POST /api/session/{id}/prompt` does hold a message until the turn ends —
+  and it is still not used. The harness owns the `Queued`/`Unqueued` rows and
+  the one-turn-at-a-time rule; letting the server own the same invariant for
+  one provider out of three would put it in two places, and the half the
+  webview draws would be the half that could not see the queue.
 
 So the queue is the manager's. A pending message is **not part of the
 conversation**: no row is written for it, it is held in memory rather than
@@ -772,8 +777,8 @@ instructions naming that course folder and its memory bucket
 (`instructions()` in `app/src-tauri/src/harness/mod.rs`); General appends
 nothing and gets the library-wide brief. The scope is stored on the thread
 (`harness_threads.subject_id`) and locks once the thread exists, for the same
-reason the provider does: both CLIs bind the appended instructions at session
-start, so a re-scope would be a lie until the process was restarted. Rust
+reason the provider does: all three CLIs bind the appended instructions at
+session start, so a re-scope would be a lie until the process was restarted. Rust
 reads it back off the row rather than trusting the payload, and joins
 `subjects` for the folder name so a renamed subject cannot leave a thread
 pointing at a folder that is gone.
@@ -811,8 +816,8 @@ A thread can also be scoped to one **recording** —
 player's dock holds beside the video. It is the subject scope's shape with a
 narrower subject and one thing it cannot do: NULL clears rather than cascades
 for the reason `subject_id` does — the conversation is the student's own and
-the lecture merely scopes it — and it is fixed at creation, because both CLIs
-bind the appended instructions at session start.
+the lecture merely scopes it — and it is fixed at creation, because all three
+CLIs bind the appended instructions at session start.
 
 **Rust reads the subject off the lecture's row, not off the payload.** The
 player has no subject picker — the recording answers that question already —
@@ -968,8 +973,18 @@ and the `@` file menu, the message queue, stopping a turn, going back
 (edit, retry, rewind), the per-job model registry above, and the lecture player's dock chat. Not yet: approvals and native questions routed to the UI, steering
 mid-turn (bb's `turn/steer` and a second stdin line — the queue is the
 waiting-room version of it, not steering), the plan/todo card, branching (rewind
-deliberately does not), and a third bridge for the API path when BYOK
-returns.
+deliberately does not).
+
+**The third bridge was the API path, and it arrived as a bridge.** This page
+used to list "a third bridge for the API path when BYOK returns" as the plan:
+the dormant provider layer would wake up beside the CLIs and chat would have
+two kinds of backend. That is reversed. opencode *is* BYOK — the provider
+catalogue, the credential store, the streaming client and the model library
+belong to a program that already does all of it, students set keys up with
+`opencode auth`, and everything reaches the app through the seam that already
+existed. So there is one `HarnessEvent` stream, one timeline, one containment
+rule and one job registry, instead of a second code path with its own tools,
+citations and spend ledger. The BYOK layer is deleted rather than dormant.
 
 The plan/todo card is still outstanding despite projects being built, because
 the two are different things: that card would draw the provider's *own*
