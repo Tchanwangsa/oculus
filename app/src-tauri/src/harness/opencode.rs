@@ -170,6 +170,110 @@ pub struct ModelInfo {
     pub is_default: bool,
 }
 
+/// One row of Settings → AI's provider list, in the shape
+/// `app/src/lib/opencodeAuth.ts` reads.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderInfo {
+    pub id: String,
+    pub name: String,
+    /// `env` | `config` | `custom` | `api`. `custom` is opencode's compiled-in
+    /// catalogue and `api` is one a credential has been written for; `config`
+    /// means the provider is *declared* in an `opencode.json` rather than
+    /// signed in to, which is why the row does not offer to disconnect it —
+    /// there is no credential to remove, and the catalogue would not change if
+    /// there were.
+    pub source: String,
+    /// The environment variables this provider would read a key from. Shown
+    /// as a hint only: the harness strips `ANTHROPIC_API_KEY` and
+    /// `OPENAI_API_KEY` from the child on purpose, so a shell's key is not
+    /// what is running here.
+    pub env: Vec<String>,
+    pub model_count: usize,
+    pub connected: bool,
+    /// How this provider can be signed in to. Never empty:
+    /// [`DEFAULT_METHOD`] stands in for the 208 providers that declare
+    /// nothing and take a plain key.
+    pub methods: Vec<AuthMethod>,
+}
+
+/// What a provider read answers: the list, and whether it is current.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderList {
+    pub providers: Vec<ProviderInfo>,
+    /// A refresh was asked for and skipped because a turn was running. The
+    /// credential write still happened — `PUT`/`DELETE` answered — but the
+    /// instance has not re-read `auth.json`, so `connected` is the state
+    /// before it. Said out loud in the UI rather than papered over.
+    pub stale: bool,
+}
+
+/// One way in, as opencode declares it — a **form spec**, not a hard-coded
+/// flow. Everything the dialog draws comes from here, so a provider added to
+/// opencode after this was written gets its own correct form with no change
+/// on this side.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthMethod {
+    /// Position in this provider's `/provider/auth` array. It is the *only*
+    /// name the OAuth endpoints have for a method, so it is carried through
+    /// rather than recomputed, and [`parse_methods`] neither filters nor
+    /// re-sorts.
+    pub index: usize,
+    /// `oauth` | `api`.
+    pub kind: String,
+    pub label: String,
+    /// The extra fields this method needs. An `api` method always also needs
+    /// a key, which is not a prompt — `openai`'s "Manually enter API Key"
+    /// declares none at all.
+    pub prompts: Vec<AuthPrompt>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthPrompt {
+    /// `text` | `select`.
+    pub kind: String,
+    pub key: String,
+    pub message: String,
+    pub placeholder: Option<String>,
+    /// Empty unless `kind` is `select`.
+    pub options: Vec<AuthOption>,
+    /// Shows this field only when another answer matches. `github-copilot`
+    /// asks for an enterprise URL only when the deployment select says
+    /// `enterprise`.
+    pub when: Option<AuthWhen>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthOption {
+    pub label: String,
+    pub value: String,
+    pub hint: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthWhen {
+    pub key: String,
+    /// `eq` | `neq`.
+    pub op: String,
+    pub value: String,
+}
+
+/// What `POST …/oauth/authorize` answers. `method` is `auto` when the server
+/// finishes the flow by itself — a loopback listener it owns, or a device
+/// poll it runs — and `code` when the student has to paste something back.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Authorization {
+    pub url: String,
+    pub method: String,
+    pub instructions: String,
+}
+
 struct SessionRoute {
     sink: Sink,
     state: Mutex<SessionState>,
@@ -373,6 +477,16 @@ impl OpencodeServer {
         )
     }
 
+    /// The other spelling. `/api/…` takes `location[directory]`; the older
+    /// `/provider`, `/provider/auth` and `/instance/dispose` take a plain
+    /// `directory`. Naming it matters: the server's own cwd is wherever the
+    /// app was launched from, so an unscoped call reads and refreshes a
+    /// *different* instance from the one every session and every model list
+    /// here belongs to.
+    fn directory_query(&self) -> String {
+        format!("directory={}", urlencode(&self.directory.display().to_string()))
+    }
+
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::SeqCst)
     }
@@ -482,6 +596,188 @@ impl OpencodeServer {
                 .then(|| m["limit"]["context"].as_u64())
                 .flatten()
         })
+    }
+
+    // ── Providers and credentials ────────────────────────────────────────
+    //
+    // opencode's catalogue is 218 providers wide and two of them answer,
+    // because a provider is only reachable once `opencode auth` holds a
+    // credential for it. That store is a file of opencode's
+    // (`~/.local/share/opencode/auth.json`) and this server is the only
+    // supported door to it: `PUT`/`DELETE /auth/{id}` write it, and the
+    // OAuth pair below runs the browser flows — including the loopback
+    // listener the redirect lands on, which is *inside this process*. That
+    // is why the app drives its own long-lived server here rather than a
+    // throwaway one.
+    //
+    // Three facts were measured against 1.18.2 and are all easy to get
+    // wrong:
+    //
+    // - **`connected` is not read from the file.** It comes off the
+    //   instance's provider state, which is built once and never
+    //   invalidated by a write — `PUT /auth/anthropic` answers `true`, the
+    //   file on disk grows the credential, and `GET /provider` keeps
+    //   reporting the old list for the life of the instance.
+    //   `POST /instance/dispose` is what re-reads it ([`Self::refresh`]),
+    //   and the next `GET /provider` is correct. The same staleness covers
+    //   the model catalogue, so the refresh is what makes a newly connected
+    //   provider's models appear in the picker.
+    // - **Disposing is survivable.** Measured: the process stays up, the
+    //   `/api/event` stream keeps heart-beating, sessions created before it
+    //   are still readable by id afterwards, and an OAuth loopback listener
+    //   opened before it is still bound after. What it does release is
+    //   "all resources", so it is not done while a turn is open
+    //   ([`Self::busy`]).
+    // - **A provider with no entry in `/provider/auth` takes a plain API
+    //   key.** Only ten of the 218 declare a method; measured,
+    //   `PUT /auth/anthropic {type:"api",key}` on one of the other 208 is
+    //   accepted and the provider comes back connected after a refresh. So
+    //   [`DEFAULT_METHOD`] is a real method rather than a guess, and one
+    //   generic form covers the whole catalogue.
+    //
+    // Nothing here goes near [`RawLog`]: only the SSE payloads are written
+    // to `agents/threads/*.ndjson`, and a credential never travels on that
+    // stream. The one place a key could leak is an error body echoing the
+    // request, so [`Self::set_api_key`] redacts its own secret out of
+    // whatever it is about to return, on top of [`scrub`].
+
+    /// True while any session on this server has a turn open. Dispose
+    /// releases the instance's resources, and doing that under a running
+    /// turn is the one way this refresh could cost something.
+    pub fn busy(&self) -> bool {
+        self.routes
+            .lock()
+            .unwrap()
+            .values()
+            .any(|r| r.state.lock().unwrap().turn_open)
+    }
+
+    /// Make the instance re-read `auth.json`. Answers whether it actually
+    /// did: a refusal is a running turn, not a failure, and the caller says
+    /// so rather than pretending the list is current.
+    pub fn refresh(&self) -> bool {
+        if self.busy() {
+            return false;
+        }
+        self.post(&format!("/instance/dispose?{}", self.directory_query()), json!({}))
+            .is_ok()
+    }
+
+    /// Every provider opencode knows, which ones are connected, and how each
+    /// one can be signed in to.
+    ///
+    /// Two calls: `GET /provider` for the catalogue and the connected list,
+    /// `GET /provider/auth` for the declarative form specs. Both name the
+    /// session directory, so the state read here is the state of the same
+    /// instance the model list and every session belong to — and the one
+    /// [`Self::refresh`] disposes.
+    pub fn list_providers(&self) -> Result<Vec<ProviderInfo>, String> {
+        let v = self.get(&format!("/provider?{}", self.directory_query()))?;
+        // A `/provider/auth` that will not answer is not a reason to refuse
+        // the list: every provider then reads as taking a plain API key,
+        // which is what 208 of them do anyway.
+        let methods = self
+            .get(&format!("/provider/auth?{}", self.directory_query()))
+            .unwrap_or(Value::Null);
+        parse_providers(&v, &methods)
+    }
+
+    /// The form spec for one method, read back from the server rather than
+    /// taken from the webview. The dialog is drawn from a spec it was handed
+    /// earlier, but what is *sent* is filtered against the spec opencode
+    /// declares now — so a stale form cannot smuggle a field into a flow, and
+    /// the index the OAuth endpoints are given is checked against the same
+    /// array they will read it out of.
+    pub fn auth_method(&self, provider: &str, index: usize) -> Result<AuthMethod, String> {
+        let v = self.get(&format!("/provider/auth?{}", self.directory_query()))?;
+        let methods = parse_methods(&v[provider]);
+        methods
+            .into_iter()
+            .find(|m| m.index == index)
+            .ok_or_else(|| format!("opencode has no sign-in method {index} for {provider}"))
+    }
+
+    /// Write an API key straight through to opencode's store. The key is a
+    /// parameter and a request body and nothing else — it is not returned,
+    /// not held, and redacted out of any error on the way back.
+    pub fn set_api_key(
+        &self,
+        provider: &str,
+        key: &str,
+        metadata: &std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        self.put_auth(provider, api_credential(key, metadata))
+            .map_err(|e| redact(&e, key))
+    }
+
+    pub fn remove_auth(&self, provider: &str) -> Result<(), String> {
+        self.delete(&format!("/auth/{}", urlencode(provider))).map(|_| ())
+    }
+
+    /// Start a browser flow. `method` is the index into the provider's own
+    /// array from `/provider/auth`, which is why [`AuthMethod::index`] is
+    /// carried rather than recomputed: the server has no other name for a
+    /// method, and the list is never filtered or re-sorted on the way
+    /// through.
+    pub fn oauth_authorize(
+        &self,
+        provider: &str,
+        method: usize,
+        inputs: &std::collections::BTreeMap<String, String>,
+    ) -> Result<Authorization, String> {
+        let mut body = json!({ "method": method });
+        if !inputs.is_empty() {
+            body["inputs"] = json!(inputs);
+        }
+        let v = self.post(
+            &format!("/provider/{}/oauth/authorize?{}", urlencode(provider), self.directory_query()),
+            body,
+        )?;
+        Ok(Authorization {
+            url: v["url"].as_str().unwrap_or_default().to_string(),
+            method: v["method"].as_str().unwrap_or("auto").to_string(),
+            instructions: v["instructions"].as_str().unwrap_or_default().to_string(),
+        })
+    }
+
+    /// Finish a `code` flow with what the student pasted. An `auto` flow
+    /// never gets here: the server's own loopback listener answers the
+    /// redirect and writes the credential, and the app finds out by
+    /// refreshing.
+    pub fn oauth_callback(&self, provider: &str, method: usize, code: Option<&str>) -> Result<(), String> {
+        let mut body = json!({ "method": method });
+        if let Some(c) = code {
+            body["code"] = json!(c);
+        }
+        let v = self.post(
+            &format!("/provider/{}/oauth/callback?{}", urlencode(provider), self.directory_query()),
+            body,
+        )?;
+        // The endpoint answers a bare boolean, and `false` is a refusal with
+        // no message behind it.
+        if v.as_bool() == Some(false) {
+            return Err("opencode rejected the code. It may have expired — try again.".into());
+        }
+        Ok(())
+    }
+
+    /// `PUT` is the one verb the bridge did not already have, and it exists
+    /// only for this: a credential is set, never posted. The path takes no
+    /// directory — a credential belongs to the machine, and `/auth/{id}` is
+    /// the one endpoint here that is not instance-scoped.
+    fn put_auth(&self, provider: &str, body: Value) -> Result<(), String> {
+        let path = format!("/auth/{}", urlencode(provider));
+        let v = self.finish(
+            self.api
+                .put(&format!("{}{path}", self.base))
+                .set("Content-Type", "application/json")
+                .send_string(&body.to_string()),
+            &path,
+        )?;
+        if v.as_bool() == Some(false) {
+            return Err("opencode would not accept that credential.".into());
+        }
+        Ok(())
     }
 
     // ── Sessions ─────────────────────────────────────────────────────────
@@ -891,6 +1187,193 @@ fn parse_port(line: &str) -> Option<u16> {
 pub fn split_model(model: &str) -> Option<(String, String)> {
     let (p, id) = model.split_once('/')?;
     (!p.is_empty() && !id.is_empty()).then(|| (p.to_string(), id.to_string()))
+}
+
+/// `GET /provider` and `GET /provider/auth`, merged into the rows Settings
+/// draws. Pure, so the merge rules — which provider counts as connected, and
+/// what a provider with no declared method takes — are pinned by tests rather
+/// than by a live server.
+///
+/// **`/provider` echoes the credential.** A connected provider's row carries
+/// its real API key in `key`, and `scrub` does not catch that field name —
+/// measured: a key written through `PUT /auth` comes straight back out of the
+/// next `/provider`. So the field is not read here and nothing built from it
+/// crosses to the webview, which is what the test below pins. It is also why
+/// this response is never quoted into an error, the way `/api/model`'s is not.
+fn parse_providers(all: &Value, methods: &Value) -> Result<Vec<ProviderInfo>, String> {
+    let list = all["all"].as_array().ok_or("opencode /provider: no providers")?;
+    let connected: std::collections::HashSet<&str> = all["connected"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+
+    let mut out: Vec<ProviderInfo> = list
+        .iter()
+        .filter_map(|p| {
+            let id = p["id"].as_str()?.to_string();
+            Some(ProviderInfo {
+                name: p["name"].as_str().unwrap_or(&id).to_string(),
+                source: p["source"].as_str().unwrap_or("custom").to_string(),
+                env: p["env"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
+                    .unwrap_or_default(),
+                model_count: p["models"].as_object().map_or(0, serde_json::Map::len),
+                connected: connected.contains(id.as_str()),
+                methods: parse_methods(&methods[&id]),
+                id,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(out)
+}
+
+/// The body of `PUT /auth/{id}` for an API key. The extra fields a method
+/// asks for (`accountId`, `resourceName`, a GitLab instance URL) are
+/// `metadata`, not part of the key, and the field is left off entirely when
+/// there are none — opencode's own store writes `{type, key}` for the plain
+/// case and an empty object would be a difference for nothing.
+fn api_credential(key: &str, metadata: &std::collections::BTreeMap<String, String>) -> Value {
+    let mut body = json!({ "type": "api", "key": key });
+    if !metadata.is_empty() {
+        body["metadata"] = json!(metadata);
+    }
+    body
+}
+
+/// What a provider that declares nothing takes. Measured, not assumed: only
+/// ten of the 218 have an entry in `/provider/auth`, and
+/// `PUT /auth/{id} {type:"api",key}` on one of the others is accepted and
+/// leaves the provider connected after a refresh. So the absence of a
+/// declared method is "a plain API key", not "no way in", and the dialog
+/// draws the same form it draws for `openai`'s third method.
+fn default_method() -> AuthMethod {
+    AuthMethod {
+        index: 0,
+        kind: "api".into(),
+        label: "API key".into(),
+        prompts: Vec::new(),
+    }
+}
+
+/// `/provider/auth`'s array for one provider. The index is the position in
+/// that array and nothing is dropped or reordered, because the index is what
+/// `oauth/authorize` and `oauth/callback` are told.
+fn parse_methods(v: &Value) -> Vec<AuthMethod> {
+    let Some(arr) = v.as_array() else {
+        return vec![default_method()];
+    };
+    let out: Vec<AuthMethod> = arr
+        .iter()
+        .enumerate()
+        .filter_map(|(index, m)| {
+            let kind = m["type"].as_str()?;
+            Some(AuthMethod {
+                index,
+                kind: kind.to_string(),
+                label: m["label"].as_str().unwrap_or(kind).to_string(),
+                prompts: m["prompts"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(parse_prompt).collect())
+                    .unwrap_or_default(),
+            })
+        })
+        .collect();
+    if out.len() == arr.len() && !out.is_empty() {
+        out
+    } else {
+        // A method the parser could not read would shift every index after
+        // it, and a wrong index starts the wrong flow silently. Fall back to
+        // the key form rather than hand the server an index that no longer
+        // means what it said.
+        vec![default_method()]
+    }
+}
+
+fn parse_prompt(p: &Value) -> Option<AuthPrompt> {
+    let kind = p["type"].as_str()?;
+    if kind != "text" && kind != "select" {
+        return None;
+    }
+    Some(AuthPrompt {
+        kind: kind.to_string(),
+        key: p["key"].as_str()?.to_string(),
+        message: p["message"].as_str().unwrap_or_default().to_string(),
+        placeholder: p["placeholder"].as_str().map(String::from),
+        options: p["options"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|o| {
+                        Some(AuthOption {
+                            label: o["label"].as_str()?.to_string(),
+                            value: o["value"].as_str()?.to_string(),
+                            hint: o["hint"].as_str().map(String::from),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        when: p["when"].as_object().and_then(|w| {
+            Some(AuthWhen {
+                key: w.get("key")?.as_str()?.to_string(),
+                op: w.get("op")?.as_str()?.to_string(),
+                value: w.get("value")?.as_str()?.to_string(),
+            })
+        }),
+    })
+}
+
+/// Whether a prompt is on screen, given what has been answered so far. An
+/// unanswered dependency reads as the empty string, so `neq "enterprise"`
+/// shows the field before the select has been touched and `eq "enterprise"`
+/// does not — which is what the dialog wants, and what the server would
+/// infer anyway.
+fn prompt_visible(p: &AuthPrompt, answers: &std::collections::BTreeMap<String, String>) -> bool {
+    let Some(w) = &p.when else { return true };
+    let actual = answers.get(&w.key).map(String::as_str).unwrap_or("");
+    match w.op.as_str() {
+        "eq" => actual == w.value,
+        "neq" => actual != w.value,
+        // An operator this build does not know is not a reason to hide a
+        // field the provider asked for.
+        _ => true,
+    }
+}
+
+/// The answers that actually belong to a method's form — dropping anything
+/// the student typed into a field that a later choice hid again, and
+/// anything the method never asked for.
+///
+/// This runs on the way *out*, not only in the dialog: the enterprise URL
+/// typed before switching the select back to GitHub.com is still in the
+/// webview's form state, and sending it would start a flow against a host
+/// nobody chose.
+pub fn visible_answers(
+    method: &AuthMethod,
+    answers: &std::collections::BTreeMap<String, String>,
+) -> std::collections::BTreeMap<String, String> {
+    method
+        .prompts
+        .iter()
+        .filter(|p| prompt_visible(p, answers))
+        .filter_map(|p| {
+            let v = answers.get(&p.key)?;
+            (!v.is_empty()).then(|| (p.key.clone(), v.clone()))
+        })
+        .collect()
+}
+
+/// Take one specific secret out of a string that is about to be shown or
+/// logged. [`scrub`] handles the keys opencode names in its own payloads;
+/// this handles the one the app is holding at that moment, for the case
+/// where a validation error quotes the request back.
+fn redact(s: &str, secret: &str) -> String {
+    if secret.len() < 8 {
+        return s.to_string();
+    }
+    s.replace(secret, "[redacted]")
 }
 
 /// Never put a provider key in a string that might be logged. `/api/model`
@@ -1478,5 +1961,206 @@ mod tests {
             .unwrap()
             .contains("\"quoted\" \\ backslash"));
         assert_eq!(v["agent"][NAMING_AGENT]["hidden"], true);
+    }
+
+    // ── Provider credentials ─────────────────────────────────────────────
+    //
+    // The JSON below is verbatim from opencode 1.18.2 on the machine this
+    // was built against, trimmed to the providers that exercise each rule.
+
+    /// `openai`'s three ways in, as `/provider/auth` declares them.
+    const OPENAI_METHODS: &str = r#"[
+      { "type": "oauth", "label": "ChatGPT Pro/Plus (browser)" },
+      { "type": "oauth", "label": "ChatGPT Pro/Plus (headless)" },
+      { "type": "api",   "label": "Manually enter API Key" }
+    ]"#;
+
+    /// `github-copilot`: one method whose form is a select and a text field
+    /// that only exists for one of the select's answers.
+    const COPILOT_METHODS: &str = r#"[
+      { "type": "oauth", "label": "Login with GitHub Copilot", "prompts": [
+        { "type": "select", "key": "deploymentType", "message": "Select GitHub deployment type",
+          "options": [
+            { "label": "GitHub.com", "value": "github.com", "hint": "Public" },
+            { "label": "GitHub Enterprise", "value": "enterprise", "hint": "Data residency or self-hosted" }
+          ] },
+        { "type": "text", "key": "enterpriseUrl", "message": "Enter your GitHub Enterprise URL or domain",
+          "placeholder": "company.ghe.com", "when": { "key": "deploymentType", "op": "eq", "value": "enterprise" } }
+      ] }
+    ]"#;
+
+    fn method(json: &str, index: usize) -> AuthMethod {
+        parse_methods(&serde_json::from_str::<Value>(json).unwrap())
+            .into_iter()
+            .find(|m| m.index == index)
+            .expect("method")
+    }
+
+    fn answers(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    /// The index **is** the name: `oauth/authorize` and `oauth/callback` have
+    /// no other handle on a method, so parsing must not filter or re-sort.
+    #[test]
+    fn method_indices_are_positions_in_the_array() {
+        let ms = parse_methods(&serde_json::from_str::<Value>(OPENAI_METHODS).unwrap());
+        assert_eq!(ms.len(), 3);
+        assert_eq!(
+            ms.iter().map(|m| (m.index, m.kind.as_str())).collect::<Vec<_>>(),
+            vec![(0, "oauth"), (1, "oauth"), (2, "api")],
+        );
+        assert_eq!(ms[2].label, "Manually enter API Key");
+        assert!(ms[0].prompts.is_empty(), "the browser flow asks nothing up front");
+    }
+
+    /// A method this build cannot read would shift every index after it, and
+    /// a wrong index starts the wrong flow with no error — so the whole list
+    /// is given up rather than renumbered.
+    #[test]
+    fn an_unreadable_method_gives_up_the_list_rather_than_renumbering() {
+        let ms = parse_methods(&serde_json::from_str::<Value>(
+            r#"[{ "label": "no type here" }, { "type": "api", "label": "Key" }]"#,
+        ).unwrap());
+        assert_eq!(ms, vec![default_method()]);
+    }
+
+    /// 208 of the 218 providers declare nothing, and measured they take a
+    /// plain `{type:"api",key}`. So "no entry" is a form, not a dead end.
+    #[test]
+    fn a_provider_with_no_declared_method_takes_a_plain_key() {
+        for v in [Value::Null, json!({}), json!([])] {
+            let ms = parse_methods(&v["anthropic"]);
+            assert_eq!(ms.len(), 1);
+            assert_eq!(ms[0].kind, "api");
+            assert!(ms[0].prompts.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_select_and_its_dependent_field_survive_parsing() {
+        let m = method(COPILOT_METHODS, 0);
+        assert_eq!(m.prompts.len(), 2);
+        assert_eq!(m.prompts[0].kind, "select");
+        assert_eq!(m.prompts[0].options.len(), 2);
+        assert_eq!(m.prompts[0].options[1].hint.as_deref(), Some("Data residency or self-hosted"));
+        assert_eq!(m.prompts[1].kind, "text");
+        assert_eq!(m.prompts[1].placeholder.as_deref(), Some("company.ghe.com"));
+        let when = m.prompts[1].when.clone().expect("a condition");
+        assert_eq!((when.key.as_str(), when.op.as_str(), when.value.as_str()),
+                   ("deploymentType", "eq", "enterprise"));
+    }
+
+    /// The `when` rule, evaluated where it matters: on the way out. An
+    /// enterprise URL typed and then abandoned by switching the select back
+    /// is still in the webview's form state, and sending it would point the
+    /// flow at a host nobody chose.
+    #[test]
+    fn hidden_answers_are_dropped_on_the_way_out() {
+        let m = method(COPILOT_METHODS, 0);
+
+        let enterprise = answers(&[("deploymentType", "enterprise"), ("enterpriseUrl", "acme.ghe.com")]);
+        assert_eq!(visible_answers(&m, &enterprise), enterprise);
+
+        let switched_back = answers(&[("deploymentType", "github.com"), ("enterpriseUrl", "acme.ghe.com")]);
+        assert_eq!(visible_answers(&m, &switched_back), answers(&[("deploymentType", "github.com")]));
+
+        // Unanswered reads as empty, so `eq` hides and the field waits.
+        assert!(visible_answers(&m, &answers(&[])).is_empty());
+    }
+
+    #[test]
+    fn answers_the_method_never_asked_for_do_not_travel() {
+        let m = method(COPILOT_METHODS, 0);
+        let padded = answers(&[("deploymentType", "github.com"), ("key", "sk-something"), ("blank", "")]);
+        assert_eq!(visible_answers(&m, &padded), answers(&[("deploymentType", "github.com")]));
+    }
+
+    /// The credential body. `metadata` carries a method's extra fields and is
+    /// left off entirely when there are none, which is the shape opencode's
+    /// own store writes.
+    #[test]
+    fn the_credential_body_is_the_key_and_nothing_else() {
+        assert_eq!(
+            api_credential("sk-live", &answers(&[])),
+            json!({ "type": "api", "key": "sk-live" }),
+        );
+        assert_eq!(
+            api_credential("cf-token", &answers(&[("accountId", "abc123")])),
+            json!({ "type": "api", "key": "cf-token", "metadata": { "accountId": "abc123" } }),
+        );
+    }
+
+    /// The one path a key could take back out is an error body quoting the
+    /// request. `scrub` covers the names opencode uses in its own payloads;
+    /// this covers the secret the app is holding at that moment.
+    #[test]
+    fn an_error_cannot_carry_the_key_back_out() {
+        let msg = redact(
+            "opencode /auth/openai: HTTP 400 invalid key sk-proj-abcdef123456",
+            "sk-proj-abcdef123456",
+        );
+        assert!(!msg.contains("sk-proj"), "{msg}");
+        assert!(msg.contains("[redacted]"));
+        // A short string is not a secret worth blanking half an error for.
+        assert_eq!(redact("cannot reach opencode", "abc"), "cannot reach opencode");
+    }
+
+    /// `GET /provider` hands back the real key for a provider that has one —
+    /// `source` flips to `api` and `key` holds the credential — and `scrub`
+    /// does not know that field name. Nothing built from that row may reach
+    /// the webview.
+    #[test]
+    fn a_connected_providers_key_never_leaves_rust() {
+        let all = json!({
+            "connected": ["xai"],
+            "default": {},
+            "all": [{ "id": "xai", "name": "xAI", "source": "api",
+                      "env": ["XAI_API_KEY"], "key": "xai-SECRETVALUE12345",
+                      "options": {}, "models": { "grok": {} } }]
+        });
+        let rows = parse_providers(&all, &Value::Null).unwrap();
+        assert!(rows[0].connected);
+        assert_eq!(rows[0].source, "api");
+        let wire = serde_json::to_string(&rows).unwrap();
+        assert!(!wire.contains("SECRETVALUE"), "{wire}");
+    }
+
+    /// The merge: who is connected, who takes what form. `tss-nvidia-spark`
+    /// is connected because it is declared in an `opencode.json`, not because
+    /// a credential exists — which is why the row does not offer to
+    /// disconnect a `config` provider.
+    #[test]
+    fn providers_merge_their_connected_state_and_their_forms() {
+        let all = json!({
+            "connected": ["opencode", "tss-nvidia-spark"],
+            "default": {},
+            "all": [
+                { "id": "openai", "name": "OpenAI", "source": "custom",
+                  "env": ["OPENAI_API_KEY"], "options": {}, "models": { "a": {}, "b": {} } },
+                { "id": "tss-nvidia-spark", "name": "TSS NVIDIA Spark", "source": "config",
+                  "env": [], "options": {}, "models": { "a": {} } },
+                { "id": "anthropic", "name": "Anthropic", "source": "custom",
+                  "env": ["ANTHROPIC_API_KEY"], "options": {}, "models": {} }
+            ]
+        });
+        let methods: Value = serde_json::from_str(&format!("{{\"openai\": {OPENAI_METHODS}}}")).unwrap();
+        let rows = parse_providers(&all, &methods).unwrap();
+
+        // Sorted by name, case-folded.
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+                   vec!["anthropic", "openai", "tss-nvidia-spark"]);
+
+        let openai = &rows[1];
+        assert!(!openai.connected);
+        assert_eq!(openai.model_count, 2);
+        assert_eq!(openai.methods.len(), 3);
+
+        let anthropic = &rows[0];
+        assert_eq!(anthropic.methods, vec![default_method()], "no entry means a plain key");
+
+        let spark = &rows[2];
+        assert!(spark.connected);
+        assert_eq!(spark.source, "config", "declared, not signed in to");
     }
 }

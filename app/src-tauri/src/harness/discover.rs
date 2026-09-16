@@ -7,6 +7,14 @@
 //! then the places the installers actually put things, then a login shell's
 //! opinion as the last resort. Results are cached for the life of the
 //! process; the binaries do not move mid-session.
+//!
+//! **This is macOS-shaped, and knowingly so.** `binary_name` answers a bare
+//! `claude`, `is_executable` off unix is only "is it a file", and npm on
+//! Windows writes `claude.cmd`, resolved through `PATHEXT` — so discovery
+//! would miss an npm install there even before anything tried to run it. The
+//! rest of the app leans the same way (launchd's PATH, `/opt/homebrew`, the
+//! keep-alive LaunchAgent), so [`install`](super::install) offers macOS routes
+//! only rather than pretending otherwise.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -149,9 +157,43 @@ pub fn binary(provider: Provider) -> Result<PathBuf, String> {
     c.entry(provider).or_insert_with(|| locate(provider)).clone()
 }
 
-/// Drop the cached lookups, for a health check after the user installs one.
+fn tool_cache() -> &'static Mutex<std::collections::HashMap<String, Option<PathBuf>>> {
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, Option<PathBuf>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Where some *other* tool is, by the same three steps and the same cache
+/// discipline as [`binary`].
+///
+/// [`install`](super::install) asks this about `brew`, `npm`, `bun` and
+/// `curl`, and the login-shell fallback is the whole point for the first of
+/// them: `brew` lives in `/opt/homebrew/bin`, which launchd's PATH does not
+/// have, so a Dock-launched app that only read PATH would tell a Homebrew
+/// user they have no Homebrew. A miss is cached like a hit, for the same
+/// reason it is on the providers; [`forget`] drops both.
+pub fn tool(name: &str) -> Option<PathBuf> {
+    if let Some(hit) = tool_cache().lock().unwrap().get(name) {
+        return hit.clone();
+    }
+    let found = search_path_env(name)
+        .or_else(|| {
+            well_known_dirs()
+                .into_iter()
+                .map(|d| d.join(name))
+                .find(|p| is_executable(p))
+        })
+        .or_else(|| ask_login_shell(name));
+    tool_cache().lock().unwrap().insert(name.to_string(), found.clone());
+    found
+}
+
+/// Drop the cached lookups *and* the cached health, for a recheck after the
+/// user installs one.
 pub fn forget() {
     cache().lock().unwrap().clear();
+    health_cache().lock().unwrap().clear();
+    tool_cache().lock().unwrap().clear();
 }
 
 /// The `oculus` binary the child should find on its PATH. In a bundle it is
@@ -189,7 +231,34 @@ pub struct BridgeHealth {
     pub override_env: &'static str,
 }
 
+fn health_cache() -> &'static Mutex<std::collections::HashMap<Provider, BridgeHealth>> {
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<Provider, BridgeHealth>>> =
+        OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Where each binary is, which version it reports, and if it is not there,
+/// why — cached for the life of the process beside the lookup itself.
+///
+/// The cache is what makes reading this cheap enough to ask on every composer.
+/// The picker now dims a provider whose CLI is missing rather than offering
+/// its catalogue, so `health` is read wherever a model is chosen, not only on
+/// the Settings page; `binary` was already cached, but the `--version` spawn
+/// behind it was not, and three of those on every menu is the same cost the
+/// login-shell fallback was avoided for. [`forget`] clears both, which is what
+/// Settings' *Recheck* does after an install.
 pub fn health(provider: Provider) -> BridgeHealth {
+    if let Some(h) = health_cache().lock().unwrap().get(&provider) {
+        return h.clone();
+    }
+    let h = probe_health(provider);
+    // Probed outside the lock: a `--version` is a process spawn, and two
+    // callers racing it write the same answer twice rather than block.
+    health_cache().lock().unwrap().insert(provider, h.clone());
+    h
+}
+
+fn probe_health(provider: Provider) -> BridgeHealth {
     let mut h = BridgeHealth {
         provider,
         label: provider.label(),

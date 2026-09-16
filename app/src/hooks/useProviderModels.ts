@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { PickerProvider } from "@/components/harness/ModelPicker";
+import { providerHealth, useBridgeHealth } from "@/hooks/useBridgeHealth";
 import { PROVIDERS, providerInfo, type HarnessModel, type Provider } from "@/lib/harness";
 
 /**
- * The model picker's providers, with each one's catalogue.
+ * The model picker's providers, with each one's catalogue and whether its CLI
+ * is actually on this machine.
  *
  * Every picker in the app — the chat composer, the lecture dock's composer and
  * the per-job rows in Settings → AI — used to assemble this itself, in three
@@ -28,6 +30,15 @@ import { PROVIDERS, providerInfo, type HarnessModel, type Provider } from "@/lib
  * asked once per mount, failures included — a missing CLI answers with an
  * empty list, and re-asking it on every render of a menu would make an absent
  * agent slow as well as absent.
+ *
+ * **Health rides alongside the catalogue rather than replacing it.** A
+ * provider whose binary was not found keeps the models it would have — Claude's
+ * compiled-in list is still the list `claude --model` takes, and `modelsFor`
+ * is used to resolve a selection, not to draw one — and it is the picker that
+ * refuses to offer them. That keeps the gate in one place for all three, and
+ * it is the same gate: before health lands, `unknown` means every provider
+ * draws exactly as it drew before this existed. The one thing health does here
+ * is spare a known-missing provider the fetch that could only fail.
  */
 export function useProviderModels(needed: Provider | Provider[]): {
   providers: PickerProvider[];
@@ -38,6 +49,7 @@ export function useProviderModels(needed: Provider | Provider[]): {
 } {
   const [fetched, setFetched] = useState<Partial<Record<Provider, HarnessModel[]>>>({});
   const asked = useRef(new Set<Provider>());
+  const { health } = useBridgeHealth();
 
   // A stable key rather than the array itself: every call site builds its
   // `needed` inline, so a fresh array each render would re-run the effect
@@ -51,27 +63,34 @@ export function useProviderModels(needed: Provider | Provider[]): {
     for (const id of key.split(" ").filter(Boolean) as Provider[]) {
       const info = providerInfo(id);
       if (!info?.fetchModels || asked.current.has(id)) continue;
+      // Known missing: the fetch would spawn a CLI that is not there and come
+      // back empty, which the picker would have to tell apart from a real
+      // empty answer. `unknown` still asks — health is not waited on, so a
+      // composer's list arrives as fast as it ever did.
+      if (providerHealth(health, id) === "missing") continue;
       asked.current.add(id);
       info
         .fetchModels()
         .then((models) => setFetched((f) => ({ ...f, [id]: models })))
         .catch(() => setFetched((f) => ({ ...f, [id]: [] })));
     }
-  }, [key]);
+  }, [key, health]);
 
   const providers = useMemo<PickerProvider[]>(
     () =>
-      PROVIDERS.map((p) =>
-        p.staticModels
-          ? { id: p.id, label: p.label, models: p.staticModels }
-          : {
-              id: p.id,
-              label: p.label,
-              models: fetched[p.id] ?? [],
-              loading: fetched[p.id] === undefined,
-            },
-      ),
-    [fetched],
+      PROVIDERS.map((p) => {
+        const state = providerHealth(health, p.id);
+        return {
+          id: p.id,
+          label: p.label,
+          models: p.staticModels ?? fetched[p.id] ?? [],
+          // A missing provider is never "loading": nothing was asked, and
+          // nothing is coming.
+          loading: !p.staticModels && state !== "missing" && fetched[p.id] === undefined,
+          health: state,
+        };
+      }),
+    [fetched, health],
   );
 
   const modelsFor = useCallback(

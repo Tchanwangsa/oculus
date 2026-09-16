@@ -1,12 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsClockwise, CircleNotch } from "@phosphor-icons/react";
-import {
-  defaultSelection,
-  harnessHealth,
-  type BridgeHealth,
-  type Provider,
-} from "@/lib/harness";
+import { defaultSelection, type Provider } from "@/lib/harness";
 import { ModelPicker } from "@/components/harness/ModelPicker";
+import { useBridgeHealth } from "@/hooks/useBridgeHealth";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,24 +14,39 @@ import {
   type JobModels,
   type JobSelection,
 } from "@/lib/db";
+import { OpencodeProvidersSection } from "@/components/settings/OpencodeProvidersSection";
+import {
+  InstallAgentDialog,
+  useAgentInstall,
+} from "@/components/settings/InstallAgentDialog";
 import { Section } from "./section";
 
 /**
  * The CLI agents behind Chat: where each binary was found and which version,
- * or why it was not. Rechecking clears the cached lookup, for right after an
- * install.
+ * or why it was not.
+ *
+ * This is no longer the only reader — every model picker asks the same
+ * question now, and a provider with no binary reads as *not installed* there
+ * rather than offering a catalogue nothing can run — so the answer comes from
+ * the shared `useBridgeHealth`. This page keeps the one thing that is its
+ * alone: *Recheck* is the only caller that passes `recheck`, which is what
+ * drops Rust's cached lookups and pays for a fresh probe after an install.
+ *
+ * It is also the only place that can *do* something about a missing one. A
+ * row with no path carries *Install*, which opens the commands this machine
+ * can run and runs the one that is picked
+ * (`app/src/components/settings/InstallAgentDialog.tsx`). The run is held
+ * here rather than in that dialog so closing it mid-install strands neither
+ * the output nor the recheck the finish fires — and `recheck` is exactly the
+ * hand-off, since a CLI installed a second ago stays missing until Rust's
+ * cached failure is dropped.
  */
 function CliAgentsSection() {
-  const [health, setHealth] = useState<BridgeHealth[] | null>(null);
-  const [checking, setChecking] = useState(false);
-  const check = useCallback(() => {
-    setChecking(true);
-    harnessHealth()
-      .then(setHealth)
-      .catch(() => setHealth([]))
-      .finally(() => setChecking(false));
-  }, []);
-  useEffect(check, [check]);
+  const { health, recheck, checking } = useBridgeHealth();
+  const install = useAgentInstall(recheck);
+  /** Which row's dialog is open. Separate from the run above: the run
+   *  outlives the dialog, and the dialog can be opened on a row with no run. */
+  const [openFor, setOpenFor] = useState<{ provider: Provider; label: string } | null>(null);
 
   return (
     <Section
@@ -56,8 +67,26 @@ function CliAgentsSection() {
               </div>
               {h.error && h.path && <div className="mt-0.5 text-xs text-destructive">{h.error}</div>}
             </div>
-            <div className="shrink-0 text-xs tabular-nums text-muted-foreground">
-              {h.version ? `v${h.version}` : h.path ? "—" : "missing"}
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {h.version ? `v${h.version}` : h.path ? "—" : "missing"}
+              </span>
+              {!h.path && (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setOpenFor({ provider: h.provider, label: h.label })}
+                >
+                  {install.run?.provider === h.provider && !install.run.result ? (
+                    <>
+                      <CircleNotch size={12} className="animate-spin" />
+                      Installing…
+                    </>
+                  ) : (
+                    "Install"
+                  )}
+                </Button>
+              )}
             </div>
           </div>
         ))}
@@ -65,10 +94,25 @@ function CliAgentsSection() {
           <div className="py-2.5 text-xs text-muted-foreground">Checking…</div>
         )}
       </div>
-      <Button variant="ghost" size="xs" className="mt-2" onClick={check} disabled={checking}>
+      <Button variant="ghost" size="xs" className="mt-2" onClick={recheck} disabled={checking}>
         {checking ? <CircleNotch size={12} className="animate-spin" /> : <ArrowsClockwise size={12} />}
         Recheck
       </Button>
+      {openFor && (
+        <InstallAgentDialog
+          provider={openFor.provider}
+          label={openFor.label}
+          run={install.run?.provider === openFor.provider ? install.run : null}
+          onStart={(route) => install.start(openFor.provider, route)}
+          onClose={() => {
+            // A finished run is cleared with the dialog, so reopening the row
+            // offers the commands again rather than a log of what already
+            // happened. One still running is kept, and reopening resumes it.
+            if (install.run?.result) install.clear();
+            setOpenFor(null);
+          }}
+        />
+      )}
     </Section>
   );
 }
@@ -182,6 +226,7 @@ export default function SettingsAiPage() {
   return (
     <div className="flex flex-col gap-8">
       <CliAgentsSection />
+      <OpencodeProvidersSection />
       <JobModelsSection />
     </div>
   );

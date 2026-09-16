@@ -568,8 +568,16 @@ export function harnessDeleteThread(threadId: number): Promise<void> {
   return invoke("harness_delete_thread", { threadId });
 }
 
-export function harnessHealth(): Promise<BridgeHealth[]> {
-  return invoke<BridgeHealth[]>("harness_health");
+/**
+ * Where each CLI is, or why it is not. Read through
+ * `app/src/hooks/useBridgeHealth.ts` rather than called directly — every model
+ * picker in the app asks this question and there is one answer per session.
+ *
+ * `recheck` drops Rust's cached lookups first, which can cost a login shell
+ * per provider; it belongs to Settings' *Recheck* button and nothing else.
+ */
+export function harnessHealth(recheck = false): Promise<BridgeHealth[]> {
+  return invoke<BridgeHealth[]>("harness_health", { recheck });
 }
 
 /** Ask the provider for its plan windows now, rather than waiting for a turn

@@ -26,6 +26,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | opencode bridge (`opencode serve`, HTTP + SSE) | `app/src-tauri/src/harness/opencode.rs` |
 | opencode's containment ruleset and system prompt | `app/src-tauri/templates/OPENCODE.template.json` |
 | Finding the binaries from a GUI app | `app/src-tauri/src/harness/discover.rs` |
+| Installing a missing one from Settings → AI | `app/src-tauri/src/harness/install.rs`, `app/src/components/settings/InstallAgentDialog.tsx` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–26, 28 and 30 in `app/src-tauri/src/lib.rs` |
 | Instructions appended to the provider's prompt | `app/src-tauri/templates/HARNESS.template.md` |
 | The library's own `AGENTS.md`, which Codex reads on its own | `app/src-tauri/templates/AGENTS.template.md` |
@@ -35,6 +36,8 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | Page, thread list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` |
 | The `@` menu's candidate files | `searchMentionFiles` in `app/src/lib/db.ts` |
 | Health and the per-job model rows in Settings → AI | `app/src/pages/settings/AiPage.tsx` |
+| Signing in to opencode's providers: the list and the generic form | `app/src/components/settings/OpencodeProvidersSection.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeAuth.ts` |
+| Whether each CLI is installed, shared by every picker | `app/src/hooks/useBridgeHealth.ts` |
 | Which agent, model and level each headless job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
 | The lecture brief a dock thread is scoped to | `instructions` in `app/src-tauri/src/harness/mod.rs` |
 | The frame grab a message's moment carries | `lecture_grab_frame` in `app/src-tauri/src/chapters.rs`, `app/src/lib/lectures.ts` |
@@ -134,7 +137,10 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   with either set grows a whole provider nobody chose — sixteen Anthropic
   models, sixty-one OpenAI ones — so without the strip the app would offer a
   different catalogue launched from a terminal than from the Dock. Stripped,
-  opencode sees only what `opencode auth` holds. And the `oculus` binary's
+  opencode sees only what `opencode auth` holds — which is why [signing a
+  provider in](#signing-in-to-a-provider) writes to *that* store rather than
+  passing a key through the environment, and why building it did not have to
+  soften this. And the `oculus` binary's
   directory is put first on PATH — `AGENTS.md` tells the agent to run
   `oculus grep`, and advice that resolves to "command not found" is worse
   than none. Claude's auto-memory is switched off in the same settings
@@ -145,7 +151,18 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   `OCULUS_CODEX_BIN` / `OCULUS_OPENCODE_BIN`, then PATH, then where the installers put things, then a
   login shell's `command -v`; the answer is cached, failures included, since
   re-asking a login shell on every send would make a missing CLI slow as
-  well as absent. Settings → AI shows the result and can recheck.
+  well as absent. The `--version` probe behind `health` is cached beside it,
+  because that answer is no longer read only by Settings → AI — every model
+  picker asks it now (below), and three process spawns per menu is the cost
+  the login-shell fallback was cached to avoid. So `harness_health` takes a
+  `recheck` flag: Settings' button passes it and drops both caches, for right
+  after an install, and nothing else does.
+- **And a missing CLI can now be installed from the row that says so**, which
+  is [Installing an agent](#installing-an-agent) below. The same three steps
+  find `brew`, `npm`, `bun` and `curl` — `discover::tool`, cached beside the
+  providers — so the offer matches the machine rather than assuming Homebrew,
+  and the login-shell step is what makes that answer true at all, since `brew`
+  lives where launchd's PATH does not look.
 - **Rust writes the rows; the webview folds the stream.** One consumer
   thread takes every event from every bridge in order, writes it to
   `harness_threads` / `harness_items` (`store.rs`), then emits it on
@@ -209,6 +226,14 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   models cannot be driven over the HTTP API at all (the gateway answers
   "OpenCode's free tier can only be used in OpenCode"), so that 400 is
   rewritten into a sentence a student can act on.
+- **The same server is also the credential store's door.** opencode reaches
+  two hundred and eighteen providers and answers for the ones `opencode auth`
+  holds a key for, which used to mean a terminal. `opencode serve` exposes the
+  whole auth surface — the provider list, a declarative form spec per provider,
+  the credential write, and the OAuth flows including the loopback listener the
+  browser comes back to — so Settings drives it over the connection the bridge
+  already has. [Signing in to a provider](#signing-in-to-a-provider) is the
+  shape of it.
 - **Codex specifics worth not rediscovering.** `thread/start` takes
   `sandbox` (a mode string) while `turn/start` takes `sandboxPolicy` (an
   object). A resumed thread replays its previous turn's token usage before
@@ -703,6 +728,28 @@ catalogues are compiled in and which are fetched from a CLI is a property of
 the `PROVIDERS` entry in `app/src/lib/harness.ts`. That file is the one place
 a provider is declared.
 
+**The menu knows whether the agent is on the machine.** Discovery's answer used
+to reach only Settings → AI, so the composer offered Claude's compiled-in
+catalogue to a student with no Claude Code installed and the truth arrived as
+an error row after sending; Codex and opencode, whose lists come from their
+CLIs, failed the fetch and drew "No models available" — the same sentence an
+installed opencode with no credentials gets. So health is shared app-wide
+through `app/src/hooks/useBridgeHealth.ts` — a module-level cache and one
+in-flight promise rather than a store, since it is one value that arrives once
+and is re-asked only when Settings rechecks — and rides `useProviderModels`
+into the picker as a field on each provider. Three states, because they are
+three different facts: *unknown* until the check lands, where a provider is
+drawn exactly as it was before health existed rather than flashing a wrong
+answer; *missing*, which replaces the catalogue with the CLI's name and a
+button into Settings → AI (through `navigateActive` in
+`app/src/lib/tabRouters.ts`, since a popover has no router of its own) and dims
+that agent's mark in the strip without removing it — seeing that Codex exists
+and is absent is the point, and the mark stays clickable because the panel
+behind it is the only thing that says why; and *installed*, where an empty list
+is still "No models available". The gate is the `health` field and not a test
+on an id, so Claude's static catalogue is withheld on exactly the same terms as
+the two fetched ones, and a fourth agent costs nothing here.
+
 Three things about it are deliberate:
 
 - **Nothing is defaulted out of sight.** There is no "default model" row and
@@ -731,6 +778,155 @@ Both CLIs bind the level when a session starts, not per turn — so changing it
 mid-thread respawns the Claude process and restarts the Codex thread, which
 `Harness::send` decides by comparing the level a live session was started with
 against the one being asked for.
+
+## Signing in to a provider
+
+Claude Code and Codex are signed in with their own CLIs and carry the
+student's subscription. opencode carries whatever `opencode auth` holds — and
+until this stage the only way to put something there was a terminal, so the
+picker above showed two providers out of two hundred and eighteen with nothing
+on screen saying why. Settings → AI now lists them, says which are connected,
+and connects and disconnects them
+(`app/src/components/settings/OpencodeProvidersSection.tsx`).
+
+**It goes through opencode's server, not around it.** `opencode serve` — the
+same one the bridge already talks to — exposes `GET /provider` (the catalogue,
+plus a `connected` list), `GET /provider/auth` (how each provider can be signed
+in to), `PUT`/`DELETE /auth/{id}` (the credential itself) and the OAuth pair
+`POST /provider/{id}/oauth/authorize` / `…/callback`. Nothing writes
+`auth.json`, nothing drives the TUI and nothing shells out. The credential
+lands in opencode's own store and is therefore shared with the opencode the
+student runs in a terminal, which the section says out loud in a line under its
+title. This also leaves the env strip above untouched: writing through
+`PUT /auth` *is* the store the strip exists to make authoritative.
+
+**The dialog is generic because the form is data.** A method arrives as a
+spec — `oauth` or `api`, a label, and prompts that are text fields or selects,
+each optionally conditional on another answer — so one component covers
+`openai`'s three ways in, `github-copilot`'s enterprise branch, and the
+providers opencode adds after this was written
+(`app/src/components/settings/OpencodeConnectDialog.tsx`). Only ten providers
+declare a method at all; the other two hundred and eight take a plain API key,
+which is measured rather than assumed — a `{type:"api",key}` written to one of
+them is accepted and the provider comes back connected — so "declares nothing"
+renders the key form rather than a dead end. The `when` rule is evaluated
+twice on purpose: in the dialog to decide what is drawn, and again in Rust
+against the spec the server declares *now*, so an enterprise URL typed and then
+abandoned by switching the select back cannot ride along.
+
+**`auto` and `code` are the two OAuth shapes, and both open the system
+browser** (`tauri-plugin-opener` — a student is far likelier to be signed in to
+GitHub or OpenAI there than in the app's in-app browser). `auto` means opencode
+finishes the flow itself: the redirect lands on a loopback listener *inside the
+app's own server*, or it polls a device code, and the app only learns of it by
+looking. `code` means the student pastes something back and the app posts it to
+`…/oauth/callback`. Both were seen in 1.18.2 — OpenAI's browser flow and its
+device flow are both `auto`.
+
+**`connected` is not read off the file, which is the trap here.** A credential
+written through `PUT /auth` answers `true` and the file on disk grows it, and
+`GET /provider` keeps reporting the old list for the life of the instance —
+the model catalogue with it. `POST /instance/dispose` is what makes the
+instance re-read its store, so every read after a write asks for one. Disposing
+was measured to be survivable: the process stays up, the `/api/event` stream
+keeps heart-beating, sessions created before it are still readable by id, and
+an OAuth loopback listener opened before it is still bound after. What it
+releases is "all resources", so it is skipped while a turn is open and the
+answer says so rather than showing a list it knows is behind. All of it names
+the session directory — `/provider`, `/provider/auth` and `/instance/dispose`
+take a plain `directory` where `/api/…` takes `location[directory]`, and the
+server's own cwd is wherever the app was launched from, so an unscoped call
+would read and refresh a *different* instance from the one the model list and
+every session belong to. `PUT`/`DELETE /auth/{id}` is the exception and takes
+none: a credential belongs to the machine.
+
+**Opening Settings does not start opencode.** The read would spawn
+`opencode serve`, and *a visit is not a reason to spawn a CLI* — the same rule
+the rate-limit read follows. So the section opens on a button and the click is
+what starts it, after which the answer is kept for the window's life. Whether
+opencode is installed at all is the free question `useBridgeHealth` already
+answers, so a machine without it says so instead of failing a call.
+
+**The list leads with what is connected.** Two hundred and eighteen rows is not
+a list, so what is signed in comes first — it is what the picker will show and
+the only thing there is to remove — then the handful that offer a real sign-in
+flow, and the rest by name through a search box. A provider whose `source` is
+`config` is connected because an `opencode.json` declares it, not because a
+credential exists, so its row says where it came from instead of offering a
+Disconnect that would do nothing.
+
+A key is never held. It travels from the field to `PUT /auth/{id}` and nowhere
+else: not into `settings`, not into the keychain, and not into
+`agents/threads/*.ndjson`, which only ever receives SSE payloads. Two paths
+back out are closed rather than assumed shut. An error body quoting the request
+is redacted of the secret the bridge is holding at that moment, on top of the
+`scrub` that already guards `/api/model`'s key-bearing rows. And **`/provider`
+itself echoes the credential** — a connected provider's row carries the real key
+in a field `scrub` does not know the name of, measured — so the merge into the
+rows Settings draws never reads that field, and a test asserts the serialized
+rows cannot carry it.
+
+## Installing an agent
+
+Settings → AI said where each CLI was, or that it was missing and which
+`OCULUS_*_BIN` would override that; the model picker now says "not installed"
+too and links here. Neither offered a way through, so the student's next move
+was to leave the app, work out which of four install routes their machine
+wants, and come back. The row now carries **Install**
+(`app/src-tauri/src/harness/install.rs`,
+`app/src/components/settings/InstallAgentDialog.tsx`).
+
+It is deliberately **not** a package-manager wrapper, and the four rules it is
+built on are the whole design:
+
+- **The command is shown, verbatim, with Copy — always.** Every route is a
+  literal string taken from the vendor's own documentation, with the URL it
+  came from in a comment beside it so the next person can re-check rather than
+  trust. Copy is the path that always works: a locked-down machine, a student
+  who would rather run it in their own terminal, or a route this machine
+  cannot run. It is there beside the button that would run it, not instead
+  of it.
+- **The offer matches the machine.** `brew`, `npm`, `bun` and `curl` are
+  found exactly as the CLIs are, login shell included, and only the routes
+  whose tool is present are offered to run. Each route also has to land the
+  binary somewhere `discover::well_known_dirs` already looks — `~/.local/bin`,
+  `~/.opencode/bin`, `~/.bun/bin`, `/opt/homebrew/bin`, npm-global — or the
+  install would succeed and the row would go on saying "missing". A machine
+  with none of the four is not a dead end and not a dead button: it gets the
+  commands to copy and no Install at all.
+- **The click on the button showing the command is the confirmation**, and
+  there is no other. Nothing that needs `sudo` is ever offered or run — a GUI
+  app has no terminal to put a password prompt in — so a provider whose only
+  route here would need elevation gets the command and stops there. The child
+  runs through `$SHELL -lc` for the profile's PATH, with **stdin on
+  `/dev/null`**, so anything that decides to ask a question fails instead of
+  hanging behind a dialog that would go on saying "working". And the webview
+  names a provider and a manager, never a command: the string comes out of
+  Rust's table, because an invoke that took the text would be a shell for
+  anything that reached the webview.
+- **The finish rechecks.** `discover::binary` caches its failures for the life
+  of the process, so a CLI installed a second ago stays missing until
+  `discover::forget()` runs — and the webview has a second cache in
+  `useBridgeHealth`. Rust deliberately forgets neither: the run's last event
+  carries `done`, and the frontend fires `recheck()`, the one path that drops
+  both. That is also why the run is held by the Settings section rather than by
+  the dialog — closing the dialog mid-install would otherwise strand the output
+  *and* the recheck.
+
+Output streams line by line on one `app.emit` event, stdout and stderr drained
+by a thread each into one channel (read one after the other, a child that fills
+the unread pipe deadlocks), so their interleaving is approximate and the `done`
+event is always last. The dialog is the only listener and the only surface:
+this app has no toasts, and an install is a foreground thing the student is
+watching rather than a background job for the sidebar.
+
+**macOS only, and said so in the code.** The routes are macOS ones, and
+discovery itself is macOS-shaped — `binary_name` answers a bare `claude` with
+no `.cmd`/`.exe`, the non-unix `is_executable` is only "is it a file", and npm
+on Windows installs `claude.cmd` resolved through `PATHEXT` — so `scoop` and
+`winget` would be buttons that install something this app then cannot find.
+The rest of the app leans the same way (launchd's PATH, `/opt/homebrew`, the
+keep-alive LaunchAgent).
 
 ## Per-job models
 
@@ -976,7 +1172,8 @@ time the question was asked.
 Built: the three bridges with recorded fixtures and replay tests, `oculus
 agent` as the headless proof, tables and lifecycle, the page, subject scope
 and the `@` file menu, the message queue, stopping a turn, going back
-(edit, retry, rewind), the per-job model registry above, and the lecture player's dock chat. Not yet: approvals and native questions routed to the UI, steering
+(edit, retry, rewind), the per-job model registry above, [signing in to opencode's
+providers](#signing-in-to-a-provider), and the lecture player's dock chat. Not yet: approvals and native questions routed to the UI, steering
 mid-turn (bb's `turn/steer` and a second stdin line — the queue is the
 waiting-room version of it, not steering), the plan/todo card, branching (rewind
 deliberately does not).
@@ -986,11 +1183,18 @@ used to list "a third bridge for the API path when BYOK returns" as the plan:
 the dormant provider layer would wake up beside the CLIs and chat would have
 two kinds of backend. That is reversed. opencode *is* BYOK — the provider
 catalogue, the credential store, the streaming client and the model library
-belong to a program that already does all of it, students set keys up with
-`opencode auth`, and everything reaches the app through the seam that already
-existed. So there is one `HarnessEvent` stream, one timeline, one containment
-rule and one job registry, instead of a second code path with its own tools,
-citations and spend ledger. The BYOK layer is deleted rather than dormant.
+belong to a program that already does all of it, and everything reaches the
+app through the seam that already existed. So there is one `HarnessEvent`
+stream, one timeline, one containment rule and one job registry, instead of a
+second code path with its own tools, citations and spend ledger. The BYOK layer
+is deleted rather than dormant.
+
+The half of BYOK that was left to a terminal — *where the key comes from* — is
+now in the app too, and it did not cost a code path either: opencode's server
+already owns the provider catalogue, the credential store and the browser
+flows, so [signing in to a provider](#signing-in-to-a-provider) is more HTTP
+over the connection the bridge already holds. Keys still live in opencode's
+store rather than this app's, which is what keeps the sentence above true.
 
 The plan/todo card is still outstanding despite projects being built, because
 the two are different things: that card would draw the provider's *own*

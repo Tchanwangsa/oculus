@@ -27,11 +27,12 @@ pub mod claude;
 pub mod codex;
 pub mod discover;
 pub mod event;
+pub mod install;
 pub mod jobs;
 pub mod opencode;
 pub mod store;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -40,7 +41,7 @@ use serde::{Deserialize, Serialize};
 
 use claude::{ClaudeSession, ClaudeSpawn};
 use codex::{CodexServer, CodexSpawn, CodexThreadOpts, ModelInfo};
-use opencode::{OpencodeServer, OpencodeSessionOpts, OpencodeSpawn};
+use opencode::{OpencodeServer, OpencodeSessionOpts, OpencodeSpawn, ProviderList};
 pub use event::{HarnessEvent, Provider, ToolKind};
 
 /// Where a bridge hands its events. Called from the bridge's reader thread,
@@ -650,6 +651,81 @@ impl Harness {
     pub fn opencode_models(&self) -> Result<Vec<opencode::ModelInfo>, String> {
         self.opencode_server()?.list_models()
     }
+
+    // ── opencode credentials ─────────────────────────────────────────────
+    //
+    // Claude Code and Codex carry the student's own subscription and are
+    // signed in with their own CLIs; opencode carries whatever
+    // `opencode auth` holds, and until this existed the only way to put
+    // something there was a terminal. Every call below goes through the
+    // server's own auth endpoints (`opencode.rs`), so the credential lands
+    // in opencode's store and is the same one the student's terminal
+    // opencode uses. Nothing is mirrored into `settings`, the keychain or a
+    // thread log.
+    //
+    // This does **not** soften [`discover::child_env`]'s strip of
+    // `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. That strip exists so the
+    // catalogue is what `opencode auth` holds rather than whatever is in a
+    // shell; writing through `PUT /auth` *is* that store, so the rule stands
+    // exactly as it did.
+    //
+    // All of them start the server if it is down — they are the answer to a
+    // button the student pressed, not to a page being opened, which is the
+    // same line `harness_opencode_models` sits on and the opposite of the
+    // rate-limit read.
+
+    pub fn opencode_providers(&self, refresh: bool) -> Result<ProviderList, String> {
+        let server = self.opencode_server()?;
+        // A refusal is a running turn: the list is then what the instance
+        // last read, which may predate a credential written since.
+        let stale = refresh && !server.refresh();
+        Ok(ProviderList {
+            providers: server.list_providers()?,
+            stale,
+        })
+    }
+
+    /// The key travels as an argument and a request body and is gone when
+    /// this returns.
+    pub fn opencode_set_api_key(
+        &self,
+        provider: &str,
+        method: usize,
+        key: &str,
+        answers: &BTreeMap<String, String>,
+    ) -> Result<ProviderList, String> {
+        let server = self.opencode_server()?;
+        let spec = server.auth_method(provider, method)?;
+        server.set_api_key(provider, key, &opencode::visible_answers(&spec, answers))?;
+        self.opencode_providers(true)
+    }
+
+    pub fn opencode_disconnect(&self, provider: &str) -> Result<ProviderList, String> {
+        self.opencode_server()?.remove_auth(provider)?;
+        self.opencode_providers(true)
+    }
+
+    pub fn opencode_oauth_authorize(
+        &self,
+        provider: &str,
+        method: usize,
+        answers: &BTreeMap<String, String>,
+    ) -> Result<opencode::Authorization, String> {
+        let server = self.opencode_server()?;
+        let spec = server.auth_method(provider, method)?;
+        server.oauth_authorize(provider, method, &opencode::visible_answers(&spec, answers))
+    }
+
+    pub fn opencode_oauth_callback(
+        &self,
+        provider: &str,
+        method: usize,
+        code: Option<&str>,
+    ) -> Result<ProviderList, String> {
+        self.opencode_server()?.oauth_callback(provider, method, code)?;
+        self.opencode_providers(true)
+    }
+
 
     /// Bring a thread's session up if it is not, then send. `resume` is the
     /// provider's session id from a previous process, if any.
@@ -1291,14 +1367,64 @@ pub mod app {
         .map_err(|e| e.to_string())?
     }
 
+    /// Where each CLI is, and whether it is there at all.
+    ///
+    /// `recheck` is the difference between Settings' *Recheck* button and
+    /// everything else. Only that button drops the cached lookups
+    /// (`discover::forget`), because a full recheck can end in a login shell's
+    /// `command -v` per provider — a few hundred milliseconds each, and this
+    /// is now read by every model picker in the app rather than by one
+    /// settings page. Without `recheck` the answer comes off
+    /// `discover::health`'s cache, so opening a composer costs nothing after
+    /// the first read of the session.
     #[tauri::command]
-    pub async fn harness_health() -> Vec<discover::BridgeHealth> {
-        tokio::task::spawn_blocking(|| {
-            discover::forget();
+    pub async fn harness_health(recheck: bool) -> Vec<discover::BridgeHealth> {
+        tokio::task::spawn_blocking(move || {
+            if recheck {
+                discover::forget();
+            }
             discover::PROVIDERS.iter().map(|p| discover::health(*p)).collect()
         })
         .await
         .unwrap_or_default()
+    }
+
+    /// The four ways this machine could install one of the CLIs, and which of
+    /// them it can actually run. Detection asks a login shell, so it is
+    /// blocking and cached (`discover::tool`); *Recheck* drops that cache
+    /// alongside everything else.
+    #[tauri::command]
+    pub async fn harness_install_offer(provider: Provider) -> install::InstallOffer {
+        tokio::task::spawn_blocking(move || install::offer(provider, install::detect()))
+            .await
+            // A join that failed is not evidence that the machine is bare, but
+            // it is the only safe thing to draw: commands to copy, no buttons.
+            .unwrap_or_else(|_| install::offer(provider, install::Managers::default()))
+    }
+
+    /// Run one of them. The webview names a provider and a manager and never
+    /// the command — `install.rs` owns the string, and that is the whole
+    /// reason this takes an enum rather than the text the dialog is showing.
+    ///
+    /// Output streams on `install::INSTALL_EVENT` the way every other job's
+    /// progress reaches the webview, and the run's last event is the one with
+    /// `done` on it: that is where Settings rechecks, because
+    /// `discover::binary` caches its failures and a freshly installed CLI
+    /// stays missing until both caches are dropped.
+    #[tauri::command]
+    pub async fn harness_install_run(
+        app: AppHandle,
+        provider: Provider,
+        manager: install::Manager,
+    ) -> Result<(), String> {
+        tokio::task::spawn_blocking(move || {
+            let emitter = app.clone();
+            install::start(provider, manager, move |line| {
+                emitter.emit(install::INSTALL_EVENT, line).ok();
+            })
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
 
     /// The Chat page, on open and on a provider switch. Codex answers a read
@@ -1335,6 +1461,91 @@ pub mod app {
     ) -> Result<Vec<opencode::ModelInfo>, String> {
         let h = state.harness.clone();
         tokio::task::spawn_blocking(move || h.opencode_models())
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    // ── opencode credentials ─────────────────────────────────────────────
+    //
+    // Settings → AI's provider list and the dialog behind it. Each of these
+    // starts the server if it is down, so none of them is called on a page
+    // opening: the section draws a button first and the student's click is
+    // what spawns opencode. `harness_health` already says whether the binary
+    // exists at all, and it costs nothing, so the section can degrade to
+    // "not installed" without any of this running.
+    //
+    // A credential never comes back out. `opencode_set_api_key` takes the
+    // key and answers with the provider list; there is no read side, because
+    // the app has no reason to know a key it has already handed over.
+
+    #[tauri::command]
+    pub async fn harness_opencode_providers(
+        state: State<'_, HarnessState>,
+        refresh: bool,
+    ) -> Result<opencode::ProviderList, String> {
+        let h = state.harness.clone();
+        tokio::task::spawn_blocking(move || h.opencode_providers(refresh))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn harness_opencode_set_key(
+        state: State<'_, HarnessState>,
+        provider: String,
+        method: usize,
+        key: String,
+        answers: Option<BTreeMap<String, String>>,
+    ) -> Result<opencode::ProviderList, String> {
+        let h = state.harness.clone();
+        let answers = answers.unwrap_or_default();
+        tokio::task::spawn_blocking(move || h.opencode_set_api_key(&provider, method, &key, &answers))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn harness_opencode_disconnect(
+        state: State<'_, HarnessState>,
+        provider: String,
+    ) -> Result<opencode::ProviderList, String> {
+        let h = state.harness.clone();
+        tokio::task::spawn_blocking(move || h.opencode_disconnect(&provider))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    /// Start a browser flow and hand back the URL to open, whether the
+    /// server finishes it by itself (`auto`) and what to tell the student.
+    /// The webview opens the URL in the *system* browser — they are far more
+    /// likely to be signed in to GitHub or OpenAI there than in the app's
+    /// in-app one.
+    #[tauri::command]
+    pub async fn harness_opencode_oauth_start(
+        state: State<'_, HarnessState>,
+        provider: String,
+        method: usize,
+        answers: Option<BTreeMap<String, String>>,
+    ) -> Result<opencode::Authorization, String> {
+        let h = state.harness.clone();
+        let answers = answers.unwrap_or_default();
+        tokio::task::spawn_blocking(move || h.opencode_oauth_authorize(&provider, method, &answers))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    /// Finish a `code` flow. An `auto` one never calls this — its credential
+    /// is written by the server's own listener, and the dialog finds out by
+    /// polling `harness_opencode_providers` with `refresh`.
+    #[tauri::command]
+    pub async fn harness_opencode_oauth_finish(
+        state: State<'_, HarnessState>,
+        provider: String,
+        method: usize,
+        code: Option<String>,
+    ) -> Result<opencode::ProviderList, String> {
+        let h = state.harness.clone();
+        tokio::task::spawn_blocking(move || h.opencode_oauth_callback(&provider, method, code.as_deref()))
             .await
             .map_err(|e| e.to_string())?
     }
