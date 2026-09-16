@@ -38,23 +38,35 @@ export function CodexMark(props: SVGProps<SVGSVGElement>) {
 }
 
 /**
- * opencode ships a lowercase wordmark rather than a glyph, and a word is
- * illegible at the 14px this is drawn at — so its mark is a neutral terminal
- * prompt, which is what the agent is. Same idiom as the two above: one
- * `currentColor` path, no stroke, filling its viewBox to the same weight, so
- * the three sit together in a row of controls without one reading as a logo.
+ * opencode's own mark, which is the only two-tone one of the three: a heavy
+ * rectangular frame with a block filling the lower two-thirds of its opening —
+ * a cursor sitting in a terminal.
+ *
+ * **Both halves are `currentColor`; the inner block is the same ink at a
+ * fraction of its alpha.** The vendor ships a light and a dark file, and the
+ * difference between them is only that each is composed against its own
+ * background: measured off the two, the inner block is the outer colour at
+ * α≈0.21 over the page in both. Carrying two SVGs to say that would also cost
+ * the thing every mark here has — one colour, inherited — so the ratio is
+ * expressed as an opacity and the theme takes care of itself. It is set a
+ * little heavier than measured because these are drawn at 14px in ink that is
+ * already `muted-foreground` at 60–70% opacity, where a true 21% block
+ * disappears into the surface.
+ *
+ * Its viewBox is 4:5 where the other two are square, so it letterboxes inside
+ * the caller's `size-` box rather than being stretched to match them.
  */
 export function OpencodeMark(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 20 20"
+      viewBox="0 0 240 300"
       fill="currentColor"
-      fillRule="evenodd"
       aria-hidden
       {...props}
     >
-      <path d="M3.6 1.5h12.8a2.1 2.1 0 0 1 2.1 2.1v12.8a2.1 2.1 0 0 1-2.1 2.1H3.6a2.1 2.1 0 0 1-2.1-2.1V3.6a2.1 2.1 0 0 1 2.1-2.1Zm0 1.5a.6.6 0 0 0-.6.6v12.8c0 .33.27.6.6.6h12.8a.6.6 0 0 0 .6-.6V3.6a.6.6 0 0 0-.6-.6H3.6Zm2.8 3.2L10.2 10l-3.8 3.8L5 12.4 7.4 10 5 7.6 6.4 6.2Zm5.2 6.1h3.6a.75.75 0 0 1 0 1.5h-3.6a.75.75 0 0 1 0-1.5Z" />
+      <path fillRule="evenodd" d="M0 0h240v300H0V0Zm60 60v180h120V60H60Z" />
+      <path d="M60 120h120v120H60z" fillOpacity={0.35} />
     </svg>
   );
 }

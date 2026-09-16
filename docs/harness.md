@@ -686,7 +686,11 @@ active provider, and a row of levels under a rule. Choosing a model closes
 the menu, choosing a level does not — the level is the fine adjustment after
 the coarse one. The marks are the `currentColor` SVGs in
 `app/src/components/harness/ProviderMark.tsx`, monochrome like bb's so they
-sit in the palette rather than fighting the indigo. They are held in a
+sit in the palette rather than fighting the indigo. opencode's is the one
+two-tone mark, and it is still one colour: the vendor's light and dark files
+differ only in being composed against their own backgrounds, so the inner
+block is drawn as the same ink at a fraction of its alpha and the theme takes
+care of itself. They are held in a
 `Record<Provider, …>` rather than picked by a ternary, so a provider added to
 the union is a compile error until its mark exists — the ternary that used to
 be there answered "not Claude" with the Codex mark.
