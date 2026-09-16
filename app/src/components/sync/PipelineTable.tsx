@@ -21,18 +21,16 @@ import {
 } from "@/stores/pipelineStore";
 
 /**
- * The full ingest ledger: one row per PDF, walking Download → Fast parse →
- * Quality parse → Embed. A row shows the stage dots and, for whatever is
- * running, a single percentage; clicking it expands a timeline of when each
- * step finished. Rows are ranked so live work sits on page one and finished
- * files fall to the back of the pages.
+ * The full ingest ledger: one row per PDF, walking Download → Parse. A row
+ * shows the stage dots and, for whatever is running, a single percentage;
+ * clicking it expands a timeline of when each step finished. Rows are ranked
+ * so live work sits on page one and finished files fall to the back of the
+ * pages.
  */
 
 const STAGES = [
   { key: "download", label: "Download" },
-  { key: "fast", label: "Fast parse" },
-  { key: "quality", label: "Quality parse" },
-  { key: "embed", label: "Embed" },
+  { key: "parse", label: "Parse" },
 ] as const;
 
 const DOT: Record<StageState, string> = {
@@ -62,9 +60,11 @@ const BADGE_VARIANT: Record<
   failed: "destructive",
 };
 
-/** Column template shared by the header and every row. */
+/** Column template shared by the header and every row. The stages column is
+ *  sized to its header rather than its dots: two dots and a connector are 30px,
+ *  narrower than the word "Stages". */
 const COLS =
-  "grid grid-cols-[minmax(0,1fr)_100px_118px_80px_minmax(120px,160px)] items-center gap-4 px-5";
+  "grid grid-cols-[minmax(0,1fr)_100px_60px_80px_minmax(120px,160px)] items-center gap-4 px-5";
 
 function StageDots({ item }: { item: PipelineItem }) {
   return (
@@ -108,35 +108,24 @@ interface TimelineStep {
 }
 
 function timelineSteps(item: PipelineItem): TimelineStep[] {
-  const qualityDetail =
-    item.quality === "active"
+  const parseDetail =
+    item.parse === "active"
       ? item.totalPages > 0
         ? `${item.pagesDone}/${item.totalPages} pages · ${Math.round((item.pagesDone / item.totalPages) * 100)}%`
         : "in progress"
-      : item.quality === "queued"
-        ? item.qualityQueuePos
-          ? item.qualityQueuePos === 1
+      : item.parse === "queued"
+        ? item.parseQueuePos
+          ? item.parseQueuePos === 1
             ? "next up"
-            : `#${item.qualityQueuePos} in line`
+            : `#${item.parseQueuePos} in line`
           : "queued"
-        : item.quality === "error"
+        : item.parse === "error"
           ? item.error
           : undefined;
 
-  const embedDetail =
-    item.embed === "active"
-      ? item.embedTotalPages > 0
-        ? `${item.embedPagesDone}/${item.embedTotalPages} pages · ${Math.round((item.embedPagesDone / item.embedTotalPages) * 100)}%`
-        : "in progress"
-      : item.embed === "error"
-        ? item.error
-        : undefined;
-
   return [
     { label: "Downloaded", state: item.download, time: item.downloadedAt },
-    { label: "Fast parse", state: item.fast, time: item.fastParsedAt },
-    { label: "Quality parse", state: item.quality, time: item.parsedAt, detail: qualityDetail },
-    { label: "Embed", state: item.embed, time: item.embeddedAt, detail: embedDetail },
+    { label: "Parse", state: item.parse, time: item.parsedAt, detail: parseDetail },
   ];
 }
 
@@ -251,7 +240,7 @@ function Row({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {s.phase === "failed" ? "Retry from the failed stage" : "Resume where it left off"}
+                {s.phase === "failed" ? "Try this file again" : "Resume where it left off"}
               </TooltipContent>
             </Tooltip>
           )}
@@ -269,12 +258,7 @@ function Row({
 /** Most recent stage timestamp, with the full breakdown one click away in the
  *  row's timeline. */
 function StageDates({ item }: { item: PipelineItem }) {
-  const latest = Math.max(
-    item.downloadedAt ?? 0,
-    item.fastParsedAt ?? 0,
-    item.parsedAt ?? 0,
-    item.embeddedAt ?? 0,
-  );
+  const latest = Math.max(item.downloadedAt ?? 0, item.parsedAt ?? 0);
   if (!latest) return <span className="text-[11px] text-muted-foreground/60">—</span>;
   return (
     <span className="text-[11px] text-muted-foreground tabular-nums">{fmtAgo(latest)}</span>

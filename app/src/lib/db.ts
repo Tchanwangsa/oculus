@@ -554,10 +554,14 @@ export async function markFileContentChanged(
   );
 }
 
-/** Forget a file's parse/embed state after a re-scrape changed its bytes.
- *  The Rust side purges the on-disk artifacts (`.md`, `.pages.json`,
- *  `.emb.json`); this clears the DB's view — stored pages and both status
- *  columns — so the pipeline re-runs and search never serves stale text. */
+/** Forget a file's parse state after a re-scrape changed its bytes. The Rust
+ *  side purges the on-disk artifacts; this clears the DB's view so the parse
+ *  re-runs and nothing serves stale text.
+ *
+ *  `embed_status` / `embedded_at` are still cleared even though nothing writes
+ *  them any more: the columns are deliberately left in the schema so a future
+ *  backfill can be additive, and a stale value left behind by a re-scrape
+ *  would be a lie that outlives this change. Not dead code — do not drop. */
 export async function resetFilePipeline(
   subjectId: number,
   relativePath: string,
@@ -598,10 +602,12 @@ export interface MentionFile {
  * one.
  *
  * Only files the agent can actually read are offered: `.md` is on disk as
- * written, but a PDF or slide deck has text only once the sidecar has parsed
- * it — the same `('fast', 'quality')` predicate retrieval uses. An unparsed
- * deck in the list would be an `oculus read` that comes back empty after the
- * student picked it, which is worse than not offering it.
+ * written, but a PDF or slide deck has text only once it has been parsed, and
+ * `parse_status = 'quality'` is the one status that says so. (The string is
+ * the finished-parse marker, not a tier — there is only one parse; see
+ * `app/src/stores/parseStore.ts`.) An unparsed deck in the list would be an
+ * `oculus read` that comes back empty after the student picked it, which is
+ * worse than not offering it.
  *
  * Ordered by prefix match, then by what they opened recently: with no query
  * typed the list is the handful of files they were just working in.
@@ -618,7 +624,7 @@ export async function searchMentionFiles(
             f.relative_path, f.category
      FROM files f
      JOIN subjects s ON s.id = f.subject_id
-     WHERE (f.file_type = 'md' OR f.parse_status IN ('fast', 'quality'))
+     WHERE (f.file_type = 'md' OR f.parse_status = 'quality')
        AND ($1 IS NULL OR f.subject_id = $1)
        AND ($2 = '' OR f.filename LIKE $3 ESCAPE '\\')
      ORDER BY (f.filename LIKE $4 ESCAPE '\\') DESC,
@@ -794,14 +800,16 @@ export async function getPdfPipelineRows(): Promise<PdfPipelineRow[]> {
   );
 }
 
-/** Update a PDF's parse status. status: 'fast' | 'quality' | 'error' | 'queued' | 'running' */
+/** Update a PDF's parse status. status: 'queued' | 'running' | 'quality' |
+ *  'error'. `'quality'` is the one terminal success — the name outlived the
+ *  tier it was named after, and the library's existing rows all speak it. */
 export async function setParseStatus(
   subjectId: number,
   relativePath: string,
   status: string,
 ): Promise<void> {
   const db = await getDb();
-  const setParsedAt = status === "quality" || status === "fast";
+  const setParsedAt = status === "quality";
   await db.execute(
     `UPDATE files SET parse_status = $1${setParsedAt ? ", parsed_at = datetime('now')" : ""}
      WHERE subject_id = $2 AND relative_path = $3`,

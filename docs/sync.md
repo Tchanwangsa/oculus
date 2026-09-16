@@ -67,8 +67,8 @@ One Rust engine scrapes three services. It runs identically inside the app
 - **Changed bytes invalidate the parse.** An `updated` write purges the
   sidecar artifacts (`.md`, `.pages.json`, `.emb.json` — see
   `paths::purge_parse_artifacts`), and the app clears the file's stored
-  pages and parse/embed statuses, so the pipeline re-runs instead of the
-  sidecar's existence checks pinning stale markdown and vectors.
+  pages and parse status, so the parse re-runs instead of the existence
+  check pinning stale markdown.
 - **Progress leaves through a `Reporter` trait**, not a channel to the UI.
   `app/src-tauri/src/scrape.rs` implements it by emitting the same Tauri
   events the frontend already listened for; the CLI implements it by
@@ -109,10 +109,11 @@ One Rust engine scrapes three services. It runs identically inside the app
   lecture, and a `warn` line says when the fallback is being used — if the
   syllabus ever starts carrying file lists again, that line goes quiet and the
   requests stop.
-- **Scrape and parse are decoupled.** A scrape completes even when the
-  sidecar is down; parsing/embedding of the PDFs it wrote is a separate,
-  idempotent pass (see [sidecar.md](./sidecar.md) and
-  [retrieval.md](./retrieval.md)).
+- **Scrape and parse are decoupled.** A scrape completes even when parsing
+  is unavailable; parsing the PDFs it wrote is a separate, idempotent pass.
+  The frontend's two-stage view of it (`download → parse`), the `parse-status`
+  event vocabulary and the background sweep that picks up what was missed are
+  in [frontend.md](./frontend.md).
 - **Parse requests are queued, not spawned per file.** Each new PDF used to
   get its own detached thread, so a first sync of a full library fired every
   deck at the sidecar at once — which FastAPI happily ran 40-wide, at ~2 GB

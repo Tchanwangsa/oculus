@@ -12,49 +12,19 @@ import { useParseStore } from "@/stores/parseStore";
 import { usePipelineStore } from "@/stores/pipelineStore";
 import type { SyncProgress } from "@/stores/syncStore";
 import type { ParseJob } from "@/stores/parseStore";
-import { embedFile } from "@/lib/retrieval";
 import { isPdfBacked } from "@/lib/fileTypes";
 import { CALENDAR_UPDATED_EVENT } from "@/lib/calendar";
 import { notifyProjectsUpdated } from "@/lib/projects";
-import { getDb } from "@/lib/db";
 import { useHarnessStore } from "@/stores/harnessStore";
 import type { HarnessEnvelope } from "@/lib/harness";
 
 /**
- * Statuses the sidecar always sent, which the file-row badges and the DB's
- * `files.parse_status` column understand. Newer stage signals ("parsing",
- * "embedding", "embedded", "embed_error") exist only for the pipeline view and
- * must not be persisted or fed to the badge store.
+ * The whole `parse-status` vocabulary Rust emits, and the whole vocabulary
+ * `files.parse_status` stores. `"quality"` is the terminal success — the name
+ * outlived the tier it was named after (see `parseStore`), and renaming it
+ * would invalidate every already-parsed row in the library.
  */
-const PARSE_STATUSES = new Set(["fast", "quality", "queued", "running", "error"]);
-
-/**
- * Index a PDF right after it parses.
- *
- * Fire-and-forget: a failed embed must never block or fail the parse flow, and
- * `embedPending()` will retry it later. Serialised through one promise chain
- * because the sidecar holds a single model — firing these in parallel would
- * queue on the GPU anyway.
- */
-let embedChain: Promise<unknown> = Promise.resolve();
-
-async function embedAfterParse(subjectId: number, relativePath: string) {
-  if (!isPdfBacked(relativePath)) return;
-  embedChain = embedChain.then(async () => {
-    try {
-      const db = await getDb();
-      const rows = await db.select<{ id: number }[]>(
-        `SELECT id FROM files WHERE subject_id = $1 AND relative_path = $2`,
-        [subjectId, relativePath],
-      );
-      const fileId = rows[0]?.id;
-      if (fileId == null) return;
-      await embedFile(fileId, relativePath);
-    } catch (e) {
-      console.error("embed after parse failed", relativePath, e);
-    }
-  });
-}
+const PARSE_STATUSES = new Set(["queued", "running", "quality", "error"]);
 
 const isPipelinePdf = (path: string) => isPdfBacked(path);
 
@@ -224,103 +194,74 @@ export function useBackendEvents() {
       }),
     );
 
-    // ── PDF parse + embed stage events ──────────────────────────────────────
+    // ── PDF parse stage events ──────────────────────────────────────────────
+    // One stage, emitted by Rust directly (there is no loopback IPC server and
+    // no sidecar any more). `"quality"` is the terminal success; see
+    // `PARSE_STATUSES` above for why that name stayed.
     unsubs.push(
       listen<ParseJob>("parse-status", async (e) => {
         const ev = e.payload;
         const path = ev.relative_path;
         if (!path) return;
 
-        // The sidecar's progress heartbeat can race the completion notify by
-        // a tick; a "running" arriving after quality finished must not undo it.
+        // A progress heartbeat can race the completion notify by a tick; a
+        // "running" arriving after the parse finished must not undo it.
         const staleRunning =
           ev.status === "running" &&
-          usePipelineStore.getState().items[path]?.quality === "done";
+          usePipelineStore.getState().items[path]?.parse === "done";
         if (staleRunning) return;
 
         if (PARSE_STATUSES.has(ev.status)) {
+          // `update` also records the failure's discriminants and raises or
+          // lifts the latch the background sweep reads.
           useParseStore.getState().update(ev);
           try {
             await setParseStatus(ev.subject_id, path, ev.status);
           } catch { /* ignore */ }
         }
 
-        // Parsed pages are only useful once they are searchable, so indexing
-        // follows parsing automatically. `quality` overwrites the markdown the
-        // `fast` pass wrote, so re-embedding then refreshes the stored text —
-        // the vectors are unchanged (they come from the page image) but the
-        // upsert picks up the better markdown.
-        if (ev.status === "fast" || ev.status === "quality") {
-          void embedAfterParse(ev.subject_id, path);
-        }
-
-        // Pipeline table: every status advances exactly one stage.
+        // Pipeline table: every status advances the one parse stage.
         const touch = pipeline().touch;
         switch (ev.status) {
-          case "parsing":
-            touch(path, ev.subject_id, { download: "done", fast: "active" });
-            break;
-          case "fast":
-            touch(path, ev.subject_id, { download: "done", fast: "done", fastParsedAt: Date.now() });
-            break;
           case "queued":
             touch(path, ev.subject_id, {
               download: "done",
-              fast: "done",
-              quality: "queued",
-              qualityQueuePos: ev.position,
+              parse: "queued",
+              parseQueuePos: ev.position,
             });
             break;
           case "running":
             touch(path, ev.subject_id, {
               download: "done",
-              fast: "done",
-              quality: "active",
+              parse: "active",
               pagesDone: ev.pages_done ?? 0,
               totalPages: ev.total_pages ?? 0,
-              qualityQueuePos: undefined,
+              parseQueuePos: undefined,
             });
             break;
           case "quality":
             touch(path, ev.subject_id, {
               download: "done",
-              fast: "done",
-              quality: "done",
+              parse: "done",
               parsedAt: Date.now(),
+              error: undefined,
+              errorKind: undefined,
+              errorRetryable: undefined,
+              errorLatching: undefined,
             });
             break;
           case "error":
-            touch(path, ev.subject_id, { quality: "error", error: ev.error ?? "Parse failed" });
-            break;
-          case "embedding":
+            // The discriminants ride into the row rather than being dropped:
+            // the failure UI has to be able to say whether a retry is worth
+            // offering at all, and that is not knowable from the message.
             touch(path, ev.subject_id, {
-              embed: "active",
-              embedPagesDone: ev.pages_done ?? 0,
-              embedTotalPages: ev.total_pages ?? 0,
+              parse: "error",
+              error: ev.error ?? "Parse failed",
+              errorKind: ev.kind,
+              errorRetryable: ev.retryable,
+              errorLatching: ev.latching,
             });
             break;
-          case "embedded": {
-            // The embed after the fast parse is provisional — the real finish
-            // line is the embed that follows the quality parse.
-            const item = usePipelineStore.getState().items[path];
-            const final = item?.quality === "done";
-            touch(path, ev.subject_id, {
-              embed: final ? "done" : "pending",
-              ...(final ? { embeddedAt: Date.now() } : {}),
-            });
-            break;
-          }
-          case "embed_error": {
-            const item = usePipelineStore.getState().items[path];
-            // Before quality is done another embed attempt is still coming,
-            // so only the final one gets to mark the stage failed.
-            if (item?.quality === "done") {
-              touch(path, ev.subject_id, { embed: "error", error: ev.error ?? "Embed failed" });
-            } else {
-              touch(path, ev.subject_id, { embed: "pending" });
-            }
-            break;
-          }
         }
       }),
     );

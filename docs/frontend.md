@@ -411,6 +411,28 @@ the one moment it shows.
 - The pipeline ledger no longer collapses finished files into a group — rows
   are ranked (running, queued, paused, failed, done) and paged, so live work
   is on page one and the footer counts what is behind it.
+- **The ingest pipeline is two stages: `download → parse`.**
+  `app/src/stores/pipelineStore.ts` holds one row per PDF-backed file and
+  `app/src/components/sync/PipelineTable.tsx` draws it — two stage dots, one
+  progress figure, a timeline of the two steps when a row is expanded. It was
+  four (a fast local parse, then a quality one, then an embed); MinerU cloud
+  is the only parser now and embeddings are gone, so a file is complete the
+  moment its parse lands.
+  The `parse-status` event Rust emits carries
+  `relative_path`, `subject_id`, one of `queued | running | quality | error`,
+  plus `pages_done`/`total_pages` while running, `position` while queued, and
+  on an error a displayable `error` with three discriminants — `kind`,
+  `retryable` (could retrying *this file* work) and `latching` (does this
+  condemn every other file too). `app/src/hooks/useBackendEvents.ts` is the
+  only reader; it writes the status to `files.parse_status` and carries the
+  discriminants into `app/src/stores/parseStore.ts` (per file, plus the latch)
+  and `pipelineStore` (per row).
+  **`"quality"` is the terminal success and is not a tier.** The name outlived
+  the two-tier parse: every already-parsed row in the library says
+  `parse_status = 'quality'`, and it is what Rust's "already done" check reads,
+  so renaming it would invalidate the library. `"fast"` is gone from the
+  vocabulary entirely. The store calls the *field* `parse`, since there is only
+  one parse to name — the field and the wire string are different things.
 - Background job progress surfaces **only** in the sidebar (driven by the
   stores fed from `useBackendEvents`) — no toasts, no bottom bars.
 - **The history arrows follow React Router's index, not
@@ -451,11 +473,23 @@ the one moment it shows.
   strip's height, `DEFAULT_ZOOM`, and that `y` — so moving any one of them
   means re-measuring; `app/src/components/tabs/TopTabBar.tsx` carries the
   arithmetic.
-- `app/src/hooks/useQualitySweep.ts` periodically queries the DB for files in
-  selected subjects whose `parse_status` is not yet `quality` and re-requests
-  the pipeline for a few at a time (the sidecar skips whatever already
-  exists). This is the recovery path for files that missed their quality
-  pass — app closed mid-queue, sidecar down during a sync, parse died.
+- **The background parse sweep is the recovery path, and it has to know when
+  to stop.** `app/src/hooks/useQualitySweep.ts` periodically queries the DB for
+  files in selected subjects whose `parse_status` is not yet `quality` and
+  re-requests a few at a time, for files that missed their parse — app closed
+  mid-queue, parsing down during a sync, a parse died. Every parse is now a
+  metered cloud call, with no local fallback beneath it, so a loop that
+  re-submits whatever failed is a quota fire: it would resubmit every
+  permanently-broken file every 15 minutes forever, and one bad token would
+  march the whole library through the same error a batch at a time. Hence the
+  two gates, both reading the error discriminants above: a file whose last
+  failure said `retryable: false` is never re-kicked (an *unknown*
+  retryability still is, or the recovery path dies — so a bad file costs one
+  attempt per launch, not four an hour), and a `latching` failure stands the
+  sweep down entirely until a parse gets somewhere again, which any
+  hand-driven route does. The one condition that heals on a clock rather than
+  an action — a daily quota — is why the latch eventually allows a single
+  probe file rather than a batch.
 - `app/src/components/lectures/LecturePlayer.tsx` streams video from the
   Rust media HTTP server via `mediaSrc()` in `app/src/lib/media.ts` — not
   `convertFileSrc`, which WebKit's media stack rejects (see

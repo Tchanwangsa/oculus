@@ -1,16 +1,24 @@
 import { create } from "zustand";
 
 /**
- * Per-file view of the full ingest pipeline:
+ * Per-file view of the ingest pipeline:
  *
- *   download → fast parse → quality parse → embed
+ *   download → parse
  *
- * Fed by `useBackendEvents` from four sources (scrape-file-start, scrape-file,
- * parse-status, and the embed statuses the sidecar posts back), and seeded
- * from the database on the Sync page so files still waiting for a stage show
- * up as backlog. A file counts as *completed* only when the quality parse AND
- * the embed that follows it are both done — never earlier, even though a
- * fast-parse embed makes it searchable before that.
+ * Two stages, not four. The fast local tier and the embed pass that followed
+ * it are gone: MinerU cloud is the only parser, so there is one parse and a
+ * file is *completed* the moment it lands.
+ *
+ * Fed by `useBackendEvents` from three events (scrape-file-start, scrape-file,
+ * parse-status) and seeded from the database on the Sync page, so files still
+ * waiting for a stage show up as backlog.
+ *
+ * **The wire and DB string for a finished parse is still `"quality"`**, which
+ * is why the seeding switch below reads it. That name outlived the tier it was
+ * named after — `files.parse_status = 'quality'` is what every already-parsed
+ * row in the user's library says, and renaming it would invalidate all of
+ * them. The *field* here is `parse`, because inside the store there is only
+ * one parse stage to name; the string stays `"quality"` forever.
  */
 
 export type StageState = "pending" | "queued" | "active" | "done" | "error";
@@ -22,29 +30,33 @@ export interface PipelineItem {
   code: string;
   filename: string;
   download: StageState;
-  fast: StageState;
-  quality: StageState;
-  embed: StageState;
-  /** Quality-parse page progress. */
+  parse: StageState;
+  /** Parse page progress. */
   pagesDone: number;
   totalPages: number;
-  /** While quality is "queued": place in the sidecar's one-at-a-time queue. */
-  qualityQueuePos?: number;
-  /** Embed page progress. */
-  embedPagesDone: number;
-  embedTotalPages: number;
+  /** While parse is "queued": place in the parse queue, when it is known. */
+  parseQueuePos?: number;
   /** Stage completion times, epoch ms. Live events stamp them as they land;
-   *  seeded rows carry the DB's scraped_at / parsed_at / embedded_at (the DB
-   *  keeps one parse time, so a seeded quality-parsed file has no fast time). */
+   *  seeded rows carry the DB's scraped_at / parsed_at. */
   downloadedAt?: number;
-  fastParsedAt?: number;
   parsedAt?: number;
-  embeddedAt?: number;
   /** Seeded with work outstanding and untouched by any live event yet: a run
    *  from an earlier session that never finished. Resumable — any event for
    *  the file (including a resume kicking off) clears it. */
   paused: boolean;
+  /** Human-readable failure text, safe to display. */
   error?: string;
+  /** Machine-readable discriminant for the failure, from the `parse-status`
+   *  event's `kind`. Carried so the failure UI can say *what* went wrong
+   *  rather than only that something did. */
+  errorKind?: string;
+  /** Could retrying **this file** ever work? `false` means it cannot —
+   *  a corrupt PDF, one past the size limit. */
+  errorRetryable?: boolean;
+  /** Does the failure condemn every other file too (no token, a rejected
+   *  token, exhausted quota)? See `useQualitySweep`, which stands down while
+   *  one of these is in force rather than marching the library into it. */
+  errorLatching?: boolean;
   startedAt: number;
   updatedAt: number;
 }
@@ -61,13 +73,9 @@ function newItem(relativePath: string, subjectId: number): PipelineItem {
     code: parts[0] === "courses" ? (parts[1] ?? "") : "",
     filename: parts[parts.length - 1] ?? relativePath,
     download: "pending",
-    fast: "pending",
-    quality: "pending",
-    embed: "pending",
+    parse: "pending",
     pagesDone: 0,
     totalPages: 0,
-    embedPagesDone: 0,
-    embedTotalPages: 0,
     paused: false,
     startedAt: Date.now(),
     updatedAt: Date.now(),
@@ -77,11 +85,12 @@ function newItem(relativePath: string, subjectId: number): PipelineItem {
 export interface SeedRow {
   relativePath: string;
   subjectId: number;
+  /** `files.parse_status` as stored — `"quality"` when parsed, an `error…`
+   *  string when the last attempt failed, and NULL / an in-flight word from
+   *  an interrupted session otherwise. */
   parseStatus: string | null;
-  embedStatus: string | null;
   downloadedAt?: number;
   parsedAt?: number;
-  embeddedAt?: number;
 }
 
 interface PipelineState {
@@ -105,7 +114,7 @@ export const usePipelineStore = create<PipelineState>((set) => ({
       const next: PipelineItem = {
         ...prev,
         ...patch,
-        // Embed events arrive without a subject id; keep the one we know.
+        // Keep a subject id we already know over a missing one.
         subjectId: prev.subjectId || subjectId,
         // Any live event means the file is moving again.
         paused: false,
@@ -123,27 +132,16 @@ export const usePipelineStore = create<PipelineState>((set) => ({
         it.download = "done"; // it's in the DB, so it's on disk
         it.downloadedAt = r.downloadedAt;
         it.parsedAt = r.parsedAt;
-        it.embeddedAt = r.embeddedAt;
         const p = r.parseStatus ?? "";
-        if (p === "fast") {
-          it.fast = "done";
-          it.fastParsedAt = r.parsedAt;
-          it.parsedAt = undefined;
-        } else if (p === "queued" || p === "running") {
-          // Stale from a previous session — the quality pass is outstanding.
-          it.fast = "done";
-          it.fastParsedAt = r.parsedAt;
-          it.parsedAt = undefined;
-          it.quality = "queued";
-        } else if (p === "quality") {
-          it.fast = "done";
-          it.quality = "done";
+        // Two terminal statuses, and nothing else is worth a branch: an
+        // interrupted session's `queued`/`running` is simply outstanding work,
+        // which the `paused` line below already says.
+        if (p === "quality") {
+          it.parse = "done";
         } else if (p.startsWith("error")) {
-          it.fast = "done";
-          it.quality = "error";
+          it.parse = "error";
           it.error = p;
         }
-        if (r.embedStatus === "done") it.embed = "done";
         // Outstanding work from a previous session sits paused until resumed
         // (or until a new sync touches the file).
         it.paused = !isComplete(it) && !hasFailed(it);
@@ -179,22 +177,20 @@ export const usePipelineStore = create<PipelineState>((set) => ({
 // ── Derived views ─────────────────────────────────────────────────────────────
 
 export function isComplete(it: PipelineItem): boolean {
-  return it.quality === "done" && it.embed === "done";
+  return it.parse === "done";
 }
 
 export function hasFailed(it: PipelineItem): boolean {
-  return (
-    it.download === "error" || it.fast === "error" || it.quality === "error" || it.embed === "error"
-  );
+  return it.download === "error" || it.parse === "error";
 }
 
 export type PipelinePhase = "active" | "waiting" | "paused" | "failed" | "done";
 
 export interface StatusView {
   phase: PipelinePhase;
-  /** Short word for the status pill, e.g. "Quality parse". */
+  /** Short word for the status pill, e.g. "Parsing". */
   short: string;
-  /** Full description for the progress column, e.g. "Quality parsing — 12/37 pages". */
+  /** Full description for the progress column, e.g. "Parsing — 12/37 pages". */
   label: string;
   /** 0–100 for the current stage, or null when the stage has no page counts. */
   percent: number | null;
@@ -209,24 +205,10 @@ export function statusOf(it: PipelineItem): StatusView {
   if (it.download === "active") {
     return { phase: "active", short: "Downloading", label: "Downloading", percent: null };
   }
-  if (it.fast === "active") {
-    return { phase: "active", short: "Fast parse", label: "Fast parsing", percent: null };
-  }
-  if (it.quality === "active") {
+  if (it.parse === "active") {
     const pct = it.totalPages > 0 ? (it.pagesDone / it.totalPages) * 100 : null;
-    const label =
-      it.totalPages > 0
-        ? `Quality parsing — ${it.pagesDone}/${it.totalPages} pages`
-        : "Quality parsing";
-    return { phase: "active", short: "Quality parse", label, percent: pct };
-  }
-  if (it.embed === "active") {
-    const pct = it.embedTotalPages > 0 ? (it.embedPagesDone / it.embedTotalPages) * 100 : null;
-    const label =
-      it.embedTotalPages > 0
-        ? `Embedding — ${it.embedPagesDone}/${it.embedTotalPages} pages`
-        : "Embedding";
-    return { phase: "active", short: "Embedding", label, percent: pct };
+    const label = it.totalPages > 0 ? `Parsing — ${it.pagesDone}/${it.totalPages} pages` : "Parsing";
+    return { phase: "active", short: "Parsing", label, percent: pct };
   }
   if (isComplete(it)) {
     return { phase: "done", short: "Done", label: "Completed", percent: 100 };
@@ -234,30 +216,19 @@ export function statusOf(it: PipelineItem): StatusView {
   // Leftovers from an earlier session: nothing is queued anywhere for these
   // until the user resumes them (or a new sync touches the file).
   if (it.paused) {
-    const remaining =
-      it.quality === "done"
-        ? "embed pending"
-        : it.fast === "done"
-          ? "quality parse pending"
-          : "parse pending";
-    return { phase: "paused", short: "Paused", label: `Paused — ${remaining}`, percent: null };
+    return { phase: "paused", short: "Paused", label: "Paused — parse pending", percent: null };
   }
-  if (it.quality === "queued") {
-    const label = it.qualityQueuePos
-      ? it.qualityQueuePos === 1
-        ? "Queued for quality parse — next up"
-        : `Queued for quality parse — #${it.qualityQueuePos} in line`
-      : "Queued for quality parse";
+  // Parses are submitted in batches, so there is still a real line to be in.
+  if (it.parse === "queued") {
+    const label = it.parseQueuePos
+      ? it.parseQueuePos === 1
+        ? "Queued to parse — next up"
+        : `Queued to parse — #${it.parseQueuePos} in line`
+      : "Queued to parse";
     return { phase: "waiting", short: "Queued", label, percent: null };
   }
   // Below here nothing is actually queued anywhere — these are backlog rows
-  // that need the next sync (or an index run) to pick them up.
-  if (it.quality === "done") {
-    return { phase: "waiting", short: "Waiting", label: "Waiting to embed", percent: null };
-  }
-  if (it.fast === "done") {
-    return { phase: "waiting", short: "Waiting", label: "Waiting for quality parse", percent: null };
-  }
+  // that need the next sync (or the sweep) to pick them up.
   if (it.download === "done") {
     return { phase: "waiting", short: "Waiting", label: "Waiting to parse", percent: null };
   }

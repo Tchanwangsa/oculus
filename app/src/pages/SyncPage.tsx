@@ -19,7 +19,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  getDb,
   upsertSubjects,
   getSubjects,
   getSyncRunSummaries,
@@ -31,7 +30,6 @@ import {
   type Subject,
   type SyncRunSummary,
 } from "@/lib/db";
-import { embedFile, embedPending } from "@/lib/retrieval";
 import { triggerSync } from "@/lib/syncRunner";
 import { fmtAgo, sqliteUtcToMs } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
@@ -87,7 +85,7 @@ export default function SyncPage() {
   const syncError = useSyncStore((s) => s.error);
   const scrapingRef = useRef(false);
 
-  // Pipeline (per-file download → parse → embed tracking).
+  // Pipeline (per-file download → parse tracking).
   const pipelineItems = usePipelineStore((s) => s.items);
   const seedPipeline = usePipelineStore((s) => s.seed);
   const clearFinished = usePipelineStore((s) => s.clearFinished);
@@ -124,7 +122,7 @@ export default function SyncPage() {
   }, [scraping]);
 
   // Backfill the pipeline table with every PDF on record, so the backlog
-  // (awaiting parse, awaiting embed) is visible even before anything runs.
+  // of files awaiting a parse is visible even before anything runs.
   // The DB's parse_status lags reality for files parsed before status
   // tracking existed (or by the CLI), so disk is consulted for anything the
   // DB doesn't already call fully parsed — and the DB is patched to match.
@@ -154,10 +152,8 @@ export default function SyncPage() {
             relativePath: r.relative_path,
             subjectId: r.subject_id,
             parseStatus: disk[r.relative_path] ?? r.parse_status,
-            embedStatus: r.embed_status,
             downloadedAt: sqliteUtcToMs(r.scraped_at),
             parsedAt: sqliteUtcToMs(r.parsed_at),
-            embeddedAt: sqliteUtcToMs(r.embedded_at),
           })),
         );
       } catch (e) {
@@ -275,64 +271,39 @@ export default function SyncPage() {
   };
 
   /**
-   * Pick the pipeline back up for one file, from whichever stage is
-   * outstanding. Parsing is idempotent on the sidecar side (fast is skipped
-   * when markdown exists, quality when its record exists), so "resume" and
-   * "retry" are the same call; a file that only lacks its embed goes straight
-   * to the embedder.
+   * Pick the pipeline back up for one file. Parsing is idempotent on the Rust
+   * side — a file whose parse record already exists is skipped — so "resume"
+   * and "retry" are the same call, and with one stage left there is nothing
+   * else it could be.
    */
   const resumeItem = useCallback(async (it: PipelineItem) => {
     const { touch } = usePipelineStore.getState();
     // Clear paused/failed immediately so the row reads as moving again.
     touch(it.relativePath, it.subjectId, {
-      ...(it.quality === "error" ? { quality: "pending" as const } : {}),
-      ...(it.embed === "error" ? { embed: "pending" as const } : {}),
+      ...(it.parse === "error" ? { parse: "pending" as const } : {}),
       error: undefined,
+      errorKind: undefined,
+      errorRetryable: undefined,
+      errorLatching: undefined,
     });
     try {
-      if (it.quality !== "done") {
-        await invoke("parse_file", {
-          subjectId: it.subjectId,
-          subjectCode: it.code,
-          relativePath: it.relativePath,
-        });
-      } else if (it.embed !== "done") {
-        const db = await getDb();
-        const rows = await db.select<{ id: number }[]>(
-          `SELECT id FROM files WHERE subject_id = $1 AND relative_path = $2`,
-          [it.subjectId, it.relativePath],
-        );
-        const fileId = rows[0]?.id;
-        if (fileId == null) throw new Error("file not in the database");
-        await embedFile(fileId, it.relativePath);
-      }
+      await invoke("parse_file", {
+        subjectId: it.subjectId,
+        subjectCode: it.code,
+        relativePath: it.relativePath,
+      });
     } catch (e) {
-      touch(
-        it.relativePath,
-        it.subjectId,
-        it.quality !== "done"
-          ? { quality: "error", error: String(e) }
-          : { embed: "error", error: String(e) },
-      );
+      touch(it.relativePath, it.subjectId, { parse: "error", error: String(e) });
     }
   }, []);
 
-  /** Resume every paused row. Parses queue up in the sidecar; files that only
-   *  need an embed run through `embedPending`, which is serialised already. */
+  /** Resume every paused row; the parses queue up behind one another. */
   const resumeAll = useCallback(() => {
     const all = Object.values(usePipelineStore.getState().items);
-    const { touch } = usePipelineStore.getState();
-    let needEmbed = false;
     for (const it of all) {
       if (statusOf(it).phase !== "paused") continue;
-      if (it.quality !== "done") {
-        void resumeItem(it);
-      } else if (it.embed !== "done") {
-        touch(it.relativePath, it.subjectId, {});
-        needEmbed = true;
-      }
+      void resumeItem(it);
     }
-    if (needEmbed) embedPending().catch((e) => console.error("resume embeds failed", e));
   }, [resumeItem]);
 
   const toggleSubject = (id: number) => {
