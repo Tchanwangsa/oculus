@@ -16,6 +16,7 @@ pub mod menu;
 pub mod okta;
 mod media;
 pub mod mineru;
+pub mod parse;
 pub mod paths;
 pub mod projects;
 pub mod recap;

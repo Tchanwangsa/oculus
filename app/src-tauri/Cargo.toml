@@ -52,6 +52,14 @@ libc = "0.2.189"
 # ripgrep over the library on disk cannot see it. Already in the lock tree.
 regex = "1"
 
+# The MinerU cloud client, ported from the Python sidecar (see src/parse/).
+# `zip` reads the result archive, `lopdf` counts pages so a document can be
+# split into MinerU's 200-page tasks, and `imagesize` replaces PIL's one use:
+# reading a crop's dimensions from its header to drop template furniture.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] }
+imagesize = "0.13"
+
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_canvas_session` in src/browser.rs) — Tauri exposes no cookie setter, so
 # that goes through WKHTTPCookieStore directly. These are the same crates wry
