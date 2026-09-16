@@ -723,9 +723,15 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   bearing: the trigger is an icon plus a **fixed-width** badge (the bare
   number in a hug-width pill re-laid out the whole row on every step), and the
   presets are a `grid-cols-6`, so they cannot wrap to a second line.
-- Markdown rendering (Canvas bodies, parsed PDFs, Ed threads) goes through
-  `app/src/components/markdown/` with KaTeX for math; PDF markdown quality
-  therefore shows up directly in Chat results and file views.
+- Markdown rendering (Canvas bodies, parsed PDFs, Ed threads, agent replies)
+  goes through `app/src/components/markdown/MdComponents.tsx` with KaTeX for
+  math; PDF markdown quality therefore shows up directly in Chat results and
+  file views. That module owns the maths half too — KaTeX's stylesheet, the
+  `MATH` gate that decides whether a string is worth the plugins, and
+  `normalizeMath`, which rewrites `\(…\)` / `\[…\]` into `$…$` / `$$…$$`
+  because CommonMark eats the backslash escape before remark-math ever sees
+  the delimiter. See [harness.md](./harness.md) for why that matters most in
+  chat.
 - **In-markdown links resolve locally when they can.** `FileViewer`
   (`app/src/components/files/FileViewer.tsx`) matches `../`-relative links
   and raw Canvas `/courses/…/files/<id>` / `/pages/<slug>` URLs against the

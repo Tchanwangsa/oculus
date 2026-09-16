@@ -6,11 +6,10 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
+import { MD_COMPONENTS, normalizeMath } from "@/components/markdown/MdComponents";
 import { PDFViewer } from "@/components/files/PDFViewer";
 import { docPdfRelPath, isPdfBacked, parsedMdRelPath } from "@/lib/fileTypes";
 import { useDataDir } from "@/hooks/useDataDir";
@@ -244,7 +243,7 @@ function MdFromPath({
           rehypePlugins={[rehypeRaw, rehypeKatex]}
           components={components}
         >
-          {text}
+          {normalizeMath(text)}
         </ReactMarkdown>
       </article>
     </div>
