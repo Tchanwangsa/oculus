@@ -98,6 +98,15 @@ interface TranscriptPanelProps {
   /** Mid resize-drag: the size is following a pointer, so it must not ease. */
   resizing: boolean;
   onSeek: (seconds: number) => void;
+  /**
+   * Fold the dock away — the header's own way out.
+   *
+   * The same thing the control bar's dock button and T do, offered here as
+   * well because the bar is over the video and fades with it: a dock docked
+   * left, on a paused lecture, is a panel whose only close control is on the
+   * other side of the player.
+   */
+  onClose: () => void;
   /** Header press — begins the drag-to-dock gesture. */
   onHeaderPointerDown: (e: React.PointerEvent) => void;
   /** The list is tracking playback rather than being read by hand. */
@@ -132,6 +141,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   open,
   resizing,
   onSeek,
+  onClose,
   onHeaderPointerDown,
   following,
   onScrollAway,
@@ -522,6 +532,19 @@ export const TranscriptPanel = memo(function TranscriptPanel({
               className="gap-3"
             />
           </div>
+          {/* Lifted onto the tabs' text like the drag handle is, and it keeps
+              its own pointerdown for the same reason they do: the header's
+              press starts a dock drag, which captures the pointer and would
+              carry this button's click away with it. */}
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={onClose}
+            aria-label="Hide panel"
+            className="mb-2 ml-auto shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <X size={11} weight="bold" />
+          </button>
         </div>
 
         {activeTab === "chat" ? (

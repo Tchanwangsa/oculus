@@ -5,9 +5,9 @@ import {
   CircleNotch,
   ClosedCaptioning,
   DownloadSimple,
-  FileText,
   Pause,
   Play,
+  SidebarSimple,
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -33,6 +33,7 @@ import {
   playbackClaim,
   syncLectureSources,
   videoForSource,
+  type PlaybackHost,
   type SourcePlan,
 } from "@/lib/lecturePlayback";
 import { useTabActive, useTabId } from "@/components/tabs/TabContext";
@@ -49,7 +50,7 @@ import {
 import { useLectureChapters } from "@/hooks/useLectureChapters";
 import type { ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
 import type { LectureChatPanelProps } from "@/components/lectures/LectureChatPanel";
-import { useTranscriptDock } from "@/hooks/useTranscriptDock";
+import { useTranscriptDock, type Dock } from "@/hooks/useTranscriptDock";
 import { PIP_CORNERS, useSourceLayout, type PipCorner } from "@/hooks/useSourceLayout";
 import { usePlayerPrefs, type DockTab } from "@/stores/playerPrefsStore";
 import {
@@ -74,6 +75,23 @@ import {
  *  which is what "I zoned out, what was that" reaches for. Longer and the
  *  excerpt starts to be the conversation rather than its context. */
 const MOMENT_TRANSCRIPT_S = 60;
+
+/**
+ * Which way the dock button's glyph faces.
+ *
+ * It is `SidebarSimple`, the same fold-away mark the app sidebar and the
+ * chat's conversations column wear, rather than the transcript's page icon:
+ * the button stopped being about the transcript when the panel grew tabs, and
+ * what it folds is a panel. Turning it to face the edge the dock is on is what
+ * a page icon could never say — the glyph draws its divider on the left, so
+ * left is the unrotated case.
+ */
+const DOCK_ICON_FACING: Record<Dock, string> = {
+  left: "",
+  right: "rotate-180",
+  top: "rotate-90",
+  bottom: "-rotate-90",
+};
 
 /** What the dock button calls the tab it would show or hide. The button used
  *  to guess from what the recording had; with three tabs, and Chat on every
@@ -404,6 +422,32 @@ interface LecturePlayerProps {
    * tab first, and the button is there.
    */
   allowFullscreen?: boolean;
+  /**
+   * Off in the side panel, for the reason fullscreen is.
+   *
+   * The dock is a panel beside the video, and the side panel is already that
+   * panel: docked left or right it left the video a sliver of black, and along
+   * the bottom of a 520px column a transcript is a two-word-wide scroller over
+   * a letterboxed strip. The dock's floors are real — they are what a cue, a
+   * chapter title and an agent's reply need to be readable — so the honest
+   * answer in a box this small is not a smaller dock but no dock, and the
+   * expand control next to it is the way to the one that fits.
+   *
+   * It takes the button and the T key with it: a control that cannot do
+   * anything here is worse than no control, and the preference is untouched —
+   * the page route opens with the dock exactly as it was left.
+   */
+  allowDock?: boolean;
+  /**
+   * Which of the two players this is — the lecture page, or the peek.
+   *
+   * It is not a capability like the two above but a fact about *where* the
+   * elements are, and it is the one thing that tells a stranded lecture from a
+   * safe one: navigating a tab takes the page's player off screen, while the
+   * peek beside that page is still there afterwards. `lib/lecturePlayback.ts`
+   * holds it; `lib/tabRouters.ts` asks.
+   */
+  host?: PlaybackHost;
 }
 
 /**
@@ -415,6 +459,8 @@ export function LecturePlayer({
   lecture,
   onRefresh,
   allowFullscreen = true,
+  allowDock = true,
+  host = "page",
 }: LecturePlayerProps) {
   const [cues, setCues] = useState<Cue[]>([]);
   const [activeCueIdx, setActiveCueIdx] = useState(-1);
@@ -850,6 +896,7 @@ export function LecturePlayer({
   // T is asking for the transcript, and this is the only place the player
   // offers to fetch one.
   const toggleTranscript = () => {
+    if (!allowDock) return;
     if (lecture.transcript_path && cues.length === 0) {
       loadTranscript(lecture.transcript_path);
     } else if (!lecture.transcript_path && dockTab === "transcript") {
@@ -977,7 +1024,7 @@ export function LecturePlayer({
       plan.push({ source: otherSource, src: secondSrc, host: secondHost });
     }
 
-    const v = syncLectureSources(lecture, plan, tabId);
+    const v = syncLectureSources(lecture, plan, { tab: tabId, host });
     // Kept for the cleanup: parking is "put these back if they are still
     // mine", never "put back whatever is out there". Another player may have
     // taken them over in between — expanding the panel into a tab is exactly
@@ -1052,7 +1099,7 @@ export function LecturePlayer({
       parkLectureVideos(claim);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lecture.id, urls[1], urls[2], layout, mainSource, onScreen, tabId]);
+  }, [lecture.id, urls[1], urls[2], layout, mainSource, onScreen, tabId, host]);
 
   // Progress is written by the module, including while nothing is mounted;
   // the list this player sits in still wants to hear about it.
@@ -1072,7 +1119,7 @@ export function LecturePlayer({
   // precondition — no file, no job — so every recording has a dock now, and
   // the tab strip is the only thing that varies with what the recording has.
   const hasTranscript = cues.length > 0;
-  const showDock = transcriptVisible;
+  const showDock = allowDock && transcriptVisible;
   /** The tab the dock is actually showing — what T shows or hides. */
   const frontTab = tabInFront(dockTab, hasTranscript);
 
@@ -1467,18 +1514,24 @@ export function LecturePlayer({
                 {/* The dock, not only the transcript, and the label names the
                     tab in front rather than guessing from what the recording
                     has — with three tabs and Chat on every one of them, what
-                    the button hides is whatever you were reading. */}
-                <ControlButton
-                  label={
-                    !lecture.transcript_path && dockTab === "transcript"
-                      ? "Download transcript"
-                      : `${showDock ? "Hide" : "Show"} ${DOCK_TAB_NOUN[frontTab]} (T)`
-                  }
-                  active={showDock}
-                  onClick={toggleTranscript}
-                >
-                  <FileText size={16} weight={showDock ? "fill" : "regular"} />
-                </ControlButton>
+                    the button hides is whatever you were reading. Gone
+                    entirely where there is no dock to fold (`allowDock`). */}
+                {allowDock && (
+                  <ControlButton
+                    label={
+                      !lecture.transcript_path && dockTab === "transcript"
+                        ? "Download transcript"
+                        : `${showDock ? "Hide" : "Show"} ${DOCK_TAB_NOUN[frontTab]} (T)`
+                    }
+                    active={showDock}
+                    onClick={toggleTranscript}
+                  >
+                    <SidebarSimple
+                      size={16}
+                      className={cn("transition-transform", DOCK_ICON_FACING[dock])}
+                    />
+                  </ControlButton>
+                )}
 
                 <ControlButton
                   label={
@@ -1515,28 +1568,36 @@ export function LecturePlayer({
       </div>
 
       {/* The dock — chapters, transcript and chat, dragged to any edge,
-          dragged wider from its divider */}
-      {showDock && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
-      <TranscriptPanel
-        cues={cues}
-        activeCueIdx={activeCueIdx}
-        tab={dockTab}
-        onTabChange={(t) => setPrefs({ dockTab: t })}
-        chapters={chaptersProps}
-        chat={chatProps}
-        dock={dock}
-        size={size}
-        open={showDock}
-        resizing={resizing}
-        onSeek={handleCueSeek}
-        onHeaderPointerDown={startDockDrag}
-        following={following}
-        onScrollAway={handleScrollAway}
-        onBackToLive={handleBackToLive}
-      />
+          dragged wider from its divider. Not rendered at all where it is not
+          allowed: mounted-but-closed is how it *slides*, and a dock that can
+          never open has nothing to slide — while its Chat tab is a thread
+          loaded and a composer built for every lecture a panel peeks at. */}
+      {allowDock && (
+        <>
+          {showDock && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
+          <TranscriptPanel
+            cues={cues}
+            activeCueIdx={activeCueIdx}
+            tab={dockTab}
+            onTabChange={(t) => setPrefs({ dockTab: t })}
+            chapters={chaptersProps}
+            chat={chatProps}
+            dock={dock}
+            size={size}
+            open={showDock}
+            resizing={resizing}
+            onSeek={handleCueSeek}
+            onClose={() => setPrefs({ transcriptVisible: false })}
+            onHeaderPointerDown={startDockDrag}
+            following={following}
+            onScrollAway={handleScrollAway}
+            onBackToLive={handleBackToLive}
+          />
 
-      {dropTarget && (
-        <DockDropPreview dock={dropTarget} height={height} width={width} />
+          {dropTarget && (
+            <DockDropPreview dock={dropTarget} height={height} width={width} />
+          )}
+        </>
       )}
     </div>
   );

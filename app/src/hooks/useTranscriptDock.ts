@@ -22,22 +22,31 @@ const CHAT_MIN_W = 300;
 const minSize = (tab: DockTab, vertical: boolean) =>
   vertical ? (tab === "chat" ? CHAT_MIN_H : MIN_H) : tab === "chat" ? CHAT_MIN_W : MIN_W;
 
-/** Room the video stack always keeps for itself. */
+/**
+ * Room the video stack always keeps for itself.
+ *
+ * It is also what decides whether a *side* dock fits at all: a container
+ * narrower than the panel's own floor plus this cannot hold both, and the two
+ * of them together are what a side panel does not have.
+ */
 const KEEP_H = 140;
 const KEEP_W = 300;
 /** Pointer travel before a header press counts as a dock drag, not a click. */
 const DRAG_SLOP = 5;
 
-/** The edge nearest the pointer — the container split into four triangles. */
-function nearestEdge(rect: DOMRect, x: number, y: number): Dock {
+/**
+ * The edge nearest the pointer — the container split into four triangles, or
+ * into two bands where there is no room beside the video, so that the edge
+ * previewed under the pointer is the edge the drop can actually deliver.
+ */
+function nearestEdge(rect: DOMRect, x: number, y: number, sides: boolean): Dock {
   const fx = Math.min(1, Math.max(0, (x - rect.left) / rect.width));
   const fy = Math.min(1, Math.max(0, (y - rect.top) / rect.height));
   const d: [Dock, number][] = [
-    ["left", fx],
-    ["right", 1 - fx],
     ["top", fy],
     ["bottom", 1 - fy],
   ];
+  if (sides) d.push(["left", fx], ["right", 1 - fx]);
   return d.reduce((a, b) => (b[1] < a[1] ? b : a))[0];
 }
 
@@ -63,6 +72,8 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
   // three of them because a tab changed is churn for a number.
   const tabRef = useRef(dockTab);
   tabRef.current = dockTab;
+  /** Whether a left/right dock fits at all; see `fitsBeside` below. */
+  const fitsRef = useRef(true);
 
   /** Edge highlighted under the pointer mid-drag; null when not dragging. */
   const [dropTarget, setDropTarget] = useState<Dock | null>(null);
@@ -91,27 +102,78 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
   }, []);
 
   /**
-   * The size actually drawn: the preference, with the tab's floor under it.
+   * The player's own size, watched rather than read once. The dock is sized
+   * against the box it sits in, and that box is a docked side panel one
+   * moment, a full page the next and a fullscreen overlay after that — all
+   * three out of one set of preferences.
+   */
+  const [area, setArea] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setArea((a) => (a.width === width && a.height === height ? a : { width, height }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [containerRef]);
+
+  /**
+   * The side actually drawn, which is the preference wherever it fits.
+   *
+   * A left or right dock needs its own floor *and* the room the video keeps,
+   * and the side panel is narrower than that sum: the panel took the width it
+   * was given in a full-page player and left the video a sliver of black
+   * beside it. Too narrow, and the dock draws along the bottom instead, where
+   * the floor to clear is a height even a panel has plenty of. Like the size
+   * floor below, this rewrites nothing — widening the window puts the dock
+   * straight back on the edge it was dropped on.
+   */
+  const fitsBeside = area.width === 0 || area.width >= minSize(dockTab, false) + KEEP_W;
+  const drawnDock: Dock = fitsBeside ? dock : "bottom";
+  // Read from a ref by the drag, for the same reason the tab's floor is: the
+  // pointer listeners are bound once and must not re-bind on a resize.
+  fitsRef.current = fitsBeside;
+  const vertical = isVertical(drawnDock);
+
+  /**
+   * The size actually drawn: the preference, with the tab's floor under it and
+   * the container's own room over it.
    *
    * A width stored from the transcript's own minimum would otherwise leave
-   * Chat in a 220px panel until someone dragged it out. The preference is
-   * never rewritten, so leaving the tab hands the transcript back exactly the
-   * panel it had — and a drag starts from what is on screen, not from the
-   * smaller number behind it.
+   * Chat in a 220px panel until someone dragged it out, and a size dragged out
+   * in a fullscreen player would otherwise be honoured in a panel a third of
+   * that wide — the drag clamps against the container, so anything that never
+   * went through a drag has to be clamped here too. The preference survives
+   * both, so leaving the tab or the panel hands the transcript back exactly
+   * the panel it had, and a drag starts from what is on screen rather than
+   * from the number behind it.
    */
-  const drawn = Math.max(minSize(dockTab, isVertical(dock)), isVertical(dock) ? height : width);
+  const drawn = (() => {
+    const min = minSize(dockTab, vertical);
+    const measured = vertical ? area.height : area.width;
+    const cap =
+      measured > 0
+        ? Math.max(min, measured - (vertical ? KEEP_H : KEEP_W))
+        : Number.POSITIVE_INFINITY;
+    return Math.min(Math.max(min, vertical ? height : width), cap);
+  })();
 
   const startResize = useCallback(
     (e: React.PointerEvent) => {
       if (e.button !== 0) return;
       e.preventDefault();
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-      resize.current = { dock, x: e.clientX, y: e.clientY, size: drawn };
+      // The drag resizes the dock as drawn, not as stored: a side dock demoted
+      // to the bottom has its divider along the bottom, and dragging it has to
+      // be the vertical gesture that matches.
+      resize.current = { dock: drawnDock, x: e.clientX, y: e.clientY, size: drawn };
       setResizing(true);
-      document.body.style.cursor = isVertical(dock) ? "row-resize" : "col-resize";
+      document.body.style.cursor = vertical ? "row-resize" : "col-resize";
       document.body.style.userSelect = "none";
     },
-    [dock, drawn],
+    [drawnDock, vertical, drawn],
   );
 
   useEffect(() => {
@@ -159,7 +221,7 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
           document.body.style.cursor = "grabbing";
           document.body.style.userSelect = "none";
         }
-        const target = nearestEdge(rect, e.clientX, e.clientY);
+        const target = nearestEdge(rect, e.clientX, e.clientY, fitsRef.current);
         dropTargetRef.current = target;
         setDropTarget(target);
       }
@@ -212,7 +274,9 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
   }, [containerRef, setPrefs]);
 
   return {
-    dock,
+    // The side as drawn, so the flex direction, the divider and the panel's
+    // own border all agree with each other and with the size above.
+    dock: drawnDock,
     height,
     width,
     size: drawn,

@@ -66,6 +66,16 @@ const RATE_TRIM = 0.08;
 /** Ending within this of the finish counts as watched. */
 const COMPLETE_WITHIN = 30;
 
+/** Which player has the elements: the lecture page, or the peek beside a page. */
+export type PlaybackHost = "page" | "panel";
+
+/** The player claiming the elements — the tab it is mounted in, and which of
+ *  the two it is. */
+export interface PlaybackOwner {
+  tab: number;
+  host: PlaybackHost;
+}
+
 /** One frame of a lecture on screen: which stream, from where, in what box. */
 export interface SourcePlan {
   source: SourceNum;
@@ -87,11 +97,20 @@ let current: Lecture | null = null;
 /** Last second written, so a paused element doesn't rewrite the same row. */
 let lastWritten = -1;
 /**
- * The tab the player was mounted in when it took the elements. Playback
- * belongs to that tab: switching to another one leaves it alone, while closing
- * it or navigating it elsewhere is leaving the lecture, and asks first.
+ * The player the elements belong to: the tab it was mounted in, and which of
+ * the two players it is. Playback belongs to that tab — switching to another
+ * one leaves it alone, while closing it or navigating it elsewhere is leaving
+ * the lecture, and asks first.
+ *
+ * The host is part of the answer because the two are stranded by different
+ * moves. A page player *is* the route, so anything that navigates its tab —
+ * a breadcrumb, a history arrow — takes the lecture off screen with it. A
+ * peek is furniture beside the route and survives a move within the same tab,
+ * so only what actually shuts it strands a lecture: the shell's navigation
+ * (which closes the panel on its way out) or closing the tab.
  */
 let ownerTab: number | null = null;
+let ownerHost: PlaybackHost = "page";
 /**
  * Which mounted player the elements belong to, as a counter bumped on every
  * claim.
@@ -302,9 +321,10 @@ function release(source: SourceNum) {
  * This is a reconcile, not a series of commands: the player in front re-states
  * what it wants on screen whenever anything changes (a different lecture, a
  * layout, a swapped source, its pane coming forward) and everything else
- * follows. Only a player on screen calls this — `tabId` is the tab it is
- * mounted in, which is what makes `ownerTab` mean something. Which means the
- * two awkward moments are handled in one place:
+ * follows. Only a player on screen calls this — `owner` says which tab it is
+ * mounted in and which of the two players it is, which is what makes
+ * `ownerTab` mean something. Which means the two awkward moments are handled
+ * in one place:
  *
  *   * **a source joins** — it loads and `syncFollowers` walks it onto the
  *     leader's clock within a tick;
@@ -317,9 +337,10 @@ function release(source: SourceNum) {
 export function syncLectureSources(
   lecture: Lecture,
   plan: SourcePlan[],
-  tabId: number,
+  owner: PlaybackOwner,
 ): HTMLVideoElement | null {
-  ownerTab = tabId;
+  ownerTab = owner.tab;
+  ownerHost = owner.host;
   claim++;
 
   const lectureChanged = current?.id !== lecture.id;
@@ -386,9 +407,17 @@ export function playingLecture(): Lecture | null {
   return isLecturePlaying() ? current : null;
 }
 
-/** Whether this tab is the one playback belongs to. */
-export function ownsPlayback(tabId: number): boolean {
-  return ownerTab === tabId;
+/**
+ * Whether this tab is the one playback belongs to — and, when `host` is given,
+ * whether it is that player holding it.
+ *
+ * Ask without a host for the moves that strand a lecture whichever player has
+ * it: closing the tab, or the shell navigating out of it. Ask with `"page"`
+ * for the moves that only strand the page's copy, which is every navigation
+ * *within* a tab — a peek rides those out.
+ */
+export function ownsPlayback(tabId: number, host?: PlaybackHost): boolean {
+  return ownerTab === tabId && (host == null || ownerHost === host);
 }
 
 /**
@@ -417,6 +446,7 @@ export function stopLecturePlayback() {
   void saveLectureProgress();
   parkLectureVideos();
   ownerTab = null;
+  ownerHost = "page";
 }
 
 /** Write where the loaded lecture is now. Safe to call at any time. */

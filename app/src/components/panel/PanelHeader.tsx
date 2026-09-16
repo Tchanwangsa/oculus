@@ -8,8 +8,13 @@ import {
 
 interface PanelHeaderProps {
   title: string;
-  /** Promote what the panel is showing to a full page in its own tab. */
-  onExpand?: () => void;
+  /**
+   * Promote what the panel is showing to a full page. `newTab` is the ⌘-click
+   * — the web's own rule for "same thing, somewhere else" — and plain clicks
+   * take over the tab the peek was opened from, which is the page it is
+   * already docked against.
+   */
+  onExpand?: (newTab: boolean) => void;
   onClose: () => void;
   /** Right-aligned controls (e.g. the PDF ↔ Markdown toggle). */
   actions?: React.ReactNode;
@@ -31,14 +36,17 @@ export function PanelHeader({ title, onExpand, onClose, actions }: PanelHeaderPr
             <Button
               variant="ghost"
               size="icon-xs"
-              onClick={onExpand}
+              onClick={(e) => onExpand(e.metaKey || e.ctrlKey)}
               aria-label="Open as full page"
               className="text-muted-foreground hover:text-foreground"
             >
               <ArrowsOutSimple size={14} />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Open as full page</TooltipContent>
+          <TooltipContent className="flex flex-col items-start gap-0.5">
+            Open as full page
+            <span className="text-[11px] text-background/60">⌘-click for a new tab</span>
+          </TooltipContent>
         </Tooltip>
       )}
 

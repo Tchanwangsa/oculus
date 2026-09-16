@@ -2,13 +2,15 @@ import { useEffect, useMemo } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import { CircleNotch } from "@phosphor-icons/react";
 import { FileViewer, PdfMdToggle, usePdfMd } from "@/components/files/FileViewer";
+import { SubjectCrumbs, fileCrumbTab } from "@/components/subjects/SubjectCrumbs";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { fileTitle, openFileSmart, recordFileAccess } from "@/lib/openFile";
 
 /**
  * A file as a full page — what the peek's expand button promotes into its own
  * tab. Standalone (not under SubjectLayout): like Notion, a full-page document
- * takes the entire content area, no subject chrome.
+ * takes the entire content area, so the subject's title block and tab strip
+ * are not above it. Its breadcrumb is what stands in for them.
  */
 export default function SubjectFilePage() {
   const { subjectId } = useParams();
@@ -48,8 +50,17 @@ export default function SubjectFilePage() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* One header: title + the PDF ↔ Markdown toggle when it applies. */}
-      <div className="h-11 shrink-0 flex items-center gap-3 px-5 border-b border-border-subtle">
+      {/* One header: where the file sits, its title, and the PDF ↔ Markdown
+          toggle when it applies. The trail is the page's only subject chrome —
+          without it a file opened from Home or the palette names no subject
+          and offers no way back to the list it came from. */}
+      <div className="h-11 shrink-0 flex items-center gap-2.5 px-5 border-b border-border-subtle">
+        <nav
+          aria-label="Breadcrumb"
+          className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
+        >
+          <SubjectCrumbs subjectId={id} tab={fileCrumbTab(file.category)} />
+        </nav>
         <h1 className="flex-1 min-w-0 text-[13px] font-semibold text-foreground truncate">
           {fileTitle(file)}
         </h1>

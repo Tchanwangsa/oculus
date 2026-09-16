@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useSidePanelStore } from "@/stores/sidePanelStore";
-import { useActivePath, useTabStore } from "@/stores/tabStore";
+import { useActivePath } from "@/stores/tabStore";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { PanelHeader } from "@/components/panel/PanelHeader";
 import { FileViewer, PdfMdToggle, usePdfMd } from "@/components/files/FileViewer";
@@ -13,12 +13,24 @@ export function filePagePath(subjectId: number, relativePath: string): string {
   return `/subjects/${subjectId}/file?path=${encodeURIComponent(relativePath)}`;
 }
 
-/** A file open in the side panel. Expanding promotes it to its own tab. */
-export default function FilePanel({ file, tabId }: { file: DbFile; tabId: number }) {
+/**
+ * A file open in the side panel. Expanding promotes it to a full page —
+ * in this tab, or in a new one on ⌘-click. The panel owns that move (see
+ * `SidePanel`) because it is the panel that animates through it; all this
+ * knows is the route.
+ */
+export default function FilePanel({
+  file,
+  tabId,
+  onExpand,
+}: {
+  file: DbFile;
+  tabId: number;
+  onExpand: (path: string, newTab: boolean) => void;
+}) {
   const { files } = useSubjectFiles(file.subject_id);
   const pdf = usePdfMd(file);
   const here = useActivePath();
-  const addTab = useTabStore((s) => s.addTab);
   const close = useSidePanelStore((s) => s.close);
 
   // A file belongs to the subject it was opened in — navigating to another
@@ -44,10 +56,9 @@ export default function FilePanel({ file, tabId }: { file: DbFile; tabId: number
     <>
       <PanelHeader
         title={fileTitle(file)}
-        onExpand={() => {
-          addTab(filePagePath(file.subject_id, file.relative_path));
-          close(tabId);
-        }}
+        onExpand={(newTab) =>
+          onExpand(filePagePath(file.subject_id, file.relative_path), newTab)
+        }
         onClose={() => close(tabId)}
         actions={
           pdf.isPdf && pdf.mdExists ? (

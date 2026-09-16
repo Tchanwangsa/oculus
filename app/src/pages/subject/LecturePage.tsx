@@ -3,11 +3,15 @@ import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import { CircleNotch } from "@phosphor-icons/react";
 import { getLectures, type Lecture } from "@/lib/db";
 import { LecturePlayer } from "@/components/lectures/LecturePlayer";
+import { LECTURES_TAB, SubjectCrumbs } from "@/components/subjects/SubjectCrumbs";
 import { recordRecent } from "@/lib/recents";
 
 /**
  * A lecture as its own page — what the peek's expand button opens in a new
- * tab. Fully standalone: no subject shell, just the player edge to edge.
+ * tab. Standalone: no subject shell above it, so the player has the height,
+ * and one breadcrumb row says which subject this recording belongs to and
+ * leads back to its Lectures list. Fullscreen takes the player `fixed
+ * inset-0`, which covers the row rather than fighting it.
  */
 export default function SubjectLecturePage() {
   const { subjectId } = useParams();
@@ -57,6 +61,17 @@ export default function SubjectLecturePage() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
+      <div className="h-11 shrink-0 flex items-center gap-2.5 px-5 border-b border-border-subtle">
+        <nav
+          aria-label="Breadcrumb"
+          className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
+        >
+          <SubjectCrumbs subjectId={id} tab={LECTURES_TAB} />
+        </nav>
+        <h1 className="flex-1 min-w-0 text-[13px] font-semibold text-foreground truncate">
+          {lecture.title}
+        </h1>
+      </div>
       <LecturePlayer lecture={lecture} onRefresh={refresh} />
     </div>
   );

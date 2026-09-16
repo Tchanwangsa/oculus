@@ -60,6 +60,11 @@ export function navigateInTab(id: number, path: string): void {
  * posed before anything is committed: there is no blocked router to leave
  * stranded, and the one door the shell navigates through is the one place the
  * rule lives.
+ *
+ * "The shell" now includes the breadcrumb row, which is drawn inside a pane
+ * but is doing the shell's job (`components/subjects/SubjectCrumbs.tsx`). It
+ * used to be `Link`s onto the pane's own router, which is how a crumb became
+ * the one way out of a lecture that never asked.
  */
 export function navigateActive(path: string): void {
   const { tabs, activeId, addTab } = useTabStore.getState();
@@ -73,7 +78,9 @@ export function navigateActive(path: string): void {
     navigateInTab(active.id, path);
   };
   // Switching tabs leaves a lecture playing behind a tab you can come back to;
-  // navigating the tab it is *in* strands it, so that one asks first.
+  // navigating the tab it is *in* strands it, so that one asks first. Either
+  // player counts here: the page's goes off screen with the route, and the
+  // peek's is shut by the `closeActivePanel` above, which stops it.
   // `confirmLeavingLecture` goes straight through unless a lecture is actually
   // playing, which is every other navigation in the app — a paused lecture has
   // never prompted and still doesn't.
@@ -91,15 +98,27 @@ export function navigateActive(path: string): void {
  * The strip's history arrows, for an app tab. A browser tab's arrows drive
  * the page's own history through Rust and never come here.
  *
- * Deliberately *not* guarded the way `navigateActive` is: an arrow has no
- * destination to weigh up — going back from a lecture is as likely to be
- * going back *to* it — and a prompt that fires on the way toward the thing it
- * is protecting is worse than none. A lecture left playing this way is still
- * reachable through the same arrow, and closing the tab asks. The side panel
- * is left alone here for the same reason — an arrow is a step within a page's
- * own history, not a departure from it.
+ * Guarded like `navigateActive`, and the worry that used to argue against it —
+ * a prompt firing on the way *toward* the lecture rather than away from it —
+ * turns out not to exist. `ownsPlayback` is only true while the elements are
+ * in a player mounted in this tab, which means the tab is *showing* the
+ * lecture: both arrows lead away from it, whichever one you press.
+ *
+ * Asked for the **page's** player alone. The side panel is deliberately left
+ * open by an arrow — a step within a page's own history is not a departure
+ * from it — so a peek is still on screen and playing afterwards, and a prompt
+ * for a lecture that never went anywhere would be the false alarm this guard
+ * is meant to avoid.
  */
 export function goInActiveTab(delta: 1 | -1): void {
   const { activeId } = useTabStore.getState();
-  routers.get(activeId)?.navigate(delta);
+  const go = () => routers.get(activeId)?.navigate(delta);
+  if (ownsPlayback(activeId, "page")) {
+    confirmLeavingLecture(() => {
+      stopLecturePlayback();
+      go();
+    });
+    return;
+  }
+  go();
 }

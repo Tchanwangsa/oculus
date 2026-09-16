@@ -168,7 +168,13 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   [one turn at a time](./harness.md#one-turn-at-a-time).
 - Files and lectures open in the **side panel** (`sidePanelStore` +
   `app/src/components/panel/SidePanel.tsx`); "expand" navigates to the
-  full-page route. It is **docked, not overlaid**: `AppLayout`'s content card
+  full-page route **in the same tab**, and to a new one on ⌘-click — the web's
+  own rule, rather than a control that can only ever spawn tabs. A same-tab
+  expand is animated: the frame sweeps out to the full width of the card with
+  its contents growing along with it, and the navigation is committed at the
+  *end* of the sweep, so the peek reads as becoming the page instead of
+  vanishing and being replaced. The panels hand `SidePanel` a route and let it
+  own the move, since it is the panel that animates through it. It is **docked, not overlaid**: `AppLayout`'s content card
   is a flex row with the pane stack on the left and the panel against its
   right edge, so the page beside it is genuinely narrower. That is what keeps
   the in-app browser honest — `BrowserPage` measures its own slot and re-places
@@ -209,6 +215,27 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   because `app/src-tauri/capabilities/default.json` grants
   `core:window:allow-start-dragging`; `core:default` does not include it, and
   without it the attribute silently does nothing.
+- **A full page keeps a trail, because it loses the shell.**
+  `/subjects/:id/file` and `/subjects/:id/lecture` sit outside `SubjectLayout`
+  on purpose — a full-page document takes the whole content area — so the
+  subject's title block and tab strip are not above them, and a lecture opened
+  from Home, the sidebar's Recent group or the ⌘K palette named no subject and
+  led back to nothing. `app/src/components/subjects/SubjectCrumbs.tsx` is that
+  trail and only that: the subject, then the tab whose list holds the thing.
+  For a lecture the tab is always Lectures; for a file it is read off the
+  file's `category` (`category_from_path` in `app/src-tauri/src/paths.rs`), so a page crumbs to Modules
+  and an Ed thread to Discussion, while `home` and `syllabus` crumb to the
+  subject alone rather than repeat the Overview the subject crumb already
+  points at. It is a Fragment ending in its separator, the shape
+  `ProjectCrumbs` established ([projects.md](./projects.md)), and it resolves
+  the subject itself because its two callers have an id and skipped the layout
+  that would have loaded one. The lecture page had no header at all before
+  this; the row is `h-11`, and fullscreen takes the player `fixed inset-0`
+  over it. The crumbs are **buttons through `navigateActive`, not `Link`s**:
+  a `Link` addresses the pane's own router and so slips past the departure
+  rules the shell keeps at that one door — which is how a crumb became the
+  only way out of a playing lecture that never asked (see the player section
+  below).
 - **The ⌘K palette searches titles, not pages.** `CommandPalette.tsx` matches
   subjects, files, lectures and the app's own routes, from SQLite, on every
   keystroke — `searchLibraryFiles` / `searchLibraryLectures` in
@@ -429,7 +456,7 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   *not* `display: none`, which is where a browser feels entitled to stop
   playback) on unmount, so a lecture keeps playing while you are in another tab
   and picks up on screen where it actually is when you come back — expanding
-  the side panel into its own tab included. This is a DOM node in the visible webview, not a
+  the side panel into a page included, in this tab or a new one. This is a DOM node in the visible webview, not a
   hidden WebView; the suspension problem that keeps scraping in Rust does not
   apply. Because the element outlives the player, so does the progress writing:
   the module saves every 5s of playback and immediately on pause, seek, end and
@@ -443,29 +470,45 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   `useTabActive` is true. With both of them live, one keypress toggled play
   twice and nothing happened, and every tab switch re-seated the picture in
   whichever pane had mounted last. Same lesson as the browser page above.
-  **Playback belongs to a tab.** The module records which tab the
-  player was mounted in, and that is what separates "switched away" from
+  **Playback belongs to a tab, and to one of its two players.** The module
+  records which tab the player was mounted in and whether that player is the
+  page or the peek, and the tab half is what separates "switched away" from
   "left": going to another tab leaves the lecture playing behind a tab you can
   return to, while closing that tab or navigating it elsewhere would leave it
-  playing with nothing owning it. Both of those ask first —
+  playing with nothing owning it. Every one of those asks first —
   `confirmLeavingLecture` (`app/src/stores/leaveLectureStore.ts`) raises one
-  dialog mounted in `AppLayout`, saying the place is already saved — and stop
-  playback on confirm. Both ask **at the door, before anything is committed**
-  — the tab strip's × and `navigateActive` in `app/src/lib/tabRouters.ts` —
-  and they tell a tab switch from a departure by asking whether the tab being
-  acted on is the one that owns playback (the strip activates the destination
-  tab *before* it navigates, so a switch is already "some other tab" here).
-  The navigation case used to be a `useBlocker` inside the player, and that was
-  the wrong shape: a router blocker is answered by whichever component holds
-  that blocker's key, so a block nobody answers drops the navigation with
-  **nothing on screen** — a sidebar click that silently does nothing, in a tab
-  that can then never navigate again. Asked at the door there is no blocked
-  router to strand. The history arrows are deliberately *not* guarded: an
-  arrow has no destination to weigh up, and going back from a lecture is as
-  likely to be going back to it. A paused lecture never prompts, and the side
-  panel's own close button is an outright stop — which is why the stop hangs
-  off that control and not off an unmount effect, since the panel unmounts its
-  body whenever another tab comes forward.
+  dialog mounted in `AppLayout`, saying the place is already saved — and stops
+  playback on confirm. They ask **at the door, before anything is committed**
+  — the tab strip's ×, and `navigateActive` / `goInActiveTab` in
+  `app/src/lib/tabRouters.ts` — and they tell a tab switch from a departure by
+  asking whether the tab being acted on is the one that owns playback (the
+  strip activates the destination tab *before* it navigates, so a switch is
+  already "some other tab" here). The navigation case used to be a
+  `useBlocker` inside the player, and that was the wrong shape: a router
+  blocker is answered by whichever component holds that blocker's key, so a
+  block nobody answers drops the navigation with **nothing on screen** — a
+  sidebar click that silently does nothing, in a tab that can then never
+  navigate again. Asked at the door there is no blocked router to strand.
+  A paused lecture never prompts, and the side panel's own close button is an
+  outright stop — which is why the stop hangs off that control and not off an
+  unmount effect, since the panel unmounts its body whenever another tab comes
+  forward.
+  **Every door has to be the door.** Two exits used to miss the rule
+  entirely. The breadcrumb row is drawn inside a pane, so it was `Link`s onto
+  that pane's own router — the guard never ran, and a crumb click left the
+  lecture running off screen with no player anywhere and nothing to come back
+  to; it goes through `navigateActive` now, like the sidebar. And the peek's
+  player sat outside every pane, so `useTabId` gave it the detached default
+  (tab `0`, which no tab has) and a playing peek was owned by nobody: closing
+  its tab neither stopped it nor asked. `SidePanel` puts its body under a
+  `TabContext.Provider` for the tab the peek was opened from. The host half of
+  the owner is what keeps the **history arrows** honest: they are guarded too,
+  but only for the *page's* player, because an arrow deliberately leaves the
+  side panel open — a peek is still on screen and playing after one, so a
+  prompt there would be a false alarm. The old worry about guarding arrows —
+  that one might fire on the way *toward* the lecture — cannot happen:
+  ownership is only true while the tab is showing the lecture, so both arrows
+  lead away from it.
 - **Two streams, one lecture, one clock.** A capture can be a Presenter screen
   *and* a room camera ([sync.md](./sync.md)), so `lecturePlayback.ts` keeps one
   element **per source** and nominates one of them the **leader**: it carries
@@ -575,8 +618,21 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   **off in the side panel**
   (`allowFullscreen={false}`) — the panel is furniture beside a page that
   stays mounted, and an element-fullscreen player inside it would have to
-  escape a Radix portal to do anything; expand promotes the lecture to its own
-  tab first.
+  escape a Radix portal to do anything; expand promotes the lecture to the
+  lecture page first.
+- **The dock is off in the side panel too** (`allowDock={false}` in
+  `app/src/components/panel/LecturePanel.tsx`), and that is a judgement rather
+  than a limitation. A dock is a panel beside the video, and the side panel
+  already *is* that panel: the responsive rules below keep it legible down to a
+  narrow window, but inside a 520px column the honest answer is not a smaller
+  dock — it is no dock, with the expand control in the panel's header as the
+  way to the one that fits. The button and the T key go with it, since a
+  control that cannot do anything reads worse than no control, and
+  `TranscriptPanel` is not mounted at all: mounted-but-closed is how the dock
+  *slides*, and a dock that can never open has nothing to slide while its Chat
+  tab would load a thread and build a composer for every lecture a panel peeks
+  at. The preference is untouched, so the lecture page opens with the dock
+  exactly as it was left.
 - **The player's furniture moves out of the way of the slide.** Captions are
   a draggable overlay (`app/src/components/lectures/CaptionOverlay.tsx`)
   because a lecture slide usually has text where a bottom-centred caption
@@ -621,7 +677,14 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   a player preference (`dockTab`) like the side it is docked to. The
   drag-to-dock gesture is unchanged; the tabs keep the pointerdown to
   themselves, since `startDockDrag` captures the pointer and a click needs both
-  of its ends on one target. The chapter list is not the transcript's follow
+  of its ends on one target — and so does the **X at the end of the header**,
+  which folds the dock away the way the control bar's button and T do. It is
+  there because the bar is over the video and fades with it: a dock docked left
+  on a paused lecture had its only close control on the far side of the player.
+  The bar's button wears `SidebarSimple`, the app's fold-away mark from the
+  sidebar and the chat's conversations column, **turned to face the edge the
+  dock is on** (`DOCK_ICON_FACING`) — it stopped being the transcript's button
+  when the panel grew tabs, and a page icon could not say which edge. The chapter list is not the transcript's follow
   machinery: twelve rows fit the panel, so the current card is a
   `scrollIntoView` and nothing else, where ~2500 cues earn a virtualizer, a
   two-stage handover and a countdown ring. See [chapters.md](./chapters.md);
@@ -645,6 +708,21 @@ look one up in, the same trade `/lecture` makes with `?t=`.
   preference, so leaving the tab hands the transcript back the panel it had.
   The rows themselves are untouched: they are the Chat page's, and there is one
   timeline.
+- **And a ceiling from the box it is in, because one preference has to serve
+  three sizes of player.** The same stored width belongs to a fullscreen
+  overlay, a full page and a docked side panel, and only the resize drag was
+  ever clamped against the container — so a width dragged out in fullscreen was
+  honoured whole in a panel a third as wide and left the video a sliver of
+  black beside it. `useTranscriptDock` watches the player with a
+  `ResizeObserver` and caps the drawn size at the container less the room the
+  video keeps (`KEEP_W` / `KEEP_H`), which is the drag's own clamp applied to
+  the sizes that never went through a drag. Past a point a cap is not enough:
+  a container narrower than the panel's floor *plus* that room cannot hold both
+  side by side, so a left or right dock **draws along the bottom** instead,
+  where the floor to clear is a height even a narrow box has. The drop targets
+  narrow to two bands while that holds, so the edge previewed under the pointer
+  is the edge the drop can deliver. Nothing is rewritten either way — widening
+  the window puts the dock straight back on the edge it was dropped on.
 - **The transcript follows playback until the reader takes it over.** The
   list auto-scrolls to keep the playing cue in the middle band, then hands
   control over — a brand pill fades in at the bottom of the panel to go *Back
