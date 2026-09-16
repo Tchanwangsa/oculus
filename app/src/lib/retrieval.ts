@@ -28,16 +28,40 @@ export interface IngestSummary {
   pages_with_markdown: number;
   model: string;
   dim: number;
-  /** True when the sidecar found an up-to-date sidecar file and did no work. */
+  /**
+   * True when a `.emb.json` in the current embedding space was already beside
+   * the PDF, so nothing was sent to the backend. The page rows are still
+   * upserted — an artifact on disk is no promise the database can see it.
+   */
   skipped: boolean;
 }
 
+/**
+ * What the index holds, split into what can be searched **now** and what is
+ * merely stored.
+ *
+ * The split is the point of the type. Vectors from two models share a table, a
+ * width and a dot product, and share no geometry at all, so only the ones from
+ * the model that embeds the query are ever scanned. A library embedded by a
+ * retired model therefore reads as `pages_embedded: 0` with a large
+ * `pages_stored` — and that is the truth, not a bug: those pages are not
+ * searchable until they are re-embedded.
+ */
 export interface IndexStats {
+  /** Searchable now: pages and files with a vector in the current space. */
   files_embedded: number;
   pages_embedded: number;
   pages_with_markdown: number;
+  /** The space the counts above are counted in. */
   model: string | null;
   dim: number | null;
+  /** Every vector in the table, whichever model wrote it. */
+  files_stored: number;
+  pages_stored: number;
+  /** Stored but not searchable. These re-embed; nothing migrates them. */
+  pages_stale: number;
+  /** Which models those came from, so a message can name them. */
+  stale_models: string[];
 }
 
 /**
@@ -56,8 +80,13 @@ export function embedFile(
 /**
  * Embed everything parsed but not yet indexed, one at a time.
  *
- * Serial on purpose: the sidecar holds a single model on the GPU, so parallel
- * calls would queue there anyway while multiplying peak memory.
+ * Serial on purpose, for a different reason than it used to be: the local
+ * sidecar held one model on the GPU, so parallel calls queued there anyway.
+ * The cloud backend batches pages within a document and paces itself against
+ * the account's per-minute ceiling, so running two documents at once would
+ * only make them share the same tokens per minute — and on an account with no
+ * payment method that ceiling is ~2.8 pages a minute, which means this loop
+ * can legitimately run for hours.
  */
 export async function embedPending(
   subjectId?: number,
@@ -123,23 +152,43 @@ export async function getPagesForFile(fileId: number): Promise<DbPage[]> {
 
 /**
  * Parsed PDF-backed files (PDFs and Office docs with a converted sibling)
- * that have no embeddings yet.
+ * that have no *usable* embeddings yet.
  *
  * Parsing must have run first — not because embedding needs the markdown (it
  * works off the page image), but because a hit with no markdown has nothing to
- * hydrate an answer from.
+ * hydrate an answer from. `'quality'` is the one finished-parse marker; the
+ * fast tier it was named against is gone.
+ *
+ * **This asks the `pages` table, not `files.embed_status`, and the difference
+ * is not cosmetic.** `embed_status` is a sticky flag written when a file was
+ * embedded, with no memory of *which space* it was embedded into — so after
+ * the move off the local model, every file in the library said `'done'` while
+ * holding vectors no query can be compared against. A predicate built on that
+ * flag reports an empty backlog over a library where nothing is searchable.
+ * Counting current-space page vectors instead makes the answer follow the
+ * space, which is also what `embed::is_embedded` does in Rust: a file is
+ * finished when its pages are covered *by this model*, and partial coverage
+ * (a rate limit that stopped a document halfway) is unfinished rather than
+ * silently permanent.
  */
 export async function getUnembeddedPdfs(subjectId?: number): Promise<DbFile[]> {
   const db = await getDb();
-  const scope = subjectId != null ? `AND f.subject_id = $1` : ``;
+  // The space comes from the backend rather than a constant here: which model
+  // is current is Rust's answer to give, and hardcoding it in the WebView is
+  // how the two drift apart.
+  const { model, dim } = await embeddingStats();
+  const scope = subjectId != null ? `AND f.subject_id = $3` : ``;
   return db.select<DbFile[]>(
     `SELECT f.* FROM files f
      WHERE lower(f.file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')
-       AND f.parse_status IN ('fast', 'quality')
-       AND (f.embed_status IS NULL OR f.embed_status != 'done')
+       AND f.parse_status = 'quality'
+       AND (SELECT COUNT(*) FROM pages p
+             WHERE p.file_id = f.id AND p.embedding IS NOT NULL
+               AND p.embed_model = $1 AND p.embed_dim = $2)
+           < max((SELECT COUNT(*) FROM pages p2 WHERE p2.file_id = f.id), 1)
        ${scope}
      ORDER BY f.relative_path ASC`,
-    subjectId != null ? [subjectId] : [],
+    subjectId != null ? [model, dim, subjectId] : [model, dim],
   );
 }
 

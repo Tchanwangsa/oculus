@@ -1,9 +1,14 @@
 //! Headless end-to-end check of the retrieval pipeline.
 //!
 //! Runs the same `retrieval::{ingest, search, stats}` the Tauri commands call,
-//! against a real SQLite file, with the sidecar running. Exists because the
-//! commands themselves need an AppHandle, which would otherwise mean the only
-//! way to test the pipeline is to click through the app.
+//! against a real SQLite file. Exists because the commands themselves need an
+//! AppHandle, which would otherwise mean the only way to test the pipeline is
+//! to click through the app.
+//!
+//! **`ingest` here spends real quota.** It goes through `embed::backend()`,
+//! which on every install today is the Voyage client and the account's own
+//! allowance; `stats` and `search` are cheap by comparison but `search` still
+//! embeds one query.
 //!
 //!   cargo run --bin retrieval_smoke -- <db_path> ingest <file_id> <pdf_path>
 //!   cargo run --bin retrieval_smoke -- <db_path> search "<query>" [limit]
@@ -27,7 +32,7 @@ async fn main() {
             let file_id: i64 = args[3].parse().expect("file_id");
             let pdf = args[4].clone();
             let force = args.get(5).map(|s| s == "force").unwrap_or(false);
-            match retrieval::ingest(&db, file_id, pdf, force, 0, String::new()).await {
+            match retrieval::ingest(&db, file_id, pdf, force).await {
                 Ok(s) => println!(
                     "ingest ok: file_id={} pages={} with_markdown={} dim={} model={} skipped={}",
                     s.file_id, s.pages_embedded, s.pages_with_markdown, s.dim, s.model, s.skipped
@@ -66,8 +71,17 @@ async fn main() {
         }
         "stats" => match retrieval::stats(&db).await {
             Ok(s) => println!(
-                "files={} pages={} with_markdown={} model={:?} dim={:?}",
-                s.files_embedded, s.pages_embedded, s.pages_with_markdown, s.model, s.dim
+                "searchable: files={} pages={} with_markdown={} model={:?} dim={:?}\n\
+                 stored:     files={} pages={} stale={} from={:?}",
+                s.files_embedded,
+                s.pages_embedded,
+                s.pages_with_markdown,
+                s.model,
+                s.dim,
+                s.files_stored,
+                s.pages_stored,
+                s.pages_stale,
+                s.stale_models
             ),
             Err(e) => {
                 eprintln!("stats FAILED: {e}");

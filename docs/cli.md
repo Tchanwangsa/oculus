@@ -87,6 +87,17 @@ the instructions gets read without opening the window.
   (`app/src-tauri/src/parse/mod.rs`), so the wait is the whole cloud round
   trip — the page count rewrites itself on the line as pages arrive, which is
   how you tell a long parse from a hung one.
+- **The embed half is slower than the parse half, and on a Voyage account with
+  no payment method it is dramatically slower**: 10K tokens a minute against
+  ~3,571 tokens for a 200-DPI page is about 2.8 pages a minute, so a large deck
+  is genuinely an hour or more. It gets the same in-place counter for the same
+  reason, and no timeout is imposed on it — the client paces itself against the
+  tier it detected and a 429 is routine rather than a failure. See
+  [retrieval.md](./retrieval.md).
+- **`index` re-embeds a file whose vectors came from a retired model.** There
+  is no migration between embedding spaces and there is not meant to be:
+  `embed::is_embedded` compares model, dim and page coverage, so the files the
+  local Qwen embedder wrote read as unfinished and rebuild on the next run.
 - `oculus status` reports the **parser**, not a sidecar process: the backend
   name, whether it is usable, and its `parser_version` — the handshake that
   decides whether artifacts written elsewhere can be read as this app's. It
@@ -106,12 +117,19 @@ the instructions gets read without opening the window.
 ## The query half
 
 - **`search` fails loudly rather than returning zero hits.** The query is
-  embedded by the same Qwen3-VL model that embedded the page images — there is
-  no text index to fall back on — so it needs the sidecar running, which in
-  practice means the app is open. An empty index **fails with exit 1 and names
-  `oculus index`**. That is deliberate: a caller handed an empty result
-  concludes the library has no answer and stops; a caller told why it is empty
-  tries the other door, which is `oculus grep`.
+  embedded by the same cloud model that embedded the page images — there is no
+  text index to fall back on — so it needs a Voyage key in the keychain and a
+  network. An empty index **fails with exit 1 and names `oculus index`**. That
+  is deliberate: a caller handed an empty result concludes the library has no
+  answer and stops; a caller told why it is empty tries the other door, which
+  is `oculus grep`.
+- **"Indexed" and "searchable" are different numbers, and `search` says which
+  one is zero.** Only vectors from the model that embedded the query are
+  scanned, because a dot product across two embedding spaces is meaningless and
+  still sorts. A library full of vectors from a retired model therefore fails
+  with a message naming that model and `oculus index`, not with "nothing is
+  indexed". `oculus status` prints the same split: an `index` line for what can
+  be searched now and a `stale` line for what needs re-embedding.
 - `search` takes a *set* of subject ids, not one — a prefix code legitimately
   matches the same subject in two terms. `retrieval::search_in` is the
   multi-subject entry point; `retrieval::search` is the one-subject wrapper
@@ -134,8 +152,11 @@ the instructions gets read without opening the window.
   document on stdout, and on failure `{"error": "..."}` on **stderr** with
   exit 1. `status --json` carries the index stats too, so a caller can find
   out whether `search` will work before trying it.
-- These commands never start the sidecar and never scrape. A read command on
-  a machine where the app has never run reports what is missing and stops.
+- These commands never scrape and never start the sidecar — nothing in the CLI
+  talks to it any more. A read command on a machine where the app has never run
+  reports what is missing and stops. `search` is the one exception to "reads
+  cost nothing": it embeds one query, which spends a few tokens of the Voyage
+  allowance.
 
 ## The planning half
 

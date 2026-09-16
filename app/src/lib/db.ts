@@ -554,14 +554,15 @@ export async function markFileContentChanged(
   );
 }
 
-/** Forget a file's parse state after a re-scrape changed its bytes. The Rust
- *  side purges the on-disk artifacts; this clears the DB's view so the parse
- *  re-runs and nothing serves stale text.
+/** Forget a file's parse *and embed* state after a re-scrape changed its bytes.
+ *  The Rust side purges the on-disk artifacts; this clears the DB's view so
+ *  both stages re-run and nothing serves stale text or ranks a vector of a
+ *  page that no longer exists.
  *
- *  `embed_status` / `embedded_at` are still cleared even though nothing writes
- *  them any more: the columns are deliberately left in the schema so a future
- *  backfill can be additive, and a stale value left behind by a re-scrape
- *  would be a lie that outlives this change. Not dead code — do not drop. */
+ *  Clearing `embed_status` / `embedded_at` is load-bearing again now that
+ *  `retrieval::ingest` writes them: new bytes mean new pages, and a page
+ *  vector that outlived its page is a hit that deep-links into a document
+ *  which does not say that any more. */
 export async function resetFilePipeline(
   subjectId: number,
   relativePath: string,

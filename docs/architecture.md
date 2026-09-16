@@ -1,9 +1,10 @@
 # Architecture
 
-Three application layers, one data directory. The Python layer supervises
-separate killable model workers rather than retaining their weights itself;
-it is being dismantled, and **PDF parsing has already left it** — that runs
-in Rust now, behind the seam in `app/src-tauri/src/parse/`.
+Three application layers, one data directory. The Python layer is being
+dismantled: **PDF parsing and page embedding have both left it** and run in
+Rust now, behind the seams in `app/src-tauri/src/parse/` and
+`app/src-tauri/src/embed/`. The sidecar process still exists and is still
+spawned; nothing on either of those paths reaches it any more.
 
 ```
 ┌───────────────────────────── Tauri app ─────────────────────────────┐
@@ -12,12 +13,13 @@ in Rust now, behind the seam in `app/src-tauri/src/parse/`.
 │                                     │                               │
 │                                  parse/  ── MinerU HTTPS API        │
 │                             (in-process, emits parse-status)        │
+│                                     │                               │
+│                                  embed/  ── Voyage HTTPS API        │
+│                        (in-process; pdfium rasterises the page)     │
 └───────────────┬─────────────────────────────────────────────────────┘
-                │ HTTP :9547
+                │ HTTP :9547 — spawned, no longer used
                 ▼
-        Python sidecar
-        sidecar/main.py   (embeddings only; parsing has moved out)
-          └─ embed_worker.py ─ Qwen model
+        Python sidecar  (removal is plan A4)
 ```
 
 Nothing calls back *into* the app any more. The sidecar used to POST parse
@@ -34,6 +36,9 @@ process, so progress is emitted directly and the server is gone.
 | PDF parse seam (trait, artifacts, errors, config) | `app/src-tauri/src/parse/mod.rs` |
 | MinerU cloud client (in-process, batched) | `app/src-tauri/src/parse/mineru/client.rs` |
 | `parse-status` events | `app/src-tauri/src/parse/events.rs` |
+| Page embed seam (trait, artifacts, errors, config) | `app/src-tauri/src/embed/mod.rs` |
+| Voyage cloud client + page rasterizer | `app/src-tauri/src/embed/voyage/client.rs`, `app/src-tauri/src/embed/raster.rs` |
+| Ingest + brute-force search over `pages` | `app/src-tauri/src/retrieval.rs` |
 | Media HTTP server (lecture video streaming) | `app/src-tauri/src/media.rs` |
 | In-app browser (one page WebView per tab, in the main window) | `app/src-tauri/src/browser.rs` |
 | CLI-agent harness (Claude Code / Codex / opencode bridges) | `app/src-tauri/src/harness/mod.rs` |
@@ -42,6 +47,7 @@ process, so progress is emitted directly and the server is gone.
 | Sidecar HTTP service | `sidecar/main.py` |
 | Model-worker lifecycle + memory accounting | `sidecar/model_workers.py`, `sidecar/worker_client.py`, `sidecar/memory_governor.py` |
 | MinerU token (keychain only) | `app/src-tauri/src/mineru.rs` |
+| Voyage API key (keychain only) | `app/src-tauri/src/voyage.rs` |
 | Frontend DB access | `app/src/lib/db.ts` |
 | CLI over the same engine | `app/src-tauri/src/bin/oculus.rs` |
 
@@ -54,7 +60,14 @@ process, so progress is emitted directly and the server is gone.
   (`SIDECAR_PORT` in `app/src-tauri/src/sidecar.rs`). The supervisor spawns
   `sidecar/main.py` with the project's `.venv` python, reclaims the port from
   orphans first, and installs exit handlers because Ctrl-C and `tauri dev`
-  rebuild SIGTERMs bypass Tauri's Exit event.
+  rebuild SIGTERMs bypass Tauri's Exit event. **Nothing in the app sends it a
+  request any more** — parsing and embedding were its last two callers and both
+  are in-process; the supervisor is what plan A4 deletes.
+- **Rust → the two clouds**: MinerU for parsing and Voyage for page
+  embeddings, both over plain HTTPS from inside this process, both with their
+  credential read from the macOS keychain and handed straight to the client.
+  Neither key enters SQLite, the WebView, a health response or a progress
+  event, and neither crosses a socket on this machine.
 - **Sidecar → Rust**: nothing. That direction used to be a tiny HTTP server of
   ours on an ephemeral port, first as a cookie proxy and WebView host for the
   JS scraper, then — once the scraper became Rust — for parse-status callbacks
@@ -80,7 +93,8 @@ live. Inside it:
 
 - `oculus.db` — SQLite, everything structured
 - `courses/<code>/…` — scraped files, mirrored to Canvas layout, plus `.md`,
-  `.pages.json`, and `<stem>_images/` siblings the parser writes
+  `.pages.json`, and `<stem>_images/` siblings the parser writes, and the
+  `.emb.json` sibling the embedder writes beside them
 - `lectures/<uuid>/` — downloaded Echo360 media: `source1.mp4` (the Presenter
   screen), `source2.mp4` (the room camera, when the capture has one and it has
   been asked for) and `transcript.vtt`. A `frames/` subfolder appears only when
@@ -95,6 +109,8 @@ live. Inside it:
   `agents/threads/<id>.ndjson`, the raw provider output per thread (see
   [harness.md](./harness.md))
 - `mineru-usage.json` — persistent daily cloud reservations and quota latch
+- `voyage-usage.json` — the same, for embeddings: pixel and token
+  reservations, the quota latch, and the rate-limit tier the client learned
 - the session cookie and auth-flag files (see [auth.md](./auth.md))
 
 ## The database
@@ -111,7 +127,10 @@ current schema. Ownership is split deliberately:
   which is why a fresh machine must open the app once before the CLI works.
 
 The `pages` table (markdown + embedding blob per PDF page) is the retrieval
-substrate — see [retrieval.md](./retrieval.md). `lecture_chapters` (migration
+substrate — see [retrieval.md](./retrieval.md). Its `embed_model` /
+`embed_dim` columns are load-bearing rather than bookkeeping: every scan
+filters on them, because a dot product between vectors from two models is not
+a worse score but a meaningless one that still sorts. `lecture_chapters` (migration
 29) is the other derived table: a recording's named topic spans, written by
 the agent job in [chapters.md](./chapters.md) and regenerable from the file on
 disk, with the job's own status on `lectures` beside it. `calendar_events` is the one
@@ -137,15 +156,24 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   retry and the 5 GB tunable floor.
 - Parse settings are in SQLite under `parse`; the seam reads which backend to
   use out of that row (`parse_config` in `app/src-tauri/src/parse/mod.rs`), and
-  the sidecar reads its own memory limits from the same blob. MinerU's token
-  never joins them: keychain → in-process client, and it no longer crosses a
-  socket at all. It is not in SQLite, in health, or in a progress event.
+  the sidecar reads its own memory limits from the same blob. Embed settings
+  are the row beside it, under `embed` (`embed_config` in
+  `app/src-tauri/src/embed/mod.rs`) — same shape, one field over. Neither
+  cloud's credential joins them: keychain → in-process client, and neither
+  crosses a socket at all. Neither is in SQLite, in health, or in a progress
+  event.
 - **Parsing blocks for minutes, and every caller is built around that.** The
   sidecar answered as soon as a fast pass had produced *some* markdown; there
   is one tier now, so a parse spans the whole cloud round trip. Concurrency
   belongs to the batcher (`app/src-tauri/src/parse/mineru/batch.rs`: a
   five-second/twenty-file window, eight batches in flight), so a scrape hands
   each PDF to a detached thread and reports itself finished.
+- **Embedding blocks for longer still**, and on an account with no payment
+  method on file it is the slowest thing the app does: Voyage allows 10K tokens
+  a minute there, which is under three pages a minute. Neither the CLI nor the
+  commands impose a timeout — the client paces itself against the tier it
+  detected and a 429 is routine, so a deadline from above could only abandon
+  work that was still progressing.
 - **A finished parse writes its own page records.** `pages.markdown` — what
   `oculus grep` searches — used to be a side effect of the embed path, which
   would have taken it down with the embedding layer.
@@ -172,6 +200,8 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   `scraper.js` mid-run with nothing to catch. The scrape engine is Rust
   (`app/src-tauri/src/sync.rs`); do not move background work back into a
   WebView.
-- The sidecar is optional at runtime: with no `.venv` (or the port opted
-  out), scraping still completes — PDFs are simply not parsed or embedded
-  until `oculus index` or the app's sweep picks them up.
+- The sidecar is optional at runtime, and now unused: with no `.venv` (or the
+  port opted out) everything still works, because parsing and embedding no
+  longer go through it. What can still leave a PDF unindexed is a missing
+  cloud credential or a spent allowance — in which case `oculus index` picks
+  it up on a later run.

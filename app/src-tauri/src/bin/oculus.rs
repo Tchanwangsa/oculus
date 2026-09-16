@@ -1065,7 +1065,7 @@ impl Ctx {
                     .await
                     .unwrap_or(0);
                 let parsed: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM files WHERE parse_status IN ('fast','quality')",
+                    "SELECT COUNT(*) FROM files WHERE parse_status = 'quality'",
                 )
                 .fetch_one(pool)
                 .await
@@ -1140,6 +1140,20 @@ impl Ctx {
                     None => String::new(),
                 }
             );
+            // Stored but not searchable. Printed as its own line rather than
+            // folded into the count above, because a caller deciding whether
+            // `oculus search` can answer needs the searchable number plain.
+            if i.pages_stale > 0 {
+                println!(
+                    "{}    {} page(s) need re-embedding{}",
+                    paint("stale", DIM),
+                    i.pages_stale,
+                    match i.stale_models.is_empty() {
+                        true => String::new(),
+                        false => paint(&format!("  from {}", i.stale_models.join(", ")), DIM),
+                    }
+                );
+            }
         }
         Ok(())
     }
@@ -1741,6 +1755,17 @@ impl Ctx {
     /// text only appeared on some later `oculus index`. It finishes the parse
     /// now. The per-page callback below is what keeps the terminal from
     /// looking hung while it does.
+    ///
+    /// **The embed half is slower still, and on the free programme it is the
+    /// governor.** Voyage allows 3 requests and 10K tokens a minute to an
+    /// account with no payment method, which at ~3,571 tokens for a 200-DPI
+    /// page is about 2.8 pages a minute however well they are batched — hours
+    /// for a large deck, against a couple of minutes on tier 1. No timeout is
+    /// imposed from here: the client paces itself against the tier it
+    /// detected, a 429 is routine rather than a failure, and a deadline
+    /// invented at this level could only abandon work that was still
+    /// progressing. What this level owes the user instead is an honest
+    /// counter, which is the second callback below.
     fn index_pdfs(&self, pool: &SqlitePool, pdfs: &[(i64, String)], embed: bool) -> Result<(), String> {
         if pdfs.is_empty() {
             return Ok(());
@@ -1786,38 +1811,62 @@ impl Ctx {
                     let _ = std::io::stdout().flush();
                 });
             print!("\r{label}\x1b[K");
-            match outcome {
-                Ok(summary) => print!("{}", paint(&summary.to_string(), DIM)),
+            let parsed = match outcome {
+                Ok(summary) => summary.to_string(),
                 Err(e) => {
                     println!("{}", paint(&e.to_string(), RED));
                     failed += 1;
                     continue;
                 }
-            }
+            };
+            print!("{}", paint(&parsed, DIM));
+            let _ = std::io::stdout().flush();
 
             if !embed {
                 println!();
                 continue;
             }
 
+            // Everything printed so far on this line, so the embed's own
+            // counter can rewrite in place after it. Embedding is the slower
+            // half now — on an account with no payment method Voyage allows
+            // ~2.8 pages a minute, so a 200-page deck is over an hour and a
+            // line that never changes is indistinguishable from a hang.
+            let stem = format!("{label}{}  ", paint(&parsed, DIM));
             let outcome = self.rt.block_on(async {
                 let Some(file_id) = store::file_id(pool, *subject_id, rel).await? else {
                     return Err("not in the database".to_string());
                 };
                 let abs = self.data_dir.join(&pdf_rel).to_string_lossy().to_string();
-                app_lib::retrieval::ingest(&app_lib::paths::db_path(&self.data_dir), file_id, abs, false, 0, String::new()).await
+                let line = stem.clone();
+                app_lib::retrieval::ingest_reporting(
+                    &app_lib::paths::db_path(&self.data_dir),
+                    file_id,
+                    abs,
+                    false,
+                    std::sync::Arc::new(move |p: app_lib::embed::Progress| {
+                        let seen = match p.total_pages {
+                            0 => format!("embedding {} pages", p.pages_done),
+                            total => format!("embedding {}/{total} pages", p.pages_done),
+                        };
+                        print!("\r{line}{}\x1b[K", paint(&seen, DIM));
+                        let _ = std::io::stdout().flush();
+                    }),
+                )
+                .await
             });
+            print!("\r{stem}\x1b[K");
 
             match outcome {
                 Ok(s) => {
                     pages_total += s.pages_embedded;
                     println!(
-                        "  {}",
+                        "{}",
                         paint(&format!("{} pages, {} with text", s.pages_embedded, s.pages_with_markdown), DIM)
                     );
                 }
                 Err(e) => {
-                    println!("  {}", paint(&e, RED));
+                    println!("{}", paint(&e, RED));
                     failed += 1;
                 }
             }
@@ -1863,11 +1912,12 @@ impl Ctx {
 
     /// Rank pages by meaning.
     ///
-    /// The two failure modes below are the point of this function. A caller
-    /// handed an empty result concludes the library has no answer and stops;
-    /// a caller told *why* it is empty tries the other door. So a missing
-    /// sidecar names `grep`, and an empty index names `index`, and both are
-    /// errors rather than a silent zero-hit success.
+    /// The failure modes below are the point of this function. A caller handed
+    /// an empty result concludes the library has no answer and stops; a caller
+    /// told *why* it is empty tries the other door. So an empty index names
+    /// `index`, and an index full of vectors from a retired model says so in
+    /// those words rather than reporting nothing indexed — both are errors
+    /// rather than a silent zero-hit success.
     fn search(&self, args: &SearchArgs) -> Result<(), String> {
         let pool = self.db().ok_or("the retrieval index lives in the database")?;
         let subjects = self.rt.block_on(store::subjects(&pool))?;
@@ -1886,6 +1936,23 @@ impl Ctx {
         let db_file = app_lib::paths::db_path(&self.data_dir);
         let stats = self.rt.block_on(app_lib::retrieval::stats(&db_file))?;
         if stats.pages_embedded == 0 {
+            // "Nothing searchable" and "nothing stored" look identical from a
+            // count of zero and call for different actions, so they are told
+            // apart here. A library embedded by a retired model is the state
+            // every install is in immediately after the move to Voyage.
+            if stats.pages_stale > 0 {
+                return Err(format!(
+                    "{} page(s) are stored, but they were embedded by {} and cannot be\n       \
+                     compared against a query from {}. Re-run `oculus index` to rebuild them.",
+                    stats.pages_stale,
+                    if stats.stale_models.is_empty() {
+                        "a retired model".to_string()
+                    } else {
+                        stats.stale_models.join(", ")
+                    },
+                    stats.model.as_deref().unwrap_or("the current model"),
+                ));
+            }
             return Err(
                 "nothing is indexed yet, so there is nothing to rank.\n       \
                  Run `oculus index` over PDFs already on record, or `oculus run -s` to scrape."
