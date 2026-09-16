@@ -26,6 +26,7 @@ pub mod sync;
 pub mod sidecar;
 mod storage;
 mod subjects;
+pub mod voyage;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
@@ -1113,6 +1114,9 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             mineru::mineru_set_api_key,
             mineru::mineru_has_api_key,
             mineru::mineru_delete_api_key,
+            voyage::voyage_set_api_key,
+            voyage::voyage_has_api_key,
+            voyage::voyage_delete_api_key,
             harness::app::harness_health,
             harness::app::harness_codex_models,
             harness::app::harness_opencode_models,
