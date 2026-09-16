@@ -23,6 +23,8 @@ this page is the structure.
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
 | Parse backend, memory budget + sidecar health | `app/src/pages/settings/LibraryPage.tsx` |
+| Theme switch (light / dark / system) | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/AppearanceSection.tsx`, `app/src/lib/theme.ts` |
+| Academic term ordering | `app/src/lib/terms.ts` |
 | Side panel (file/lecture preview) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser (route, tab mirror, API) | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/stores/browserStore.ts`, `app/src/lib/browser.ts`, `app/src-tauri/src/browser.rs` |
 | Viewers | `app/src/components/files/PDFViewer.tsx`, `app/src/components/files/FileViewer.tsx`, `app/src/components/lectures/LecturePlayer.tsx`, `app/src/components/lectures/ChaptersPanel.tsx` |
@@ -68,6 +70,33 @@ the one moment it shows.
   is needed. The memory input has a 5 GB floor and recommends 8 GB. Health
   polling displays whole-tree memory, peak and recoveries inline, with no
   toasts. Backend changes affect new parse requests.
+- A lecture row in `app/src/pages/subject/LecturesPage.tsx` carries its own
+  controls: download when there is no file, percentage plus a cancel while one
+  is transferring, and a ✓ plus a delete once it is on disk. Cancel disappears
+  during `trimming` — that phase is ffmpeg on a complete file, with no
+  transfer left to stop. Deleting asks first, because a download is minutes of
+  transfer, and says what it keeps. They are `div`s with a button role
+  (`RowAction`), not `<button>`s: the row itself is a button, nesting one is
+  invalid HTML and WebKit drops the inner element's clicks.
+- Settings → Appearance owns the theme. `applyTheme` in
+  `app/src/lib/theme.ts` is the only writer of both the `.dark` class and the
+  stored preference, so the control keeps no state of its own. `system`
+  resolves the OS preference *and* keeps following it — `watchSystemTheme`,
+  started once in `App.tsx`, re-applies on change so an evening switch to dark
+  lands without a relaunch. An explicit light/dark choice ignores the OS.
+- Subject lists order by term through `app/src/lib/terms.ts`, not by
+  comparing term names as text. Canvas names them `"2026 Summer Term"` /
+  `"2026 Semester 2"`, and `Su` > `Se`, so a plain string sort files Summer
+  *last* in its year when it runs first. `TERM_RANK_SQL` inlines the same
+  ranking as a `CASE` for the query in `getSubjects`.
+- **`getSubjects` derives `is_current`; it does not read the column.** The
+  stored flag is stamped at sync time by `list_courses` in
+  `app/src-tauri/src/sync.rs`, which takes the newest term with `.max()` over
+  term *names* — so a single summer enrolment outranks the semester actually
+  being studied and marks every real subject past. Recomputing at read time
+  costs one pass, cannot go stale between syncs, and keeps the current/past
+  split, the chat subject picker and the project pickers honest. The column
+  is still what Rust and the CLI read, so the same ranking belongs there too.
 - Choosing MinerU cloud or Automatic opts into uploading PDFs to MinerU's
   PRC-hosted service; Local only is the default. Token save/remove invokes
   Rust keychain commands, never DB writes. Automatic is cloud-first when a
