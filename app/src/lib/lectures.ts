@@ -166,6 +166,70 @@ export function findLectureChapters(lectureId: string, force = false): Promise<v
   return invoke("lecture_find_chapters", { lectureId, force });
 }
 
+// ── Recap ────────────────────────────────────────────────────────────────────
+
+/** Rust's own event (`recap::app::LECTURE_RECAP_EVENT`), the recap job's
+ *  sibling of `LECTURE_CHAPTERS_EVENT` and separate from it for the same
+ *  reason the two jobs are separate: either can finish while the other has
+ *  never been run. */
+export const LECTURE_RECAP_EVENT = "lecture-recap";
+
+/** How a recap run ended. `notes` is how many were written — which on an
+ *  `error` can still be more than zero, because a recap commits window by
+ *  window and the ones before the failure are kept (docs/chapters.md). */
+export interface RecapRunFinished {
+  lectureId: string;
+  status: "ready" | "error";
+  notes: number;
+  error: string | null;
+}
+
+/** Rust's step report while a recap is in flight
+ *  (`recap::app::LECTURE_RECAP_PROGRESS_EVENT`). */
+export const LECTURE_RECAP_PROGRESS_EVENT = "lecture-recap-progress";
+
+/** Which part of the recap job is running. There is no `naming` here: the
+ *  reply arriving means one window is decided, not the whole lecture, and the
+ *  window counter already says that. */
+export type RecapPhase = "decoding" | "frames" | "agent" | "writing";
+
+/**
+ * What the recap run is doing right now.
+ *
+ * `window` is the one thing a chaptering run has no equivalent of, and it is
+ * the reason this job can be honest about its progress where the other cannot:
+ * a recap is a sequence of countable agent turns, so "window 3 of 7" is a real
+ * fraction rather than an estimate of a single turn that has not answered.
+ */
+export interface RecapRunProgress {
+  lectureId: string;
+  phase: RecapPhase;
+  detail: string | null;
+  kind: ToolKind | null;
+  done: number | null;
+  total: number | null;
+  window: { done: number; total: number } | null;
+}
+
+export const RECAP_PHASE_LABEL: Record<RecapPhase, string> = {
+  decoding: "Watching the recording",
+  frames: "Grabbing slide frames",
+  agent: "Writing the notes",
+  writing: "Saving notes",
+};
+
+/**
+ * Write a recap with the agent the `lectureRecap` job is configured with
+ * (Settings → AI), the same job `oculus lecture recap` runs.
+ *
+ * Returns as soon as the run is claimed. It needs both the recording *and* the
+ * transcript — unlike chaptering, none of the transcript is optional reading —
+ * and Rust refuses the run outright without them.
+ */
+export function writeLectureRecap(lectureId: string, force = false): Promise<void> {
+  return invoke("lecture_write_recap", { lectureId, force });
+}
+
 /**
  * One JPEG of the moment the playhead is at, for a message sent from the
  * player's dock.
@@ -198,8 +262,15 @@ export function chapterEnds(starts: number[], duration: number): number[] {
   return starts.map((s, i) => Math.max(s, i + 1 < starts.length ? starts[i + 1] : duration));
 }
 
-/** Which chapter second `t` falls in, or -1 before the first one starts. */
-export function chapterAt(starts: number[], t: number): number {
+/**
+ * Which span second `t` falls in, or -1 before the first one starts.
+ *
+ * Named for the shape rather than for chapters: a chapter set and a recap's
+ * notes are both an ordered list of starts with no ends, and "which one is the
+ * playhead in" is the same arithmetic over either. Two copies of it would be
+ * two places for an off-by-one to live.
+ */
+export function spanAt(starts: number[], t: number): number {
   let idx = -1;
   for (let i = starts.length - 1; i >= 0; i--) {
     if (t >= starts[i]) {

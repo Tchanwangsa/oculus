@@ -149,16 +149,23 @@ the one moment it shows.
   card. The bar's track is inset from both ends (`::-webkit-scrollbar-track`)
   so the thumb stops clear of the card's rounded corners instead of being
   clipped into a stub.
-- **`MD_COMPONENTS` is sized for a document; chat overrides it in the
-  cascade.** One markdown renderer serves the file viewer, the calendar popover
-  and the chat timeline (`app/src/components/markdown/MdComponents.tsx`), and
-  its sizes are baked in as utilities. A reply is a smaller register than a
-  lecture page, so the timeline wraps its renderer in `.chat-md` and
+- **`MD_COMPONENTS` is sized for a document; a panel overrides it in the
+  cascade.** One markdown renderer serves the file viewer, the calendar popover,
+  the chat timeline and the player's recap notes
+  (`app/src/components/markdown/MdComponents.tsx`), and its sizes are baked in
+  as utilities. A reply and a note are a smaller register than a lecture page,
+  so both go through `CompactMd`, which wraps them in `.md-compact`, and
   `app/src/index.css` scales the type down under that class alone. That block
   is the one rule in the file that is deliberately **unlayered** — layer order
   beats specificity, so the same rules inside `@layer base` would lose to the
   very utilities they exist to override. Base *resets* still belong in the
   layer; this is the inverse case.
+- **`InlineMd` is the same renderer with every block element flattened**, and
+  it exists because of where it is used: a chapter's summary is drawn inside
+  the `<button>` that seeks to it, and a `<p>` inside a button is invalid HTML
+  that WebKit resolves by closing the button early. Paragraphs become spans and
+  headings are unwrapped to their text, so the one thing those summaries really
+  carry — inline maths — renders without risking the control around it.
 - `TopTabBar`'s tabs are **uniform and fixed-width, Chrome-style**: every tab
   is `TAB_W` however long its title, and only once the strip is full do they
   shrink together to share it, down to `TAB_MIN_W` before it scrolls. The
@@ -731,9 +738,11 @@ the one moment it shows.
   element*, not just the value: `playbackRate` and `volume` are per-element and
   reset on load, so a source switch has to re-apply both to the decoder that
   just took over the audio.
-- **The dock is three readings of one recording.** The panel's header is a
-  `ViewTabs` strip — Chapters, Transcript, Chat — and which one is in front is
-  a player preference (`dockTab`) like the side it is docked to. The
+- **The dock is four readings of one recording.** The panel's header is a
+  `ViewTabs` strip — Chapters, Recap, Transcript, Chat — and which one is in
+  front is a player preference (`dockTab`) like the side it is docked to. Four
+  labels do not fit the 220px minimum, so the strip scrolls sideways with its
+  scrollbar hidden rather than pushing the close button out of the header. The
   drag-to-dock gesture is unchanged; the tabs keep the pointerdown to
   themselves, since `startDockDrag` captures the pointer and a click needs both
   of its ends on one target — and so does the **X at the end of the header**,
@@ -746,8 +755,11 @@ the one moment it shows.
   when the panel grew tabs, and a page icon could not say which edge. The chapter list is not the transcript's follow
   machinery: twelve rows fit the panel, so the current card is a
   `scrollIntoView` and nothing else, where ~2500 cues earn a virtualizer, a
-  two-stage handover and a countdown ring. See [chapters.md](./chapters.md);
-  Chat is [harness.md](./harness.md).
+  two-stage handover and a countdown ring. The Recap tab is the same list an
+  order of magnitude denser and read as prose rather than as navigation — every
+  note's body is on screen, and notes arrive while the job that writes them is
+  still running. See [chapters.md](./chapters.md); Chat is
+  [harness.md](./harness.md).
 - **Chat is the tab every recording has, and that is why the dock is
   unconditional.** Transcript is dropped from the strip when there are no cues
   on disk, and Chapters can only show a job's state — but a conversation needs

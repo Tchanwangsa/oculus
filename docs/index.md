@@ -23,7 +23,7 @@ live in the root `CLAUDE.md`, not here.
 | [harness.md](./harness.md) | Chat as a CLI agent: the Claude Code, Codex and opencode bridges, containment, the timeline |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [projects.md](./projects.md) | Assignments broken into tasks: the Overview, the board, a page per task, and the CLI the agent plans through |
-| [chapters.md](./chapters.md) | Splitting a lecture recording at its topic boundaries — the detector, the agent job, and what is not built yet |
+| [chapters.md](./chapters.md) | Splitting a lecture recording at its topic boundaries — the detector, the two agent jobs, and what is not built yet |
 | [frontend.md](./frontend.md) | Routes, layouts, stores, hooks, the UI system |
 | [cli.md](./cli.md) | The `oculus` binary — headless sync from a terminal |
 | [cli-reference.md](./cli-reference.md) | Every command and flag — generated from the binary, not hand-kept |
@@ -60,12 +60,12 @@ Built: **lecture chapters**. Boundaries are detected, named by a CLI agent and
 stored from the command line (`oculus lecture chapters`) or the app, then read
 as a dock list, a current-chapter strip and scrub-bar ticks in the player.
 
-Part-built: **lecture recap**. The backend job segments a recording at its
-visual changes, asks a CLI agent for short windowed notes and stores each
-validated window (`oculus lecture recap`). Its model is configured in Settings
-→ AI, but the player tab that reads those rows is the next stage.
-[chapters.md](./chapters.md#lecture-recap) describes the shared pipeline and
-the remaining UI boundary.
+Built: **lecture recap**. The backend job segments a recording at its visual
+changes, asks a CLI agent for short windowed notes and stores each validated
+window (`oculus lecture recap`, or the player's own Recap tab). Its model is
+configured in Settings → AI. [chapters.md](./chapters.md#lecture-recap)
+describes the shared pipeline; the tab is in
+[The recap tab](./chapters.md#the-recap-tab).
 
 Removed: the **BYOK API layer** — provider config, keychain keys, an
 OpenAI-compatible streaming client, spend limits and its own agent tool loop —

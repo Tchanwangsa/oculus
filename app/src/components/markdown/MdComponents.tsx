@@ -1,4 +1,7 @@
-import type { Components } from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { ArrowSquareOut } from "@phosphor-icons/react";
 import { libraryPath, openLibraryPath } from "@/lib/openFile";
 import { cn } from "@/lib/utils";
@@ -151,3 +154,83 @@ export const MD_COMPONENTS: Components = {
     <td className="border border-border px-3 py-1.5 text-foreground/90" {...p} />
   ),
 };
+
+// ── Two ready-made renderers ─────────────────────────────────────────────────
+
+/** The plugin sets, hoisted so a re-render hands `ReactMarkdown` the same array
+ *  identity it had last time. KaTeX is the expensive part of the pipeline and
+ *  most text has no maths at all, so both are gated on [`MATH`]. */
+const PLAIN = [remarkGfm];
+const WITH_MATH = [remarkGfm, remarkMath];
+const KATEX = [rehypeKatex];
+const NO_PLUGINS: never[] = [];
+
+/**
+ * Markdown with no block elements in the output — every paragraph is a
+ * `<span>`, and a heading, list or fence is unwrapped to its text.
+ *
+ * **This exists because of where it is used.** A lecture chapter's card is a
+ * `<button>` (`ChaptersPanel`), and a `<p>` or `<ul>` inside a button is
+ * invalid HTML that WebKit resolves by closing the button early — the tail of
+ * the summary ends up outside the control that seeks. So the one thing these
+ * summaries actually carry, inline maths, gets rendered, and the block grammar
+ * a one-paragraph summary was never going to use is flattened rather than
+ * risked.
+ */
+export function InlineMd({ text, className }: { text: string; className?: string }) {
+  const math = MATH.test(text);
+  return (
+    <span className={cn("md-inline", className)}>
+      <ReactMarkdown
+        remarkPlugins={math ? WITH_MATH : PLAIN}
+        rehypePlugins={math ? KATEX : NO_PLUGINS}
+        components={INLINE_COMPONENTS}
+        disallowedElements={BLOCKS}
+        unwrapDisallowed
+      >
+        {math ? normalizeMath(text) : text}
+      </ReactMarkdown>
+    </span>
+  );
+}
+
+/** Unwrapped rather than dropped: the text inside a stray heading is still the
+ *  sentence someone wrote, and losing it silently is worse than losing its
+ *  weight. */
+const BLOCKS = ["h1", "h2", "h3", "h4", "h5", "h6", "hr", "img", "table", "blockquote"];
+
+/** `p` and `li` become inline so nothing block-level reaches the DOM; the rest
+ *  of the vocabulary — emphasis, code, links, maths — is already inline and
+ *  comes from the shared set. */
+const INLINE_COMPONENTS: Components = {
+  ...MD_COMPONENTS,
+  p: (p: any) => <span {...p} />,
+  ul: (p: any) => <span {...p} />,
+  ol: (p: any) => <span {...p} />,
+  li: (p: any) => <span {...p} />,
+  pre: (p: any) => <span {...p} />,
+};
+
+/**
+ * Full markdown at the size a docked panel can hold — the recap's notes, and
+ * the chat timeline's replies.
+ *
+ * The components in this file are sized for a document (the file viewer), and
+ * `.md-compact` in `index.css` is the one block that pulls that scale down,
+ * including KaTeX's own metrics: a display formula in a 220px dock needs a
+ * scroller of its own or it widens the panel it is in.
+ */
+export function CompactMd({ text, className }: { text: string; className?: string }) {
+  const math = MATH.test(text);
+  return (
+    <div className={cn("md-compact min-w-0", className)}>
+      <ReactMarkdown
+        remarkPlugins={math ? WITH_MATH : PLAIN}
+        rehypePlugins={math ? KATEX : NO_PLUGINS}
+        components={MD_COMPONENTS}
+      >
+        {math ? normalizeMath(text) : text}
+      </ReactMarkdown>
+    </div>
+  );
+}

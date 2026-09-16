@@ -363,47 +363,47 @@ p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
   scrollbar-gutter: stable both-edges;
 }
 
-/* Chat's markdown, scaled to a reply.
+/* Markdown scaled to a panel: a chat reply, a recap note.
  *
  * `MD_COMPONENTS` is sized for a document — the file viewer reads a whole
  * lecture page through it — and those sizes are baked into the components as
- * utilities. A chat reply is a different register, so the timeline wraps its
- * renderer in `.chat-md` and this block pulls the type down there and nowhere
- * else.
+ * utilities. A reply in the timeline and a note in the player's dock are a
+ * different register, so both go through `CompactMd`, which wraps them in
+ * `.md-compact`, and this block pulls the type down there and nowhere else.
  *
  * Deliberately *unlayered*, and the one place in this file that should be:
  * layer order beats specificity, so the same rules inside `@layer base` would
  * lose to the very utilities they exist to override. Every base reset still
  * belongs in the layer — this is the inverse case, an override, not a
  * default. */
-.chat-md {
+.md-compact {
   font-size: 13px;
 }
-.chat-md :is(p, ul, ol, blockquote, table, li) {
+.md-compact :is(p, ul, ol, blockquote, table, li) {
   font-size: inherit;
 }
-.chat-md :is(p, ul, ol, blockquote) {
+.md-compact :is(p, ul, ol, blockquote) {
   margin-block: 0.6rem;
 }
-.chat-md h3 {
+.md-compact h3 {
   font-size: 14px;
   margin-block: 1rem 0.4rem;
 }
-.chat-md h4 {
+.md-compact h4 {
   font-size: 13px;
   margin-block: 0.85rem 0.35rem;
 }
-.chat-md :is(code, pre code) {
+.md-compact :is(code, pre code) {
   font-size: 12px;
 }
-.chat-md th {
+.md-compact th {
   font-size: 11px;
 }
 /* First and last blocks sit flush: the row around them owns the gap. */
-.chat-md > :first-child {
+.md-compact > :first-child {
   margin-block-start: 0;
 }
-.chat-md > :last-child {
+.md-compact > :last-child {
   margin-block-end: 0;
 }
 
@@ -415,13 +415,32 @@ p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
  * shrink to. Unlayered for the same reason the block above is, and one step
  * more specific than `.katex`, so it wins wherever KaTeX's sheet lands in the
  * cascade. */
-.chat-md .katex {
+.md-compact .katex {
   font-size: 1.05em;
 }
-.chat-md .katex-display {
+.md-compact .katex-display {
   margin-block: 0.7rem;
   overflow-x: auto;
   overflow-y: hidden;
   /* The scroller clips the descenders of a fraction otherwise. */
   padding-block: 2px;
+}
+
+/* Markdown with its blocks flattened — `InlineMd`, which renders a chapter
+ * summary inside the button that seeks to it. The wrapper has to sit in the
+ * text it is part of, so it inherits rather than setting a size, and KaTeX
+ * comes down to the surrounding 11px the same way it does above. Unlayered
+ * for the same reason that block is. */
+.md-inline .katex {
+  font-size: 1.05em;
+}
+/* No `overflow-x` guard on an inline formula, which is the obvious thing to
+ * reach for and wrong: an inline-block with a clipped overflow takes its
+ * baseline from its bottom margin edge, so every `$n_0$` in a sentence sits a
+ * subscript's depth above the line it is in. A summary's formulas are short,
+ * and the wrapper below lets a long one break out rather than widening the
+ * panel around it. */
+.md-inline {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

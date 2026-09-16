@@ -39,7 +39,7 @@ import {
 import { useTabActive, useTabId } from "@/components/tabs/TabContext";
 import {
   parseVtt,
-  chapterAt,
+  spanAt,
   chapterEnds,
   fmtDuration,
   fmtTime,
@@ -48,7 +48,9 @@ import {
   type Cue,
 } from "@/lib/lectures";
 import { useLectureChapters } from "@/hooks/useLectureChapters";
+import { useLectureRecap } from "@/hooks/useLectureRecap";
 import type { ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
+import type { RecapPanelProps } from "@/components/lectures/RecapPanel";
 import type { LectureChatPanelProps } from "@/components/lectures/LectureChatPanel";
 import { useTranscriptDock, type Dock } from "@/hooks/useTranscriptDock";
 import { PIP_CORNERS, useSourceLayout, type PipCorner } from "@/hooks/useSourceLayout";
@@ -94,10 +96,11 @@ const DOCK_ICON_FACING: Record<Dock, string> = {
 };
 
 /** What the dock button calls the tab it would show or hide. The button used
- *  to guess from what the recording had; with three tabs, and Chat on every
+ *  to guess from what the recording had; with four tabs, and Chat on every
  *  recording, the only honest answer is the one in front. */
 const DOCK_TAB_NOUN: Record<DockTab, string> = {
   chapters: "chapters",
+  recap: "recap",
   transcript: "transcript",
   chat: "chat",
 };
@@ -673,6 +676,18 @@ export function LecturePlayer({
     [chapterState.chapters],
   );
 
+  // ── Recap ────────────────────────────────────────────────────────────────
+
+  // The denser reading of the same recording, read the same way and for the
+  // same reason. The two jobs are independent — a lecture can have either,
+  // both or neither — so this is a second hook rather than a field on the
+  // first one's state.
+  const recapState = useLectureRecap(lecture.id);
+  const recapStarts = useMemo(
+    () => recapState.notes.map((n) => n.start_seconds),
+    [recapState.notes],
+  );
+
   // ── Transcript loading ───────────────────────────────────────────────────
 
   const loadTranscript = useCallback(async (path: string) => {
@@ -1124,7 +1139,7 @@ export function LecturePlayer({
   const frontTab = tabInFront(dockTab, hasTranscript);
 
   /** The chapter the playhead is in, and how far through it we are. */
-  const activeChapterIdx = chapterAt(chapterStarts, currentTime);
+  const activeChapterIdx = spanAt(chapterStarts, currentTime);
   const activeChapter =
     activeChapterIdx >= 0 ? chapterState.chapters[activeChapterIdx] : null;
   const activeChapterEnd = activeChapter
@@ -1173,6 +1188,42 @@ export function LecturePlayer({
     ],
   );
 
+  /** The note the playhead is in — the same boundary arithmetic the chapter
+   *  strip does, over a list that is ten times denser. */
+  const activeNoteIdx = spanAt(recapStarts, currentTime);
+
+  const recapProps: RecapPanelProps = useMemo(
+    () => ({
+      notes: recapState.notes,
+      activeIdx: activeNoteIdx,
+      status: recapState.status,
+      error: recapState.error,
+      since: recapState.since,
+      progress: recapState.progress,
+      busy: recapState.busy,
+      downloaded: !!lecture.video_path,
+      // A recap reads the whole transcript, so the cues the player already
+      // parsed are the honest test of whether one can be written — the same
+      // file Rust refuses the run without.
+      hasTranscript: cues.length > 0,
+      onSeek: handleCueSeek,
+      onWrite: recapState.write,
+    }),
+    [
+      recapState.notes,
+      recapState.status,
+      recapState.error,
+      recapState.since,
+      recapState.progress,
+      recapState.busy,
+      recapState.write,
+      activeNoteIdx,
+      lecture.video_path,
+      cues.length,
+      handleCueSeek,
+    ],
+  );
+
   /**
    * The moment a message from the dock carries, built here because this is
    * where the playhead, the cues and the chapters already are.
@@ -1195,7 +1246,7 @@ export function LecturePlayer({
         `The student is at ${fmtTime(at, true)} of this recording (second ${at}).`,
       ];
 
-      const idx = chapterAt(chapterStarts, at);
+      const idx = spanAt(chapterStarts, at);
       const chapter = idx >= 0 ? chapterState.chapters[idx] : null;
       if (chapter) {
         parts.push(
@@ -1581,6 +1632,7 @@ export function LecturePlayer({
             tab={dockTab}
             onTabChange={(t) => setPrefs({ dockTab: t })}
             chapters={chaptersProps}
+            recap={recapProps}
             chat={chatProps}
             dock={dock}
             size={size}

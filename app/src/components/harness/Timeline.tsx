@@ -123,14 +123,14 @@ const WITH_MATH = [remarkGfm, remarkMath];
 const KATEX = [rehypeKatex];
 const NO_PLUGINS: never[] = [];
 
-/** `chat-md` scales the shared markdown components down to chat's own size —
+/** `md-compact` scales the shared markdown components down to a panel's size —
  *  see the rule in `app/src/index.css`. The components themselves are sized
  *  for a document (the file viewer), which is a size too large for a reply. */
 const Assistant = memo(function Assistant({ text }: { text: string }) {
   const math = MATH.test(text);
   const body = math ? normalizeMath(text) : text;
   return (
-    <div className="chat-md min-w-0 px-2 text-[13px] leading-relaxed">
+    <div className="md-compact min-w-0 px-2 text-[13px] leading-relaxed">
       <ReactMarkdown
         remarkPlugins={math ? WITH_MATH : PLAIN}
         rehypePlugins={math ? KATEX : NO_PLUGINS}

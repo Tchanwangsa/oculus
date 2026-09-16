@@ -4,15 +4,15 @@ import type { SourceNum } from "@/lib/db";
 /** Which edge of the player the docked panel is attached to. */
 export type Dock = "bottom" | "top" | "left" | "right";
 
-/** Which of the dock's three readings of the recording is in front. Chat is
- *  the odd one: the other two are the recording read back, and it is a
+/** Which of the dock's four readings of the recording is in front. Chat is
+ *  the odd one: the other three are the recording read back, and it is a
  *  conversation about it — but it is the same dock and the same preference. */
-export type DockTab = "chapters" | "transcript" | "chat";
+export type DockTab = "chapters" | "recap" | "transcript" | "chat";
 
 /** Every value the tab may hold, so the tolerant read below stays one list.
  *  It hard-coded `=== "chapters"` once, which silently reset a stored `chat`
  *  to the default on the next launch. */
-const DOCK_TABS: DockTab[] = ["chapters", "transcript", "chat"];
+const DOCK_TABS: DockTab[] = ["chapters", "recap", "transcript", "chat"];
 
 export const isVertical = (dock: Dock) => dock === "bottom" || dock === "top";
 

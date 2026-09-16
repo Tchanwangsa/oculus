@@ -407,10 +407,12 @@ rehype-katex. Two things make that hold up:
 
 KaTeX's own stylesheet is imported by `MdComponents.tsx` rather than by a
 viewer, so it arrives with the components every renderer already shares.
-`.chat-md .katex` in `app/src/index.css` brings 1.21em down to something that
-sits in 13px text and gives a display formula its own horizontal scroller —
-without one, a long derivation has no width to shrink to and widens the
-player's dock.
+`.md-compact .katex` in `app/src/index.css` brings 1.21em down to something
+that sits in 13px text and gives a display formula its own horizontal scroller
+— without one, a long derivation has no width to shrink to and widens the
+player's dock. The class is not chat's: `CompactMd` in `MdComponents.tsx` is
+what wraps a renderer in it, and the recap notes in the player's dock go
+through the same component.
 
 **Every message has a row of actions under it**, and it is under rather than
 beside for one reason: a control floating next to a bubble has to be placed

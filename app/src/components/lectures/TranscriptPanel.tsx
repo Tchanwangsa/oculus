@@ -25,6 +25,7 @@ import {
   ChaptersPanel,
   type ChaptersPanelProps,
 } from "@/components/lectures/ChaptersPanel";
+import { RecapPanel, type RecapPanelProps } from "@/components/lectures/RecapPanel";
 import {
   LectureChatPanel,
   type LectureChatPanelProps,
@@ -50,10 +51,15 @@ const IDLE_RESYNC_MS = 8000;
 /** The countdown ring drawn on the pill, in px. Hairline, like every border. */
 const RING_STROKE = 1.5;
 
-/** The dock's three readings of the recording. No "In this video" label over
- *  them: the panel is narrow and its subject is never in doubt. */
+/** The dock's four readings of the recording. No "In this video" label over
+ *  them: the panel is narrow and its subject is never in doubt.
+ *
+ *  Recap sits next to Chapters because the two are the same recording read at
+ *  two densities — a topic per chapter, a slide per note — and the transcript
+ *  and the chat are what you reach for when neither has been run. */
 const TABS: ReadonlyArray<ViewTab<DockTab>> = [
   { value: "chapters", label: "Chapters" },
+  { value: "recap", label: "Recap" },
   { value: "transcript", label: "Transcript" },
   { value: "chat", label: "Chat" },
 ];
@@ -86,6 +92,9 @@ interface TranscriptPanelProps {
    * is not re-rendering constantly next to a decoding video.
    */
   chapters: ChaptersPanelProps;
+  /** The Recap tab's own bag, beside `chapters` and memoised for the reason
+   *  that prop's comment gives. */
+  recap: RecapPanelProps;
   /** Everything the Chat tab draws, as a second memoised bag beside
    *  `chapters` and for the same reason — read that prop's comment. Nothing
    *  time-varying is in it: the playhead arrives as a ref the chip ticks
@@ -135,6 +144,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   tab,
   onTabChange,
   chapters,
+  recap,
   chat,
   dock,
   size,
@@ -524,12 +534,19 @@ export const TranscriptPanel = memo(function TranscriptPanel({
             </TooltipTrigger>
             <TooltipContent>Drag to dock left, right, top or bottom</TooltipContent>
           </Tooltip>
-          <div className="min-w-0" onPointerDown={(e) => e.stopPropagation()}>
+          {/* Four tabs do not fit a 220px dock, so the strip scrolls sideways
+              rather than pushing the close button off the header. No visible
+              scrollbar: these are classic scrollbars on this machine, and a
+              bar under four words is furniture the header has no room for. */}
+          <div
+            className="min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <ViewTabs
               tabs={tabs}
               value={activeTab}
               onChange={onTabChange}
-              className="gap-3"
+              className="w-max gap-3"
             />
           </div>
           {/* Lifted onto the tabs' text like the drag handle is, and it keeps
@@ -551,6 +568,8 @@ export const TranscriptPanel = memo(function TranscriptPanel({
           <LectureChatPanel {...chat} />
         ) : activeTab === "chapters" ? (
           <ChaptersPanel {...chapters} />
+        ) : activeTab === "recap" ? (
+          <RecapPanel {...recap} />
         ) : (
           <>
           <div className="px-1.5 pt-1.5 shrink-0">

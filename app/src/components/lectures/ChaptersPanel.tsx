@@ -4,6 +4,7 @@ import { CircleNotch } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { Chapter } from "@/lib/db";
+import { InlineMd } from "@/components/markdown/MdComponents";
 import {
   CHAPTER_PHASE_LABEL,
   chapterEnds,
@@ -161,10 +162,16 @@ export const ChaptersPanel = memo(function ChaptersPanel({
                     {fmtSpan(ends[i] - c.start_seconds)}
                   </span>
                 </span>
+                {/* Through the markdown renderer, because the agent writes
+                    these with formulas in them — `$\log_2 N$` sat in the
+                    panel as its own source until it did. Inline-only: this is
+                    inside the button that seeks, and a `<p>` in a `<button>`
+                    closes the button early in WebKit. */}
                 {active && (
-                  <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">
-                    {c.summary}
-                  </span>
+                  <InlineMd
+                    text={c.summary}
+                    className="mt-1 block text-[11px] leading-relaxed text-muted-foreground"
+                  />
                 )}
               </span>
             </button>

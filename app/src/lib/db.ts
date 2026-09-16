@@ -871,6 +871,11 @@ export interface Lecture {
   /** Why the last run failed; cleared on success. A status column cannot
    *  carry a message, and the player has to be able to say what went wrong. */
   chapter_error: string | null;
+  /** The recap job's state, the same four values `chapter_status` takes. The
+   *  two jobs are independent: a lecture can have one, both or neither. */
+  recap_status: string | null;
+  recapped_at: string | null;
+  recap_error: string | null;
 }
 
 export interface LectureData {
@@ -1004,6 +1009,51 @@ export async function getChapterStatus(
   const rows = await db.select<
     { chapter_status: string | null; chapter_error: string | null }[]
   >(`SELECT chapter_status, chapter_error FROM lectures WHERE id = $1`, [lectureId]);
+  return rows[0] ?? null;
+}
+
+// ── Lecture recap ─────────────────────────────────────────────────────────────
+
+/**
+ * One row of `lecture_recap` (migration 31), written by the recap job in
+ * `app/src-tauri/src/recap.rs`.
+ *
+ * The denser sibling of `Chapter`: a note per visual segment rather than per
+ * topic, so a lecture has tens of these where it has eight chapters. `body` is
+ * markdown — the job asks for two to four sentences and the model writes
+ * formulas as `$…$` — which is why this is the one lecture reading that goes
+ * through the markdown renderer.
+ *
+ * There is no end here either, for the same reason there is none on a chapter:
+ * a note runs until the next one starts.
+ */
+export interface RecapNote {
+  lecture_id: string;
+  idx: number;
+  start_seconds: number;
+  /** A short heading for the segment. The column is nullable — the agent may
+   *  omit one — so the panel falls back to the timestamp alone. */
+  label: string | null;
+  body: string;
+}
+
+export async function getRecap(lectureId: string): Promise<RecapNote[]> {
+  const db = await getDb();
+  return db.select<RecapNote[]>(
+    `SELECT * FROM lecture_recap WHERE lecture_id = $1 ORDER BY idx ASC`,
+    [lectureId],
+  );
+}
+
+/** The recap job's state, read on its own for the reason `getChapterStatus`
+ *  is: the player's `lecture` prop is a snapshot that predates the run. */
+export async function getRecapStatus(
+  lectureId: string,
+): Promise<{ recap_status: string | null; recap_error: string | null } | null> {
+  const db = await getDb();
+  const rows = await db.select<
+    { recap_status: string | null; recap_error: string | null }[]
+  >(`SELECT recap_status, recap_error FROM lectures WHERE id = $1`, [lectureId]);
   return rows[0] ?? null;
 }
 

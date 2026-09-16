@@ -11,13 +11,14 @@ writes the named chapters to the database. `oculus lecture candidates` is the
 first; `oculus lecture chapters` is the whole pipeline, and the app runs that
 same job through the `lecture_find_chapters` command. Which agent, model and
 reasoning level it runs on is configured in Settings → AI — see [A configured
-job](#a-configured-job). The player reads them back three ways — see [Three
-readings in the player](#three-readings-in-the-player).
+job](#a-configured-job). The player reads them back three ways — see
+[Reading them in the player](#reading-them-in-the-player).
 
 The same visual pipeline now has a second backend job: `oculus lecture recap`
 writes short slide-level notes about what is shown and said. It deliberately
 has a different density and write lifetime from chapters; see
-[Lecture recap](#lecture-recap). Its player tab is not built yet.
+[Lecture recap](#lecture-recap). It has its own tab in the player's dock,
+beside the chapter list.
 
 ## Where
 
@@ -41,6 +42,9 @@ has a different density and write lifetime from chapters; see
 | Reading the rows and the job's state in the app | `getChapters` / `getChapterStatus` in `app/src/lib/db.ts` |
 | The player's chapter state, and the event it listens on | `app/src/hooks/useLectureChapters.ts` |
 | The chapter list, and every state it has | `app/src/components/lectures/ChaptersPanel.tsx` |
+| The recap's rows, its job state, and its panel | `app/src/lib/db.ts`, `app/src/hooks/useLectureRecap.ts`, `app/src/components/lectures/RecapPanel.tsx` |
+| The recap's frontend binding and its two event names | `app/src/lib/lectures.ts` |
+| The two markdown renderers both panels use | `InlineMd` / `CompactMd` in `app/src/components/markdown/MdComponents.tsx` |
 | The dock's tab strip | `app/src/components/lectures/TranscriptPanel.tsx` |
 | The chapter strip and the scrub-bar ticks | `app/src/components/lectures/LecturePlayer.tsx` |
 | Which tab the dock opens on | `dockTab` in `app/src/stores/playerPrefsStore.ts` |
@@ -355,29 +359,53 @@ sweep clears a stale `running` left by an interrupted process.
 `oculus lecture recap <ID>` is the built reader-independent door. It accepts
 the same unique lecture-id prefix and one-run model overrides as chaptering,
 prints each window before its agent tool rows, and requires `--force` before
-replacing an existing recap. No duration estimate is documented yet: the two
-reference lectures have not been measured with this job, and the player tab
-that will consume these rows is not built.
+replacing an existing recap. The app's door is the Recap tab's own button,
+which calls `lecture_write_recap` — the command was registered before anything
+in the frontend called it. No duration estimate is documented: the reference
+lectures have not been measured with this job, so the panel offers the shape of
+the cost ("one agent turn per ten minutes of recording") rather than a number
+it would be inventing.
 
-## Three readings in the player
+**The two jobs are independent, and share code rather than data.** Recap calls
+`chapters::candidates_with_spacing`, `sample_diffs`, `cue_gaps` and the same
+offset-probed `extract_frames` — the expensive, measured half — but it requires
+no chapter set to run, and a lecture may have either, both or neither. Where it
+*reads* chapters is `store::chapters` at the top of the windowing step, and
+they change two things when present: a window edge snaps to a chapter boundary
+within three minutes of the ten-minute target, and each window's prompt names
+the chapter it sits inside. With no chapters the snap falls back to ordinary
+chunking and the prompt simply omits that line. So chaptering first is better,
+not required.
 
-Chapters are three different questions, so they are drawn three times over
+One consequence worth knowing: both jobs write `lectures/<id>/frames/`, and
+they thin candidates differently (90 s against 25 s). A recap run therefore
+replaces the frames a chaptering run left behind. Nothing reads them back —
+they are a run's leavings, checkable by eye — but the set on disk belongs to
+whichever job ran last.
+
+## Reading them in the player
+
+Chapters are three different questions, so they are drawn three times over,
+and the recap gets a fourth surface of its own
 (`app/src/components/lectures/LecturePlayer.tsx`, and see
 [frontend.md](./frontend.md) for the player's own shape).
 
 **Chapters are one of the dock's tabs.** What was the transcript panel's
-header is a `ViewTabs` strip — *Chapters*, *Transcript*, *Chat*
+header is a `ViewTabs` strip — *Chapters*, *Recap*, *Transcript*, *Chat*
 ([harness.md](./harness.md)) — sitting on the border it already had, with the
 `DotsSixVertical` and the drag-to-dock gesture untouched. The
 tabs stop the pointerdown from reaching the header: `startDockDrag` captures
 the pointer on the element it fires from, which retargets the pointerup onto
 the header, and a click needs both ends on one target — without that the tab
 would never register one. Everything around the tabs still drags. There is no
-"In this video" heading over them; the dock is 200px wide at its narrowest and
-its subject is never in doubt. The Transcript tab is only offered when there
+"In this video" heading over them; the dock is 220px wide at its narrowest and
+its subject is never in doubt. Four labels do not fit that width, so the strip
+scrolls sideways with no visible bar rather than pushing the close button off
+the header. The Transcript tab is only offered when there
 are cues, since a tab that could only ever be empty is not a tab; Chat needs
 neither a file nor a run and so is always offered, which is what makes the dock
-itself unconditional.
+itself unconditional. Recap is always offered too: like Chapters it explains
+its own empty state and carries the button that fills it.
 
 **The list follows playback**
 (`app/src/components/lectures/ChaptersPanel.tsx`): every chapter collapsed to
@@ -413,6 +441,36 @@ slide.
 side and size in `playerPrefsStore` — a habit like the side it is docked to,
 not a property of one recording. It defaults to the transcript: every
 downloaded lecture has one, and chapters have to be asked for.
+
+### The recap tab
+
+The Recap tab (`app/src/components/lectures/RecapPanel.tsx`,
+`app/src/hooks/useLectureRecap.ts`) is the chapter list's denser sibling and
+mirrors it almost exactly — a status read from SQLite rather than from the
+`lectures` row the player was handed, a module-level map for the elapsed clock
+and last step of a run this session started, the same five real states, the
+same Regenerate footer. Three things are deliberately different.
+
+- **Every note's prose is on screen, not just the playing one's.** Chapters
+  are navigation and a list of twelve titles is the point of them; a recap is
+  the lecture written down, something to read after the fact. Following
+  playback is a highlight here rather than the only way to see any prose.
+- **Notes appear while the job is still running.** A recap commits window by
+  window, so the panel shows the list *and* the progress line together, and the
+  hook re-reads the table on the `writing` phase rather than only at the end.
+  This is the visible half of a decision that would otherwise live only in the
+  database.
+- **It can say how far through itself it is.** A recap is a countable sequence
+  of agent turns, so the spinner carries "3/7" — a fact, where a chaptering
+  run's single turn has no denominator and is still given none.
+
+Only the heading row seeks. A note's body is markdown — `CompactMd`, the same
+renderer the chat timeline uses — and none of that may sit inside a `<button>`,
+which is why the click target is the line above the prose rather than the whole
+card the Chapters tab uses. A chapter's summary has the same problem in
+miniature and takes the other way out: `InlineMd` flattens it to inline
+elements so it can stay inside the button. Both exist because the agents write
+maths, and `$\log_2 N$` sat in the panel as its own source until they did.
 
 ### Every state is a real one
 
