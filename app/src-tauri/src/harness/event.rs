@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 pub enum Provider {
     Claude,
     Codex,
+    Opencode,
 }
 
 impl Provider {
@@ -28,6 +29,7 @@ impl Provider {
         match self {
             Provider::Claude => "claude",
             Provider::Codex => "codex",
+            Provider::Opencode => "opencode",
         }
     }
 
@@ -35,6 +37,7 @@ impl Provider {
         match s {
             "claude" => Some(Provider::Claude),
             "codex" => Some(Provider::Codex),
+            "opencode" => Some(Provider::Opencode),
             _ => None,
         }
     }
@@ -43,6 +46,9 @@ impl Provider {
         match self {
             Provider::Claude => "Claude Code",
             Provider::Codex => "Codex",
+            // Lowercase is the project's own branding, and the frontend's
+            // `PROVIDERS` entry spells it the same way.
+            Provider::Opencode => "opencode",
         }
     }
 }
@@ -195,12 +201,22 @@ impl HarnessEvent {
 }
 
 /// Classify a tool by its raw name and input. Provider-specific names are
-/// mapped here so both bridges share one table.
+/// mapped here so all three bridges share one table.
+///
+/// The three CLIs spell their tools differently and, worse, spell their
+/// *arguments* differently. Claude sends `Read { file_path }`; opencode's
+/// runner sends `read { path }` — measured off the wire, not off its
+/// `/experimental/tool` registry, which still advertises `filePath`. So the
+/// lowercase names below have their own arms wherever the accessor differs,
+/// and only join a Claude arm where the key is genuinely the same
+/// (`command`, `pattern`, `url`). A fall-through would have titled every
+/// opencode file row with an empty string, which looks like a missing title
+/// rather than a wrong lookup.
 pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
     let s = |k: &str| input.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let base = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
     match name {
-        "Bash" | "commandExecution" => {
+        "Bash" | "commandExecution" | "bash" => {
             let cmd = s("command");
             let kind = if is_oculus_cli(&cmd) {
                 ToolKind::OculusCli
@@ -214,10 +230,21 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
         "Write" => (ToolKind::Write, base(&s("file_path"))),
         "NotebookEdit" => (ToolKind::Edit, base(&s("notebook_path"))),
         "fileChange" => (ToolKind::Edit, s("title")),
-        "Grep" | "Glob" => (ToolKind::Search, s("pattern")),
-        "WebSearch" => (ToolKind::Web, s("query")),
-        "WebFetch" | "webSearch" => (ToolKind::Web, s("url")),
-        "Task" | "Agent" | "collabAgentToolCall" => (
+        "Grep" | "Glob" | "grep" | "glob" => (ToolKind::Search, s("pattern")),
+        "WebSearch" | "websearch" => (ToolKind::Web, s("query")),
+        "WebFetch" | "webSearch" | "webfetch" => (ToolKind::Web, s("url")),
+        // opencode's own file tools. `path`, not `file_path`.
+        "read" => (ToolKind::Read, base(&s("path"))),
+        "edit" => (ToolKind::Edit, base(&s("path"))),
+        "write" => (ToolKind::Write, base(&s("path"))),
+        "list" => (ToolKind::Search, base(&s("path"))),
+        // One tool for a whole multi-file patch; the row is titled with the
+        // first file the patch names, which is the one an `*** Update File:`
+        // header carries.
+        "apply_patch" => (ToolKind::Edit, base(&patch_target(&s("patchText")))),
+        "skill" => (ToolKind::Other, s("name")),
+        "question" => (ToolKind::Other, String::new()),
+        "Task" | "Agent" | "collabAgentToolCall" | "task" => (
             ToolKind::Task,
             if s("description").is_empty() {
                 s("prompt").lines().next().unwrap_or("").to_string()
@@ -225,7 +252,7 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
                 s("description")
             },
         ),
-        "TodoWrite" | "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet" => {
+        "TodoWrite" | "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet" | "todowrite" => {
             (ToolKind::Plan, String::new())
         }
         "Skill" => (ToolKind::Other, s("skill")),
@@ -239,6 +266,22 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
             (ToolKind::Other, String::new())
         }
     }
+}
+
+/// The first file an `apply_patch` envelope names. The patch text is a
+/// sequence of `*** Add File: p` / `*** Update File: p` / `*** Delete File: p`
+/// headers; anything else has no path in it and titles the row with nothing,
+/// which is what an unparseable patch deserves.
+fn patch_target(patch: &str) -> String {
+    for line in patch.lines() {
+        let line = line.trim();
+        for verb in ["*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"] {
+            if let Some(rest) = line.strip_prefix(verb) {
+                return rest.trim().to_string();
+            }
+        }
+    }
+    String::new()
 }
 
 /// `oculus grep …`, `/path/to/oculus search …`, or the same behind an env
@@ -278,6 +321,31 @@ mod tests {
         assert_eq!(k, ToolKind::OculusCli);
         let (k, _) = classify("Bash", &serde_json::json!({"command": "ls myoculus"}));
         assert_eq!(k, ToolKind::Bash);
+    }
+
+    /// opencode's runner spells its tools in lowercase and its file argument
+    /// `path`. Letting those fall through to Claude's arms would have read
+    /// `file_path` off every one of them and titled the row with nothing.
+    #[test]
+    fn opencode_tool_names_are_titled_off_their_own_arguments() {
+        use serde_json::json;
+        assert_eq!(classify("read", &json!({"path": "../courses/COMP30026/w1.md"})), (ToolKind::Read, "w1.md".into()));
+        assert_eq!(classify("write", &json!({"path": "memories/a.md"})), (ToolKind::Write, "a.md".into()));
+        assert_eq!(classify("edit", &json!({"path": "memories/a.md"})), (ToolKind::Edit, "a.md".into()));
+        assert_eq!(classify("glob", &json!({"pattern": "**/*.md"})), (ToolKind::Search, "**/*.md".into()));
+        assert_eq!(classify("todowrite", &json!({"todos": []})), (ToolKind::Plan, String::new()));
+        assert_eq!(classify("skill", &json!({"name": "customize-opencode"})), (ToolKind::Other, "customize-opencode".into()));
+        // Bash is the one place the two CLIs agree on the argument name.
+        assert_eq!(
+            classify("bash", &json!({"command": "oculus files COMP30026"})),
+            (ToolKind::OculusCli, "oculus files COMP30026".into())
+        );
+        assert_eq!(
+            classify("apply_patch", &json!({"patchText": "*** Begin Patch\n*** Update File: memories/x.md\n@@\n-a\n+b\n*** End Patch"})),
+            (ToolKind::Edit, "x.md".into())
+        );
+        // Claude's own spelling is untouched by any of it.
+        assert_eq!(classify("Read", &json!({"file_path": "/a/b.md"})), (ToolKind::Read, "b.md".into()));
     }
 
     #[test]

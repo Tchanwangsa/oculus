@@ -160,12 +160,12 @@ enum Command {
 
 #[derive(Args)]
 #[command(
-    about = "Run one prompt through a CLI agent (Claude Code or Codex)",
+    about = "Run one prompt through a CLI agent (Claude Code, Codex or opencode)",
     long_about = "Run one prompt through a CLI agent and print what it does.\n\n\
 The same bridges the app's chat uses, without the window: the agent runs from \
 the library's agents/ folder with the app's instructions appended, can read the \
 whole library and write only there, and its normalized events are printed as they \
-arrive. Needs the provider's CLI installed and signed in (`claude` or `codex`). \
+arrive. Needs the provider's CLI installed and signed in (`claude`, `codex` or `opencode`). \
 Nothing is recorded in the database; this is for checking a bridge works."
 )]
 struct AgentArgs {
@@ -173,7 +173,7 @@ struct AgentArgs {
     #[arg(value_name = "PROMPT")]
     prompt: String,
     /// Which CLI to drive
-    #[arg(short, long, value_parser = ["claude", "codex"], default_value = "claude")]
+    #[arg(short, long, value_parser = ["claude", "codex", "opencode"], default_value = "claude")]
     provider: String,
     /// Model to request (provider-specific name or alias)
     #[arg(short, long)]
@@ -739,7 +739,7 @@ struct LectureChaptersArgs {
     // registry (`app/src-tauri/src/harness/jobs.rs`), so the app and the CLI
     // run the same thing. A flag overrides that selection for one run.
     /// Which CLI to drive (default: the configured one)
-    #[arg(short, long, value_parser = ["claude", "codex"])]
+    #[arg(short, long, value_parser = ["claude", "codex", "opencode"])]
     provider: Option<String>,
     /// Model to request (default: the configured one)
     #[arg(short, long)]
@@ -773,7 +773,7 @@ struct LectureRecapArgs {
     // replaces only the named part for this run, exactly as chapter naming
     // does above.
     /// Which CLI to drive (default: the configured one)
-    #[arg(short, long, value_parser = ["claude", "codex"])]
+    #[arg(short, long, value_parser = ["claude", "codex", "opencode"])]
     provider: Option<String>,
     /// Model to request (default: the configured one)
     #[arg(short, long)]

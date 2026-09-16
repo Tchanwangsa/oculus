@@ -1,12 +1,14 @@
 # The harness: CLI agents as chat
 
-Chat is a coding agent the student already has — Claude Code or Codex —
-run as a subprocess from the library, with its output folded into one
-timeline. No API key, no per-token billing: the CLIs carry the student's own
-subscription, which is the whole reason for driving them rather than the
-model APIs. The shape is bb's (get-bb/bb) with its plugin system taken out:
-one bridge per provider, one normalized event stream, a timeline that only
-ever sees the stream.
+Chat is a coding agent the student already has — Claude Code, Codex or
+opencode — run as a subprocess from the library, with its output folded into
+one timeline. Claude Code and Codex carry the student's own subscription,
+which is the whole reason for driving them rather than the model APIs;
+opencode is the odd one out and carries whatever provider key `opencode auth`
+holds, so it is the one agent here that does spend per token — it earns its
+place by reaching every provider at once rather than by being free. The shape
+is bb's (get-bb/bb) with its plugin system taken out: one bridge per provider,
+one normalized event stream, a timeline that only ever sees the stream.
 
 The BYOK API layer this replaced is gone: its Rust, its Settings sections and
 its chat page and store were deleted once nothing routed to them. Migrations
@@ -21,6 +23,8 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | The normalized event enum and tool classification | `app/src-tauri/src/harness/event.rs` |
 | Claude Code bridge (`claude -p`, stream-json) | `app/src-tauri/src/harness/claude.rs` |
 | Codex bridge (`codex app-server`, JSON-RPC) | `app/src-tauri/src/harness/codex.rs` |
+| opencode bridge (`opencode serve`, HTTP + SSE) | `app/src-tauri/src/harness/opencode.rs` |
+| opencode's containment ruleset and system prompt | `app/src-tauri/templates/OPENCODE.template.json` |
 | Finding the binaries from a GUI app | `app/src-tauri/src/harness/discover.rs` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–26, 28 and 30 in `app/src-tauri/src/lib.rs` |
 | Instructions appended to the provider's prompt | `app/src-tauri/templates/HARNESS.template.md` |
@@ -53,13 +57,16 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   calls carry a provider-neutral `ToolKind` plus the raw name; `classify` in
   `event.rs` is the one table both bridges share, and it knows an `oculus …`
   command from any other Bash.
-- **Claude is a process per thread; Codex is one server for all of them.**
+- **Claude is a process per thread; Codex and opencode are one server each.**
   A Claude thread is one long-lived `claude -p --input-format stream-json`
   process that takes user turns on stdin and is resumed by session id
   (`--resume`) when a new message finds it gone. Codex is one
   `codex app-server` per app, started on first use, with every thread a
   `threadId` inside it — the protocol routes by thread, so a process per
-  thread would buy nothing here. Both are handles behind the same `Harness`;
+  thread would buy nothing here. opencode is the same shape again: one
+  `opencode serve` on a loopback port, one HTTP *session* per thread, and one
+  SSE connection to `GET /api/event` for the whole app, routed by
+  `data.sessionID`. All three are handles behind the same `Harness`;
   nothing above it assumes a process per thread.
 - **Every thread runs from `agents/`, and that is the containment.** Not the
   library root: measured, a Claude thread rooted there under `acceptEdits`
@@ -73,6 +80,25 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   rules; `courses/` heals on the next sync, the database does not. The
   module docs in `claude.rs` say what each part buys and what broke without
   it. Bash writes are refused by both sandboxes at the OS level.
+- **opencode is the exception to that last sentence, and it is worth knowing
+  before trusting it.** It has no sandbox at all: its permissions are a rule
+  list its own runner checks. For the file tools that is real and measured —
+  `edit` (which governs `write`, `edit` and `apply_patch` together; there is
+  no separate `write` key) refuses every path outside `agents/` — but `bash`
+  is matched by a glob over the command *string*, so the ruleset allow-lists
+  `oculus …` and `ls …` and denies the rest. That stops `rm -rf ../courses`;
+  it does not stop a redirect smuggled onto the end of an allowed command.
+  An opencode thread is therefore one notch less contained than a Claude or
+  Codex one, by the CLI's design rather than by this app's configuration.
+  Three rule shapes were measured before the current one worked, and
+  `opencode.rs`'s module docs list them: a leading `"*": "deny"` denies
+  everything however many allows follow it (deny wins on the path check,
+  exactly as in Claude's syntax, which is why the siblings of `agents/` are
+  named individually here too); whichever rule comes *last* decides whether
+  the tool is offered to the model at all, so an allow has to be last or the
+  tool vanishes; and a pattern for a path inside the session directory has to
+  be written *relative* to it, which is how `opencode.json` itself is put
+  beyond the agent's reach.
 - **The agent can now write to the database, and that does not loosen the rule
   above.** `oculus project` and `oculus task` put a plan into the tables the
   app's board draws ([projects.md](./projects.md)), so a breakdown the student
@@ -87,16 +113,28 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   the command text rather than `classify`'s `ToolKind`, since `is_oculus_cli`
   only word-matches the first few words and `cd … && oculus task add` reads as
   plain Bash.
-- **The prompt is appended, not replaced.** `HARNESS.template.md`, rendered
-  with the real data-dir path and the course folders on disk, goes in as
-  `--append-system-prompt` (Claude) or `developerInstructions` (Codex). It
+- **The prompt is appended, not replaced — except on opencode, where it is
+  the whole prompt.** `HARNESS.template.md`, rendered with the real data-dir
+  path and the course folders on disk, goes in as `--append-system-prompt`
+  (Claude) or `developerInstructions` (Codex). opencode has no append at all:
+  an agent's `prompt` *replaces* the system prompt, and it lives in a config
+  document, not in a call — so the rendered template is the `oculus` agent's
+  `prompt` inside `agents/opencode.json`, rewritten on every server start,
+  and the per-thread half of the brief (the subject, the lecture) rides the
+  first message of the session because there is nowhere else to put it.
+  opencode reads `agents/AGENTS.md` natively, the way Codex does. It
   says where the library is, that `oculus` is on PATH and what it is for,
   that writes stay in `agents/`, and where memory goes. Codex also reads
   `agents/AGENTS.md` on its own, so that file's opener now covers both the
   course folders it is symlinked into and the folder it lives in.
 - **The child's environment is edited twice.** `ANTHROPIC_API_KEY` and
   `OPENAI_API_KEY` are stripped, so a key in the shell cannot silently move
-  a subscription session onto API billing. And the `oculus` binary's
+  a subscription session onto API billing. The same strip does a second job
+  for opencode, which reads both names itself: measured, a server started
+  with either set grows a whole provider nobody chose — sixteen Anthropic
+  models, sixty-one OpenAI ones — so without the strip the app would offer a
+  different catalogue launched from a terminal than from the Dock. Stripped,
+  opencode sees only what `opencode auth` holds. And the `oculus` binary's
   directory is put first on PATH — `AGENTS.md` tells the agent to run
   `oculus grep`, and advice that resolves to "command not found" is worse
   than none. Claude's auto-memory is switched off in the same settings
@@ -104,7 +142,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   `~/.claude/projects/…/memory/` instead, and the library has its own layer.
 - **Finding the binaries is the sidecar's problem again.** A Dock-launched
   app has launchd's PATH. `discover.rs` tries `OCULUS_CLAUDE_BIN` /
-  `OCULUS_CODEX_BIN`, then PATH, then where the installers put things, then a
+  `OCULUS_CODEX_BIN` / `OCULUS_OPENCODE_BIN`, then PATH, then where the installers put things, then a
   login shell's `command -v`; the answer is cached, failures included, since
   re-asking a login shell on every send would make a missing CLI slow as
   well as absent. Settings → AI shows the result and can recheck.
@@ -153,6 +191,24 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   recordings in `fixtures/harness/` that the bridge tests replay are these
   files. `app-server` is marked experimental; when its shapes drift, a
   recording is the difference between a morning and a week.
+- **opencode specifics worth not rediscovering.** `--port 0` means "prefer
+  4096", not "pick a free port", so the real port is parsed off the one
+  stdout line that says it. An instance bootstraps *asynchronously*: the
+  first call naming a directory returns before that directory's config has
+  been read, so the bridge asks for the agent list until `oculus` is in it
+  before creating a session. `session.idle` never fires — not once, in any
+  run — so a turn closes on the first `step.ended` whose `finish` is not
+  `tool-calls`, or on a `step.failed`; a turn is a chain of steps and a tool
+  failure does not end it. An interrupt *is* a `step.failed`, with the
+  message `Provider turn interrupted`, and is mapped to `interrupted` rather
+  than to an error row. And a turn whose model cannot be resolved emits
+  **nothing at all** — no event on either stream — so the bridge watches the
+  gap between `prompted` and the first `step.started` and fails the turn
+  itself; `POST /api/session/{id}/wait`, which the schema offers for exactly
+  this, answers 503 straight away and is no use. The free `opencode/*` Zen
+  models cannot be driven over the HTTP API at all (the gateway answers
+  "OpenCode's free tier can only be used in OpenCode"), so that 400 is
+  rewritten into a sentence a student can act on.
 - **Codex specifics worth not rediscovering.** `thread/start` takes
   `sandbox` (a mode string) while `turn/start` takes `sandboxPolicy` (an
   object). A resumed thread replays its previous turn's token usage before
@@ -575,11 +631,19 @@ a round-trip before this was built:
 | --- | --- | --- |
 | Claude | `control_request` / `rewind_conversation` | the uuid of the user message |
 | Codex | `thread/revert` | the id of the turn to revert before |
+| opencode | `revert/stage` then `revert/commit` | the id of the message to **keep** |
 
-Neither will say that identifier twice, so it is learned once — when the turn
-goes out — and kept on the question's row as `anchor` (migration 28), arriving
+None of them will say that identifier twice, so it is learned once — when the
+turn goes out — and kept on the question's row as `anchor` (migration 28), arriving
 as a `TurnAnchor` event like everything else the bridges learn. Codex says its
-turn id in the `turn/start` reply. Claude says nothing: its `stream-json`
+turn id in the `turn/start` reply, and opencode returns the `msg_…` straight
+out of the prompt POST. opencode's is the one that needs arithmetic: its
+revert names the message that *survives* and drops everything strictly after
+it, so rewinding **to** a question means staging on the message before it,
+which the bridge looks up in that session's `/context`. The first message of
+a session therefore cannot be rewound past — there is no revert-to-empty —
+and that case is refused rather than half-done, which is what puts the
+timeline's "the agent still remembers" note on screen. Claude says nothing: its `stream-json`
 output never echoes the message we sent, so the uuid is read out of the CLI's
 own transcript at `~/.claude/projects/<slug>/<session>.jsonl`. That file is a
 tree rather than a list — every row names its `parentUuid` — so the question
@@ -643,9 +707,14 @@ Three things about it are deliberate:
   thing here that goes stale by hand. Codex answers `model/list` and needs no
   such list.
 - **Levels belong to the model, not the provider.** `claude --effort` takes
-  five (`low`…`max`); Codex declares a subset per model. The picker reads
-  them off the selected row, so a model that only reasons a little never
-  offers a level it would reject.
+  five (`low`…`max`); Codex declares a subset per model; opencode calls them
+  *variants* and, in 1.18.2, declares none for any of the hundred-odd models
+  reachable here. The picker reads them off the selected row, so a model that
+  only reasons a little never offers a level it would reject — and an
+  opencode model simply draws no level row. That is the intended answer
+  rather than a gap: nothing is invented, the session is created without a
+  `variant`, and a later opencode that fills the field in lights the row up
+  with no code change.
 
 Both CLIs bind the level when a session starts, not per turn — so changing it
 mid-thread respawns the Claude process and restarts the Codex thread, which
@@ -893,7 +962,7 @@ time the question was asked.
 
 ## Stages
 
-Built: the two bridges with recorded fixtures and replay tests, `oculus
+Built: the three bridges with recorded fixtures and replay tests, `oculus
 agent` as the headless proof, tables and lifecycle, the page, subject scope
 and the `@` file menu, the message queue, stopping a turn, going back
 (edit, retry, rewind), the per-job model registry above, and the lecture player's dock chat. Not yet: approvals and native questions routed to the UI, steering

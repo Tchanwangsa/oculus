@@ -15,12 +15,13 @@ use serde::Serialize;
 
 use super::event::Provider;
 
-/// `OCULUS_CLAUDE_BIN` / `OCULUS_CODEX_BIN` — bb's `BB_CLAUDE_CODE_EXECUTABLE`,
-/// for a build that lives somewhere unusual.
+/// `OCULUS_CLAUDE_BIN` / `OCULUS_CODEX_BIN` / `OCULUS_OPENCODE_BIN` — bb's
+/// `BB_CLAUDE_CODE_EXECUTABLE`, for a build that lives somewhere unusual.
 pub fn override_env(provider: Provider) -> &'static str {
     match provider {
         Provider::Claude => "OCULUS_CLAUDE_BIN",
         Provider::Codex => "OCULUS_CODEX_BIN",
+        Provider::Opencode => "OCULUS_OPENCODE_BIN",
     }
 }
 
@@ -28,21 +29,29 @@ fn binary_name(provider: Provider) -> &'static str {
     match provider {
         Provider::Claude => "claude",
         Provider::Codex => "codex",
+        Provider::Opencode => "opencode",
     }
 }
+
+/// Every provider, in the order Settings lists them. One array rather than a
+/// literal at each call site: a provider added to the enum without being
+/// added here is a bridge nobody can find.
+pub const PROVIDERS: [Provider; 3] = [Provider::Claude, Provider::Codex, Provider::Opencode];
 
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
 /// Where the installers put things, in the order worth trying. `~/.claude/local`
-/// is Claude's own migrate-installer target; the rest are npm-global, bun and
+/// is Claude's own migrate-installer target and `~/.opencode/bin` is where
+/// opencode's install script puts its binary; the rest are npm-global, bun and
 /// Homebrew defaults.
 fn well_known_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(h) = home() {
         dirs.push(h.join(".local/bin"));
         dirs.push(h.join(".claude/local"));
+        dirs.push(h.join(".opencode/bin"));
         dirs.push(h.join(".bun/bin"));
         dirs.push(h.join(".npm-global/bin"));
         dirs.push(h.join(".volta/bin"));
@@ -222,10 +231,15 @@ pub fn health(provider: Provider) -> BridgeHealth {
 /// Two deliberate edits to the inherited env. The API keys are stripped so
 /// that a `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the user's shell cannot
 /// silently move a subscription session onto per-token billing — the entire
-/// reason this layer drives the CLIs rather than the APIs. And the `oculus`
-/// binary's directory is put in front of PATH, because `AGENTS.md` tells the
-/// agent to run `oculus grep`, and advice that resolves to "command not
-/// found" is worse than none.
+/// reason this layer drives the CLIs rather than the APIs. The same strip is
+/// what keeps opencode on the student's own `opencode auth` store rather than
+/// on a key that happens to be in a shell: measured, a server started with
+/// either name set grows a whole provider (16 anthropic models, 61 openai)
+/// that nobody chose, so the same app would offer a different catalogue
+/// launched from a terminal than from the Dock. And the `oculus` binary's
+/// directory is put in front of PATH, because `AGENTS.md` tells the agent to
+/// run `oculus grep`, and advice that resolves to "command not found" is
+/// worse than none.
 pub fn child_env() -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(k, _)| {
@@ -249,7 +263,7 @@ pub fn child_env() -> Vec<(String, String)> {
             path_parts.push(d.to_path_buf());
         }
     }
-    for p in [Provider::Claude, Provider::Codex] {
+    for p in PROVIDERS {
         if let Ok(b) = binary(p) {
             if let Some(d) = b.parent() {
                 path_parts.push(d.to_path_buf());

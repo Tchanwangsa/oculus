@@ -1113,6 +1113,7 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             mineru::mineru_delete_api_key,
             harness::app::harness_health,
             harness::app::harness_codex_models,
+            harness::app::harness_opencode_models,
             harness::app::harness_refresh_rate_limits,
             harness::app::harness_send,
             harness::app::harness_edit_resend,

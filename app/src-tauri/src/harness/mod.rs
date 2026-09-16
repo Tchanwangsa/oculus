@@ -28,6 +28,7 @@ pub mod codex;
 pub mod discover;
 pub mod event;
 pub mod jobs;
+pub mod opencode;
 pub mod store;
 
 use std::collections::{HashMap, VecDeque};
@@ -39,6 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use claude::{ClaudeSession, ClaudeSpawn};
 use codex::{CodexServer, CodexSpawn, CodexThreadOpts, ModelInfo};
+use opencode::{OpencodeServer, OpencodeSessionOpts, OpencodeSpawn};
 pub use event::{HarnessEvent, Provider, ToolKind};
 
 /// Where a bridge hands its events. Called from the bridge's reader thread,
@@ -85,12 +87,26 @@ pub fn instructions(data_dir: &Path, scope: Option<&str>, lecture: Option<&Lectu
     let base = INSTRUCTIONS_TEMPLATE
         .replace("{{DATA_DIR}}", &data_dir.display().to_string())
         .replace("{{COURSES}}", &courses);
-    let mut out = match scope {
-        None => base,
-        Some(code) => format!(
-            "{base}\n\n## This conversation\n\n             It is scoped to **{code}** — the folder `../courses/{code}/`. Unless the              student names another subject, answer from that folder, and pass `{code}`              as the subject to the CLI. Read its `AGENTS.md` for the layout, and its              `agents/memories/` for what you have already learned about it; a fact worth              keeping from this conversation belongs there rather than in `./memories/`.\n"
-        ),
-    };
+    format!("{base}{}", thread_sections(scope, lecture))
+}
+
+/// The part of the brief that is about *this thread* — the subject it was
+/// scoped to, the lecture it was opened over — and not about the library.
+///
+/// Split out of [`instructions`] because opencode cannot take the two
+/// together. Claude appends a whole system prompt per process and Codex
+/// takes `developerInstructions` per thread, so for both this is simply the
+/// tail of the one string. opencode has no append at all: an agent's
+/// `prompt` *replaces* its system prompt and lives in one config document
+/// shared by every thread, so its bridge puts the library-wide half in that
+/// document and sends this half ahead of the session's first message.
+pub fn thread_sections(scope: Option<&str>, lecture: Option<&LectureBrief>) -> String {
+    let mut out = String::new();
+    if let Some(code) = scope {
+        out.push_str(&format!(
+            "\n\n## This conversation\n\n             It is scoped to **{code}** — the folder `../courses/{code}/`. Unless the              student names another subject, answer from that folder, and pass `{code}`              as the subject to the CLI. Read its `AGENTS.md` for the layout, and its              `agents/memories/` for what you have already learned about it; a fact worth              keeping from this conversation belongs there rather than in `./memories/`.\n"
+        ));
+    }
     if let Some(lec) = lecture {
         out.push_str(&lecture_section(lec, scope));
     }
@@ -471,6 +487,14 @@ enum Live {
         thread_id: String,
         opts: CodexThreadOpts,
     },
+    Opencode {
+        server: Arc<OpencodeServer>,
+        session: String,
+        /// What variant this session was created with. opencode binds it at
+        /// session creation, like the other two bind their level, so asking
+        /// for a different one means a new session.
+        variant: Option<String>,
+    },
 }
 
 impl Live {
@@ -478,6 +502,7 @@ impl Live {
         match self {
             Live::Claude { session, .. } => session.is_alive(),
             Live::Codex { server, thread_id, .. } => server.is_alive() && server.has_thread(thread_id),
+            Live::Opencode { server, session, .. } => server.is_alive() && server.has_session(session),
         }
     }
 
@@ -486,6 +511,7 @@ impl Live {
         match self {
             Live::Claude { effort, .. } => effort.as_deref(),
             Live::Codex { opts, .. } => opts.reasoning_effort.as_deref(),
+            Live::Opencode { variant, .. } => variant.as_deref(),
         }
     }
 }
@@ -494,6 +520,7 @@ impl Live {
 enum Rewindable {
     Claude(Arc<ClaudeSession>),
     Codex(Arc<CodexServer>, String),
+    Opencode(Arc<OpencodeServer>, String),
 }
 
 /// The set of live sessions plus the shared Codex server. One per app.
@@ -501,12 +528,19 @@ pub struct Harness {
     data_dir: PathBuf,
     live: Mutex<HashMap<i64, Live>>,
     codex: Mutex<Option<Arc<CodexServer>>>,
+    /// The shared opencode server, the same shape as the Codex one: one
+    /// process for the app, one session per thread inside it.
+    opencode: Mutex<Option<Arc<OpencodeServer>>>,
     /// Codex events that belong to the account rather than to any one
     /// thread — the rate-limit windows, which the shared server reports with
     /// no `threadId` on them. Claude needs no equivalent: its processes are
     /// one per thread, so its windows already arrive on a thread's stream.
     /// Set by the app; `None` headless, where nothing is listening.
     codex_account_sink: Mutex<Option<Sink>>,
+    /// Where opencode's session-less events go — thirty of its eighty-eight
+    /// types name no session, and `session.error`'s own id is optional. Same
+    /// role as the Codex account sink above, and the same thread id 0.
+    opencode_default_sink: Mutex<Option<Sink>>,
 }
 
 impl Harness {
@@ -515,7 +549,9 @@ impl Harness {
             data_dir,
             live: Mutex::new(HashMap::new()),
             codex: Mutex::new(None),
+            opencode: Mutex::new(None),
             codex_account_sink: Mutex::new(None),
+            opencode_default_sink: Mutex::new(None),
         }
     }
 
@@ -525,6 +561,11 @@ impl Harness {
     /// the server that reports it is shared by all of them.
     pub fn set_codex_account_sink(&self, sink: Sink) {
         *self.codex_account_sink.lock().unwrap() = Some(sink);
+    }
+
+    /// The same, for opencode's events that name no session.
+    pub fn set_opencode_default_sink(&self, sink: Sink) {
+        *self.opencode_default_sink.lock().unwrap() = Some(sink);
     }
 
     /// The shared Codex server, started on first use.
@@ -575,6 +616,41 @@ impl Harness {
         self.codex_server()?.list_models()
     }
 
+    /// The shared opencode server, started on first use.
+    ///
+    /// The config it runs under is rendered first, every time. That document
+    /// is both the containment ruleset and the only way to give opencode a
+    /// system prompt (`opencode::write_config`), and it has the library's
+    /// real paths and the course folders on disk in it — so a stale one is a
+    /// stale brief *and* a stale deny list.
+    fn opencode_server(&self) -> Result<Arc<OpencodeServer>, String> {
+        let mut slot = self.opencode.lock().unwrap();
+        if let Some(s) = slot.as_ref().filter(|s| s.is_alive()) {
+            return Ok(s.clone());
+        }
+        let bin = discover::binary(Provider::Opencode)?;
+        let directory = thread_cwd(&self.data_dir);
+        opencode::write_config(
+            &directory,
+            &self.data_dir,
+            &instructions(&self.data_dir, None, None),
+            NAMING_INSTRUCTIONS,
+        )?;
+        let server = OpencodeServer::spawn(OpencodeSpawn {
+            bin,
+            directory,
+            env: discover::child_env(),
+            raw_log: RawLog::open(&self.data_dir, 0),
+            default_sink: self.opencode_default_sink.lock().unwrap().clone(),
+        })?;
+        *slot = Some(server.clone());
+        Ok(server)
+    }
+
+    pub fn opencode_models(&self) -> Result<Vec<opencode::ModelInfo>, String> {
+        self.opencode_server()?.list_models()
+    }
+
     /// Bring a thread's session up if it is not, then send. `resume` is the
     /// provider's session id from a previous process, if any.
     pub fn send(
@@ -595,6 +671,7 @@ impl Harness {
                 thread_id: tid,
                 opts,
             } => server.start_turn(tid, text, opts),
+            Live::Opencode { server, session, .. } => server.prompt(session, text),
         }
     }
 
@@ -633,11 +710,15 @@ impl Harness {
                     thread_id: tid,
                     ..
                 } => Rewindable::Codex(server.clone(), tid.clone()),
+                Live::Opencode { server, session, .. } => {
+                    Rewindable::Opencode(server.clone(), session.clone())
+                }
             }
         };
         match handle {
             Rewindable::Claude(s) => s.rewind(anchor),
             Rewindable::Codex(server, tid) => server.revert(&tid, anchor),
+            Rewindable::Opencode(server, ses) => server.revert(&ses, anchor),
         }
     }
 
@@ -710,6 +791,35 @@ impl Harness {
                     opts: topts,
                 }
             }
+            Provider::Opencode => {
+                let server = self.opencode_server()?;
+                let sopts = OpencodeSessionOpts {
+                    model: opts.model.clone(),
+                    // Only ever set when the picker offered a level, which
+                    // means the model declared one. Nothing is invented: in
+                    // 1.18.2 no model declares any, so this is None and the
+                    // session takes the model's own default.
+                    variant: opts.reasoning_effort.clone(),
+                    // The library-wide brief is the agent's prompt in the
+                    // config; this is the rest of it, and it rides the
+                    // session's first message because there is nowhere else
+                    // to put it.
+                    brief: thread_sections(opts.scope.as_deref(), opts.lecture.as_ref()),
+                    agent: opencode::AGENT,
+                };
+                let ses = match resume {
+                    Some(id) => {
+                        server.attach_session(id, &sopts, sink)?;
+                        id.to_string()
+                    }
+                    None => server.start_session(&sopts, sink)?,
+                };
+                Live::Opencode {
+                    server,
+                    session: ses,
+                    variant: opts.reasoning_effort.clone(),
+                }
+            }
         };
         live.insert(thread_id, session);
         Ok(())
@@ -747,6 +857,7 @@ impl Harness {
         // Held so the session outlives the collect loop, and dropped after it.
         let claude;
         let codex;
+        let oc;
         match provider {
             Provider::Claude => {
                 let s = ClaudeSession::spawn(
@@ -770,6 +881,7 @@ impl Harness {
                 s.send(&prompt)?;
                 claude = Some(s);
                 codex = None;
+                oc = None;
             }
             Provider::Codex => {
                 let server = self.codex_server()?;
@@ -783,6 +895,25 @@ impl Harness {
                 server.start_turn(&tid, &prompt, &opts)?;
                 claude = None;
                 codex = Some((server, tid));
+                oc = None;
+            }
+            Provider::Opencode => {
+                let server = self.opencode_server()?;
+                // A throwaway session on the shared server, exactly as for
+                // Codex — and on the hidden `oculus-namer` agent, because
+                // opencode has no per-session instructions and the naming
+                // brief cannot ride the `oculus` agent's own prompt.
+                let sopts = OpencodeSessionOpts {
+                    model: Some(sel.model.clone()),
+                    variant: sel.reasoning_effort.clone(),
+                    brief: String::new(),
+                    agent: opencode::NAMING_AGENT,
+                };
+                let ses = server.start_session(&sopts, sink)?;
+                server.prompt(&ses, &prompt)?;
+                claude = None;
+                codex = None;
+                oc = Some((server, ses));
             }
         }
 
@@ -810,6 +941,12 @@ impl Harness {
         if let Some((server, tid)) = codex {
             server.detach(&tid);
         }
+        // Deleted rather than detached: a naming session is a question the
+        // student never asked, and leaving it on the server would put it in
+        // their own `opencode` session list for ever.
+        if let Some((server, ses)) = oc {
+            server.delete_session(&ses);
+        }
         match (clean_title(&text), failed) {
             (Some(t), _) => Ok(t),
             (None, Some(e)) => Err(e),
@@ -822,6 +959,7 @@ impl Harness {
         match live.get(&thread_id) {
             Some(Live::Claude { session, .. }) => session.interrupt(),
             Some(Live::Codex { server, thread_id, .. }) => server.interrupt(thread_id),
+            Some(Live::Opencode { server, session, .. }) => server.interrupt(session),
             None => Ok(()),
         }
     }
@@ -833,6 +971,7 @@ impl Harness {
             match l {
                 Live::Claude { session, .. } => session.kill(),
                 Live::Codex { server, thread_id, .. } => server.detach(&thread_id),
+                Live::Opencode { server, session, .. } => server.detach(&session),
             }
         }
     }
@@ -848,6 +987,9 @@ impl Harness {
             self.close(id);
         }
         if let Some(s) = self.codex.lock().unwrap().take() {
+            s.kill();
+        }
+        if let Some(s) = self.opencode.lock().unwrap().take() {
             s.kill();
         }
     }
@@ -945,6 +1087,14 @@ pub mod app {
             let bus = tx.clone();
             harness.set_codex_account_sink(Arc::new(move |ev| {
                 let _ = bus.send((0, Provider::Codex, ev));
+            }));
+        }
+        // opencode's session-less events, on the same thread id 0 its raw log
+        // uses.
+        {
+            let bus = tx.clone();
+            harness.set_opencode_default_sink(Arc::new(move |ev| {
+                let _ = bus.send((0, Provider::Opencode, ev));
             }));
         }
         // The naming turn's answer comes back in as an event like any other,
@@ -1145,7 +1295,7 @@ pub mod app {
     pub async fn harness_health() -> Vec<discover::BridgeHealth> {
         tokio::task::spawn_blocking(|| {
             discover::forget();
-            vec![discover::health(Provider::Claude), discover::health(Provider::Codex)]
+            discover::PROVIDERS.iter().map(|p| discover::health(*p)).collect()
         })
         .await
         .unwrap_or_default()
@@ -1172,6 +1322,19 @@ pub mod app {
     pub async fn harness_codex_models(state: State<'_, HarnessState>) -> Result<Vec<ModelInfo>, String> {
         let h = state.harness.clone();
         tokio::task::spawn_blocking(move || h.codex_models())
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    /// opencode's catalogue, for the same picker. It starts the server if it
+    /// is not up — unlike the rate-limit read, this one is the answer to a
+    /// question the picker asked and there is no cached list behind it.
+    #[tauri::command]
+    pub async fn harness_opencode_models(
+        state: State<'_, HarnessState>,
+    ) -> Result<Vec<opencode::ModelInfo>, String> {
+        let h = state.harness.clone();
+        tokio::task::spawn_blocking(move || h.opencode_models())
             .await
             .map_err(|e| e.to_string())?
     }

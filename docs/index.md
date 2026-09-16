@@ -4,7 +4,7 @@ Oculus is a Tauri 2 desktop app that scrapes a student's UniMelb coursework —
 Canvas pages and files, Ed Discussion threads, Echo360 lecture recordings —
 into a local library, parses every PDF to markdown, embeds each page as an
 image, and answers questions by retrieving the right pages. Chat is a coding
-agent the student already has — Claude Code or Codex — run from the library
+agent the student already has — Claude Code, Codex or opencode — run from the library
 with the `oculus` CLI as its tool surface (see [harness.md](./harness.md)).
 
 These pages are the map: where things live, how the pieces connect, and the
@@ -20,7 +20,7 @@ live in the root `CLAUDE.md`, not here.
 | [auth.md](./auth.md) | Canvas session cookie, keep-alive, Ed `x-token`, Echo360 LTI |
 | [sidecar.md](./sidecar.md) | The Python process: fast/quality PDF parsing, lifecycle, endpoints |
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |
-| [harness.md](./harness.md) | Chat as a CLI agent: the Claude Code and Codex bridges, containment, the timeline |
+| [harness.md](./harness.md) | Chat as a CLI agent: the Claude Code, Codex and opencode bridges, containment, the timeline |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [projects.md](./projects.md) | Assignments broken into tasks: the Overview, the board, a page per task, and the CLI the agent plans through |
 | [chapters.md](./chapters.md) | Splitting a lecture recording at its topic boundaries — the detector, the agent job, and what is not built yet |
@@ -45,7 +45,7 @@ live in the root `CLAUDE.md`, not here.
 
 Built: Canvas SSO + sync, Ed Discussion sync, Echo360 download + player, the
 two-tier PDF pipeline, page-image retrieval, chat as a CLI agent over it
-(Claude Code or Codex, driven as a subprocess — see
+(Claude Code, Codex or opencode, driven as a subprocess — see
 [harness.md](./harness.md)), projects: assignments broken into tasks, each
 project opening on an Overview (a brief, tags, a pinned calendar event, what is
 next) with its tasks on a board, a table or a timeline behind a Tasks tab and a

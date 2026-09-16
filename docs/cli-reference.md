@@ -26,7 +26,7 @@ Commands:
   task      Add, move, finish and delete the tasks on a project's board
   lecture   Look inside a downloaded lecture recording
   docs      Write the agent-facing docs into the library
-  agent     Run one prompt through a CLI agent (Claude Code or Codex)
+  agent     Run one prompt through a CLI agent (Claude Code, Codex or opencode)
   help      Print this message or the help of the given subcommand(s)
 
 Options:
@@ -875,7 +875,7 @@ Options:
   -p, --provider <PROVIDER>
           Which CLI to drive (default: the configured one)
 
-          [possible values: claude, codex]
+          [possible values: claude, codex, opencode]
 
   -m, --model <MODEL>
           Model to request (default: the configured one)
@@ -913,7 +913,7 @@ Options:
   -p, --provider <PROVIDER>
           Which CLI to drive (default: the configured one)
 
-          [possible values: claude, codex]
+          [possible values: claude, codex, opencode]
 
   -m, --model <MODEL>
           Model to request (default: the configured one)
@@ -960,8 +960,8 @@ Run one prompt through a CLI agent and print what it does.
 The same bridges the app's chat uses, without the window: the agent runs from the
 library's agents/ folder with the app's instructions appended, can read the whole
 library and write only there, and its normalized events are printed as they arrive.
-Needs the provider's CLI installed and signed in (`claude` or `codex`). Nothing is
-recorded in the database; this is for checking a bridge works.
+Needs the provider's CLI installed and signed in (`claude`, `codex` or `opencode`).
+Nothing is recorded in the database; this is for checking a bridge works.
 
 Usage: oculus agent [OPTIONS] <PROMPT>
 
@@ -974,7 +974,7 @@ Options:
           Which CLI to drive
 
           [default: claude]
-          [possible values: claude, codex]
+          [possible values: claude, codex, opencode]
 
   -m, --model <MODEL>
           Model to request (provider-specific name or alias)
