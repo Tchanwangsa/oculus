@@ -31,7 +31,6 @@ separate killable model workers rather than retaining their weights itself.
 | CLI-agent harness (Claude Code / Codex bridges) | `app/src-tauri/src/harness/mod.rs` |
 | Projects and tasks, written headlessly | `app/src-tauri/src/projects.rs` |
 | Lecture chapters: boundary detection and the naming job | `app/src-tauri/src/chapters.rs` |
-| LLM provider client (keys, streaming, spend limits; dormant) | `app/src-tauri/src/llm.rs` |
 | Sidecar HTTP service | `sidecar/main.py` |
 | Model-worker lifecycle + memory accounting | `sidecar/model_workers.py`, `sidecar/worker_client.py`, `sidecar/memory_governor.py` |
 | MinerU token (keychain only) | `app/src-tauri/src/mineru.rs` |

@@ -29,28 +29,6 @@ pub fn proxy_cookie(app: &AppHandle) -> String {
     canvas_cookie_header(app)
 }
 
-/// A library file's markdown, resolved headlessly (no `AppHandle`, so the
-/// agent and the CLI can call it).
-///
-/// Markdown-native files — Canvas pages, announcements, Ed threads — *are*
-/// the markdown. PDF-backed ones (real PDFs and the Office conversions) have
-/// it beside the PDF as `{stem}.md`, written by the parser; a file that has
-/// not been parsed yet has none, which is a meaningful answer rather than an
-/// error the caller should retry.
-pub fn read_parsed_markdown(relative_path: &str) -> Result<String, String> {
-    let base = crate::paths::data_dir();
-    if relative_path.to_ascii_lowercase().ends_with(".md") {
-        return std::fs::read_to_string(base.join(relative_path)).map_err(|e| e.to_string());
-    }
-    let pdf_rel = crate::paths::doc_pdf_rel(relative_path)
-        .ok_or_else(|| format!("{relative_path}: not a document with parsed markdown"))?;
-    let md = base.join(&pdf_rel).with_extension("md");
-    if !md.is_file() {
-        return Err("not parsed yet — no markdown on disk".into());
-    }
-    std::fs::read_to_string(md).map_err(|e| e.to_string())
-}
-
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]

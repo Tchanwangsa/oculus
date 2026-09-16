@@ -9,8 +9,8 @@
 //!
 //! One JSON value in `settings` under [`SETTINGS_KEY`], written by the
 //! frontend (`getJobModels` / `setJobModels` in `app/src/lib/db.ts`) and read
-//! here, the way `llm` is. The read is tolerant for the same reason
-//! `load_config` is: a half-written or older value should cost the job its
+//! here, beside the app's other settings rows. The read is tolerant on
+//! purpose: a half-written or older value should cost the job its
 //! configuration, not its run.
 
 use serde::{Deserialize, Serialize};

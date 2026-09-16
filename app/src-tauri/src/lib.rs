@@ -1,4 +1,3 @@
-pub mod agent;
 pub mod agents;
 mod auth;
 pub mod browser;
@@ -12,7 +11,6 @@ pub mod harness;
 mod ipc;
 pub mod keepalive;
 mod lectures;
-pub mod llm;
 pub mod md;
 pub mod menu;
 pub mod okta;
@@ -50,7 +48,6 @@ pub fn run() {
         .manage(Echo360Cache(Arc::new(Mutex::new(std::collections::HashMap::new()))))
         .manage(SidecarProcess(Arc::new(Mutex::new(None))))
         .manage(ScrapeCancel::default())
-        .manage(agent::ChatCancel::default())
         .manage(browser::BrowserState::default())
         .setup(|app| {
             // ── IPC HTTP server ────────────────────────────────────────
@@ -444,13 +441,22 @@ CREATE TABLE IF NOT EXISTS sync_schedules (
                         tauri_plugin_sql::Migration {
                             version: 16,
                             description: "llm usage ledger",
-                            // One row per model call, written by Rust (`llm.rs`)
-                            // right where the spending limit is enforced — the
-                            // sum over the current month is the budget check.
-                            // Soft refs only (chat_id has no FK): usage history
-                            // must survive a library reset (`clearAllFiles`)
-                            // and the chats table only arrives in a later
-                            // migration. cost_usd is NULL for local providers.
+                            // RETIRED FEATURE, LIVE MIGRATION. The BYOK API
+                            // layer this ledger belonged to was deleted; 16
+                            // and 17 stay because they already ran on every
+                            // existing database. `llm_usage` is created and
+                            // then left alone — nothing reads or writes it.
+                            // Bringing an API path back needs no new
+                            // migration; dropping these would need one.
+                            //
+                            // One row per model call, written by Rust right
+                            // where the spending limit was enforced — the sum
+                            // over the current month was the budget check.
+                            // Soft refs only (chat_id has no FK): usage
+                            // history had to survive a library reset
+                            // (`clearAllFiles`) and the chats table only
+                            // arrives in a later migration. cost_usd is NULL
+                            // for local providers.
                             sql: r#"
 CREATE TABLE IF NOT EXISTS llm_usage (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -471,12 +477,19 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at);
                         tauri_plugin_sql::Migration {
                             version: 17,
                             description: "chat conversations",
-                            // Written by Rust (`agent.rs`), not the frontend:
+                            // RETIRED FEATURE, LIVE MIGRATION — see 16. These
+                            // held the BYOK agent's conversations; chat is a
+                            // CLI agent now and keeps its own threads
+                            // (migrations 24–26, 28, 30). The tables are
+                            // created and then left alone.
+                            //
+                            // They were written by Rust, not the frontend:
                             // the loop's own tool-call and tool-result turns
-                            // are re-read on the next model turn, so the
-                            // history has to be authoritative where the loop
-                            // runs. `tool_calls`/`citations` are JSON blobs —
-                            // the OpenAI message shape round-trips unchanged.
+                            // were re-read on the next model turn, so the
+                            // history had to be authoritative where the loop
+                            // ran. `tool_calls`/`citations` are JSON blobs —
+                            // the OpenAI message shape round-tripped
+                            // unchanged.
                             sql: r#"
 CREATE TABLE IF NOT EXISTS chats (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1095,17 +1108,9 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             retrieval::embed_file,
             retrieval::search_pages,
             retrieval::embedding_stats,
-            llm::llm_set_api_key,
-            llm::llm_has_api_key,
-            llm::llm_delete_api_key,
-            llm::llm_list_models,
-            llm::llm_test_prompt,
-            llm::llm_usage_summary,
             mineru::mineru_set_api_key,
             mineru::mineru_has_api_key,
             mineru::mineru_delete_api_key,
-            agent::chat_send,
-            agent::chat_cancel,
             harness::app::harness_health,
             harness::app::harness_codex_models,
             harness::app::harness_refresh_rate_limits,

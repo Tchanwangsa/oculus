@@ -21,7 +21,6 @@ live in the root `CLAUDE.md`, not here.
 | [sidecar.md](./sidecar.md) | The Python process: fast/quality PDF parsing, lifecycle, endpoints |
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |
 | [harness.md](./harness.md) | Chat as a CLI agent: the Claude Code and Codex bridges, containment, the timeline |
-| [llm.md](./llm.md) | The dormant BYOK layer: provider config, keychain keys, streaming, spend limits |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [projects.md](./projects.md) | Assignments broken into tasks: the Overview, the board, a page per task, and the CLI the agent plans through |
 | [chapters.md](./chapters.md) | Splitting a lecture recording at its topic boundaries — the detector, the agent job, and what is not built yet |
@@ -68,15 +67,18 @@ validated window (`oculus lecture recap`). Its model is configured in Settings
 [chapters.md](./chapters.md#lecture-recap) describes the shared pipeline and
 the remaining UI boundary.
 
-Dormant rather than built: the **BYOK API layer** — provider config, keychain
-keys, streaming, spend limits — which the CLI-agent bridges replaced. Nothing
-routes to it and it is the planned third bridge, so it is described in
-[llm.md](./llm.md) in the present tense; that is a description of code that
-exists, not of a feature you can use.
+Removed: the **BYOK API layer** — provider config, keychain keys, an
+OpenAI-compatible streaming client, spend limits and its own agent tool loop —
+which the CLI-agent bridges replaced. Nothing had routed to it for a while, so
+it was deleted rather than carried; its page went with it. Migrations 16 and 17
+stay, so `llm_usage`, `chats` and `chat_messages` still exist and are read by
+nothing. The one measured fact worth keeping — how to ask macOS how much memory
+a local model can actually have — is in
+[retrieval.md](./retrieval.md#how-much-memory-a-local-model-can-actually-have).
 
 Removed: **automations and the Inbox** — the trigger/condition/action canvas
 that delivered sync digests. It worked, but it was a detour from the core, so
-it was cut rather than carried. The last version that has it is the
-`automations` branch (its docs page went with it); master keeps migrations 18,
+it was cut rather than carried. The last version that has it is commit
+`d64dc11` (its docs page went with it); master keeps migrations 18,
 20 and 21 so the tables still exist, unused, and reinstating needs no
 migration. Scheduled sync went with it — sync is manual-only now.

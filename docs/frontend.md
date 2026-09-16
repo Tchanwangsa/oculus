@@ -19,7 +19,7 @@ this page is the structure.
 | Calendar (month / week / upcoming) | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/`, `app/src/lib/calendar.ts` |
 | Projects (index, one board, a subject's tab) | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/subject/ProjectsPage.tsx`, `app/src/components/projects/`, `app/src/stores/projectsStore.ts`, `app/src/lib/projects.ts` |
 | Overlap packing, shared by the week grid and the project timeline | `app/src/lib/lanes.ts` |
-| Provider/model pickers (settings + composer) | `app/src/components/llm/` |
+| Agent/model/reasoning picker (settings rows + composer) | `app/src/components/harness/ModelPicker.tsx` |
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
 | Parse backend, memory budget + sidecar health | `app/src/pages/settings/LibraryPage.tsx` |

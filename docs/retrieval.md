@@ -75,3 +75,34 @@ Benchmarked 2026-08-15 on real course decks (152-page corpus, then re-run at
 - Embedding and parsing meet **only** on `(file, page_no)` via
   `.pages.json`. If page attribution breaks in the parser, retrieval
   silently returns the wrong markdown for a correct visual hit.
+
+## How much memory a local model can actually have
+
+The embedder is not the only thing that wants the GPU. The deleted BYOK layer
+ran a preflight before every local model call, because a local model that does
+not fit is not slow — it is an OOM that takes the machine down, observed with
+a 17 GB Ollama model loading beside the sidecar's Qwen3-VL embedder on a 36 GB
+machine. Nothing does that check today; chat is a CLI agent and the sidecar
+governs its own two workers. The method is written down here because it was
+measured rather than reasoned, and re-adding a preflight when a local provider
+returns should be an afternoon rather than a rediscovery.
+
+- **Available memory is physical memory (`sysctl hw.memsize`) less wired
+  pages, not free pages.** macOS keeps almost nothing free, compressing
+  anonymous memory and evicting file cache on demand: measured on the 36 GB
+  dev machine while it was happily serving a 17.4 GB resident model, free +
+  inactive + speculative + purgeable came to 2.9 GB — a figure that refuses
+  every model there is. Wired pages are the ones the kernel cannot page out,
+  and on Apple silicon that is exactly where GPU-resident weights (and the
+  sidecar's MPS embedder) live, so they are the ones worth counting.
+  Everything else is compressible or swappable.
+- **Read the page size out of `vm_stat`'s own header.** It is 16 KB on Apple
+  silicon; assuming the historical 4 KB miscounts wired memory fourfold.
+- **Budget weights at 1.15×** for the KV cache and runtime — measured, a
+  16.5 GB Q4_K_M 27B sits at 17.4 GB resident at a 32k context.
+- **A model already resident needs nothing at all** and is never refused
+  whatever the arithmetic says; what a runtime already holds loaded counts as
+  available besides, because it evicts to make room.
+- **An unmeasurable model skips the check rather than blocking on a guess.**
+  Sizes came from Ollama's native `/api/tags`; the OpenAI-compatible
+  `/v1/models` carries no size and LM Studio exposes none.

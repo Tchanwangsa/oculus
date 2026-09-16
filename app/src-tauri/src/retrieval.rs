@@ -122,6 +122,16 @@ pub async fn pool(path: &Path) -> Result<SqlitePool, String> {
         .map_err(|e| format!("open {}: {e}", path.display()))
 }
 
+/// Open the shared database the same way the CLI does — no AppHandle, so
+/// later phases can run headless.
+pub async fn open_pool() -> Result<SqlitePool, String> {
+    let path = crate::paths::db_path(&crate::paths::data_dir());
+    if !path.exists() {
+        return Err(format!("no database at {}", path.display()));
+    }
+    crate::retrieval::pool(&path).await
+}
+
 fn decode_vector(b64: &str) -> Result<Vec<f32>, String> {
     let raw = base64::engine::general_purpose::STANDARD
         .decode(b64)

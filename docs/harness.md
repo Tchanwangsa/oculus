@@ -8,9 +8,10 @@ model APIs. The shape is bb's (get-bb/bb) with its plugin system taken out:
 one bridge per provider, one normalized event stream, a timeline that only
 ever sees the stream.
 
-The BYOK layer in [llm.md](./llm.md) is dormant while this is the chat: its
-Rust and Settings section are still there, nothing routes to them, and the
-old chat page and store are gone.
+The BYOK API layer this replaced is gone: its Rust, its Settings sections and
+its chat page and store were deleted once nothing routed to them. Migrations
+16 and 17 stay, so `llm_usage`, `chats` and `chat_messages` are still there
+and still empty of readers (see `app/src-tauri/src/lib.rs`).
 
 ## Where
 
@@ -654,7 +655,7 @@ told, and there is no per-provider default hiding behind it.
 The registry is one JSON value in `settings` under `job_models`:
 `harness::jobs` (`app/src-tauri/src/harness/jobs.rs`) reads it, because the
 jobs themselves run in Rust, and `getJobModels` / `setJobModels` in
-`app/src/lib/db.ts` write it, beside `getLlmSettings` and shaped like it —
+`app/src/lib/db.ts` write it, shaped like the app's other settings rows —
 tolerant on read, so a half-written or older value costs a job its
 configuration rather than its run. Both sides carry the defaults and have to
 agree on them: either can be the one resolving an unconfigured job.

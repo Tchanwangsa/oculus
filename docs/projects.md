@@ -208,11 +208,11 @@ from outside are these.
   remembering.** WebKit — which is what a Tauri WKWebView is — **aborts a drag
   whose `dragstart` handler sets no data on the `dataTransfer`**: no `dragover`
   and no `drop` ever fire, silently, with every handler correctly attached. So
-  `ProjectBoard` and `app/src/components/llm/FallbackList.tsx` each call
-  `e.dataTransfer.setData("text/plain", …)` purely to keep the drag alive; the
-  payload is never read, because the dragged id is already in React state.
-  Both carry a comment saying so, because the call looks like dead code and
-  deleting it breaks the feature without breaking a type or a test. The timeline packs
+  `ProjectBoard` calls `e.dataTransfer.setData("text/plain", …)` purely to
+  keep the drag alive; the payload is never read, because the dragged id is
+  already in React state. It carries a comment saying so, because the call
+  looks like dead code and deleting it breaks the feature without breaking a
+  type or a test. The timeline packs
   overlapping bars with `packLanes` in `app/src/lib/lanes.ts` — lifted out of
   `app/src/components/calendar/WeekView.tsx`, which was its only caller until
   this needed the same packing, and made generic over the item because the two

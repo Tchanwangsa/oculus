@@ -9,11 +9,11 @@ Echo360) into a searchable personal knowledge base. Three processes:
 
 Ingestion and retrieval are built. Chat is a **CLI agent** — Claude Code or
 Codex, driven as a subprocess from the library's `agents/` folder
-(`docs/harness.md`). The BYOK API layer it replaced is dormant, not deleted:
-nothing routes to it, and it is the planned third bridge (`docs/llm.md`).
-Automations and the Inbox were built and then removed — they live on the
-`automations` branch; do not reintroduce pieces of them here without being
-asked.
+(`docs/harness.md`). The BYOK API layer it replaced has been deleted —
+nothing had routed to it for a while; its migrations stay, its code does not.
+Automations and the Inbox were built and then removed — the last commit that
+has them is `d64dc11`, reachable from master's history; do not reintroduce
+pieces of them here without being asked.
 
 ## Orient before you edit
 
@@ -31,7 +31,6 @@ structure by searching.
 | PDF parsing, the Python sidecar | `docs/sidecar.md` |
 | Embeddings, search, the `pages` table | `docs/retrieval.md` |
 | Chat: the CLI-agent bridges, containment, the timeline | `docs/harness.md` |
-| LLM providers, keys, the dormant API path | `docs/llm.md` |
 | Class times, due dates, the calendar | `docs/calendar.md` |
 | React pages, stores, hooks, UI system | `docs/frontend.md` |
 | The `oculus` command line | `docs/cli.md` |
@@ -87,10 +86,10 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
 - **A drag needs `dataTransfer.setData()` or WebKit cancels it.** A
   `dragstart` handler that sets no data aborts the drag silently — no
   `dragover`, no `drop`, every handler correctly attached and nothing moves.
-  That is why `app/src/components/projects/ProjectBoard.tsx` and
-  `app/src/components/llm/FallbackList.tsx` each set a `text/plain` payload
-  nothing ever reads. It looks like dead code; deleting it breaks the feature
-  without breaking a type or a test.
+  That is why `app/src/components/projects/ProjectBoard.tsx` — the one place
+  left that drags — sets a `text/plain` payload nothing ever reads. It looks
+  like dead code; deleting it breaks the feature without breaking a type or a
+  test.
 - **Retrieval embeds page images, not extracted text** — measured, not
   aesthetic. Image embeddings roughly double recall on formula/diagram pages.
   Don't switch to text embeddings or average the two; see `docs/retrieval.md`.

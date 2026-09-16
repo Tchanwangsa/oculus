@@ -252,148 +252,6 @@ export async function setParseSettings(settings: ParseSettings): Promise<void> {
   await setSetting(PARSE_SETTINGS_KEY, JSON.stringify(settings));
 }
 
-// ── LLM settings ─────────────────────────────────────────────────────────────
-
-export type LlmProviderKind =
-  | "ollama"
-  | "lmstudio"
-  | "openrouter"
-  | "opencode-go"
-  | "custom";
-
-/** How many models the fallback chain holds — mirrors `MAX_FALLBACKS` in
- *  `app/src-tauri/src/llm.rs`. Adding past it drops the last one. */
-export const MAX_FALLBACKS = 5;
-
-/** One configured endpoint. `id` is generated once and never changes: it is
- *  the keychain account holding that provider's key. */
-export interface LlmProvider {
-  id: string;
-  kind: LlmProviderKind;
-  label: string;
-  /** Overrides the kind's default base URL; required for `custom`. */
-  baseUrl: string | null;
-}
-
-/** A model in the library. Provider and model id together — the same model id
- *  can be served by two providers. */
-export interface ModelRef {
-  providerId: string;
-  model: string;
-}
-
-/** Mirrors `LlmConfig` in `app/src-tauri/src/llm.rs` (serde camelCase) — Rust
- *  reads the same JSON headlessly to make model calls. API keys are NOT here:
- *  they live in the macOS keychain, reachable only through the llm_* commands. */
-export interface LlmSettings {
-  providers: LlmProvider[];
-  /** The curated models; every picker in the app chooses from this list. */
-  library: ModelRef[];
-  chatModel: ModelRef | null;
-  /** Tried in order when the chosen model cannot run. */
-  fallbacks: ModelRef[];
-  limits: {
-    monthlyUsd: number | null;
-    monthlyTokens: number | null;
-  };
-}
-
-export const DEFAULT_LLM_SETTINGS: LlmSettings = {
-  providers: [],
-  library: [],
-  chatModel: null,
-  fallbacks: [],
-  limits: { monthlyUsd: null, monthlyTokens: null },
-};
-
-const LLM_SETTINGS_KEY = "llm";
-
-/** Every kind the client understands, in the order the Add dialog lists them.
- *  `addable: false` keeps a kind rendering and resolving for a config that
- *  already names it without offering it to new ones. */
-export const PROVIDER_KINDS: {
-  kind: LlmProviderKind;
-  label: string;
-  needsKey: boolean;
-  addable: boolean;
-}[] = [
-  { kind: "opencode-go", label: "OpenCode Go", needsKey: true, addable: true },
-  { kind: "openrouter", label: "OpenRouter", needsKey: true, addable: true },
-  { kind: "ollama", label: "Ollama", needsKey: false, addable: true },
-  { kind: "custom", label: "Custom", needsKey: true, addable: true },
-  { kind: "lmstudio", label: "LM Studio", needsKey: false, addable: false },
-];
-
-/** What Add provider offers: three presets worth having, then Custom for
- *  everything else. LM Studio is not among them — it is Custom with a
- *  localhost URL, and a short list is the point. */
-export const ADDABLE_PROVIDER_KINDS = PROVIDER_KINDS.filter((p) => p.addable);
-
-export const providerNeedsKey = (kind: LlmProviderKind) =>
-  PROVIDER_KINDS.find((p) => p.kind === kind)?.needsKey ?? true;
-
-/** Stable string form of a model ref, for React keys and `<Select>` values. */
-// The separator is a literal NUL, written as an escape: a raw one in the
-// source makes every grep treat this file as binary.
-export const modelKey = (m: ModelRef) => `${m.providerId}\u0000${m.model}`;
-export const sameModel = (a: ModelRef | null, b: ModelRef | null) =>
-  a != null && b != null && a.providerId === b.providerId && a.model === b.model;
-
-/** Settings written before multi-provider support: one provider, three bare
- *  model names. Upgraded on read (Rust does the same in `load_config`); the
- *  first edit in Settings → AI writes the new shape back. The synthesised
- *  provider id equals the old provider name, so its keychain key still works. */
-function migrateLegacy(parsed: any): LlmSettings {
-  const kind: LlmProviderKind = parsed.provider ?? "ollama";
-  const provider: LlmProvider = {
-    id: kind,
-    kind,
-    label: PROVIDER_KINDS.find((p) => p.kind === kind)?.label ?? "Custom",
-    baseUrl: parsed.baseUrl ?? null,
-  };
-  const ref = (name: unknown): ModelRef | null =>
-    typeof name === "string" && name.trim()
-      ? { providerId: provider.id, model: name }
-      : null;
-  const chatModel = ref(parsed.chatModel);
-  const fallback = ref(parsed.fallbackModel);
-
-  const library: ModelRef[] = [];
-  for (const m of [chatModel, fallback]) {
-    if (m && !library.some((l) => sameModel(l, m))) library.push(m);
-  }
-
-  return {
-    providers: [provider],
-    library,
-    chatModel,
-    fallbacks: fallback ? [fallback] : [],
-    limits: { ...DEFAULT_LLM_SETTINGS.limits, ...(parsed.limits ?? {}) },
-  };
-}
-
-export async function getLlmSettings(): Promise<LlmSettings> {
-  const raw = await getSetting(LLM_SETTINGS_KEY);
-  if (!raw) return structuredClone(DEFAULT_LLM_SETTINGS);
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed.providers) || parsed.providers.length === 0) {
-      return migrateLegacy(parsed);
-    }
-    return {
-      ...DEFAULT_LLM_SETTINGS,
-      ...parsed,
-      limits: { ...DEFAULT_LLM_SETTINGS.limits, ...(parsed.limits ?? {}) },
-    };
-  } catch {
-    return structuredClone(DEFAULT_LLM_SETTINGS);
-  }
-}
-
-export async function setLlmSettings(settings: LlmSettings): Promise<void> {
-  await setSetting(LLM_SETTINGS_KEY, JSON.stringify(settings));
-}
-
 // ── Per-job models ───────────────────────────────────────────────────────────
 //
 // Every model-backed job that is not a chat turn — chaptering a lecture,
@@ -449,9 +307,9 @@ export const DEFAULT_JOB_MODELS: JobModels = {
 
 const JOB_MODELS_KEY = "job_models";
 
-/** Tolerant like `getLlmSettings`: a job whose stored row is missing, gutted
- *  or from an older build falls back to its default rather than leaving a
- *  picker with nothing selected. */
+/** Tolerant on read: a job whose stored row is missing, gutted or from an
+ *  older build falls back to its default rather than leaving a picker with
+ *  nothing selected. */
 export async function getJobModels(): Promise<JobModels> {
   const raw = await getSetting(JOB_MODELS_KEY);
   if (!raw) return structuredClone(DEFAULT_JOB_MODELS);
@@ -476,57 +334,6 @@ export async function getJobModels(): Promise<JobModels> {
 
 export async function setJobModels(models: JobModels): Promise<void> {
   await setSetting(JOB_MODELS_KEY, JSON.stringify(models));
-}
-
-// ── Chats ────────────────────────────────────────────────────────────────────
-//
-// Rows here are written by Rust (`app/src-tauri/src/agent.rs`), not by this
-// module — the agent loop re-reads its own tool turns, so the history has to
-// be authoritative where the loop runs. These are the read side plus delete.
-
-export interface DbChat {
-  id: number;
-  title: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DbChatMessage {
-  id: number;
-  chat_id: number;
-  role: "user" | "assistant" | "tool";
-  content: string | null;
-  tool_calls: string | null;
-  tool_call_id: string | null;
-  /** JSON array of {subject_id, relative_path, filename, page_no}. */
-  citations: string | null;
-  model: string | null;
-  created_at: string;
-}
-
-export async function getChats(limit = 50): Promise<DbChat[]> {
-  const db = await getDb();
-  return db.select<DbChat[]>(
-    `SELECT id, title, created_at, updated_at FROM chats
-     ORDER BY updated_at DESC LIMIT $1`,
-    [limit],
-  );
-}
-
-/** Display history: the tool plumbing turns are for the model, not the reader. */
-export async function getChatMessages(chatId: number): Promise<DbChatMessage[]> {
-  const db = await getDb();
-  return db.select<DbChatMessage[]>(
-    `SELECT * FROM chat_messages
-     WHERE chat_id = $1 AND role IN ('user', 'assistant') AND tool_calls IS NULL
-     ORDER BY id ASC`,
-    [chatId],
-  );
-}
-
-export async function deleteChat(id: number): Promise<void> {
-  const db = await getDb();
-  await db.execute(`DELETE FROM chats WHERE id = $1`, [id]);
 }
 
 // ── Sync runs ────────────────────────────────────────────────────────────────

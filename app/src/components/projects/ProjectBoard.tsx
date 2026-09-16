@@ -22,9 +22,8 @@ import {
  * below actually worked, because dragging a card out of the backlog into Todo
  * is the same `moveTask` reached by the gesture a kanban board exists for.
  *
- * Dragging is hand-rolled HTML5 (`draggable` + dragstart/dragover/drop), the
- * same shape as `app/src/components/llm/FallbackList.tsx` — a board of tens of
- * cards does not earn a drag library.
+ * Dragging is hand-rolled HTML5 (`draggable` + dragstart/dragover/drop) — a
+ * board of tens of cards does not earn a drag library.
  */
 export function ProjectBoard({
   project,
@@ -125,8 +124,6 @@ export function ProjectBoard({
                       // drop ever fire and a card cannot be moved at all. The
                       // payload is never read (the id is in state); setting
                       // *something* is the whole point. Do not "clean it up".
-                      // `app/src/components/llm/FallbackList.tsx` carries the
-                      // same line for the same reason.
                       e.dataTransfer.setData("text/plain", String(node.task.id));
                       e.dataTransfer.effectAllowed = "move";
                       setDragId(node.task.id);
