@@ -406,3 +406,22 @@ p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
 .chat-md > :last-child {
   margin-block-end: 0;
 }
+
+/* KaTeX in a reply. Its own stylesheet is written for a document — 1.21em and
+ * a centred display block that is allowed to be as wide as the formula is —
+ * and the dock is 360px of it. The size comes down to something that sits in
+ * 13px text, and a display formula gets its own scroller: without one a long
+ * derivation widens the whole panel, since `.katex-display` has no width to
+ * shrink to. Unlayered for the same reason the block above is, and one step
+ * more specific than `.katex`, so it wins wherever KaTeX's sheet lands in the
+ * cascade. */
+.chat-md .katex {
+  font-size: 1.05em;
+}
+.chat-md .katex-display {
+  margin-block: 0.7rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* The scroller clips the descenders of a fraction otherwise. */
+  padding-block: 2px;
+}

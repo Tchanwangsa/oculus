@@ -14,7 +14,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
-import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
+import { MATH, MD_COMPONENTS, normalizeMath } from "@/components/markdown/MdComponents";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -114,11 +114,13 @@ function bundleLabel(items: HarnessItem[]): { label: string; icon: ToolKind } {
   return { label: label.charAt(0).toUpperCase() + label.slice(1), icon: dominant ?? "other" };
 }
 
-/** KaTeX is the most expensive thing in the pipeline and most replies have no
- *  maths in them at all, so the two math plugins are only loaded over text
- *  that carries a delimiter. */
-const MATH = /\$|\\\(|\\\[/;
-/** One frozen empty array, so the no-maths path keeps prop identity too. */
+/** The two plugin lists, frozen: a reply with no maths in it keeps prop
+ *  identity across renders, and `MATH` (`MdComponents`) is what decides which
+ *  it gets — KaTeX is the most expensive thing in the pipeline and most
+ *  replies carry no delimiter at all. */
+const PLAIN = [remarkGfm];
+const WITH_MATH = [remarkGfm, remarkMath];
+const KATEX = [rehypeKatex];
 const NO_PLUGINS: never[] = [];
 
 /** `chat-md` scales the shared markdown components down to chat's own size —
@@ -126,14 +128,15 @@ const NO_PLUGINS: never[] = [];
  *  for a document (the file viewer), which is a size too large for a reply. */
 const Assistant = memo(function Assistant({ text }: { text: string }) {
   const math = MATH.test(text);
+  const body = math ? normalizeMath(text) : text;
   return (
     <div className="chat-md min-w-0 px-2 text-[13px] leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={math ? [remarkGfm, remarkMath] : [remarkGfm]}
-        rehypePlugins={math ? [rehypeKatex] : NO_PLUGINS}
+        remarkPlugins={math ? WITH_MATH : PLAIN}
+        rehypePlugins={math ? KATEX : NO_PLUGINS}
         components={MD_COMPONENTS}
       >
-        {text}
+        {body}
       </ReactMarkdown>
     </div>
   );

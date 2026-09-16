@@ -3,6 +3,53 @@ import { ArrowSquareOut } from "@phosphor-icons/react";
 import { libraryPath, openLibraryPath } from "@/lib/openFile";
 import { cn } from "@/lib/utils";
 
+// KaTeX's own stylesheet, imported here rather than at a call site: this is
+// the module every markdown renderer in the app already goes through for its
+// components, so the styles arrive with them instead of depending on which
+// viewer happens to be in the bundle. Unlayered, so it outranks the Tailwind
+// layers — which is what a `.katex` span needs to keep its own metrics.
+import "katex/dist/katex.min.css";
+
+/** Whether a reply is worth running the maths plugins over.
+ *
+ *  KaTeX is the most expensive thing in the markdown pipeline and most text
+ *  has no maths in it at all, so both plugins are gated on a delimiter being
+ *  present. `\(` and `\[` count even though remark-math cannot read them —
+ *  [`normalizeMath`] turns those into the ones it can, and the gate is asked
+ *  before that runs. */
+export const MATH = /\$|\\\(|\\\[/;
+
+/** Code fences and inline code spans, which are left exactly as written. */
+const CODE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g;
+const DISPLAY = /\\\[([\s\S]+?)\\\]/g;
+const INLINE = /\\\(([\s\S]+?)\\\)/g;
+
+/**
+ * Rewrite LaTeX's `\(…\)` and `\[…\]` into the `$…$` and `$$…$$` remark-math
+ * actually reads.
+ *
+ * The pair never survives to the maths plugin on its own: CommonMark treats a
+ * backslash before ASCII punctuation as an escape, so the parser eats the
+ * backslash and hands on a bare `(` long before remark-math looks for a
+ * delimiter — the formula renders as plain text with its parentheses intact,
+ * which reads like the model simply chose not to use maths. It is also the
+ * form a model reaches for by default, so the prompt asking for dollars
+ * (`HARNESS.template.md`) is the fix and this is the net under it.
+ *
+ * Code is stepped over: `\(` inside a fence is someone's source, not a
+ * formula.
+ */
+export function normalizeMath(text: string): string {
+  return text
+    .split(CODE)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(DISPLAY, (_, m) => `$$${m}$$`).replace(INLINE, (_, m) => `$${m}$`),
+    )
+    .join("");
+}
+
 /**
  * Code outside markdown — a command line, a tool's output. This is the one
  * file that may use `font-mono` (root CLAUDE.md), so anything code-shaped

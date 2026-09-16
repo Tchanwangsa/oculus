@@ -319,6 +319,33 @@ outside markdown set in monospace, through `CodeText` in
 `app/src/components/markdown/MdComponents.tsx`, which is where the font
 lives.
 
+### Maths in a reply
+
+Coursework here is formulas, so the appended prompt asks for LaTeX — `$…$`
+inline and `$$…$$` displayed — and `Timeline` renders it with remark-math and
+rehype-katex. Two things make that hold up:
+
+- **The prompt has to ask.** Without a rule for it a model writes formulas as
+  Unicode — `cos(θ_B/2)|0⟩` — which is not maths, just characters that look
+  like it, and no renderer can recover it. `HARNESS.template.md` names the two
+  delimiters and rules out the Unicode; `recap.rs`'s prompt already said the
+  same thing, and the chat brief was the one that did not.
+- **`\(…\)` and `\[…\]` never reach remark-math**, which is the form a model
+  reaches for by default. CommonMark treats a backslash before ASCII
+  punctuation as an escape, so `\(x\)` is parsed to a literal `(x)` before the
+  maths plugin looks for a delimiter — the formula comes out as prose with
+  stray brackets, indistinguishable from the model not having used maths at
+  all. `normalizeMath` in `MdComponents.tsx` rewrites the pair into dollars
+  first, stepping over code fences and spans. The prompt is the fix; this is
+  the net under it.
+
+KaTeX's own stylesheet is imported by `MdComponents.tsx` rather than by a
+viewer, so it arrives with the components every renderer already shares.
+`.chat-md .katex` in `app/src/index.css` brings 1.21em down to something that
+sits in 13px text and gives a display formula its own horizontal scroller —
+without one, a long derivation has no width to shrink to and widens the
+player's dock.
+
 **Every message has a row of actions under it**, and it is under rather than
 beside for one reason: a control floating next to a bubble has to be placed
 against text of unknown width, while a row below it is just a row. The row's
@@ -393,7 +420,8 @@ in the preview harness:
   (streaming text, reasoning, "Working…") and the one tool row whose output
   is still arriving. Parsed tool `meta` is cached per row object in
   `parseToolMeta` — a single thread can carry 300KB of command output — and
-  the KaTeX plugins are only loaded over text that has a maths delimiter.
+  the KaTeX plugins are only loaded over text that has a maths delimiter
+  (`MATH` in `app/src/components/markdown/MdComponents.tsx`).
 - **Following the stream watches for growth.** A `scrollTo` per delta forced a
   layout of the whole thread and yanked the page down whenever the reader
   had scrolled up; a `ResizeObserver` on the column scrolls only while the
