@@ -9,6 +9,11 @@ import { cn } from "@/lib/utils";
 
 const COLLAPSED_KEY = "oculus-chat-groups-collapsed";
 
+/** How many threads a group shows before it has to be asked for more, and how
+ *  many each ask adds. Long-running subjects accumulate dozens of threads, and
+ *  a column that lists every one of them buries the groups under it. */
+const PAGE = 5;
+
 /** Which groups are folded away, by group key. What is stored is the collapsed
  *  ones rather than the open ones, so a subject scoped for the first time
  *  arrives expanded without having to be listed anywhere first. */
@@ -117,6 +122,9 @@ export const ThreadList = memo(function ThreadList({
   // Which *groups* are folded — not to be confused with the panel's own
   // `collapsed` prop above.
   const [folded, setFolded] = useState<Set<string>>(loadCollapsed);
+  // How many threads each group has been asked to show, over the default page.
+  // Deliberately not persisted: a fresh window starts every group short again.
+  const [shown, setShown] = useState<Record<string, number>>({});
 
   useEffect(() => {
     localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...folded]));
@@ -132,6 +140,13 @@ export const ThreadList = memo(function ThreadList({
       else next.add(key);
       return next;
     });
+
+  const setGroupOpenAndReset = (key: string, open: boolean) => {
+    setGroupOpen(key, open);
+    // Folding a group away is also the way back to a short list: it comes back
+    // at one page rather than at whatever it had been expanded to.
+    if (!open) setShown(({ [key]: _dropped, ...rest }) => rest);
+  };
 
   return (
     <aside
@@ -173,6 +188,12 @@ export const ThreadList = memo(function ThreadList({
           {groups.map((g) => {
             const open = !folded.has(g.key);
             const busy = g.threads.some((t) => runningIds.has(t.id));
+            // The open thread is always drawn, however far down the group it
+            // sits: a list that hides the conversation you are reading would
+            // leave the page with no row highlighted at all.
+            const activeAt = g.threads.findIndex((t) => t.id === activeId);
+            const limit = Math.max(shown[g.key] ?? PAGE, activeAt + 1);
+            const rest = g.threads.length - limit;
             return (
               <div key={g.key} className="mb-1.5">
                 {/* The label and its caret are one control on the left — the
@@ -185,7 +206,7 @@ export const ThreadList = memo(function ThreadList({
                     type="button"
                     title={g.title}
                     aria-expanded={open}
-                    onClick={() => setGroupOpen(g.key, !open)}
+                    onClick={() => setGroupOpenAndReset(g.key, !open)}
                     className="flex min-w-0 flex-1 items-center gap-0.5 text-left text-[11px] font-medium tracking-wide text-muted-foreground transition-colors hover:text-foreground"
                   >
                     <span className="truncate">{g.label}</span>
@@ -228,7 +249,7 @@ export const ThreadList = memo(function ThreadList({
                 </div>
                 {open && (
                   <div className="flex flex-col gap-0.5">
-                    {g.threads.map((t) => {
+                    {g.threads.slice(0, limit).map((t) => {
                       const running = runningIds.has(t.id);
                       const active = t.id === activeId;
                       return (
@@ -305,6 +326,19 @@ export const ThreadList = memo(function ThreadList({
                         </div>
                       );
                     })}
+                    {/* Quiet, and shaped like a row rather than a button: it is
+                        the tail of the list, not a control beside it. The count
+                        says how big a step it is, and the group header above
+                        already carries the total. */}
+                    {rest > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShown((prev) => ({ ...prev, [g.key]: limit + PAGE }))}
+                        className="rounded-lg py-1.5 pl-2.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        Show {Math.min(PAGE, rest)} more
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

@@ -254,6 +254,15 @@ spinner in place of its count while a thread inside it is running, since the
 row that would say so is folded away; and its `+` expands the group before
 opening the new thread, which would otherwise be started out of sight.
 
+**A group shows five threads and offers the rest.** A subject accumulates
+dozens of conversations, and listing every one of them buries the groups under
+it, so each group draws a page at a time with a *Show N more* row at its tail
+that adds another five. How far a group has been expanded is kept in memory
+only, not `localStorage`: a fresh window starts every group short again, and
+folding a group away drops its expansion, which is also the way back to a short
+list. The open thread is always drawn however far down its group it sits —
+paging it out of view would leave the page with no row highlighted at all.
+
 The column reserves its scrollbar gutter whether or not it overflows, through
 `overflow-y: scroll` rather than `auto`. With classic scrollbars on, a bar that
 appears only once the list is long enough takes its width out of every row, so
@@ -700,6 +709,17 @@ front of it and its own tools for opening a file, and a path is what it was
 missing. That path is also exactly what `oculus read` takes, which
 `HARNESS.template.md` tells the agent.
 
+The menu **opens downwards and only flips up when it would not fit**
+(`Composer.tsx`). The same composer sits in three very different places — the
+middle of the home page, the middle of the chat hero, and pinned to the bottom
+of an open thread — so which way is out of the way is a fact about the
+viewport, not about the call site, and it is measured after the menu is in the
+DOM rather than against its `max-height`, so a three-file list is judged on the
+90px it occupies and not the 256px it is allowed. Opening upwards
+unconditionally was right for the thread and wrong everywhere else: on the home
+page the list covered the subject pill and the cards above it while the lower
+half of the page sat empty.
+
 The earlier BYOK chat agent did the opposite — it read the file, embedded the
 query and packed the result into the request — because its model could only
 see what the prompt carried. A CLI agent can open the file itself, so that
@@ -737,9 +757,27 @@ its chapters on the next turn — and the brief is resolved before *any* session
 is spawned, the one a rewind brings back up included, since a session opened
 without it would answer without it for the rest of the thread.
 
+**The rest of the section is paid for by a turn that went looking.** A
+recorded thread (`agents/threads/26.ndjson`) spent a minute on one question:
+four reads scrolling a VTT whose every other line is a `NOTE CONF` block of
+recogniser confidence numbers the agent had no way to know was noise, two
+`oculus files` calls to discover which PDF the slide deck was, and two
+refusals from guessing that `grep` and `read` take a subject positionally the
+way `files` does. None of that is the model being slow — it is the brief
+naming a course folder and leaving the rest to be rediscovered on every
+thread. So the section also carries **the recording's date** (Echo360 titles
+are the timetable's — `MULT20015_2026_SM2 TU L105` — so the date is the only
+thing on the row that says which week, and therefore which deck), **the shape
+of the VTT** and how to seek in it by timestamp, and **the deck hunt written
+out with its real flags**. Nothing links a recording to its slide deck in the
+database, so that last one is a recipe rather than a fact; if a link ever
+exists, it replaces the recipe.
+
 The section closes with the sentence the dock depends on: the student is
 watching this lecture, and a message may carry the moment it was sent at — a
-timestamp, the last minute of transcript, and a frame.
+timestamp, the last minute of transcript, and a frame — and that the moment is
+usually enough, so the deck is for when a question needs the exact notation
+rather than a first move.
 
 **The moment rides the prompt; it never becomes the message.**
 `SendOptions.context` is appended to what the CLI receives, after the

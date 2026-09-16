@@ -33,6 +33,11 @@ const LINE_H = 16;
 /** Roughly ten lines. Past that the box stops growing and scrolls. */
 const MAX_H = 160;
 
+/** The gap the `@` menu keeps from the composer and from the viewport edge —
+ *  `mb-2`/`mt-2`, in pixels, because the flip below has to do arithmetic with
+ *  it. */
+const MENU_GAP = 8;
+
 /**
  * The `@…` token the caret is sitting in, or null.
  *
@@ -125,10 +130,14 @@ export function Composer({
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [codexModels, setCodexModels] = useState<CodexModel[] | null>(null);
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
   const [files, setFiles] = useState<MentionFile[]>([]);
   const [index, setIndex] = useState(0);
+  /** Which way the `@` menu opens. See the layout effect that sets it. */
+  const [drop, setDrop] = useState<"up" | "down">("down");
   // The query the menu is currently showing, so a slow lookup that lands
   // after the token changed cannot overwrite a newer list.
   const latest = useRef("");
@@ -234,6 +243,31 @@ export function Composer({
 
   const menuOpen = mention !== null && files.length > 0;
 
+  /**
+   * The `@` menu opens downwards, and only flips up when it would not fit.
+   *
+   * The composer is the same component in three very different places — the
+   * middle of the home page, the middle of the chat hero, and pinned to the
+   * bottom of an open thread — so which way is "out of the way" is a fact
+   * about the viewport, not about the call site. Opening up unconditionally
+   * was right for the thread and wrong everywhere else: on the home page the
+   * list covered the subject pill and the cards above it while the whole
+   * lower half of the page sat empty.
+   *
+   * Measured after the menu is in the DOM rather than against `max-h-64`, so
+   * a three-file list is judged on the ~90px it actually occupies instead of
+   * the 256px it is allowed. `useLayoutEffect`, so the flip lands before
+   * paint and the menu is never seen in the wrong place.
+   */
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const menu = menuRef.current;
+    if (!menuOpen || !wrap || !menu) return;
+    const box = wrap.getBoundingClientRect();
+    const needed = menu.offsetHeight + MENU_GAP;
+    setDrop(window.innerHeight - box.bottom >= needed || box.top < needed ? "down" : "up");
+  }, [menuOpen, files.length]);
+
   const send = () => {
     const t = text.trim();
     if (!t) return;
@@ -245,7 +279,7 @@ export function Composer({
   };
 
   return (
-    <div className="relative flex flex-col gap-1.5">
+    <div ref={wrapRef} className="relative flex flex-col gap-1.5">
       {!subjectLocked && (
         <div className="flex items-center px-0.5">
           <SubjectSelect
@@ -258,7 +292,13 @@ export function Composer({
       )}
 
       {menuOpen && (
-        <div className="absolute bottom-full left-0 right-0 z-20 mb-2 max-h-64 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover py-1 shadow-md">
+        <div
+          ref={menuRef}
+          className={cn(
+            "absolute left-0 right-0 z-20 max-h-64 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover py-1 shadow-md",
+            drop === "down" ? "top-full mt-2" : "bottom-full mb-2",
+          )}
+        >
           {files.map((f, i) => (
             <button
               key={f.id}
