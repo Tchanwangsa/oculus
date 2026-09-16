@@ -7,9 +7,14 @@ Echo360) into a searchable personal knowledge base. Two processes:
 - **Rust core** — Tauri backend, scrape engine, PDF parsing, page-image
   embedding, and the `oculus` CLI, in `app/src-tauri/`
 
-PDF parsing (MinerU) and page embedding (Voyage) are cloud calls made
+PDF parsing (MinerU) and page embedding (Voyage) are HTTP calls made
 in-process from Rust, behind seams in `app/src-tauri/src/parse/` and
-`app/src-tauri/src/embed/`. **The Python sidecar is gone** — code and
+`app/src-tauri/src/embed/`. Embedding is cloud-only. Parsing has **two
+engines, chosen in Settings → Library**: MinerU's cloud service, or a MinerU
+server the user installs and runs themselves, reached over loopback. There is
+no *bundled* local parser and no local inference tier in this repo — the
+second engine is somebody else's program at an address, which Oculus never
+starts, supervises or ships. **The Python sidecar is gone** — code and
 directory. The last commit holding `sidecar/` is `f875bb1`, which is where the
 separate local-server repo forks from; Rust comments that cite `sidecar/*.py`
 are provenance for ported behaviour and point there. Do not re-add a Python
@@ -37,7 +42,7 @@ structure by searching.
 | How the processes talk, the data dir, the database | `docs/architecture.md` |
 | Scraping Canvas / Ed / Echo360 | `docs/sync.md` |
 | Sign-in, session cookies, keep-alive | `docs/auth.md` |
-| PDF parsing, MinerU cloud, the parser seam | `docs/parsing.md` |
+| PDF parsing, the two MinerU engines, the parser seam | `docs/parsing.md` |
 | Embeddings, search, the `pages` table | `docs/retrieval.md` |
 | Chat: the CLI-agent bridges, containment, the timeline | `docs/harness.md` |
 | Class times, due dates, the calendar | `docs/calendar.md` |
@@ -77,7 +82,14 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   `bun run cli` for the `oculus` binary).
 - **No Python toolchain.** There is no `uv` step, no `.venv`, and no
   `sidecar/` — the pins that used to live in `sidecar/pyproject.toml` belong to
-  the separate repo now, and are at `f875bb1` if you need them.
+  the separate repo now, and are at `f875bb1` if you need them. **The local
+  parse engine does not breach this**, and will read as if it does: the rule is
+  about *this repo and this app* — no bundled interpreter, no venv in the
+  build, no supervised child process, no 1.2 GB payload to sign. A MinerU the
+  user installed with their own `uv` and started themselves, spoken to over
+  HTTP, is the same boundary as MinerU cloud with a different hostname. Its
+  `uv tool install` line lives in `docs/parsing.md` as an instruction *to a
+  user*, never as a build step here.
 - `libpdfium` and `ffmpeg` are fetched, not vendored — `bun run pdfium` and
   `bun run ffmpeg` into the gitignored `app/src-tauri/binaries/`. The pdfium
   release tag is pinned to the Chromium revision `pdfium-render` binds
@@ -92,19 +104,25 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
 - **Canvas API tokens are blocked by the university** — the admin has
   disabled self-service access tokens, so the session cookie is the only auth
   path. Don't re-propose `Authorization: Bearer`. See `docs/auth.md`.
-- **A parse or an embed blocks for minutes, and that is not a hang.** Both
-  are cloud round trips with no timeout imposed from above: the MinerU client
-  owns a 60-minute poll deadline and the Voyage client paces itself against
+- **A parse or an embed blocks for minutes, and that is not a hang.** Neither
+  has a timeout imposed from above: the MinerU client owns a 60-minute poll
+  deadline, a local MinerU parse is minutes of silence on this machine's own
+  CPU with only a *connect* timeout above it, and the Voyage client paces
+  itself against
   the rate-limit tier it detected, where a 429 is routine rather than a
   failure. A second deadline layered on top could only abandon work that was
   still progressing. On a Voyage account with no payment method the ceiling is
   10K tokens/minute — under three pages a minute — so a large deck genuinely
   takes an hour. Watch the page counter, not the clock.
-- **There is no fallback beneath the cloud.** A missing token, a rejected
-  token, a spent quota or no network all mean that PDF has no markdown at all
-  — no local tier catches it. That is why `ParseError` carries
-  `kind`/`retryable`/`latching` and why the file row and the background sweep
-  both read them. Never add a silent fallback; see `docs/parsing.md`.
+- **Nothing catches a failed parse — an engine you choose is not a tier that
+  saves you.** A missing token, a rejected token, a spent quota, no network, a
+  server that is not running: each means that PDF has no markdown at all. The
+  parser setting selects *which* MinerU runs; it does not stack them, and a
+  parse that fails on the selected engine is never re-tried on the other one.
+  That is why `ParseError` carries `kind`/`retryable`/`latching` and why the
+  file row and the background sweep both read them. **Never add a fallback
+  between engines, and never let a failure degrade quietly into something that
+  looks like success** — a failed parse must surface. See `docs/parsing.md`.
 - **A drag needs `dataTransfer.setData()` or WebKit cancels it.** A
   `dragstart` handler that sets no data aborts the drag silently — no
   `dragover`, no `drop`, every handler correctly attached and nothing moves.

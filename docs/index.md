@@ -18,7 +18,7 @@ live in the root `CLAUDE.md`, not here.
 | [architecture.md](./architecture.md) | The two processes, how they talk, the data directory, `oculus.db` |
 | [sync.md](./sync.md) | The scrape engine: Canvas modules, Ed threads, Echo360 lectures, HTML→md |
 | [auth.md](./auth.md) | Canvas session cookie, keep-alive, Ed `x-token`, Echo360 LTI |
-| [parsing.md](./parsing.md) | PDFs to markdown: the parser seam, MinerU cloud, the on-disk contract, failures |
+| [parsing.md](./parsing.md) | PDFs to markdown: the parser seam, the two MinerU engines, the on-disk contract, failures |
 | [retrieval.md](./retrieval.md) | Page-image embeddings, the `pages` table, query flow |
 | [harness.md](./harness.md) | Chat as a CLI agent: the Claude Code, Codex and opencode bridges, containment, the timeline |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
@@ -42,9 +42,9 @@ live in the root `CLAUDE.md`, not here.
 
 ## Status honesty
 
-Built: Canvas SSO + sync, Ed Discussion sync, Echo360 download + player, cloud
-PDF parsing, page-image retrieval, chat as a CLI agent over it
-(Claude Code, Codex or opencode, driven as a subprocess — see
+Built: Canvas SSO + sync, Ed Discussion sync, Echo360 download + player, PDF
+parsing (MinerU cloud, or a MinerU you run), page-image retrieval, chat as a
+CLI agent over it (Claude Code, Codex or opencode, driven as a subprocess — see
 [harness.md](./harness.md)), projects: assignments broken into tasks, each
 project opening on an Overview (a brief, tags, a pinned calendar event, what is
 next) with its tasks on a board, a table or a timeline behind a Tasks tab and a
@@ -69,12 +69,15 @@ describes the shared pipeline; the tab is in
 Removed: the **Python sidecar**, code and directory both. PDF parsing and page
 embedding run in Rust now, against MinerU and Voyage
 ([parsing.md](./parsing.md), [retrieval.md](./retrieval.md)); the supervisor,
-the loopback port, the whole-tree memory governor and the local-parser choice
-went with it. There is no local tier and no fallback: a PDF with no cloud parse
-simply has no markdown, and the UI says so. **The last commit holding
-`sidecar/` is `f875bb1`** — 32 files, 6,652 lines, every pin and measurement
-intact — which is where the separate local-server repo forks from. Same pattern
-as automations at `d64dc11`: moved, not lost.
+the loopback port and the whole-tree memory governor went with it. Parsing on
+this machine came back, but as an *engine you select* rather than a tier that
+catches anything: Settings → Library offers MinerU's cloud service or a MinerU
+server you install and run yourself, and **there is no fallback between them**.
+A PDF that fails on the selected engine simply has no markdown, and the UI says
+so. **The last commit holding `sidecar/` is `f875bb1`** — 32 files, 6,652
+lines, every pin and measurement intact — which is where the separate
+local-server repo forks from. Same pattern as automations at `d64dc11`:
+moved, not lost.
 
 Removed: the **BYOK API layer** — provider config, keychain keys, an
 OpenAI-compatible streaming client, spend limits and its own agent tool loop —

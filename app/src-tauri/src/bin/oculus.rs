@@ -1006,9 +1006,11 @@ impl Ctx {
             }
         };
 
-        // Local only: constructing the backend reads the settings row and the
-        // keychain, and `preflight` asks it about itself. Nothing goes over
-        // the network, so `status` stays instant and costs no cloud quota.
+        // Constructing the backend reads the settings row and the keychain, and
+        // `preflight` asks it about itself. On the cloud engine that is purely
+        // local and costs no quota. On the local engine `health()` probes the
+        // server over loopback — still no cloud call and still no quota, but a
+        // connect, which is why that probe carries a short timeout of its own.
         let parser = match app_lib::parse::backend() {
             Ok(backend) => match app_lib::parse::preflight(backend.as_ref()) {
                 Ok(health) => ParserStatus {

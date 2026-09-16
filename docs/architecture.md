@@ -2,15 +2,17 @@
 
 **Two processes, one data directory.** PDF parsing and page embedding both run
 in Rust, behind the seams in `app/src-tauri/src/parse/` and
-`app/src-tauri/src/embed/`, reaching two clouds over HTTPS. The Python sidecar
-that used to own both is gone from the app entirely.
+`app/src-tauri/src/embed/`, reaching two clouds over HTTPS — or, for parsing, a
+MinerU the user runs themselves. The Python sidecar that used to own both is
+gone from the app entirely.
 
 ```
 ┌───────────────────────────── Tauri app ─────────────────────────────┐
 │  React frontend (WebView)  ⇄  Rust core (commands + events)         │
 │        app/src/                  app/src-tauri/src/                 │
 │                                     │                               │
-│                                  parse/  ── MinerU HTTPS API        │
+│                                  parse/  ── MinerU cloud, or a      │
+│                                            MinerU on loopback       │
 │                             (in-process, emits parse-status)        │
 │                                     │                               │
 │                                  embed/  ── Voyage HTTPS API        │
@@ -18,10 +20,14 @@ that used to own both is gone from the app entirely.
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-There is no local child process and no loopback port on either path. Nothing
-calls back *into* the app: the sidecar used to POST parse progress to a
-loopback server of ours on an ephemeral port, and both ends of that are
-deleted.
+**Oculus starts no child process on either path**, and that is the invariant
+worth holding onto. It is not the same as "no loopback": the parse seam has a
+second engine, and with it selected a parse is an HTTP call to
+`127.0.0.1:8000` — a MinerU server the *user* installed and runs, which Oculus
+neither launches, supervises nor ships. Same boundary as MinerU cloud, with a
+different hostname. Nothing calls back *into* the app in either case: the
+sidecar used to POST parse progress to a loopback server of ours on an
+ephemeral port, and both ends of that are deleted.
 
 ## Where
 
@@ -31,6 +37,7 @@ deleted.
 | Data-dir + path resolution (no Tauri handle needed) | `app/src-tauri/src/paths.rs` |
 | PDF parse seam (trait, artifacts, errors, config) | `app/src-tauri/src/parse/mod.rs` |
 | MinerU cloud client (in-process, batched) | `app/src-tauri/src/parse/mineru/client.rs` |
+| MinerU-on-this-Mac client (in-process, one POST over loopback) | `app/src-tauri/src/parse/mineru/local.rs` |
 | `parse-status` events | `app/src-tauri/src/parse/events.rs` |
 | Page embed seam (trait, artifacts, errors, config) | `app/src-tauri/src/embed/mod.rs` |
 | Voyage cloud client + page rasterizer | `app/src-tauri/src/embed/voyage/client.rs`, `app/src-tauri/src/embed/raster.rs` |
@@ -54,7 +61,9 @@ deleted.
   embeddings, both over plain HTTPS from inside this process, both with their
   credential read from the macOS keychain and handed straight to the client.
   Neither key enters SQLite, the WebView, a health response or a progress
-  event, and neither crosses a socket on this machine.
+  event, and neither crosses a socket on this machine. Parsing has a second
+  destination — MinerU's own server on loopback — which needs no credential at
+  all, so a local parse touches the keychain not at all.
 - **Anything → Rust**: nothing listens. There used to be a tiny HTTP server of
   ours on an ephemeral port, first as a cookie proxy and WebView host for the
   JS scraper, then — once the scraper became Rust — for parse-status callbacks
@@ -137,7 +146,11 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
 ## How it connects
 
 - Parse settings are in SQLite under `parse`; the seam reads which backend to
-  use out of that row (`parse_config` in `app/src-tauri/src/parse/mod.rs`).
+  use out of that row (`parse_config` in `app/src-tauri/src/parse/mod.rs`),
+  where `engine` is `cloud` or `local` and an optional `engineUrl` overrides
+  the chosen engine's API root. **Changing it invalidates nothing** — both
+  engines write the same artifacts at the same `PARSER_VERSION` — which is the
+  opposite of the embed row beside it; see [parsing.md](./parsing.md).
   Two dead keys from the sidecar — `memoryCapMb` and a `local|cloud|auto`
   `backend` — still sit in the same blob and are deliberately ignored rather
   than migrated out; only `engine` selects a parser. Embed settings

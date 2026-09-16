@@ -997,7 +997,7 @@ fn backoff(client: &MinerUCloud, attempt: &mut u32, delay: &mut Duration) {
     *delay = (*delay * 2).min(MAX_RETRY);
 }
 
-fn transport_detail(transport: &ureq::Transport) -> String {
+pub(super) fn transport_detail(transport: &ureq::Transport) -> String {
     match transport.message() {
         Some(message) => format!("{}: {message}", transport.kind()),
         None => transport.kind().to_string(),
@@ -1021,7 +1021,7 @@ fn check_transfer_url(url: &str, what: &str) -> Result<(), ParseError> {
     Ok(())
 }
 
-fn page_count(pdf: &Path) -> Result<u32, ParseError> {
+pub(super) fn page_count(pdf: &Path) -> Result<u32, ParseError> {
     let document = lopdf::Document::load(pdf)
         .map_err(|_| ParseError::Document { code: "unreadable-pdf".into() })?;
     let pages = document.get_pages().len() as u32;
@@ -1080,7 +1080,7 @@ impl Drop for Scratch {
 /// Extract with a zip-slip guard: every member has to resolve inside the
 /// destination. `enclosed_name` already refuses `..` and absolute paths; the
 /// prefix check is the second lock on the same door.
-fn safe_extract(zip_path: &Path, destination: &Path) -> Result<(), ParseError> {
+pub(super) fn safe_extract(zip_path: &Path, destination: &Path) -> Result<(), ParseError> {
     fs::create_dir_all(destination)
         .map_err(|e| ParseError::Io(format!("create {}: {e}", destination.display())))?;
     let file = fs::File::open(zip_path)
@@ -1118,7 +1118,7 @@ fn safe_extract(zip_path: &Path, destination: &Path) -> Result<(), ParseError> {
 
 /// The first `*_content_list.json` anywhere under the extracted result, in a
 /// stable order so two runs over the same archive pick the same file.
-fn find_content_list(root: &Path) -> Option<PathBuf> {
+pub(super) fn find_content_list(root: &Path) -> Option<PathBuf> {
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {

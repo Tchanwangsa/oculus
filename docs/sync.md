@@ -116,20 +116,28 @@ One Rust engine scrapes three services. It runs identically inside the app
   in [frontend.md](./frontend.md).
 - **The parse is in this process, and it takes minutes.** `parse_pdf` in
   `app/src-tauri/src/sync.rs` goes through the seam in
-  `app/src-tauri/src/parse/mod.rs` rather than POSTing to a loopback port. The
-  Python used to return in seconds — as soon as a fast pass had produced some
-  markdown — and finish the real parse on its own thread. There is no fast tier
-  now, so the call spans the entire cloud round trip, and there is no timeout
-  here either: the client's own 60-minute poll deadline is the single limit, so
-  nothing shorter can abandon work it is still doing.
+  `app/src-tauri/src/parse/mod.rs` and blocks until the chosen backend is done.
+  The Python used to return in seconds — as soon as a fast pass had produced
+  some markdown — and finish the real parse on its own thread. There is no fast
+  tier now, so the call spans the whole of it, and no deadline is imposed from
+  here on either engine: the cloud client owns a 60-minute poll deadline, and a
+  local parse is a connect timeout followed by minutes of silence on this
+  machine's own CPU. Anything shorter could only abandon work still in
+  progress. A loopback POST does exist again, but it belongs to the local
+  backend behind the seam — `sync.rs` no longer knows a port is involved, which
+  is the part the sidecar's removal actually settled.
 - **Fire-and-forget is one detached thread per PDF**, and the bounded worker
   pool that used to be here is gone. The pool existed because every parse was
   an HTTP request and a full library meant a hundred simultaneous POSTs at ~2 GB
-  each. Concurrency is the batcher's now
-  (`app/src-tauri/src/parse/mineru/batch.rs` — a five-second/twenty-file window,
-  eight batches in flight), and a second gate would only stop files reaching the
-  window they are meant to share. Each thread spends its wait parked on a
-  condvar: no socket, no request in flight.
+  each. Concurrency is the backend's now, and the two answer it differently:
+  the cloud batches (`app/src-tauri/src/parse/mineru/batch.rs` — a
+  five-second/twenty-file window, eight batches in flight), while the local
+  engine takes a single permit (`app/src-tauri/src/parse/mineru/local.rs`),
+  because the server on the other end is this machine and works one document at
+  a time regardless. A gate back here would serve neither: it would only keep
+  cloud files out of the window they are meant to share. Each thread spends its
+  wait parked on a condvar or on that permit — no socket, no request in
+  flight.
 - **Finishing a parse writes its own page records**, into `pages` via
   `store::upsert_pages`. That write used to live on the embed path, which made
   the markdown `oculus grep` searches a side effect of building the vector

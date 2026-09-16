@@ -21,7 +21,7 @@ from the code and are not.
 | Process boundaries, IPC, data dir, `oculus.db` | `docs/architecture.md` |
 | Scraping Canvas / Ed Discussion / Echo360 | `docs/sync.md` |
 | Sign-in, session cookie, keep-alive, tokens | `docs/auth.md` |
-| PDF parsing, MinerU cloud, the parser seam | `docs/parsing.md` |
+| PDF parsing, the two MinerU engines, the parser seam | `docs/parsing.md` |
 | Embeddings, search, the `pages` table | `docs/retrieval.md` |
 | Chat: the CLI-agent bridges, containment, the timeline | `docs/harness.md` |
 | Class times, due dates, the calendar | `docs/calendar.md` |

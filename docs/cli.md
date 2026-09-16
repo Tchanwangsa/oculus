@@ -56,8 +56,11 @@ the instructions gets read without opening the window.
 ## How it connects
 
 - **`--json` is the only global flag.** `--memory-cap` went with the Python
-  sidecar it bounded: there is no local process to cap, and what governs a
-  parse now is MinerU's allowance rather than this machine's memory.
+  sidecar it bounded, and did not come back with the local parse engine. A
+  MinerU the user installed and started is not this app's child process: its
+  memory is its own to manage, and a flag here could not bound it if it tried.
+  What a parse costs is the selected engine's business — MinerU's allowance on
+  the cloud, this machine's RAM on a local server somebody else is running.
 - The CLI reads the same session cookie and writes the same `oculus.db` the
   app uses — a CLI sync shows up in the app and vice versa. But it **never
   creates the database** (schema stays with the app's migrations), so a
@@ -99,8 +102,10 @@ the instructions gets read without opening the window.
 - `oculus status` reports the **parser**, not a local process: the backend
   name, whether it is usable, and its `parser_version` — the handshake that
   decides whether artifacts written elsewhere can be read as this app's. It
-  asks the backend about itself locally and never calls MinerU, so it is
-  instant and costs no metered quota.
+  goes through `preflight`, so it never calls MinerU's cloud and costs no
+  metered quota. On the local engine it is not quite free: `health()` probes
+  the configured loopback address, which answers at once or times out in three
+  seconds. See [parsing.md](./parsing.md).
 - `run -s` also refreshes each subject's Canvas calendar (class times and due
   dates) into `calendar_events` after the scrape — the CLI has no sync options
   to gate it with, so it always runs. See [calendar.md](./calendar.md).

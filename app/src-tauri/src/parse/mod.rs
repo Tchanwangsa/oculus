@@ -2,10 +2,11 @@
 //!
 //! Parsing used to live behind the Python sidecar's HTTP port, which meant the
 //! contract was a URL and a JSON shape nobody could typecheck. It is a trait
-//! now: MinerU cloud implements it in-process, and a local parse server —
-//! shipped as its own repo, spoken to over loopback — implements the same one.
-//! Nothing here may assume the cloud; anything cloud-shaped (an API root, a
-//! token, an upload ceiling) arrives as configuration or as a parameter.
+//! now, and both implementations live in this process: MinerU cloud over
+//! HTTPS, and MinerU's *own* server — installed and started by the user, not
+//! by us — over loopback. Nothing here may assume the cloud; anything
+//! cloud-shaped (an API root, a token, an upload ceiling) arrives as
+//! configuration or as a parameter.
 //!
 //! What the seam owns is the *contract*, not the parsing: the on-disk artifact
 //! layout, the version that decides whether a file is already done, the error
@@ -341,13 +342,19 @@ impl Health {
     /// is **refused, not warned about** — a warning here means a library of
     /// files that each look parsed and none of which are.
     ///
-    /// This looks redundant today and is not dead code: the only backend in
-    /// this process is the in-process cloud client, which compares its own
-    /// constant against itself and can never disagree. The check exists for the
-    /// *other* implementation — the local parse server, which ships from a
-    /// separate repo, updates on its own schedule, and absolutely can be a
-    /// version ahead of or behind the app talking to it. Deleting it would
-    /// remove the only thing that catches that.
+    /// The `ready` arm is live, and it is live because of the local engine:
+    /// MinerU's own server is a program the user installs and starts, so it is
+    /// routinely absent or still loading its models, and `NotReady` — retryable
+    /// and non-latching — is how that reaches the sweep instead of marking a
+    /// perfectly good PDF broken.
+    ///
+    /// The `parser_version` arm cannot fire from either backend *today*, and is
+    /// still not dead code. Both stamp this constant because both hand their
+    /// content list to the same `render` in this process, so the record shape
+    /// is ours by construction. It is the guard for a backend that renders its
+    /// own records — the version skew the local server actually exhibits is in
+    /// its *API*, which no negotiation could reconcile and which
+    /// `mineru::local::probe` names separately.
     pub fn check(&self) -> Result<(), ParseError> {
         if self.parser_version != PARSER_VERSION {
             return Err(ParseError::VersionMismatch {
@@ -608,6 +615,16 @@ impl Engine {
         }
     }
 
+    /// Where this engine lives when nothing overrides it. The settings page
+    /// shows it as the endpoint field's placeholder, so the default a user
+    /// reads and the default a parse actually uses are the same constant.
+    pub fn default_base_url(self) -> &'static str {
+        match self {
+            Engine::Cloud => CLOUD_BASE_URL,
+            Engine::Local => LOCAL_BASE_URL,
+        }
+    }
+
     /// Anything that is not one of the two names — `"auto"` included — is not
     /// an engine, and is treated as if the field were absent.
     fn parse(value: &str) -> Option<Self> {
@@ -650,10 +667,17 @@ pub struct ParseConfig {
 /// MinerU's published API root — the same one the Python client used.
 pub const CLOUD_BASE_URL: &str = "https://mineru.net/api/v4";
 
-/// The local parse server's default origin. It is the port the Python sidecar
-/// is vacating, which keeps one number in the user's firewall rules rather
-/// than two.
-pub const LOCAL_BASE_URL: &str = "http://127.0.0.1:9547";
+/// The local parse server's default origin.
+///
+/// This used to be the port the Python sidecar vacated, on the reasoning that
+/// one number in a firewall rule beats two. That reasoning does not survive
+/// contact with the thing on the other end: the local server is **MinerU's
+/// own**, started by the user, and it binds `127.0.0.1:8000` by default. A
+/// default of ours that nobody's server answers on is a setting every single
+/// user has to change before the engine works at all, which is a worse first
+/// run than a second port number. `engineUrl` remains the override for anyone
+/// who moved it.
+pub const LOCAL_BASE_URL: &str = "http://127.0.0.1:8000";
 
 /// The `parse` row, as far as this seam cares about it. Every field is
 /// optional: the blob still carries two dead keys from the Python sidecar
@@ -679,13 +703,7 @@ pub fn parse_config() -> ParseConfig {
     let base_url = stored
         .engine_url
         .filter(|u| !u.trim().is_empty())
-        .unwrap_or_else(|| {
-            match engine {
-                Engine::Cloud => CLOUD_BASE_URL,
-                Engine::Local => LOCAL_BASE_URL,
-            }
-            .to_string()
-        });
+        .unwrap_or_else(|| engine.default_base_url().to_string());
     let credentials = match engine {
         Engine::Cloud => CredentialSource::Keychain,
         Engine::Local => CredentialSource::None,
@@ -703,11 +721,11 @@ pub fn parse_config() -> ParseConfig {
 pub fn backend() -> Result<Box<dyn Parser>, ParseError> {
     match parse_config().engine {
         Engine::Cloud => Ok(Box::new(mineru::client::MinerUCloud::from_config()?)),
-        // The local parse server ships from its own repo and has no client in
-        // this process yet. Nothing selects it today (`engine` is absent on
-        // every install, which means `Cloud`), so this is a hand-edited
-        // setting pointing at something that is not here.
-        Engine::Local => Err(ParseError::NotReady { backend: "local".into() }),
+        // Nothing can fail here, and the asymmetry is the point: the cloud
+        // client refuses to exist without a token, while a loopback address
+        // has nothing to authenticate. A server that is not running is not a
+        // construction error — it is the `Offline` the first parse returns.
+        Engine::Local => Ok(Box::new(mineru::local::MinerULocal::from_config())),
     }
 }
 
@@ -947,3 +965,6 @@ pub mod mineru;
 
 /// `parse-status`, the one event this path emits. See `parse/events.rs`.
 pub mod events;
+
+/// Settings → Library's parser control. See `parse/commands.rs`.
+pub mod commands;

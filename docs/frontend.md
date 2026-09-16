@@ -22,7 +22,8 @@ this page is the structure.
 | Agent/model/reasoning picker (settings rows + composer) | `app/src/components/harness/ModelPicker.tsx` |
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
-| Library counts, the MinerU token + the privacy statement | `app/src/pages/settings/LibraryPage.tsx` |
+| Library counts, and the page that composes the two engine sections | `app/src/pages/settings/LibraryPage.tsx` |
+| Parse engine, the MinerU token, the server address + status | `app/src/components/settings/ParserSection.tsx`, `app/src-tauri/src/parse/commands.rs` |
 | Embedding backend, the index run, the re-index it costs | `app/src/components/settings/EmbeddingSection.tsx`, `app/src/components/settings/ReindexConfirmDialog.tsx`, `app/src/stores/indexStore.ts`, `app/src-tauri/src/embed/commands.rs` |
 | Side panel (file/lecture preview) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser (route, tab mirror, API) | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/stores/browserStore.ts`, `app/src/lib/browser.ts`, `app/src-tauri/src/browser.rs` |
@@ -65,11 +66,24 @@ the one moment it shows.
 
 ## How it connects
 
-- **Settings → Library states the parser rather than offering it.** MinerU
-  cloud is the only one, so there is no backend control and no memory budget —
-  both described the Python sidecar. What is left is the library counts, the
-  MinerU token, and the privacy boundary written as a fact: every PDF goes to
-  MinerU and its PRC-hosted OSS storage.
+- **Settings → Library offers the parser, and switching it costs nothing**
+  (`ParserSection`). Two engines: MinerU's cloud service, or a MinerU server
+  the user runs on their own Mac. Unlike the embedding control directly below
+  it, the change is **not destructive** — both engines write the same artifacts
+  at the same `PARSER_VERSION`, nothing is re-parsed and nothing is thrown
+  away — so the select is a plain `onValueChange` with **no confirmation
+  dialog**, and one must not be added for symmetry with `ReindexConfirmDialog`.
+  The engine list, its labels and any refusal come from Rust, so the page
+  cannot offer what the backend would refuse. Three sub-rows appear
+  conditionally: the MinerU token **only under Cloud** (a key field under a
+  backend that cannot use it is where people paste secrets), and the server
+  address plus a live status line only under Local. That status line has four
+  states, not two — reachable, unreachable, a server that answers but speaks
+  MinerU 4's V1 API, and *not asked yet*, which must never be drawn as a
+  failure. Its sentence is Rust's, because Rust distinguishes causes the page
+  cannot see. The privacy boundary is still written as a fact rather than an
+  offer, now one per engine: uploaded to MinerU's PRC-hosted OSS storage, or
+  nothing leaves the machine. See [parsing.md](./parsing.md).
 - **Settings → Library also owns the embedding backend, and changing it is
   destructive on purpose.** One engine is selected (`embed` in the `settings`
   table, read by `embed_config()` in `app/src-tauri/src/embed/mod.rs`) and
@@ -84,9 +98,11 @@ the one moment it shows.
   numbers the index actually holds (`ReindexConfirmDialog`), and skips the
   dialog entirely when there is nothing indexed to lose. The engine list, its
   labels and the reason an engine is unavailable come from Rust, so the page
-  cannot offer what the backend would refuse. `Engine::Local` is real in the
-  seam and has no server to talk to yet, so it is listed and disabled with that
-  sentence under the control rather than hidden.
+  cannot offer what the backend would refuse. The *embedding* `Engine::Local`
+  is real in that seam and has no server to talk to yet, so it is listed and
+  disabled with that sentence under the control rather than hidden — which is
+  the one place these two sections differ, because the parser's local engine
+  does have a server and is always selectable.
 - **The same section starts and stops the index run**
   (`app/src/stores/indexStore.ts`). Until it existed the index could only be
   built by `oculus index` from a terminal: `embedFile` and `embedPending` were
@@ -460,9 +476,9 @@ the one moment it shows.
   `app/src/stores/pipelineStore.ts` holds one row per PDF-backed file and
   `app/src/components/sync/PipelineTable.tsx` draws it — two stage dots, one
   progress figure, a timeline of the two steps when a row is expanded. It was
-  four (a fast local parse, then a quality one, then an embed); MinerU cloud
-  is the only parser now and embeddings are gone, so a file is complete the
-  moment its parse lands.
+  four (a fast local parse, then a quality one, then an embed); there is one
+  parse now — whichever MinerU is selected — and embeddings are gone, so a file
+  is complete the moment its parse lands.
   The `parse-status` event Rust emits carries
   `relative_path`, `subject_id`, one of `queued | running | quality | error`,
   plus `pages_done`/`total_pages` while running, `position` while queued, and
@@ -478,8 +494,9 @@ the one moment it shows.
   so renaming it would invalidate the library. `"fast"` is gone from the
   vocabulary entirely. The store calls the *field* `parse`, since there is only
   one parse to name — the field and the wire string are different things.
-- **A file says whether it has markdown, and why not.** MinerU cloud is the
-  only parser and nothing catches it, so a failure means that file has no
+- **A file says whether it has markdown, and why not.** One engine is
+  selected and nothing catches its failures — a parse is never re-tried on the
+  other engine — so a failure means that file has no
   markdown — no search, no `@`-mention, no Markdown view — until something
   changes. `app/src/lib/parseState.ts` is the one place that turns a status
   plus the failure discriminants into a state and its words; every surface
