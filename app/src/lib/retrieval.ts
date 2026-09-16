@@ -87,17 +87,30 @@ export function embedFile(
  * only make them share the same tokens per minute — and on an account with no
  * payment method that ceiling is ~2.8 pages a minute, which means this loop
  * can legitimately run for hours.
+ *
+ * `shouldStop` is polled **between files, never during one.** A run that can
+ * last most of a day has to be interruptible, but abandoning a document
+ * mid-flight would throw away quota already spent on its pages without leaving
+ * a record behind — and the next run would pay for them again. On a file
+ * boundary the record and the page rows are both written, so stopping costs
+ * nothing and resuming skips what is done.
  */
 export async function embedPending(
   subjectId?: number,
   onProgress?: (done: number, total: number, filename: string) => void,
-): Promise<{ files: number; pages: number; errors: string[] }> {
+  shouldStop?: () => boolean,
+): Promise<{ files: number; pages: number; errors: string[]; stopped: boolean }> {
   const pending = await getUnembeddedPdfs(subjectId);
   const errors: string[] = [];
   let pages = 0;
   let done = 0;
+  let stopped = false;
 
   for (const f of pending) {
+    if (shouldStop?.()) {
+      stopped = true;
+      break;
+    }
     onProgress?.(done, pending.length, f.filename);
     try {
       const summary = await embedFile(f.id, f.relative_path);
@@ -108,7 +121,7 @@ export async function embedPending(
     done += 1;
   }
   onProgress?.(done, pending.length, "");
-  return { files: done - errors.length, pages, errors };
+  return { files: done - errors.length, pages, errors, stopped };
 }
 
 /** Rank indexed pages against a natural-language question. */

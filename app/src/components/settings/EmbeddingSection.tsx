@@ -10,6 +10,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { getUnembeddedPdfs } from "@/lib/retrieval";
+import { useIndexStore, type IndexState } from "@/stores/indexStore";
 import { Section, StatRow } from "@/pages/settings/section";
 import { ReindexConfirmDialog, type ReindexPrompt } from "./ReindexConfirmDialog";
 
@@ -37,6 +39,10 @@ interface EmbedSettings {
     pages_with_markdown: number;
     model: string | null;
     dim: number | null;
+    files_stored: number;
+    pages_stored: number;
+    pages_stale: number;
+    stale_models: string[];
   };
 }
 
@@ -64,6 +70,25 @@ export function EmbeddingSection() {
   const [keyNote, setKeyNote] = useState<{ kind: "error" | "warn"; text: string } | null>(null);
   const [checkingKey, setCheckingKey] = useState(false);
 
+  // How many files a run would actually touch. Not derivable from the counts
+  // above — `pages_stale` counts pages from any model, and a file can be
+  // partly embedded — so it is the same query the run itself walks.
+  const [outstanding, setOutstanding] = useState<number | null>(null);
+
+  const run = useIndexStore();
+
+  const reload = () => {
+    invoke<EmbedSettings>("embed_settings")
+      .then(setSettings)
+      .catch((cause) => {
+        console.error("embed settings failed", cause);
+        setError("Could not read the embedding settings.");
+      });
+    getUnembeddedPdfs()
+      .then((files) => setOutstanding(files.length))
+      .catch(() => setOutstanding(null));
+  };
+
   useEffect(() => {
     let cancelled = false;
     invoke<EmbedSettings>("embed_settings")
@@ -74,10 +99,24 @@ export function EmbeddingSection() {
         console.error("embed settings failed", cause);
         if (!cancelled) setError("Could not read the embedding settings.");
       });
+    getUnembeddedPdfs()
+      .then((files) => {
+        if (!cancelled) setOutstanding(files.length);
+      })
+      .catch(() => {
+        if (!cancelled) setOutstanding(null);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // A finished run moves every number on this page, so re-read them rather
+  // than leaving counts that were true before it started.
+  useEffect(() => {
+    if (!run.running && (run.result || run.error)) reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.running]);
 
   const selected = settings?.engines.find((engine) => engine.id === settings.engine) ?? null;
   const unavailable = settings?.engines.filter((engine) => !engine.available) ?? [];
@@ -263,16 +302,46 @@ export function EmbeddingSection() {
           label="Files indexed"
           value={settings ? settings.index.files_embedded.toLocaleString() : "—"}
         />
-        {/* What the stored vectors *are*, not what this build would write —
-            the two disagree for exactly as long as a re-index is outstanding,
-            and that gap is the thing worth seeing. */}
+        {/* `index.model` is the space this build *writes*, not the space the
+            stored vectors are in — `stats` reads it off the seam's constants so
+            it can answer before a key exists. Labelling it "Vector space" said
+            the library held Voyage vectors while every one of them was Qwen.
+            The stale counts below are where the stored side is told. */}
         <StatRow
-          label="Vector space"
+          label="Search space"
           value={
             settings?.index.model && settings.index.dim
               ? `${settings.index.model} · ${settings.index.dim}d`
-              : "Empty"
+              : "—"
           }
+        />
+        {settings && settings.index.pages_stale > 0 ? (
+          <StatRow
+            label="Awaiting re-index"
+            value={`${settings.index.pages_stale.toLocaleString()} pages`}
+          />
+        ) : null}
+
+        {/* The one place the gap is spelled out rather than left to be
+            inferred from two numbers that happen to disagree. */}
+        {settings && settings.index.pages_stale > 0 ? (
+          <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
+            {settings.index.pages_stale.toLocaleString()} stored pages were embedded by{" "}
+            {settings.index.stale_models.length
+              ? settings.index.stale_models.join(", ")
+              : "a retired model"}
+            . They cannot be compared against a query from {settings.index.model}, so they are
+            not searchable until they are rebuilt. Nothing migrates between the two spaces.
+          </p>
+        ) : null}
+
+        {/* The run. Until this existed the index could only be built from a
+            terminal, which meant a library could sit permanently unsearchable
+            with nothing in the app admitting it or offering a fix. */}
+        <IndexRunRow
+          outstanding={outstanding}
+          ready={Boolean(settings?.credentials_ready)}
+          run={run}
         />
 
         {error ? (
@@ -287,5 +356,105 @@ export function EmbeddingSection() {
         onCancel={() => setPrompt(null)}
       />
     </Section>
+  );
+}
+
+/**
+ * Start, watch and stop an index run.
+ *
+ * It names the file it is on, not just a percentage, because on a Voyage
+ * account with no payment method this is ~2.8 pages a minute — a run that can
+ * take most of a day, where a bar that has not moved in ten minutes is
+ * indistinguishable from a hang and a filename that changed is proof of life.
+ *
+ * No toast and no bottom bar, per the house rules: the page that owns the
+ * index shows the detail, and the sidebar carries it once you navigate away.
+ */
+function IndexRunRow({
+  outstanding,
+  ready,
+  run,
+}: {
+  outstanding: number | null;
+  ready: boolean;
+  run: IndexState;
+}) {
+  const nothingToDo = outstanding === 0;
+
+  return (
+    <div className="pt-2">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-xs text-foreground">Build the index</p>
+          <p className="text-[11px] text-muted-foreground">
+            {run.running
+              ? run.progress
+                ? `${run.progress.done} of ${run.progress.total}${
+                    run.progress.filename ? ` · ${run.progress.filename}` : ""
+                  }`
+                : "Working out what is outstanding…"
+              : outstanding == null
+                ? "Embeds every parsed PDF that is not in the current space."
+                : nothingToDo
+                  ? "Every parsed PDF is in the current space."
+                  : `${outstanding} file${outstanding === 1 ? "" : "s"} to embed. This can take hours on a free Voyage account.`}
+          </p>
+        </div>
+        {run.running ? (
+          <Button variant="outline" size="xs" disabled={run.stopping} onClick={() => run.stop()}>
+            {/* Stopping lands on a file boundary, so the button says so
+                rather than pretending the click was instant. */}
+            {run.stopping ? "Stopping…" : "Stop"}
+          </Button>
+        ) : (
+          <Button
+            size="xs"
+            disabled={!ready || nothingToDo}
+            onClick={() => void run.start()}
+          >
+            Index
+          </Button>
+        )}
+      </div>
+
+      {!ready && !run.running ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Save a Voyage API key first — there is nothing to embed against without one.
+        </p>
+      ) : null}
+
+      {run.result ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+          {run.result.stopped ? "Stopped after " : "Indexed "}
+          {run.result.files} file{run.result.files === 1 ? "" : "s"} ·{" "}
+          {run.result.pages.toLocaleString()} pages
+          {run.result.errors.length
+            ? ` · ${run.result.errors.length} failed`
+            : ""}
+        </p>
+      ) : null}
+
+      {/* Named, not counted: a run that failed on three files should say which,
+          because the reasons differ per file and one of them may be the whole
+          account's. */}
+      {run.result?.errors.length ? (
+        <ul className="mt-1 space-y-0.5">
+          {run.result.errors.slice(0, 5).map((message) => (
+            <li key={message} className="text-[11px] leading-relaxed text-destructive">
+              {message}
+            </li>
+          ))}
+          {run.result.errors.length > 5 ? (
+            <li className="text-[11px] text-muted-foreground">
+              …and {run.result.errors.length - 5} more
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+
+      {run.error ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-destructive">{run.error}</p>
+      ) : null}
+    </div>
   );
 }

@@ -23,7 +23,7 @@ this page is the structure.
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
 | Library counts, the MinerU token + the privacy statement | `app/src/pages/settings/LibraryPage.tsx` |
-| Embedding backend + the re-index it costs | `app/src/components/settings/EmbeddingSection.tsx`, `app/src/components/settings/ReindexConfirmDialog.tsx`, `app/src-tauri/src/embed/commands.rs` |
+| Embedding backend, the index run, the re-index it costs | `app/src/components/settings/EmbeddingSection.tsx`, `app/src/components/settings/ReindexConfirmDialog.tsx`, `app/src/stores/indexStore.ts`, `app/src-tauri/src/embed/commands.rs` |
 | Side panel (file/lecture preview) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser (route, tab mirror, API) | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/stores/browserStore.ts`, `app/src/lib/browser.ts`, `app/src-tauri/src/browser.rs` |
 | Viewers | `app/src/components/files/PDFViewer.tsx`, `app/src/components/files/FileViewer.tsx`, `app/src/components/lectures/LecturePlayer.tsx`, `app/src/components/lectures/ChaptersPanel.tsx` |
@@ -87,6 +87,28 @@ the one moment it shows.
   cannot offer what the backend would refuse. `Engine::Local` is real in the
   seam and has no server to talk to yet, so it is listed and disabled with that
   sentence under the control rather than hidden.
+- **The same section starts and stops the index run**
+  (`app/src/stores/indexStore.ts`). Until it existed the index could only be
+  built by `oculus index` from a terminal: `embedFile` and `embedPending` were
+  both written and wired to Rust and neither had a caller, so a library could
+  sit permanently unsearchable with nothing in the app admitting it. One run at
+  a time — `embedPending` is serial because the backend paces itself against
+  the account's per-minute ceiling, so a second loop would only split the same
+  tokens between two — and it can legitimately last hours, which shapes the
+  rest: progress names the file it is on rather than only a percentage, the
+  state lives in the store so it survives navigating away, and **stopping is
+  cooperative and lands between files**, never mid-document, because abandoning
+  one mid-flight would waste the quota already spent on its pages. Per the
+  house rules there is no toast and no bottom bar: the page that owns the index
+  shows the detail, and a spinner on the sidebar's Sync row is the whole of its
+  presence elsewhere.
+- **The stats rows distinguish the two spaces, and the labels had to change to
+  do it.** `IndexStats.model` is the space this build *writes* — `stats` reads
+  it off the seam's constants so it can answer before a key exists — not the
+  space the stored vectors are in. Shown as "Vector space" it claimed the
+  library held Voyage vectors while every one of them was Qwen, so it is
+  "Search space" now, with `pages_stale` and `stale_models` carrying the stored
+  side and naming the model that wrote them.
 - Token save/remove invokes Rust keychain commands, never DB writes. Saving
   checks the token against MinerU first, so a bad or expired one is named at
   that moment, and it lifts the app-wide parse latch — the in-process client

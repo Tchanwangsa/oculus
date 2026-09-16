@@ -154,8 +154,10 @@ So:
   never a setting that claims one space while the table holds another.
 
 There is no migration path between spaces and there is not meant to be. A
-re-index is a re-run of `oculus index`, which is only true because
-`is_embedded` already rejects the old records.
+re-index is just a re-run — `oculus index`, or **Build the index** in
+Settings → Library — and that is only true because `is_embedded` already
+rejects the old records. There is no reset step and no migration script to
+write; do not add one.
 
 ## How it connects
 
@@ -177,9 +179,20 @@ re-index is a re-run of `oculus index`, which is only true because
   deadline imposed from above could only abandon work that was still
   progressing. Same rule as the parse path. What the call site owes instead is
   an honest counter, which is what `ingest_reporting`'s `ProgressSink` carries
-  — used by `oculus index` for its in-place line. The app has no listener for
-  it: there is no embed stage in the pipeline table and nothing in
-  `app/src/hooks/useBackendEvents.ts` subscribes to an embed event.
+  — used by `oculus index` for its in-place line. **The app counts files, not
+  pages**: there is still no embed event, no embed stage in the pipeline table
+  and nothing in `app/src/hooks/useBackendEvents.ts` subscribing to one, so
+  `indexStore` gets its progress from the loop around `embed_file` rather than
+  from inside a document. Per-page progress in the UI is the one thing that
+  would need an event.
+- **The app can start an index run now** (`app/src/stores/indexStore.ts`, driven
+  from Settings → Library). `embedFile`, `embedPending`, `searchPages`,
+  `embeddingStats` and `getUnembeddedPdfs` in `app/src/lib/retrieval.ts` had no
+  caller at all for a while — every one of them wired to Rust and reachable only
+  from the CLI — which is how a library ended up parsed, unsearchable, and
+  silent about it. `embedPending` takes a `shouldStop` polled between files, so
+  a run that may last hours can be interrupted without abandoning a document
+  mid-flight and re-paying for its pages.
 - Two callers rank against the same store: `search_pages` in the app and
   `oculus search`. The ⌘K palette is **not** a third one — it matches titles
   in SQLite so it can answer every keystroke; see

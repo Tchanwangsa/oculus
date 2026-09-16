@@ -11,6 +11,7 @@ import {
   House,
 } from "@phosphor-icons/react";
 import { anyRunning, useHarnessStore } from "@/stores/harnessStore";
+import { useIndexStore } from "@/stores/indexStore";
 import { usePaletteStore } from "@/stores/paletteStore";
 import { cn } from "@/lib/utils";
 import NavItem from "./NavItem";
@@ -46,6 +47,11 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // An agent at work is the one background job that shows here, bb's way:
   // a spinner on the row, nothing else.
   const agentBusy = useHarnessStore((s) => anyRunning(s.live));
+  // An index run is measured in hours, not seconds, and it is started from a
+  // settings page nobody stays on. The house rule is that a background job
+  // surfaces in the sidebar and nowhere else, so this is the whole of its
+  // presence once you navigate away.
+  const indexing = useIndexStore((s) => s.running);
 
   const measure = useCallback(() => {
     const el = scrollRef.current;
@@ -155,7 +161,16 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
         {/* Bottom nav */}
         <div className="pt-1.5 pb-2 px-2 shrink-0">
           <NavItem to="/settings" icon={GearSix} label="Settings" />
-          <NavItem to="/sync" icon={ArrowsClockwise} label="Sync" />
+          <NavItem
+            to="/sync"
+            icon={ArrowsClockwise}
+            label="Sync"
+            badge={
+              indexing ? (
+                <CircleNotch size={12} className="shrink-0 animate-spin text-muted-foreground" />
+              ) : null
+            }
+          />
         </div>
       </div>
     </aside>
