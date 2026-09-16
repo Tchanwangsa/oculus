@@ -98,6 +98,18 @@ One Rust engine scrapes three services. It runs identically inside the app
   lets the player run them off one clock (see [frontend.md](./frontend.md)).
   Only source 1 is fetched by a sync — the camera roughly doubles a semester
   on disk and is downloaded per lecture, on demand, from the player.
+- **A download can be cancelled, and a downloaded video deleted.**
+  `echo360_cancel_download` and `echo360_delete_video` in
+  `app/src-tauri/src/lectures.rs`, both keyed by media id and source like the
+  progress bars. The transfer is a blocking read loop, so cancelling is an
+  `AtomicBool` in `DownloadCancels` that `stream_to_file` checks between 64 KB
+  chunks; it then returns `echo360::CANCELLED`, and the existing error path
+  deletes the partial. The frontend tells that phase apart from a failure and
+  clears its bar without reporting one. **Deleting removes only the video
+  files** — the transcript, chapters and recap notes are kilobytes and cost an
+  agent turn each to rebuild, while the video re-downloads unattended. A
+  delete cancels an in-flight download for the same lecture first, so the
+  writer cannot recreate the file just after it is removed.
 - **Whether a camera exists is probed, not read.** `syllabus` looks for
   `secondaryFiles` anywhere under the lesson (the nesting has moved between
   Echo360 versions, so it searches for the key rather than a path), but this

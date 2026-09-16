@@ -48,6 +48,7 @@ pub fn run() {
         .manage(AuthState(Arc::new(Mutex::new(false))))
         .manage(SubjectsState(Arc::new(Mutex::new(vec![]))))
         .manage(Echo360Cache(Arc::new(Mutex::new(std::collections::HashMap::new()))))
+        .manage(lectures::DownloadCancels::default())
         .manage(SidecarProcess(Arc::new(Mutex::new(None))))
         .manage(ScrapeCancel::default())
         .manage(agent::ChatCancel::default())
@@ -1088,6 +1089,8 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             calendar::calendar_sync_events,
             lectures::echo360_sync_lectures,
             lectures::echo360_download_video,
+            lectures::echo360_cancel_download,
+            lectures::echo360_delete_video,
             lectures::echo360_download_transcript,
             lectures::echo360_read_transcript,
             lectures::echo360_clear_transcripts,

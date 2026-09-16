@@ -377,10 +377,21 @@ pub fn download_url(
 }
 
 /// Stream a URL to disk, calling `on_progress` with a percentage as it goes.
+/// The error `stream_to_file` returns when `should_cancel` asked it to stop.
+/// Callers match on it to tell a user's cancellation apart from a failure —
+/// one is a finished intention, the other is worth reporting.
+pub const CANCELLED: &str = "cancelled";
+
+/// Stream `url` to `dest`, reporting whole-percent progress.
+///
+/// `should_cancel` is polled once per 64 KB chunk rather than per byte: the
+/// read blocks on the network, so a finer check would not stop sooner, and a
+/// coarser one would leave a cancelled download running for megabytes.
 pub fn stream_to_file(
     url: &str,
     dest: &Path,
     on_progress: &dyn Fn(u8),
+    should_cancel: &dyn Fn() -> bool,
 ) -> Result<u64, String> {
     let resp = ureq::get(url).call().map_err(|e| format!("HTTP request failed: {e}"))?;
     let total = resp
@@ -395,6 +406,9 @@ pub fn stream_to_file(
     let mut last_pct = u8::MAX;
 
     loop {
+        if should_cancel() {
+            return Err(CANCELLED.to_string());
+        }
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
