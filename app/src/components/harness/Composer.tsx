@@ -7,7 +7,14 @@ import { UsageMeter } from "@/components/harness/UsageMeter";
 import { SubjectSelect } from "@/components/harness/SubjectSelect";
 import { fileTitle } from "@/lib/openFile";
 import { displayCode } from "@/lib/format";
-import { searchMentionFiles, type MentionFile, type Subject } from "@/lib/db";
+import {
+  countUnparsedMentionMatches,
+  searchMentionFiles,
+  type MentionFile,
+  type Subject,
+} from "@/lib/db";
+import { useParseStore } from "@/stores/parseStore";
+import { PARSE_SWEEP_NOTE } from "@/lib/parseState";
 import {
   defaultSelection,
   type Provider,
@@ -130,6 +137,8 @@ export function Composer({
   const menuRef = useRef<HTMLDivElement>(null);
   const [mention, setMention] = useState<{ query: string; start: number } | null>(null);
   const [files, setFiles] = useState<MentionFile[]>([]);
+  /** Files this query matched that have no markdown, so could not be offered. */
+  const [unparsed, setUnparsed] = useState(0);
   const [index, setIndex] = useState(0);
   /** Which way the `@` menu opens. See the layout effect that sets it. */
   const [drop, setDrop] = useState<"up" | "down">("down");
@@ -138,6 +147,9 @@ export function Composer({
   const latest = useRef("");
   /** Where the caret goes once the picked path is in the DOM. */
   const caretAfterPick = useRef<number | null>(null);
+  /** An app-wide parse failure, so the line below can name the real cause
+   *  rather than blaming the files. */
+  const latch = useParseStore((s) => s.latch);
 
   useEffect(() => {
     if (autoFocus) ref.current?.focus();
@@ -156,15 +168,24 @@ export function Composer({
   useEffect(() => {
     if (!mention) {
       setFiles([]);
+      setUnparsed(0);
       return;
     }
     const token = `${subjectId ?? ""} ${mention.query}`;
     latest.current = token;
     searchMentionFiles(subjectId, mention.query)
-      .then((found) => {
+      .then(async (found) => {
         if (latest.current !== token) return;
         setFiles(found);
         setIndex(0);
+        // Only when the menu has nothing to show: an empty type-ahead reads
+        // as a typo, and for a PDF that is simply unparsed it is not one.
+        // Counting on every keystroke would be a second query per key for a
+        // line almost nobody ever sees.
+        const missing = found.length === 0
+          ? await countUnparsedMentionMatches(subjectId, mention.query).catch(() => 0)
+          : 0;
+        if (latest.current === token) setUnparsed(missing);
       })
       .catch(() => {});
   }, [mention, subjectId]);
@@ -230,6 +251,16 @@ export function Composer({
   }
 
   const menuOpen = mention !== null && files.length > 0;
+  /**
+   * Why the menu is empty, when the answer is "those files have no markdown".
+   *
+   * Deliberately *not* rows in the menu: a row that cannot be picked is a
+   * control that does nothing, and the agent genuinely cannot read a file that
+   * was never parsed. It is a line instead — and it is outside `menuOpen`, so
+   * the list's keyboard handling, its flip measurement and Enter-sends all
+   * behave exactly as they do with no `@` open at all.
+   */
+  const emptyReason = mention !== null && files.length === 0 && unparsed > 0;
 
   /**
    * The `@` menu opens downwards, and only flips up when it would not fit.
@@ -276,6 +307,20 @@ export function Composer({
             onChange={onSubject}
             className="h-6 max-w-[200px] rounded-full border-border/70 bg-card px-2 text-[11px] text-muted-foreground shadow-none hover:bg-accent hover:text-foreground"
           />
+        </div>
+      )}
+
+      {emptyReason && (
+        <div
+          className={cn(
+            "absolute left-0 right-0 z-20 rounded-xl border border-border bg-popover px-3 py-2 text-[11px] leading-snug text-muted-foreground shadow-md",
+            drop === "down" ? "top-full mt-2" : "bottom-full mb-2",
+          )}
+        >
+          {unparsed === 1
+            ? "1 matching file has no markdown, so it cannot be mentioned."
+            : `${unparsed} matching files have no markdown, so they cannot be mentioned.`}
+          {` ${latch ? latch.message : PARSE_SWEEP_NOTE}`}
         </div>
       )}
 

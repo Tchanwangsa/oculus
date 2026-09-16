@@ -19,23 +19,37 @@ import type { DbFile } from "@/lib/db";
  * Shared PDF ↔ parsed-markdown toggle state, lifted out of the viewer so the
  * host (peek header, full-page header) can render the toggle in ITS header
  * instead of stacking a second toolbar.
+ *
+ * This is also the app's "is there markdown?" probe, which is why it reports
+ * `mdChecked` as well as `mdExists`: a PDF with no markdown gets
+ * `MarkdownUnavailable` in place of the toggle
+ * (`app/src/components/files/ParseState.tsx`), and rendering that during the
+ * one tick before the probe answers would flash "No Markdown" across every
+ * parsed file that is opened. Neither control is drawn until the answer is in.
  */
 export function usePdfMd(file: DbFile | null) {
   const isPdf = file != null && isPdfBacked(file.filename);
   const mdRelPath = file ? parsedMdRelPath(file) : null;
   const [viewMode, setViewMode] = useState<"pdf" | "markdown">("pdf");
   const [mdExists, setMdExists] = useState(false);
+  const [mdChecked, setMdChecked] = useState(false);
 
   useEffect(() => {
     setViewMode("pdf");
     setMdExists(false);
+    setMdChecked(false);
     if (!mdRelPath) return;
+    let live = true;
     invoke<string>("read_course_file", { relativePath: mdRelPath })
-      .then((t) => setMdExists(t.length > 0))
-      .catch(() => setMdExists(false));
+      .then((t) => live && setMdExists(t.length > 0))
+      .catch(() => live && setMdExists(false))
+      .finally(() => live && setMdChecked(true));
+    return () => {
+      live = false;
+    };
   }, [file?.id, mdRelPath]);
 
-  return { isPdf, mdExists, viewMode, setViewMode };
+  return { isPdf, mdExists, mdChecked, viewMode, setViewMode };
 }
 
 export function PdfMdToggle({

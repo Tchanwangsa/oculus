@@ -12,6 +12,7 @@ import { useParseStore } from "@/stores/parseStore";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
+import { ParseStateBadge } from "@/components/files/ParseState";
 import { fileIconFor, isPdfBacked } from "@/lib/fileTypes";
 import { fmtSize } from "@/lib/format";
 import {
@@ -33,7 +34,6 @@ export default function SubjectDownloadsPage() {
   const [rescraping, setRescraping] = useState<Set<number>>(new Set());
   const [rescrapeError, setRescrapeError] = useState<string | null>(null);
 
-  const liveStatuses = useParseStore((s) => s.statuses);
   const mergeParseStatuses = useParseStore((s) => s.merge);
 
   // Reconcile parse status from disk: PDF-backed files with parse output get a
@@ -145,7 +145,6 @@ export default function SubjectDownloadsPage() {
             <DownloadRow
               key={f.id}
               file={f}
-              status={liveStatuses[f.relative_path]}
               rescraping={f.canvas_id != null && rescraping.has(f.canvas_id)}
               onRescrape={() => rescrape(f)}
             />
@@ -157,10 +156,9 @@ export default function SubjectDownloadsPage() {
 }
 
 function DownloadRow({
-  file, status, rescraping, onRescrape,
+  file, rescraping, onRescrape,
 }: {
   file: DbFile;
-  status: string | undefined;
   rescraping: boolean;
   onRescrape: () => void;
 }) {
@@ -176,14 +174,11 @@ function DownloadRow({
         <span className="text-[12px] text-foreground truncate flex-1">
           {file.filename}
         </span>
-        {/* Fixed-width, right-aligned columns so every row lines up. */}
-        <span
-          className={cn(
-            "shrink-0 w-12 text-right text-[10px] uppercase tracking-wide",
-            status === "error" ? "text-destructive" : "text-success",
-          )}
-        >
-          {status === "quality" ? "parsed" : status === "error" ? "failed" : ""}
+        {/* Fixed-width, right-aligned columns so every row lines up. The
+            parse column carries a word for every state a PDF can be in —
+            blank here means "this file has no parse", never "all is well". */}
+        <span className="shrink-0 w-20 flex items-center justify-end">
+          <ParseStateBadge file={file} />
         </span>
         <span className="shrink-0 w-17 text-right text-[11px] text-muted-foreground tabular-nums">
           {fmtSize(file.size_bytes)}

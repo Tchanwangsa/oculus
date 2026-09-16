@@ -26,6 +26,7 @@ this page is the structure.
 | Side panel (file/lecture preview) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser (route, tab mirror, API) | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/stores/browserStore.ts`, `app/src/lib/browser.ts`, `app/src-tauri/src/browser.rs` |
 | Viewers | `app/src/components/files/PDFViewer.tsx`, `app/src/components/files/FileViewer.tsx`, `app/src/components/lectures/LecturePlayer.tsx`, `app/src/components/lectures/ChaptersPanel.tsx` |
+| Parse state: the words, and the row badge / viewer notice | `app/src/lib/parseState.ts`, `app/src/components/files/ParseState.tsx` |
 | shadcn components (source, editable) | `app/src/components/ui/` |
 | Table chrome: view tabs, footer pagination | `app/src/components/ui/ViewTabs.tsx`, `app/src/components/ui/TablePagination.tsx` |
 | Zustand stores | `app/src/stores/` |
@@ -209,7 +210,11 @@ the one moment it shows.
   `ProviderMark.tsx` beside them — and `SubjectSelect.tsx`, which scopes the
   thread to one subject or leaves it library-wide. `@` in the textarea opens a
   file menu narrowed to that subject and writes the picked file's library path
-  into the message; nothing is read or attached in the frontend. A message
+  into the message; nothing is read or attached in the frontend. The menu
+  offers only files the agent can read, so an unparsed PDF is absent — and an
+  empty type-ahead reads as a typo, which is why a query that matched only
+  unparsed files gets a line saying so (`countUnparsedMentionMatches` in
+  `app/src/lib/db.ts`) rather than rows that cannot be picked. A message
   typed while the agent is working is **queued by Rust**, not sent — the box
   keeps taking input and grows a stop button beside its send — and it is
   drawn as a dashed bubble at the end of the thread until it goes out. See
@@ -433,6 +438,29 @@ the one moment it shows.
   so renaming it would invalidate the library. `"fast"` is gone from the
   vocabulary entirely. The store calls the *field* `parse`, since there is only
   one parse to name — the field and the wire string are different things.
+- **A file says whether it has markdown, and why not.** MinerU cloud is the
+  only parser and nothing catches it, so a failure means that file has no
+  markdown — no search, no `@`-mention, no Markdown view — until something
+  changes. `app/src/lib/parseState.ts` is the one place that turns a status
+  plus the failure discriminants into a state and its words; every surface
+  renders that, so a row and a document can never say different things.
+  Seven states, three of them ordinary (`parsed`, `parsing`, `queued`) and
+  four that used to be invisible: `not parsed` (quiet — an unparsed file is
+  not a failure and colouring it red is a lie), `failed`, `can't parse` (the
+  failure said `retryable: false`, so the sweep will never re-kick it) and
+  `on hold` (a `latching` cause — no token, a rejected token, a spent quota —
+  which condemns the whole library, not this file). That last split is the one
+  the UI must never fudge; unknown discriminants, which is every failure
+  inherited from a previous session, stay their own case rather than being
+  rounded to either end. `app/src/components/files/ParseState.tsx` draws it
+  twice: a word per row in `app/src/pages/subject/DownloadsPage.tsx`, where
+  three of those states used to render as the empty string and so read as
+  "fine", and `MarkdownUnavailable` in place of the PDF ↔ Markdown toggle in
+  `app/src/pages/subject/FilePage.tsx` and
+  `app/src/components/panel/FilePanel.tsx`, where the toggle used to simply not
+  be there. Its popover carries the backend's own sentence, and a button to
+  `/settings/library` for the one cause a student can fix — a token. A quota
+  gets no button, because waiting is the only move.
 - Background job progress surfaces **only** in the sidebar (driven by the
   stores fed from `useBackendEvents`) — no toasts, no bottom bars.
 - **The history arrows follow React Router's index, not

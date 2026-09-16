@@ -4,6 +4,7 @@ import { useActivePath } from "@/stores/tabStore";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { PanelHeader } from "@/components/panel/PanelHeader";
 import { FileViewer, PdfMdToggle, usePdfMd } from "@/components/files/FileViewer";
+import { MarkdownUnavailable } from "@/components/files/ParseState";
 import { fileTitle, openFileSmart } from "@/lib/openFile";
 import { recordRecent } from "@/lib/recents";
 import type { DbFile } from "@/lib/db";
@@ -61,8 +62,14 @@ export default function FilePanel({
         }
         onClose={() => close(tabId)}
         actions={
-          pdf.isPdf && pdf.mdExists ? (
-            <PdfMdToggle value={pdf.viewMode} onChange={pdf.setViewMode} />
+          /* Same pairing as the full page: the toggle when there is markdown,
+             the reason there is none when there is not. */
+          pdf.isPdf && pdf.mdChecked ? (
+            pdf.mdExists ? (
+              <PdfMdToggle value={pdf.viewMode} onChange={pdf.setViewMode} />
+            ) : (
+              <MarkdownUnavailable file={file} />
+            )
           ) : undefined
         }
       />

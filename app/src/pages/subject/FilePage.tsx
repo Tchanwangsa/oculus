@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import { CircleNotch } from "@phosphor-icons/react";
 import { FileViewer, PdfMdToggle, usePdfMd } from "@/components/files/FileViewer";
+import { MarkdownUnavailable } from "@/components/files/ParseState";
 import { SubjectCrumbs, fileCrumbTab } from "@/components/subjects/SubjectCrumbs";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { fileTitle, openFileSmart, recordFileAccess } from "@/lib/openFile";
@@ -64,9 +65,15 @@ export default function SubjectFilePage() {
         <h1 className="flex-1 min-w-0 text-[13px] font-semibold text-foreground truncate">
           {fileTitle(file)}
         </h1>
-        {pdf.isPdf && pdf.mdExists && (
-          <PdfMdToggle value={pdf.viewMode} onChange={pdf.setViewMode} />
-        )}
+        {/* A PDF with markdown toggles; a PDF without says why it has none,
+            rather than quietly lacking the control the reader saw on the last
+            file (`MarkdownUnavailable`). */}
+        {pdf.isPdf && pdf.mdChecked &&
+          (pdf.mdExists ? (
+            <PdfMdToggle value={pdf.viewMode} onChange={pdf.setViewMode} />
+          ) : (
+            <MarkdownUnavailable file={file} />
+          ))}
       </div>
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {/* In-document links open the linked file as a peek over this page. */}

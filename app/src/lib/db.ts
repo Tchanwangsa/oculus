@@ -636,6 +636,34 @@ export async function searchMentionFiles(
 }
 
 /**
+ * How many files the `@` query *would* have matched if they had markdown.
+ *
+ * The filter above is a capability, not a preference, so an unparsed deck is
+ * simply absent — and absence in a type-ahead is indistinguishable from a
+ * typo. This is what lets the menu say "two more match, they have no markdown
+ * yet" instead of nothing at all. Only PDF-backed types are counted (the list
+ * `useQualitySweep` parses): a zip or an image is not waiting on a parse and
+ * never will be, so counting it would promise markdown that is not coming.
+ */
+export async function countUnparsedMentionMatches(
+  subjectId: number | null,
+  query: string,
+): Promise<number> {
+  const db = await getDb();
+  const esc = query.replace(/[%_\\]/g, (c) => `\\${c}`);
+  const rows = await db.select<{ n: number }[]>(
+    `SELECT COUNT(*) AS n
+     FROM files f
+     WHERE lower(f.file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')
+       AND (f.parse_status IS NULL OR f.parse_status != 'quality')
+       AND ($1 IS NULL OR f.subject_id = $1)
+       AND ($2 = '' OR f.filename LIKE $3 ESCAPE '\\')`,
+    [subjectId, query, `%${esc}%`],
+  );
+  return rows[0]?.n ?? 0;
+}
+
+/**
  * One file by its library path (`courses/<subject>/…`, what `relative_path`
  * holds and what the chat's `@` menu and `oculus read` both speak).
  *
