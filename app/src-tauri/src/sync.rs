@@ -278,12 +278,15 @@ impl Engine {
             .collect();
 
         // The newest term that still has live courses is "current"; everything
-        // else is archive. Term names sort chronologically here.
+        // else is archive. Ranked, never compared as text: "2026 Summer Term"
+        // beats "2026 Semester 2" as a string while starting six months
+        // earlier, so `.max()` on the names handed the whole year to a single
+        // summer subject. See `crate::terms`.
         let latest = academic
             .iter()
             .filter(|c| c["workflow_state"] == "available")
             .filter_map(|c| c["term"]["name"].as_str())
-            .max()
+            .max_by_key(|t| crate::terms::term_key(t))
             .map(str::to_string);
 
         Ok(academic

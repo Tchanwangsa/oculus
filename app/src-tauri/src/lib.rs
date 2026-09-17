@@ -25,6 +25,7 @@ pub mod retrieval;
 mod scrape;
 pub mod store;
 pub mod sync;
+pub mod terms;
 pub mod sidecar;
 mod storage;
 mod subjects;

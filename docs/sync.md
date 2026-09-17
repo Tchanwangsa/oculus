@@ -17,12 +17,22 @@ One Rust engine scrapes three services. It runs identically inside the app
 | App-side entry: thread + `AppReporter` | `app/src-tauri/src/scrape.rs` |
 | Headless DB writes | `app/src-tauri/src/store.rs` |
 | Subject list state | `app/src-tauri/src/subjects.rs` |
+| Chronological term ranking | `app/src-tauri/src/terms.rs` |
 | Agent docs written into the library | `app/src-tauri/src/agents.rs` |
 | Canvas calendar (class times, due dates) | `app/src-tauri/src/calendar.rs` |
 | Frontend sync page / runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 
 ## How it connects
 
+- **The current term is ranked, not compared as text.** `list_courses` marks
+  the newest term that still has available courses as current, and that flag
+  is what `oculus run` syncs by default, what `oculus list` marks, and what a
+  search with no named subject falls back to. Canvas term names do not sort
+  chronologically — `"2026 Summer Term"` beats `"2026 Semester 2"` as a
+  string while starting six months earlier — so `app/src-tauri/src/terms.rs`
+  ranks the term within its year (summer, semester 1, winter, semester 2).
+  Before that, one summer enrolment marked a whole year of real subjects as
+  past, and a default CLI sync fetched the summer subject alone.
 - **Modules are the driver.** The engine walks each course's modules and
   fetches pages and files through them, so nothing is downloaded twice. It
   was ported line-for-line in strategy from the old `scraper.js` (hidden

@@ -96,7 +96,9 @@ the one moment it shows.
   being studied and marks every real subject past. Recomputing at read time
   costs one pass, cannot go stale between syncs, and keeps the current/past
   split, the chat subject picker and the project pickers honest. The column
-  is still what Rust and the CLI read, so the same ranking belongs there too.
+  itself is written correctly too — `app/src-tauri/src/terms.rs` is the same
+  ranking, and the CLI reads the column — but deriving here means a database
+  stamped by an older build is not believed.
 - Choosing MinerU cloud or Automatic opts into uploading PDFs to MinerU's
   PRC-hosted service; Local only is the default. Token save/remove invokes
   Rust keychain commands, never DB writes. Automatic is cloud-first when a
