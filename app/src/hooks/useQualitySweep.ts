@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getDb } from "@/lib/db";
+import { PDF_BACKED_SQL_LIST } from "@/lib/fileTypes";
 import { useParseStore } from "@/stores/parseStore";
 
 /**
@@ -25,7 +26,7 @@ async function sweep(): Promise<void> {
     `SELECT f.subject_id, f.relative_path, s.code
      FROM files f JOIN subjects s ON s.id = f.subject_id
      WHERE s.selected = 1
-       AND lower(f.file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')
+       AND lower(f.file_type) IN ${PDF_BACKED_SQL_LIST}
        AND (f.parse_status IS NULL OR f.parse_status != 'quality')
      ORDER BY f.scraped_at DESC`,
   );

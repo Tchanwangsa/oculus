@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { getDb, type DbFile } from "./db";
+import { PDF_BACKED_SQL_LIST } from "./fileTypes";
 
 /**
  * Semantic page retrieval.
@@ -134,7 +135,7 @@ export async function getUnembeddedPdfs(subjectId?: number): Promise<DbFile[]> {
   const scope = subjectId != null ? `AND f.subject_id = $1` : ``;
   return db.select<DbFile[]>(
     `SELECT f.* FROM files f
-     WHERE lower(f.file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')
+     WHERE lower(f.file_type) IN ${PDF_BACKED_SQL_LIST}
        AND f.parse_status IN ('fast', 'quality')
        AND (f.embed_status IS NULL OR f.embed_status != 'done')
        ${scope}

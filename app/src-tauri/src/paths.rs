@@ -218,7 +218,7 @@ pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
 
 /// Extensions LibreOffice converts to PDF at download time. The original is
 /// the library file; the conversion lives beside it as `{name}.pdf`.
-pub const OFFICE_EXTS: &[&str] = &[".pptx", ".docx", ".ppt", ".doc"];
+pub const OFFICE_EXTS: &[&str] = &[".pptx", ".docx", ".xlsx", ".ppt", ".doc", ".xls"];
 
 /// The PDF that parsing, embedding and in-app viewing operate on for a library
 /// file: the file itself for real PDFs, the converted sibling
@@ -305,6 +305,8 @@ mod tests {
         assert_eq!(doc_pdf_rel("files/a.pdf").as_deref(), Some("files/a.pdf"));
         assert_eq!(doc_pdf_rel("files/deck.pptx").as_deref(), Some("files/deck.pptx.pdf"));
         assert_eq!(doc_pdf_rel("files/notes.DOCX").as_deref(), Some("files/notes.DOCX.pdf"));
+        assert_eq!(doc_pdf_rel("files/marks.xlsx").as_deref(), Some("files/marks.xlsx.pdf"));
+        assert_eq!(doc_pdf_rel("files/legacy.xls").as_deref(), Some("files/legacy.xls.pdf"));
         assert_eq!(doc_pdf_rel("pages/intro.md"), None);
         assert_eq!(doc_pdf_rel("images/x.png"), None);
     }

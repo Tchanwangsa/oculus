@@ -74,6 +74,31 @@ One Rust engine scrapes three services. It runs identically inside the app
   are always re-fetched and re-generated — the byte-compare in
   `paths::write_course_bytes` is what decides new/updated/unchanged, so e.g.
   a changed submission status still lands. "Re-download" bypasses the skip.
+- **Office documents are stored as themselves plus a derived PDF.** Everything
+  downstream — the parsers, the page-image embedder, the viewer — is
+  PDF-shaped, so `.pptx/.docx/.xlsx/.ppt/.doc/.xls` are downloaded intact and
+  LibreOffice headless writes `deck.pptx.pdf` beside the original
+  (`office_to_pdf` in `app/src-tauri/src/sync.rs`). The derived PDF is never
+  announced and never gets a `files` row — the original name is the library
+  row, which is what `paths::doc_pdf_rel` resolves for every consumer.
+  Migration 10 in `app/src-tauri/src/lib.rs` exists because those PDFs once
+  did get rows. **With LibreOffice absent the original is still stored**, the
+  run logs a warning, and the file stays out of `file-manifest.json` so the
+  next sync retries the conversion rather than skipping it.
+- **A spreadsheet is exported as one page per sheet**, not with Calc's default
+  pagination (`convert_target` in `app/src-tauri/src/sync.rs`). Calc slices a
+  wide sheet into page-width column bands and gives the later bands no
+  headers: a 300-row × 25-column marks sheet exported as 54 pages, of which
+  only the first band carried the ID and name columns — the rest were bare
+  grids of numbers, which is both a meaningless page image and the markdown a
+  citation would hydrate from. `SinglePageSheets` keeps every row with its
+  headers; `MAX_RENDER_PIXELS` in `sidecar/embedder.py` is what stops the
+  resulting page being rendered at its full size.
+- **An untyped upload is judged by its extension.** Canvas reports whatever
+  content type the uploading browser claimed, so the same deck arrives typed
+  on one course and `application/octet-stream` on another. A generic type
+  falls back to the filename (`office_ext_of`), which is still an allowlist —
+  only the extensions the converter handles, plus `.pdf`.
 - **Changed bytes invalidate the parse.** An `updated` write purges the
   sidecar artifacts (`.md`, `.pages.json`, `.emb.json` — see
   `paths::purge_parse_artifacts`), and the app clears the file's stored

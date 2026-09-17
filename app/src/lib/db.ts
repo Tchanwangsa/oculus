@@ -1,6 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 
 import type { Provider } from "@/lib/harness";
+import { PDF_BACKED_SQL_LIST } from "@/lib/fileTypes";
 import { compareTermsNewestFirst, TERM_RANK_SQL } from "@/lib/terms";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -999,7 +1000,7 @@ export async function getPdfPipelineRows(): Promise<PdfPipelineRow[]> {
     `SELECT subject_id, relative_path, parse_status, embed_status,
             scraped_at, parsed_at, embedded_at
      FROM files
-     WHERE lower(file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')
+     WHERE lower(file_type) IN ${PDF_BACKED_SQL_LIST}
      ORDER BY relative_path ASC`,
   );
 }

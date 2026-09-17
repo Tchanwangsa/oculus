@@ -27,8 +27,10 @@ const DOWNLOADABLE_TYPES: &[&str] = &["application/pdf"];
 const OFFICE_TYPES: &[(&str, &str)] = &[
     ("application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
     ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
+    ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
     ("application/vnd.ms-powerpoint", "ppt"),
     ("application/msword", "doc"),
+    ("application/vnd.ms-excel", "xls"),
 ];
 
 /// A wedged soffice must not hang the whole sync run.
@@ -960,9 +962,23 @@ impl Engine {
         }
         let info = r.json()?;
 
+        let name = info["filename"]
+            .as_str()
+            .or_else(|| info["display_name"].as_str())
+            .or(display)
+            .unwrap_or("file.bin")
+            .replace(['/', '\\'], "_");
+
+        // Canvas serves some uploads as a generic binary — the type depends on
+        // what the staff member's browser claimed at upload time, so the same
+        // deck can arrive typed on one course and untyped on another. Falling
+        // back to the extension is what keeps those from being silently
+        // skipped; the allowlist is still an allowlist, just keyed on the name.
         let ct = content_type_of(&info);
-        let office = office_ext(&ct);
-        if !DOWNLOADABLE_TYPES.contains(&ct.as_str()) && office.is_none() {
+        let office = office_ext(&ct).or_else(|| is_generic_binary(&ct).then(|| office_ext_of(&name)).flatten());
+        let downloadable = DOWNLOADABLE_TYPES.contains(&ct.as_str())
+            || (is_generic_binary(&ct) && name.to_ascii_lowercase().ends_with(".pdf"));
+        if !downloadable && office.is_none() {
             return Ok(None);
         }
         if info["size"].as_u64().unwrap_or(0) > MAX_FILE_BYTES {
@@ -983,13 +999,6 @@ impl Engine {
             self.reporter.log("info", &c.code, &format!("{name}: locked{until}, skipped"));
             return Ok(None);
         }
-
-        let name = info["filename"]
-            .as_str()
-            .or_else(|| info["display_name"].as_str())
-            .or(display)
-            .unwrap_or("file.bin")
-            .replace(['/', '\\'], "_");
 
         // Same version Canvas reported last time, and the artifacts are still
         // on disk (the derived PDF too, for Office files) → skip the download.
@@ -1351,7 +1360,25 @@ fn office_ext(ct: &str) -> Option<&'static str> {
     OFFICE_TYPES.iter().find(|(k, _)| *k == ct).map(|(_, v)| *v)
 }
 
-/// pptx/docx/ppt/doc → PDF via LibreOffice headless. Everything happens in a
+/// A content type that says nothing about the file — the only case where the
+/// filename is allowed to decide what this is.
+fn is_generic_binary(ct: &str) -> bool {
+    matches!(ct, "" | "application/octet-stream" | "binary/octet-stream")
+}
+
+/// The converter extension an untyped file's *name* claims, if it claims one
+/// this engine knows. `.pptx` is tested before `.ppt` by construction: the
+/// table's entries are whole extensions, and "deck.pptx" does not end in
+/// ".ppt".
+fn office_ext_of(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    OFFICE_TYPES
+        .iter()
+        .map(|(_, e)| *e)
+        .find(|e| lower.ends_with(&format!(".{e}")))
+}
+
+/// pptx/docx/xlsx/ppt/doc/xls → PDF via LibreOffice headless. Everything happens in a
 /// scratch directory soffice writes into alone, so the read-back name is
 /// unambiguous; the directory is removed whatever the outcome.
 fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> {
@@ -1374,6 +1401,26 @@ fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> {
     result
 }
 
+/// What to ask soffice to convert *to*. Plain `pdf` for documents and decks,
+/// which already know their own page breaks.
+///
+/// A spreadsheet does not. Calc paginates a wide sheet by slicing it into
+/// page-width columns, and the slices carry no headers: measured on a
+/// 300-row × 25-column marks sheet, the default export was 54 pages of which
+/// only the first band held the ID and name columns — page 14 is a bare grid
+/// of numbers, useless as a page image and worse as the markdown a citation
+/// hydrates from. `SinglePageSheets` puts each sheet on one page instead, so
+/// every row keeps its headers. See the render clamp in `sidecar/embedder.py`,
+/// which is what keeps the resulting page from being rendered at full size.
+fn convert_target(ext: &str) -> &'static str {
+    match ext {
+        "xlsx" | "xls" => {
+            r#"pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}"#
+        }
+        _ => "pdf",
+    }
+}
+
 fn convert_in(soffice: &Path, dir: &Path, bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> {
     let input = dir.join(format!("input.{ext}"));
     std::fs::write(&input, bytes).map_err(|e| format!("write temp: {e}"))?;
@@ -1384,7 +1431,9 @@ fn convert_in(soffice: &Path, dir: &Path, bytes: &[u8], ext: &str) -> Result<Vec
         .map_err(|_| "profile path not absolute".to_string())?;
     let mut child = std::process::Command::new(soffice)
         .arg(format!("-env:UserInstallation={profile}"))
-        .args(["--headless", "--norestore", "--convert-to", "pdf", "--outdir"])
+        .args(["--headless", "--norestore", "--convert-to"])
+        .arg(convert_target(ext))
+        .arg("--outdir")
         .arg(dir)
         .arg(&input)
         .stdout(std::process::Stdio::null())
@@ -1566,6 +1615,39 @@ mod tests {
         assert_eq!(up_to_course_root("home.md"), "");
         assert_eq!(up_to_course_root("pages/week-one.md"), "../");
         assert_eq!(up_to_course_root("announcements/2026-08-14-x.md"), "../");
+    }
+
+    #[test]
+    fn spreadsheets_convert_like_every_other_office_format() {
+        assert_eq!(
+            office_ext("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            Some("xlsx")
+        );
+        assert_eq!(office_ext("application/vnd.ms-excel"), Some("xls"));
+        assert_eq!(office_ext("application/zip"), None);
+    }
+
+    #[test]
+    fn only_spreadsheets_ask_calc_to_stop_slicing_the_sheet() {
+        assert_eq!(convert_target("pptx"), "pdf");
+        assert_eq!(convert_target("docx"), "pdf");
+        assert!(convert_target("xlsx").contains("SinglePageSheets"));
+        assert!(convert_target("xls").starts_with("pdf:calc_pdf_Export:"));
+    }
+
+    #[test]
+    fn an_untyped_upload_falls_back_to_its_extension() {
+        // The longer extension has to win, or "deck.pptx" converts as "ppt".
+        assert_eq!(office_ext_of("deck.pptx"), Some("pptx"));
+        assert_eq!(office_ext_of("old deck.PPT"), Some("ppt"));
+        assert_eq!(office_ext_of("marks.xlsx"), Some("xlsx"));
+        // Not an Office format, so the name buys it nothing.
+        assert_eq!(office_ext_of("archive.zip"), None);
+        assert_eq!(office_ext_of("notes.pdf"), None);
+
+        assert!(is_generic_binary(""));
+        assert!(is_generic_binary("application/octet-stream"));
+        assert!(!is_generic_binary("application/pdf"));
     }
 
     #[test]

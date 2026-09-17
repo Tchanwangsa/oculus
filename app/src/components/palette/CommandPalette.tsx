@@ -176,7 +176,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         icon: <Icon size={15} className="shrink-0 text-muted-foreground" />,
         label: fileTitle(f),
         meta: displayCode(f.subject_code),
-        // A binary we cannot render — a .zip, a .xlsx — has no page to go to,
+        // A binary we cannot render — a .zip, a .mp3 — has no page to go to,
         // so it leaves for the system viewer the way any list row does.
         ...(f.category === "file" && !isPdfBacked(f.filename)
           ? { run: () => openFileSmart(f) }

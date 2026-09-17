@@ -94,7 +94,7 @@ function SubjectChips({ codes }: { codes: string[] }) {
 function fileIcon(path: string) {
   const lower = path.toLowerCase();
   if (lower.endsWith(".pdf")) return FilePdf;
-  if (/\.(pptx?|docx?)$/.test(lower)) return FileDoc;
+  if (/\.(pptx?|docx?|xlsx?)$/.test(lower)) return FileDoc;
   return FileIcon;
 }
 

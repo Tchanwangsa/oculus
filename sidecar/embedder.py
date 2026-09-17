@@ -51,6 +51,16 @@ from modellock import MODEL_INIT_LOCK
 RENDER_DPI = 200
 _PIXELS_PER_TOKEN = 32 * 32  # patch 16 with 2x2 spatial merge
 
+# A ceiling on the rendered pixmap, because a page is not always page-sized. A
+# spreadsheet exported with SinglePageSheets is one page however many rows it
+# has: a 300-row marks sheet lands at 3418x3853pt, which at 200 DPI is 101
+# megapixels — 305 MB of RGB for one page, in a process tree with a hard
+# memory cap. The cap costs nothing real: the processor downscales to
+# EMBED_MAX_TOKENS (640 tokens ~ 0.66 MP) anyway, so 8 MP is still an order of
+# magnitude more detail than the model can see. A4 at 200 DPI is 3.9 MP and so
+# is never clamped — no existing vector changes.
+MAX_RENDER_PIXELS = 8_000_000
+
 # Asymmetric retrieval: documents are embedded plainly, queries carry a task
 # instruction. Changing either invalidates every stored vector.
 _embedder = None
@@ -139,11 +149,21 @@ def _b64(arr: np.ndarray) -> str:
     return base64.b64encode(arr.tobytes()).decode("ascii")
 
 
+def _page_zoom(page, zoom: float) -> tuple[float, float]:
+    """`zoom`, lowered if this page would render past MAX_RENDER_PIXELS."""
+    rect = page.rect
+    area = max(1.0, rect.width * rect.height)
+    capped = (MAX_RENDER_PIXELS / area) ** 0.5
+    z = min(zoom, capped)
+    return z, z
+
+
 def render_pages(pdf_path: str, dpi: int = RENDER_DPI):
     doc = fitz.open(pdf_path)
     zoom = dpi / 72
     for i in range(doc.page_count):
-        pix = doc[i].get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+        page = doc[i]
+        pix = page.get_pixmap(matrix=fitz.Matrix(*_page_zoom(page, zoom)))
         yield i + 1, Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
 

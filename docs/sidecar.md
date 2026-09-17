@@ -66,6 +66,16 @@ not a persisted preference.
   correct (1% vs 18% KaTeX render failures on the benchmark deck). Docling
   is fully removed — no fallback path.
 
+### A page is not always page-sized
+
+`render_pages` caps a rendered pixmap at `MAX_RENDER_PIXELS` (8 MP) rather than
+trusting `RENDER_DPI`. A spreadsheet converted with `SinglePageSheets` is one
+page however many rows it has — a 300-row sheet measures 3418×3853pt, or 101 MP
+and 305 MB of RGB at 200 DPI, inside a process tree with a hard memory cap. The
+cap costs no accuracy: the processor downscales to `EMBED_MAX_TOKENS`
+(640 tokens ≈ 0.66 MP) regardless. A4 at 200 DPI is 3.9 MP, so ordinary pages
+are never clamped and no stored vector changes.
+
 ### Outputs, per PDF (written beside it)
 
 - `<stem>.md` — full-document markdown
