@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PickerProvider } from "@/components/harness/ModelPicker";
 import { providerHealth, useBridgeHealth } from "@/hooks/useBridgeHealth";
 import { PROVIDERS, providerInfo, type HarnessModel, type Provider } from "@/lib/harness";
+import { useCatalogue } from "@/lib/opencodeCatalogue";
 
 /**
  * The model picker's providers, with each one's catalogue and whether its CLI
@@ -31,6 +32,17 @@ import { PROVIDERS, providerInfo, type HarnessModel, type Provider } from "@/lib
  * empty list, and re-asking it on every render of a menu would make an absent
  * agent slow as well as absent.
  *
+ * **Once per mount, plus once per catalogue edit.** opencode's list is its CLI
+ * catalogue less whatever the student hid, per
+ * `app/src/lib/opencodeCatalogue.ts`, so a student ticking models in Settings
+ * changes what this hook should have answered — and the composer is usually
+ * already mounted behind it. That is not the same as dropping the once-per-
+ * mount rule: the expensive thing is the CLI call, and the catalogue's version
+ * counter changes only when Settings writes, which is a handful of times in a
+ * session rather than once a render. So the ask is re-armed on a version
+ * change and on nothing else. The old list stays on screen until the new one
+ * lands, since a tick should not blank the menu for a beat.
+ *
  * **Health rides alongside the catalogue rather than replacing it.** A
  * provider whose binary was not found keeps the models it would have — Claude's
  * compiled-in list is still the list `claude --model` takes, and `modelsFor`
@@ -50,6 +62,8 @@ export function useProviderModels(needed: Provider | Provider[]): {
   const [fetched, setFetched] = useState<Partial<Record<Provider, HarnessModel[]>>>({});
   const asked = useRef(new Set<Provider>());
   const { health } = useBridgeHealth();
+  const { version } = useCatalogue();
+  const askedVersion = useRef(version);
 
   // A stable key rather than the array itself: every call site builds its
   // `needed` inline, so a fresh array each render would re-run the effect
@@ -60,6 +74,12 @@ export function useProviderModels(needed: Provider | Provider[]): {
   );
 
   useEffect(() => {
+    // Re-armed here rather than in an effect of its own, so nothing depends on
+    // which of two effects React runs first.
+    if (askedVersion.current !== version) {
+      askedVersion.current = version;
+      asked.current.clear();
+    }
     for (const id of key.split(" ").filter(Boolean) as Provider[]) {
       const info = providerInfo(id);
       if (!info?.fetchModels || asked.current.has(id)) continue;
@@ -74,7 +94,7 @@ export function useProviderModels(needed: Provider | Provider[]): {
         .then((models) => setFetched((f) => ({ ...f, [id]: models })))
         .catch(() => setFetched((f) => ({ ...f, [id]: [] })));
     }
-  }, [key, health]);
+  }, [key, health, version]);
 
   const providers = useMemo<PickerProvider[]>(
     () =>
@@ -88,6 +108,7 @@ export function useProviderModels(needed: Provider | Provider[]): {
           // nothing is coming.
           loading: !p.staticModels && state !== "missing" && fetched[p.id] === undefined,
           health: state,
+          emptyNote: p.emptyNote,
         };
       }),
     [fetched, health],

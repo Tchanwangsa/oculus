@@ -9,6 +9,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getDb, getSetting } from "@/lib/db";
+import { filterOffered, loadCatalogue } from "@/lib/opencodeCatalogue";
 
 export type Provider = "claude" | "codex" | "opencode";
 
@@ -47,6 +48,12 @@ export interface HarnessModel {
   /** Where the composer starts before anyone has picked. Not a "default
    *  model" the user can select — every turn names its model outright. */
   isDefault?: boolean;
+  /** What the provider says this model can do, for opencode's rows only —
+   *  Claude's and Codex's lists carry none of these, and absent reads as
+   *  capable. `unusableReason` in `@/lib/opencodeCatalogue` is the rule. */
+  toolCall?: boolean;
+  textInput?: boolean;
+  textOutput?: boolean;
 }
 
 /** The model and level a fresh composer opens on. Nothing is ever sent
@@ -128,6 +135,38 @@ export interface ProviderInfo {
    *  names a provider to know which command to invoke
    *  (`useProviderModels` in `app/src/hooks/useProviderModels.ts`). */
   fetchModels?: () => Promise<HarnessModel[]>;
+  /** How this CLI's own sign-in ends — the one thing `SignInDialog` branches
+   *  on, and a property of the provider rather than a test on its id.
+   *
+   *  `"code"` is Claude: `claude auth login` prints the authorize URL and then
+   *  *blocks reading a pasted authorization code off stdin*, so the dialog has
+   *  to offer a field. `"callback"` is Codex: `codex login` runs a loopback
+   *  server on :1455 and finishes by itself when the browser comes back, so
+   *  there is nothing to type and the dialog only waits.
+   *
+   *  `null` is opencode, and it is a decision rather than a gap. opencode's
+   *  credentials are per *provider*, not per CLI, and Settings → AI already
+   *  owns that whole surface — the catalogue, the form specs, the OAuth flows
+   *  (`OpencodeProvidersSection.tsx`). A second path to the same store would
+   *  be a second answer to "am I signed in", so `harness_sign_in_start`
+   *  rejects opencode and `harness_sign_in_status` answers `signedIn: null`. */
+  signIn: "code" | "callback" | null;
+  /** What a picker should say when this provider's list comes back empty and
+   *  its CLI *is* installed — the one case "No models available" is a dead end
+   *  rather than a fact, because there is something the student can do about
+   *  it.
+   *
+   *  opencode's list is filtered by the catalogue below, so an installed,
+   *  connected opencode with nothing probed yet legitimately has zero rows,
+   *  and the sentence has to point at where the probing happens. Claude and
+   *  Codex leave this unset: an empty catalogue from either of them is an
+   *  answer their CLI gave, not a step that was skipped.
+   *
+   *  It is a field here rather than an `id === "opencode"` in the picker for
+   *  the same reason `staticModels`, `signIn` and `health` are: this file is
+   *  the one place a provider is declared, and the picker stays provider-blind
+   *  so a fourth agent costs it nothing. */
+  emptyNote?: string;
 }
 
 /**
@@ -140,23 +179,46 @@ export interface ProviderInfo {
  * opencode brands itself lowercase, so the label is not title-cased.
  */
 export const PROVIDERS: ProviderInfo[] = [
-  { id: "claude", label: "Claude Code", staticModels: CLAUDE_MODELS },
+  { id: "claude", label: "Claude Code", staticModels: CLAUDE_MODELS, signIn: "code" },
   {
     id: "codex",
     label: "Codex",
     staticModels: null,
     fetchModels: () => harnessCodexModels().then(codexAsModels),
+    signIn: "callback",
   },
   {
     id: "opencode",
     label: "opencode",
     staticModels: null,
-    fetchModels: () => harnessOpencodeModels().then(opencodeAsModels),
+    // opencode is the one provider whose catalogue is bigger than its truth:
+    // 218 providers' worth of rows, some of which answer 400 or 401 when
+    // asked (`app/src/lib/opencodeCatalogue.ts`). The filter lives inside the
+    // entry so `useProviderModels` and `ModelPicker` still name no provider —
+    // "fetch the list" and "fetch the list that works" are the same job from
+    // where they stand.
+    fetchModels: async () => {
+      const models = opencodeAsModels(await harnessOpencodeModels());
+      return filterOffered(models, await loadCatalogue());
+    },
+    signIn: null,
+    emptyNote: "Sign in to a provider in Settings → AI to get models here.",
   },
 ];
 
 export function providerInfo(provider: Provider): ProviderInfo | undefined {
   return PROVIDERS.find((p) => p.id === provider);
+}
+
+export function providerLabel(provider: Provider): string {
+  return providerInfo(provider)?.label ?? provider;
+}
+
+/** Which sign-in shape this agent has, or null for one that has none here.
+ *  Read off `PROVIDERS` rather than tested on an id, so a fourth agent costs
+ *  the dialog nothing. */
+export function signInFlow(provider: Provider): "code" | "callback" | null {
+  return providerInfo(provider)?.signIn ?? null;
 }
 
 /** Narrow a string that came out of the database — or out of an older build —
@@ -191,7 +253,12 @@ export type ToolKind =
  * (docs/chapters.md), and two tables would drift into two vocabularies for one
  * `ToolKind`.
  */
-export function toolVerb(kind: ToolKind, done: boolean): string {
+export function toolVerb(kind: ToolKind, done: boolean, name?: string | null): string {
+  // The one kind two tools share: a search and a fetch are both `web`, and
+  // "Fetched" over a list of queries reads as the wrong thing having happened.
+  // The provider's own tool name is the only thing that tells them apart, and
+  // every row carries it (`name` in `ToolMeta`).
+  if (kind === "web" && name && /search/i.test(name)) return done ? "Searched" : "Searching";
   switch (kind) {
     case "read": return done ? "Read" : "Reading";
     case "edit": return done ? "Edited" : "Editing";
@@ -228,7 +295,7 @@ export type HarnessEvent =
   | { type: "thinking"; text: string }
   | { type: "tool_started"; id: string; kind: ToolKind; name: string; title: string; input: unknown }
   | { type: "tool_output_delta"; id: string; text: string }
-  | { type: "tool_finished"; id: string; ok: boolean; output: string }
+  | { type: "tool_finished"; id: string; ok: boolean; output: string; title?: string | null }
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number | null; context_window: number | null; cost_usd: number | null }
   | { type: "rate_limits"; windows: RateWindow[] }
   | { type: "thread_titled"; title: string }
@@ -247,7 +314,13 @@ export type HarnessEvent =
    *  it still holds the original, and the timeline says so. */
   | { type: "rewound"; from_item_id: number; context: boolean }
   | { type: "turn_finished"; status: "completed" | "interrupted" | "failed" }
-  | { type: "error"; message: string }
+  /** `auth` names the provider when the message is that CLI saying it has no
+   *  usable credentials — an expired OAuth session, a login never done. It is
+   *  the difference between a crash and a state the student can fix, so the
+   *  timeline draws a sign-in card rather than a red row for it. Rust writes
+   *  the same fact to the row's `meta` (`{"auth":"claude"}`), which is what
+   *  `parseErrorMeta` reads after a reload. */
+  | { type: "error"; message: string; auth: Provider | null }
   | { type: "exited"; code: number | null };
 
 export interface HarnessEnvelope {
@@ -302,6 +375,13 @@ export type ItemKind = "user" | "assistant" | "thinking" | "tool" | "error" | "i
 export interface QueuedMessage {
   id: string;
   text: string;
+}
+
+/** What an `error` row's `meta` can carry. Only the one field, and only on
+ *  the rows that have it: an error that is not a credentials failure has no
+ *  `meta` at all. */
+export interface ErrorMeta {
+  auth?: Provider;
 }
 
 export interface ToolMeta {
@@ -373,6 +453,11 @@ export interface OpencodeModel {
   variants?: string[];
   defaultVariant?: string | null;
   isDefault?: boolean;
+  /** `ModelInfo` in `app/src-tauri/src/harness/opencode.rs` always sends
+   *  these three; optional here so an older payload still parses. */
+  toolCall?: boolean;
+  textInput?: boolean;
+  textOutput?: boolean;
 }
 
 /** `opencode models` in the shape `CLAUDE_MODELS` has, so the picker renders
@@ -385,6 +470,9 @@ export function opencodeAsModels(models: OpencodeModel[]): HarnessModel[] {
     reasoningEfforts: m.variants ?? [],
     defaultReasoningEffort: m.defaultVariant ?? m.variants?.[0] ?? null,
     isDefault: m.isDefault ?? false,
+    toolCall: m.toolCall,
+    textInput: m.textInput,
+    textOutput: m.textOutput,
   }));
 }
 
@@ -435,6 +523,30 @@ export function messageAt(item: HarnessItem): number | null {
     return typeof at === "number" ? at : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Which agent an error row is about, when the error was that agent saying it
+ * has no credentials — and null for every other error.
+ *
+ * Rust puts it on the row (`{"auth":"claude"}`) as well as on the event, so a
+ * reloaded page draws the same card rather than a thread whose one actionable
+ * row quietly became a red line again. `isProvider` narrows it, so a row
+ * naming an agent this build does not have reads as an ordinary error instead
+ * of an unreachable button.
+ *
+ * No cache, on `messageAt`'s precedent rather than `parseToolMeta`'s: that one
+ * exists because a single tool row can carry 300KB of output, where this is
+ * one short field on a memoised row.
+ */
+export function parseErrorMeta(item: HarnessItem): ErrorMeta {
+  if (!item.meta) return {};
+  try {
+    const auth = (JSON.parse(item.meta) as { auth?: unknown }).auth;
+    return isProvider(auth) ? { auth } : {};
+  } catch {
+    return {};
   }
 }
 
@@ -588,6 +700,66 @@ export function harnessRefreshRateLimits(provider: Provider): Promise<void> {
   return invoke<void>("harness_refresh_rate_limits", { provider });
 }
 
+/**
+ * Whether the CLI thinks it is signed in, and as whom.
+ *
+ * Three fields rather than one boolean because they are three different
+ * answers. `signedIn: null` is "not answerable from here" — opencode, whose
+ * store is per provider and whose surface is Settings → AI — and is not the
+ * same as signed out. `error` is the probe itself failing (no binary, a spawn
+ * that would not start), which is not evidence either way.
+ *
+ * Read through `app/src/hooks/useSignInStatus.ts` rather than called directly:
+ * Rust spawns the CLI per ask and caches nothing, so the frontend cache is the
+ * only one there is.
+ */
+export interface SignInStatus {
+  provider: Provider;
+  signedIn: boolean | null;
+  /** Which account the CLI is on — an email where it names one, else the
+   *  door it went through ("Claude subscription", "ChatGPT"). */
+  account: string | null;
+  error: string | null;
+}
+
+/** One line of a running sign-in, or the last event of the run. Same shape as
+ *  the install stream next door, plus the authorize URL. */
+export const SIGNIN_EVENT = "harness-signin";
+
+export interface SignInLine {
+  provider: Provider;
+  line: string | null;
+  /** Emitted once, on the first line that carries one. Rust opens it in the
+   *  system browser itself; it rides the event anyway so the dialog can show
+   *  it with a Copy, because an `open` that silently failed must not be a
+   *  dead end. */
+  url: string | null;
+  done: boolean;
+  ok: boolean | null;
+  status: string | null;
+}
+
+export function harnessSignInStatus(provider: Provider): Promise<SignInStatus> {
+  return invoke<SignInStatus>("harness_sign_in_status", { provider });
+}
+
+/** Run the CLI's own login. Output arrives on `SIGNIN_EVENT` until a line
+ *  carries `done`; nothing is returned here because the run outlives the call.
+ *  Rejects for opencode — see `ProviderInfo.signIn`. */
+export function harnessSignInStart(provider: Provider): Promise<void> {
+  return invoke("harness_sign_in_start", { provider });
+}
+
+/** The authorization code the student pasted back. Only Claude's flow asks
+ *  for one: `claude auth login` blocks on stdin until it arrives. */
+export function harnessSignInCode(provider: Provider, code: string): Promise<void> {
+  return invoke("harness_sign_in_code", { provider, code });
+}
+
+export function harnessSignInCancel(provider: Provider): Promise<void> {
+  return invoke("harness_sign_in_cancel", { provider });
+}
+
 export function harnessCodexModels(): Promise<CodexModel[]> {
   return invoke<CodexModel[]>("harness_codex_models");
 }
@@ -595,3 +767,4 @@ export function harnessCodexModels(): Promise<CodexModel[]> {
 export function harnessOpencodeModels(): Promise<OpencodeModel[]> {
   return invoke<OpencodeModel[]>("harness_opencode_models");
 }
+

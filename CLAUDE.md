@@ -123,6 +123,21 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   file row and the background sweep both read them. **Never add a fallback
   between engines, and never let a failure degrade quietly into something that
   looks like success** — a failed parse must surface. See `docs/parsing.md`.
+- **Nothing in Settings may spend money, and a model list is not worth a
+  request.** opencode's catalogue advertises models whose gateway refuses
+  everything, and the way that was solved was a *probe*: one real turn per
+  model, swept automatically when the provider manager opened. It cost **two**
+  billed requests per model — the probe, plus the session title opencode
+  generates for every session it creates — at up to 8.6K input tokens each,
+  against a provider like OpenRouter's ~300 models. It is deleted. Almost
+  everything it bought is free: `/config/providers` lists only providers that
+  are actually usable, `capabilities.toolcall` says whether a model can read a
+  course file at all (69 of OpenRouter's 369 cannot), and the free Zen models
+  are a static rule on the provider id. `unusableReason`/`isZen`/`filterOffered`
+  in `app/src/lib/opencodeCatalogue.ts` are the whole gate. What no free check
+  can see is a stale key, or a model behind the provider's own verification
+  (Meta's Muse Spark) — both are allowed to fail once in the timeline. **Never
+  re-add a per-model probe, and never let a settings page make a billed call.**
 - **A drag needs `dataTransfer.setData()` or WebKit cancels it.** A
   `dragstart` handler that sets no data aborts the drag silently — no
   `dragover`, no `drop`, every handler correctly attached and nothing moves.

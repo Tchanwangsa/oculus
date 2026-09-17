@@ -18,7 +18,7 @@ pub mod mineru;
 pub mod parse;
 pub mod paths;
 pub mod projects;
-pub mod recap;
+pub mod reading;
 pub mod retrieval;
 mod scrape;
 pub mod store;
@@ -76,9 +76,9 @@ pub fn run() {
             // A chaptering run killed mid-turn leaves `running` on the
             // lecture row; nothing else will ever clear it.
             chapters::app::reconcile(app.handle());
-            // Recap windows commit as they finish, but an interrupted run's
-            // `running` marker still needs the same startup repair.
-            recap::app::reconcile(app.handle());
+            // Reading-copy windows commit as they finish, but an interrupted
+            // run's `running` marker still needs the same startup repair.
+            reading::app::reconcile(app.handle());
             // ── Session restore on startup ──────────────────────────────
             // No WebView dance: we replay the persisted session cookie via a
             // server-side ureq ping. Valid → connected instantly. Rejected →
@@ -1068,6 +1068,72 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
                         "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 34,
+                            description: "lecture reading copy: the recap replaced by lines",
+                            // The recap (migration 31) is replaced, not
+                            // migrated: its notes were third-person summaries
+                            // per slide and the reading copy is a rewrite of
+                            // the transcript, one sentence per line. Nothing
+                            // in a recap row becomes a line, so the table is
+                            // dropped and the three status columns with it —
+                            // derived data, regenerable from the recording,
+                            // like `pages`. SQLite has dropped columns since
+                            // 3.35 and nothing indexes these three.
+                            //
+                            // `para` is derived in Rust from the slide
+                            // changes after a window validates (see
+                            // `reading::mark_paragraphs`), never asked of the
+                            // model. There is still no stored end: a line
+                            // lasts until the next starts.
+                            //
+                            // The job's model selection carries over: the
+                            // `job_models` settings row is rekeyed from
+                            // `lectureRecap` to `lectureReading` so a picked
+                            // model is not silently reset to the default.
+                            // Guarded by `json_valid` inside a CASE (which
+                            // short-circuits where a WHERE's AND need not):
+                            // `json_type` raises on malformed JSON, and the
+                            // registry read is tolerant of a bad row on
+                            // purpose — a migration must not be less so.
+                            sql: r#"
+DROP TABLE IF EXISTS lecture_recap;
+CREATE TABLE IF NOT EXISTS lecture_reading (
+    lecture_id    TEXT    NOT NULL REFERENCES lectures(id) ON DELETE CASCADE,
+    idx           INTEGER NOT NULL,
+    start_seconds INTEGER NOT NULL,
+    para          INTEGER NOT NULL DEFAULT 0,
+    text          TEXT    NOT NULL,
+    PRIMARY KEY (lecture_id, idx)
+);
+ALTER TABLE lectures DROP COLUMN recap_status;
+ALTER TABLE lectures DROP COLUMN recapped_at;
+ALTER TABLE lectures DROP COLUMN recap_error;
+ALTER TABLE lectures ADD COLUMN reading_status TEXT;
+ALTER TABLE lectures ADD COLUMN reading_written_at TEXT;
+ALTER TABLE lectures ADD COLUMN reading_error TEXT;
+UPDATE settings
+   SET value = json_set(json_remove(value, '$.lectureRecap'),
+                        '$.lectureReading', json_extract(value, '$.lectureRecap'))
+ WHERE key = 'job_models'
+   AND CASE WHEN json_valid(value) THEN json_type(value, '$.lectureRecap') END = 'object';
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                        tauri_plugin_sql::Migration {
+                            version: 35,
+                            description: "lexical page search: an FTS5 index over pages.markdown",
+                            // The words inside a document, searchable as you
+                            // type. Title search cannot see into a deck at
+                            // all, and the page-image embeddings answer a
+                            // *question*, not a keystroke — a cloud round trip
+                            // per search is not a field you type in. The SQL,
+                            // and the reasoning behind its triggers, live next
+                            // to the table they index:
+                            // `retrieval::PAGES_FTS_SQL`.
+                            sql: crate::retrieval::PAGES_FTS_SQL,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -1108,6 +1174,9 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             mineru::mineru_delete_api_key,
             embed::commands::embed_settings,
             embed::commands::embed_set_engine,
+            embed::commands::embed_set_budget,
+            embed::commands::embed_blocked,
+            embed::commands::embed_estimate,
             parse::commands::parse_settings,
             parse::commands::parse_set_engine,
             parse::commands::parse_set_engine_url,
@@ -1118,6 +1187,10 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             harness::app::harness_health,
             harness::app::harness_install_offer,
             harness::app::harness_install_run,
+            harness::app::harness_sign_in_status,
+            harness::app::harness_sign_in_start,
+            harness::app::harness_sign_in_code,
+            harness::app::harness_sign_in_cancel,
             harness::app::harness_codex_models,
             harness::app::harness_opencode_models,
             harness::app::harness_opencode_providers,
@@ -1136,7 +1209,7 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             harness::app::harness_delete_thread,
             chapters::app::lecture_find_chapters,
             chapters::app::lecture_grab_frame,
-            recap::app::lecture_write_recap,
+            reading::app::lecture_write_reading,
             storage::storage_report,
             browser::browser_open_url,
             browser::browser_state,

@@ -30,6 +30,7 @@ pub mod event;
 pub mod install;
 pub mod jobs;
 pub mod opencode;
+pub mod signin;
 pub mod store;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -105,7 +106,15 @@ pub fn thread_sections(scope: Option<&str>, lecture: Option<&LectureBrief>) -> S
     let mut out = String::new();
     if let Some(code) = scope {
         out.push_str(&format!(
-            "\n\n## This conversation\n\n             It is scoped to **{code}** — the folder `../courses/{code}/`. Unless the              student names another subject, answer from that folder, and pass `{code}`              as the subject to the CLI. Read its `AGENTS.md` for the layout, and its              `agents/memories/` for what you have already learned about it; a fact worth              keeping from this conversation belongs there rather than in `./memories/`.\n"
+            "\n\n## This conversation\n\n\
+             It is scoped to **{code}** — the folder `../courses/{code}/`. Unless the \
+             student names another subject, answer from that folder, and pass `{code}` \
+             as the subject to the CLI. Read its `AGENTS.md` for the layout, and \
+             `./memories/{code}/` for what you have already learned about it — that is \
+             where a fact worth keeping from this conversation belongs, rather than in \
+             `./memories/` itself. (The course folder's own `agents/memories/` is a \
+             link to it; write the path above, since the folder it links to is the one \
+             you can write.)\n"
         ));
     }
     if let Some(lec) = lecture {
@@ -700,6 +709,30 @@ impl Harness {
         self.opencode_providers(true)
     }
 
+    /// Bring a thread's session up if it is not, then send. `resume` is the
+    /// provider's session id from a previous process, if any.
+    pub fn send(
+        &self,
+        thread_id: i64,
+        provider: Provider,
+        resume: Option<&str>,
+        opts: &SendOptions,
+        text: &str,
+        sink: Sink,
+    ) -> Result<(), String> {
+        let mut live = self.live.lock().unwrap();
+        self.ensure(&mut live, thread_id, provider, resume, opts, sink)?;
+        match live.get(&thread_id).ok_or("no session")? {
+            Live::Claude { session, .. } => session.send(text),
+            Live::Codex {
+                server,
+                thread_id: tid,
+                opts,
+            } => server.start_turn(tid, text, opts),
+            Live::Opencode { server, session, .. } => server.prompt(session, text),
+        }
+    }
+
     pub fn opencode_disconnect(&self, provider: &str) -> Result<ProviderList, String> {
         self.opencode_server()?.remove_auth(provider)?;
         self.opencode_providers(true)
@@ -724,31 +757,6 @@ impl Harness {
     ) -> Result<ProviderList, String> {
         self.opencode_server()?.oauth_callback(provider, method, code)?;
         self.opencode_providers(true)
-    }
-
-
-    /// Bring a thread's session up if it is not, then send. `resume` is the
-    /// provider's session id from a previous process, if any.
-    pub fn send(
-        &self,
-        thread_id: i64,
-        provider: Provider,
-        resume: Option<&str>,
-        opts: &SendOptions,
-        text: &str,
-        sink: Sink,
-    ) -> Result<(), String> {
-        let mut live = self.live.lock().unwrap();
-        self.ensure(&mut live, thread_id, provider, resume, opts, sink)?;
-        match live.get(&thread_id).ok_or("no session")? {
-            Live::Claude { session, .. } => session.send(text),
-            Live::Codex {
-                server,
-                thread_id: tid,
-                opts,
-            } => server.start_turn(tid, text, opts),
-            Live::Opencode { server, session, .. } => server.prompt(session, text),
-        }
     }
 
     /// Take a question and everything after it out of the provider's own
@@ -850,6 +858,18 @@ impl Harness {
                 let server = self.codex_server()?;
                 let topts = CodexThreadOpts {
                     cwd,
+                    // Existing files only: Codex stats every writable root
+                    // and refuses to run a command whose root it cannot
+                    // inspect ("failed to inspect Seatbelt writable root"),
+                    // so a missing WAL sidecar would cost the whole turn
+                    // rather than one write. It is missing only when nothing
+                    // holds the database open — and then the CLI would need a
+                    // grant on the folder to create it, which this
+                    // deliberately does not give.
+                    writable_files: crate::paths::db_write_paths(&self.data_dir)
+                        .into_iter()
+                        .filter(|p| p.exists())
+                        .collect(),
                     model: opts.model.clone(),
                     reasoning_effort: opts.reasoning_effort.clone(),
                     instructions: instructions(&self.data_dir, opts.scope.as_deref(), opts.lecture.as_ref()),
@@ -963,6 +983,10 @@ impl Harness {
                 let server = self.codex_server()?;
                 let opts = CodexThreadOpts {
                     cwd,
+                    // The namer writes nothing: it is one question with no
+                    // tool worth reaching for, so it gets no hole in the
+                    // sandbox either.
+                    writable_files: Vec::new(),
                     model: Some(sel.model.clone()),
                     reasoning_effort: sel.reasoning_effort.clone(),
                     instructions: NAMING_INSTRUCTIONS.into(),
@@ -998,7 +1022,7 @@ impl Harness {
         loop {
             match rx.recv_timeout(std::time::Duration::from_secs(NAMING_TIMEOUT_SECS)) {
                 Ok(HarnessEvent::AssistantMessage { text: t }) => text.push_str(&t),
-                Ok(HarnessEvent::Error { message }) => failed = Some(message),
+                Ok(HarnessEvent::Error { message, .. }) => failed = Some(message),
                 Ok(HarnessEvent::TurnFinished { .. }) => break,
                 Ok(HarnessEvent::Exited { code }) => {
                     failed.get_or_insert(format!("provider exited (code {code:?}) before naming the thread"));
@@ -1094,7 +1118,7 @@ pub fn run_once(
     for ev in rx {
         on_event(&ev);
         match &ev {
-            HarnessEvent::Error { message } => failed = Some(message.clone()),
+            HarnessEvent::Error { message, .. } => failed = Some(message.clone()),
             HarnessEvent::TurnFinished { .. } => break,
             HarnessEvent::Exited { code } => {
                 failed.get_or_insert(format!("provider exited (code {code:?}) before finishing"));
@@ -1425,6 +1449,77 @@ pub mod app {
         })
         .await
         .map_err(|e| e.to_string())?
+    }
+
+    /// Whether a provider has credentials, asked of the provider.
+    ///
+    /// Read in two places and cached in neither: the Settings → AI row, and
+    /// the sign-in card the timeline draws over an auth error. Both are places
+    /// a student is looking *because* something is wrong, so a cached "signed
+    /// out" that outlived the sign-in that fixed it would be the one answer
+    /// that must not be stale — which is why this differs from
+    /// `harness_health` and spawns the CLI every time. `discover::forget` has
+    /// nothing of this to drop.
+    ///
+    /// opencode answers `signedIn: null`: its credentials are per provider and
+    /// live behind `harness_opencode_providers`, not behind a login command.
+    #[tauri::command]
+    pub async fn harness_sign_in_status(provider: Provider) -> signin::SignInStatus {
+        tokio::task::spawn_blocking(move || signin::status(provider))
+            .await
+            // A join that failed is not evidence about the account either way,
+            // and "cannot say" is exactly what `signed_in: None` means.
+            .unwrap_or_else(|e| signin::SignInStatus {
+                provider,
+                signed_in: None,
+                account: None,
+                error: Some(e.to_string()),
+            })
+    }
+
+    /// Run the provider's own login flow, and open the page it points at.
+    ///
+    /// Output streams on `signin::SIGNIN_EVENT` the way an install's streams
+    /// on `install::INSTALL_EVENT`. The one addition is the URL: the first
+    /// line that carries one opens it **in the system browser**
+    /// (`tauri_plugin_opener`), because the student is almost certainly
+    /// already signed in to claude.com or chatgpt.com there, while this app's
+    /// own in-app browser (`browser.rs`) has a cookie jar seeded for Canvas
+    /// and nothing else. The URL rides the event as well as being opened, so
+    /// the dialog can show it with a Copy button — an `open` that silently did
+    /// nothing must not be a dead end.
+    #[tauri::command]
+    pub async fn harness_sign_in_start(app: AppHandle, provider: Provider) -> Result<(), String> {
+        tokio::task::spawn_blocking(move || {
+            let emitter = app.clone();
+            signin::start(provider, move |line| {
+                if let Some(url) = line.url.as_deref() {
+                    tauri_plugin_opener::open_url(url, None::<&str>).ok();
+                }
+                emitter.emit(signin::SIGNIN_EVENT, line).ok();
+            })
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
+    /// The code Claude's flow ends on, pasted back from the browser. Codex
+    /// finishes on its own loopback callback and never reaches this.
+    #[tauri::command]
+    pub async fn harness_sign_in_code(provider: Provider, code: String) -> Result<(), String> {
+        tokio::task::spawn_blocking(move || signin::submit_code(provider, &code))
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    /// The student closed the dialog. Nothing else ends a login — an OAuth
+    /// page can sit open for as long as a person takes, so there is no
+    /// deadline above this to expire.
+    #[tauri::command]
+    pub async fn harness_sign_in_cancel(provider: Provider) -> Result<(), String> {
+        tokio::task::spawn_blocking(move || signin::cancel(provider))
+            .await
+            .map_err(|e| e.to_string())?
     }
 
     /// The Chat page, on open and on a provider switch. Codex answers a read
@@ -1924,6 +2019,14 @@ mod tests {
         let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None);
         assert!(scoped.starts_with(&general), "the scope is appended to the same brief");
         assert!(scoped.contains("`../courses/COMP30026_2026_SM2/`"));
+        // The memory bucket it names has to be one the thread can write:
+        // `agents/memories/<CODE>/` under the cwd, never the course folder's
+        // own, which every sandbox here refuses.
+        assert!(scoped.contains("`./memories/COMP30026_2026_SM2/`"));
+        assert!(
+            !scoped.contains("../courses/COMP30026_2026_SM2/agents/memories"),
+            "the unwritable path is not offered as a place to write"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

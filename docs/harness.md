@@ -27,6 +27,8 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | opencode's containment ruleset and system prompt | `app/src-tauri/templates/OPENCODE.template.json` |
 | Finding the binaries from a GUI app | `app/src-tauri/src/harness/discover.rs` |
 | Installing a missing one from Settings → AI | `app/src-tauri/src/harness/install.rs`, `app/src/components/settings/InstallAgentDialog.tsx` |
+| Signing an installed one back in, and classifying an auth failure | `app/src-tauri/src/harness/signin.rs`, `app/src/components/harness/SignInDialog.tsx` |
+| Whether each CLI has credentials, shared by the three surfaces that ask | `app/src/hooks/useSignInStatus.ts` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–26, 28 and 30 in `app/src-tauri/src/lib.rs` |
 | Instructions appended to the provider's prompt | `app/src-tauri/templates/HARNESS.template.md` |
 | The library's own `AGENTS.md`, which Codex reads on its own | `app/src-tauri/templates/AGENTS.template.md` |
@@ -36,7 +38,9 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | Page, thread list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` |
 | The `@` menu's candidate files | `searchMentionFiles` in `app/src/lib/db.ts` |
 | Health and the per-job model rows in Settings → AI | `app/src/pages/settings/AiPage.tsx` |
-| Signing in to opencode's providers: the list and the generic form | `app/src/components/settings/OpencodeProvidersSection.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeAuth.ts` |
+| opencode's providers and models: the Settings line, the manager, the generic sign-in form | `app/src/components/settings/OpencodeProvidersSection.tsx`, `app/src/components/settings/OpencodeCatalogDialog.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeAuth.ts` |
+| Which opencode models the picker is allowed to offer | `app/src/lib/opencodeCatalogue.ts` |
+| Which opencode models a picker may offer | `filterOffered`/`unusableReason`/`isZen` in `app/src/lib/opencodeCatalogue.ts` |
 | Whether each CLI is installed, shared by every picker | `app/src/hooks/useBridgeHealth.ts` |
 | Which agent, model and level each headless job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
 | The lecture brief a dock thread is scoped to | `instructions` in `app/src-tauri/src/harness/mod.rs` |
@@ -68,8 +72,8 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   `threadId` inside it — the protocol routes by thread, so a process per
   thread would buy nothing here. opencode is the same shape again: one
   `opencode serve` on a loopback port, one HTTP *session* per thread, and one
-  SSE connection to `GET /api/event` for the whole app, routed by
-  `data.sessionID`. All three are handles behind the same `Harness`;
+  SSE connection to `GET /event?directory=` for the whole app, routed by
+  `properties.sessionID`. All three are handles behind the same `Harness`;
   nothing above it assumes a process per thread.
 - **Every thread runs from `agents/`, and that is the containment.** Not the
   library root: measured, a Claude thread rooted there under `acceptEdits`
@@ -82,7 +86,8 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   put the courses back inside `acceptEdits`. `oculus.db` is named in those
   rules; `courses/` heals on the next sync, the database does not. The
   module docs in `claude.rs` say what each part buys and what broke without
-  it. Bash writes are refused by both sandboxes at the OS level.
+  it. Bash writes are refused by both sandboxes at the OS level, with one
+  named exception: the database's three files, below.
 - **opencode is the exception to that last sentence, and it is worth knowing
   before trusting it.** It has no sandbox at all: its permissions are a rule
   list its own runner checks. For the file tools that is real and measured —
@@ -102,14 +107,31 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   tool vanishes; and a pattern for a path inside the session directory has to
   be written *relative* to it, which is how `opencode.json` itself is put
   beyond the agent's reach.
-- **The agent can now write to the database, and that does not loosen the rule
-  above.** `oculus project` and `oculus task` put a plan into the tables the
-  app's board draws ([projects.md](./projects.md)), so a breakdown the student
-  agrees to is rows rather than a markdown file in `agents/`. The CLI is the
-  door in both directions and `oculus.db` stays on the deny list: the binary
-  is what knows that a column id must exist, that `done_at` follows the
+- **The agent writes to the database through the CLI, and that took a hole in
+  both sandboxes — three files wide.** `oculus project` and `oculus task` put
+  a plan into the tables the app's board draws
+  ([projects.md](./projects.md)), so a breakdown the student agrees to is rows
+  rather than a markdown file in `agents/`. But `oculus.db` sits at the
+  library root, outside the one writable root, and **a sandbox that lets
+  SQLite open the database but not `oculus.db-wal` fails with "attempt to
+  write a readonly database"** — which is what every `oculus task add` from a
+  Claude or Codex thread did, transactionally and silently, while the
+  templates told the agent to plan that way. So `paths::db_write_paths`
+  names the three files (`oculus.db`, `-wal`, `-shm`) and both bridges hand
+  them over: `filesystem.allowWrite` for Claude, `writableRoots` on the turn's
+  `sandboxPolicy` — and `sandbox_workspace_write.writable_roots` in the
+  thread's config, since `thread/start` takes no policy — for Codex.
+  Measured, and measured as *files*: a seatbelt grant on a regular file works,
+  and granting the folder instead would put the session cookie and the Ed
+  token inside the agent's reach. opencode needed nothing, having no sandbox
+  to open.
+  The CLI stays the only door: `oculus.db` is still `Edit`-denied for
+  Claude and opencode, and `sqlite3` is denied by name, because the binary is
+  what knows that a column id must exist, that `done_at` follows the
   destination column's kind, and that a whole breakdown belongs in one
   transaction — none of which a `sqlite3` a model reached for would honour.
+  Codex has no per-path rules to pair with its sandbox, which is why the hole
+  is three files and not a folder.
   Both templates say so. The board picks the write up because
   `useBackendEvents` watches this event stream for a finished tool call whose
   command names one of those and fires `PROJECTS_UPDATED_EVENT`; it matches on
@@ -208,24 +230,47 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   recordings in `fixtures/harness/` that the bridge tests replay are these
   files. `app-server` is marked experimental; when its shapes drift, a
   recording is the difference between a morning and a week.
+- **opencode runs on its v1 session API, and that is not a detail.** The
+  bridge was written against v2 — `/api/session`, `/api/event`, the
+  `session.next.*` event family — and moved wholesale, because on 1.18.31 a
+  v2 prompt on any provider whose credential lives in `auth.json` failed
+  inside the server with `ModelUnavailableError` and emitted no event at
+  all. That is OpenRouter, which is every student here, so the whole
+  provider story was unreachable over v2 while the same session over v1
+  answered. The v2 translator and its recordings are kept — they still fold
+  a recorded stream, and the tests still replay it — until v1 has run on
+  real threads for a while, but the endpoints are not dual: one `dispatch`
+  routes by wherever the session id is and picks the translator off the
+  envelope (`properties` is v1, `data` is v2).
 - **opencode specifics worth not rediscovering.** `--port 0` means "prefer
   4096", not "pick a free port", so the real port is parsed off the one
-  stdout line that says it. An instance bootstraps *asynchronously*: the
-  first call naming a directory returns before that directory's config has
-  been read, so the bridge asks for the agent list until `oculus` is in it
-  before creating a session. `session.idle` never fires — not once, in any
-  run — so a turn closes on the first `step.ended` whose `finish` is not
-  `tool-calls`, or on a `step.failed`; a turn is a chain of steps and a tool
-  failure does not end it. An interrupt *is* a `step.failed`, with the
-  message `Provider turn interrupted`, and is mapped to `interrupted` rather
-  than to an error row. And a turn whose model cannot be resolved emits
-  **nothing at all** — no event on either stream — so the bridge watches the
-  gap between `prompted` and the first `step.started` and fails the turn
-  itself; `POST /api/session/{id}/wait`, which the schema offers for exactly
-  this, answers 503 straight away and is no use. The free `opencode/*` Zen
-  models cannot be driven over the HTTP API at all (the gateway answers
+  stdout line that says it. Every call names `?directory=<the session dir>`,
+  because a bare `/event` or `/session` binds to the server's own cwd —
+  wherever the app was launched from — and would stream a different
+  instance's sessions. The bridge checks that `oculus` is in
+  `GET /agent?directory=` before creating a session: a session created
+  without it runs as a built-in agent with none of the containment. And the
+  agent and model a session is *created* with are decorative — a prompt that
+  does not repeat them runs as opencode's stock `build` agent — so the route
+  holds both and every prompt sends them. `prompt_async` answers 204 with no
+  body, so nothing about a turn is known until the stream says it. A turn
+  opens on the user's `message.updated` and closes on the completed
+  assistant one; `session.idle` fires on every turn and is the backstop for
+  a turn nothing else will ever close — no assistant row at all, or one
+  created and never completed — except during an abort, where idle arrives
+  *before* the partial answer and would close the turn early. An interrupt
+  is `POST /abort`, arriving as `session.error{MessageAbortedError}` and
+  mapped to `interrupted` rather than to an error row. The drain watchdog —
+  a user message with no assistant one after it in thirty seconds — is
+  inherited from v2, where a turn whose model could not be resolved emitted
+  **nothing at all** and `POST /api/session/{id}/wait`, which the schema
+  offers for exactly this, answered 503 straight away; on v1 the known cases
+  say so themselves and it is belt to the stream's braces. The free
+  `opencode/*` Zen models cannot be driven over the HTTP API at all (the gateway answers
   "OpenCode's free tier can only be used in OpenCode"), so that 400 is
-  rewritten into a sentence a student can act on.
+  rewritten into a sentence a student can act on — and, since that is a whole
+  provider the picker should never have offered, [the catalogue](#which-models-reach-the-picker)
+  is what now keeps it out of the menu rather than out of the error row.
 - **The same server is also the credential store's door.** opencode reaches
   two hundred and eighteen providers and answers for the ones `opencode auth`
   holds a key for, which used to mean a terminal. `opencode serve` exposes the
@@ -405,10 +450,47 @@ a keyboard. The same matcher gates markdown links in the agent's prose
 (`MdComponents`): a `courses/…` href becomes a button into the panel, because
 the anchor everything else uses carries `target="_blank"` and the webview has
 nowhere to take such a path but a blank new tab. Web URLs stay anchors — those
-are caught in `AppLayout`'s capture phase and routed to an in-app browser tab. Command output is the one thing
+are caught in `AppLayout`'s capture phase and routed to an in-app browser tab.
+
+**Three shapes the same path arrives in, because the agent writes what its own
+tools gave it.** `HARNESS.template.md` asks for the library path and the
+matcher takes it, but a model that has just read a file cites it the way it
+read it: absolutely (`/…/com.tchan.oculus/courses/…`), with a `:97` line
+number on the end, and pointing at the parser's `.md` rather than the document.
+All three used to fall through the matcher to the anchor, and the anchor
+resolved the path against the app's own origin — `http://localhost:1420/Users/…`,
+a 404 in a browser tab. So `libraryPath` now also takes an absolute path,
+anchored on a leading `/` so a *command* that merely contains one stays a
+command, and trims a line suffix; and `openLibraryPath` looks through a `.md`
+with no row of its own to the file it was parsed from (`parsedMdSource` in
+`app/src/lib/fileTypes.ts`, the inverse of `parsedMdRelPath`). The link
+destination is percent-encoded by the markdown parser on its way to `href`,
+which is why the matcher decodes before it matches — the data directory has a
+space in it. Anything left that has no URL scheme at all is a path to
+somewhere this app cannot go, and it renders as the text it was rather than as
+an anchor that can only 404. Command output is the one thing
 outside markdown set in monospace, through `CodeText` in
 `app/src/components/markdown/MdComponents.tsx`, which is where the font
 lives.
+
+**A web search is the one row whose title arrives late, and the one that used
+to lie about failing.** Codex announces a search with `item/started` and an
+*empty* query, then sends the queries and the results on `item/completed` —
+with **no `status` field at all** (measured on 0.153.4). The bridge compared
+that absent status to `"completed"` the way it does for a command, so every
+search the student ever ran was drawn `failed` in red while the model was
+answering perfectly well out of the results it got back. So a missing status
+now reads as a search that ran, and `HarnessEvent::ToolFinished` carries an
+optional `title` — the one event that may rename the row it closes — which
+`store.rs` writes to `content` and `harnessStore` folds the same way, so the
+row can finally say what was searched for the way Claude's `WebSearch` row
+does from its first event. The verb comes off the provider's tool name rather
+than the kind (`toolVerb` in `app/src/lib/harness.ts`): a search and a fetch
+are both `ToolKind::Web`, and "Fetched" over a list of queries names the wrong
+thing. All three agents can search: opencode's `websearch` and `webfetch` are
+allowed in its ruleset for parity, since the two that carry a subscription
+have the web natively and an agent that cannot look anything up is a
+different agent.
 
 ### Maths in a reply
 
@@ -419,7 +501,7 @@ rehype-katex. Two things make that hold up:
 - **The prompt has to ask.** Without a rule for it a model writes formulas as
   Unicode — `cos(θ_B/2)|0⟩` — which is not maths, just characters that look
   like it, and no renderer can recover it. `HARNESS.template.md` names the two
-  delimiters and rules out the Unicode; `recap.rs`'s prompt already said the
+  delimiters and rules out the Unicode; `reading.rs`'s prompt already said the
   same thing, and the chat brief was the one that did not.
 - **`\(…\)` and `\[…\]` never reach remark-math**, which is the form a model
   reaches for by default. CommonMark treats a backslash before ASCII
@@ -436,8 +518,31 @@ viewer, so it arrives with the components every renderer already shares.
 that sits in 13px text and gives a display formula its own horizontal scroller
 — without one, a long derivation has no width to shrink to and widens the
 player's dock. The class is not chat's: `CompactMd` in `MdComponents.tsx` is
-what wraps a renderer in it, and the recap notes in the player's dock go
-through the same component.
+what wraps a renderer in it, and the reading copy's lines in the player's dock
+go through the same components.
+
+### Diagrams in a reply
+
+A ```mermaid fence in a reply is **drawn**. The renderer is shared with every
+other markdown surface — `app/src/components/markdown/Mermaid.tsx`, reached
+from `MD_COMPONENTS.pre`, and [frontend.md](./frontend.md) has the four
+non-obvious things about how it draws. Two of them are chat's, though:
+
+- **The prompt has to ask, the same way it does for maths.** A model does not
+  volunteer a diagram into a chat it has no reason to think can show one, so
+  the Diagrams section of `HARNESS.template.md` says the fence renders, when
+  a shape beats a sentence, and which diagram types are worth trusting. It
+  says to keep LaTeX out of node labels, where KaTeX never runs, and it asks
+  for a diagram that can be taken in at a glance — not because a big one
+  cannot be read (clicking it opens it full-window, zoomable and pannable)
+  but because a reply that needs a lightbox to be understood has moved the
+  work onto the reader.
+- **A fence is seen while it is still being written.** The reply streams, so
+  the component is handed `flowchart TD` before the arrows exist and a node
+  before its closing bracket. It settles for 150ms, asks `mermaid.parse`
+  before rendering, and shows the fence as a code block until one succeeds —
+  so a half-written diagram reads as source becoming a picture, and a diagram
+  that never parses simply stays the source it was.
 
 **Every message has a row of actions under it**, and it is under rather than
 beside for one reason: a control floating next to a bubble has to be placed
@@ -514,7 +619,10 @@ in the preview harness:
   is still arriving. Parsed tool `meta` is cached per row object in
   `parseToolMeta` — a single thread can carry 300KB of command output — and
   the KaTeX plugins are only loaded over text that has a maths delimiter
-  (`MATH` in `app/src/components/markdown/MdComponents.tsx`).
+  (`MATH` in `app/src/components/markdown/MdComponents.tsx`). Mermaid is the
+  same bet one step further out: ~1MB of parsers and layout engines behind a
+  dynamic `import()`, so a session that never opens a diagram never fetches
+  it, and one that opens four fetches once.
 - **Following the stream watches for growth.** A `scrollTo` per delta forced a
   layout of the whole thread and yanked the page down whenever the reader
   had scrolled up; a `ResizeObserver` on the column scrolls only while the
@@ -572,9 +680,10 @@ reads in order, and each CLI was measured getting it wrong in its own way:
   the timeline above the answer to the previous one, there is one
   `turn/completed` for both, and the reply to the first question can look
   like it never came. This is what "the message just disappears" was.
-- **opencode would take it correctly** — `delivery: "queue"` on
-  `POST /api/session/{id}/prompt` does hold a message until the turn ends —
-  and it is still not used. The harness owns the `Queued`/`Unqueued` rows and
+- **opencode was the one that would take it correctly** — the v2 prompt
+  endpoint offered `delivery: "queue"`, which holds a message until the turn
+  ends — and it was never used, nor is there an equivalent on the v1
+  `prompt_async` the bridge runs on now. The harness owns the `Queued`/`Unqueued` rows and
   the one-turn-at-a-time rule; letting the server own the same invariant for
   one provider out of three would put it in two places, and the half the
   webview draws would be the half that could not see the queue.
@@ -663,19 +772,18 @@ a round-trip before this was built:
 | --- | --- | --- |
 | Claude | `control_request` / `rewind_conversation` | the uuid of the user message |
 | Codex | `thread/revert` | the id of the turn to revert before |
-| opencode | `revert/stage` then `revert/commit` | the id of the message to **keep** |
+| opencode | `POST /session/{id}/revert` | the id of the message to **drop**, and everything after it |
 
 None of them will say that identifier twice, so it is learned once — when the
 turn goes out — and kept on the question's row as `anchor` (migration 28), arriving
 as a `TurnAnchor` event like everything else the bridges learn. Codex says its
-turn id in the `turn/start` reply, and opencode returns the `msg_…` straight
-out of the prompt POST. opencode's is the one that needs arithmetic: its
-revert names the message that *survives* and drops everything strictly after
-it, so rewinding **to** a question means staging on the message before it,
-which the bridge looks up in that session's `/context`. The first message of
-a session therefore cannot be rewound past — there is no revert-to-empty —
-and that case is refused rather than half-done, which is what puts the
-timeline's "the agent still remembers" note on screen. Claude says nothing: its `stream-json`
+turn id in the `turn/start` reply. opencode says nothing synchronously —
+`prompt_async` answers 204 with no body — so its `msg_…` is read off the event
+stream instead, as the first user `message.updated` of the turn. Its revert is
+inclusive and lazy: one call naming the question's own id drops that message
+*and* everything after it, so the first message of a session can be rewound
+like any other, and nothing is actually deleted until the next prompt, when
+`message.removed` events say which rows went. Claude says nothing: its `stream-json`
 output never echoes the message we sent, so the uuid is read out of the CLI's
 own transcript at `~/.claude/projects/<slug>/<session>.jsonl`. That file is a
 tree rather than a list — every row names its `parentUuid` — so the question
@@ -750,7 +858,7 @@ is still "No models available". The gate is the `health` field and not a test
 on an id, so Claude's static catalogue is withheld on exactly the same terms as
 the two fetched ones, and a fourth agent costs nothing here.
 
-Three things about it are deliberate:
+Four things about it are deliberate:
 
 - **Nothing is defaulted out of sight.** There is no "default model" row and
   no "default" level: every turn names both, so what the composer shows is
@@ -773,6 +881,17 @@ Three things about it are deliberate:
   rather than a gap: nothing is invented, the session is created without a
   `variant`, and a later opencode that fills the field in lights the row up
   with no code change.
+- **opencode's list is a filtered one, and the filter is the provider's own
+  business.** Its catalogue is the only one that advertises models which
+  refuse every request, and the only one a single provider can add three
+  hundred rows to, so what reaches the menu is what
+  [the student](#which-models-reach-the-picker) has left ticked.
+  The gate lives inside opencode's `PROVIDERS` entry — `fetchModels` runs the
+  CLI's answer through `filterOffered` — so `useProviderModels` and
+  `ModelPicker` still name no provider, which is the rule that file states
+  about itself. An empty list is then not the same sentence for all three:
+  a provider may carry an `emptyNote`, and opencode's sends the student to
+  Settings → AI rather than leaving a menu that reads as broken.
 
 Both CLIs bind the level when a session starts, not per turn — so changing it
 mid-thread respawns the Claude process and restarts the Codex thread, which
@@ -825,19 +944,36 @@ device flow are both `auto`.
 
 **`connected` is not read off the file, which is the trap here.** A credential
 written through `PUT /auth` answers `true` and the file on disk grows it, and
-`GET /provider` keeps reporting the old list for the life of the instance —
-the model catalogue with it. `POST /instance/dispose` is what makes the
-instance re-read its store, so every read after a write asks for one. Disposing
-was measured to be survivable: the process stays up, the `/api/event` stream
+`GET /provider` keeps reporting the old list for the life of the instance.
+`POST /instance/dispose` is what makes the instance re-read its store.
+
+**The model list comes from `/config/providers`, and `/api/model` is a trap.**
+The two read like the same question and are not: `/api/model` answers with the
+models of the providers the running *instance* has instantiated, which bears no
+relation to what the student signed in to. Measured on 1.18.2 with OpenRouter
+connected — `/provider` called it connected with 369 models, `/api/provider`
+listed two providers, and `/api/model` returned 33 models with **not one** of
+OpenRouter's among them. It is not staleness: a server process spawned hours
+*after* the credential was written answered identically, and a
+`POST /instance/dispose` changed nothing, so neither refreshing nor restarting
+reaches it. `/config/providers` is what `opencode models` itself prints — 378
+on that machine, and the three providers the config can use rather than all
+221. `parse_models` in `app/src-tauri/src/harness/opencode.rs` reads it, and a
+test pins the shape, which the endpoint it replaced never had.
+
+The symptom was a single line: a provider the student had just connected
+offered no models at all, because the endpoint that was read did not list any
+of them.
+
+Disposing was measured to be survivable: the process stays up, the event stream
 keeps heart-beating, sessions created before it are still readable by id, and
 an OAuth loopback listener opened before it is still bound after. What it
 releases is "all resources", so it is skipped while a turn is open and the
 answer says so rather than showing a list it knows is behind. All of it names
-the session directory — `/provider`, `/provider/auth` and `/instance/dispose`
-take a plain `directory` where `/api/…` takes `location[directory]`, and the
-server's own cwd is wherever the app was launched from, so an unscoped call
-would read and refresh a *different* instance from the one the model list and
-every session belong to. `PUT`/`DELETE /auth/{id}` is the exception and takes
+the session directory — `?directory=`, the same scoping the session endpoints
+and the event stream use — because the server's own cwd is wherever the app
+was launched from, so an unscoped call would read and refresh a *different*
+instance from the one the model list and every session belong to. `PUT`/`DELETE /auth/{id}` is the exception and takes
 none: a credential belongs to the machine.
 
 **Opening Settings does not start opencode.** The read would spawn
@@ -853,7 +989,9 @@ the only thing there is to remove — then the handful that offer a real sign-in
 flow, and the rest by name through a search box. A provider whose `source` is
 `config` is connected because an `opencode.json` declares it, not because a
 credential exists, so its row says where it came from instead of offering a
-Disconnect that would do nothing.
+Disconnect that would do nothing — **Hide from Oculus** is what it offers
+instead, because the alternative would be this app editing the student's own
+`opencode.json`, which it has no business doing.
 
 A key is never held. It travels from the field to `PUT /auth/{id}` and nowhere
 else: not into `settings`, not into the keychain, and not into
@@ -865,6 +1003,227 @@ itself echoes the credential** — a connected provider's row carries the real k
 in a field `scrub` does not know the name of, measured — so the merge into the
 rows Settings draws never reads that field, and a test asserts the serialized
 rows cannot carry it.
+
+## Which models reach the picker
+
+Signing a provider in is not the same as having models worth offering, and
+opencode is the one agent where those two facts come apart. Two hundred and
+eighteen providers reach this app; some advertise models whose gateway refuses
+everything, and one of them — OpenRouter — is three hundred rows on its own.
+
+**There used to be a probe, and it is deleted.** An opencode model was offered
+only once a real turn had been sent to it and had come back: `probe_model`
+opened a session on the hidden `oculus-namer` agent and sent one sentence, four
+models at a time, and a sweep ran on connect *and* whenever the provider
+manager was opened with a provider it had no verdicts for. It answered the
+question correctly and it was the wrong trade, because the evidence was bought
+from the provider:
+
+- Every probe was a **billed request**, and a sweep was as long as the
+  catalogue — ~300 for OpenRouter alone, on a settings page, without a click.
+- It was **two** billed requests per model, not one. The probe created a
+  session per model, and opencode titles a new session on its own small model,
+  so each probe carried a second request nothing here asked for.
+- Tools were attached to the probe's turn, so a request the code described as
+  "a handful of tokens" was measured at **~8.6K input tokens** against some
+  providers.
+
+Nothing in this repo may spend a student's credits to populate a menu. The
+sweep, its progress events, its cancel flag and its stored verdicts are gone.
+
+**Most of what it bought was already free**, and that part is kept:
+
+- *Is the provider signed in?* `list_models` reads `GET /config/providers`,
+  which lists the providers the config can actually **use** — three of 221 on
+  the machine this was measured on. A provider with no credential contributes
+  no models to the list at all, so the question never had to be asked.
+- *Does the model exist?* Same list, same answer. The probe's `Model not
+  found` class cannot arise from a menu built out of the list itself.
+- *Can the model call a tool?* `capabilities.toolcall` on the row. This one
+  matters more than it looks: the agent answers out of the student's own
+  library, so a model that cannot call a tool does not fail loudly — it answers
+  from nothing, confidently, which is worse than a red row. **69 of
+  OpenRouter's 369** are in that state, and none of opencode's or the Spark
+  endpoint's.
+- *Is it one of opencode's free **Zen** models?* A static fact about the id.
+  Their gateway answers `HTTP 400 … MissingSessionID … "OpenCode's free tier
+  can only be used in OpenCode"` to anything that is not the opencode TUI, so
+  every model under provider id `opencode` refuses every request from this
+  bridge, always. `isZen` reads that off the id for nothing; the probe used to
+  buy the same fact one model at a time.
+
+What no free check can see is a credential that is present but **stale** — a
+401. That one fails once, in the timeline, in the provider's own words, which
+`friendly` already turns into a sentence. One failed message is the honest
+price; ~600 billed requests was not.
+
+**So three rules are left, and none of them costs anything.** An opencode
+model is offered when it can run here at all, it is not a Zen model, its
+provider is not hidden, and the student has not hidden it.
+
+The first of those is `unusableReason`, and it is the half that needs the model
+*row* rather than its id — so `filterOffered` is where the capability half and
+the catalogue half meet, and it is the only path the composer's menu takes.
+Settings counts through the same call rather than a local test, so a provider
+row and the picker cannot come to different numbers. Its flags are read in
+`parse_models` and **absent means capable**: a provider whose rows say nothing
+about tools must not have its whole catalogue gated out, and a claim that turns
+out to be wrong costs one failed turn where a missing claim read as a refusal
+would cost the provider. The text-in and text-out flags are assertions rather
+than filters — every model in the catalogue today passes both — kept because
+OpenRouter's own catalogue already carries transcription, embedding, rerank and
+image models, and the day opencode surfaces one it should not reach a chat
+composer.
+
+The store for the other two is one JSON value in `settings` under
+`opencode_catalogue` (`app/src/lib/opencodeCatalogue.ts`), `isOffered` is the
+single place the rule is written, and **an absent entry means offered** — the
+reverse of what it meant while the probe existed, when "no entry" meant "not
+checked yet". The catalogue now records only what was switched off, so a
+provider nobody has touched has no rows at all. It still reads catalogues the
+probe build wrote, keeping `hidden` and discarding the verdicts: a purchased
+`ok: false` must not keep a model out of a picker that no longer re-checks
+anything.
+
+Blocked models stay **in** the Settings list rather than being filtered out of
+it, drawn with the reason and an unticked, disabled checkbox — `blockedBecause`
+in `app/src/components/settings/OpencodeCatalogDialog.tsx` writes the one
+sentence each, so the list and its counts cannot disagree about which rows are
+on offer. A student who signed in to opencode's free tier, or who goes looking
+for a coder model that turns out to have no tool calling, is owed the sentence
+rather than an absence.
+
+**What no free check can see is a model gated behind the provider's own
+verification** — Meta's Muse Spark family, for one. Nothing marks it: opencode
+lists it `status: "active"` with full capabilities and ordinary pricing, and
+OpenRouter's public `/api/v1/models` has no verification field either
+(`top_provider.is_moderated` is content moderation, not an age gate). Verified
+2026-09-18 against both catalogues. The probe caught those empirically, at the
+price described above; they now fail once in the timeline like a stale key.
+
+**The surface is a dialog, and Settings → AI keeps one line.** The provider
+list, the 218-row search, connect and disconnect, and a per-model list with its
+search and its ticks are more than a settings page should hold beside four
+other sections — so they live in `OpencodeCatalogDialog.tsx` and the page shows
+a button plus what the *stored catalogue* knows. That summary is now what has
+been **hidden** ("2 models hidden"), not what is offered: counting offered
+models would mean knowing how many exist, which means starting a CLI, and
+opening Settings must not do that. The click on *Manage providers* is what
+spawns `opencode serve`, which is the rule the rate-limit read already keeps.
+
+**Inside the dialog the query is the mode, and there is one scroll region.**
+The obvious layout was built first and does not work: connected list, hidden
+list, then a search with its results under it, all sharing one column. Every
+group competes with every other for the same height and the results always
+lose — a student with five providers signed in had about two rows of room to
+scroll two hundred in, and pinning the top half only moved the squeeze. So the
+search field is the only pinned thing; empty, the body is the student's own
+providers, and typing gives the body over to the matches. Looking for one of
+218 providers is a find, not a browse, and nothing in the connected list helps
+with it. Row actions follow: *Models* keeps a label because it is the way
+further in, while Disconnect, Hide and Show are icons with tooltips — three
+words of chrome per row made the provider's own name the least emphatic thing
+in it. *Check* was the fourth and is gone with the sweep.
+
+**Every model row is tickable except a blocked one.** A tick is a promise that
+the composer will offer the model, and the gate will not offer a Zen model or
+one that cannot call a tool — so an enabled checkbox there would be a control
+that appears to work and changes nothing. That was the rule for a failed probe
+too, and it survives only for the refusals that are knowable without asking
+anybody. Everywhere else a tick is the whole fact: an untick removes the row
+rather than storing `hidden: false`, and disconnecting a provider forgets
+everything stored under it.
+
+## Signing in to an agent
+
+Installing a CLI and being able to use it are different facts, and until this
+stage only the first one was on screen anywhere. An expired OAuth session
+surfaced as a red timeline row reading *"Failed to authenticate: OAuth session
+expired and could not be refreshed"* — true, unactionable, and identical in
+shape to a row about a syntax error in a file. The student's next move was to
+find a terminal, remember which of three CLIs the thread was on, and guess the
+subcommand. `app/src-tauri/src/harness/signin.rs` is the way through, and it
+does two separable things.
+
+**Reading a failure, and drawing it as a state rather than a crash.**
+`signin::is_auth_failure` takes a provider's own error text and says whether it
+is that provider saying it has no usable credentials. `HarnessEvent::error_for`
+is what calls it — the bridges use it wherever the error is something the
+*provider* reported, and the plain `HarnessEvent::error` stays for the manager
+failing to start a bridge, which is nobody's credential. `Error` therefore
+carries `auth: Option<Provider>`, `store.rs` puts the same fact in the error
+row's otherwise-unused `meta` (`{"auth":"claude"}`, so no migration), and
+`harnessStore.ts` folds it into the live row too — without that second write
+the card a student needs *right now* would only appear after a reload. The
+timeline's `ErrorRow` branches on it into a sign-in card
+(`app/src/components/harness/WorkRow.tsx`).
+
+**The lists are kept tight on purpose, and that is the design decision here.**
+A false positive is worse than a miss: it sends a student to re-authenticate
+over a failure that had nothing to do with their account, and the sign-in they
+then do will not fix it. So every entry is a whole clause rather than a word —
+`"auth"` alone would match a compile error about a file named `auth.rs`,
+`"expired"` alone would match a cached download — and `401` never counts on its
+own, since a byte count, a line number and a path can all carry those three
+digits.
+
+**The two live flows are genuinely different shapes**, measured rather than
+assumed, which is why `ProviderInfo.signIn` in `app/src/lib/harness.ts` is
+`"code" | "callback" | null` and not a boolean:
+
+- `claude auth login` prints an authorize URL and then **blocks reading a
+  pasted code off stdin**. Its last prompt carries no trailing newline, so a
+  `lines()` loop never emits it — nothing waits for one. The dialog offers its
+  paste field as soon as the URL arrives and `signin::submit_code` writes the
+  answer to the child's stdin. This is also the one place the module departs
+  from `install.rs`, which nulls stdin precisely so anything that asks a
+  question fails instead of hanging; here the question is the point.
+- `codex login` starts its **own loopback listener** on port 1455, prints the
+  URL, and finishes by itself when the browser redirect comes back. It never
+  reads stdin, so the dialog only waits.
+- opencode is deliberately absent. Its credentials are per *provider*, not per
+  CLI, and [signing in to a provider](#signing-in-to-a-provider) already owns
+  that whole surface through the server the bridge is already talking to.
+  Driving `opencode auth login` as a subprocess would be a second, worse door
+  to the same store — it is a TUI with arrow-key menus, and it could only write
+  what the existing path already writes. So `status` answers `signedIn: null`,
+  which is *not answerable from here* and a different fact from "no", and
+  `start` returns an error naming the dialog that is the real answer.
+
+**The URL opens in the system browser, and still rides the event.** Rust calls
+`tauri_plugin_opener::open_url` on the first line carrying one, because the
+student is probably already signed in to claude.com or chatgpt.com there, where
+Oculus' own in-app browser (`app/src-tauri/src/browser.rs`) has a cookie jar
+seeded for Canvas and nothing else. The URL is shown in the dialog with a Copy
+button anyway: an `open` that silently failed must not be a dead end with a
+spinner on it.
+
+**Nothing here is cached, which is the difference from `discover::health`.**
+Health is asked by every model picker, three spawns a menu, so Rust memoises it
+for the life of the process. Sign-in state is asked in three places — a
+settings row, the composer's line above the box, and an error row a student is
+looking at *because something just failed* — and a cached "signed out" that
+outlived the sign-in that fixed it would be the one wrong answer that matters.
+So `signin::status` spawns the CLI every time, and `useSignInStatus.ts` holds
+the only cache there is, dropped by Settings' *Recheck* and by the end of a
+run. The binary lookup underneath is still cached: where a CLI *is* does not
+change when its credentials do.
+
+**Three states, and `unknown` draws nothing** — the same discipline
+`providerHealth` follows, for the same reason. Until the probe lands, a
+provider is neither signed in nor signed out, and a line that flashed the wrong
+answer for a beat would be worse than no line. And the composer's warning
+**never disables sending**: the status is a cached read of a store the student
+can change in a terminal without this app hearing about it, and locking the box
+on a stale read would be the app refusing to do the one thing it is for.
+
+**No deadline is imposed from above**, on the same rule a parse and an embed
+follow. An OAuth page can sit open for as long as a person takes to find a
+password, switch accounts, or answer a second factor on a phone in another
+room. A timeout could only abandon a flow that was still going; `signin::cancel`
+is what ends one, and closing the dialog is not it — the run is held by whatever
+*opened* the dialog, so hiding it strands nothing and reopening resumes the same
+run.
 
 ## Installing an agent
 
@@ -975,7 +1334,10 @@ subjects are reachable from the sidebar, not from here. It is not a
 sandbox — every thread runs from `agents/` and reads all of `../courses/`
 either way — it says which subject the questions are about, so "what's due
 this week" has an answer. Picking one appends a short section to the
-instructions naming that course folder and its memory bucket
+instructions naming that course folder and its memory bucket —
+`agents/memories/<CODE>/`, which is under the thread's own writable root
+rather than in the course folder, because the course folder's copy is a
+symlink and a path the sandbox refuses is not an instruction
 (`instructions()` in `app/src-tauri/src/harness/mod.rs`); General appends
 nothing and gets the library-wide brief. The scope is stored on the thread
 (`harness_threads.subject_id`) and locks once the thread exists, for the same
@@ -994,6 +1356,52 @@ attached and nothing is retrieved here: the agent already has the library in
 front of it and its own tools for opening a file, and a path is what it was
 missing. That path is also exactly what `oculus read` takes, which
 `HARNESS.template.md` tells the agent.
+
+**The query may hold spaces, and it has to.** Stopping the token at the first
+whitespace put every multi-word title permanently out of reach — and matching
+a spaced query literally would find nothing either, because `safe_filename` in
+`app/src-tauri/src/paths.rs` turns "Paper Topics" into `Paper_Topics` on the
+way to disk, so no filename in a library contains a space at all. So the words
+are ANDed instead: every word must appear in the filename
+(`searchMentionFiles` in `app/src/lib/db.ts`, shared with the
+"N matching files have no markdown" count so the two cannot disagree), which
+is what makes `@paper topics` reach `INFO30006_Paper_Topics_14.docx`. What
+keeps a stray `@` in prose from leaving a menu armed over the Enter key is
+three cheap guards — the character after the `@` must not be whitespace, the
+token stops at four words and 60 characters, and a backtick ends it so a token
+cannot reach back across a mention already picked — and, still, that the menu
+only opens when the query matched a file.
+
+**A mention is drawn as a chip and sent as a path**, and those being two
+different strings is the whole design. `app/src/components/markdown/FileChip.tsx`
+is one definition used in three places — the composer's box while the message
+is being typed, the question bubble once it is sent, and a path the agent
+quotes back in its own prose — so a mention never changes appearance as it
+moves through the thread, while the message itself stays the backticked
+library path the agent needs. The chip is built from the path *alone*
+(`pathFile` and `splitLibraryPaths` in `app/src/lib/openFile.ts`, whose folder
+table mirrors `category_from_path` in `paths.rs`), which keeps the timeline's
+rule intact: shape, never resolution, so a hundred of them cost no queries and
+the row is only read when one is clicked. Only a fence whose *whole* content
+is a library path counts — a backticked command or flag is prose that happens
+to be fenced and stays monospace, since that is the one place monospace is
+still for code.
+
+That chip is why the composer's box is **no longer a `<textarea>`**: a
+textarea cannot draw an icon inside its text.
+`app/src/components/harness/MentionInput.tsx` is a contenteditable whose
+mentions are atomic `contenteditable="false"` spans, and it keeps the DOM as
+the source of truth while someone types — React renders its chunk model only
+on a structural change (a pick, a restore, a send) and bumps the editor's
+`key` so the box is rebuilt rather than diffed against a tree the typist has
+been editing underneath it. `readEditor` walks the live nodes back into the
+message, where a chip is its path again and WebKit's no-break space and the
+zero-width caret guards are dropped. Two things that look like superstition
+and are not: the guard in front of a leading chip exists because WebKit has
+nowhere to put a caret before a `contenteditable="false"` element that starts
+a block, and the explicit `select-text` exists because `index.css` turns
+selection off on `body` and hands it back per *tag* — a `div` is not on that
+list and a `textarea` was.
 
 The menu **opens downwards and only flips up when it would not fit**
 (`Composer.tsx`). The same composer sits in three very different places — the
@@ -1147,7 +1555,8 @@ nothing time-varying reaches it. So the playhead travels as a **ref** whose
 identity never changes: the chip ticks itself off it once a second — the shape
 `Running`'s elapsed clock uses in `ChaptersPanel` — and the send reads it there
 rather than from a prop that would be a frame behind. The Chat tab's props are
-a second memoised bag beside `chapters`, built over stable values only.
+a third memoised bag beside the Chapters tab's and the enhanced transcript's,
+built over stable values only.
 
 **The moment is built by the player at send time**
 (`buildMoment` in `LecturePlayer.tsx`): the second itself, the chapter the
@@ -1173,7 +1582,8 @@ Built: the three bridges with recorded fixtures and replay tests, `oculus
 agent` as the headless proof, tables and lifecycle, the page, subject scope
 and the `@` file menu, the message queue, stopping a turn, going back
 (edit, retry, rewind), the per-job model registry above, [signing in to opencode's
-providers](#signing-in-to-a-provider), and the lecture player's dock chat. Not yet: approvals and native questions routed to the UI, steering
+providers](#signing-in-to-a-provider), [signing an agent back
+in](#signing-in-to-an-agent), and the lecture player's dock chat. Not yet: approvals and native questions routed to the UI, steering
 mid-turn (bb's `turn/steer` and a second stdin line — the queue is the
 waiting-room version of it, not steering), the plan/todo card, branching (rewind
 deliberately does not).
