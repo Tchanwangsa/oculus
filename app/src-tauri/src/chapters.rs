@@ -352,8 +352,8 @@ pub fn candidates(
 
 /// The shared detector with a caller-selected thinning radius.
 ///
-/// Chapters use 90 seconds because they are topic spans; recap notes use a
-/// denser radius because they follow visual changes. Keeping the radius at
+/// Chapters use 90 seconds because they are topic spans; the reading copy
+/// uses a denser radius because its paragraphs follow visual changes. Keeping the radius at
 /// this boundary lets both jobs share the measured decode, collapse and score
 /// pipeline without pretending they want the same output density.
 pub fn candidates_with_spacing(
@@ -435,7 +435,7 @@ pub struct Detection {
     /// has to use, or the pictures would be of the stream nobody read.
     pub video: PathBuf,
     /// The decode pass itself, for a caller that thins it its own way
-    /// (`recap` does).
+    /// (`reading` does).
     pub diffs: Vec<(u32, f32)>,
     /// [`candidates`] over those diffs, in play order.
     pub candidates: Vec<Candidate>,
@@ -543,6 +543,19 @@ pub fn detect(
 /// `on_grab` fires with how many are written so far — five probes and a JPEG
 /// per boundary is ten seconds on a long lecture, and it is countable, so the
 /// panel says `12 / 50` rather than spinning.
+///
+/// **A JPEG from a previous run that this one will not overwrite is deleted.**
+/// Grabs are written by their second, so a re-run whose candidate set moved
+/// used to leave the old set's frames behind — and after [`detect`] that can
+/// mean frames off a stream this run never looked at. The lecture whose slide
+/// capture failed kept a grab of the room's Crestron splash in its folder for
+/// exactly that reason: the one candidate the black stream produced. Nothing
+/// reads a frame after the turn that asked for it, so the only thing an
+/// orphan can do is mislead whoever opens the folder next.
+///
+/// Only files are swept, and only `.jpg` directly in `out_dir` — the
+/// subfolders beside them belong to other jobs (`live/` is the chat dock's,
+/// `reading/` is the reading copy's) and each sweeps its own.
 pub fn extract_frames(
     ffmpeg: &Path,
     video: &Path,
@@ -551,6 +564,7 @@ pub fn extract_frames(
     mut on_grab: impl FnMut(usize),
 ) -> Result<Vec<PathBuf>, String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
+    sweep_orphans(out_dir, secs);
     let mut written = Vec::with_capacity(secs.len());
     for &second in secs {
         let out = out_dir.join(format!("{second}.jpg"));
@@ -559,6 +573,33 @@ pub fn extract_frames(
         on_grab(written.len());
     }
     Ok(written)
+}
+
+/// Delete the `.jpg` files in `out_dir` that this run is not about to rewrite.
+///
+/// Best effort on purpose: a frame that cannot be removed is clutter, and
+/// failing a ten-minute job over it would be the wrong trade. A name that is
+/// not a plain second was not written by [`extract_frames`], so it is left
+/// alone rather than guessed at.
+fn sweep_orphans(out_dir: &Path, keep: &[u32]) {
+    let Ok(entries) = std::fs::read_dir(out_dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jpg") {
+            continue;
+        }
+        if !entry.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        let second = path.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse::<u32>().ok());
+        match second {
+            Some(second) if keep.contains(&second) => continue,
+            Some(_) => {
+                std::fs::remove_file(&path).ok();
+            }
+            None => continue,
+        }
+    }
 }
 
 /// One probed JPEG of `second`, written to `out`.
@@ -1810,6 +1851,29 @@ mod tests {
         // splash; the first frame within tolerance of the best wins.
         let probed = [(1726, 81.4), (1730, 102.5), (1736, 102.5), (1724, 102.6)];
         assert_eq!(pick_offset(&probed), Some(1730));
+    }
+
+    #[test]
+    fn a_run_sweeps_the_grabs_it_will_not_rewrite() {
+        let dir = std::env::temp_dir().join(format!("oculus-sweep-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(dir.join("live")).unwrap();
+        for name in ["50.jpg", "313.jpg", "1767.jpg", "notes.txt", "keyframe.jpg"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        // The chat dock's own grabs are a folder, not a file, and are not this
+        // run's business.
+        std::fs::write(dir.join("live").join("900.jpg"), b"x").unwrap();
+
+        sweep_orphans(&dir, &[313, 1767, 2550]);
+
+        let left = |name: &str| dir.join(name).exists();
+        assert!(!left("50.jpg"), "an orphan from a previous candidate set goes");
+        assert!(left("313.jpg") && left("1767.jpg"), "a frame this run rewrites stays");
+        assert!(left("notes.txt"), "only JPEGs are swept");
+        assert!(left("keyframe.jpg"), "a name that is not a second was not written here");
+        assert!(left("live/900.jpg"), "another job's subfolder is untouched");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

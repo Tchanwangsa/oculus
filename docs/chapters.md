@@ -14,11 +14,15 @@ reasoning level it runs on is configured in Settings → AI — see [A configure
 job](#a-configured-job). The player reads them back three ways — see
 [Reading them in the player](#reading-them-in-the-player).
 
-The same visual pipeline now has a second backend job: `oculus lecture recap`
-writes short slide-level notes about what is shown and said. It deliberately
-has a different density and write lifetime from chapters; see
-[Lecture recap](#lecture-recap). It has its own tab in the player's dock,
-beside the chapter list.
+The same visual pipeline has a second backend job: `oculus lecture reading`
+writes the **reading copy** — the transcript rewritten as text a student can
+read, one sentence per line, each pinned to its second, with spoken maths set
+as maths. It deliberately has a different density and write lifetime from
+chapters; see [The reading copy](#the-reading-copy). It replaced the recap.
+In the player it is not a tab of its own but the Transcript tab's second
+register, labelled **Enhanced** beside the standard cue list — one artifact
+under two names, for the reason [that section](#the-transcript-has-two-registers)
+gives.
 
 ## Where
 
@@ -31,11 +35,11 @@ beside the chapter list.
 | Writing the rows and the job's status | `app/src-tauri/src/store.rs` |
 | `lecture_chapters` + the three `lectures` columns (migration 29) | `app/src-tauri/src/lib.rs` |
 | The job itself — detect, grab, ask, validate, write | `run` in `app/src-tauri/src/chapters.rs` |
-| Recap segmentation, windows, prompt, validation and job | `app/src-tauri/src/recap.rs` |
-| `lecture_recap` + the three `lectures` columns (migration 31) | `app/src-tauri/src/lib.rs` |
-| `oculus lecture candidates`, `oculus lecture chapters`, `oculus lecture recap` | `app/src-tauri/src/bin/oculus.rs` |
+| Reading copy: segmentation, windows, prompt, validation, `para`, and the job | `app/src-tauri/src/reading.rs` |
+| `lecture_reading` + the three `lectures` columns (migration 34) | `app/src-tauri/src/lib.rs` |
+| `oculus lecture candidates`, `oculus lecture chapters`, `oculus lecture reading` | `app/src-tauri/src/bin/oculus.rs` |
 | The app's trigger, its two events, and the startup sweep | `chapters::app` in `app/src-tauri/src/chapters.rs` |
-| The recap command, progress/finish events, and startup sweep | `recap::app` in `app/src-tauri/src/recap.rs` |
+| The reading command, progress/finish events, and startup sweep | `reading::app` in `app/src-tauri/src/reading.rs` |
 | The phases a run reports, and where each one fires | `Step` in `app/src-tauri/src/chapters.rs` |
 | Which agent and model the job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
 | The Settings → AI row that picks them | `app/src/pages/settings/AiPage.tsx` |
@@ -43,13 +47,17 @@ beside the chapter list.
 | The tool verbs the running panel borrows from the timeline | `toolVerb` in `app/src/lib/harness.ts` |
 | Reading the rows and the job's state in the app | `getChapters` / `getChapterStatus` in `app/src/lib/db.ts` |
 | The player's chapter state, and the event it listens on | `app/src/hooks/useLectureChapters.ts` |
-| The chapter list, and every state it has | `app/src/components/lectures/ChaptersPanel.tsx` |
-| The recap's rows, its job state, and its panel | `app/src/lib/db.ts`, `app/src/hooks/useLectureRecap.ts`, `app/src/components/lectures/RecapPanel.tsx` |
-| The recap's frontend binding and its two event names | `app/src/lib/lectures.ts` |
-| The two markdown renderers both panels use | `InlineMd` / `CompactMd` in `app/src/components/markdown/MdComponents.tsx` |
+| The Chapters tab — the card list and every state it has | `app/src/components/lectures/ChaptersPanel.tsx` |
+| The Transcript tab's Enhanced register, and every state it has | `app/src/components/lectures/ReadingList.tsx` |
+| The Standard ↔ Enhanced picker, which is also the enhance job's control | `app/src/components/lectures/TranscriptModePicker.tsx` |
+| The reading copy's rows and its job state in the app | `getReading` / `getReadingStatus` in `app/src/lib/db.ts`, `app/src/hooks/useLectureReading.ts` |
+| The reading copy's frontend binding and its two event names | `app/src/lib/lectures.ts` |
+| The virtualised, playback-following list both transcript registers render through | `app/src/components/lectures/FollowList.tsx` |
+| The inline markdown renderer a chapter summary and an enhanced line use | `InlineMd` in `app/src/components/markdown/MdComponents.tsx` |
 | The dock's tab strip | `app/src/components/lectures/TranscriptPanel.tsx` |
-| The chapter strip and the scrub-bar ticks | `app/src/components/lectures/LecturePlayer.tsx` |
-| Which tab the dock opens on | `dockTab` in `app/src/stores/playerPrefsStore.ts` |
+| The chapter name over the frame, and the scrub-bar ticks | `app/src/components/lectures/LecturePlayer.tsx` |
+| The progress line across the playing chapter's card | `app/src/components/lectures/EntryProgress.tsx` |
+| Which tab the dock opens on, what order the tabs sit in, and which register the transcript is in | `dockTab` / `dockTabOrder` / `transcriptMode` in `app/src/stores/playerPrefsStore.ts` |
 | The one-turn headless run both share | `run_once` in `app/src-tauri/src/harness/mod.rs` |
 | ffmpeg lookup (bundled, dev copy, or system) | `app/src-tauri/src/echo360.rs` |
 | The frontend's VTT parser, whose timing half is mirrored | `app/src/lib/lectures.ts` |
@@ -108,8 +116,8 @@ candidate and hand the agent a menu of one.
   wrong — the same argument as [no candidates
   table](#why-there-is-nothing-to-tune-and-nothing-to-cache).
 - `--source 1|2` on `lecture candidates`, `lecture chapters` and `lecture
-  recap` overrules all of it, and `findLectureChapters` /
-  `writeLectureRecap` take the same argument.
+  reading` overrules all of it, and `findLectureChapters` /
+  `writeLectureReading` take the same argument.
 
 Two things it deliberately does not do. **It never picks by candidate count** —
 on one measured lecture that chooses the room camera's 20 over the real slide
@@ -168,8 +176,9 @@ titles and formulas legible, which is the size a model will need.
   would land in a different place in each. `cue_gaps` still throws the *words*
   away, because a pause bonus does not care what was said; `parse_transcript`
   beside it keeps them for the outline, off one shared timestamp reader, so a
-  cue start in a recap window and a cue start in an outline are the same
-  second. It used to live in `recap.rs`, which was its only caller.
+  cue start in a reading window and a cue start in an outline are the same
+  second. It used to live in `reading.rs` (the recap, then), which was its
+  only caller.
 - **A lecture id is a UUID, so a unique prefix is accepted.** A prefix matching
   two lectures is reported with the full ids rather than guessed, the same rule
   `one_subject` follows for subject codes. `oculus list -l` prints the first
@@ -195,7 +204,22 @@ titles and formulas legible, which is the size a model will need.
   a detailed frame depends on the deck, while a blank or a splash loses to a
   real slide by a wide margin in any deck. A probe costs ~40 ms, so the whole
   thing adds well under a second per candidate. The file keeps the **boundary**
-  second in its name, not the offset one. The chat dock's live grab of the
+  second in its name, not the offset one.
+
+  Because the name is the second, **a run deletes the grabs it is not about to
+  rewrite.** A re-run whose candidate set moved used to leave the old set
+  behind, and once the source can change that means frames off a stream this
+  run never looked at: the lecture with the dead slide capture kept a grab of
+  the room's Crestron splash — the single candidate its black stream produced —
+  sitting in the folder. Nothing reads a frame after the turn that asked for
+  it, so an orphan's only power is to mislead whoever opens the folder next.
+  The sweep touches `.jpg` files directly in the folder and nothing else, so
+  the subfolders beside them survive: `live/` is the chat dock's grabs and
+  `reading/` is the reading copy's. **They have to be separate folders.**
+  Chapters and the reading copy are claimed independently — a reading run can
+  start while a chaptering turn is still open on the same lecture — and the
+  reading copy thins at 25 s against chapters' 90 s, so in one shared folder
+  each job's sweep would take most of the other's frames out from under it. The chat dock's live grab of the
   playhead's moment shares that probing (`grab_frame`, and
   [harness.md](./harness.md)) — a frame the student asked about can land on a
   dropout exactly as easily as a boundary's can.
@@ -425,205 +449,383 @@ because the decode would write to the row hundreds of times.
   drip-feeding half-validated chapters into the panel would fight that
   directly.
 
-## Lecture recap
+## The reading copy
 
-Chapters answer "what part of the lecture is this?"; recap notes answer "what
-was on screen, and what was just said?" They therefore share the expensive
-evidence pipeline but not its final shape. `app/src-tauri/src/recap.rs` reuses
-`sample_diffs`, collapse and pause scoring, and the same offset-probed frame
-grab that avoids the room's AV splash. Chapter candidates are thinned at 90
-seconds. Recap starts from the same candidates thinned at 25 seconds, then
-merges a segment shorter than roughly 25 seconds into a neighbour and splits a
-segment longer than roughly three minutes at its longest transcript pause.
-Second 0 remains the first boundary in both jobs.
+Chapters answer "what part of the lecture is this?"; the reading copy answers
+"what was said, as text". The transcript's real defect is not its length but
+that **maths is spoken** — "a naught ket zero plus a one ket one" — and that
+speech is filler, restarts and repeats. A paraphrase pass renders
+`$a_0|0\rangle + a_1|1\rangle$`, fixes the speech recognition from the slide,
+drops the filler and gives one sentence per thought: the lecture as it would
+read on the page. It replaced the **recap**, which produced ~150 words of
+third-person narration per two-minute segment — 0.45× the transcript, so
+neither notes nor a text you could read, under a label column that repeated
+the chapter title.
 
-**A recap is windowed before it reaches the agent.** Consecutive segments are
-grouped into roughly ten-minute windows, snapped to a chapter boundary when a
-chapter set exists. Windows run in sequence. Each prompt carries that span of
-the transcript inline and names the frame paths; unlike chapter naming, none
-of the transcript is optional reading. That is why the job refuses a lecture
-without both its downloaded recording and transcript and points back to the
-lecture download command.
+**The unit is a line** (`ReadingLine` in `app/src-tauri/src/reading.rs`):
+`start_seconds`, `para`, `text`. `start_seconds` is `floor(cue.start)` of the
+first transcript cue the line covers — free and exact, because the prompt
+prints every cue with that integer in its first column, and it is what lets
+the player find the line from the playhead and the playhead from a line. A
+line runs until the next line's start (`chapterEnds` again). A line covers two
+to six cues (Echo360 cues are ~3 s), never more than eight; a two-hour lecture
+is ~600 lines. There is no label, and no region yet — an attention overlay is
+a later, separate pass.
 
-The reply is one markdown body and optional short label per retained segment.
-Validation is per window: every start must be a segment start in that window,
-strictly increasing, with the first segment present, and the agent may merge
-adjacent segments but never invent a split. A bad window gets one retry. The
-model is selected through `Job::LectureRecap` in
-`app/src-tauri/src/harness/jobs.rs`; the CLI's `--provider`, `--model` and
-`--effort` flags replace that selection for one run.
+**It shares chapters' evidence pipeline and not its shape.** `reading.rs`
+reuses `sample_diffs`, collapse and pause scoring, and the same offset-probed
+frame grab that avoids the room's AV splash — into `frames/reading/`, its own
+folder for the reason [the sweep](#details-worth-not-rediscovering) describes.
+Chapter candidates are thinned at 90 seconds; the reading copy starts from the
+same candidates thinned at 25 seconds, merges a segment shorter than roughly
+25 seconds into a neighbour, and splits one longer than roughly three minutes
+at its longest transcript pause. Second 0 remains the first boundary. Those
+segment starts are the **slide changes**: the prompt lists them, the frames
+are grabbed at them, and paragraphs are derived from them — but a line does
+not have to start on one, only on a cue.
 
-**Windows are also the commit boundary.** Migration 31 adds
-`lecture_recap(lecture_id, idx, start_seconds, label, body)` plus
-`recap_status`, `recapped_at` and `recap_error` on `lectures`. A fresh run
+**A run is windowed before it reaches the agent.** Consecutive segments are
+grouped into roughly ten-minute windows, snapped to a chapter boundary within
+three minutes when a chapter set exists. Windows run in sequence. Each prompt
+carries that window's span of the transcript inline — every cue as
+`second  timestamp  text`, so the number a line must cite is the first thing
+on the row — lists the window's slide changes, and names the frame paths; the
+agent opens the frames as images because the slide is what tells it the
+notation. None of the transcript is optional reading, which is why the job
+refuses a lecture without both its downloaded recording and transcript. A cue
+belongs to the window its *start* falls in, so neighbouring windows never both
+own the cue that straddles their edge, and a window with no cues at all is
+skipped rather than asked about.
+
+The reply is `[{start, text}]`, pulled out of prose, a fence or an envelope
+the way `parse_chapters` does. **Validation is per window, and it is the
+whole difference between a reading copy and a recap that drifted**, so every
+rule names the line and its clock:
+
+1. a non-empty reply, every `text` non-empty;
+2. starts strictly increasing;
+3. every start the integer second of a cue in this window;
+4. the first line on the window's first cue;
+5. **coverage** — the cues from a line's start up to the next line's start
+   number at most `MAX_CUES_PER_LINE` (8) *and* speak for at most
+   `MAX_SPEECH_PER_LINE_SECS` (45 s) between them, summed cue durations so
+   silence does not count. A model that folds a minute of speech into one
+   sentence has stopped rewriting and started summarising, and the window
+   goes back with that line named. Both constants are guesses from cue
+   statistics and exist to be tuned after one real run.
+
+A bad window gets one retry with the error appended. Then `para` is set in
+Rust — `mark_paragraphs`: true for the window's first line and for the first
+line at or after each slide change — and never asked of the model, because
+the slide changes are already known to the second and a model asked to mark
+them would mark some other set. The model is selected through
+`Job::LectureReading` in `app/src-tauri/src/harness/jobs.rs`; the CLI's
+`--provider`, `--model` and `--effort` flags replace that selection for one
+run.
+
+**Windows are also the commit boundary.** Migration 34 replaces the recap's
+table with `lecture_reading(lecture_id, idx, start_seconds, para, text)` plus
+`reading_status`, `reading_written_at` and `reading_error` on `lectures`,
+dropping `lecture_recap` and its three columns rather than converting them —
+nothing in a recap row becomes a line — and rekeying the job's model in the
+`job_models` settings row so a picked model survives the rename. A fresh run
 atomically claims the lecture and clears the prior set; that shared gate stops
 the app and CLI from spending two agent turns on the same lecture. Then
-`store::save_recap_window` commits each validated window independently. If
+`store::save_reading_window` commits each validated window independently. If
 window seven fails, windows one through six from the new run stay visible and
 the lecture ends in `error`; this is intentionally different from the
-all-or-nothing chapter write. There is no stored window or end second — windows
-are job-time batching, and each note ends at the next note's start. A startup
-sweep clears a stale `running` left by an interrupted process.
+all-or-nothing chapter write. There is no stored window or end second —
+windows are job-time batching, and each line ends at the next line's start. A
+startup sweep clears a stale `running` left by an interrupted process.
 
-`oculus lecture recap <ID>` is the built reader-independent door. It accepts
-the same unique lecture-id prefix and one-run model overrides as chaptering,
-prints each window before its agent tool rows, and requires `--force` before
-replacing an existing recap. The app's door is the Recap tab's own button,
-which calls `lecture_write_recap` — the command was registered before anything
-in the frontend called it. No duration estimate is documented: the reference
-lectures have not been measured with this job, so the panel offers the shape of
-the cost ("one agent turn per ten minutes of recording") rather than a number
-it would be inventing.
+`oculus lecture reading <ID>` is the CLI door. It accepts the same unique
+lecture-id prefix and one-run model overrides as chaptering, prints each
+window before its agent tool rows, then every line as `hms  text`, and
+requires `--force` before replacing an existing reading copy. The app's door
+is `lecture_write_reading`, with `lecture-reading-progress` and
+`lecture-reading` as its two events. No duration estimate is documented: the
+reference lectures have not been measured with this job, so the panel offers
+the shape of the cost ("one agent turn per ten minutes of recording") rather
+than a number it would be inventing.
 
-**The two jobs are independent, and share code rather than data.** Recap calls
-`chapters::candidates_with_spacing`, `sample_diffs`, `cue_gaps` and the same
-offset-probed `extract_frames` — the expensive, measured half — but it requires
-no chapter set to run, and a lecture may have either, both or neither. Where it
-*reads* chapters is `store::chapters` at the top of the windowing step, and
-they change two things when present: a window edge snaps to a chapter boundary
-within three minutes of the ten-minute target, and each window's prompt names
-the chapter it sits inside. With no chapters the snap falls back to ordinary
-chunking and the prompt simply omits that line. So chaptering first is better,
-not required.
-
-One consequence worth knowing: both jobs write `lectures/<id>/frames/`, and
-they thin candidates differently (90 s against 25 s). A recap run therefore
-replaces the frames a chaptering run left behind. Nothing reads them back —
-they are a run's leavings, checkable by eye — but the set on disk belongs to
-whichever job ran last.
+**The two jobs are independent, and share code rather than data.** The
+reading copy calls `chapters::candidates_with_spacing`, `sample_diffs`,
+`cue_gaps` and the same offset-probed `extract_frames` — the expensive,
+measured half — but it requires no chapter set to run, and a lecture may have
+either, both or neither. Where it *reads* chapters is `store::chapters` at the
+top of the windowing step, and they change two things when present: a window
+edge snaps to a chapter boundary within three minutes of the ten-minute
+target, and each window's prompt names the chapter it sits inside. With no
+chapters the snap falls back to ordinary chunking and the prompt simply omits
+that line. So chaptering first is better, not required.
 
 ## Reading them in the player
 
-Chapters are three different questions, so they are drawn three times over,
-and the recap gets a fourth surface of its own
-(`app/src/components/lectures/LecturePlayer.tsx`, and see
-[frontend.md](./frontend.md) for the player's own shape).
+Chapters are drawn three times over, because they are three different
+questions (`app/src/components/lectures/LecturePlayer.tsx`, and see
+[frontend.md](./frontend.md) for the player's own shape): as the dock's
+chapter list, as the name over the frame, and as ticks on the scrub bar. The
+reading copy is none of them — it is a second *register of the transcript*,
+one tab over.
 
-**Chapters are one of the dock's tabs.** What was the transcript panel's
-header is a `ViewTabs` strip — *Chapters*, *Recap*, *Transcript*, *Chat*
-([harness.md](./harness.md)) — sitting on the border it already had, with the
-`DotsSixVertical` and the drag-to-dock gesture untouched. The
-tabs stop the pointerdown from reaching the header: `startDockDrag` captures
-the pointer on the element it fires from, which retargets the pointerup onto
-the header, and a click needs both ends on one target — without that the tab
-would never register one. Everything around the tabs still drags. There is no
-"In this video" heading over them; the dock is 220px wide at its narrowest and
-its subject is never in doubt. Four labels do not fit that width, so the strip
-scrolls sideways with no visible bar rather than pushing the close button off
-the header. The Transcript tab is only offered when there
-are cues, since a tab that could only ever be empty is not a tab; Chat needs
-neither a file nor a run and so is always offered, which is what makes the dock
-itself unconditional. Recap is always offered too: like Chapters it explains
-its own empty state and carries the button that fills it.
+**The dock is Chapters / Transcript / Chat.** What was the transcript panel's
+header is a `ViewTabs` strip sitting on the border it already had, with the
+`DotsSixVertical` and the drag-to-dock gesture untouched. The tabs stop the
+pointerdown from reaching the header: `startDockDrag` captures the pointer on
+the element it fires from, which retargets the pointerup onto the header, and
+a click needs both ends on one target — without that the tab would never
+register one. Everything around the tabs still drags. There is no "In this
+video" heading over them; the dock is 220px wide at its narrowest and its
+subject is never in doubt. The Transcript tab is only offered when there are
+cues, since a tab that could only ever be empty is not a tab; Chat needs
+neither a file nor a run and so is always offered, which is what makes the
+dock itself unconditional. Chapters is always offered too: it explains its own
+empty state and carries the button that fills it.
 
-**The list follows playback**
-(`app/src/components/lectures/ChaptersPanel.tsx`): every chapter collapsed to
-its title and length, the current one expanded with its summary, so the prose
-beside the video is about what is being said now. Clicking one seeks to its
-start. It deliberately does **not** reuse the transcript's follow machinery —
-that code is wound around a virtualizer and earns its two-stage handover and
-countdown ring on ~2500 rows, where twelve fit the panel with room over. The
-current card is brought into view with `scrollIntoView({ block: "nearest" })`
-and nothing else: no pill, no window, no ring. Coming back from the Chapters
-tab does count as reopening the transcript, though, because that list is
-unmounted while chapters are in front and would otherwise return scrolled to
-the top with its cue index unchanged.
+**These two were briefly one tab, and it is worth saying why they are not.**
+*Read* drew the chapters as headings over the reading copy's lines, on the
+argument that a chapter is the heading of the text under it. It cost the one
+thing the chapter list does well — twelve rows taken in at once, which is a
+table of contents, where twelve headings scattered through six hundred lines
+is not one — and it bought nothing the transcript's own list could not carry,
+because everything the reading copy adds over the transcript is a *row
+source*: the lines instead of the cues. So the chapter list came back whole,
+and the reading copy moved into the tab it is a rewrite of.
+
+### The chapter list
+
+`app/src/components/lectures/ChaptersPanel.tsx` — five to twelve cards, each a
+`<button>` that seeks, carrying the chapter's start, its length rounded to the
+minute, its title, and its summary while it is the one playing. The seconds
+are dropped from the length because the job will not name anything under about
+three minutes a chapter, and `12m 04s` beside a wrapping title is what pushes
+the title onto a third line in a 200px dock.
+
+**It is deliberately not the transcript's follow machinery.** That code is
+wound around a virtualizer and earns its two-stage handover and countdown ring
+on ~2500 rows; twelve fit the panel with room over. So the playing card is
+brought into view with `scrollIntoView({ block: "nearest" })` and nothing else
+— no pill, no window, no ring. `nearest` scrolls the least that will do, so a
+card already on screen does not jump to the middle of the panel under the eye.
+
+A summary goes through `InlineMd`, which flattens paragraphs and lists to
+spans: it sits inside the button that seeks, and a `<p>` in a `<button>`
+closes the button early in WebKit. The renderer is there because the agents
+write maths — `$\log_2 N$` sat in the panel as its own source until it was.
+
+### The transcript has two registers
+
+**Standard and Enhanced are one tab, not two**
+(`app/src/components/lectures/TranscriptPanel.tsx`, and
+`app/src/components/lectures/ReadingList.tsx` for the second). Standard is the
+cue list: every ~3 s fragment as the recogniser heard it. Enhanced is the
+reading copy over the same span — the same words with the filler dropped, the
+notation fixed off the slide and the spoken maths set as maths. Same order,
+same seek on click, same list: switching is a change of register, not a
+navigation, which is the whole reason it is a picker in the search row
+(`app/src/components/lectures/TranscriptModePicker.tsx`) and not a fourth tab.
+It shares that row rather than taking one of its own, because a second row in
+a 220px dock is a row of the transcript; the field takes what is left of the
+width.
+
+**The picker is also how the enhanced copy gets written**, which is the point
+of it being a picker and not a segmented toggle. It is the source switcher's
+shape (`SourceControls.tsx`): a row per option with what it is under its name,
+and the row for the thing that is not there yet says so and starts the job —
+*Enhance* where a downloaded source says *Download*. Picking it runs the job
+**and** switches, because the enhanced view is the progress: the job commits
+window by window, so its lines arrive into the list behind the panel that
+asked for them. A run keeps a spinner on the trigger while you read the other
+register, since it is minutes long and the list it has not filled yet is the
+only other sign of it. The row carries the job's state as its own second line
+— the phase while it runs, the agent's message and *Retry* when a run failed
+with nothing to show for it, and the reason it cannot be picked at all when
+the recording is not downloaded.
+
+**A stored `enhanced` falls back per lecture** (`modeInFront` in
+`TranscriptPanel.tsx`). The register is a habit carried between lectures and
+most lectures have no enhanced copy, so opening one would otherwise mean an
+empty panel with a Write button parked in it — a control you meet only by
+first choosing the empty view. Instead the cues stay in front and the picker
+is the one place the job is asked for. A run already in flight keeps the
+enhanced view, because watching the windows land is the point. So `ReadingList`
+has no "nothing yet" state at all: it is mounted with lines, or with a run
+that has not committed its first window.
+
+**The label and the backend noun differ on purpose.** Everything behind the
+picker says *reading copy* — `lecture_reading`, `lecture_write_reading`,
+`oculus lecture reading`, migration 34. "Enhanced" is what it is *next to
+Standard*, where "Reading" would only be a second word for the thing both
+registers are. They are one artifact under two names, and renaming the
+artifact to match the label would cost a migration for a word.
+
+**Enhanced is coarser than Standard, and that is the design.** A cue is a
+three-second fragment and maths spans several of them, so a line covers two to
+six cues — the validator's `MAX_CUES_PER_LINE` is what holds that. So the
+enhanced list has fewer, longer rows and its highlight moves in ten- to
+twenty-second steps rather than three-second ones. That is the granularity of
+reading; following along word by word is what the other register is for.
+
+**No chapter headings inside it.** The chapter list is the table of contents
+and the name over the frame already says where the playhead is, so a heading
+row in the text would be a third answer to a question already answered twice.
+
+**It is one list.** ~600 lines and ~2500 cues are the same order of rows, so
+both registers render through `app/src/components/lectures/FollowList.tsx` —
+the virtualizer, the snap and band-rule follow-scroll, the nudge / unfollow /
+soft-resume handover, the eight-second idle re-sync with its countdown ring on
+the *Back to live* pill, the edge fades and the reopen-scroll after the dock
+slides. Each register keeps only its own mapping into row space, and each keys
+a row by what it *is* — a cue index, a line index — so a measured height
+survives a search. They share one `following` flag in the player, since only
+one of them is mounted at a time. A search narrows the rows to matching text;
+a matched enhanced line is shown as plain text with the hit marked, because
+`InlineMd` cannot carry a `<mark>` through it, so a hit's maths reads as its
+source until the query is cleared.
+
+**A line's markdown is inline**, for the chapter summary's reason: the row is
+a `<button>` that seeks, and for the reading copy the maths is the point. A
+`para` line opens a paragraph gap, and the gap is padding on the row's
+positioned wrapper rather than a margin on the button — the virtualizer
+measures a row's border box, and a margin on an absolutely positioned row
+would push it onto the row below by an amount the list never learns of. The
+gap is suppressed while searching, where consecutive rows are not consecutive
+lines.
+
+**Which register is in front is a player preference**, `transcriptMode` beside
+the dock's tab, side and size in `playerPrefsStore` — a habit, not a property
+of one recording. It defaults to `standard` for the reason the dock defaults
+to Transcript: every downloaded lecture has one, and the enhanced copy has to
+be asked for.
 
 **A chapter's end is derived, in the reader.** `chapterEnds` in
 `app/src/lib/lectures.ts` is the whole of it — the next chapter's start, or the
 lecture's duration for the last. It is given the *player's* duration, which is
-the element's where a file is loaded rather than the catalogue's.
+the element's where a file is loaded rather than the catalogue's. `spanAt`
+beside it answers "which one is the playhead in" over any ordered list of
+starts, and the player asks it twice: once over the chapters, once over the
+lines.
 
-**The strip and the ticks answer "how much of this bit is left".** Above the
-scrub bar, inside the controls scrim, the chapter's name and a hairline that
-fills across that chapter's span — not the lecture's, which the scrub bar
-already says. It lives in the scrim, so it fades with the control bar.
-Boundaries are notched into the `SeekBar` track as a 2px cut in the scrim's own
-black, which reads against the played fill and the unplayed track alike; a
-segmented bar was the alternative and costs the rounded ends and the growing
-hover height that make it read as one bar. Second 0 is the left edge, so it is
-not drawn. Those colours are fixed rather than semantic on purpose — the bar
-sits on the frame, where `background` is whatever the lecturer put on the
-slide.
+### How much of this bit is left
+
+`EntryProgress` (`app/src/components/lectures/EntryProgress.tsx`) is a 2px
+brand-coloured line across the top edge of the playing chapter's card, filled
+by the playhead's position inside *that* chapter's span — not the lecture's,
+which the scrub bar already says. Lines do not get one: ten to twenty seconds
+is not a span worth measuring, and the highlight moving down the page already
+is the progress.
+
+**The fill used to be a hairline above the scrub bar**, beside the chapter's
+name inside the controls scrim. It said the same thing over the frame, where it
+had to be white-on-black and faded out with the control bar; on the card it
+is beside the title it is measuring and it stays. Only the current chapter is
+given one: a track on all twelve would read as a ladder rather than as a
+playhead, and the highlight already says which card is current.
+
+**The name stayed put.** Which chapter is playing is the one thing the scrub
+bar cannot say and the dock only says when it is open, so it is still written
+over the frame, in the scrim, fading with the controls.
+
+The playhead reaches it as `atRef`, the same `RefObject<number>` the chat
+composer's moment chip reads, and the line writes its own width on a 200 ms
+interval rather than through state — the panel is memoised against a player
+that re-renders four times a second, and a `currentTime` prop would throw that
+memo away on every frame and put the virtualised list back beside a decoding
+video.
+
+**The ticks stay on the scrub bar.** Boundaries are notched into the `SeekBar`
+track as a 2px cut in the scrim's own black, which reads against the played
+fill and the unplayed track alike; a segmented bar was the alternative and
+costs the rounded ends and the growing hover height that make it read as one
+bar. Second 0 is the left edge, so it is not drawn. Those colours are fixed
+rather than semantic on purpose — the bar sits on the frame, where `background`
+is whatever the lecturer put on the slide.
 
 **Which tab is in front is a player preference**, `dockTab` beside the dock's
-side and size in `playerPrefsStore` — a habit like the side it is docked to,
-not a property of one recording. It defaults to the transcript: every
-downloaded lecture has one, and chapters have to be asked for.
+side and size — a habit like the side it is docked to, not a property of one
+recording. It defaults to the transcript. A stored `chapters` still means the
+chapter list; a stored `recap` or `read`, from the two shapes that came
+between, falls to the default through the same tolerant read. **What order
+they sit in is the same kind of preference** (`dockTabOrder`), dragged
+tab-on-tab in the header; see [frontend.md](./frontend.md) for how a stored
+order survives a tab being added, removed or hidden.
 
-### The recap tab
+### Two jobs, two panels
 
-The Recap tab (`app/src/components/lectures/RecapPanel.tsx`,
-`app/src/hooks/useLectureRecap.ts`) is the chapter list's denser sibling and
-mirrors it almost exactly — a status read from SQLite rather than from the
-`lectures` row the player was handed, a module-level map for the elapsed clock
-and last step of a run this session started, the same five real states, the
-same Regenerate footer. Three things are deliberately different.
+Both read their state from SQLite (`app/src/hooks/useLectureChapters.ts`,
+`app/src/hooks/useLectureReading.ts`) rather than from the `lectures` row the
+player was handed: in the side panel that row is a snapshot held by a store
+and in a list it is whatever the last `getLectures` returned, and neither is
+re-read when a run lands minutes later. Each hook owns its read, listens for
+its job's finish event, and re-reads on it; each keeps a module-level map of
+when a run this session started and the last step it reported, because the
+player unmounts on every tab switch and the job outlives it.
 
-- **Every note's prose is on screen, not just the playing one's.** Chapters
-  are navigation and a list of twelve titles is the point of them; a recap is
-  the lecture written down, something to read after the fact. Following
-  playback is a highlight here rather than the only way to see any prose.
-- **Notes appear while the job is still running.** A recap commits window by
-  window, so the panel shows the list *and* the progress line together, and the
-  hook re-reads the table on the `writing` phase rather than only at the end.
-  This is the visible half of a decision that would otherwise live only in the
-  database.
-- **It can say how far through itself it is.** A recap is a countable sequence
-  of agent turns, so the spinner carries "3/7" — a fact, where a chaptering
-  run's single turn has no denominator and is still given none.
-
-Only the heading row seeks. A note's body is markdown — `CompactMd`, the same
-renderer the chat timeline uses — and none of that may sit inside a `<button>`,
-which is why the click target is the line above the prose rather than the whole
-card the Chapters tab uses. A chapter's summary has the same problem in
-miniature and takes the other way out: `InlineMd` flattens it to inline
-elements so it can stay inside the button. Both exist because the agents write
-maths, and `$\log_2 N$` sat in the panel as its own source until they did.
+- **Lines appear while the job is still running.** The reading copy commits
+  window by window, so the panel shows the list *and* the footer's running
+  line together, and the hook re-reads the table on the `writing` phase rather
+  than only at the end. This is the visible half of a decision that would
+  otherwise live only in the database. Chapters are all-or-nothing in one
+  transaction, so there is nothing to show until that run ends.
+- **The reading copy can say how far through itself it is; chaptering cannot.**
+  It is a countable sequence of agent turns, so its running line carries
+  "3/7" — a fact, where a chaptering run's single turn has no denominator and
+  is still given none.
+- **Both can run at once**, claimed independently in Rust. They no longer share
+  a footer to stack their running lines in: each panel shows its own job and
+  says nothing about the other's.
 
 ### Every state is a real one
 
-The panel never shows a control that does nothing, so the tab has five states
-and no placeholder among them:
+Nothing here shows a control that does nothing, so there is no placeholder
+among these states. The two jobs put them in different places, though: the
+chapter list is its own panel and carries its own, while the enhanced copy's
+live in the picker until there is a list to put them beside.
 
-- **Not downloaded.** Chaptering watches the recording, so the tab says the
-  file has to be there. The download button is already on the frame and on the
-  control bar; this state does not grow a third.
-- **Nothing yet.** A **Find chapters** button, and what it costs: 8–11
-  minutes.
+- **Not downloaded.** Both jobs watch the recording. The chapter tab says so;
+  the picker's Enhanced row says so as its second line and cannot be picked.
+  The download button is already on the frame and on the control bar; neither
+  grows a third.
+- **No transcript on disk.** The Transcript tab is dropped from the strip
+  entirely, which takes the enhanced register with it — and Rust refuses the
+  reading job without a transcript anyway, so the register that could not run
+  is the one that is not offered. Chapters need only the recording, so that
+  tab is untouched and is what the dock falls to (`tabInFront`).
+- **Nothing yet.** Chapters offers **Find chapters** and its 8–11 minutes in
+  the panel. Enhanced has no panel state at all — `modeInFront` keeps the
+  cues in front — so it is the picker's row that offers it, as *Enhance*
+  beside the register's name. No duration is quoted for it: the reference
+  lectures have not been measured with this job, and the panel says the shape
+  of the cost ("one agent turn per ten minutes of recording") rather than a
+  number it would be inventing.
 - **`running`.** A spinner in `brand` — the accent the app spends on work in
   flight — the phase it is on, the step under it, and a clock counting *up*.
   See [Saying what it is doing](#saying-what-it-is-doing). There is still no
   bar: a fill towards an estimate reaches the end and keeps waiting, which is
-  exactly what hung looks like, and the agent turn — most of the run — cannot
-  say how far through itself it is. A run *this session* started has its start
-  time in a module-level map, because the player unmounts on every tab switch
-  and the job outlives it by eight minutes; a run already in flight when the
-  app started has no start time anywhere — `chaptered_at` is stamped by a
-  terminal status only — and is shown without a clock rather than with a wrong
-  one. Its steps are in a second map for the same reason and with the same
-  gap.
-- **`error`.** `chapter_error` verbatim, because it is the agent's own
-  failure, and a retry.
-- **Chapters.** The list, with **Regenerate** in a footer. A regenerate that
-  fails leaves the chapters that were already there (`store::save_chapters` is
-  one transaction), so that failure is a line *beside* them rather than in
-  place of them.
+  exactly what hung looks like, and an agent turn cannot say how far through
+  itself it is. A run already in flight when the app started has no start
+  time anywhere — `chaptered_at` and `reading_written_at` are stamped by a
+  terminal status only — and is shown without a clock rather than with a
+  wrong one.
+- **`error`.** The job's own message as the agent left it, and a retry. With
+  rows already on screen the message sits in the footer beside them: a
+  regenerate that fails leaves what was there (`store::save_chapters` is one
+  transaction; the reading copy's windows before the failure are kept), so the
+  failure is a line *beside* the rows rather than in place of them. A reading
+  run that failed with nothing to show for it has no footer to sit in, so it
+  is the picker's Enhanced row that carries the message and the *Retry*.
+- **Rows.** The list, with one **Regenerate** in that panel's own footer. The
+  menu of two jobs that footer briefly held went with the tab that had both of
+  them in it; one panel, one job, one word.
 
-**Nothing is hand-editable.** Chapters are derived data an agent writes, like
-`pages` and `parse_status`, so the only two affordances are Find chapters and
-Regenerate — there is no boundary to drag and no title to type.
+**Nothing is hand-editable.** Chapters and lines are derived data an agent
+writes, like `pages` and `parse_status`, so the only affordances are the two
+jobs — there is no boundary to drag and no sentence to retype.
 
-**The button is disabled while a run is in flight, not apologetic after the
+**The buttons are disabled while a run is in flight, not apologetic after the
 fact.** Rust refuses a second call with "that lecture is already being
 chaptered", and an error message is the wrong place to learn that a button was
 never going to work.
-
-**The job's state is read from SQLite, not from the `lectures` row the player
-was handed.** In the side panel that row is a snapshot held by a store and in a
-list it is whatever the last `getLectures` returned; neither is re-read when a
-run lands eight minutes later. `useLectureChapters` owns the read, listens for
-`lecture-chapters`, and re-reads on it.
 
 ## What is not built
 

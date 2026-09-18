@@ -40,7 +40,6 @@ import { useTabActive, useTabId } from "@/components/tabs/TabContext";
 import {
   parseVtt,
   spanAt,
-  chapterEnds,
   fmtDuration,
   fmtTime,
   fmtLectureDate,
@@ -48,9 +47,9 @@ import {
   type Cue,
 } from "@/lib/lectures";
 import { useLectureChapters } from "@/hooks/useLectureChapters";
-import { useLectureRecap } from "@/hooks/useLectureRecap";
+import { useLectureReading } from "@/hooks/useLectureReading";
 import type { ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
-import type { RecapPanelProps } from "@/components/lectures/RecapPanel";
+import type { ReadingListProps } from "@/components/lectures/ReadingList";
 import type { LectureChatPanelProps } from "@/components/lectures/LectureChatPanel";
 import { useTranscriptDock, type Dock } from "@/hooks/useTranscriptDock";
 import { PIP_CORNERS, useSourceLayout, type PipCorner } from "@/hooks/useSourceLayout";
@@ -96,11 +95,12 @@ const DOCK_ICON_FACING: Record<Dock, string> = {
 };
 
 /** What the dock button calls the tab it would show or hide. The button used
- *  to guess from what the recording had; with four tabs, and Chat on every
- *  recording, the only honest answer is the one in front. */
+ *  to guess from what the recording had; with three tabs, and Chat on every
+ *  recording, the only honest answer is the one in front. The transcript is
+ *  one noun in both of its registers — enhanced or verbatim, it is still what
+ *  the button would be showing you. */
 const DOCK_TAB_NOUN: Record<DockTab, string> = {
   chapters: "chapters",
-  recap: "recap",
   transcript: "transcript",
   chat: "chat",
 };
@@ -491,7 +491,9 @@ export function LecturePlayer({
   const [fileDuration, setFileDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** Transcript list is tracking playback (vs. the user reading ahead). */
+  /** The dock's list is tracking playback (vs. the user reading ahead). One
+   *  flag for both the Transcript and the Read tab: they share `FollowList`,
+   *  and only one of the two is mounted at a time. */
   const [following, setFollowing] = useState(true);
   /** Controls are over the frame, so they fade out of the way while playing. */
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -676,16 +678,15 @@ export function LecturePlayer({
     [chapterState.chapters],
   );
 
-  // ── Recap ────────────────────────────────────────────────────────────────
+  // ── Reading copy ─────────────────────────────────────────────────────────
 
-  // The denser reading of the same recording, read the same way and for the
-  // same reason. The two jobs are independent — a lecture can have either,
-  // both or neither — so this is a second hook rather than a field on the
-  // first one's state.
-  const recapState = useLectureRecap(lecture.id);
-  const recapStarts = useMemo(
-    () => recapState.notes.map((n) => n.start_seconds),
-    [recapState.notes],
+  // The same recording as text, read the same way and for the same reason.
+  // The two jobs are independent — a lecture can have either, both or neither
+  // — so this is a second hook rather than a field on the first one's state.
+  const readingState = useLectureReading(lecture.id);
+  const lineStarts = useMemo(
+    () => readingState.lines.map((l) => l.start_seconds),
+    [readingState.lines],
   );
 
   // ── Transcript loading ───────────────────────────────────────────────────
@@ -949,11 +950,13 @@ export function LecturePlayer({
     setActiveCueIdx(idx);
   };
 
-  // ── Transcript follow ────────────────────────────────────────────────────
+  // ── Follow ───────────────────────────────────────────────────────────────
 
-  // The scrolling itself lives in the panel, which owns the virtualizer and so
-  // is the only thing that knows where a cue sits. The player owns just the
-  // flag and the two ways back to live.
+  // The scrolling itself lives in `FollowList`, which owns the virtualizer and
+  // so is the only thing that knows where a row sits. The player owns just the
+  // flag and the two ways back to live — shared by the Transcript and Read
+  // tabs, since only one of their lists is mounted at a time and a hand-scroll
+  // on either means the same thing.
   const handleScrollAway = useCallback(() => {
     if (!followingRef.current) return;
     followingRef.current = false;
@@ -1138,31 +1141,26 @@ export function LecturePlayer({
   /** The tab the dock is actually showing — what T shows or hides. */
   const frontTab = tabInFront(dockTab, hasTranscript);
 
-  /** The chapter the playhead is in, and how far through it we are. */
+  /** The chapter the playhead is in. Its *name* still sits above the scrub bar;
+   *  how far through it we are is drawn in the dock instead, on the playing
+   *  card's own top edge (`EntryProgress`). */
   const activeChapterIdx = spanAt(chapterStarts, currentTime);
   const activeChapter =
     activeChapterIdx >= 0 ? chapterState.chapters[activeChapterIdx] : null;
-  const activeChapterEnd = activeChapter
-    ? chapterEnds(chapterStarts, duration)[activeChapterIdx]
-    : 0;
-  const chapterPct = activeChapter
-    ? Math.min(
-        100,
-        Math.max(
-          0,
-          ((currentTime - activeChapter.start_seconds) /
-            Math.max(1, activeChapterEnd - activeChapter.start_seconds)) *
-            100,
-        ),
-      )
-    : 0;
 
-  // One memoised bag, because `TranscriptPanel` is memo'd against a player that
-  // re-renders on every `timeupdate` — see the prop's own comment there.
+  /** The line the playhead is in — the same boundary arithmetic the chapter
+   *  strip does, over a list fifty times denser. */
+  const activeLineIdx = spanAt(lineStarts, currentTime);
+
+  // One memoised bag per tab, because `TranscriptPanel` is memo'd against a
+  // player that re-renders on every `timeupdate` — see the props' own comments
+  // there. Two jobs, two tabs, two bags: they share an evidence pipeline in
+  // Rust and nothing at all on screen.
   const chaptersProps: ChaptersPanelProps = useMemo(
     () => ({
       chapters: chapterState.chapters,
       activeIdx: activeChapterIdx,
+      atRef,
       duration,
       status: chapterState.status,
       error: chapterState.error,
@@ -1188,38 +1186,44 @@ export function LecturePlayer({
     ],
   );
 
-  /** The note the playhead is in — the same boundary arithmetic the chapter
-   *  strip does, over a list that is ten times denser. */
-  const activeNoteIdx = spanAt(recapStarts, currentTime);
-
-  const recapProps: RecapPanelProps = useMemo(
+  /** The Transcript tab's Enhanced register. It is only ever mounted inside
+   *  that tab, which the strip drops when the recording has no cues — so the
+   *  transcript the job rewrites is already proven and the bag does not carry
+   *  a `hasTranscript`. The register picker is built from this bag inside
+   *  `TranscriptPanel`, since the Standard register needs it too. */
+  const readingProps: Omit<ReadingListProps, "picker"> = useMemo(
     () => ({
-      notes: recapState.notes,
-      activeIdx: activeNoteIdx,
-      status: recapState.status,
-      error: recapState.error,
-      since: recapState.since,
-      progress: recapState.progress,
-      busy: recapState.busy,
+      lines: readingState.lines,
+      activeLineIdx,
+      status: readingState.status,
+      error: readingState.error,
+      since: readingState.since,
+      progress: readingState.progress,
+      busy: readingState.busy,
+      onWrite: readingState.write,
       downloaded: !!lecture.video_path,
-      // A recap reads the whole transcript, so the cues the player already
-      // parsed are the honest test of whether one can be written — the same
-      // file Rust refuses the run without.
-      hasTranscript: cues.length > 0,
+      open: showDock,
+      active: frontTab === "transcript",
+      following,
+      onScrollAway: handleScrollAway,
+      onBackToLive: handleBackToLive,
       onSeek: handleCueSeek,
-      onWrite: recapState.write,
     }),
     [
-      recapState.notes,
-      recapState.status,
-      recapState.error,
-      recapState.since,
-      recapState.progress,
-      recapState.busy,
-      recapState.write,
-      activeNoteIdx,
+      readingState.lines,
+      readingState.status,
+      readingState.error,
+      readingState.since,
+      readingState.progress,
+      readingState.busy,
+      readingState.write,
+      activeLineIdx,
       lecture.video_path,
-      cues.length,
+      showDock,
+      frontTab,
+      following,
+      handleScrollAway,
+      handleBackToLive,
       handleCueSeek,
     ],
   );
@@ -1274,7 +1278,7 @@ export function LecturePlayer({
     [lecture.id, cues, chapterStarts, chapterState.chapters],
   );
 
-  // The Chat tab's bag, beside `chaptersProps` and memoised for the same
+  // The Chat tab's bag, beside the other two and memoised for the same
   // reason. Everything in it is stable across a `timeupdate`: the playhead
   // travels by ref, not by value.
   const chatProps: LectureChatPanelProps = useMemo(
@@ -1462,21 +1466,16 @@ export function LecturePlayer({
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/85 via-black/45 to-transparent" />
 
             <div className="relative px-3 pb-1">
-              {/* Where you are in *this* chapter, not in the lecture — the
-                  scrub bar below already says that. It lives inside the scrim,
-                  so it goes when the bar does. White on the frame, like every
-                  other mark down here. */}
+              {/* Which chapter is playing, named over the frame — the one
+                  thing the scrub bar cannot say. The hairline that used to
+                  fill beside it is gone: how far through this chapter we are
+                  is the dock's line now (`EntryProgress`), where it is beside
+                  the same title in the list and does not fade with the
+                  controls. White on the frame, like every other mark down
+                  here, and inside the scrim so it goes when the bar does. */}
               {activeChapter && (
-                <div className="flex select-none items-center gap-2.5 pb-1">
-                  <span className="min-w-0 shrink truncate text-[11.5px] font-medium text-white/90">
-                    {activeChapter.title}
-                  </span>
-                  <span className="relative h-px min-w-6 flex-1 overflow-hidden rounded-full bg-white/25">
-                    <span
-                      className="absolute inset-y-0 left-0 bg-white/80"
-                      style={{ width: `${chapterPct}%` }}
-                    />
-                  </span>
+                <div className="select-none truncate pb-1 text-[11.5px] font-medium text-white/90">
+                  {activeChapter.title}
                 </div>
               )}
 
@@ -1618,7 +1617,7 @@ export function LecturePlayer({
         )}
       </div>
 
-      {/* The dock — chapters, transcript and chat, dragged to any edge,
+      {/* The dock — the reading copy, the transcript and chat, dragged to any edge,
           dragged wider from its divider. Not rendered at all where it is not
           allowed: mounted-but-closed is how it *slides*, and a dock that can
           never open has nothing to slide — while its Chat tab is a thread
@@ -1632,7 +1631,7 @@ export function LecturePlayer({
             tab={dockTab}
             onTabChange={(t) => setPrefs({ dockTab: t })}
             chapters={chaptersProps}
-            recap={recapProps}
+            reading={readingProps}
             chat={chatProps}
             dock={dock}
             size={size}

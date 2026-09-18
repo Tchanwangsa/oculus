@@ -1,10 +1,11 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type RefObject } from "react";
 import { CircleNotch } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { Chapter } from "@/lib/db";
 import { InlineMd } from "@/components/markdown/MdComponents";
+import { EntryProgress } from "@/components/lectures/EntryProgress";
 import {
   CHAPTER_PHASE_LABEL,
   chapterEnds,
@@ -32,6 +33,10 @@ export interface ChaptersPanelProps {
   chapters: Chapter[];
   /** Which chapter the playhead is in; -1 before the first one starts. */
   activeIdx: number;
+  /** The playhead itself, for the fill across the playing card's top edge.
+   *  A ref and not a number: this panel is memoised against a player that
+   *  re-renders four times a second — see `atRef` in `LecturePlayer.tsx`. */
+  atRef: RefObject<number>;
   /** The player's duration — the element's where one is loaded, since the
    *  last chapter ends there and the catalogue's figure runs short. */
   duration: number;
@@ -68,6 +73,7 @@ export interface ChaptersPanelProps {
 export const ChaptersPanel = memo(function ChaptersPanel({
   chapters,
   activeIdx,
+  atRef,
   duration,
   status,
   error,
@@ -129,12 +135,19 @@ export const ChaptersPanel = memo(function ChaptersPanel({
               ref={active ? activeRef : undefined}
               onClick={() => onSeek(c.start_seconds)}
               className={cn(
-                "mb-0.5 flex w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors",
+                "relative mb-0.5 flex w-full items-start gap-2 overflow-hidden rounded px-2 py-1.5 text-left transition-colors",
                 active
                   ? "bg-brand/12"
                   : "text-muted-foreground hover:bg-surface hover:text-foreground",
               )}
             >
+              {/* How far through *this* chapter we are, on its own top edge.
+                  It used to be a hairline above the scrub bar, where it had to
+                  be white-on-frame and faded out with the controls; beside the
+                  title it is measuring it stays put — see `EntryProgress`. */}
+              {active && (
+                <EntryProgress atRef={atRef} start={c.start_seconds} end={ends[i]} />
+              )}
               <span
                 className={cn(
                   "w-10 shrink-0 pt-px text-[10px] tabular-nums",

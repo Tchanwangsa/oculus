@@ -1,16 +1,25 @@
-//! Lecture recap: one short note for each meaningful visual moment.
+//! The reading copy: the lecture as it would read on the page, one sentence
+//! per line, each pinned to the second it was said.
 //!
-//! Recap shares chapters' cheap visual detector and splash-resistant frame
-//! grabs, but deliberately keeps a denser boundary set. The recording is
-//! then split into roughly ten-minute windows so a long lecture never becomes
-//! one enormous agent turn. Each window is parsed, validated and written on
-//! its own; a failure therefore leaves the completed windows visible.
+//! The transcript is speech — filler, restarts, and maths said out loud. The
+//! reading copy is the same content rewritten as text: spoken maths set as
+//! maths, ASR fixed from the slide, one sentence per thought. It shares
+//! chapters' cheap visual detector and splash-resistant frame grabs, and keeps
+//! a denser boundary set whose slide changes become paragraph breaks. The
+//! recording is split into roughly ten-minute windows so a long lecture never
+//! becomes one enormous agent turn. Each window is parsed, validated and
+//! written on its own; a failure therefore leaves the completed windows
+//! visible.
+//!
+//! This job replaced the lecture recap (`recap.rs`, third-person notes per
+//! slide); the windows, frames and commit shape are its, with the unit and
+//! the validator changed.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// Recap follows slide changes closely enough that looking away for half a
-/// minute normally moves to at most one new note.
+/// Paragraphs follow slide changes closely enough that looking away for
+/// half a minute normally moves to at most one new paragraph.
 const MIN_SEGMENT_SECS: u32 = 25;
 
 /// A lecturer can speak over one unchanged slide for a long time. Past this
@@ -24,43 +33,64 @@ const WINDOW_TARGET_SECS: u32 = 10 * 60;
 /// change, but a far-away one should not make a tiny or enormous turn.
 const WINDOW_SNAP_SECS: u32 = 3 * 60;
 
+/// The coverage floor: the whole difference between a reading copy and a
+/// recap that drifted into summary. A line that covers more transcript than
+/// this is a summary, and the window is rejected so the model splits it.
+///
+/// Both constants are guesses from cue statistics (Echo360 cues run ~3 s;
+/// the prompt asks for two to six per line) and exist to be tuned after one
+/// real run.
+pub const MAX_CUES_PER_LINE: usize = 8;
+/// The summed cue duration one line may cover — speech only, so a pause
+/// between cues does not count against the line. See [`MAX_CUES_PER_LINE`].
+pub const MAX_SPEECH_PER_LINE_SECS: f32 = 45.0;
+
 /// One WebVTT cue, and the parser for them, both `chapters`'.
 ///
-/// They were here first, when a recap was the only job that needed the words
-/// as well as the timings. Chaptering needs them now too — the outline it
-/// hands its agent is the transcript with the slide changes merged in — so the
-/// parser sits beside `chapters::cue_gaps`, which reads the same file for the
-/// same two timestamp shapes. One parser, so a cue start in a recap window and
-/// a cue start in an outline are the same second.
+/// They were here first, when the reading copy (then the recap) was the only
+/// job that needed the words as well as the timings. Chaptering needs them
+/// now too — the outline it hands its agent is the transcript with the slide
+/// changes merged in — so the parser sits beside `chapters::cue_gaps`, which
+/// reads the same file for the same two timestamp shapes. One parser, so a
+/// cue start in a reading window and a cue start in an outline are the same
+/// second.
 pub use crate::chapters::{parse_transcript, TranscriptCue};
 
-/// One stored recap row. Its end is the next row's start (or the lecture's
-/// duration), so storing an end would duplicate a fact just as it would for a
-/// chapter.
+/// One stored line of the reading copy. Its end is the next line's start (or
+/// the lecture's duration), so storing an end would duplicate a fact just as
+/// it would for a chapter.
+///
+/// `start_seconds` is `floor(cue.start)` of the first transcript cue the line
+/// covers, so a line can be found from the playhead and the playhead from a
+/// line. `para` is derived here from the slide changes, never asked of the
+/// model — see [`mark_paragraphs`].
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct RecapNote {
+pub struct ReadingLine {
     pub start_seconds: u32,
-    pub label: String,
-    pub body: String,
+    pub para: bool,
+    pub text: String,
 }
 
 #[derive(serde::Deserialize)]
-struct ReplyNote {
+struct ReplyLine {
     #[serde(alias = "start_seconds", alias = "seconds", alias = "at")]
     start: f64,
-    #[serde(default)]
-    label: String,
-    body: String,
+    #[serde(alias = "body", alias = "line")]
+    text: String,
 }
 
 #[derive(serde::Deserialize)]
 struct ReplyEnvelope {
-    #[serde(alias = "recap")]
-    notes: Vec<ReplyNote>,
+    #[serde(alias = "reading", alias = "notes")]
+    lines: Vec<ReplyLine>,
 }
 
 /// A job-time window. Windows are intentionally not persisted: they are only
 /// a way to keep each agent turn bounded.
+///
+/// `segment_starts` are the slide changes inside the window — what the prompt
+/// lists and what `para` is derived from. They are not where a line has to
+/// start: a line starts on a transcript cue.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
     pub start_seconds: u32,
@@ -71,7 +101,7 @@ pub struct Window {
 
 // ── Transcript and segmentation ─────────────────────────────────────────────
 
-/// Dense, time-ordered recap segment starts, always beginning at second 0.
+/// Dense, time-ordered slide-change seconds, always beginning at second 0.
 ///
 /// Visual candidates use chapters' measured detector with a 25-second
 /// thinning radius. Short leading/trailing fragments are merged away, then a
@@ -160,7 +190,7 @@ fn previous_cue_end(cues: &[TranscriptCue], start: f32) -> f32 {
 // ── Windows and prompt ──────────────────────────────────────────────────────
 /// Chunk segments into approximately ten-minute windows. A chapter boundary
 /// within three minutes of the target wins; it is mapped to the nearest
-/// segment start so the first note in every window remains a valid segment.
+/// segment start so every window opens on a slide change.
 pub fn windows(
     starts: &[u32],
     duration_secs: u32,
@@ -220,6 +250,32 @@ fn nearest_later_start(starts: &[u32], first: usize, target: u32) -> usize {
     }
 }
 
+/// The integer second a line cites for a cue: the number printed in the
+/// transcript's first column, and the only form a `start` may take.
+fn cue_second(cue: &TranscriptCue) -> u32 {
+    cue.start.max(0.0).floor() as u32
+}
+
+/// The cues that belong to a window, by their start. A cue belongs to exactly
+/// one window, so the transcript the prompt prints and the starts the
+/// validator allows are the same set, and neighbouring windows never both
+/// own the cue that straddles their edge.
+fn window_cues<'a>(
+    cues: &'a [TranscriptCue],
+    window: &Window,
+) -> impl Iterator<Item = &'a TranscriptCue> + 'a {
+    let start = window.start_seconds as f32;
+    let end = window.end_seconds as f32;
+    cues.iter()
+        .filter(move |cue| cue.start >= start && cue.start < end)
+}
+
+/// The second the window's first line has to start at, or `None` when the
+/// window has no speech in it at all.
+pub fn first_cue_start(cues: &[TranscriptCue], window: &Window) -> Option<u32> {
+    window_cues(cues, window).next().map(cue_second)
+}
+
 /// Everything one window's prompt needs.
 pub struct Prompt<'a> {
     pub title: &'a str,
@@ -229,7 +285,13 @@ pub struct Prompt<'a> {
     pub cues: &'a [TranscriptCue],
 }
 
-/// Build one self-contained recap turn: transcript inline, frames by path.
+/// Build one self-contained reading-copy turn: transcript inline, frames by
+/// path.
+///
+/// Every transcript line is printed as `second  timestamp  text`, the bare
+/// second first, because that number is what a line's `start` has to be
+/// *exactly*. A model asked to convert a clock to seconds will sometimes
+/// round, and a rounded second is not a cue start.
 pub fn prompt(job: &Prompt) -> String {
     let segments = job
         .window
@@ -238,7 +300,7 @@ pub fn prompt(job: &Prompt) -> String {
         .map(|second| format!("  {second:>6}  {}", crate::chapters::hms(*second)))
         .collect::<Vec<_>>()
         .join("\n");
-    let transcript = transcript_span(job.cues, job.window.start_seconds, job.window.end_seconds);
+    let transcript = transcript_span(job.cues, job.window);
     let chapter = job
         .window
         .chapter_title
@@ -249,26 +311,57 @@ pub fn prompt(job: &Prompt) -> String {
         .course_dir
         .map(|dir| format!("Course folder: {dir}/\n"))
         .unwrap_or_default();
+    let first = first_cue_start(job.cues, job.window).unwrap_or(job.window.start_seconds);
     format!(
-        "Write the recap notes for one window of a university lecture.\n\n\
-Lecture: {title}\n\
-Window: {from}–{to}\n\
-{chapter}\
-Recording folder: {lecture_dir}\n\
-Frames: {lecture_dir}/frames/<second>.jpg\n\
-{course}\n\
-Segment starts (second, timestamp):\n{segments}\n\n\
-Transcript for this window:\n\n{transcript}\n\n\
-Rules\n\
-- Write one note per segment unless two adjacent segments are genuinely one thought. You may merge adjacent segments by omitting the later start; never invent or split a segment.\n\
-- Describe this moment, not the whole chapter: what the slide shows, what the lecturer is arguing, any equation or definition written, and any question asked. Use two to four sentences in present tense.\n\
-- Use the lecturer's own vocabulary and notation. Put maths in $…$ or $$…$$, and code in fenced code blocks.\n\
-- Say when the moment is a worked example, student question, aside, or housekeeping.\n\
-- Give a short label of two to six words. It may be empty when the body is the whole point.\n\
-- Some frames are the lecture theatre's AV splash screen (for example, a panel saying \"connect your laptop\"), not a slide. Ignore it and use the transcript and neighbouring frames.\n\
-- The first segment in this window must have a note. Starts must be in strictly increasing play order.\n\n\
-Reply with JSON and nothing else:\n\n\
-[{{\"start\": {first}, \"label\": \"…\", \"body\": \"…\"}}]",
+        r#"Write one window of a university lecture as a reading copy: the lecture as it
+would read on the page, one sentence per line, each pinned to the second it
+was said.
+
+Lecture: {title}
+Window: {from}–{to}
+{chapter}Recording folder: {lecture_dir}
+Frames: {lecture_dir}/frames/reading/<second>.jpg — one grab per slide change
+in this window, named by its second. Open them as images: they show what the
+maths and the diagrams actually look like, which is how you set the notation.
+{course}
+Slide changes in this window (second, timestamp):
+{segments}
+
+Transcript for this window — every line is `second  timestamp  text`:
+{transcript}
+
+What a reading copy is
+- The transcript is speech: filler, false starts, repeats, and maths said out
+  loud ("a naught ket zero plus a one ket one"). The reading copy is the same
+  content as text a student can read, skim and search — $a_0|0\rangle +
+  a_1|1\rangle$. Setting spoken maths as maths is the main job; the slide
+  frame tells you the notation.
+- It is a rewrite, not a summary. Keep every claim, definition, formula,
+  worked step, example, question and answer, in the order they were said. Drop
+  only filler, restarts and repetition. If one of your lines covers more than
+  about twenty seconds of speech you are summarising: split it.
+- Write it as the lecture reads, in the lecturer's voice and tense — never
+  "he explains that…" or "the lecturer says…". Fix speech-recognition errors
+  from context and from the slide.
+- One sentence per line, occasionally two short ones. Use the lecturer's own
+  vocabulary and notation. Maths in $…$ or $$…$$, never Unicode look-alikes;
+  code in backticks.
+- Housekeeping, admin and asides are kept, but kept short.
+- Some frames are the lecture theatre's AV splash screen (a panel saying
+  "connect your laptop"), not a slide. Ignore it and use the transcript and
+  the neighbouring frames.
+
+Lines
+- A line's `start` is the number in the first column of the first transcript
+  line it covers — exactly that number, never rounded or in between.
+- Lines cover the whole window in order with no gap: every transcript line
+  belongs to exactly one of yours. A line covers two to six transcript lines,
+  never more than eight.
+- The first line starts at {first}. Start a new line at every slide change.
+
+Reply with JSON and nothing else:
+
+[{{"start": {first}, "text": "…"}}, {{"start": …, "text": "…"}}]"#,
         title = job.title,
         from = crate::chapters::hms(job.window.start_seconds),
         to = crate::chapters::hms(job.window.end_seconds),
@@ -277,25 +370,19 @@ Reply with JSON and nothing else:\n\n\
         course = course,
         segments = segments,
         transcript = transcript,
-        first = job.window.segment_starts[0],
+        first = first,
     )
 }
 
-fn transcript_span(cues: &[TranscriptCue], start: u32, end: u32) -> String {
-    let lines = cues
-        .iter()
-        .filter(|cue| cue.start < end as f32 && cue.end >= start as f32)
+fn transcript_span(cues: &[TranscriptCue], window: &Window) -> String {
+    let lines = window_cues(cues, window)
         .map(|cue| {
-            format!(
-                "{}–{}  {}",
-                crate::chapters::hms(cue.start.max(0.0) as u32),
-                crate::chapters::hms(cue.end.max(0.0) as u32),
-                cue.text
-            )
+            let second = cue_second(cue);
+            format!("{second:>6}  {}  {}", crate::chapters::hms(second), cue.text)
         })
         .collect::<Vec<_>>();
     if lines.is_empty() {
-        "(No transcript cues in this span.)".to_string()
+        "(No transcript lines in this window.)".to_string()
     } else {
         lines.join("\n")
     }
@@ -303,41 +390,44 @@ fn transcript_span(cues: &[TranscriptCue], start: u32, end: u32) -> String {
 
 // ── Reply parsing and validation ─────────────────────────────────────────────
 
-/// Pull a recap array out of a bare, fenced, prose-wrapped or enveloped reply.
-pub fn parse_notes(reply: &str) -> Result<Vec<RecapNote>, String> {
+/// Pull a line array out of a bare, fenced, prose-wrapped or enveloped reply.
+///
+/// Every line comes back with `para` false; [`mark_paragraphs`] sets it after
+/// the window has been validated.
+pub fn parse_lines(reply: &str) -> Result<Vec<ReadingLine>, String> {
     for candidate in json_candidates(reply) {
-        if let Some(notes) = decode_notes(&candidate) {
-            return Ok(notes);
+        if let Some(lines) = decode_lines(&candidate) {
+            return Ok(lines);
         }
     }
     Err(format!(
-        "no recap note list in the reply ({} chars): {}",
+        "no reading line list in the reply ({} chars): {}",
         reply.chars().count(),
         clip(reply.trim(), 200)
     ))
 }
 
-fn decode_notes(text: &str) -> Option<Vec<RecapNote>> {
-    let items: Vec<ReplyNote> = serde_json::from_str(text)
-        .or_else(|_| serde_json::from_str::<ReplyEnvelope>(text).map(|envelope| envelope.notes))
+fn decode_lines(text: &str) -> Option<Vec<ReadingLine>> {
+    let items: Vec<ReplyLine> = serde_json::from_str(text)
+        .or_else(|_| serde_json::from_str::<ReplyEnvelope>(text).map(|envelope| envelope.lines))
         .ok()?;
     if items.is_empty() {
         return None;
     }
     items
         .into_iter()
-        .map(|note| {
-            if !note.start.is_finite()
-                || note.start < 0.0
-                || note.start > f64::from(u32::MAX)
-                || note.start.fract() != 0.0
+        .map(|line| {
+            if !line.start.is_finite()
+                || line.start < 0.0
+                || line.start > f64::from(u32::MAX)
+                || line.start.fract() != 0.0
             {
                 return None;
             }
-            Some(RecapNote {
-                start_seconds: note.start as u32,
-                label: note.label.trim().to_string(),
-                body: note.body.trim().to_string(),
+            Some(ReadingLine {
+                start_seconds: line.start as u32,
+                para: false,
+                text: line.text.trim().to_string(),
             })
         })
         .collect()
@@ -423,34 +513,89 @@ fn clip(text: &str, chars: usize) -> String {
 }
 
 /// Validate one window before any of its rows are written.
-pub fn validate(notes: &[RecapNote], window: &Window) -> Result<(), String> {
-    if notes.is_empty() {
-        return Err("no recap notes in the reply".to_string());
+///
+/// Five rules, every failure naming the line and its clock: a non-empty
+/// reply with non-empty text; starts strictly increasing; every start the
+/// integer second of a cue in this window; the first line on the window's
+/// first cue; and the coverage floor — the cues from a line's start up to
+/// the next line's start number at most [`MAX_CUES_PER_LINE`] and speak for
+/// at most [`MAX_SPEECH_PER_LINE_SECS`] between them. The last is what
+/// separates a reading copy from a summary: a model that folds a minute of
+/// speech into one sentence has stopped rewriting.
+pub fn validate(
+    lines: &[ReadingLine],
+    window: &Window,
+    cues: &[TranscriptCue],
+) -> Result<(), String> {
+    if lines.is_empty() {
+        return Err("no reading lines in the reply".to_string());
     }
-    let first = window.segment_starts[0];
-    if notes[0].start_seconds != first {
+    let cues: Vec<&TranscriptCue> = window_cues(cues, window).collect();
+    let Some(first) = cues.first().map(|cue| cue_second(cue)) else {
+        return Err("no transcript lines in this window".to_string());
+    };
+    if lines[0].start_seconds != first {
         return Err(format!(
-            "note 1 ({}): the window's first segment must be present",
-            crate::chapters::hms(notes[0].start_seconds)
+            "line 1 ({}): the first line must start on the window's first transcript line, {first}",
+            crate::chapters::hms(lines[0].start_seconds)
         ));
     }
     let mut previous = None;
-    for (idx, note) in notes.iter().enumerate() {
-        let where_ = format!("note {} ({}): ", idx + 1, crate::chapters::hms(note.start_seconds));
-        if note.body.is_empty() {
-            return Err(format!("{where_}a note needs a body"));
+    for (idx, line) in lines.iter().enumerate() {
+        let where_ = format!("line {} ({}): ", idx + 1, crate::chapters::hms(line.start_seconds));
+        if line.text.trim().is_empty() {
+            return Err(format!("{where_}a line needs text"));
         }
-        if !window.segment_starts.contains(&note.start_seconds) {
-            return Err(format!("{where_}start is not a segment in this window"));
+        if !cues.iter().any(|cue| cue_second(cue) == line.start_seconds) {
+            return Err(format!(
+                "{where_}start is not the second of a transcript line in this window"
+            ));
         }
         if let Some(before) = previous {
-            if note.start_seconds <= before {
-                return Err(format!("{where_}start is not after the note before it ({before})"));
+            if line.start_seconds <= before {
+                return Err(format!("{where_}start is not after the line before it ({before})"));
             }
         }
-        previous = Some(note.start_seconds);
+        previous = Some(line.start_seconds);
+
+        let until = lines.get(idx + 1).map(|next| next.start_seconds);
+        let covered = cues.iter().copied().filter(|cue| {
+            let second = cue_second(cue);
+            second >= line.start_seconds && until.is_none_or(|until| second < until)
+        });
+        let (count, speech) = covered.fold((0usize, 0.0f32), |(count, speech), cue| {
+            (count + 1, speech + (cue.end - cue.start).max(0.0))
+        });
+        if count > MAX_CUES_PER_LINE {
+            return Err(format!(
+                "{where_}covers {count} transcript lines, more than {MAX_CUES_PER_LINE} — split it"
+            ));
+        }
+        if speech > MAX_SPEECH_PER_LINE_SECS {
+            return Err(format!(
+                "{where_}covers {speech:.0} s of speech, more than {MAX_SPEECH_PER_LINE_SECS:.0} — split it"
+            ));
+        }
     }
     Ok(())
+}
+
+/// Set `para` on a validated, ordered window of lines: the first line, and
+/// the first line at or after each slide change. Derived here rather than
+/// asked of the model because the slide changes are already known to the
+/// second, and a model asked to mark them would mark some other set.
+pub fn mark_paragraphs(lines: &mut [ReadingLine], slide_changes: &[u32]) {
+    for line in lines.iter_mut() {
+        line.para = false;
+    }
+    if let Some(first) = lines.first_mut() {
+        first.para = true;
+    }
+    for &change in slide_changes {
+        if let Some(line) = lines.iter_mut().find(|line| line.start_seconds >= change) {
+            line.para = true;
+        }
+    }
 }
 
 // ── Running the whole job ────────────────────────────────────────────────────
@@ -460,10 +605,10 @@ pub struct Run<'a> {
     pub lecture_id: &'a str,
     pub selection: &'a crate::harness::jobs::JobSelection,
     pub force: bool,
-    /// Read this stream instead of letting `chapters::detect` choose. Recap
-    /// carries it for the same reason chaptering does and with the same
-    /// meaning: the two jobs decode the same file and had the same blind spot,
-    /// so fixing one and leaving the other would only hide it.
+    /// Read this stream instead of letting `chapters::detect` choose. The
+    /// reading copy carries it for the same reason chaptering does and with
+    /// the same meaning: the two jobs decode the same file and had the same
+    /// blind spot, so fixing one and leaving the other would only hide it.
     pub source: Option<crate::echo360::SourceNum>,
 }
 
@@ -482,10 +627,10 @@ pub struct Outcome {
     pub source: crate::echo360::SourceNum,
     pub segments: usize,
     pub windows: usize,
-    pub notes: Vec<RecapNote>,
+    pub lines: Vec<ReadingLine>,
 }
 
-/// Segment, grab, ask and write a lecture recap.
+/// Segment, grab, ask and write a lecture's reading copy.
 ///
 /// Windows run strictly in sequence. A rejected or failed window is retried
 /// once with the validation error appended to the original prompt. Each valid
@@ -520,10 +665,10 @@ pub fn run(
     let transcript: Option<String> = row.get("transcript_path");
     let code: Option<String> = row.get("code");
 
-    let existing = rt.block_on(crate::store::recap(pool, id))?;
+    let existing = rt.block_on(crate::store::reading(pool, id))?;
     if !existing.is_empty() && !job.force {
         return Err(format!(
-            "{title} already has {} recap note(s) — re-running replaces them",
+            "{title} already has a reading copy of {} line(s) — re-running replaces it",
             existing.len()
         ));
     }
@@ -553,21 +698,21 @@ pub fn run(
     let ffmpeg = crate::echo360::find_ffmpeg(None)
         .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
 
-    if !rt.block_on(crate::store::claim_recap(pool, id))? {
-        return Err(format!("a recap is already being written for {title}"));
+    if !rt.block_on(crate::store::claim_reading(pool, id))? {
+        return Err(format!("a reading copy is already being written for {title}"));
     }
 
     let on_event: Arc<dyn Fn(&HarnessEvent) + Send + Sync> = Arc::new(on_event);
     let outcome = (|| -> Result<Outcome, String> {
-        // `claim_recap` made this a new, empty set. From here on, each accepted
-        // window becomes visible immediately; if a later one fails, those rows
-        // deliberately remain as the partial result of this run.
+        // `claim_reading` made this a new, empty set. From here on, each
+        // accepted window becomes visible immediately; if a later one fails,
+        // those rows deliberately remain as the partial result of this run.
         let gaps = crate::chapters::cue_gaps(&vtt);
         let dir = crate::echo360::lecture_dir(job.data_dir, id);
         let mut last = std::time::Instant::now();
         // Which of the capture's streams actually holds the slides; see
-        // `chapters::detect`. Recap reads the raw diffs rather than the
-        // candidates because it thins them at its own radius.
+        // `chapters::detect`. The reading copy reads the raw diffs rather
+        // than the candidates because it thins them at its own radius.
         let detected = crate::chapters::detect(
             &ffmpeg,
             &dir,
@@ -584,7 +729,7 @@ pub fn run(
         )?;
         let starts = segment_starts(&detected.diffs, &gaps, &cues, duration);
         if starts.is_empty() {
-            return Err(format!("no recap segments in {title}"));
+            return Err(format!("no reading segments in {title}"));
         }
         on_step(Step::Segmented {
             title: &title,
@@ -593,27 +738,41 @@ pub fn run(
         });
 
         let total = starts.len();
+        // A subfolder of chapters', the way the chat dock's `live/` is.
+        // `extract_frames` now deletes the grabs a run will not rewrite, and
+        // the two jobs are independently claimed — a reading copy can start
+        // while a chaptering turn is still open on the same lecture — so
+        // sharing one folder would let either job pull the other's frames
+        // out from under it. This job's boundaries are thinned at 25 s
+        // against chapters' 90 s, so they would mostly not survive each
+        // other's sweep.
         crate::chapters::extract_frames(
             &ffmpeg,
             &detected.video,
             &starts,
-            &dir.join("frames"),
+            &dir.join("frames").join("reading"),
             |done| on_step(Step::Grabbing { done, total }),
         )?;
 
         let chapters = rt.block_on(crate::store::chapters(pool, id))?;
         let windows = windows(&starts, duration, &chapters);
         if windows.is_empty() {
-            return Err(format!("no recap windows in {title}"));
+            return Err(format!("no reading windows in {title}"));
         }
         let course_dir = code
             .as_deref()
             .map(|value| format!("../courses/{}", crate::paths::safe_dir(value)));
         let lecture_dir = format!("../lectures/{id}");
         let window_total = windows.len();
-        let mut all_notes = Vec::new();
+        let mut all_lines = Vec::new();
 
         for (index, window) in windows.iter().enumerate() {
+            // A window with no speech in it has no reading copy: there is
+            // nothing a line could start on, so asking would only spend two
+            // turns to be told so.
+            if first_cue_start(&cues, window).is_none() {
+                continue;
+            }
             on_step(Step::Window {
                 done: index + 1,
                 total: window_total,
@@ -661,17 +820,17 @@ pub fn run(
                 );
                 let reply = reply.lock().unwrap().clone();
                 let result = turn
-                    .and_then(|()| parse_notes(&reply))
-                    .and_then(|notes| validate(&notes, window).map(|()| notes));
+                    .and_then(|()| parse_lines(&reply))
+                    .and_then(|lines| validate(&lines, window, &cues).map(|()| lines));
                 match result {
-                    Ok(notes) => {
-                        accepted = Some(notes);
+                    Ok(lines) => {
+                        accepted = Some(lines);
                         break;
                     }
                     Err(error) => failure = Some(error),
                 }
             }
-            let notes = accepted.ok_or_else(|| {
+            let mut lines = accepted.ok_or_else(|| {
                 format!(
                     "window {} of {} ({}–{}) failed twice: {}",
                     index + 1,
@@ -681,27 +840,28 @@ pub fn run(
                     failure.unwrap_or_else(|| "unknown error".to_string())
                 )
             })?;
+            mark_paragraphs(&mut lines, &window.segment_starts);
             on_step(Step::Writing {
                 done: index + 1,
                 total: window_total,
             });
-            rt.block_on(crate::store::save_recap_window(pool, id, &notes))?;
-            all_notes.extend(notes);
+            rt.block_on(crate::store::save_reading_window(pool, id, &lines))?;
+            all_lines.extend(lines);
         }
 
-        rt.block_on(crate::store::set_recap_status(pool, id, Some("ready"), None))?;
+        rt.block_on(crate::store::set_reading_status(pool, id, Some("ready"), None))?;
         Ok(Outcome {
             title: title.clone(),
             duration_seconds: duration,
             source: detected.source,
             segments: starts.len(),
             windows: window_total,
-            notes: all_notes,
+            lines: all_lines,
         })
     })();
 
     if let Err(error) = &outcome {
-        rt.block_on(crate::store::set_recap_status(pool, id, Some("error"), Some(error)))?;
+        rt.block_on(crate::store::set_reading_status(pool, id, Some("error"), Some(error)))?;
     }
     outcome
 }
@@ -712,8 +872,8 @@ pub mod app {
     use super::*;
     use tauri::{AppHandle, Emitter};
 
-    pub const LECTURE_RECAP_EVENT: &str = "lecture-recap";
-    pub const LECTURE_RECAP_PROGRESS_EVENT: &str = "lecture-recap-progress";
+    pub const LECTURE_READING_EVENT: &str = "lecture-reading";
+    pub const LECTURE_READING_PROGRESS_EVENT: &str = "lecture-reading-progress";
 
     #[derive(serde::Serialize, Clone, Copy)]
     #[serde(rename_all = "camelCase")]
@@ -753,12 +913,12 @@ pub mod app {
     struct Finished {
         lecture_id: String,
         status: &'static str,
-        notes: usize,
+        lines: usize,
         error: Option<String>,
     }
 
     #[tauri::command]
-    pub async fn lecture_write_recap(
+    pub async fn lecture_write_reading(
         app: AppHandle,
         lecture_id: String,
         force: Option<bool>,
@@ -771,14 +931,14 @@ pub mod app {
         }
         let pool = crate::store::open_pool().await?;
         let running: Option<String> =
-            sqlx::query_scalar("SELECT recap_status FROM lectures WHERE id = ?1")
+            sqlx::query_scalar("SELECT reading_status FROM lectures WHERE id = ?1")
                 .bind(&lecture_id)
                 .fetch_optional(&pool)
                 .await
                 .map_err(|error| error.to_string())?
                 .flatten();
         if running.as_deref() == Some("running") {
-            return Err("that lecture recap is already being written".into());
+            return Err("that lecture's reading copy is already being written".into());
         }
         drop(pool);
 
@@ -787,21 +947,21 @@ pub mod app {
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Runtime::new() {
                 Ok(runtime) => runtime,
-                Err(error) => return eprintln!("[oculus] recap: {error}"),
+                Err(error) => return eprintln!("[oculus] reading: {error}"),
             };
             let pool = match rt.block_on(crate::store::open_pool()) {
                 Ok(pool) => pool,
-                Err(error) => return eprintln!("[oculus] recap: {error}"),
+                Err(error) => return eprintln!("[oculus] reading: {error}"),
             };
             let selection = rt.block_on(crate::harness::jobs::selection(
                 &pool,
-                crate::harness::jobs::Job::LectureRecap,
+                crate::harness::jobs::Job::LectureReading,
             ));
             let window = Arc::new(Mutex::new(None::<WindowProgress>));
             let emit = {
                 let app = app.clone();
                 move |progress: Progress| {
-                    app.emit(LECTURE_RECAP_PROGRESS_EVENT, progress).ok();
+                    app.emit(LECTURE_READING_PROGRESS_EVENT, progress).ok();
                 }
             };
             let step = {
@@ -878,20 +1038,20 @@ pub mod app {
                 Ok(outcome) => Finished {
                     lecture_id: lecture_id.clone(),
                     status: "ready",
-                    notes: outcome.notes.len(),
+                    lines: outcome.lines.len(),
                     error: None,
                 },
                 Err(error) => {
-                    eprintln!("[oculus] recap: {error}");
+                    eprintln!("[oculus] reading: {error}");
                     Finished {
                         lecture_id: lecture_id.clone(),
                         status: "error",
-                        notes: 0,
+                        lines: 0,
                         error: Some(error),
                     }
                 }
             };
-            app.emit(LECTURE_RECAP_EVENT, finished).ok();
+            app.emit(LECTURE_READING_EVENT, finished).ok();
         });
         Ok(())
     }
@@ -901,9 +1061,9 @@ pub mod app {
         let _ = app;
         tauri::async_runtime::spawn(async {
             if let Ok(pool) = crate::store::open_pool().await {
-                if let Ok(count) = crate::store::reconcile_recap_status(&pool).await {
+                if let Ok(count) = crate::store::reconcile_reading_status(&pool).await {
                     if count > 0 {
-                        eprintln!("[oculus] recap: cleared {count} interrupted run(s)");
+                        eprintln!("[oculus] reading: cleared {count} interrupted run(s)");
                     }
                 }
             }
@@ -919,8 +1079,28 @@ mod tests {
         TranscriptCue { start, end, text: text.to_string() }
     }
 
-    fn note(start: u32, body: &str) -> RecapNote {
-        RecapNote { start_seconds: start, label: String::new(), body: body.to_string() }
+    fn line(start: u32, text: &str) -> ReadingLine {
+        ReadingLine { start_seconds: start, para: false, text: text.to_string() }
+    }
+
+    /// `count` cues, `step` seconds apart from `from`, each `length` long.
+    fn cues_every(from: u32, count: usize, step: u32, length: f32) -> Vec<TranscriptCue> {
+        (0..count)
+            .map(|n| {
+                let start = (from + n as u32 * step) as f32;
+                cue(start, start + length, &format!("cue at {start}"))
+            })
+            .collect()
+    }
+
+    /// Second 0 to 100 with slide changes at 0, 40 and 70.
+    fn window() -> Window {
+        Window {
+            start_seconds: 0,
+            end_seconds: 100,
+            segment_starts: vec![0, 40, 70],
+            chapter_title: None,
+        }
     }
 
     #[test]
@@ -986,27 +1166,31 @@ mod tests {
     }
 
     const REPLY: &str = r#"[
-      {"start": 0, "label": "Opening", "body": "Defines $x$ and motivates the proof."},
-      {"start": 40, "label": "", "body": "Works through the first case."}
+      {"start": 0, "text": "We define $x$ and set out what the proof needs."},
+      {"start": 40, "text": "The first case is the one where $x = 0$."}
     ]"#;
 
     #[test]
     fn tolerant_json_parsing_accepts_wrappers_fences_and_aliases() {
-        assert_eq!(parse_notes(REPLY).unwrap().len(), 2);
-        assert_eq!(parse_notes(&format!("```json\n{REPLY}\n```" )).unwrap().len(), 2);
-        assert_eq!(parse_notes(&format!("Here: {{\"notes\":{REPLY}}}" )).unwrap().len(), 2);
-        let alias = r#"[{"start_seconds":0.0,"body":"Opening."}]"#;
-        assert_eq!(parse_notes(alias).unwrap()[0].start_seconds, 0);
+        assert_eq!(parse_lines(REPLY).unwrap().len(), 2);
+        assert_eq!(parse_lines(&format!("```json\n{REPLY}\n```")).unwrap().len(), 2);
+        assert_eq!(parse_lines(&format!("Here: {{\"lines\":{REPLY}}}")).unwrap().len(), 2);
+        let parsed = parse_lines(r#"[{"start_seconds":0.0,"body":"Opening."}]"#).unwrap();
+        assert_eq!(parsed[0], line(0, "Opening."));
+        let parsed = parse_lines(r#"[{"at":7,"line":" Trimmed. "}]"#).unwrap();
+        assert_eq!(parsed[0], line(7, "Trimmed."));
+        let parsed = parse_lines(r#"[{"seconds":9,"text":"Nine."}]"#).unwrap();
+        assert_eq!(parsed[0].start_seconds, 9);
     }
 
     #[test]
-    fn parsing_rejects_negative_and_fractional_segment_starts() {
+    fn parsing_rejects_negative_and_fractional_starts() {
         for start in ["-1", "0.4"] {
-            let reply = format!(r#"[{{"start":{start},"body":"Opening."}}]"#);
-            assert!(parse_notes(&reply).is_err(), "{start} must not be coerced");
+            let reply = format!(r#"[{{"start":{start},"text":"Opening."}}]"#);
+            assert!(parse_lines(&reply).is_err(), "{start} must not be coerced");
         }
         assert_eq!(
-            parse_notes(r#"[{"start":742.0,"body":"A valid whole second."}]"#)
+            parse_lines(r#"[{"start":742.0,"text":"A valid whole second."}]"#)
                 .unwrap()[0]
                 .start_seconds,
             742
@@ -1014,29 +1198,106 @@ mod tests {
     }
 
     #[test]
-    fn validation_allows_merged_segments_but_not_missing_first_or_invented_starts() {
-        let window = Window {
-            start_seconds: 0,
-            end_seconds: 100,
-            segment_starts: vec![0, 40, 70],
-            chapter_title: None,
-        };
-        assert!(validate(&[note(0, "Opening"), note(70, "Merged the middle")], &window).is_ok());
-        let error = validate(&[note(40, "Too late")], &window).unwrap_err();
-        assert!(error.starts_with("note 1 (00:00:40):"), "{error}");
-        let error = validate(&[note(0, "Good"), note(55, "Invented")], &window).unwrap_err();
-        assert!(error.starts_with("note 2 (00:00:55):"), "{error}");
+    fn validation_accepts_lines_on_cue_starts_covering_the_window() {
+        // Twenty 3-second cues, one every 5 s; five lines of four cues each.
+        let cues = cues_every(0, 20, 5, 3.0);
+        let lines = [line(0, "a"), line(20, "b"), line(40, "c"), line(60, "d"), line(80, "e")];
+        assert!(validate(&lines, &window(), &cues).is_ok());
     }
 
     #[test]
-    fn prompt_inlines_only_the_window_transcript_and_names_frames() {
+    fn validation_rejects_an_empty_reply_and_empty_text() {
+        let cues = cues_every(0, 20, 5, 3.0);
+        assert!(validate(&[], &window(), &cues).is_err());
+        let error = validate(&[line(0, "a"), line(20, "  ")], &window(), &cues).unwrap_err();
+        assert!(error.starts_with("line 2 (00:00:20):"), "{error}");
+    }
+
+    #[test]
+    fn validation_rejects_a_start_that_is_not_a_cue_start() {
+        let cues = cues_every(0, 20, 5, 3.0);
+        let error = validate(&[line(0, "a"), line(12, "between cues")], &window(), &cues)
+            .unwrap_err();
+        assert!(error.starts_with("line 2 (00:00:12):"), "{error}");
+        // A cue's start is its floor: 22.6 s is cited as 22, and 23 is nobody's.
+        let cues = vec![cue(0.0, 3.0, "a"), cue(22.6, 25.0, "b")];
+        assert!(validate(&[line(0, "a"), line(22, "b")], &window(), &cues).is_ok());
+        assert!(validate(&[line(0, "a"), line(23, "b")], &window(), &cues).is_err());
+    }
+
+    #[test]
+    fn validation_rejects_a_first_line_off_the_windows_first_cue() {
+        let cues = cues_every(0, 20, 5, 3.0);
+        let error = validate(&[line(5, "late")], &window(), &cues).unwrap_err();
+        assert!(error.starts_with("line 1 (00:00:05):"), "{error}");
+        // The first cue *in the window*, not the transcript's first cue.
+        let later = Window { start_seconds: 50, end_seconds: 100, ..window() };
+        assert!(validate(&[line(50, "a"), line(75, "b")], &later, &cues).is_ok());
+        assert!(validate(&[line(0, "a")], &later, &cues).is_err());
+    }
+
+    #[test]
+    fn validation_rejects_starts_out_of_order() {
+        let cues = cues_every(0, 20, 5, 3.0);
+        let error = validate(&[line(0, "a"), line(20, "b"), line(20, "c")], &window(), &cues)
+            .unwrap_err();
+        assert!(error.starts_with("line 3 (00:00:20):"), "{error}");
+    }
+
+    #[test]
+    fn coverage_rejects_a_line_over_nine_cues() {
+        // Line 1 would cover the cues at 0, 5, …, 40: nine of them.
+        let cues = cues_every(0, 20, 5, 3.0);
+        let error = validate(&[line(0, "too much"), line(45, "rest")], &window(), &cues)
+            .unwrap_err();
+        assert!(error.starts_with("line 1 (00:00:00):"), "{error}");
+        assert!(error.contains("9 transcript lines"), "{error}");
+        // Eight is the ceiling, and passes.
+        assert!(validate(&[line(0, "a"), line(40, "b"), line(80, "c")], &window(), &cues).is_ok());
+    }
+
+    #[test]
+    fn coverage_rejects_a_line_over_forty_five_seconds_of_speech() {
+        // Six 10-second cues back to back: 0–10, 10–20, … 50–60.
+        let cues = cues_every(0, 6, 10, 10.0);
+        let window = Window { end_seconds: 60, ..window() };
+        // Five cues is under the count ceiling but 50 s of speech.
+        let error = validate(&[line(0, "long"), line(50, "rest")], &window, &cues).unwrap_err();
+        assert!(error.starts_with("line 1 (00:00:00):"), "{error}");
+        assert!(error.contains("50 s of speech"), "{error}");
+        // Silence between cues does not count: the same five starts with
+        // 2-second cues is 10 s of speech.
+        let sparse = cues_every(0, 6, 10, 2.0);
+        assert!(validate(&[line(0, "short"), line(50, "rest")], &window, &sparse).is_ok());
+    }
+
+    #[test]
+    fn paragraphs_open_at_the_first_line_and_at_each_slide_change() {
+        let mut lines = [line(0, "a"), line(20, "b"), line(40, "c"), line(60, "d"), line(80, "e")];
+        mark_paragraphs(&mut lines, &[0, 40, 70]);
+        let para: Vec<bool> = lines.iter().map(|line| line.para).collect();
+        // 0 is the first line; 40 sits on a slide change; 80 is the first
+        // line at or after the change at 70; 20 and 60 are mid-paragraph.
+        assert_eq!(para, vec![true, false, true, false, true]);
+        // No slide changes at all still opens the window with a paragraph.
+        mark_paragraphs(&mut lines, &[]);
+        let para: Vec<bool> = lines.iter().map(|line| line.para).collect();
+        assert_eq!(para, vec![true, false, false, false, false]);
+    }
+
+    #[test]
+    fn prompt_inlines_only_the_window_transcript_with_integer_starts() {
         let window = Window {
             start_seconds: 60,
             end_seconds: 120,
             segment_starts: vec![60, 90],
             chapter_title: Some("Resolution".into()),
         };
-        let cues = vec![cue(10.0, 20.0, "outside"), cue(70.0, 80.0, "inside")];
+        let cues = vec![
+            cue(10.0, 20.0, "outside"),
+            cue(70.4, 80.0, "inside"),
+            cue(120.0, 130.0, "next window"),
+        ];
         let text = prompt(&Prompt {
             title: "Lecture 4",
             lecture_dir: "../lectures/abc",
@@ -1044,9 +1305,18 @@ mod tests {
             window: &window,
             cues: &cues,
         });
-        assert!(text.contains("inside"));
+        assert!(text.contains("    70  00:01:10  inside"), "{text}");
         assert!(!text.contains("outside"));
-        assert!(text.contains("../lectures/abc/frames/<second>.jpg"));
+        assert!(!text.contains("next window"), "a cue on the end edge is the next window's");
+        assert!(text.contains("../lectures/abc/frames/reading/<second>.jpg"));
+        assert!(text.contains("Slide changes in this window (second, timestamp):\n      60  00:01:00\n      90  00:01:30\n"));
         assert!(text.contains("Chapter at this window: Resolution"));
+        assert!(text.contains("Course folder: ../courses/logic/"));
+        assert!(text.contains("The first line starts at 70."));
+        assert!(text.contains(r#"[{"start": 70, "text": "…"}"#));
+        // `\r` in the LaTeX would be a carriage return in an ordinary string
+        // literal; the prompt is a raw string so the backslash survives.
+        assert!(text.contains(r"$a_0|0\rangle +"), "LaTeX survives the literal");
+        assert!(text.contains(r"a_1|1\rangle$"), "{text}");
     }
 }

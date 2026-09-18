@@ -20,11 +20,11 @@ import { stopLecturePlayback } from "@/lib/lecturePlayback";
  */
 export default function LecturePanel({
   lecture,
-  tabId,
+  paneId,
   onExpand,
 }: {
   lecture: Lecture;
-  tabId: number;
+  paneId: number;
   onExpand: (path: string, newTab: boolean) => void;
 }) {
   const close = useSidePanelStore((s) => s.close);
@@ -35,7 +35,7 @@ export default function LecturePanel({
   // meant to keep playing through that.
   const closeAndStop = () => {
     stopLecturePlayback();
-    close(tabId);
+    close(paneId);
   };
 
   return (

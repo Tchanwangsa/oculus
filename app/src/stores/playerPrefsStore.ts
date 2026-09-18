@@ -4,15 +4,79 @@ import type { SourceNum } from "@/lib/db";
 /** Which edge of the player the docked panel is attached to. */
 export type Dock = "bottom" | "top" | "left" | "right";
 
-/** Which of the dock's four readings of the recording is in front. Chat is
- *  the odd one: the other three are the recording read back, and it is a
- *  conversation about it — but it is the same dock and the same preference. */
-export type DockTab = "chapters" | "recap" | "transcript" | "chat";
+/** Which of the dock's three readings of the recording is in front. Chat is
+ *  the odd one: the other two are the recording read back — as its shape, and
+ *  as its words — and it is a conversation about it; but it is the same dock
+ *  and the same preference. */
+export type DockTab = "chapters" | "transcript" | "chat";
+
+/**
+ * Which register the Transcript tab is showing.
+ *
+ * `standard` is the cue list — every three-second fragment of what the
+ * recogniser heard. `enhanced` is the same recording through the reading
+ * copy: the same words with the filler dropped, the mis-heard notation fixed
+ * off the slide and the spoken maths set as maths (`docs/chapters.md`). They
+ * are one tab and not two because the second is the first made readable, and
+ * the transcript is what you are looking for either way.
+ *
+ * A habit like the dock's side: someone who reads the enhanced copy reads it
+ * on every lecture. It defaults to `standard`, which every downloaded
+ * recording has — the enhanced copy is a job that has to be asked for, and a
+ * stored `enhanced` falls back to it per lecture until there is one
+ * (`modeInFront`).
+ */
+export type TranscriptMode = "standard" | "enhanced";
+
+const TRANSCRIPT_MODES: TranscriptMode[] = ["standard", "enhanced"];
 
 /** Every value the tab may hold, so the tolerant read below stays one list.
  *  It hard-coded `=== "chapters"` once, which silently reset a stored `chat`
- *  to the default on the next launch. */
-const DOCK_TABS: DockTab[] = ["chapters", "recap", "transcript", "chat"];
+ *  to the default on the next launch. Two names have passed through this list
+ *  and are gone: `recap`, and the `read` tab that briefly held the chapter
+ *  list and the reading copy together. Neither is in it now, so a stored
+ *  value naming either falls to the default through that same tolerant read,
+ *  and `orderDockTabs` drops it from a stored order. */
+const DOCK_TABS: DockTab[] = ["chapters", "transcript", "chat"];
+
+/**
+ * Put the dock's tabs back in a stored order, tolerantly.
+ *
+ * The order is user state that outlives any one version of the app, so this
+ * has to survive a stored value that repeats a tab, names one that no longer
+ * exists, or is missing one that has since been added — a saved order from
+ * before Chat shipped is one case, and one that still names the two tabs
+ * that became Read is the other. Unknown and duplicate entries
+ * are dropped and anything missing is appended in its default position, which
+ * means a new tab shows up at the end rather than silently not at all.
+ */
+export function orderDockTabs(stored: unknown): DockTab[] {
+  const out: DockTab[] = [];
+  if (Array.isArray(stored)) {
+    for (const v of stored) {
+      if (DOCK_TABS.includes(v as DockTab) && !out.includes(v as DockTab)) {
+        out.push(v as DockTab);
+      }
+    }
+  }
+  for (const t of DOCK_TABS) if (!out.includes(t)) out.push(t);
+  return out;
+}
+
+/**
+ * Fold a reordering of the *visible* tabs back into the full stored order.
+ *
+ * The strip drops the Transcript tab on a recording that has none on disk, so
+ * the list the drag rearranged is not always the list that is stored. Walking
+ * the full order and refilling only the slots that held a visible tab keeps the
+ * hidden one exactly where it was — otherwise a reorder done on a lecture with
+ * no transcript would quietly shunt Transcript to the end for every lecture.
+ */
+export function reorderDockTabs(full: DockTab[], visibleNext: DockTab[]): DockTab[] {
+  const visible = new Set(visibleNext);
+  let i = 0;
+  return full.map((t) => (visible.has(t) ? visibleNext[i++] : t));
+}
 
 export const isVertical = (dock: Dock) => dock === "bottom" || dock === "top";
 
@@ -97,6 +161,12 @@ export interface PlayerPrefs {
    *  property of one recording: someone who reads chapters reads them for
    *  every lecture, and re-picking the tab per lecture is the friction. */
   dockTab: DockTab;
+  /** What order the three sit in, left to right — dragged by hand in the dock's
+   *  header. A habit like the side and the tab, and the same argument: the tab
+   *  you reach for first is the same one on every recording. */
+  dockTabOrder: DockTab[];
+  /** Which register the Transcript tab is in — see `TranscriptMode`. */
+  transcriptMode: TranscriptMode;
   height: number;
   width: number;
   speed: number;
@@ -125,6 +195,9 @@ const DEFAULTS: PlayerPrefs = {
   // Transcript: every downloaded lecture has one, and chapters are a job that
   // has to be asked for. Opening on a tab that is usually empty is worse.
   dockTab: "transcript",
+  dockTabOrder: [...DOCK_TABS],
+  // …and standard inside it, for the same reason one tab over.
+  transcriptMode: "standard",
   height: DEFAULT_H,
   width: DEFAULT_W,
   speed: 1,
@@ -172,6 +245,10 @@ function load(): PlayerPrefs {
           ? p.dock
           : DEFAULTS.dock,
       dockTab: DOCK_TABS.includes(p.dockTab as DockTab) ? (p.dockTab as DockTab) : DEFAULTS.dockTab,
+      dockTabOrder: orderDockTabs(p.dockTabOrder),
+      transcriptMode: TRANSCRIPT_MODES.includes(p.transcriptMode as TranscriptMode)
+        ? (p.transcriptMode as TranscriptMode)
+        : DEFAULTS.transcriptMode,
       height: num(p.height, DEFAULTS.height),
       width: num(p.width, DEFAULTS.width),
       speed:

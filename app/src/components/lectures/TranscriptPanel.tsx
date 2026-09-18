@@ -6,26 +6,27 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
 } from "react";
-import {
-  ArrowLineDown,
-  ArrowLineUp,
-  DotsSixVertical,
-  MagnifyingGlass,
-  X,
-} from "@phosphor-icons/react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { DotsSixVertical, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ViewTabs, type ViewTab } from "@/components/ui/ViewTabs";
-import { isVertical, type Dock, type DockTab } from "@/stores/playerPrefsStore";
-import { fmtTime, type Cue } from "@/lib/lectures";
 import {
-  ChaptersPanel,
-  type ChaptersPanelProps,
-} from "@/components/lectures/ChaptersPanel";
-import { RecapPanel, type RecapPanelProps } from "@/components/lectures/RecapPanel";
+  isVertical,
+  reorderDockTabs,
+  usePlayerPrefs,
+  type Dock,
+  type DockTab,
+  type TranscriptMode,
+} from "@/stores/playerPrefsStore";
+import { fmtTime, type Cue } from "@/lib/lectures";
+import { FollowList, Highlight, SearchField } from "@/components/lectures/FollowList";
+import { ChaptersPanel, type ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
+import { ReadingList, type ReadingListProps } from "@/components/lectures/ReadingList";
+import {
+  TranscriptModePicker,
+  type TranscriptModePickerProps,
+} from "@/components/lectures/TranscriptModePicker";
 import {
   LectureChatPanel,
   type LectureChatPanelProps,
@@ -39,27 +40,22 @@ const INNER_BORDER: Record<Dock, string> = {
   right: "border-l",
 };
 
-/** A one-line cue at the panel's default width; two-liners are measured. */
-const ESTIMATED_ROW = 26;
-
-/** Slide duration, matched to the sidebar's collapse so the app has one feel. */
-const SLIDE_MS = 200;
-
-/** How long the list has to sit untouched before it re-syncs to playback. */
-const IDLE_RESYNC_MS = 8000;
-
-/** The countdown ring drawn on the pill, in px. Hairline, like every border. */
-const RING_STROKE = 1.5;
-
-/** The dock's four readings of the recording. No "In this video" label over
+/** The dock's three readings of the recording. No "In this video" label over
  *  them: the panel is narrow and its subject is never in doubt.
  *
- *  Recap sits next to Chapters because the two are the same recording read at
- *  two densities — a topic per chapter, a slide per note — and the transcript
- *  and the chat are what you reach for when neither has been run. */
+ *  Chapters sits first because it is the shape of the hour — twelve rows you
+ *  can take in at once, which is the one thing a six-hundred-row list cannot
+ *  do. Transcript is the words, in either register (see
+ *  `TranscriptModePicker`). Chat is what you reach for when neither is the
+ *  question.
+ *
+ *  These two were briefly one tab called *Read*, with the chapters drawn as
+ *  headings over the reading copy. It cost the table of contents — twelve
+ *  headings scattered through six hundred lines are not an outline — and the
+ *  enhanced text is a register of the transcript rather than a fourth thing,
+ *  so it moved into that tab and the chapter list came back whole. */
 const TABS: ReadonlyArray<ViewTab<DockTab>> = [
   { value: "chapters", label: "Chapters" },
-  { value: "recap", label: "Recap" },
   { value: "transcript", label: "Transcript" },
   { value: "chat", label: "Chat" },
 ];
@@ -76,6 +72,24 @@ export function tabInFront(tab: DockTab, hasTranscript: boolean): DockTab {
   return !hasTranscript && tab === "transcript" ? "chapters" : tab;
 }
 
+/**
+ * Which register is really in front, by the same argument one level down.
+ *
+ * `transcriptMode` is a habit carried between lectures, and most lectures have
+ * no enhanced copy — so a stored `enhanced` on a recording that has none would
+ * open on an empty panel with a button in it. It falls back to the cues
+ * instead, and the picker is where the copy gets asked for. A run already in
+ * flight keeps the enhanced view, because its lines land into it window by
+ * window and watching that arrive is the point.
+ */
+export function modeInFront(
+  mode: TranscriptMode,
+  hasLines: boolean,
+  running: boolean,
+): TranscriptMode {
+  return mode === "enhanced" && !hasLines && !running ? "standard" : mode;
+}
+
 interface TranscriptPanelProps {
   cues: Cue[];
   activeCueIdx: number;
@@ -85,18 +99,20 @@ interface TranscriptPanelProps {
   /**
    * Everything the Chapters tab draws, as one memoised bag.
    *
-   * A bag rather than eight loose props, and a value rather than a rendered
+   * A bag rather than a dozen loose props, and a value rather than a rendered
    * node: this component is `memo`'d against a player that re-renders four
    * times a second on `timeupdate`, and a fresh element on every one of those
    * would throw the memo away — which is the whole reason the virtualised list
    * is not re-rendering constantly next to a decoding video.
    */
   chapters: ChaptersPanelProps;
-  /** The Recap tab's own bag, beside `chapters` and memoised for the reason
-   *  that prop's comment gives. */
-  recap: RecapPanelProps;
-  /** Everything the Chat tab draws, as a second memoised bag beside
-   *  `chapters` and for the same reason — read that prop's comment. Nothing
+  /** Everything the Transcript tab's Enhanced register draws, as a second bag
+   *  beside `chapters` and for the same reason. The register itself is a
+   *  stored preference this panel reads, so the bag does not carry it — and
+   *  nor does it carry the picker, which this panel builds from the rest. */
+  reading: Omit<ReadingListProps, "picker">;
+  /** Everything the Chat tab draws, as a third memoised bag beside the other
+   *  two and for the same reason — read their comment. Nothing
    *  time-varying is in it: the playhead arrives as a ref the chip ticks
    *  itself off. */
   chat: LectureChatPanelProps;
@@ -127,16 +143,14 @@ interface TranscriptPanelProps {
 }
 
 /**
- * The transcript list.
- *
- * **Virtualised, and it has to be.** A 2-hour lecture is ~2500 cues; rendered
- * in full that is over 12,000 nodes for WebKit to lay out and paint in a
- * scroller that sits next to a decoding video, which was the floor on how
- * smooth scrolling could get no matter how little React did. Windowed, the
- * list is ~40 rows and the cost stops scaling with the lecture's length.
- *
- * Rows are variable height (a cue wraps to two lines often enough), so heights
- * are measured rather than assumed — `ESTIMATED_ROW` only has to be close.
+ * The dock: its box and slide, the header that is both drag handle and tab
+ * strip, and the tab in front. The Transcript tab is a search row over a
+ * `FollowList` — of cue buttons in its Standard register, and of the reading
+ * copy's lines in Enhanced (`ReadingList`), which is a register and not a tab
+ * because it is the same recording, the same order and the same seek on
+ * click. The virtualizer, the follow-scroll and the Back-to-live pill all
+ * live in `FollowList`, which both registers share; what is left here is the
+ * mapping from cue space to row space.
  */
 export const TranscriptPanel = memo(function TranscriptPanel({
   cues,
@@ -144,7 +158,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   tab,
   onTabChange,
   chapters,
-  recap,
+  reading,
   chat,
   dock,
   size,
@@ -183,28 +197,94 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   // recording always has — which is also what makes the dock itself
   // unconditional (`hasDock` in `LecturePlayer`).
   const hasTranscript = cues.length > 0;
-  const tabs = hasTranscript ? TABS : TABS.filter((t) => t.value !== "transcript");
+  // `TABS` is the vocabulary; the order is the reader's, dragged in the header
+  // and stored with the dock's side and size. A tab missing from the stored
+  // order still appears — `orderDockTabs` appends it — so shipping a fourth one
+  // does not need a migration.
+  const order = usePlayerPrefs((p) => p.dockTabOrder);
+  const setPrefs = usePlayerPrefs((p) => p.set);
+  const tabs = useMemo(() => {
+    const byValue = new Map(TABS.map((t) => [t.value, t]));
+    const all = order.map((v) => byValue.get(v)!).filter(Boolean);
+    return hasTranscript ? all : all.filter((t) => t.value !== "transcript");
+  }, [order, hasTranscript]);
+  const onReorder = useCallback(
+    (next: DockTab[]) => setPrefs({ dockTabOrder: reorderDockTabs(order, next) }),
+    [order, setPrefs],
+  );
   const activeTab: DockTab = tabInFront(tab, hasTranscript);
 
-  const listRef = useRef<HTMLDivElement>(null);
-  /** Next follow-scroll jumps straight to the cue, band or no band. */
-  const snapRef = useRef(true);
-  /** Read by the delayed scroll below, which fires after the panel slides. */
-  const followingRef = useRef(following);
-  followingRef.current = following;
-  /**
-   * Hand-scrolled, but the playing cue is still in frame: the list holds where
-   * it was put and stays live. Only the cue leaving the frame ends following.
-   */
-  const [nudged, setNudged] = useState(false);
-  const nudgedRef = useRef(false);
-  /** Re-following because the cue was scrolled back into view — don't snap. */
-  const softResumeRef = useRef(false);
-  /** Pending re-sync, pushed back by every scroll so it measures idle time. */
-  const idleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const pillRef = useRef<HTMLButtonElement>(null);
-  const ringRef = useRef<SVGRectElement>(null);
-  const ringAnimRef = useRef<Animation | null>(null);
+  // Which register the Transcript tab is in. A preference like the tab itself
+  // and read from the store here rather than threaded down from the player:
+  // nothing above this panel needs to know, and the player's memoised bags
+  // would have to be rebuilt to carry it.
+  const storedMode = usePlayerPrefs((p) => p.transcriptMode);
+  const setMode = useCallback(
+    (transcriptMode: TranscriptMode) => setPrefs({ transcriptMode }),
+    [setPrefs],
+  );
+  const mode = modeInFront(storedMode, reading.lines.length > 0, reading.status === "running");
+
+  // The picker is the register switch *and* the enhanced copy's only Write
+  // button, so it needs the job's state as well as the mode. Memoised because
+  // both registers take it as a prop and `ReadingList` is memoised against it.
+  const picker: TranscriptModePickerProps = useMemo(
+    () => ({
+      value: mode,
+      onChange: setMode,
+      status: reading.status,
+      error: reading.error,
+      progress: reading.progress,
+      busy: reading.busy,
+      downloaded: reading.downloaded,
+      hasLines: reading.lines.length > 0,
+      onEnhance: reading.onWrite,
+    }),
+    [
+      mode,
+      setMode,
+      reading.status,
+      reading.error,
+      reading.progress,
+      reading.busy,
+      reading.downloaded,
+      reading.lines.length,
+      reading.onWrite,
+    ],
+  );
+
+  // ── The strip's own overflow ─────────────────────────────────────────────
+
+  // Three tabs are a squeeze in a 220px dock, so the strip scrolls sideways —
+  // and a scroller with no visible bar has to say so some other way. Same shape as
+  // the transcript's vertical fades below: only shown over content they are
+  // actually hiding.
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [stripEdges, setStripEdges] = useState({ left: false, right: false });
+
+  const readStripEdges = useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setStripEdges((e) => (e.left === left && e.right === right ? e : { left, right }));
+  }, []);
+
+  // The dock being resized, docked to another edge, or losing its Transcript
+  // tab all change what fits without anyone scrolling — and the header is laid
+  // out after the first paint, so the initial read has to come from the
+  // observer rather than from an effect that runs once.
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(readStripEdges);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, [readStripEdges]);
+  useEffect(() => {
+    readStripEdges();
+  }, [readStripEdges, tabs, size, dock, open]);
 
   // ── Search ───────────────────────────────────────────────────────────────
 
@@ -229,275 +309,6 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   // have one — so search suspends the follow-scroll and the pill rather than
   // fighting a list the query is choosing the contents of.
   const followIdx = searching ? -1 : activeCueIdx;
-
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => listRef.current,
-    estimateSize: () => ESTIMATED_ROW,
-    getItemKey: (i) => rows[i],
-    overscan: 12,
-  });
-
-  // Results start from the top; clearing the query hands the list back to the
-  // follow-scroll, which knows better where to put it.
-  //
-  // Nothing re-measures here, and calling `virtualizer.measure()` would be
-  // actively wrong: `getItemKey` above keys the height cache by *cue* index, so
-  // a row's measured height survives the query that moved it to a different row
-  // — while `measure()` wipes the cache after the new rows have already
-  // reported their heights, leaving every row on the estimate and two-line cues
-  // overlapping the ones below them.
-  useEffect(() => {
-    snapRef.current = true;
-    if (searching) listRef.current?.scrollTo({ top: 0, behavior: "auto" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needle]);
-
-  const items = virtualizer.getVirtualItems();
-
-  // React 19 treats a ref callback's return value as a cleanup function, so
-  // this must return nothing.
-  const measure = useCallback(
-    (el: HTMLElement | null) => {
-      if (el) virtualizer.measureElement(el);
-    },
-    [virtualizer],
-  );
-
-  // ── Follow the playing cue ───────────────────────────────────────────────
-
-  // Keyed on the cue index, never on `timeupdate`: re-issuing a smooth scroll
-  // four times a second cancels and retargets it before it can land, so it
-  // creeps forever and snatches the list back the instant you touch it.
-  useEffect(() => {
-    if (!open || !following || nudged || followIdx < 0) return;
-    const list = listRef.current;
-    if (!list) return;
-
-    // A cue the window isn't rendering is certainly off screen. One it is
-    // rendering has a measured offset, so the maths below is exact.
-    const item = items.find((i) => i.index === followIdx);
-    const h = list.clientHeight;
-
-    if (snapRef.current || !item) {
-      // Coming back from a scroll, or from far away: let the virtualizer do
-      // it — the target may never have been measured, and it corrects itself
-      // once the row renders. Instant, because a smooth scroll across
-      // unmeasured rows chases a moving target.
-      snapRef.current = false;
-      virtualizer.scrollToIndex(followIdx, { align: "center" });
-      return;
-    }
-
-    // Only move once the cue drifts out of the middle band, so the text is not
-    // sliding under the eye on every line.
-    const rel = item.start - list.scrollTop;
-    if (rel >= h * 0.2 && rel + item.size <= h * 0.8) return;
-
-    const centred = item.start - (h - item.size) / 2;
-    list.scrollTo({
-      top: Math.max(0, Math.min(virtualizer.getTotalSize() - h, centred)),
-      behavior: "smooth",
-    });
-    // `items` is deliberately not a dependency: it changes on every scroll
-    // frame, and this should run when the cue changes, not when the window does.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followIdx, following, nudged, virtualizer, open]);
-
-  // Reopening lands on the playing cue rather than wherever the list was when
-  // it closed — and only once the box has finished growing, since a scroll
-  // computed against a collapsing height ends up nowhere useful. Coming back
-  // from the Chapters tab counts as reopening: the list is unmounted while that
-  // tab is in front, so it returns scrolled to the top with the cue index
-  // unchanged, which is the one case the follow effect below cannot see.
-  useEffect(() => {
-    if (!open || activeTab !== "transcript") return;
-    snapRef.current = true;
-    const t = setTimeout(() => {
-      if (followingRef.current && followIdx >= 0) {
-        virtualizer.scrollToIndex(followIdx, { align: "center" });
-      }
-    }, SLIDE_MS + 30);
-    return () => clearTimeout(t);
-    // Only on open: the follow effect above owns every other reason to scroll.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, activeTab]);
-
-  // Arm the snap whenever following resumes, so Back to live and play both
-  // land on the cue rather than easing towards it. A nudge only means anything
-  // while following, so either edge clears it.
-  useEffect(() => {
-    if (following) {
-      // Except when the cue is already on screen because the reader scrolled
-      // it back: there is nothing to jump to, so the band rule takes over.
-      snapRef.current = !softResumeRef.current;
-      // Being live again is the end of the countdown, however it was reached:
-      // a deliberate Back to live cancels the pending re-sync it would race,
-      // and a re-sync that has already fired has nothing left to cancel.
-      clearTimeout(idleRef.current);
-      ringAnimRef.current?.cancel();
-    }
-    // The *other* edge must leave the countdown alone. Losing the cue off the
-    // top of the frame is what unfollows, and it is decided by the scroll
-    // event *after* the last wheel tick — so clearing the timer here killed
-    // the re-sync armed by that tick, and with it the ring on the pill that
-    // had just appeared. The whole point of the idle timer is that this state
-    // ends on its own.
-    softResumeRef.current = false;
-    nudgedRef.current = false;
-    setNudged(false);
-  }, [following]);
-
-  useEffect(
-    () => () => {
-      clearTimeout(idleRef.current);
-      ringAnimRef.current?.cancel();
-    },
-    [],
-  );
-
-  // ── Which way is live ────────────────────────────────────────────────────
-
-  // The button points at the cue, not at a fixed direction: read ahead and it
-  // sends you back up, read behind and it sends you down. Measured against the
-  // middle of the viewport so the answer doesn't flicker as the cue crosses an
-  // edge, and against the virtualizer's cache because the cue is usually off
-  // screen — that is why the button is showing — and so has no DOM node.
-  const [liveAbove, setLiveAbove] = useState(false);
-
-  const readDirection = useCallback(() => {
-    const list = listRef.current;
-    if (!list || followIdx < 0) return;
-    const measured = virtualizer.measurementsCache[followIdx];
-    const start = measured ? measured.start : followIdx * ESTIMATED_ROW;
-    setLiveAbove(start < list.scrollTop + list.clientHeight / 2);
-  }, [followIdx, virtualizer]);
-
-  // Playback keeps moving while the list is being read by hand, so the cue can
-  // cross the viewport with nobody scrolling.
-  useEffect(readDirection, [readDirection]);
-
-  // ── Nudge, unfollow, re-sync ─────────────────────────────────────────────
-
-  /** Any part of the playing cue is on screen, so nothing needs to move. */
-  const cueInFrame = useCallback(() => {
-    const list = listRef.current;
-    if (!list || followIdx < 0) return false;
-    const m = virtualizer.measurementsCache[followIdx];
-    const start = m ? m.start : followIdx * ESTIMATED_ROW;
-    const size = m ? m.size : ESTIMATED_ROW;
-    const rel = start - list.scrollTop;
-    return rel + size > 0 && rel < list.clientHeight;
-  }, [followIdx, virtualizer]);
-
-  // The ring is drawn from the pill's own box rather than a fixed size: the
-  // label is text, so its width is whatever the font renders. Measured even
-  // while the pill is hidden — it is faded out, not unmounted, so it still has
-  // a layout.
-  const [pill, setPill] = useState({ w: 0, h: 0 });
-  useEffect(() => {
-    const el = pillRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const r = el.getBoundingClientRect();
-      setPill((p) => (p.w === r.width && p.h === r.height ? p : { w: r.width, h: r.height }));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // A stadium's perimeter, computed rather than asked for: `getTotalLength()`
-  // on a `<rect>` is SVG2 and not worth betting a silent blank ring on.
-  const ringW = Math.max(0, pill.w - RING_STROKE);
-  const ringH = Math.max(0, pill.h - RING_STROKE);
-  const ringLen = 2 * Math.max(0, ringW - ringH) + Math.PI * ringH;
-
-  // Driven by hand, not by a state flag: this restarts on every scroll, and a
-  // re-render per wheel tick to redraw a ring is not a trade worth making.
-  const startRing = useCallback(() => {
-    ringAnimRef.current?.cancel();
-    const el = ringRef.current;
-    if (!el || ringLen <= 0) return;
-    // Dash pattern `[len on, len off]`, so the offset eats the outline from the
-    // far end back to the start — full pill at zero seconds used, bare at eight.
-    ringAnimRef.current = el.animate(
-      [{ strokeDashoffset: 0 }, { strokeDashoffset: ringLen }],
-      { duration: IDLE_RESYNC_MS, easing: "linear", fill: "forwards" },
-    );
-  }, [ringLen]);
-
-  // A hand-scroll is a glance until it is proven otherwise, so the list comes
-  // back on its own once it has been left alone. Every scroll pushes this back:
-  // what it waits for is the hand stopping, not the first touch.
-  const armResync = useCallback(() => {
-    startRing();
-    clearTimeout(idleRef.current);
-    idleRef.current = setTimeout(() => {
-      snapRef.current = true;
-      nudgedRef.current = false;
-      setNudged(false);
-      // Following already: clearing the nudge above is what re-scrolls. Not
-      // following: this is the Back to live press the user didn't have to make.
-      onBackToLive();
-    }, IDLE_RESYNC_MS);
-  }, [onBackToLive, startRing]);
-
-  const handleUserScroll = useCallback(() => {
-    const list = listRef.current;
-    // A list with nothing to scroll has nowhere to come back from.
-    if (!list || virtualizer.getTotalSize() <= list.clientHeight) return;
-    // Cancel any follow-scroll still animating, or it fights the wheel.
-    list.scrollTo({ top: list.scrollTop, behavior: "auto" });
-    // Hold the list still under the hand, but stay live: whether this scroll
-    // actually left the cue behind is decided once it has landed, since a wheel
-    // event still reads the pre-scroll `scrollTop`.
-    if (followingRef.current) {
-      nudgedRef.current = true;
-      setNudged(true);
-    }
-    armResync();
-  }, [virtualizer, armResync]);
-
-  // ── Edges ────────────────────────────────────────────────────────────────
-
-  // Whether there is anything above or below what's on screen, so the fades
-  // only appear over content they are actually hiding.
-  const [edges, setEdges] = useState({ above: false, below: false });
-
-  const readEdges = useCallback(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const above = list.scrollTop > 1;
-    const below = list.scrollTop + list.clientHeight < list.scrollHeight - 1;
-    setEdges((e) => (e.above === above && e.below === below ? e : { above, below }));
-  }, []);
-
-  // Rows measuring, a query narrowing the list, a resize or the panel opening
-  // all change what fits without anyone scrolling.
-  const totalSize = virtualizer.getTotalSize();
-  useEffect(() => {
-    readEdges();
-  }, [readEdges, totalSize, rows.length, size, open]);
-
-  const handleScroll = useCallback(() => {
-    readDirection();
-    readEdges();
-    if (nudgedRef.current) {
-      // The only way out of following: a hand-scroll that pushed the cue out of
-      // frame. A nudge that leaves it visible needs no way back, so it is
-      // offered none — the pill appearing over a list you can already read is
-      // the noise this avoids.
-      if (!cueInFrame()) onScrollAway();
-    } else if (!followingRef.current && cueInFrame()) {
-      // And the same rule in reverse: scrolling the cue back into view *is* the
-      // Back to live press, so it is taken as one rather than left sitting
-      // under a pill pointing at a cue already on screen.
-      softResumeRef.current = true;
-      onBackToLive();
-    }
-  }, [readDirection, readEdges, cueInFrame, onScrollAway, onBackToLive]);
-
-  const showBackToLive = !following && followIdx >= 0;
 
   return (
     <div
@@ -534,20 +345,28 @@ export const TranscriptPanel = memo(function TranscriptPanel({
             </TooltipTrigger>
             <TooltipContent>Drag to dock left, right, top or bottom</TooltipContent>
           </Tooltip>
-          {/* Four tabs do not fit a 220px dock, so the strip scrolls sideways
-              rather than pushing the close button off the header. No visible
-              scrollbar: these are classic scrollbars on this machine, and a
-              bar under four words is furniture the header has no room for. */}
-          <div
-            className="min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <ViewTabs
-              tabs={tabs}
-              value={activeTab}
-              onChange={onTabChange}
-              className="w-max gap-3"
-            />
+          {/* Three tabs are a squeeze in a 220px dock, so the strip scrolls
+              sideways rather than pushing the close button off the header. No
+              visible scrollbar: these are classic scrollbars on this machine,
+              and a bar under three words is furniture the header has no room
+              for — the fades either side carry the affordance instead. */}
+          <div className="relative min-w-0">
+            <div
+              ref={stripRef}
+              onScroll={readStripEdges}
+              className="min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <ViewTabs
+                tabs={tabs}
+                value={activeTab}
+                onChange={onTabChange}
+                onReorder={onReorder}
+                className="w-max gap-3"
+              />
+            </div>
+            <StripFade side="left" show={stripEdges.left} />
+            <StripFade side="right" show={stripEdges.right} />
           </div>
           {/* Lifted onto the tabs' text like the drag handle is, and it keeps
               its own pointerdown for the same reason they do: the header's
@@ -568,235 +387,75 @@ export const TranscriptPanel = memo(function TranscriptPanel({
           <LectureChatPanel {...chat} />
         ) : activeTab === "chapters" ? (
           <ChaptersPanel {...chapters} />
-        ) : activeTab === "recap" ? (
-          <RecapPanel {...recap} />
+        ) : mode === "enhanced" ? (
+          <ReadingList {...reading} picker={picker} />
         ) : (
           <>
-          <div className="px-1.5 pt-1.5 shrink-0">
-            <div className="relative">
-              <MagnifyingGlass
-                size={12}
-                className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
+            {/* The picker shares the search row rather than taking one of its
+                own: the dock is 220px at its narrowest and a second row here
+                is a row of the transcript. The field takes what is left. */}
+            <div className="flex shrink-0 items-center gap-1.5 px-1.5 pt-1.5">
+              <SearchField
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setQuery("");
-                    e.currentTarget.blur();
-                  }
-                }}
-                placeholder="Search transcript"
-                spellCheck={false}
-                className={cn(
-                  "w-full h-6 pl-6 rounded-full bg-surface text-[11px] text-foreground",
-                  "placeholder:text-muted-foreground focus:outline-none",
-                  "focus:ring-1 focus:ring-brand/40 transition-shadow",
-                  searching ? "pr-14" : "pr-2",
-                )}
+                onChange={setQuery}
+                placeholder="Search"
+                count={searching ? rows.length : undefined}
+                className="min-w-0 flex-1 shrink p-0"
               />
-              {searching && (
-                <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-                  <span className="text-[10px] tabular-nums text-muted-foreground">
-                    {rows.length}
-                  </span>
+              <TranscriptModePicker {...picker} />
+            </div>
+            <FollowList
+              count={rows.length}
+              followIdx={followIdx}
+              // Keyed by *cue* index, not row: a row's measured height then
+              // survives the query that moved it to a different row.
+              getItemKey={(i) => rows[i]}
+              open={open}
+              active={activeTab === "transcript"}
+              following={following}
+              onScrollAway={onScrollAway}
+              onBackToLive={onBackToLive}
+              resetKey={needle}
+              overlay={searching && rows.length === 0 ? "No matches" : undefined}
+              renderRow={(row, item, measure) => {
+                const cueIdx = rows[row];
+                const cue = cues[cueIdx];
+                const active = cueIdx === activeCueIdx;
+                return (
                   <button
-                    onClick={() => setQuery("")}
-                    aria-label="Clear search"
-                    className="p-0.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                    data-index={item.index}
+                    ref={measure}
+                    onClick={() => onSeek(cue.start)}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${item.start}px)`,
+                    }}
+                    className={cn(
+                      "text-left text-[11px] px-2 py-1 rounded flex gap-2 items-start",
+                      active
+                        ? "bg-brand/12 text-brand"
+                        : "text-muted-foreground hover:text-foreground hover:bg-surface",
+                    )}
                   >
-                    <X size={10} weight="bold" />
+                    <span className="tabular-nums text-[10px] shrink-0 pt-px w-10 opacity-60">
+                      {fmtTime(Math.floor(cue.start))}
+                    </span>
+                    <span className="flex-1">
+                      <Highlight text={cue.text} needle={needle} />
+                    </span>
                   </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="relative flex-1 min-h-0">
-            <div
-              ref={listRef}
-              // Intent, not the `scroll` event: our own follow-scroll fires scroll
-              // events too, and telling the two apart after the fact is guesswork.
-              // A wheel, a touch drag, or a press on the scrollbar (which lands on
-              // the scroller itself, never on a cue) is unambiguously the user.
-              onWheel={(e) => {
-                if (e.deltaY !== 0) handleUserScroll();
+                );
               }}
-              onTouchMove={handleUserScroll}
-              onScroll={handleScroll}
-              onPointerDown={(e) => {
-                if (e.target === e.currentTarget) handleUserScroll();
-              }}
-              className="absolute inset-0 overflow-y-auto px-1.5 py-2"
-            >
-              <div
-                style={{ height: virtualizer.getTotalSize(), position: "relative" }}
-              >
-                {items.map((item) => {
-                  const cueIdx = rows[item.index];
-                  const cue = cues[cueIdx];
-                  const active = cueIdx === activeCueIdx;
-                  return (
-                    <button
-                      key={item.key}
-                      data-index={item.index}
-                      ref={measure}
-                      onClick={() => onSeek(cue.start)}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${item.start}px)`,
-                      }}
-                      className={cn(
-                        "text-left text-[11px] px-2 py-1 rounded flex gap-2 items-start",
-                        active
-                          ? "bg-brand/12 text-brand"
-                          : "text-muted-foreground hover:text-foreground hover:bg-surface",
-                      )}
-                    >
-                      <span className="tabular-nums text-[10px] shrink-0 pt-px w-10 opacity-60">
-                        {fmtTime(Math.floor(cue.start))}
-                      </span>
-                      <span className="flex-1">
-                        <Highlight text={cue.text} needle={needle} />
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Scroll fades. A gradient rather than a `backdrop-filter`: a blur
-                layer over a scrolling virtualised list that sits next to a
-                decoding video is exactly the compositing the player spends its
-                effort avoiding.
-
-                Two things keep a gradient from looking like a cut. It holds
-                solid `background` for its first few pixels rather than letting
-                text through immediately — the top one butts against the opaque
-                search row, and half-visible text a pixel under solid white
-                reads as clipped, not faded — then takes the rest of its height
-                to dissolve, so the hold never thickens into a white band. And
-                it ends at `background/0`, not `transparent`: `transparent` is
-                *transparent black*, so interpolating to it drags the middle of
-                the ramp grey and leaves a dirty smear across the text. */}
-            <div
-              aria-hidden
-              className={cn(
-                "pointer-events-none absolute inset-x-0 top-0 h-10 z-10",
-                "bg-gradient-to-b from-background from-15%",
-                "via-background/50 via-50% to-background/0",
-                "transition-opacity duration-150",
-                edges.above ? "opacity-100" : "opacity-0",
-              )}
             />
-            <div
-              aria-hidden
-              className={cn(
-                "pointer-events-none absolute inset-x-0 bottom-0 h-10 z-10",
-                "bg-gradient-to-t from-background from-15%",
-                "via-background/50 via-50% to-background/0",
-                "transition-opacity duration-150",
-                edges.below ? "opacity-100" : "opacity-0",
-              )}
-            />
-
-            {searching && rows.length === 0 && (
-              <div className="pointer-events-none absolute inset-x-0 top-6 text-center text-[11px] text-muted-foreground">
-                No matches
-              </div>
-            )}
-
-            {/* Scrolled away from the playing cue — offer the way back. */}
-            <div
-              className={cn(
-                "pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center transition-opacity duration-200",
-                showBackToLive ? "opacity-100" : "opacity-0",
-              )}
-            >
-              <button
-                ref={pillRef}
-                onClick={onBackToLive}
-                tabIndex={showBackToLive ? 0 : -1}
-                aria-hidden={!showBackToLive}
-                className={cn(
-                  "pointer-events-auto relative h-6 pl-2 pr-2.5 rounded-full flex items-center gap-1",
-                  "bg-brand text-brand-foreground text-[11px] font-medium",
-                  "shadow-md shadow-black/15 hover:bg-brand-hover transition-colors",
-                  !showBackToLive && "pointer-events-none",
-                )}
-              >
-                {/* Time left before the list re-syncs on its own — the outline
-                    drains over the eight seconds, so the pill going bare is the
-                    warning that it is about to jump back. */}
-                {pill.w > 0 && (
-                  <svg
-                    aria-hidden
-                    viewBox={`0 0 ${pill.w} ${pill.h}`}
-                    className="pointer-events-none absolute inset-0 h-full w-full text-brand-foreground/70"
-                  >
-                    <rect
-                      ref={ringRef}
-                      x={RING_STROKE / 2}
-                      y={RING_STROKE / 2}
-                      width={ringW}
-                      height={ringH}
-                      rx={ringH / 2}
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={RING_STROKE}
-                      strokeDasharray={ringLen}
-                    />
-                  </svg>
-                )}
-                {liveAbove ? (
-                  <ArrowLineUp size={11} weight="bold" />
-                ) : (
-                  <ArrowLineDown size={11} weight="bold" />
-                )}
-                Back to live
-              </button>
-            </div>
-          </div>
           </>
         )}
       </div>
     </div>
   );
 });
-
-/**
- * The matched run, marked in place. Split by hand rather than by a regular
- * expression: the needle is whatever was typed, so `.`, `(` and `?` are
- * characters a transcript contains, not syntax.
- */
-function Highlight({ text, needle }: { text: string; needle: string }) {
-  if (!needle) return <>{text}</>;
-  const hay = text.toLowerCase();
-  const parts: ReactNode[] = [];
-  let at = 0;
-  for (;;) {
-    const hit = hay.indexOf(needle, at);
-    if (hit < 0) {
-      parts.push(text.slice(at));
-      break;
-    }
-    if (hit > at) parts.push(text.slice(at, hit));
-    parts.push(
-      <mark
-        key={hit}
-        className="bg-brand/20 text-brand rounded-[2px] px-px"
-      >
-        {text.slice(hit, hit + needle.length)}
-      </mark>,
-    );
-    at = hit + needle.length;
-  }
-  return <>{parts}</>;
-}
 
 /**
  * The band the panel would land in, previewed under the pointer mid-drag —
@@ -855,5 +514,37 @@ export function DockResizeHandle({
         )}
       />
     </div>
+  );
+}
+
+/**
+ * Fade over one end of the header's tab strip, shown only while there is more
+ * of it that way.
+ *
+ * A gradient and not a `backdrop-filter`, for the reason the transcript's own
+ * fades give at length further up: a blur layer inside a panel that clips its
+ * overflow and transitions its width is the compositing this player spends its
+ * effort avoiding, and over the header's flat `background` the two are
+ * indistinguishable anyway. It ends at `background/0` rather than
+ * `transparent` for the same reason as well — `transparent` is transparent
+ * *black*, and interpolating to it drags the middle of the ramp grey and
+ * smears the tab label underneath.
+ *
+ * Narrower than the list's fades (24px against 40) because it is covering a
+ * word, not a paragraph: any more and the first tab is half-dissolved before
+ * the strip has been scrolled at all.
+ */
+function StripFade({ side, show }: { side: "left" | "right"; show: boolean }) {
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        "pointer-events-none absolute inset-y-0 w-6 transition-opacity duration-150",
+        side === "left"
+          ? "left-0 bg-gradient-to-r from-background from-15% via-background/50 via-50% to-background/0"
+          : "right-0 bg-gradient-to-l from-background from-15% via-background/50 via-50% to-background/0",
+        show ? "opacity-100" : "opacity-0",
+      )}
+    />
   );
 }

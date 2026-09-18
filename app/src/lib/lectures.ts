@@ -175,44 +175,45 @@ export function findLectureChapters(
   return invoke("lecture_find_chapters", { lectureId, force, source });
 }
 
-// ── Recap ────────────────────────────────────────────────────────────────────
+// ── Reading copy ─────────────────────────────────────────────────────────────
 
-/** Rust's own event (`recap::app::LECTURE_RECAP_EVENT`), the recap job's
- *  sibling of `LECTURE_CHAPTERS_EVENT` and separate from it for the same
- *  reason the two jobs are separate: either can finish while the other has
- *  never been run. */
-export const LECTURE_RECAP_EVENT = "lecture-recap";
+/** Rust's own event (`reading::app::LECTURE_READING_EVENT`), the reading-copy
+ *  job's sibling of `LECTURE_CHAPTERS_EVENT` and separate from it for the
+ *  same reason the two jobs are separate: either can finish while the other
+ *  has never been run. */
+export const LECTURE_READING_EVENT = "lecture-reading";
 
-/** How a recap run ended. `notes` is how many were written — which on an
- *  `error` can still be more than zero, because a recap commits window by
+/** How a reading-copy run ended. `lines` is how many were written — which on
+ *  an `error` can still be more than zero, because the job commits window by
  *  window and the ones before the failure are kept (docs/chapters.md). */
-export interface RecapRunFinished {
+export interface ReadingRunFinished {
   lectureId: string;
   status: "ready" | "error";
-  notes: number;
+  lines: number;
   error: string | null;
 }
 
-/** Rust's step report while a recap is in flight
- *  (`recap::app::LECTURE_RECAP_PROGRESS_EVENT`). */
-export const LECTURE_RECAP_PROGRESS_EVENT = "lecture-recap-progress";
+/** Rust's step report while a reading copy is in flight
+ *  (`reading::app::LECTURE_READING_PROGRESS_EVENT`). */
+export const LECTURE_READING_PROGRESS_EVENT = "lecture-reading-progress";
 
-/** Which part of the recap job is running. There is no `naming` here: the
- *  reply arriving means one window is decided, not the whole lecture, and the
- *  window counter already says that. */
-export type RecapPhase = "decoding" | "frames" | "agent" | "writing";
+/** Which part of the reading-copy job is running. There is no `naming` here:
+ *  the reply arriving means one window is decided, not the whole lecture, and
+ *  the window counter already says that. */
+export type ReadingPhase = "decoding" | "frames" | "agent" | "writing";
 
 /**
- * What the recap run is doing right now.
+ * What the reading-copy run is doing right now.
  *
  * `window` is the one thing a chaptering run has no equivalent of, and it is
  * the reason this job can be honest about its progress where the other cannot:
- * a recap is a sequence of countable agent turns, so "window 3 of 7" is a real
- * fraction rather than an estimate of a single turn that has not answered.
+ * a reading copy is a sequence of countable agent turns, so "window 3 of 7" is
+ * a real fraction rather than an estimate of a single turn that has not
+ * answered.
  */
-export interface RecapRunProgress {
+export interface ReadingRunProgress {
   lectureId: string;
-  phase: RecapPhase;
+  phase: ReadingPhase;
   detail: string | null;
   kind: ToolKind | null;
   done: number | null;
@@ -220,30 +221,30 @@ export interface RecapRunProgress {
   window: { done: number; total: number } | null;
 }
 
-export const RECAP_PHASE_LABEL: Record<RecapPhase, string> = {
+export const READING_PHASE_LABEL: Record<ReadingPhase, string> = {
   decoding: "Watching the recording",
   frames: "Grabbing slide frames",
-  agent: "Writing the notes",
-  writing: "Saving notes",
+  agent: "Writing the reading copy",
+  writing: "Saving lines",
 };
 
 /**
- * Write a recap with the agent the `lectureRecap` job is configured with
- * (Settings → AI), the same job `oculus lecture recap` runs.
+ * Write a reading copy with the agent the `lectureReading` job is configured
+ * with (Settings → AI), the same job `oculus lecture reading` runs.
  *
  * Returns as soon as the run is claimed. It needs both the recording *and* the
- * transcript — unlike chaptering, none of the transcript is optional reading —
- * and Rust refuses the run outright without them.
+ * transcript — the copy is a rewrite of the transcript, so none of it is
+ * optional reading — and Rust refuses the run outright without them.
  *
  * `source` is `findLectureChapters`': the two jobs decode the same file and
  * choose the stream the same way.
  */
-export function writeLectureRecap(
+export function writeLectureReading(
   lectureId: string,
   force = false,
   source?: SourceNum
 ): Promise<void> {
-  return invoke("lecture_write_recap", { lectureId, force, source });
+  return invoke("lecture_write_reading", { lectureId, force, source });
 }
 
 /**
@@ -281,10 +282,10 @@ export function chapterEnds(starts: number[], duration: number): number[] {
 /**
  * Which span second `t` falls in, or -1 before the first one starts.
  *
- * Named for the shape rather than for chapters: a chapter set and a recap's
- * notes are both an ordered list of starts with no ends, and "which one is the
- * playhead in" is the same arithmetic over either. Two copies of it would be
- * two places for an off-by-one to live.
+ * Named for the shape rather than for chapters: a chapter set and a reading
+ * copy's lines are both an ordered list of starts with no ends, and "which one
+ * is the playhead in" is the same arithmetic over either. Two copies of it
+ * would be two places for an off-by-one to live.
  */
 export function spanAt(starts: number[], t: number): number {
   let idx = -1;
