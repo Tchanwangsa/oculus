@@ -50,8 +50,10 @@ export function recentKey(path: string): string | null {
   const [pathname, search = ""] = path.split("?");
   // A browser tab's path names a native page Rust owns; the id dies with
   // the page, so it would come back as a link to nothing. Home is one
-  // keystroke away and is where an empty tab starts.
-  if (browseId(pathname) != null || pathname === "/") return null;
+  // keystroke away, and `/new` is where an empty tab starts — it lists this
+  // very trail, so a row leading back to it would be a row leading nowhere.
+  if (browseId(pathname) != null || pathname === "/" || pathname === "/new")
+    return null;
 
   const task = /^\/projects\/(\d+)\/tasks\/(\d+)/.exec(pathname);
   if (task) return `task:${task[1]}:${task[2]}`;

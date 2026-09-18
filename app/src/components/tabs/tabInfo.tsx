@@ -5,12 +5,15 @@ import {
   CalendarBlank,
   Chat,
   CheckSquare,
+  FileDashed,
   GearSix,
   Globe,
   House,
   Kanban,
+  ListChecks,
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
+import { faviconFor } from "@/hooks/useBrowserTabs";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { displayCode, humanizeSlug } from "@/lib/format";
 import type { Subject } from "@/lib/db";
@@ -40,17 +43,35 @@ export function tabInfo(
   subjects: Subject[],
   browserTabs: BrowserTab[],
   size = 13,
+  favicons: Record<string, string> = {},
 ): TabInfo {
   const [pathname, search = ""] = path.split("?");
-  // A browser tab is titled by its page, as a browser's is; the globe
-  // spins while the page loads.
+  // A browser tab is titled by its page and marked by the site's own icon, as
+  // a browser's is. Three states in order: the spinner while it loads, the
+  // favicon once one has been found for that host, and the globe for a site
+  // that has none or has not been asked yet — which is also every tab for the
+  // first second of a cold start, since the icons are read from the database
+  // rather than shipped with the app.
   const bid = browseId(pathname);
   if (bid != null) {
     const tab = browserTabs.find((t) => t.id === bid);
+    const icon = faviconFor(tab?.url, favicons);
     return {
       title: tab?.title || hostOf(tab?.url ?? "") || "New tab",
       icon: tab?.loading ? (
         <ArrowClockwise size={size} className="animate-spin" />
+      ) : icon ? (
+        <img
+          src={icon}
+          alt=""
+          width={size}
+          height={size}
+          /* A square box whatever the icon's own aspect: `object-contain`
+             letterboxes a wide one rather than cropping it, and the fixed
+             size keeps every tab's title starting at the same x. */
+          style={{ width: size, height: size }}
+          className="shrink-0 rounded-[2px] object-contain"
+        />
       ) : (
         <Globe size={size} />
       ),
@@ -58,8 +79,18 @@ export function tabInfo(
   }
   // Exact, not a prefix: every other route starts with "/" too.
   if (pathname === "/") return { title: "Home", icon: <House size={size} /> };
+  // A tab that has not been sent anywhere yet, titled as a browser's is.
+  if (pathname === "/new")
+    return { title: "New tab", icon: <FileDashed size={size} /> };
+  // A conversation is titled by itself, like a project or a lecture: the name
+  // rides in the query, written by `ChatPage` as the open thread changes and
+  // as the model renames it. Nothing open means no `?n=`, and the tab is the
+  // section it is.
   if (pathname.startsWith("/chat"))
-    return { title: "Chat", icon: <Chat size={size} /> };
+    return {
+      title: new URLSearchParams(search).get("n") || "Chat",
+      icon: <Chat size={size} />,
+    };
   if (pathname.startsWith("/calendar"))
     return { title: "Calendar", icon: <CalendarBlank size={size} /> };
   // A task's own page, tested *before* the project below it: `/projects/(\d+)`
@@ -84,6 +115,20 @@ export function tabInfo(
   }
   if (pathname.startsWith("/projects"))
     return { title: "Projects", icon: <Kanban size={size} /> };
+  // An unfiled task's own page — the `/tasks/:taskId` half of `taskHref`.
+  // Tested before the universal list below it for the same reason the project
+  // pair above is ordered that way: `/tasks` is a prefix of this path.
+  if (/^\/tasks\/\d+/.test(pathname)) {
+    return {
+      title: new URLSearchParams(search).get("n") || "Task",
+      icon: <CheckSquare size={size} />,
+    };
+  }
+  // Every task across every project, and the ones filed nowhere. A checklist
+  // rather than the single task's checkbox or the board's Kanban glyph — it is
+  // a list, and it is not one project's.
+  if (pathname.startsWith("/tasks"))
+    return { title: "Tasks", icon: <ListChecks size={size} /> };
   if (pathname.startsWith("/sync"))
     return { title: "Sync", icon: <ArrowsClockwise size={size} /> };
   if (pathname.startsWith("/settings"))
