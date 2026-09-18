@@ -79,8 +79,8 @@ rather than waiting to be reopened — which is the cost of titling from the
 path, paid at the one moment it shows.
 
 **`/tasks` is every task there is**, across every project and including the
-ones that belong to none (`app/src/pages/TasksPage.tsx`) — a board of three
-column *kinds* or a flat table, over `useTaskList` rather than
+ones that belong to none (`app/src/pages/TasksPage.tsx`) — a board of the four
+columns every project is born with, or a flat table, over `useTaskList` rather than
 `projectsStore`, which holds one open project and is the wrong shape for a view
 that spans them all. It carries a second, nested route: **an unfiled task's own
 page is `/tasks/:taskId`**, the same `TaskPage` component with no project

@@ -6,27 +6,30 @@ import { cn } from "@/lib/utils";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { DRAG_SURFACE, useCardDrag, useSettledList } from "@/hooks/useCardDrag";
 import { displayCode } from "@/lib/format";
-import type { DbProject, DbTaskWithProject } from "@/lib/projects";
+import type { DbProject, DbTaskWithProject, ProjectColumn } from "@/lib/projects";
 import { CardTitle } from "./CardTitle";
 import { taskHref } from "./taskHref";
 import { AgentMark, DueChip, TaskGlyph } from "./TaskMarks";
 import {
-  KIND_COLUMNS,
-  columnForKind,
-  kindOf,
+  columnForUniversal,
   projectLabel,
+  universalColumnOf,
 } from "./universalTasks";
 
 /**
- * Every task there is, on three columns — Backlog, In progress, Done.
+ * Every task there is, on the board every project is born with — Backlog,
+ * Todo, In progress, Done.
  *
- * The columns are **kinds**, not columns: this board spans projects, and the
- * only vocabulary every project's board shares is what a column means
- * (`KIND_COLUMNS` in `./universalTasks.ts`). Dropping a card in another column
- * therefore writes a change of kind, resolved against the card's *own* board —
- * so a project that distinguishes Todo from In progress keeps that
- * distinction, and a board with no Done column refuses a drop onto Done
- * instead of inventing one.
+ * The columns are `DEFAULT_COLUMNS` itself (`UNIVERSAL_COLUMNS` in
+ * `./universalTasks.ts`), **handed in as a prop** so the board never has to
+ * know a filter exists: the page passes the whole list, or the subset the
+ * status filter leaves standing. A card is drawn in the column whose *id* its
+ * own board's column has, falling back to that column's kind — which is what
+ * keeps Todo and In progress apart here, since a kind alone cannot tell them
+ * apart. Dropping a card in another column writes that column back onto the
+ * card's *own* board, by id if it has one and by kind otherwise — so a project
+ * that renamed Todo still receives a drop onto Todo, and a board with no Done
+ * column refuses a drop onto Done instead of inventing one.
  *
  * **Within a column there is no manual order, so a drag inside one is a
  * no-op.** `./universalTasks.ts` carries the long version: `position` is only
@@ -57,11 +60,15 @@ const CARD = cn(
 
 export function TasksBoard({
   tasks,
+  columns,
   projectById,
   onMove,
 }: {
   /** In `UNIVERSAL_ORDER` — see above. */
   tasks: DbTaskWithProject[];
+  /** Which of `UNIVERSAL_COLUMNS` to draw, in order. The page filters it; the
+   *  board just draws what it is given. */
+  columns: readonly ProjectColumn[];
   projectById: Map<number, DbProject>;
   /** Given a column id off the task's own board, never an invented one. */
   onMove: (task: DbTaskWithProject, columnId: string) => void;
@@ -81,17 +88,23 @@ export function TasksBoard({
   const drag = useCardDrag(
     ({ id, from, containerId }) => {
       // The whole no-manual-order rule, in one line: a card that came back to
-      // the kind it started in has nothing to write, however far it travelled or
-      // which two cards it was hovering between. The hook already drops a
+      // the column it started in has nothing to write, however far it travelled
+      // or which two cards it was hovering between. The hook already drops a
       // gesture that ends in the slot it began in; this drops the rest.
       if (from === containerId) return;
       const task = tasksRef.current.find((t) => t.id === id);
-      const target = KIND_COLUMNS.find((c) => c.kind === containerId);
-      if (!task || !target) return;
-      const column = columnForKind(task, projectById, target.kind);
-      // No column of that kind on this task's own board. Nothing is written and
-      // nothing is faked — the card springs back to where it was.
+      if (!task) return;
+      const column = columnForUniversal(task, projectById, containerId);
+      // No column of that id or kind on this task's own board. Nothing is
+      // written and nothing is faked — the card springs back to where it was.
       if (!column) return;
+      // The guard above compares *universal* columns, and two of them can
+      // resolve to the same column on a given task's own board — a board with
+      // one active column takes a drop onto Todo and onto In progress at the
+      // same place. Writing that move would only shuffle `position` within a
+      // run this view does not order by: the card springs back, having written
+      // something. So the resolved column is checked too.
+      if (column.id === task.column_id) return;
       onMove(task, column.id);
       return true;
     },
@@ -109,8 +122,12 @@ export function TasksBoard({
 
   // Grouped once per render and shared by the columns: two passes could
   // disagree about what the user was looking at.
-  const byKind = new Map(KIND_COLUMNS.map((c) => [c.kind, [] as DbTaskWithProject[]]));
-  for (const task of settledTasks) byKind.get(kindOf(task, projectById))?.push(task);
+  const byColumn = new Map(columns.map((c) => [c.id, [] as DbTaskWithProject[]]));
+  // A task whose universal column is filtered out simply has nowhere to go and
+  // is not drawn — `byColumn` has no bucket for it.
+  for (const task of settledTasks) {
+    byColumn.get(universalColumnOf(task, projectById).id)?.push(task);
+  }
 
   /** The pointer is back over the column it was lifted from, where a drop
    *  would do nothing — so nothing moves. The cards used to slide apart and
@@ -121,15 +138,15 @@ export function TasksBoard({
 
   return (
     <div className="flex h-full gap-3 overflow-x-auto px-5 py-4">
-      {KIND_COLUMNS.map((column) => {
-        const cards = byKind.get(column.kind) ?? [];
+      {columns.map((column) => {
+        const cards = byColumn.get(column.id) ?? [];
         return (
           <section
-            key={column.kind}
-            ref={drag.containerRef(column.kind)}
+            key={column.id}
+            ref={drag.containerRef(column.id)}
             className={cn(
               "flex w-72 shrink-0 flex-col rounded-xl border bg-surface/40 transition-colors",
-              live?.targetContainerId === column.kind && !idle
+              live?.targetContainerId === column.id && !idle
                 ? "border-brand/50"
                 : "border-border-subtle",
             )}
@@ -152,12 +169,12 @@ export function TasksBoard({
 
               {cards.map((task, i) => {
                 const grabbed = live?.id === task.id;
-                const shift = grabbed || idle ? 0 : drag.shiftFor(column.kind, i);
+                const shift = grabbed || idle ? 0 : drag.shiftFor(column.id, i);
                 const href = taskHref(task.project_id, task);
                 return (
                   <article
                     key={task.id}
-                    ref={drag.itemRef(column.kind, task.id)}
+                    ref={drag.itemRef(column.id, task.id)}
                     /* The card opens the task, and stays a plain `<article>`
                        to do it: it holds controls of its own — the title's
                        anchor, the Show more toggle — and interactive content
@@ -170,7 +187,7 @@ export function TasksBoard({
                        card rather than only from the title. */
                     data-tab-href={href}
                     onPointerDown={(e) =>
-                      drag.onPointerDown(e, { id: task.id, containerId: column.kind })
+                      drag.onPointerDown(e, { id: task.id, containerId: column.id })
                     }
                     onClick={(e) => {
                       // What is *on* the card keeps its own click: the title
@@ -307,7 +324,11 @@ function TaskCard({
       )}
 
       <div className="mt-1 flex min-w-0 items-start gap-1.5">
-        <TaskGlyph kind={kindOf(task, projectById)} size={13} className="mt-0.5" />
+        <TaskGlyph
+          kind={universalColumnOf(task, projectById).kind}
+          size={13}
+          className="mt-0.5"
+        />
         {/* Folded to three lines and broken so an unbreakable token — a pasted
             URL — cannot leave the card. Still an anchor: it is the keyboard way
             in and what ⌘-click reads. */}

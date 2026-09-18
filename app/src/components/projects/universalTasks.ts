@@ -1,5 +1,6 @@
 import {
   boardOf,
+  DEFAULT_COLUMNS,
   type ColumnKind,
   type DbProject,
   type DbTaskWithProject,
@@ -26,24 +27,40 @@ import { columnOf } from "./taskTree";
  * (`TasksBoard`), and the table's rows are sortable by header rather than
  * draggable (`TasksTable`).
  *
- * What a drag across columns *does* write is a change of **kind**, which every
- * board shares: see {@link KIND_COLUMNS} and {@link columnForKind}.
+ * What a drag across columns *does* write is a change of column on the task's
+ * own board: see {@link UNIVERSAL_COLUMNS} and {@link columnForUniversal}.
  */
 
 /**
- * The universal board's three columns.
+ * The universal board's columns: **literally {@link DEFAULT_COLUMNS}**, the
+ * board every project is born with.
  *
- * Kinds, not columns: a project renames its columns and may have several of
- * one kind (a default board has Todo *and* In progress, both `active`), so the
- * only vocabulary every board shares is what a column *means*. The names are
- * `DEFAULT_COLUMNS`' own words for each kind, so the universal board and a new
- * project's board read the same.
+ * An alias rather than a second list of the same four names, because two lists
+ * of the same four names is how the two drift. A project renames its columns
+ * and may add its own, so no cross-project view can use a project's vocabulary
+ * — but the default board's *is* the shared one, since every project starts
+ * there and an unfiled task's `column_id` is one of these four ids by
+ * construction (`boardOf`).
+ *
+ * They are matched **id first, kind as fallback** — see
+ * {@link universalColumnOf}. That is what keeps Todo and In progress apart
+ * here, which a kind alone cannot do: they are both `active`.
  */
-export const KIND_COLUMNS: ReadonlyArray<{ kind: ColumnKind; name: string }> = [
-  { kind: "backlog", name: "Backlog" },
-  { kind: "active", name: "In progress" },
-  { kind: "done", name: "Done" },
-];
+export const UNIVERSAL_COLUMNS: readonly ProjectColumn[] = DEFAULT_COLUMNS;
+
+/**
+ * Where a kind goes when an id cannot be matched.
+ *
+ * `active` lands on **In progress**, not Todo: a board that renamed or
+ * replaced its active columns has no way to claim Todo specifically, and In
+ * progress is the kind's plain name — the word `DEFAULT_COLUMNS` gives the
+ * kind when it is not being split in two.
+ */
+const HOME_OF_KIND: Record<ColumnKind, string> = {
+  backlog: "backlog",
+  active: "doing",
+  done: "done",
+};
 
 /** The project a task is filed in, or `null` when it is filed nowhere — which
  *  `boardOf` and `columnOf` both take as "the default board". */
@@ -55,41 +72,63 @@ export function projectOf(
 }
 
 /**
- * Which of the three columns a task is drawn in.
+ * Which of {@link UNIVERSAL_COLUMNS} a task is drawn in.
  *
- * A column its own board no longer has resolves to no kind at all, and those
+ * **Id first**: a task whose own board still uses one of the four default ids
+ * — which is every task on an unedited board, and every unfiled task — draws
+ * in that same column, so Todo and In progress stay two columns here exactly
+ * as they are on the project's own board.
+ *
+ * **Kind second**, through {@link HOME_OF_KIND}, for a column a project added
+ * or renamed the id of. That column means something every board shares; which
+ * of the two `active` columns it would have been is not knowable, so it takes
+ * the kind's home.
+ *
+ * A column its own board no longer has resolves to nothing at all, and those
  * fall to Backlog — the leftmost column, where a card's life starts — rather
  * than being dropped from the board, because a card nothing draws is a card
  * nobody can fix. It is not drawn as though it were filed correctly: the
  * table's `StatusPill` paints an unknown column `destructive` and names it,
  * which is the readout that says what actually happened.
  */
-export function kindOf(
+export function universalColumnOf(
   task: DbTaskWithProject,
   projectById: Map<number, DbProject>,
-): ColumnKind {
-  return columnOf(projectOf(task, projectById), task.column_id)?.kind ?? "backlog";
+): ProjectColumn {
+  const backlog = UNIVERSAL_COLUMNS[0];
+  const own = columnOf(projectOf(task, projectById), task.column_id);
+  if (!own) return backlog;
+  return (
+    UNIVERSAL_COLUMNS.find((c) => c.id === own.id) ??
+    UNIVERSAL_COLUMNS.find((c) => c.id === HOME_OF_KIND[own.kind]) ??
+    backlog
+  );
 }
 
 /**
- * The column a drop into `kind` means **on this task's own board**.
+ * The column a drop onto universal column `universalId` means **on this task's
+ * own board**.
  *
- * The first column of that kind: entering a kind puts you at its start, so a
- * card dragged out of Backlog lands in Todo rather than skipping to In
- * progress on a board that distinguishes them. That distinction is the
- * project's to make and survives every drag that does not change kind, because
- * such a drag writes nothing at all.
+ * The same id if the board has it, so a default board receives the drop
+ * exactly where it was aimed. Otherwise the first column of that id's *kind*:
+ * a board that renamed `todo` to "Next" still takes a drop onto Todo, and
+ * entering a kind puts you at its start rather than skipping to the end of it.
  *
- * `null` when the board has no column of that kind — a board with no Done
- * column has nowhere for a drop onto Done to go, and refusing is the only
+ * `null` when the board has no column of that kind either — a board with no
+ * Done column has nowhere for a drop onto Done to go, and refusing is the only
  * honest answer.
  */
-export function columnForKind(
+export function columnForUniversal(
   task: DbTaskWithProject,
   projectById: Map<number, DbProject>,
-  kind: ColumnKind,
+  universalId: string,
 ): ProjectColumn | null {
-  return boardOf(projectOf(task, projectById)).find((c) => c.kind === kind) ?? null;
+  const board = boardOf(projectOf(task, projectById));
+  const exact = board.find((c) => c.id === universalId);
+  if (exact) return exact;
+  const kind = UNIVERSAL_COLUMNS.find((c) => c.id === universalId)?.kind;
+  if (!kind) return null;
+  return board.find((c) => c.kind === kind) ?? null;
 }
 
 /**
