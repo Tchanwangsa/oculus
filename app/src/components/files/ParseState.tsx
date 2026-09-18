@@ -120,6 +120,10 @@ export function MarkdownUnavailable({ file }: { file: DbFile }) {
         <Button
           variant="ghost"
           size="xs"
+          /* The badge sits inside a row that leads to the file's page, and
+             this button leads nowhere — so it keeps its own ⌘-click rather
+             than the row's (`lib/newTabClicks.ts`). */
+          data-tab-skip
           className={cn(
             "shrink-0 text-[11px] font-normal",
             moving ? "text-brand" : "text-muted-foreground",
@@ -139,6 +143,7 @@ export function MarkdownUnavailable({ file }: { file: DbFile }) {
             variant="secondary"
             size="xs"
             className="mt-3"
+            data-tab-href="/settings/library"
             onClick={() => {
               setOpen(false);
               navigateActive("/settings/library");

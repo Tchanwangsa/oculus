@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
-import { useTabStore } from "@/stores/tabStore";
+import { useActivePaneId, useTabStore } from "@/stores/tabStore";
 import { navigateInTab } from "@/lib/tabRouters";
 import {
   itemKey,
@@ -61,7 +61,12 @@ const EXPAND_MS = 260;
  */
 export function SidePanel() {
   const item = useActivePanelItem();
-  const activeId = useTabStore((s) => s.activeId);
+  // The panel belongs to the **pane** in front, not the tab: a split tab's two
+  // halves each peek at their own thing, and the panel shows whichever half
+  // you are working in. `tabId` is only for the context the contents render
+  // in, which still wants to know which strip tab it is inside.
+  const paneId = useActivePaneId();
+  const tabId = useTabStore((s) => s.activeId);
   const addTab = useTabStore((s) => s.addTab);
   const close = useSidePanelStore((s) => s.close);
   const panel = useResizablePanel(PANEL);
@@ -80,26 +85,26 @@ export function SidePanel() {
   // What is on screen, which outlives what is in the store by one exit: a
   // panel whose contents vanished the instant it closed would collapse on an
   // empty frame. The tab id rides along rather than being read live, so a
-  // panel sliding out of a tab you just left still belongs to the tab that
+  // panel sliding out of a pane you just left still belongs to the pane that
   // opened it — and dropping the pair at the end is what finally stops a
   // lecture playing.
-  const [drawn, setDrawn] = useState<{ item: PanelItem; tabId: number } | null>(
-    item && activeId != null ? { item, tabId: activeId } : null,
+  const [drawn, setDrawn] = useState<{ item: PanelItem; paneId: number } | null>(
+    item && paneId !== 0 ? { item, paneId } : null,
   );
   useEffect(() => {
-    if (item && activeId != null) {
-      setDrawn({ item, tabId: activeId });
+    if (item && paneId !== 0) {
+      setDrawn({ item, paneId });
       return;
     }
     const t = setTimeout(() => setDrawn(null), ANIM_MS);
     return () => clearTimeout(t);
-  }, [item, activeId]);
+  }, [item, paneId]);
 
   // Memoised: a new object every render would re-render the panel's body — and
   // the lecture player's would re-run its whole layout reconcile — for nothing.
   const panelTab = useMemo(
-    () => ({ id: drawn?.tabId ?? 0, active: true }),
-    [drawn?.tabId],
+    () => ({ id: drawn?.paneId ?? 0, tabId, side: "main" as const, active: true }),
+    [drawn?.paneId, tabId],
   );
 
   // The width the frame is sweeping out to while an expansion runs, and null
@@ -127,18 +132,17 @@ export function SidePanel() {
    */
   const expand = useCallback(
     (path: string, newTab: boolean) => {
-      const tabId = activeId;
-      if (tabId == null) return;
+      if (paneId === 0) return;
       if (newTab) {
         addTab(path);
-        close(tabId);
+        close(paneId);
         return;
       }
       if (expandTimer.current) return;
       const full = frameRef.current?.parentElement?.clientWidth ?? null;
       const commit = () => {
-        navigateInTab(tabId, path);
-        close(tabId);
+        navigateInTab(paneId, path);
+        close(paneId);
         // No exit slide: the page took the panel's place at its full width, so
         // there is nothing left to slide out — dropping `drawn` here is what
         // skips the timer the close would otherwise start.
@@ -155,17 +159,17 @@ export function SidePanel() {
         commit();
       }, EXPAND_MS);
     },
-    [activeId, addTab, close],
+    [paneId, addTab, close],
   );
 
   useEffect(() => {
-    if (!item || activeId == null) return;
+    if (!item || paneId === 0) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close(activeId);
+      if (e.key === "Escape") close(paneId);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [item, activeId, close]);
+  }, [item, paneId, close]);
 
   // ⌥⌘S folds the panel away, the third of the app's fold shortcuts after ⌘B
   // for the sidebar and ⌥⌘B for the chat's conversations column — ⌥⌘B being
@@ -185,8 +189,7 @@ export function SidePanel() {
 
   // Zero the moment the store lets go, while `drawn` lingers — that gap is
   // the exit animation.
-  const width =
-    expandTo ?? (item && activeId != null ? panel.width : 0);
+  const width = expandTo ?? (item && paneId !== 0 ? panel.width : 0);
 
   return (
     <>
@@ -234,10 +237,10 @@ export function SidePanel() {
             )}
             style={{ width: expandTo != null ? undefined : panel.restWidth }}
           >
-            {/* The peek belongs to the tab it was opened from, even though it
-                is drawn by the shell and sits outside every pane. Without
-                this the player inside reads the detached default — tab 0,
-                which no tab has — and a playing peek is owned by nobody:
+            {/* The peek belongs to the pane it was opened from, even though
+                it is drawn by the shell and sits outside every pane. Without
+                this the player inside reads the detached default — pane 0,
+                which no pane has — and a playing peek is owned by nobody:
                 closing its tab neither stops it nor asks, leaving a lecture
                 running with nothing on screen. `active` is unconditionally
                 true because only the tab in front ever has a body here. */}
@@ -249,14 +252,14 @@ export function SidePanel() {
                 <FilePanel
                   key={itemKey(drawn.item)}
                   file={drawn.item.file}
-                  tabId={drawn.tabId}
+                  paneId={drawn.paneId}
                   onExpand={expand}
                 />
               ) : (
                 <LecturePanel
                   key={itemKey(drawn.item)}
                   lecture={drawn.item.lecture}
-                  tabId={drawn.tabId}
+                  paneId={drawn.paneId}
                   onExpand={expand}
                 />
               )}

@@ -136,3 +136,20 @@ export function fileIconFor(filename: string): Icon {
     default: return File;
   }
 }
+
+/**
+ * The file a parsed-markdown path belongs to — the inverse of
+ * [`parsedMdRelPath`]. An agent reads the markdown, so the markdown is the
+ * path it cites back, but `X.md` is a parser artefact with no row of its own:
+ * the file the library knows is the PDF it was parsed from ("a.md" → "a.pdf")
+ * or, for an Office document, the document itself ("deck.pptx.md" →
+ * "deck.pptx").
+ *
+ * Only asked after a direct lookup has missed, so markdown that *is* a file in
+ * its own right — a page, an announcement, an Ed thread — never reaches here.
+ */
+export function parsedMdSource(path: string): string | null {
+  if (!/\.md$/i.test(path)) return null;
+  const stem = path.slice(0, -3);
+  return isOfficeFile(stem) ? stem : `${stem}.pdf`;
+}

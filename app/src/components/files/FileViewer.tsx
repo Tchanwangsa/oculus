@@ -12,6 +12,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MD_COMPONENTS, normalizeMath } from "@/components/markdown/MdComponents";
 import { PDFViewer } from "@/components/files/PDFViewer";
 import { docPdfRelPath, isPdfBacked, parsedMdRelPath } from "@/lib/fileTypes";
+import { filePageHref } from "@/lib/openFile";
 import { useDataDir } from "@/hooks/useDataDir";
 import type { DbFile } from "@/lib/db";
 
@@ -154,6 +155,7 @@ export function FileViewer({
             <Button
               variant="link"
               className="h-auto p-0 text-left text-sm font-normal whitespace-normal"
+              data-tab-href={filePageHref(target) ?? undefined}
               onClick={() => onOpenFile(target)}
               {...p}
             >
