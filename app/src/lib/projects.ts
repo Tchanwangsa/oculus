@@ -1079,7 +1079,7 @@ export async function moveTask(
 
 /**
  * The kind a task's column means **on its own board**, and `"backlog"` for a
- * column that board no longer has — `kindOf`'s fallback in
+ * column that board no longer has — `universalColumnOf`'s fallback in
  * `app/src/components/projects/universalTasks.ts`, and `kind_of`'s in
  * `app/src-tauri/src/projects.rs`. All three have to agree: a refile must land
  * a card in the column the universal board just drew it in.
@@ -1102,9 +1102,11 @@ function kindOf(project: DbProject | null, columnId: string): ColumnKind {
  * **The column maps across by *kind*, never by id.** A column id only means
  * something against the board it was checked against, and two boards share
  * nothing but what a column *means*. The destination is the **first** column
- * of that kind — `columnForKind`'s rule in
- * `app/src/components/projects/universalTasks.ts`, the same one the universal
- * board's drag writes — so entering a kind puts you at its start: a task filed
+ * of that kind — the fallback half of `columnForUniversal`'s rule in
+ * `app/src/components/projects/universalTasks.ts`, which the universal board's
+ * drag reaches for once an id cannot be matched; a refile crosses two boards
+ * and so never has an id to match. Entering a kind puts you at its start: a
+ * task filed
  * into a default board lands in Todo rather than skipping to In progress. A
  * board with no column of that kind is refused outright; there is no nearest
  * kind to fall back to.

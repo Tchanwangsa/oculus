@@ -10,7 +10,12 @@ import { ProjectPicker } from "./ProjectPicker";
 import { StatusPill } from "./StatusPill";
 import { taskHref } from "./taskHref";
 import { AgentMark, DueChip, TaskGlyph } from "./TaskMarks";
-import { KIND_COLUMNS, kindOf, projectLabel, projectOf } from "./universalTasks";
+import {
+  UNIVERSAL_COLUMNS,
+  projectLabel,
+  projectOf,
+  universalColumnOf,
+} from "./universalTasks";
 
 /**
  * Every task in the library as one flat table — the view for reading what you
@@ -139,14 +144,16 @@ export function TasksTable({
         // subject-less ones (Personal, and every unfiled task) sit together.
         case "subject":
           return (a.project_subject_code ?? "").localeCompare(b.project_subject_code ?? "");
-        // By kind, in the board's own left-to-right order — never by the
-        // column's name, which is the user's to change. Two columns of one
-        // kind (Todo, In progress) are one rank here, and the tiebreak below
-        // sorts them by due date like everything else.
+        // By the universal column the row sits in, in the board's own
+        // left-to-right order — never by the column's name, which is the
+        // user's to change. It is the *same* rank the board draws the card at,
+        // so Todo and In progress sort apart here exactly as they sit apart
+        // there; ranking by kind instead would call them equal while the board
+        // separates them, and the column would read as a broken sort.
         case "status":
           return (
-            KIND_COLUMNS.findIndex((c) => c.kind === kindOf(a, projectById)) -
-            KIND_COLUMNS.findIndex((c) => c.kind === kindOf(b, projectById))
+            UNIVERSAL_COLUMNS.indexOf(universalColumnOf(a, projectById)) -
+            UNIVERSAL_COLUMNS.indexOf(universalColumnOf(b, projectById))
           );
         case "due":
           return dueCmp(a, b);
@@ -245,7 +252,7 @@ export function TasksTable({
                 </span>
 
                 <div className="flex min-w-0 items-center gap-1.5">
-                  <TaskGlyph kind={kindOf(task, projectById)} />
+                  <TaskGlyph kind={universalColumnOf(task, projectById).kind} />
                   {/* A subtask says so where it is, since the row it belongs
                       to is sorted wherever its own due date put it. The parent
                       names itself on hover rather than taking width in a cell

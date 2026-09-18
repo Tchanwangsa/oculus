@@ -404,7 +404,7 @@ from outside are these.
 ## The universal view
 
 `/tasks` is every task there is — across every project, plus the ones filed
-nowhere — read as a board of three columns or as a flat table
+nowhere — read as a board of four columns or as a flat table
 (`app/src/pages/TasksPage.tsx`). A project's board is where *one* plan is
 arranged; this answers the question a board cannot, which is what there is to
 do at all, and it is where a task with nowhere to go gets written down.
@@ -418,12 +418,26 @@ do at all, and it is where a task with nowhere to go gets written down.
   and a write the chat agent made through `oculus task` still arrive by one
   door. The projects come along because a task carries its project's *name*,
   not its board, and a column id only means something against a board.
-- **Its columns are column *kinds*** — Backlog / In progress / Done — because a
-  kind is the only vocabulary every board shares. A drop into another kind
-  calls `moveTask` with that task's **own** board's first column of that kind
-  (`columnForKind` in `app/src/components/projects/universalTasks.ts`), so a
-  project's Todo/In-progress distinction survives a drag that does not change
-  kind — such a drag writes nothing at all.
+- **Its columns are `DEFAULT_COLUMNS`** — Backlog / Todo / In progress / Done —
+  aliased as `UNIVERSAL_COLUMNS` in
+  `app/src/components/projects/universalTasks.ts` rather than written out a
+  second time, because the board every project is *born* with is the closest
+  thing to a shared vocabulary there is. They were column *kinds* until
+  2026-09-19, which collapsed Todo and In progress into one column while the
+  table's `StatusPill` went on naming them apart — one page, two answers.
+  - A card is placed **id first, kind second** (`universalColumnOf`): its own
+    board's column, if that column still carries one of the four default ids;
+    otherwise the kind's home column — `active` lands on In progress, since a
+    renamed or added active column has no way to claim Todo specifically. A
+    column its own board no longer has falls to Backlog, and the table's
+    `StatusPill` is what says so.
+  - A drop onto universal column X writes, on the task's **own** board, the
+    column with id X if it has one, else the first column of X's *kind*, else
+    nothing at all (`columnForUniversal`). So a board that renamed `todo` to
+    "Next" still receives a drop onto Todo, and a board with no Done column
+    still honestly refuses one. A drop that resolves to the column the card is
+    already in writes nothing either — two universal columns can resolve to one
+    column on a board that has only one active column.
 - **There is no manual order in this view, and there cannot be.** `position` is
   a fractional slot *inside one project's column*; two projects' positions are
   two unrelated number lines, so a midpoint between them is arithmetic on
@@ -454,10 +468,13 @@ do at all, and it is where a task with nowhere to go gets written down.
   `app/src/components/projects/ProjectPicker.tsx`. Three rules make it the only
   writer of `project_id` after a create:
   - It **maps the column across by kind**, into the first column of that kind
-    on the destination's board — the same rule `columnForKind` applies to a
-    drag — and refuses a destination with no column of that kind rather than
-    picking the nearest, because there is no nearest kind. `done_at` still
-    follows the column it lands in.
+    on the destination's board — the fallback half of the rule
+    `columnForUniversal` applies to a drag — and refuses a destination with no
+    column of that kind rather than picking the nearest, because there is no
+    nearest kind. Kind alone, with no id step in front of it: a refile crosses
+    two boards that share nothing but what a column means, where a drag stays
+    on one board and can honestly aim at an id. `done_at` still follows the
+    column it lands in.
   - It **carries the task's subtasks with it**, each by its own column's kind.
     A subtask sits in its parent's project — `assertCanParent` /
     `assert_can_parent` refuse both directions of the alternative — so this is

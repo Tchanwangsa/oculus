@@ -4,7 +4,10 @@ import { ViewTabs } from "@/components/ui/ViewTabs";
 import { NewTaskButton } from "@/components/projects/NewTaskButton";
 import { TasksBoard } from "@/components/projects/TasksBoard";
 import { TasksTable } from "@/components/projects/TasksTable";
-import { appendNeighbour } from "@/components/projects/universalTasks";
+import {
+  UNIVERSAL_COLUMNS,
+  appendNeighbour,
+} from "@/components/projects/universalTasks";
 import { useTaskList, type TaskScope } from "@/hooks/useTaskList";
 import type { DbTaskWithProject } from "@/lib/projects";
 import { useProjectsStore } from "@/stores/projectsStore";
@@ -185,7 +188,12 @@ export default function TasksPage() {
             <p className="text-xs text-muted-foreground">Loading…</p>
           </div>
         ) : view === "board" ? (
-          <TasksBoard tasks={tasks} projectById={projectById} onMove={move} />
+          <TasksBoard
+            tasks={tasks}
+            columns={UNIVERSAL_COLUMNS}
+            projectById={projectById}
+            onMove={move}
+          />
         ) : (
           <TasksTable
             tasks={tasks}
