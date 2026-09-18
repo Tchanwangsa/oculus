@@ -66,7 +66,15 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-3.5 rounded-xl border border-border-subtle bg-popover p-5 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // `[&>*]:min-w-0` is load-bearing, not tidying: this is a grid, and a
+          // grid item's default `min-width: auto` refuses to shrink below its
+          // min-content width. One unbreakable string in any child — an OAuth
+          // URL, a long path — therefore sets the column's width, the card's
+          // `max-w` is silently exceeded, and every *other* row re-wraps at
+          // that new width while the footer slides off the right edge. A
+          // `truncate` inside cannot save it; the ancestor has to be allowed
+          // to shrink first.
+          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-3.5 rounded-xl border border-border-subtle bg-popover p-5 shadow-lg duration-200 outline-none [&>*]:min-w-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
         {...props}
@@ -81,6 +89,44 @@ function DialogContent({
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
         )}
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  )
+}
+
+// A dialog that *is* the window rather than a card floating in the middle of
+// it — a lightbox. `DialogContent` above is a centred grid with a card's
+// padding, radius, border and shadow, and overriding all of those at a call
+// site to get a bare surface leaves more override than component; it also
+// makes the note above ("every dialog overrides only `max-w`") stop being
+// true. So the full-bleed case is its own export, composed from the same
+// primitives and living in the same file, which is where this app keeps them.
+//
+// Deliberately without the close button: a canvas puts its own controls where
+// the content is, not in a fixed corner. `DialogTitle` is still required by
+// Radix for the announcement — give it `sr-only`.
+function DialogCanvas({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Content>) {
+  return (
+    <DialogPortal data-slot="dialog-portal">
+      {/* Not `bg-black/50`: a canvas dims the app rather than blacking it out,
+          and the app's own ground is what it should dim towards in either
+          theme. Nearly opaque, and blurred behind that — at 85% the text of
+          the page underneath was still readable through the picture on top of
+          it, which is the one thing a lightbox exists to stop. */}
+      <DialogOverlay className="bg-background/95 backdrop-blur-sm" />
+      <DialogPrimitive.Content
+        data-slot="dialog-canvas"
+        className={cn(
+          "fixed inset-0 z-50 flex flex-col outline-none duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+          className,
+        )}
+        {...props}
+      >
+        {children}
       </DialogPrimitive.Content>
     </DialogPortal>
   )
@@ -151,6 +197,7 @@ function DialogDescription({
 
 export {
   Dialog,
+  DialogCanvas,
   DialogClose,
   DialogContent,
   DialogDescription,

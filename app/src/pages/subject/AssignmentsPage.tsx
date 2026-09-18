@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useModuleTocs } from "@/hooks/useModuleTocs";
 import { useSubject } from "@/layouts/SubjectLayout";
-import { openFileSmart } from "@/lib/openFile";
+import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { humanizeSlug } from "@/lib/format";
 import type { DbFile } from "@/lib/db";
@@ -184,6 +184,7 @@ function TaskRow({ task: t, muted }: { task: TaskDoc; muted: boolean }) {
   const Icon = t.kind === "quiz" ? Rocket : PencilLine;
   return (
     <button
+      data-tab-href={filePageHref(t.file) ?? undefined}
       onClick={() => openFileSmart(t.file)}
       className={cn(
         "w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface transition-colors",

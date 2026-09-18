@@ -15,12 +15,22 @@ import type { ReactNode } from "react";
  * anything Continue, Projects or a project's own Upcoming tasks invented for
  * itself would read as a different list on the same page.
  */
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({
+  title,
+  children,
+}: {
+  /** Optional: a column of rows that needs no naming — the new-tab page's two
+   *  doors say what they are — is the same column without a heading over it. */
+  title?: string;
+  children: ReactNode;
+}) {
   return (
     <section>
-      <h2 className="mb-2 px-0.5 text-[13px] font-semibold text-foreground">
-        {title}
-      </h2>
+      {title && (
+        <h2 className="mb-2 px-0.5 text-[13px] font-semibold text-foreground">
+          {title}
+        </h2>
+      )}
       <div className="overflow-hidden rounded-lg border border-border divide-y divide-border-subtle">
         {children}
       </div>

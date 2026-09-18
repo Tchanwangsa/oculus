@@ -5,8 +5,8 @@ import {
   ArrowsClockwise,
   CircleNotch,
   Kanban,
+  ListChecks,
   MagnifyingGlass,
-  SidebarSimple,
   GearSix,
   House,
 } from "@phosphor-icons/react";
@@ -25,14 +25,17 @@ import {
 
 interface SidebarProps {
   collapsed: boolean;
-  onToggle: () => void;
 }
 
 const WIDTH = 212;
 
 /**
  * Collapsed means gone: the sidebar animates to zero width (no icon rail), and
- * the way back in is the sidebar button in the title bar — Notion's pattern.
+ * the title bar's sidebar button is the only handle on that state — in *both*
+ * directions. This header used to carry a second one that faded in on hover,
+ * which meant the control for a persistent setting was itself not persistent;
+ * the header's slot goes to search instead, which is an action and can afford
+ * to sit in chrome.
  *
  * It carries no fill or divider of its own — it sits directly on the window's
  * warm ground, and the content card's border is what separates the two.
@@ -40,7 +43,7 @@ const WIDTH = 212;
  * Only the subject list scrolls. The logo, the top-level nav and the footer are
  * pinned, and inset hairlines mark where the scrolling middle begins and ends.
  */
-export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export default function Sidebar({ collapsed }: SidebarProps) {
   const width = collapsed ? 0 : WIDTH;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ top: false, bottom: false });
@@ -85,45 +88,24 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
          its min-content size mid-transition. */
       style={{ width, minWidth: width, maxWidth: width }}
       className={cn(
-        "group/sidebar flex flex-col h-full shrink-0 grow-0 overflow-hidden",
+        "flex flex-col h-full shrink-0 grow-0 overflow-hidden",
         "transition-[width,min-width,max-width] duration-200 ease-out",
       )}
     >
       {/* Inner keeps its full width during the slide so content doesn't reflow,
           it just gets clipped. */}
       <div className="flex flex-col h-full" style={{ width: WIDTH, minWidth: WIDTH }}>
-        {/* Header: logo + collapse toggle */}
+        {/* Header: logo + search */}
         <div className="relative flex items-center h-10 pl-3 pr-2 shrink-0">
           <img src="/oculus-mark.svg" alt="" className="w-[18px] h-[18px] shrink-0" />
           <span className="ml-2 flex-1 min-w-0 overflow-hidden whitespace-nowrap font-display font-semibold text-foreground tracking-tight text-[13px]">
             Oculus
           </span>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={onToggle}
-                aria-label="Close sidebar"
-                className={cn(
-                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
-                  "text-muted-foreground hover:text-foreground hover:bg-sidebar-item-hover active:bg-sidebar-item-active",
-                  "opacity-0 focus-visible:opacity-100 group-hover/sidebar:opacity-100 transition-[opacity,color,background-color] duration-150",
-                )}
-              >
-                <SidebarSimple size={15} />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" align="end" className="flex flex-col items-start gap-0.5">
-              Close sidebar
-              <span className="text-[11px] text-background/60">⌘B</span>
-            </TooltipContent>
-          </Tooltip>
+          <SearchButton />
         </div>
 
         {/* Pinned top-level nav — outside the scroller, so it never slides away. */}
         <div className="px-2 pb-1.5 shrink-0">
-          <SearchItem />
           <NavItem to="/" icon={House} label="Home" />
           <NavItem
             to="/chat"
@@ -133,6 +115,10 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
           />
           <NavItem to="/calendar" icon={CalendarBlank} label="Calendar" />
           <NavItem to="/projects" icon={Kanban} label="Projects" />
+          {/* Under Projects because it is the same rows read the other way
+              round — every task at once instead of one project's board — and
+              because it is where a task that belongs to no project lives. */}
+          <NavItem to="/tasks" icon={ListChecks} label="Tasks" />
         </div>
 
         <Rule />
@@ -178,29 +164,38 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
 }
 
 /**
- * The ⌘K palette's visible handle, shaped like a nav row but a button: search
- * is the one thing at the top of this list that is not a place. The shortcut
- * rides on the row rather than in a tooltip — it is what the row is teaching.
+ * The ⌘K palette's visible handle. It was a nav row under the logo and is now
+ * the icon in the header, because search is the one thing in that list that is
+ * not a place — up here it stops pretending to be one, and the nav below reads
+ * as five destinations rather than four and an action.
+ *
+ * Unlike the collapse button it replaces, it does not fade in on hover: a
+ * handle you have to find by sweeping the mouse is no handle at all, and the
+ * shortcut it teaches now lives in the tooltip.
  */
-function SearchItem() {
+function SearchButton() {
   const setOpen = usePaletteStore((s) => s.setOpen);
   return (
-    <button
-      type="button"
-      onClick={() => setOpen(true)}
-      className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12.5px]",
-        "text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground transition-colors",
-      )}
-    >
-      <MagnifyingGlass size={16} className="shrink-0" />
-      <span className="flex-1 min-w-0 overflow-hidden whitespace-nowrap text-clip text-left">
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Search"
+          className={cn(
+            "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
+            "text-muted-foreground hover:text-foreground hover:bg-sidebar-item-hover active:bg-sidebar-item-active",
+            "transition-colors duration-150",
+          )}
+        >
+          <MagnifyingGlass size={15} />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="end" className="flex flex-col items-start gap-0.5">
         Search
-      </span>
-      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
-        ⌘K
-      </span>
-    </button>
+        <span className="text-[11px] text-background/60">⌘K</span>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

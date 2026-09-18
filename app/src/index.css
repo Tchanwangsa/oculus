@@ -251,13 +251,66 @@
   --shadow-panel: 0 0 0 1px rgb(255 255 255 / 0.03), 0 8px 24px -14px rgb(0 0 0 / 0.6);
 }
 
+/* ─── Diagram palette ───────────────────────────────────────────── */
+/* What a ```mermaid fence is painted with (`components/markdown/Mermaid.tsx`).
+ *
+ * It is a layer of aliases rather than a direct read of the tokens above, and
+ * that is load-bearing twice over.
+ *
+ * Mermaid is a library that draws an SVG from colour *values* — it runs each
+ * one through its own colour maths to derive the dozen shades it actually
+ * paints with — so the component has to resolve these with `getComputedStyle`
+ * rather than name them in a class. **And Tailwind v4 only emits a theme
+ * variable that something references**: measured, `--color-surface`,
+ * `--color-ink-500` and the whole `--color-chart-*` family come back as empty
+ * strings unless a utility somewhere in the app happens to use them, and an
+ * empty string reaches mermaid as "Unsupported color format" and no diagram.
+ * They survive today only because `ThreadMap` and `EmbeddingSection` each
+ * happen to name one. The `var()` references below are what actually pin
+ * them, so deleting a class in an unrelated file can no longer blank a
+ * diagram.
+ *
+ * Declared on `:root`, which is also where `.dark` lands, so each alias
+ * resolves against whichever palette won — one block covers both themes.
+ *
+ * Neutral by design: the app has one colour and it is spent on controls, so a
+ * diagram that reached for the indigo would read as a second accent competing
+ * with the button beside it. The series slots are the exception — a pie needs
+ * to tell its slices apart — and they are the validated chart palette in its
+ * validated order. */
+:root {
+  --diagram-node: var(--color-surface);
+  --diagram-node-alt: var(--color-surface-raised);
+  --diagram-ground: var(--color-background);
+  --diagram-paper: var(--color-card);
+  --diagram-border: var(--color-border);
+  --diagram-stroke: var(--color-ink-500);
+  --diagram-edge: var(--color-muted-foreground);
+  --diagram-ink: var(--color-foreground);
+  --diagram-font: var(--font-sans);
+  --diagram-series-1: var(--color-chart-1);
+  --diagram-series-2: var(--color-chart-2);
+  --diagram-series-3: var(--color-chart-3);
+  --diagram-series-4: var(--color-chart-4);
+  --diagram-series-5: var(--color-chart-5);
+}
+
 /* ─── Base resets ───────────────────────────────────────────────── */
-/* Inside @layer base on purpose. Unlayered CSS outranks every layer, so as a
-   bare `*` rule this default silently beat every `border-<colour>` utility in
-   the app — an active tab's `border-primary` underline, a destructive
-   button's `border-destructive/30` — and painted them all plain grey. In the
-   base layer it is still the default for anything that names no colour, and
-   utilities win again. */
+/* All of it inside @layer base, without exception. Unlayered CSS outranks
+   every layer, so a reset written out here is not a default at all — it is an
+   `!important` with no keyword, beating every Tailwind utility regardless of
+   specificity. This section has been bitten twice. The `*` border-colour
+   below silently beat every `border-<colour>` utility in the app — an active
+   tab's `border-primary` underline, a destructive button's
+   `border-destructive/30` — and painted them all plain grey. The
+   `body`/`span` selection pair beat every `select-none` and `select-text`
+   utility that landed on a `p`, `span`, `li`, `td`, `th`, `input` or
+   `textarea`, which is how the project board's drag lost its
+   `[&_*]:select-none` (`hooks/useCardDrag.ts`). In the layer each of these is
+   still the default for anything that names nothing, and utilities win again.
+
+   The blocks further down the file that are deliberately unlayered are
+   overrides, not defaults, and say so at each one. */
 @layer base {
   *,
   *::before,
@@ -265,44 +318,45 @@
     box-sizing: border-box;
     border-color: var(--color-border);
   }
-}
 
-html {
-  height: 100%;
-  overflow: hidden; /* desktop app — no scroll on html root */
-}
+  html {
+    height: 100%;
+    overflow: hidden; /* desktop app — no scroll on html root */
+  }
 
-body {
-  height: 100%;
-  margin: 0;
-  background-color: var(--color-background);
-  color: var(--color-foreground);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  /* Inter Variable carries an optical-size axis; letting it track the rendered
-     size is what keeps hero type from looking like inflated UI text. */
-  font-optical-sizing: auto;
-  user-select: none;
-}
+  body {
+    height: 100%;
+    margin: 0;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Inter Variable carries an optical-size axis; letting it track the
+       rendered size is what keeps hero type from looking like inflated UI
+       text. */
+    font-optical-sizing: auto;
+    user-select: none;
+  }
 
-#root {
-  height: 100%;
-  display: flex;
-}
+  #root {
+    height: 100%;
+    display: flex;
+  }
 
-/* Allow text selection inside content areas */
-p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
-  user-select: text;
-}
+  /* Allow text selection inside content areas */
+  p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
+    user-select: text;
+  }
 
-/* Selection is brand-tinted, not the ink fill — a solid black highlight over
-   body copy is unreadable and reads as a rendering fault. */
-::selection {
-  background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
-  color: inherit;
+  /* Selection is brand-tinted, not the ink fill — a solid black highlight over
+     body copy is unreadable and reads as a rendering fault. */
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+    color: inherit;
+  }
 }
 
 @layer base {
@@ -363,13 +417,15 @@ p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
   scrollbar-gutter: stable both-edges;
 }
 
-/* Markdown scaled to a panel: a chat reply, a recap note.
+/* Markdown scaled to a panel: a chat reply.
  *
  * `MD_COMPONENTS` is sized for a document — the file viewer reads a whole
  * lecture page through it — and those sizes are baked into the components as
- * utilities. A reply in the timeline and a note in the player's dock are a
- * different register, so both go through `CompactMd`, which wraps them in
- * `.md-compact`, and this block pulls the type down there and nowhere else.
+ * utilities. A reply in the timeline is a different register, so it goes
+ * through `CompactMd`, which wraps it in `.md-compact`, and this block pulls
+ * the type down there and nowhere else. (The player's Read tab is not here:
+ * its lines sit inside buttons and take `InlineMd`, which sizes itself at the
+ * call site.)
  *
  * Deliberately *unlayered*, and the one place in this file that should be:
  * layer order beats specificity, so the same rules inside `@layer base` would
@@ -399,6 +455,14 @@ p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
 .md-compact th {
   font-size: 11px;
 }
+/* An inline picture (`MdImage`) is capped by the column it is in everywhere
+   else, which in 360px of dock is already small — but a portrait screenshot
+   is capped by its *height*, and 20rem of it above a question bubble whose own
+   picture stops at 16rem reads as two different sizes for the same file. One
+   number for both. */
+.md-compact img {
+  max-height: 16rem;
+}
 /* First and last blocks sit flush: the row around them owns the gap. */
 .md-compact > :first-child {
   margin-block-start: 0;
@@ -426,6 +490,159 @@ p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
   padding-block: 2px;
 }
 
+/* A rendered ```mermaid fence (`components/markdown/Mermaid.tsx`): the
+ * `<figure>` that owns the hover control, and the scroller inside it that
+ * holds the picture.
+ *
+ * **The label size is what is bounded, not the box.** Mermaid's own sizing is
+ * `width: 100%` under an inline `max-width` of the diagram's natural width,
+ * which fits the picture to whatever it is dropped into — so the *column*
+ * decides how big the type is. Measured in the 760px chat page: the twelve-node
+ * `graph TD` (natural 360 × 791) renders at scale 1.0 with 13px labels, while a
+ * five-column `graph LR` (natural 1525 × 181) is fitted to scale 0.50 and its
+ * labels land at 6.5px. One reply, two diagrams, one at body-text size and one
+ * an unreadable smear.
+ *
+ * There was a floor before this and it was in the wrong unit: a flat 520px,
+ * which in a 760px column never fires at all, and which for a wide diagram
+ * would have meant scale 0.34 — worse than the bug. A floor has to be
+ * *proportional* to the diagram to say anything about its type.
+ *
+ * So the whole policy is one sentence and one `clamp()`: *a diagram is drawn as
+ * large as it can be without passing the column, the size it was drawn at, or a
+ * target height — and never so small that a label drops under 11px.* The two
+ * bounds are computed in `Mermaid.tsx`, which is the only place that knows both
+ * numbers (`LABEL_PX`, `MIN_LABEL_PX`, `TARGET_HEIGHT_PX`):
+ *
+ *   - `--diagram-max` — the widest it should be drawn. Natural width for a
+ *     diagram that already fits the height target, walked down the band for one
+ *     that does not, which is how a tall diagram lands at 11px and a short one
+ *     at 13px with neither being a special case.
+ *   - `--diagram-min` — the width at which labels hit 11px. Past it the diagram
+ *     stops shrinking and **overflows** instead, on either axis.
+ *
+ * Between the two, `100%` wins and the picture fits its column. Both fall back
+ * to leaving `width: 100%` alone, so a diagram whose natural size could not be
+ * read behaves the way it did before any of this.
+ *
+ * Unlayered like the two blocks above, and for the same reason. */
+.diagram-figure {
+  margin-block: 0.75rem;
+  /* A dragged diagram must not also select the text of the reply around it —
+     WebKit starts a selection from the first pointermove otherwise, and the
+     whole message ends up highlighted behind the pan. */
+  user-select: none;
+}
+.diagram {
+  overflow: auto;
+  /* The scroller would otherwise clip the hairline border of an edge node. */
+  padding-block: 1px;
+  /* Flex, and only so the centring below can be an auto margin.
+   *
+   * A diagram is a figure, and a figure centres — which is also what makes a
+   * narrow `graph TD` stop reading as a column of boxes shoved against the
+   * left margin of a 760px reply. `justify-content: center` is the obvious way
+   * to say it and is the one thing that must not be used here: centred content
+   * that outgrows its scroller overflows equally in both directions, and the
+   * overflow before the start edge cannot be scrolled to, so the left end of a
+   * wide diagram becomes unreachable. An auto margin on a *flex item* is
+   * defined to absorb only positive free space — an overflowing item ignores
+   * it and overflows in the end direction — so the same one rule centres a
+   * small diagram and pins a wide one. `AppLayout` and the lightbox learned
+   * this the hard way; this is the third place it applies.
+   *
+   * `flex-start` because a diagram taller than the cap must begin at the top:
+   * the default `stretch` would also hand the SVG a cross size it never asked
+   * for. */
+  display: flex;
+  align-items: flex-start;
+  /* Tall is allowed; endless is not.
+   *
+   * Mermaid draws a `graph TD` at whatever height its ranks need and caps
+   * nothing — measured, the twelve-node flowchart comes out 791px tall, which
+   * at this app's page zoom is very nearly the whole window. Scaling it down
+   * to fit is the wrong fix for the reason the whole block above exists: the
+   * scale needed is ~0.55 and a 13px label lands at 7px. So the picture keeps
+   * the size it was drawn at, the box is capped, and the rest is a scroll or
+   * the expand control.
+   *
+   * 80vh was tried and is a takeover rather than a figure — at this app's page
+   * zoom it is the whole pane. The `rem` half of the `min()` is what stops a
+   * tall window handing a diagram 700px just because it can; between the two,
+   * most diagrams now come in under the cap on their own, because
+   * `FLOWCHART_LAYOUT` took ~16% off the height before this rule ever sees
+   * it. */
+  max-height: min(60vh, 30rem);
+
+  /* Where the picture runs out, it fades out.
+   *
+   * A capped, scrolling box guillotines a diagram mid-node and the cut reads as
+   * the end of it, so each edge with something behind it gets softened. Four
+   * edges, driven by `--fade-*` written straight onto this element from
+   * `Mermaid.tsx` on every scroll — 1 where there is more to see, 0 where there
+   * is not — so an edge with nothing behind it stays a hard edge.
+   *
+   * A mask rather than a gradient overlay, and that is the whole reason this is
+   * pleasant: a mask fades to *transparent*, so it needs no opinion about what
+   * colour is behind the diagram. An overlay would have to name one, and this
+   * component renders on `card` in a reply, on `background` in the lecture
+   * dock, and on either in both themes — four colours to keep in sync with a
+   * palette, for an effect that wants none of them.
+   *
+   * The two gradients are composed with `intersect` so the horizontal and
+   * vertical fades both apply; `mask-composite` and `calc(var())` inside a
+   * gradient stop are both confirmed in the app's own WKWebView, not merely in
+   * a Chromium tab. The stops sit 1px *outside* the box on purpose: at exactly
+   * 0 and 100% the unfaded case still antialiases its last pixel, which takes
+   * the hairline border off an edge node. */
+  --diagram-fade: 24px;
+  mask-image:
+    linear-gradient(
+      to right,
+      #0000 -1px,
+      #000 calc(var(--fade-inline-start, 0) * var(--diagram-fade)),
+      #000 calc(100% - var(--fade-inline-end, 0) * var(--diagram-fade)),
+      #0000 calc(100% + 1px)
+    ),
+    linear-gradient(
+      to bottom,
+      #0000 -1px,
+      #000 calc(var(--fade-block-start, 0) * var(--diagram-fade)),
+      #000 calc(100% - var(--fade-block-end, 0) * var(--diagram-fade)),
+      #0000 calc(100% + 1px)
+    );
+  mask-composite: intersect;
+}
+/* Some diagram types still draw their labels as real HTML inside a
+   `<foreignObject>`, and that HTML lands inside `.md-compact`, where the
+   `margin-block` on `p` would walk a caption out of the box drawn around it.
+   Flowcharts no longer do — `Mermaid.tsx` asks for SVG `<text>` labels at the
+   top level of the config, where the key is actually read — but the others
+   have no such switch, so the guard stays. Mermaid's own `p { margin: 0 }`
+   also happens to win (it is scoped by the SVG's id, and an id beats a class),
+   which is their stylesheet defending our layout by accident; this is the rule
+   that means it. Same specificity as `.md-compact`'s and later in the file,
+   which is what decides it. Sizes are left alone: `font-size: inherit` on a
+   caption inherits from the label mermaid already sized. */
+.diagram :is(p, ul, ol, li, blockquote) {
+  margin: 0;
+}
+.diagram > svg {
+  /* The clamp the whole block above is about. `clamp()` is
+     `max(min, min(100%, max))`, which reads exactly as the policy: fit the
+     column, never past the size it should be drawn at, never below the width
+     where its labels stop being readable. */
+  width: clamp(var(--diagram-min, 0px), 100%, var(--diagram-max, 100%));
+  /* Centred when it fits, pinned to the start when it does not — see the
+     `display: flex` note above for why this cannot be `justify-content`. */
+  margin-inline: auto;
+  /* A flex item's default `flex-shrink: 1` would take the clamp's floor
+     straight back out and squeeze the picture to the column anyway, which is
+     the bug this rule exists to fix. Measured once already in the lightbox,
+     where the zoom climbed while the picture did not move. */
+  flex: none;
+}
+
 /* Markdown with its blocks flattened — `InlineMd`, which renders a chapter
  * summary inside the button that seeks to it. The wrapper has to sit in the
  * text it is part of, so it inherits rather than setting a size, and KaTeX
@@ -443,4 +660,47 @@ p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
 .md-inline {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* pdf.js's viewer stylesheet, brought back inside this app's world — the page
+ * surface for `components/files/PDFViewer.tsx`.
+ *
+ * `pdf_viewer.css` is third-party and imported unlayered, so it outranks every
+ * `@layer` in this file: the trap recorded at the top of the file, met from the
+ * other side. These rules are unlayered for the same reason the blocks above
+ * are, and each is one step more specific than the pdf.js rule it answers,
+ * because at equal specificity the winner would come down to whichever
+ * stylesheet Vite happened to emit last.
+ *
+ * **`pdf_viewer.css` declares `color-scheme: light dark` on `:root`** — a
+ * whole-app statement smuggled in by one view's stylesheet. Dark mode here is
+ * the `.dark` class and nothing else (`lib/theme.ts`), so on a Mac set to dark
+ * that line would turn the native scrollbars, the form controls and the canvas
+ * default dark underneath a light app. Pinning the scheme to the class is both
+ * the fix and the thing that should have been declared all along. `html:root`
+ * is one element more specific than `:root`, which is what decides it. */
+html:root {
+  color-scheme: light;
+}
+html:root.dark {
+  color-scheme: dark;
+}
+
+/* The ground the pages sit on. pdf.js draws no ground of its own — the grey
+ * one belongs to its toolbar chrome, which this app does not ship. */
+.pdf-surface .pdfViewer {
+  padding-block: 16px;
+}
+/* The page. The viewer is constructed with `removePageBorders`, which drops
+ * pdf.js's 9px transparent frame and the shadow image hung on it — drawn for
+ * that grey ground, and wrong on this one — so the page takes the same
+ * hairline-and-soft-shadow treatment as every other card in the app. The
+ * shadow is `shadow-sm`'s, written out because there is no utility to reach
+ * for on an element pdf.js creates. */
+.pdf-surface .pdfViewer.removePageBorders .page {
+  margin: 0 auto 16px;
+  border-radius: 4px;
+  box-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.1),
+    0 1px 2px -1px rgb(0 0 0 / 0.1);
 }

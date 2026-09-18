@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsClockwise, CircleNotch } from "@phosphor-icons/react";
 import { defaultSelection, type Provider } from "@/lib/harness";
 import { ModelPicker } from "@/components/harness/ModelPicker";
 import { useBridgeHealth } from "@/hooks/useBridgeHealth";
 import { useProviderModels } from "@/hooks/useProviderModels";
+import { signInAccount, signInState, useSignInStatus } from "@/hooks/useSignInStatus";
+import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_JOB_MODELS,
@@ -40,13 +42,36 @@ import { Section } from "./section";
  * the output nor the recheck the finish fires — and `recheck` is exactly the
  * hand-off, since a CLI installed a second ago stays missing until Rust's
  * cached failure is dropped.
+ *
+ * A row whose CLI *is* here answers the second question too — whether it is
+ * signed in, and as whom. Being installed and being usable are different
+ * facts, and until this stage the second one only surfaced as a red row in the
+ * timeline after a turn had already failed. Sign-in status is its own shared
+ * read (`app/src/hooks/useSignInStatus.ts`) rather than a field on health,
+ * because Rust answers it by spawning the CLI and asking, where health is a
+ * cached lookup — so *Recheck* drops both caches and asks both questions.
+ *
+ * opencode's row says nothing here, and that is the contract rather than an
+ * omission: its credentials are per provider, so `harness_sign_in_status`
+ * answers `signedIn: null` and the providers strip below is the answer.
  */
 function CliAgentsSection() {
   const { health, recheck, checking } = useBridgeHealth();
+  const { statuses, recheck: recheckSignIn, checking: checkingSignIn } = useSignInStatus();
+  /** One button, both questions — a row that said "installed" and went on
+   *  saying "signed out" a minute after signing in would be the row that
+   *  lies. */
+  const recheckAll = useCallback(() => {
+    recheck();
+    recheckSignIn();
+  }, [recheck, recheckSignIn]);
+
   const install = useAgentInstall(recheck);
+  const signIn = useSignIn(recheckSignIn);
   /** Which row's dialog is open. Separate from the run above: the run
    *  outlives the dialog, and the dialog can be opened on a row with no run. */
   const [openFor, setOpenFor] = useState<{ provider: Provider; label: string } | null>(null);
+  const [signInFor, setSignInFor] = useState<Provider | null>(null);
 
   return (
     <Section
@@ -54,48 +79,82 @@ function CliAgentsSection() {
       description="Chat runs Claude Code, Codex or opencode from your own machine, signed in as you — no API key, no per-token billing."
     >
       <div className="divide-y divide-border-subtle">
-        {(health ?? []).map((h) => (
-          <div key={h.provider} className="flex items-start justify-between gap-4 py-2.5">
-            <div className="min-w-0">
-              <div className="text-[13px] text-foreground">{h.label}</div>
-              <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                {h.path ?? (
-                  <>
-                    Not found. Install it, or set <span className="text-foreground">{h.overrideEnv}</span> to the binary.
-                  </>
+        {(health ?? []).map((h) => {
+          // `unknown` — the probe has not landed, or this is opencode — draws
+          // nothing at all, the same three-state discipline the model picker
+          // uses for health.
+          const state = h.path ? signInState(statuses, h.provider) : "unknown";
+          const account = signInAccount(statuses, h.provider);
+          return (
+            <div key={h.provider} className="flex items-start justify-between gap-4 py-2.5">
+              <div className="min-w-0">
+                <div className="text-[13px] text-foreground">{h.label}</div>
+                <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {h.path ?? (
+                    <>
+                      Not found. Install it, or set <span className="text-foreground">{h.overrideEnv}</span> to the binary.
+                    </>
+                  )}
+                </div>
+                {state !== "unknown" && (
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {state === "in" ? (account ? `Signed in — ${account}` : "Signed in") : "Signed out"}
+                  </div>
+                )}
+                {h.error && h.path && <div className="mt-0.5 text-xs text-destructive">{h.error}</div>}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {h.version ? `v${h.version}` : h.path ? "—" : "missing"}
+                </span>
+                {state === "out" && (
+                  <Button variant="outline" size="xs" onClick={() => setSignInFor(h.provider)}>
+                    {signIn.run?.provider === h.provider && !signIn.run.result ? (
+                      <>
+                        <CircleNotch size={12} className="animate-spin" />
+                        Signing in…
+                      </>
+                    ) : (
+                      "Sign in"
+                    )}
+                  </Button>
+                )}
+                {!h.path && (
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={() => setOpenFor({ provider: h.provider, label: h.label })}
+                  >
+                    {install.run?.provider === h.provider && !install.run.result ? (
+                      <>
+                        <CircleNotch size={12} className="animate-spin" />
+                        Installing…
+                      </>
+                    ) : (
+                      "Install"
+                    )}
+                  </Button>
                 )}
               </div>
-              {h.error && h.path && <div className="mt-0.5 text-xs text-destructive">{h.error}</div>}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {h.version ? `v${h.version}` : h.path ? "—" : "missing"}
-              </span>
-              {!h.path && (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() => setOpenFor({ provider: h.provider, label: h.label })}
-                >
-                  {install.run?.provider === h.provider && !install.run.result ? (
-                    <>
-                      <CircleNotch size={12} className="animate-spin" />
-                      Installing…
-                    </>
-                  ) : (
-                    "Install"
-                  )}
-                </Button>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
         {health === null && (
           <div className="py-2.5 text-xs text-muted-foreground">Checking…</div>
         )}
       </div>
-      <Button variant="ghost" size="xs" className="mt-2" onClick={recheck} disabled={checking}>
-        {checking ? <CircleNotch size={12} className="animate-spin" /> : <ArrowsClockwise size={12} />}
+      <Button
+        variant="ghost"
+        size="xs"
+        className="mt-2"
+        onClick={recheckAll}
+        disabled={checking || checkingSignIn}
+      >
+        {checking || checkingSignIn ? (
+          <CircleNotch size={12} className="animate-spin" />
+        ) : (
+          <ArrowsClockwise size={12} />
+        )}
         Recheck
       </Button>
       {openFor && (
@@ -110,6 +169,21 @@ function CliAgentsSection() {
             // happened. One still running is kept, and reopening resumes it.
             if (install.run?.result) install.clear();
             setOpenFor(null);
+          }}
+        />
+      )}
+      {signInFor && (
+        <SignInDialog
+          provider={signInFor}
+          run={signIn.run?.provider === signInFor ? signIn.run : null}
+          onStart={() => signIn.start(signInFor)}
+          onCode={(code) => signIn.submitCode(code)}
+          onCancel={() => signIn.cancel()}
+          onClose={() => {
+            // Same rule as the install above: a finished run is cleared with
+            // the dialog, one still in flight is kept and resumes on reopen.
+            if (signIn.run?.result) signIn.clear();
+            setSignInFor(null);
           }}
         />
       )}

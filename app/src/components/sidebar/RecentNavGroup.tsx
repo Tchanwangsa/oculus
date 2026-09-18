@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { navigateActive } from "@/lib/tabRouters";
 import { useSubjects } from "@/hooks/useSubjects";
 import { recentKey, useRecentTabsStore } from "@/stores/recentTabsStore";
-import { useActivePath, useTabStore } from "@/stores/tabStore";
+import { useActivePath } from "@/stores/tabStore";
 import { tabInfo } from "@/components/tabs/tabInfo";
 
 const OPEN_KEY = "oculus-recent-nav-open";
@@ -23,7 +23,6 @@ const SHOWN = 5;
 export default function RecentNavGroup() {
   const recents = useRecentTabsStore((s) => s.recents);
   const forget = useRecentTabsStore((s) => s.forget);
-  const addTab = useTabStore((s) => s.addTab);
   const here = useActivePath();
   const hereKey = recentKey(here);
   const { subjects } = useSubjects();
@@ -82,10 +81,8 @@ export default function RecentNavGroup() {
                 <button
                   type="button"
                   title={title}
-                  onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey) addTab(entry.path);
-                    else navigateActive(entry.path);
-                  }}
+                  data-tab-href={entry.path}
+                  onClick={() => navigateActive(entry.path)}
                   className={cn(
                     "flex w-full items-center gap-2.5 rounded-md pl-2 pr-7 py-1.5 text-[12.5px] transition-colors",
                     // Matched on the entry's identity, not its path: one

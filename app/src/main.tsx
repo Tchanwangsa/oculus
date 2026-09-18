@@ -33,7 +33,11 @@ function paint(label: string, err: unknown) {
 // as a window `error` event with a null `error` — indistinguishable from a
 // crash to the listener below, and a window resize fires every observer in
 // every open tab at once, so it blacked out a working app. Ignore it by name.
-const BENIGN = /^ResizeObserver loop/;
+// The second is pdf.js's global `selectionchange` handler walking backwards
+// with no null guard, out of a text layer it detached itself — unguarded
+// upstream too, and it fires for any selection in the app while a PDF is open.
+// A bare identifier only, so our own `p.node.previousSibling` still surfaces.
+const BENIGN = /^ResizeObserver loop|evaluating '\w+\.previousSibling'/;
 
 window.addEventListener("error", (ev) => {
   if (BENIGN.test(ev.message ?? "")) return;

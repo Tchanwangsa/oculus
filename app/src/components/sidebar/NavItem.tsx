@@ -15,7 +15,8 @@ interface NavItemProps {
  * A row in the sidebar. Not a `NavLink`: the sidebar is outside every tab's
  * router, so it has neither a location to match against nor one to navigate
  * — it asks the strip which tab is in front and where that tab is, and sends
- * the tab somewhere new through `navigateActive`.
+ * the tab somewhere new through `navigateActive`. ⌘-click still opens a tab of
+ * its own, off `data-tab-href` (`app/src/lib/newTabClicks.ts`).
  */
 export default function NavItem({ to, icon: Icon, label, badge }: NavItemProps) {
   // `NavLink`'s default, not its `end`: /settings lights for /settings/canvas.
@@ -27,6 +28,10 @@ export default function NavItem({ to, icon: Icon, label, badge }: NavItemProps) 
   return (
     <button
       type="button"
+      /* Not an href: the sidebar is outside every router, so the plain click
+         has to go through `navigateActive`. The attribute is how the ⌘-click
+         net finds where the row leads (`lib/newTabClicks.ts`). */
+      data-tab-href={to}
       onClick={() => navigateActive(to)}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12.5px] transition-colors",

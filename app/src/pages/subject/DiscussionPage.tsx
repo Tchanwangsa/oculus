@@ -10,7 +10,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useSubject } from "@/layouts/SubjectLayout";
-import { openFileSmart } from "@/lib/openFile";
+import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { humanizeSlug } from "@/lib/format";
 import type { DbFile } from "@/lib/db";
@@ -146,6 +146,7 @@ export default function SubjectDiscussionPage() {
             return (
               <button
                 key={f.id}
+                data-tab-href={filePageHref(f) ?? undefined}
                 onClick={() => openFileSmart(f)}
                 className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface transition-colors"
               >

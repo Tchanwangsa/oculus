@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { listen } from "@tauri-apps/api/event";
 import Sidebar from "@/components/sidebar/Sidebar";
 import TopTabBar from "@/components/tabs/TopTabBar";
 import TabPane from "@/components/tabs/TabPane";
@@ -7,9 +8,18 @@ import { SidePanel } from "@/components/panel/SidePanel";
 import CommandPalette from "@/components/palette/CommandPalette";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LeaveLectureDialog } from "@/components/lectures/LeaveLectureDialog";
-import { isWebUrl, openExternal } from "@/lib/browser";
+import { EventDialog } from "@/components/calendar/EventDialog";
+import {
+  browser,
+  browseId,
+  isWebUrl,
+  openExternal,
+  stepZoom,
+} from "@/lib/browser";
 import { useBrowserTabs } from "@/hooks/useBrowserTabs";
-import { useTabStore } from "@/stores/tabStore";
+import { useNewTabClicks } from "@/lib/newTabClicks";
+import { useBrowserStore } from "@/stores/browserStore";
+import { activePane, useTabStore } from "@/stores/tabStore";
 
 const SIDEBAR_KEY = "oculus-sidebar-collapsed";
 const ZOOM_KEY = "oculus-zoom";
@@ -60,6 +70,11 @@ export default function AppLayout() {
   // Browser tabs opened in Rust arrive in the tab strip through this.
   useBrowserTabs();
 
+  // ⌘-click anything that leads somewhere in the app and it opens in a tab of
+  // its own — one capture-phase net, so no call site has to know
+  // (`lib/newTabClicks.ts`). The external-link net below is its twin.
+  useNewTabClicks();
+
   // Every external link in the app opens in an in-app browser tab instead
   // of leaving for Safari — caught here, in the capture phase, so no call
   // site has to know: an `<a href="https://…">` anywhere, markdown included,
@@ -82,8 +97,71 @@ export default function AppLayout() {
     return () => document.removeEventListener("click", onClick, true);
   }, []);
 
-  // ⌘B toggles the sidebar; ⌘+/⌘− zoom the whole window; ⌘0 resets to the
-  // default scale.
+  /**
+   * ⌘= / ⌘− / ⌘0 have **two scopes and one pair of keys**: on a browser tab
+   * they zoom the *page*, as they would in any browser; anywhere else they
+   * zoom the window, which is what they have always done here.
+   *
+   * The choice is made here rather than in the menu because this is the side
+   * that knows what is in front — and asked of the *focused* half, so a split
+   * with a page in one side zooms whichever side you are working in.
+   */
+  const zoomBy = useCallback((direction: 1 | -1 | 0) => {
+    const page = browseId(activePane()?.path);
+    if (page != null) {
+      const current =
+        useBrowserStore.getState().tabs.find((t) => t.id === page)?.zoom ?? 1;
+      const next = direction === 0 ? 1 : stepZoom(current, direction);
+      browser.setZoom(page, next).catch(() => {});
+      return;
+    }
+    if (direction === 0) {
+      setZoom(DEFAULT_ZOOM);
+      return;
+    }
+    setZoom((z) =>
+      direction > 0
+        ? Math.min(ZOOM_MAX, Math.round((z + 0.1) * 100) / 100)
+        : Math.max(ZOOM_MIN, Math.round((z - 0.1) * 100) / 100),
+    );
+  }, []);
+
+  /** ⌘R, and ⇧⌘R for the reload that ignores the cache.
+   *
+   *  A no-op away from a browser tab, deliberately: an app page has nothing to
+   *  reload that reloading the shell would not throw away, and ⌘R has never
+   *  done anything there. */
+  const reload = useCallback((hard: boolean) => {
+    const page = browseId(activePane()?.path);
+    if (page != null) browser.reload(page, hard).catch(() => {});
+  }, []);
+
+  // Menu events rather than key presses, because a browser page's native
+  // WebView takes every ⌘-key and the app's own webview never sees it — the
+  // same reason ⌘T and ⌘W are menu items (`app/src-tauri/src/menu.rs`).
+  const menu = useRef({ zoomBy, reload });
+  menu.current = { zoomBy, reload };
+  useEffect(() => {
+    const pending = [
+      listen("menu-zoom-in", () => menu.current.zoomBy(1)),
+      listen("menu-zoom-out", () => menu.current.zoomBy(-1)),
+      listen("menu-zoom-reset", () => menu.current.zoomBy(0)),
+      listen("menu-reload", () => menu.current.reload(false)),
+      listen("menu-hard-reload", () => menu.current.reload(true)),
+    ];
+    return () => {
+      for (const p of pending) p.then((off) => off()).catch(() => {});
+    };
+  }, []);
+
+  // ⌘B toggles the sidebar, and is a plain key press because nothing in the
+  // menu claims it.
+  //
+  // ⌘+ is here for the same reason the menu cannot take it: muda binds the
+  // *physical* key, and ⌘+ is ⇧⌘= — which the menu's ⌘= does not match. So
+  // the shifted one falls through to this listener and is routed exactly as
+  // the menu item would route it. (The unshifted keys never reach here on
+  // macOS; the menu bar gets first refusal.)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // ⌥ is not part of any of these, and saying so is what keeps ⌘⌥B — the
@@ -100,15 +178,15 @@ export default function AppLayout() {
         case "=":
         case "+":
           e.preventDefault();
-          setZoom((z) => Math.min(ZOOM_MAX, Math.round((z + 0.1) * 100) / 100));
+          menu.current.zoomBy(1);
           break;
         case "-":
           e.preventDefault();
-          setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - 0.1) * 100) / 100));
+          menu.current.zoomBy(-1);
           break;
         case "0":
           e.preventDefault();
-          setZoom(DEFAULT_ZOOM);
+          menu.current.zoomBy(0);
           break;
       }
     };
@@ -127,7 +205,7 @@ export default function AppLayout() {
         {/* `gap-2` survives the sidebar collapsing to zero width, so the card
             keeps its left inset either way. */}
         <div className="flex flex-1 overflow-hidden gap-2 pb-2 pr-2">
-          <Sidebar collapsed={collapsed} onToggle={toggle} />
+          <Sidebar collapsed={collapsed} />
           {/* The document floats: content is a rounded card inset from the
               ground the shell sits on, so the sidebar and tab strip read as
               furniture around the page rather than panels beside it. That
@@ -150,6 +228,11 @@ export default function AppLayout() {
         {/* Raised from the tab strip and from the player alike, so it hangs
             here rather than in either of them. */}
         <LeaveLectureDialog />
+        {/* Raised by the Calendar header's New event and by the Edit on any
+            local event's card — which is rendered by all three calendar views
+            and by Home's Today list — so it hangs here rather than in any of
+            them. */}
+        <EventDialog />
         {/* ⌘K, over everything. It listens for the menu event itself; the
             sidebar's Search row is the other way in. */}
         <CommandPalette />

@@ -58,6 +58,7 @@ export default function SubjectsNavGroup() {
       <div className="group/row flex items-center justify-between pl-2 pr-1 mb-0.5">
         <button
           type="button"
+          data-tab-href="/subjects"
           onClick={() => navigateActive("/subjects")}
           className={cn(
             "flex-1 min-w-0 truncate py-1 text-left text-[11px] font-medium tracking-wide transition-colors",
@@ -167,6 +168,7 @@ function SubjectNavRow({
   return (
     <button
       type="button"
+      data-tab-href={to}
       onClick={() => navigateActive(to)}
       title={subject.name}
       className={cn(

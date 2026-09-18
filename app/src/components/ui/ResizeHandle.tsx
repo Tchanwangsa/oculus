@@ -11,9 +11,20 @@ interface ResizeHandleProps {
   /** Accessible name, e.g. "Resize side panel". */
   label?: string;
   className?: string;
+  /** Drawn inside the grip, positioned against it. The split's focus marker
+   *  lives here rather than inside a pane: a pane showing a browser page is
+   *  covered by a native WebView, and anything the DOM draws under that is
+   *  simply not on screen. */
+  children?: React.ReactNode;
 }
 
-export function ResizeHandle({ onMouseDown, dragging, label, className }: ResizeHandleProps) {
+export function ResizeHandle({
+  onMouseDown,
+  dragging,
+  label,
+  className,
+  children,
+}: ResizeHandleProps) {
   return (
     <div
       onMouseDown={onMouseDown}
@@ -29,6 +40,7 @@ export function ResizeHandle({ onMouseDown, dragging, label, className }: Resize
     >
       {/* Wider invisible hit area */}
       <div className="absolute inset-y-0 -left-1 -right-1" />
+      {children}
     </div>
   );
 }

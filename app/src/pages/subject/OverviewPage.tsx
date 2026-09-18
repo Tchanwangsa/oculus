@@ -14,7 +14,7 @@ import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { getRecents, relativeTime, type RecentEntry } from "@/lib/recents";
 import { dateFromSlug, humanizeSlug } from "@/lib/format";
-import { openFileSmart } from "@/lib/openFile";
+import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { lecturePagePath } from "@/lib/lectures";
 import { getLectures, type DbFile, type Lecture } from "@/lib/db";
@@ -307,6 +307,7 @@ function FileLink({
 }) {
   return (
     <button
+      data-tab-href={filePageHref(file) ?? undefined}
       onClick={() => openFileSmart(file)}
       className="w-full flex items-center gap-3 rounded-md px-2 py-1.5 -mx-2 text-left text-muted-foreground hover:bg-surface hover:text-foreground transition-colors"
     >

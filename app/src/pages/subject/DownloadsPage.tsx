@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useParseStore } from "@/stores/parseStore";
 import { useSubject } from "@/layouts/SubjectLayout";
-import { openFileSmart } from "@/lib/openFile";
+import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { ParseStateBadge } from "@/components/files/ParseState";
 import { fileIconFor, isPdfBacked } from "@/lib/fileTypes";
@@ -167,6 +167,7 @@ function DownloadRow({
   return (
     <div className="group flex items-center gap-3 px-3 py-2 hover:bg-surface transition-colors">
       <button
+        data-tab-href={filePageHref(file) ?? undefined}
         onClick={() => openFileSmart(file)}
         className="flex items-center gap-3 flex-1 min-w-0 text-left"
       >

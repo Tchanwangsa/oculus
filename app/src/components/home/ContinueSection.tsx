@@ -4,8 +4,17 @@ import { Chat, FileText, Play } from "@phosphor-icons/react";
 import { lectureLabel } from "@/lib/calendar";
 import { displayCode, fmtAgo, sqliteUtcToMs } from "@/lib/format";
 import { loadContinue, type ContinueItem } from "@/lib/home";
-import { LECTURES_CHANGED_EVENT, progressLabel } from "@/lib/lectures";
-import { FILE_ACCESSED_EVENT, fileTitle, openFileSmart } from "@/lib/openFile";
+import {
+  LECTURES_CHANGED_EVENT,
+  lecturePagePath,
+  progressLabel,
+} from "@/lib/lectures";
+import {
+  FILE_ACCESSED_EVENT,
+  filePageHref,
+  fileTitle,
+  openFileSmart,
+} from "@/lib/openFile";
 import { useHarnessStore } from "@/stores/harnessStore";
 import { useSidePanelStore } from "@/stores/sidePanelStore";
 import { ROW, Section } from "./Section";
@@ -115,6 +124,11 @@ function Row({
   let title = "";
   let sub: ReactNode = null;
   let open = () => {};
+  /* Where ⌘-click leads (`lib/newTabClicks.ts`). A lecture and a file both
+     have a page of their own; a thread does not — it is selected in the one
+     chat page rather than routed to — so its row has no new-tab form and is
+     left without one. */
+  let tabHref: string | null = null;
 
   if (item.kind === "lecture") {
     const { lecture } = item;
@@ -133,6 +147,7 @@ function Row({
       </>
     );
     open = () => useSidePanelStore.getState().open({ kind: "lecture", lecture });
+    tabHref = lecturePagePath(lecture);
   } else if (item.kind === "file") {
     const { file } = item;
     Glyph = FileText;
@@ -142,6 +157,7 @@ function Row({
     // listens on; stamping it again here would be one write and one reload too
     // many.
     open = () => openFileSmart(file);
+    tabHref = filePageHref(file);
   } else {
     const { thread } = item;
     Glyph = Chat;
@@ -153,7 +169,12 @@ function Row({
   }
 
   return (
-    <button type="button" className={ROW} onClick={open}>
+    <button
+      type="button"
+      className={ROW}
+      data-tab-href={tabHref ?? undefined}
+      onClick={open}
+    >
       <Glyph size={13} className="shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[12px] text-foreground">{title}</span>

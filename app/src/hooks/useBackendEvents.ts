@@ -2,14 +2,16 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  setParseStatus, upsertFile, finishSyncRun, addLog,
+  setParseStatus, setEmbedStatus, upsertFile, finishSyncRun, addLog,
   addSyncRunFile, getSyncOptions, markFileContentChanged, resetFilePipeline,
-  upsertLectures, replaceCalendarEvents,
+  upsertLectures, replaceCalendarEvents, getFileByRelativePath,
   type CalendarEventData, type LectureData, type SyncFileAction,
 } from "@/lib/db";
 import { useSyncStore } from "@/stores/syncStore";
 import { useParseStore } from "@/stores/parseStore";
 import { usePipelineStore } from "@/stores/pipelineStore";
+import { reportEmbedPages, useIndexStore } from "@/stores/indexStore";
+import { embedReady } from "@/lib/retrieval";
 import type { SyncProgress } from "@/stores/syncStore";
 import type { ParseJob } from "@/stores/parseStore";
 import { isPdfBacked } from "@/lib/fileTypes";
@@ -26,6 +28,26 @@ import type { HarnessEnvelope } from "@/lib/harness";
  */
 const PARSE_STATUSES = new Set(["queued", "running", "quality", "error"]);
 
+/**
+ * The `embed-status` vocabulary, which is the parse one with the historical
+ * name taken out: the terminal success is `"done"`, because unlike
+ * `'quality'` it was never written into a library's worth of rows.
+ */
+const EMBED_STATUSES = new Set(["queued", "running", "done", "error"]);
+
+/** `embed-status`, exactly as `app/src-tauri/src/embed/events.rs` emits it. */
+interface EmbedJob {
+  relative_path: string;
+  subject_id: number;
+  status: string;
+  pages_done?: number;
+  total_pages?: number;
+  error?: string;
+  kind?: string;
+  retryable?: boolean;
+  latching?: boolean;
+}
+
 const isPipelinePdf = (path: string) => isPdfBacked(path);
 
 /**
@@ -38,6 +60,12 @@ export function useBackendEvents() {
   useEffect(() => {
     const unsubs: Array<Promise<() => void>> = [];
     const pipeline = () => usePipelineStore.getState();
+
+    // Is there an embedder behind the third stage? Asked once here, at the one
+    // place that is mounted for the life of the app, and re-asked by Settings
+    // → Library whenever a key is saved or cleared. Nothing is queued
+    // automatically while this is false — see `indexStore`.
+    void embedReady().then((ready) => useIndexStore.getState().setReady(ready));
 
     // ── CLI agents ──────────────────────────────────────────────────────────
     // App-level, not page-level: a thread keeps running while you are on
@@ -249,6 +277,24 @@ export function useBackendEvents() {
               errorRetryable: undefined,
               errorLatching: undefined,
             });
+            // The third stage, and the one hop that makes the pipeline
+            // continuous: a file that has just become parseable text is also a
+            // file that can be embedded, and the queue is serial, so appending
+            // here costs nothing but a place in line. Gated on a stored Voyage
+            // key — with none there is no backend to queue against, and the
+            // stage is not drawn at all.
+            //
+            // The file row is read rather than assumed because the queue needs
+            // its `id`: `pages` is keyed on `file_id`, and this event carries
+            // a path. `scrape-file` has already upserted it by the time a
+            // parse can have finished.
+            if (useIndexStore.getState().ready) {
+              getFileByRelativePath(path)
+                .then((file) => {
+                  if (file) useIndexStore.getState().enqueueFile(file);
+                })
+                .catch(() => {});
+            }
             break;
           case "error":
             // The discriminants ride into the row rather than being dropped:
@@ -262,6 +308,71 @@ export function useBackendEvents() {
               errorLatching: ev.latching,
             });
             break;
+        }
+      }),
+    );
+
+    // ── Page embedding stage events ─────────────────────────────────────────
+    // The third stage, and the only one that reports progress *inside* a
+    // document on a clock measured in minutes per page. Same shape as
+    // `parse-status` deliberately — see `app/src-tauri/src/embed/events.rs`.
+    unsubs.push(
+      listen<EmbedJob>("embed-status", async (e) => {
+        const ev = e.payload;
+        const path = ev.relative_path;
+        if (!path || !EMBED_STATUSES.has(ev.status)) return;
+
+        // A progress heartbeat can race the completion notify by a tick; a
+        // "running" arriving after the file finished must not undo it.
+        if (ev.status === "running" && pipeline().items[path]?.embed === "done") return;
+
+        const touch = pipeline().touch;
+        switch (ev.status) {
+          case "queued":
+            touch(path, ev.subject_id, { parse: "done", embed: "queued" });
+            break;
+          case "running":
+            touch(path, ev.subject_id, {
+              parse: "done",
+              embed: "active",
+              embedPagesDone: ev.pages_done ?? 0,
+              embedTotalPages: ev.total_pages ?? 0,
+            });
+            // The settings page's bar is drawn from the run, and this is the
+            // only place the page inside the current document is known.
+            reportEmbedPages(path, ev.pages_done ?? 0, ev.total_pages ?? 0);
+            break;
+          case "done":
+            touch(path, ev.subject_id, {
+              parse: "done",
+              embed: "done",
+              embedPagesDone: ev.pages_done ?? 0,
+              embedTotalPages: ev.total_pages ?? 0,
+              embeddedAt: Date.now(),
+              error: undefined,
+              errorKind: undefined,
+              errorRetryable: undefined,
+              errorLatching: undefined,
+            });
+            break;
+          case "error":
+            touch(path, ev.subject_id, {
+              embed: "error",
+              error: ev.error ?? "Embedding failed",
+              errorKind: ev.kind,
+              errorRetryable: ev.retryable,
+              errorLatching: ev.latching,
+            });
+            break;
+        }
+
+        // Rust writes `'done'` itself when the ingest commits. What it cannot
+        // write is a failure — the transaction never ran — and a row that
+        // forgot its failure on restart would come back as merely waiting.
+        if (ev.status === "done" || ev.status === "error") {
+          try {
+            await setEmbedStatus(ev.subject_id, path, ev.status);
+          } catch { /* ignore */ }
         }
       }),
     );

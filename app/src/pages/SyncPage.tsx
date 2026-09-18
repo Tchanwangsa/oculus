@@ -23,6 +23,8 @@ import {
   getSubjects,
   getSyncRunSummaries,
   getPdfPipelineRows,
+  getEmbedCoverage,
+  getFileByRelativePath,
   setParseStatusByPath,
   setSubjectSelected,
   addLog,
@@ -31,6 +33,8 @@ import {
   type SyncRunSummary,
 } from "@/lib/db";
 import { triggerSync } from "@/lib/syncRunner";
+import { embeddingStats } from "@/lib/retrieval";
+import { useIndexStore } from "@/stores/indexStore";
 import { fmtAgo, sqliteUtcToMs } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import { useSyncStore } from "@/stores/syncStore";
@@ -60,7 +64,10 @@ const VIEW_KEY = "oculus-sync-view";
  *  opening anything. */
 const VIEWS = [
   { value: "history", label: "Sync History" },
-  { value: "pipeline", label: "Parse Activity" },
+  // "Parse Activity" while parsing was the only stage worth watching. The
+  // table walks download → parse → embed now, and naming it after one stage
+  // would send someone looking elsewhere for the other two.
+  { value: "pipeline", label: "File Activity" },
 ] as const satisfies ReadonlyArray<{ value: ActivityView; label: string }>;
 
 export default function SyncPage() {
@@ -87,6 +94,7 @@ export default function SyncPage() {
 
   // Pipeline (per-file download → parse tracking).
   const pipelineItems = usePipelineStore((s) => s.items);
+  const embedStage = usePipelineStore((s) => s.embedStage);
   const seedPipeline = usePipelineStore((s) => s.seed);
   const clearFinished = usePipelineStore((s) => s.clearFinished);
 
@@ -132,6 +140,16 @@ export default function SyncPage() {
         const rows = await getPdfPipelineRows();
         const byPath = new Map(rows.map((r) => [r.relative_path, r]));
 
+        // The embed stage is seeded from page coverage in the *current* space,
+        // never from `files.embed_status` — that column is a sticky flag with
+        // no memory of which model wrote the vectors, so after an engine
+        // change it claims 'done' over a library where nothing is searchable.
+        // Same question `getUnembeddedPdfs` asks, asked once for every row.
+        const { model, dim } = await embeddingStats();
+        const coverage = new Map(
+          (await getEmbedCoverage(model, dim)).map((c) => [c.relative_path, c]),
+        );
+
         const unsure = rows
           .filter((r) => r.parse_status !== "quality")
           .map((r) => r.relative_path);
@@ -152,8 +170,12 @@ export default function SyncPage() {
             relativePath: r.relative_path,
             subjectId: r.subject_id,
             parseStatus: disk[r.relative_path] ?? r.parse_status,
+            embedStatus: r.embed_status,
+            pagesTotal: coverage.get(r.relative_path)?.pages_total ?? 0,
+            pagesCurrent: coverage.get(r.relative_path)?.pages_current ?? 0,
             downloadedAt: sqliteUtcToMs(r.scraped_at),
             parsedAt: sqliteUtcToMs(r.parsed_at),
+            embeddedAt: sqliteUtcToMs(r.embedded_at),
           })),
         );
       } catch (e) {
@@ -168,7 +190,7 @@ export default function SyncPage() {
   const counts = useMemo(() => {
     let active = 0, waiting = 0, paused = 0, failed = 0, done = 0;
     for (const it of items) {
-      const phase = statusOf(it).phase;
+      const phase = statusOf(it, embedStage).phase;
       if (phase === "active") active++;
       else if (phase === "waiting") waiting++;
       else if (phase === "paused") paused++;
@@ -176,7 +198,7 @@ export default function SyncPage() {
       else done++;
     }
     return { active, waiting, paused, failed, done };
-  }, [items]);
+  }, [items, embedStage]);
 
   // ── Auth events (cancelled, expired) ──────────────────────────────────────
 
@@ -271,21 +293,45 @@ export default function SyncPage() {
   };
 
   /**
-   * Pick the pipeline back up for one file. Parsing is idempotent on the Rust
-   * side — a file whose parse record already exists is skipped — so "resume"
-   * and "retry" are the same call, and with one stage left there is nothing
-   * else it could be.
+   * Pick the pipeline back up for one file, at whichever stage it stopped.
+   *
+   * Both halves are idempotent on the Rust side — a file whose parse record
+   * exists is skipped, and so is one whose embedding record is already in the
+   * current space — so "resume" and "retry" are the same call either way. What
+   * the stage decides is *which* call: re-parsing a file whose parse is
+   * already done would be a no-op that left the embed it was actually waiting
+   * for exactly where it was.
    */
   const resumeItem = useCallback(async (it: PipelineItem) => {
     const { touch } = usePipelineStore.getState();
+    const embedding = it.parse === "done";
+
     // Clear paused/failed immediately so the row reads as moving again.
     touch(it.relativePath, it.subjectId, {
       ...(it.parse === "error" ? { parse: "pending" as const } : {}),
+      ...(it.embed === "error" ? { embed: "pending" as const } : {}),
       error: undefined,
       errorKind: undefined,
       errorRetryable: undefined,
       errorLatching: undefined,
     });
+
+    if (embedding) {
+      // Into the same serial queue the Index button and auto-embed feed, so a
+      // hand-driven retry can never open a second run against the same
+      // per-minute ceiling. Rust narrates the rest over `embed-status`.
+      const file = await getFileByRelativePath(it.relativePath).catch(() => null);
+      if (!file) {
+        touch(it.relativePath, it.subjectId, {
+          embed: "error",
+          error: "This file is not in the database",
+        });
+        return;
+      }
+      useIndexStore.getState().enqueueFile(file);
+      return;
+    }
+
     try {
       await invoke("parse_file", {
         subjectId: it.subjectId,
@@ -297,11 +343,13 @@ export default function SyncPage() {
     }
   }, []);
 
-  /** Resume every paused row; the parses queue up behind one another. */
+  /** Resume every paused row; parses batch behind one another and embeds go
+   *  into the one serial queue. */
   const resumeAll = useCallback(() => {
     const all = Object.values(usePipelineStore.getState().items);
+    const on = usePipelineStore.getState().embedStage;
     for (const it of all) {
-      if (statusOf(it).phase !== "paused") continue;
+      if (statusOf(it, on).phase !== "paused") continue;
       void resumeItem(it);
     }
   }, [resumeItem]);
@@ -321,7 +369,9 @@ export default function SyncPage() {
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const phase = progress?.phase ? (PHASE_LABEL[progress.phase] ?? progress.phase) : null;
-  const finishedCount = items.filter((it) => isComplete(it) || hasFailed(it)).length;
+  const finishedCount = items.filter(
+    (it) => isComplete(it, embedStage) || hasFailed(it),
+  ).length;
   const lastCompleted = runs.find((r) => r.status === "completed" && r.finished_at);
   const needsAuth = authStatus !== "connected";
 

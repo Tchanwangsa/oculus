@@ -52,8 +52,10 @@ export const fileCrumbTab = (category: string | null): CrumbTab | null =>
  * drops into the page's own crumb row, inherits its gap, and ends with the
  * separator the page's leaf follows.
  *
- * Buttons through `navigateActive`, not `Link`s, and the difference is not
- * cosmetic. A `Link` goes straight to the pane's own router, which skips the
+ * Buttons with a `data-tab-href`, not `Link`s, and the difference is not
+ * cosmetic. The attribute gives ⌘-click a tab of its own
+ * (`app/src/lib/newTabClicks.ts`); the plain click goes through
+ * `navigateActive`. A `Link` goes straight to the pane's own router, which skips the
  * one door the app's departure rules live behind: a crumb clicked out of a
  * playing lecture stranded it off screen — still running, no player anywhere,
  * no prompt — and a crumb clicked out of a page with a peek open carried that
@@ -83,6 +85,7 @@ export function SubjectCrumbs({
     <>
       <button
         type="button"
+        data-tab-href={`/subjects/${subject.id}`}
         onClick={() => navigateActive(`/subjects/${subject.id}`)}
         className="flex shrink-0 cursor-pointer items-center gap-1.5 transition-colors hover:text-foreground"
       >
@@ -94,6 +97,7 @@ export function SubjectCrumbs({
         <>
           <button
             type="button"
+            data-tab-href={`/subjects/${subject.id}/${tab.to}`}
             onClick={() => navigateActive(`/subjects/${subject.id}/${tab.to}`)}
             className="shrink-0 cursor-pointer transition-colors hover:text-foreground"
           >

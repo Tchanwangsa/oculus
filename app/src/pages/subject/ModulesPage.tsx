@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useModuleTocs, type LoadedModule } from "@/hooks/useModuleTocs";
 import { useSubject } from "@/layouts/SubjectLayout";
-import { openFileSmart } from "@/lib/openFile";
+import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { fileIconFor } from "@/lib/fileTypes";
 import { resolveTocHref, type ModuleItem } from "@/lib/moduleToc";
@@ -201,6 +201,7 @@ function ItemRow({
   if (target) {
     return (
       <button
+        data-tab-href={filePageHref(target) ?? undefined}
         onClick={() => openFileSmart(target)}
         className={cn(rowClass, "text-foreground hover:bg-surface")}
       >

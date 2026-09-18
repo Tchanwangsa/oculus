@@ -31,6 +31,7 @@ import { recordRecent } from "@/lib/recents";
 import {
   fmtDuration,
   fmtLectureDate,
+  lecturePagePath,
   progressLabel,
   LECTURES_CHANGED_EVENT,
 } from "@/lib/lectures";
@@ -154,6 +155,10 @@ export default function SubjectLecturesPage() {
                 return (
                   <button
                     key={lec.id}
+                    /* The row opens the lecture as a peek; ⌘-click wants the
+                       same lecture as a page of its own, which is where this
+                       leads (`lib/newTabClicks.ts`). */
+                    data-tab-href={lecturePagePath(lec)}
                     onClick={() => handleSelectLecture(lec)}
                     className={cn(
                       "w-full text-left px-3 py-2.5 flex gap-3 items-center hover:bg-surface transition-colors",
@@ -204,6 +209,7 @@ export default function SubjectLecturesPage() {
                         <span
                           role="button"
                           tabIndex={0}
+                          data-tab-skip
                           aria-label="Download video"
                           title="Download video"
                           onClick={(e) => {
