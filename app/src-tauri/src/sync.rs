@@ -1370,7 +1370,7 @@ fn is_generic_binary(ct: &str) -> bool {
 /// this engine knows. `.pptx` is tested before `.ppt` by construction: the
 /// table's entries are whole extensions, and "deck.pptx" does not end in
 /// ".ppt".
-fn office_ext_of(name: &str) -> Option<&'static str> {
+pub(crate) fn office_ext_of(name: &str) -> Option<&'static str> {
     let lower = name.to_ascii_lowercase();
     OFFICE_TYPES
         .iter()
@@ -1381,7 +1381,7 @@ fn office_ext_of(name: &str) -> Option<&'static str> {
 /// pptx/docx/xlsx/ppt/doc/xls → PDF via LibreOffice headless. Everything happens in a
 /// scratch directory soffice writes into alone, so the read-back name is
 /// unambiguous; the directory is removed whatever the outcome.
-fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> {
     let soffice = find_soffice().ok_or_else(|| {
         "LibreOffice not installed — `brew install --cask libreoffice` enables Office → PDF conversion"
             .to_string()

@@ -161,6 +161,9 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
+        // The native open panel, for adding your own files to a subject. The
+        // picker hands back *paths*, so the bytes never cross the IPC bridge.
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_sql::Builder::new()
                 .add_migrations(
@@ -1087,6 +1090,8 @@ ALTER TABLE projects ADD COLUMN event_id TEXT;
             files::read_course_file,
             files::open_course_file,
             files::scan_parsed_files,
+            files::import_uploads,
+            files::delete_upload,
             calendar::calendar_sync_events,
             lectures::echo360_sync_lectures,
             lectures::echo360_download_video,

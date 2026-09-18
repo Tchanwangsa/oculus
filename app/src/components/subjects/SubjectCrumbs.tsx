@@ -27,6 +27,7 @@ const FILE_TAB: Record<string, CrumbTab> = {
   page: { to: "modules", label: "Modules" },
   module: { to: "modules", label: "Modules" },
   file: { to: "downloads", label: "Downloads" },
+  upload: { to: "uploads", label: "Uploads" },
   announcement: { to: "announcements", label: "Announcements" },
   assignment: { to: "assignments", label: "Assignments" },
   quiz: { to: "assignments", label: "Assignments" },

@@ -195,10 +195,17 @@ pub fn write_course_bytes(
     Ok((rel, content.len() as u64, action))
 }
 
-/// Delete the parse/embed artifacts a PDF-backed file leaves beside its PDF
-/// (`{stem}.md`, `{stem}.pages.json`, `{stem}.emb.json`). The sidecar's skip
-/// checks are pure existence checks — without this, a re-scrape that finds
-/// changed bytes would keep serving the old parse and embeddings forever.
+/// Delete everything a PDF-backed file leaves beside its PDF — `{stem}.md`,
+/// `{stem}.pages.json`, `{stem}.emb.json` and the `{stem}_images/` directory
+/// the markdown's figures live in.
+///
+/// The sidecar's skip checks are pure existence checks, so without this a
+/// re-scrape that finds changed bytes would keep serving the old parse and
+/// embeddings forever. The images go with them because they are only ever
+/// referenced *from* that markdown: leaving them is not a fallback, it is a
+/// directory of figures for a document that no longer says anything about
+/// them, and both parse tiers rebuild it from scratch anyway.
+///
 /// `library_rel` is the library file, data-dir-relative (`courses/…`).
 pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
     let Some(pdf_rel) = doc_pdf_rel(library_rel) else { return };
@@ -214,6 +221,7 @@ pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
     ] {
         let _ = std::fs::remove_file(parent.join(name));
     }
+    let _ = std::fs::remove_dir_all(parent.join(format!("{stem}_images")));
 }
 
 /// Extensions LibreOffice converts to PDF at download time. The original is
@@ -261,10 +269,29 @@ pub fn parse_mode(pdf: &std::path::Path) -> Option<&'static str> {
     }
 }
 
+/// The one directory inside a course folder the scraper never writes to: the
+/// student's own files, added by hand. Everything downstream — conversion,
+/// parsing, embedding, search, the agent's view of `courses/` — treats them as
+/// ordinary library files, so this constant is the whole of what makes them
+/// separate.
+pub const UPLOADS_DIR: &str = "uploads";
+
+/// True for a data-dir-relative path inside some subject's uploads folder.
+///
+/// This is the delete command's entire guard. Nothing else under `courses/` is
+/// the user's to throw away — a scraped file deleted from disk comes back on
+/// the next sync, minus its parse — so deletion is scoped here by construction
+/// rather than by asking the caller to be careful.
+pub fn is_upload_rel(rel: &str) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    !rel.contains("..") && parts.len() > 3 && parts[0] == "courses" && parts[2] == UPLOADS_DIR
+}
+
 pub fn category_from_path(path: &str) -> &'static str {
     match path {
         "home.md" => "home",
         "syllabus.md" => "syllabus",
+        p if p.starts_with("uploads/") => "upload",
         p if p.starts_with("pages/") => "page",
         p if p.starts_with("assignments/") => "assignment",
         p if p.starts_with("quizzes/") => "quiz",
@@ -319,6 +346,18 @@ mod tests {
         assert_eq!(category_from_path("assignments/a1.md"), "assignment");
         assert_eq!(category_from_path("quizzes/week-3.md"), "quiz");
         assert_eq!(category_from_path("ed/0031-welcome.md"), "ed");
+        assert_eq!(category_from_path("uploads/tutor-notes.pdf"), "upload");
         assert_eq!(category_from_path("nope.txt"), "other");
+    }
+
+    #[test]
+    fn only_a_subjects_uploads_folder_is_deletable() {
+        assert!(is_upload_rel("courses/COMP30026/uploads/notes.pdf"));
+        // Everything else under courses/ belongs to a sync.
+        assert!(!is_upload_rel("courses/COMP30026/files/lecture.pdf"));
+        assert!(!is_upload_rel("courses/COMP30026/uploads"));
+        assert!(!is_upload_rel("lectures/abc/source1.mp4"));
+        assert!(!is_upload_rel("courses/../oculus.db"));
+        assert!(!is_upload_rel("courses/X/uploads/../../../oculus.db"));
     }
 }

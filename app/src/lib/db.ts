@@ -787,6 +787,23 @@ export async function resetFilePipeline(
   );
 }
 
+/** Drop one file's row along with its indexed pages — what keeps search from
+ *  ranking a page of a file that is no longer on disk.
+ *
+ *  `pages.file_id` is declared `ON DELETE CASCADE`, but the delete is written
+ *  out anyway: SQLite enforces foreign keys only when `PRAGMA foreign_keys=ON`
+ *  is set per connection, and nothing here sets it — so the constraint is
+ *  documentation, not a guarantee, and orphaned embeddings would outlive the
+ *  file silently.
+ *
+ *  Only uploads are ever deleted this way; a scraped file's row belongs to the
+ *  sync that wrote it. */
+export async function deleteFileRow(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM pages WHERE file_id = $1`, [id]);
+  await db.execute(`DELETE FROM files WHERE id = $1`, [id]);
+}
+
 export async function markFileAccessed(id: number): Promise<void> {
   const db = await getDb();
   await db.execute(`UPDATE files SET last_accessed_at = datetime('now') WHERE id = $1`, [id]);

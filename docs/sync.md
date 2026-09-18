@@ -84,7 +84,11 @@ One Rust engine scrapes three services. It runs identically inside the app
   Migration 10 in `app/src-tauri/src/lib.rs` exists because those PDFs once
   did get rows. **With LibreOffice absent the original is still stored**, the
   run logs a warning, and the file stays out of `file-manifest.json` so the
-  next sync retries the conversion rather than skipping it.
+  next sync retries the conversion rather than skipping it. `office_to_pdf`
+  and `office_ext_of` are `pub(crate)` for one caller outside this engine:
+  the student's own uploads go through the very same conversion
+  (`app/src-tauri/src/files.rs`, [frontend.md](./frontend.md)), so a dropped
+  `.docx` is searchable on exactly the terms a scraped one is.
 - **A spreadsheet is exported as one page per sheet**, not with Calc's default
   pagination (`convert_target` in `app/src-tauri/src/sync.rs`). Calc slices a
   wide sheet into page-width column bands and gives the later bands no

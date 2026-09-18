@@ -10,6 +10,7 @@ import SubjectsIndexPage from "@/pages/SubjectsIndexPage";
 import SubjectOverviewPage from "@/pages/subject/OverviewPage";
 import SubjectModulesPage from "@/pages/subject/ModulesPage";
 import SubjectDownloadsPage from "@/pages/subject/DownloadsPage";
+import SubjectUploadsPage from "@/pages/subject/UploadsPage";
 import SubjectLecturesPage from "@/pages/subject/LecturesPage";
 import SubjectAnnouncementsPage from "@/pages/subject/AnnouncementsPage";
 import SubjectAssignmentsPage from "@/pages/subject/AssignmentsPage";
@@ -68,6 +69,7 @@ export const routes: RouteObject[] = [
           { index: true, element: <SubjectOverviewPage /> },
           { path: "modules", element: <SubjectModulesPage /> },
           { path: "downloads", element: <SubjectDownloadsPage /> },
+          { path: "uploads", element: <SubjectUploadsPage /> },
           { path: "lectures", element: <SubjectLecturesPage /> },
           { path: "announcements", element: <SubjectAnnouncementsPage /> },
           { path: "assignments", element: <SubjectAssignmentsPage /> },

@@ -20,6 +20,7 @@ this page is the structure.
 | Projects (index, one board, a subject's tab) | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/subject/ProjectsPage.tsx`, `app/src/components/projects/`, `app/src/stores/projectsStore.ts`, `app/src/lib/projects.ts` |
 | Overlap packing, shared by the week grid and the project timeline | `app/src/lib/lanes.ts` |
 | Provider/model pickers (settings + composer) | `app/src/components/llm/` |
+| A subject's own files (the Uploads tab) | `app/src/pages/subject/UploadsPage.tsx`, `app/src/lib/uploads.ts`, `app/src-tauri/src/files.rs` |
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
 | Parse backend, memory budget + sidecar health | `app/src/pages/settings/LibraryPage.tsx` |
@@ -41,8 +42,8 @@ router over it (`app/src/components/tabs/TabPane.tsx`) — the shell is above al
 of them, so there is no one router to name. `/` is **Home**; it used to
 redirect to `/chat`. Then `/chat`, `/calendar`, `/projects`,
 `/projects/:projectId` and `/projects/:projectId/tasks/:taskId`, `/subjects`, `/subjects/:subjectId` (SubjectLayout →
-overview / modules / downloads / lectures / announcements / assignments /
-discussion / projects), `/subjects/:subjectId/file` and `/lecture` (the side
+overview / modules / downloads / uploads / lectures / announcements /
+assignments / discussion / projects), `/subjects/:subjectId/file` and `/lecture` (the side
 panel promoted to a full Notion-style page, outside SubjectLayout on purpose),
 `/sync`, and `/settings/*`. Legacy routes (`/lectures`, a subject's `files`
 tab) redirect.
@@ -158,13 +159,50 @@ the one moment it shows.
   with the history table and interrupted runs never count as a sync.
 - `SubjectLayout` resolves the subject once and hands it to tab pages via
   outlet context — tab pages must not re-fetch it. Its underline tabs are a
-  **sideways scroller**, not a row that gets clipped: eight tabs already crowd
+  **sideways scroller**, not a row that gets clipped: nine tabs already crowd
   the centred column and the card is narrower still with the side panel docked
   open, so the row scrolls with its bar hidden, a fade over each live edge (the
   sidebar's affordance) and the active tab scrolled into view. The `-mb-px`
   that lands the active underline on the header's border sits on the scroller,
   not on the tabs: `overflow-x` clips on both axes, so inside it the underline
   would go with it.
+- **Uploads is the one subject tab whose rows nothing scraped**, and it is
+  thin because it has to add almost nothing. `import_uploads` copies the picked
+  bytes into `courses/<code>/uploads/` and converts Office documents there the
+  same way a download is converted; from that moment the file is an ordinary
+  library file, so the parse sweep, the embed hop, ⌘K, semantic search and the
+  chat agent's `courses/` all reach it without knowing it was never on Canvas.
+  What `app/src/lib/uploads.ts` adds is the `files` row and the first parse
+  kick — **in that order**, because `embedAfterParse` in `useBackendEvents`
+  resolves a finished parse back to a file by `(subject_id, relative_path)`,
+  and a file parsed before its row exists would never be indexed.
+  Three choices are worth keeping. The picker and the drag both hand back
+  **paths**, never bytes, so nothing large crosses the IPC bridge. A name
+  already taken steps aside (`notes.pdf` → `notes-2.pdf`) rather than
+  overwriting, except for byte-identical content under the same name, which is
+  the same file again and keeps its parse; adding the wrong file can therefore
+  never destroy the right one. And a Finder drag is a **native window event**
+  (`onDragDropEvent`) rather than an HTML drop — WebKit never sees those files
+  — which means it is the *window's* event, not the page's: every tab stays
+  mounted, so the page scopes it with `useTabActive` or a backgrounded Uploads
+  tab would claim a drop meant for whatever is in front.
+  Deleting is the only destructive control in the library, and its guard is
+  `is_upload_rel` in `app/src-tauri/src/paths.rs`, not a confirmation dialog:
+  only a path under some subject's `uploads/` can be removed at all. It takes
+  the converted PDF and `purge_parse_artifacts` with it, and the `pages` rows
+  too — which `deleteFileRow` writes out by hand, since nothing sets
+  `PRAGMA foreign_keys=ON` and the declared cascade is documentation rather
+  than a guarantee.
+  **A delete cannot fully clean up after itself, so the next write does the
+  rest.** The sidecar's skip checks are plain existence checks, and a quality
+  pass still in flight when the delete lands writes its `{stem}.md` out
+  afterwards, beside a PDF that is gone — so a later upload handed that freed
+  name would inherit a stale parse. `store_upload` therefore purges the
+  artifacts on the name it is about to use whenever the bytes are not
+  byte-identical to what is there, which is the one case they provably are its
+  own. That purge is also why `purge_parse_artifacts` takes `{stem}_images/`:
+  those figures are referenced only from the markdown it deletes, so keeping
+  them is not a fallback, and both parse tiers rebuild the directory anyway.
 - **The shell is furniture around a floating document.** `AppLayout` puts the
   sidebar and `TopTabBar` straight onto the window ground and renders content
   as an inset rounded card, so neither needs a divider of its own. Two

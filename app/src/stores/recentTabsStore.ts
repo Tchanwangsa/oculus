@@ -40,7 +40,7 @@ export interface RecentTab {
  * The identity of the thing a path names, or null for a path that is not a
  * destination at all.
  *
- * Coarser than the path on purpose: a subject's eight section tabs are views
+ * Coarser than the path on purpose: a subject's nine section tabs are views
  * of one subject, so they share a row that follows you between them rather
  * than filling the group with rows all called "INFO30006". A file and a
  * lecture are the exception — a full page of their own, as their tab is — and
