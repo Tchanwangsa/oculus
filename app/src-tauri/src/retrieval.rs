@@ -29,6 +29,53 @@
 //! never scanned, and `IndexStats` reports them separately so "2,980 pages
 //! indexed" can never mean "2,980 pages searchable".
 
+/// The lexical half of search, as SQL: an FTS5 index over `pages.markdown`.
+///
+/// Page *images* are what the semantic index embeds, for the reason at the top
+/// of this file — but the markdown beside them is the only place a person's
+/// exact words ("Nash equilibrium", a lecturer's turn of phrase) can be found
+/// verbatim, and a title search cannot see inside a deck at all. So the two
+/// live side by side: this one answers as you type, the embeddings answer a
+/// question. Read from the frontend
+/// (`searchPageText` in `app/src/lib/db.ts`), which is why it is SQL here and
+/// not a command — the app's SQLite and this one are the same file.
+///
+/// External content (`content='pages'`): the index stores terms, not a second
+/// copy of every page, and the triggers keep it in step with whichever writer
+/// moved — the app through `tauri-plugin-sql`, the CLI through
+/// `app/src-tauri/src/store.rs`. `UPDATE OF markdown` and not a bare `UPDATE`,
+/// because every embed writes a blob to these rows and re-indexing the text
+/// for that would be work for nothing.
+///
+/// **A page deleted by `files`' `ON DELETE CASCADE` does not fire the delete
+/// trigger** — SQLite only runs triggers for foreign-key actions with
+/// `recursive_triggers` on — so the index can hold entries whose page is gone.
+/// That costs ranking, never correctness: every read joins
+/// `pages ON pages.id = pages_fts.rowid`, and an entry with no page behind it
+/// drops out of the join. `INSERT INTO pages_fts(pages_fts) VALUES('rebuild')`
+/// is the cure if one is ever wanted.
+pub const PAGES_FTS_SQL: &str = r#"
+CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
+    markdown,
+    content='pages',
+    content_rowid='id',
+    tokenize="unicode61 remove_diacritics 2"
+);
+INSERT INTO pages_fts(rowid, markdown) SELECT id, markdown FROM pages;
+CREATE TRIGGER pages_fts_ai AFTER INSERT ON pages BEGIN
+    INSERT INTO pages_fts(rowid, markdown) VALUES (new.id, new.markdown);
+END;
+CREATE TRIGGER pages_fts_ad AFTER DELETE ON pages BEGIN
+    INSERT INTO pages_fts(pages_fts, rowid, markdown)
+    VALUES ('delete', old.id, old.markdown);
+END;
+CREATE TRIGGER pages_fts_au AFTER UPDATE OF markdown ON pages BEGIN
+    INSERT INTO pages_fts(pages_fts, rowid, markdown)
+    VALUES ('delete', old.id, old.markdown);
+    INSERT INTO pages_fts(rowid, markdown) VALUES (new.id, new.markdown);
+END;
+"#;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -49,6 +96,50 @@ use crate::embed;
 /// in-place progress line. That is the honest shape: a cloud embed on the free
 /// programme can take hours, and a silent terminal looks like a hang.
 pub type ProgressSink = Arc<dyn Fn(embed::Progress) + Send + Sync>;
+
+/// Why an ingest failed, with the discriminants intact.
+///
+/// The string alone was enough while the only caller was a terminal that
+/// printed it. It is not enough for the pipeline row: whether to offer a retry
+/// at all is `retryable`, and whether the run should stop rather than report
+/// one account-wide fact once per file is `latching` — neither is recoverable
+/// from prose, and guessing at them from the message is how a spent quota
+/// turns into 166 red rows.
+///
+/// The three are **optional** for the same reason `ParseError`'s are on the
+/// parse side: a failure that never reached a backend (the file is not on
+/// disk, the database refused the write) has no `EmbedError` behind it, and
+/// unknown is its own case rather than a coerced `false`.
+#[derive(Debug, Clone)]
+pub struct IngestError {
+    pub message: String,
+    pub kind: Option<&'static str>,
+    pub retryable: Option<bool>,
+    pub latching: Option<bool>,
+}
+
+impl From<embed::EmbedError> for IngestError {
+    fn from(error: embed::EmbedError) -> Self {
+        Self {
+            message: error.to_string(),
+            kind: Some(error.kind()),
+            retryable: Some(error.retryable()),
+            latching: Some(error.latching()),
+        }
+    }
+}
+
+impl From<String> for IngestError {
+    fn from(message: String) -> Self {
+        Self { message, kind: None, retryable: None, latching: None }
+    }
+}
+
+impl std::fmt::Display for IngestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
 
 #[derive(Serialize)]
 pub struct IngestSummary {
@@ -155,7 +246,9 @@ pub async fn ingest(
     pdf_path: String,
     force: bool,
 ) -> Result<IngestSummary, String> {
-    ingest_reporting(db_file, file_id, pdf_path, force, Arc::new(|_| {})).await
+    ingest_reporting(db_file, file_id, pdf_path, force, Arc::new(|_| {}))
+        .await
+        .map_err(|e| e.message)
 }
 
 /// `ingest`, plus a callback for a caller that renders its own progress.
@@ -173,10 +266,10 @@ pub async fn ingest_reporting(
     pdf_path: String,
     force: bool,
     on_progress: ProgressSink,
-) -> Result<IngestSummary, String> {
+) -> Result<IngestSummary, IngestError> {
     let pdf = PathBuf::from(&pdf_path);
     if !pdf.is_file() {
-        return Err(format!("not on disk: {}", pdf.display()));
+        return Err(format!("not on disk: {}", pdf.display()).into());
     }
 
     // Markdown is optional here: a PDF can be embedded before the parse has
@@ -192,7 +285,7 @@ pub async fn ingest_reporting(
     let skipped = !force && embed::is_embedded(&pdf);
     let record = if skipped {
         embed::read_record(&pdf)
-            .ok_or_else(|| format!("{}: embedding record vanished", pdf.display()))?
+            .ok_or_else(|| IngestError::from(format!("{}: embedding record vanished", pdf.display())))?
     } else {
         let target = pdf.clone();
         tauri::async_runtime::spawn_blocking(move || {
@@ -209,16 +302,18 @@ pub async fn ingest_reporting(
             Ok::<_, embed::EmbedError>(output)
         })
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?
+        // The join itself failing is a panic in the blocking thread, which is
+        // ours and not the backend's — so it keeps no discriminants.
+        .map_err(|e| IngestError::from(e.to_string()))?
+        .map_err(IngestError::from)?
     };
 
-    let db = pool(db_file).await?;
-    let mut tx = db.begin().await.map_err(|e| e.to_string())?;
+    let db = pool(db_file).await.map_err(IngestError::from)?;
+    let mut tx = db.begin().await.map_err(|e| IngestError::from(e.to_string()))?;
     let mut with_md = 0usize;
 
     for page in &record.pages {
-        let vec_bytes = blob_from_wire(page.page_no, &page.vector)?;
+        let vec_bytes = blob_from_wire(page.page_no, &page.vector).map_err(IngestError::from)?;
         let page_no = page.page_no as i64;
         let md = markdown.get(&page_no).cloned().unwrap_or_default();
         if !md.is_empty() {
@@ -248,16 +343,16 @@ pub async fn ingest_reporting(
         .bind(record.dim as i64)
         .execute(&mut *tx)
         .await
-        .map_err(|e| format!("upsert page {}: {e}", page.page_no))?;
+        .map_err(|e| IngestError::from(format!("upsert page {}: {e}", page.page_no)))?;
     }
 
     sqlx::query("UPDATE files SET embed_status = 'done', embedded_at = datetime('now') WHERE id = ?1")
         .bind(file_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| IngestError::from(e.to_string()))?;
 
-    tx.commit().await.map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| IngestError::from(e.to_string()))?;
     db.close().await;
 
     Ok(IngestSummary {
@@ -463,19 +558,72 @@ pub async fn stats(db_file: &Path) -> Result<IndexStats, String> {
 
 /// `relative_path` is relative to the app data dir, matching `read_course_file`
 /// and `open_course_file` — the frontend never handles absolute paths.
+///
+/// **It narrates itself over `embed-status`**, which is the whole reason it
+/// takes a `subject_id` it never otherwise needs: the pipeline row is keyed on
+/// `(subject_id, relative_path)` exactly as the parse path's is, and a stage
+/// that could not say which file it was moving would be a spinner, not a
+/// progress story. The return value is unchanged — the caller still gets its
+/// summary or its error string — so the events are additive: a caller that
+/// listens to nothing behaves as before.
+///
+/// The events are emitted around the call rather than from inside `ingest`,
+/// because `ingest` is also the CLI's path and the CLI has no window to emit
+/// to. `embed::events` no-ops there anyway, but keeping the seam clean is
+/// cheaper than relying on that.
 #[tauri::command]
 pub async fn embed_file(
     app: AppHandle,
     file_id: i64,
+    subject_id: i64,
     relative_path: String,
     force: Option<bool>,
 ) -> Result<IngestSummary, String> {
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let pdf_rel = crate::paths::doc_pdf_rel(&relative_path)
-        .ok_or_else(|| format!("{relative_path}: no PDF representation to embed"))?;
+    let pdf_rel = match crate::paths::doc_pdf_rel(&relative_path) {
+        Some(rel) => rel,
+        None => {
+            let message = format!("{relative_path}: no PDF representation to embed");
+            embed::events::failed_with(&relative_path, subject_id, message.clone(), None, None, None);
+            return Err(message);
+        }
+    };
     let pdf = base.join(&pdf_rel);
     let db = db_path(&app)?;
-    ingest(&db, file_id, pdf.to_string_lossy().to_string(), force.unwrap_or(false)).await
+
+    embed::events::queued(&relative_path, subject_id);
+
+    let path = relative_path.clone();
+    let outcome = ingest_reporting(
+        &db,
+        file_id,
+        pdf.to_string_lossy().to_string(),
+        force.unwrap_or(false),
+        Arc::new(move |progress: embed::Progress| {
+            embed::events::running(&path, subject_id, progress);
+        }),
+    )
+    .await;
+
+    match outcome {
+        Ok(summary) => {
+            embed::events::embedded(&relative_path, subject_id, summary.pages_embedded as u32);
+            Ok(summary)
+        }
+        Err(error) => {
+            // The discriminants the row needs travel on the event; the caller
+            // still gets the sentence, which is all a `catch` can use.
+            embed::events::failed_with(
+                &relative_path,
+                subject_id,
+                error.message.clone(),
+                error.kind,
+                error.retryable,
+                error.latching,
+            );
+            Err(error.message)
+        }
+    }
 }
 
 #[tauri::command]
@@ -703,5 +851,119 @@ mod tests {
         assert_eq!(stats.pages_stale, 0);
         assert!(stats.stale_models.is_empty());
         assert_eq!(stats.model.as_deref(), Some(embed::EMBED_MODEL));
+    }
+}
+
+#[cfg(test)]
+mod fts_tests {
+    use sqlx::sqlite::SqlitePoolOptions;
+    use sqlx::SqlitePool;
+
+    use super::PAGES_FTS_SQL;
+
+    /// A `pages` table and the FTS index over it, built from the very SQL
+    /// migration 35 runs — so a change to that string is a change to what
+    /// this asserts.
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::query(
+            "CREATE TABLE pages (
+                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                 file_id   INTEGER NOT NULL,
+                 page_no   INTEGER NOT NULL,
+                 markdown  TEXT NOT NULL DEFAULT '',
+                 embedding BLOB,
+                 UNIQUE(file_id, page_no)
+             )",
+        )
+        .execute(&pool)
+        .await
+        .expect("pages");
+        // `raw_sql`, not `query`: this is several statements including
+        // triggers with semicolons of their own, and it is how the migration
+        // runner executes it too.
+        sqlx::raw_sql(PAGES_FTS_SQL)
+            .execute(&pool)
+            .await
+            .expect("pages_fts");
+        pool
+    }
+
+    async fn hits(pool: &SqlitePool, q: &str) -> Vec<i64> {
+        sqlx::query_scalar(
+            "SELECT p.page_no FROM pages_fts
+               JOIN pages p ON p.id = pages_fts.rowid
+              WHERE pages_fts MATCH ?1
+              ORDER BY bm25(pages_fts)",
+        )
+        .bind(q)
+        .fetch_all(pool)
+        .await
+        .expect("match")
+    }
+
+    /// The whole dependency in one line: without FTS5 compiled into the
+    /// SQLite this links, migration 35 cannot run and the app cannot open its
+    /// database at all. `libsqlite3-sys`' bundled build defines
+    /// `SQLITE_ENABLE_FTS5`; this is the assertion that it still does.
+    #[tokio::test]
+    async fn fts5_indexes_inserts_updates_and_deletes() {
+        let pool = pool().await;
+        sqlx::query("INSERT INTO pages (file_id, page_no, markdown) VALUES (1, 1, ?1)")
+            .bind("A Nash equilibrium is a profile of strategies")
+            .execute(&pool)
+            .await
+            .expect("insert");
+        assert_eq!(hits(&pool, "nash").await, vec![1], "insert trigger");
+
+        // An embed writes a blob to the same row. `UPDATE OF markdown` means
+        // that costs no re-indexing — and must not drop the row either.
+        sqlx::query("UPDATE pages SET embedding = ?1 WHERE page_no = 1")
+            .bind(vec![0u8; 8])
+            .execute(&pool)
+            .await
+            .expect("embed");
+        assert_eq!(hits(&pool, "nash").await, vec![1], "blob write left the index alone");
+
+        // A re-parse replaces the text: the old terms must stop matching.
+        sqlx::query("UPDATE pages SET markdown = ?1 WHERE page_no = 1")
+            .bind("A dominant strategy dominates every alternative")
+            .execute(&pool)
+            .await
+            .expect("reparse");
+        assert!(hits(&pool, "nash").await.is_empty(), "update trigger cleared the old terms");
+        assert_eq!(hits(&pool, "dominant").await, vec![1], "update trigger indexed the new ones");
+
+        sqlx::query("DELETE FROM pages WHERE page_no = 1")
+            .execute(&pool)
+            .await
+            .expect("delete");
+        assert!(hits(&pool, "dominant").await.is_empty(), "delete trigger");
+    }
+
+    /// `snippet()` is what puts the matched prose under a search row, and
+    /// prefix terms are what make it answer while the word is still being
+    /// typed.
+    #[tokio::test]
+    async fn snippet_marks_the_matched_words() {
+        let pool = pool().await;
+        sqlx::query("INSERT INTO pages (file_id, page_no, markdown) VALUES (1, 1, ?1)")
+            .bind("Shannon entropy measures the uncertainty of a source")
+            .execute(&pool)
+            .await
+            .expect("insert");
+        let snippet: String = sqlx::query_scalar(
+            "SELECT snippet(pages_fts, 0, '<', '>', '…', 8)
+               FROM pages_fts WHERE pages_fts MATCH ?1",
+        )
+        .bind("\"entrop\"*")
+        .fetch_one(&pool)
+        .await
+        .expect("snippet");
+        assert!(snippet.contains("<entropy>"), "got {snippet}");
     }
 }
