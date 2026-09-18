@@ -12,7 +12,10 @@ import {
   matchesFilter,
   type TaskFilter,
 } from "@/components/projects/TaskFilters";
-import { appendNeighbour } from "@/components/projects/universalTasks";
+import {
+  UNIVERSAL_COLUMNS,
+  appendNeighbour,
+} from "@/components/projects/universalTasks";
 import { useTaskList } from "@/hooks/useTaskList";
 import type { DbTaskWithProject } from "@/lib/projects";
 import { useProjectsStore } from "@/stores/projectsStore";
@@ -84,8 +87,12 @@ function storedStatus(): readonly string[] {
     // An empty set would be a board with no columns and no way back but the
     // toolbar, and a stored value is the one input nothing validated on the
     // way in.
-    if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_FILTER.status;
-    const ids = parsed.filter((v): v is string => typeof v === "string");
+    if (!Array.isArray(parsed)) return DEFAULT_FILTER.status;
+    // Kept to ids that still exist, in the board's own order: an id nothing
+    // draws would filter every row out with no column on screen to explain it,
+    // and an empty set would be a board with no columns and no way back but
+    // the toolbar.
+    const ids = UNIVERSAL_COLUMNS.filter((c) => parsed.includes(c.id)).map((c) => c.id);
     return ids.length > 0 ? ids : DEFAULT_FILTER.status;
   } catch {
     return DEFAULT_FILTER.status;
