@@ -79,26 +79,31 @@ export default function ProjectsIndexPage() {
       </SectionHeader>
 
       {/* The page's own body, under a full-width header: centred and capped,
-          which the Tasks tab's board must not be. */}
-      <div className="page-scroll min-h-0 flex-1">
-        <div className="mx-auto max-w-3xl px-6 py-6">
-          <ProjectGroups
-            projects={active}
-            counts={counts}
-            subjects={subjects}
-            onCreate={create}
-            actions={actions}
-          />
+          which the Tasks tab's board must not be. The scroller is a child of
+          the flex item rather than the flex item itself — `page-scroll` is
+          `height: 100%`, and `ProjectPage` wraps its tabs the same way. */}
+      <div className="min-h-0 flex-1">
+        <div className="page-scroll">
+          <div className="mx-auto max-w-3xl px-6 py-6">
+            <ProjectGroups
+              projects={active}
+              counts={counts}
+              subjects={subjects}
+              onCreate={create}
+              actions={actions}
+            />
 
-          {/* Only once there is something in it — the page's rule for every
-              group but Personal, and an empty "Archived" heading would be the
-              one thing on the page telling you about a state you are not in. */}
-          {archived.length > 0 && (
-            <>
-              <div className="my-6 border-t border-border" />
-              <ArchivedProjects projects={archived} counts={counts} actions={actions} />
-            </>
-          )}
+            {/* Only once there is something in it — the page's rule for every
+                group but Personal, and an empty "Archived" heading would be the
+                one thing on the page telling you about a state you are not
+                in. */}
+            {archived.length > 0 && (
+              <>
+                <div className="my-6 border-t border-border" />
+                <ArchivedProjects projects={archived} counts={counts} actions={actions} />
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
