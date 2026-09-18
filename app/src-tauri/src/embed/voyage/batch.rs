@@ -109,6 +109,14 @@ pub fn billed_pixels(page: &RenderedPage) -> u64 {
 /// A page that is too big is a **document** failure and not a run failure: the
 /// next file is very probably fine. It is also not something to skip — skipping
 /// would produce exactly the short record this module exists to prevent.
+///
+/// **Pixels rarely reach here any more, and that is the point.** `run_document`
+/// hands [`MAX_PIXELS_PER_IMAGE`] to the rasterizer, which renders a page over
+/// it at a lower DPI rather than at 200 — costing nothing, since Voyage
+/// downscales to [`BILLED_PIXEL_CAP`] before it encodes or bills. So this is
+/// the floor under that: a page the clamp could not save (one DPI wide is
+/// still too big), a PNG over the byte ceiling, a token cost the estimate did
+/// not predict.
 pub fn refuse_oversized(page: &RenderedPage) -> Result<u64, EmbedError> {
     let tokens = tokens_for(page.width, page.height);
     // Note the token check below is unreachable now that the estimate is
@@ -295,7 +303,12 @@ pub fn run_document(
     // sentinel is thrown away.
     let mut stop: Option<EmbedError> = None;
 
-    let rendered = raster::render_pages(pdf, |page| {
+    // The ceiling travels into the renderer rather than being checked after
+    // the fact: a page over it is rendered at a lower DPI instead of failing
+    // the document (`raster::dpi_for_page`). `refuse_oversized` below is still
+    // the guard — it is what catches a page the clamp could not save, and the
+    // byte and token ceilings it also checks are not things a DPI fixes.
+    let rendered = raster::render_pages(pdf, Some(MAX_PIXELS_PER_IMAGE), |page| {
         if let Some(error) = run.failure() {
             stop = Some(error);
             return Err(halt(page.page_no));

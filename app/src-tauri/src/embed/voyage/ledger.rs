@@ -59,9 +59,29 @@ pub const TIER1_RPM: f64 = 2_000.0;
 pub const TIER1_TPM: f64 = 2_000_000.0;
 
 /// The free pixel grant. Cumulative for the life of the account, and the
-/// library is ~11.5B pixels — 7.7% of it — so this is a backstop against a
-/// runaway loop, not a budget anyone is close to.
+/// library bills 5.18B pixels — 3.5% of it, measured 2026-09-17 over 166 files
+/// and 2,980 pages — so this is a backstop against a runaway loop, not a budget
+/// anyone is close to.
+///
+/// **It is granted to every account, not only to free ones.** Voyage's pricing
+/// page states the first 200M text tokens and 150B pixels are free "for every
+/// account", which is why adding a payment method does not change what this
+/// library costs — it changes the per-minute ceiling. The settings page says
+/// that out loud, and this constant is where the number comes from.
 pub const FREE_PIXELS: u64 = 150_000_000_000;
+
+/// What a pixel costs **past** [`FREE_PIXELS`]: $0.60 per billion, from
+/// Voyage's pricing page for `voyage-multimodal-3.5`. A 200-DPI page bills at
+/// the 2,000,000-pixel cap, so a page past the grant is $0.0012 — the same
+/// maximum the pricing page quotes per image, arrived at from the other end.
+pub const USD_PER_BILLION_PIXELS: f64 = 0.60;
+
+/// The default spend guard: stop once the free grant is spent.
+///
+/// It is 100 rather than "off" because the only thing on the other side of the
+/// grant is a bill, and a run that can last most of a day is not something
+/// anybody watches to the end. 0 means no guard at all.
+pub const DEFAULT_STOP_AT_PERCENT: u8 = 100;
 
 /// How long the server's "out of credit" keeps us off the network.
 ///
@@ -282,6 +302,13 @@ pub struct Usage {
     /// Unix seconds the latch was set, so it can expire. See `QUOTA_LATCH`.
     pub quota_latched_at: u64,
     pub tier: Tier,
+    /// Stop sending once `pixels` reaches this percentage of [`FREE_PIXELS`].
+    /// 0 is no guard. Set from Settings → Library and kept **here**, in the
+    /// ledger, rather than in the `settings` row: the check that enforces it
+    /// already reads this file on every reservation, the two are then one
+    /// atomic read, and a process-wide singleton ledger picks a change up
+    /// without being rebuilt. See [`UsageLedger::budget`].
+    pub stop_at_percent: u8,
 }
 
 impl Default for Usage {
@@ -294,6 +321,11 @@ impl Default for Usage {
             quota_exhausted: false,
             quota_latched_at: 0,
             tier: Tier::default(),
+            // Container-level `#[serde(default)]` fills a missing field from
+            // *this* value, so a `voyage-usage.json` written before the guard
+            // existed reads back as 100 rather than as "off" — the guard
+            // arrives switched on, which is the safe direction.
+            stop_at_percent: DEFAULT_STOP_AT_PERCENT,
         }
     }
 }
@@ -304,6 +336,19 @@ impl Usage {
     pub fn latched(&self) -> bool {
         self.quota_exhausted
             && now_secs().saturating_sub(self.quota_latched_at) < QUOTA_LATCH.as_secs()
+    }
+
+    /// The pixel ceiling the guard imposes, or `None` when it is off.
+    ///
+    /// **This applies on a paid account too, and that is the point.** The old
+    /// check only consulted the grant when the tier read as free, on the
+    /// grounds that refusing a paid account's work against a free pool would
+    /// be a limit the app invented. A percentage the user set is not invented:
+    /// past 150B pixels a paid account is being billed, and the default of 100
+    /// is "stop before this starts costing money".
+    pub fn budget(&self) -> Option<u64> {
+        let percent = self.stop_at_percent.min(100);
+        (percent > 0).then(|| (FREE_PIXELS / 100).saturating_mul(percent as u64))
     }
 }
 
@@ -344,16 +389,23 @@ impl UsageLedger {
     /// Would `pixels` more fit? Checks the server's latch first: once Voyage
     /// has said the allowance is gone, nothing else is worth sending.
     ///
-    /// The pixel grant is only consulted on the **free** programme. A paid
-    /// account is not drawing on it, and refusing its work against a free
-    /// account's pool would be a limit this app invented.
+    /// The pixel ceiling is [`Usage::budget`] — the user's percentage of the
+    /// free grant, on **either** programme. It used to be the whole grant and
+    /// only on the free one; see `budget` for why that moved.
     pub fn ensure_available(&self, pixels: u64) -> Result<(), EmbedError> {
-        let usage = self.snapshot();
+        Self::affordable(&self.snapshot(), pixels)
+    }
+
+    /// The two refusals, in one place so the check before a run and the check
+    /// inside a reservation cannot drift apart.
+    fn affordable(usage: &Usage, pixels: u64) -> Result<(), EmbedError> {
         if usage.latched() {
             return Err(EmbedError::QuotaExhausted);
         }
-        if usage.tier.is_free() && usage.pixels.saturating_add(pixels) > FREE_PIXELS {
-            return Err(EmbedError::QuotaExhausted);
+        if let Some(ceiling) = usage.budget() {
+            if usage.pixels.saturating_add(pixels) > ceiling {
+                return Err(EmbedError::BudgetReached { percent: usage.stop_at_percent.min(100) });
+            }
         }
         Ok(())
     }
@@ -365,12 +417,7 @@ impl UsageLedger {
     pub fn record(&self, requests: u64, tokens: u64, pixels: u64) -> Result<(), EmbedError> {
         let _guard = hold(&self.guard);
         let mut usage = self.read();
-        if usage.latched() {
-            return Err(EmbedError::QuotaExhausted);
-        }
-        if usage.tier.is_free() && usage.pixels.saturating_add(pixels) > FREE_PIXELS {
-            return Err(EmbedError::QuotaExhausted);
-        }
+        Self::affordable(&usage, pixels)?;
         usage.requests += requests;
         usage.tokens += tokens;
         usage.pixels += pixels;
@@ -405,6 +452,16 @@ impl UsageLedger {
 
     pub fn tier(&self) -> Tier {
         self.snapshot().tier.sane()
+    }
+
+    /// Move the spend guard. Clamped to 0..=100 here rather than trusted from
+    /// the caller, because this number is the only thing between a long
+    /// unattended run and a bill.
+    pub fn store_stop_at(&self, percent: u8) {
+        let _guard = hold(&self.guard);
+        let mut usage = self.read();
+        usage.stop_at_percent = percent.min(100);
+        self.write(&usage);
     }
 
     /// Write down what was learned, so a restart does not rediscover it. Only
@@ -811,7 +868,7 @@ mod tests {
         ledger.store_tier(Tier::free());
         ledger.record(1, 3_572, FREE_PIXELS).unwrap();
 
-        assert!(matches!(ledger.record(1, 3_572, 1), Err(EmbedError::QuotaExhausted)));
+        assert!(matches!(ledger.record(1, 3_572, 1), Err(EmbedError::BudgetReached { .. })));
         let usage = ledger.snapshot();
         assert_eq!(usage.pixels, FREE_PIXELS);
         assert_eq!(usage.tokens, 3_572);
@@ -820,8 +877,14 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
+    /// **This reverses an earlier rule, deliberately.** The grant check used to
+    /// be skipped on a paid account, on the grounds that refusing its work
+    /// against a free pool would be a limit the app invented. The guard is not
+    /// invented — it is a percentage the user set — and past the grant a paid
+    /// account is being *billed*, which is the one moment a long unattended run
+    /// most needs a brake.
     #[test]
-    fn the_free_pixel_grant_does_not_bind_a_paid_account() {
+    fn the_spend_guard_binds_a_paid_account_too() {
         let dir = scratch("paid");
         let ledger = ledger_at(&dir);
         ledger.store_tier(Tier {
@@ -830,10 +893,64 @@ mod tests {
             source: TierSource::Stated,
             learned_at: now_secs(),
         });
-        // Well past the free grant, and correctly not refused: a card-holding
-        // account is not drawing on it.
+        ledger.record(1, 1, FREE_PIXELS - 1).unwrap();
+        assert!(matches!(
+            ledger.ensure_available(2),
+            Err(EmbedError::BudgetReached { percent: 100 })
+        ));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// And the escape hatch, because past the grant is a *price*, not a wall:
+    /// somebody who means to pay for it turns the guard off and the app stops
+    /// having an opinion.
+    #[test]
+    fn turning_the_guard_off_lets_a_paid_account_past_the_grant() {
+        let dir = scratch("guard-off");
+        let ledger = ledger_at(&dir);
+        ledger.store_stop_at(0);
         ledger.record(1, 1, FREE_PIXELS * 3).unwrap();
         assert!(ledger.ensure_available(FREE_PIXELS).is_ok());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A partial guard stops where it says it will, not at the grant.
+    #[test]
+    fn a_partial_guard_stops_at_its_own_percentage() {
+        let dir = scratch("guard-half");
+        let ledger = ledger_at(&dir);
+        ledger.store_stop_at(50);
+        ledger.record(1, 1, FREE_PIXELS / 2).unwrap();
+        assert!(matches!(
+            ledger.ensure_available(1),
+            Err(EmbedError::BudgetReached { percent: 50 })
+        ));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The guard must arrive switched on over a ledger written before it
+    /// existed. Container-level `#[serde(default)]` fills a missing field from
+    /// `Usage::default()`, so this pins that and not serde's own `u8::default`,
+    /// which would be 0 — "off", silently, on every install that had already
+    /// indexed anything.
+    #[test]
+    fn an_older_ledger_reads_back_with_the_guard_on() {
+        let dir = scratch("legacy");
+        let path = dir.join("voyage-usage.json");
+        fs::write(
+            &path,
+            r#"{"opened":"2026-09-01","requests":4,"tokens":10,"pixels":20,
+                "quota_exhausted":false,"quota_latched_at":0}"#,
+        )
+        .unwrap();
+
+        let usage = UsageLedger::at(&path).snapshot();
+        assert_eq!(usage.stop_at_percent, DEFAULT_STOP_AT_PERCENT);
+        assert_eq!(usage.budget(), Some(FREE_PIXELS));
+        assert_eq!(usage.pixels, 20);
 
         fs::remove_dir_all(&dir).ok();
     }

@@ -18,7 +18,7 @@
 use std::ffi::OsString;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{ExtendedColorType, ImageEncoder};
@@ -43,6 +43,40 @@ use pdfium_render::prelude::{
 /// and the symptom shows up as worse recall on exactly the formula and diagram
 /// pages this whole approach exists to serve.
 pub const RENDER_DPI: u32 = 200;
+
+/// **One pdfium session at a time, process-wide.**
+///
+/// pdfium is not safe to use from two threads, and `pdfium-render`'s
+/// `thread_safe` feature — which *is* enabled here — is not enough on its own:
+/// it serialises individual FFI calls, where the unit that has to be atomic is
+/// the whole session, from `load_pdf_from_file` through the last page render.
+///
+/// This was measured, not assumed. Two threads sweeping the same 166-file
+/// library: **0 failures serially, 18 per thread concurrently**. The errors are
+/// worth knowing because neither looks like a race:
+///
+/// * `PdfiumLibraryInternalError(Unknown)` loading a page — pdfium's own
+///   document state, torn.
+/// * **`Encrypted`, on files that are not encrypted.** `FPDF_GetLastError()` is
+///   process-global and is a *separate* call from the one that failed, so a
+///   thread reads whichever error another thread left behind. That is the
+///   dangerous one: it is a confident, specific, wrong diagnosis, and it was
+///   reaching the settings page as "47 files could not be measured".
+///
+/// Every entry point below that opens a document takes this first. The hold can
+/// be long — an embed's render pass is a whole document — so the trade is
+/// explicit: a caller may wait, and no caller gets a torn answer. `render_page`
+/// renders one page rather than sweeping the document for it, which is both
+/// cheaper and a shorter hold on the interactive path.
+static SESSION: Mutex<()> = Mutex::new(());
+
+/// A poisoned lock means another thread panicked inside pdfium; the library is
+/// still there and refusing every render afterwards would be worse than
+/// carrying on. Same call as the two usage ledgers', kept local so the modules
+/// do not reach into each other.
+fn session() -> MutexGuard<'static, ()> {
+    SESSION.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// One rendered page, 1-based to match `page_no` everywhere else in the app —
 /// the `pages` table, `<stem>.pages.json`, and the citation deep links all
@@ -141,28 +175,77 @@ fn pixels_for(points: f32, dpi: u32) -> u32 {
     ((scaled - 0.001).ceil() as i64).max(1) as u32
 }
 
+/// The DPI one page is actually rendered at: [`RENDER_DPI`], or less when that
+/// page is so large that the pixels would be refused.
+///
+/// **A poster page in an ordinary deck is why this exists.** Every backend has
+/// a hard ceiling on the pixels in one image — Voyage's is 16M — and a page
+/// past it is not a page that can be split, so without this the whole document
+/// fails on it and nothing about a retry can change that. Three real files in
+/// the library were stuck exactly there (`page-too-many-pixels-p23` and two
+/// p1s): one A0-sized page each, in decks whose other 364 pages were fine.
+///
+/// **Nothing about it costs quality or money, and that is the argument for
+/// clamping rather than skipping.** The backend downscales to its own billing
+/// cap (2,000,000 px for Voyage) before it encodes or charges, so every pixel
+/// between that cap and the hard ceiling is already thrown away; a page brought
+/// down to 16M px is still ~8x past the point where more pixels are looked at,
+/// bills the identical 2M, and yields a vector from the same image at the same
+/// scale the model would have downscaled it to anyway. Only pages that would
+/// otherwise be **refused outright** are touched — every page in the library
+/// that embeds today still renders byte-identically at 200 DPI.
+///
+/// Rounded *down* and then verified, because [`pixels_for`] rounds up: a scale
+/// factor that lands a hair over the ceiling would trade a document error for a
+/// document error.
+fn dpi_for_page(width_pt: f32, height_pt: f32, dpi: u32, max_pixels: Option<u64>) -> u32 {
+    let Some(max_pixels) = max_pixels.filter(|max| *max > 0) else { return dpi };
+    let pixels = |at: u32| u64::from(pixels_for(width_pt, at)) * u64::from(pixels_for(height_pt, at));
+    if pixels(dpi) <= max_pixels {
+        return dpi;
+    }
+    let scale = (max_pixels as f64 / pixels(dpi) as f64).sqrt();
+    let mut at = ((dpi as f64 * scale).floor() as u32).max(1);
+    // At most a couple of turns in practice — `pixels_for`'s ceil can only
+    // overshoot by a pixel on each edge.
+    while at > 1 && pixels(at) > max_pixels {
+        at -= 1;
+    }
+    at
+}
+
 /// Renders every page of `pdf` at [`RENDER_DPI`], handing each to `on_page` as
 /// it is produced. Returns the number of pages rendered.
+///
+/// `max_pixels` is the caller's backend ceiling for one image, or `None` for a
+/// caller that has none. A page over it is rendered smaller rather than
+/// refused — see [`dpi_for_page`], which is the whole of that story.
 ///
 /// Streaming rather than returning a `Vec` is the point: a 191-page deck at
 /// 200 DPI is ~2 GB of decoded RGB if held at once, and Python's `render_pages`
 /// was a generator for the same reason. `on_page` may return an error to stop
 /// early — a full-document embed that runs out of quota on page 40 should not
 /// render the other 150.
-pub fn render_pages<F>(pdf: &Path, on_page: F) -> Result<u32, RasterError>
+pub fn render_pages<F>(pdf: &Path, max_pixels: Option<u64>, on_page: F) -> Result<u32, RasterError>
 where
     F: FnMut(RenderedPage) -> Result<(), RasterError>,
 {
-    render_pages_at_dpi(pdf, RENDER_DPI, on_page)
+    render_pages_at_dpi(pdf, RENDER_DPI, max_pixels, on_page)
 }
 
 /// [`render_pages`] with an explicit DPI. Exists for tests and for the odd
 /// caller that wants a thumbnail; production embedding always takes the
 /// constant, for the reasons on [`RENDER_DPI`].
-pub fn render_pages_at_dpi<F>(pdf: &Path, dpi: u32, mut on_page: F) -> Result<u32, RasterError>
+pub fn render_pages_at_dpi<F>(
+    pdf: &Path,
+    dpi: u32,
+    max_pixels: Option<u64>,
+    mut on_page: F,
+) -> Result<u32, RasterError>
 where
     F: FnMut(RenderedPage) -> Result<(), RasterError>,
 {
+    let _session = session();
     let pdfium = pdfium()?;
     let document = pdfium.load_pdf_from_file(pdf, None).map_err(load_error)?;
     let pages = document.pages();
@@ -173,65 +256,135 @@ where
     }
 
     for index in 0..count {
-        let page_no = index as u32 + 1;
-        let page = pages
-            .get(index)
-            .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?;
-
-        let width = pixels_for(page.width().value, dpi);
-        let height = pixels_for(page.height().value, dpi);
-
-        // `set_fixed_size` rather than `set_target_size`: the dimensions are
-        // already computed from this page's own box, and letting pdfium
-        // re-derive them from an aspect ratio reintroduces the rounding
-        // disagreement with MuPDF that `pixels_for` exists to remove.
-        let config = PdfRenderConfig::new().set_fixed_size(width as Pixels, height as Pixels);
-
-        let bitmap = page
-            .render_with_config(&config)
-            .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?;
-
-        // `as_image` is what normalises pdfium's channel order (it renders
-        // reversed-byte-order by default); dropping to RGB8 matches what
-        // Python handed the embedder, which was PIL "RGB".
-        let rgb = bitmap
-            .as_image()
-            .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?
-            .into_rgb8();
-
-        let mut png = Vec::new();
-        // Fast compression, not best: these bytes live long enough to be
-        // base64'd into one HTTP request and are then dropped. Trading ~10%
-        // of body size for several times the encode speed is the right way
-        // round for a 166-file re-index.
-        PngEncoder::new_with_quality(
-            Cursor::new(&mut png),
-            CompressionType::Fast,
-            FilterType::Adaptive,
-        )
-        .write_image(rgb.as_raw(), rgb.width(), rgb.height(), ExtendedColorType::Rgb8)
-        .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?;
-
-        on_page(RenderedPage { page_no, width: rgb.width(), height: rgb.height(), png })?;
+        on_page(render_one(&pages, index as u32 + 1, dpi, max_pixels)?)?;
     }
 
     Ok(count as u32)
 }
 
-/// Renders a single 1-based page. Convenience over [`render_pages`] for the
-/// file viewer and for re-embedding one page.
+/// Rasterise one 1-based page of an already-open document.
+///
+/// Shared by the sweep and by [`render_page`] so the two cannot drift: the
+/// pixel arithmetic, the `set_fixed_size` choice and the PNG settings below are
+/// each load-bearing, and a second copy of them is a second chance to get the
+/// page geometry subtly wrong — which retrieval would only show as hits on the
+/// wrong slide. The caller holds [`SESSION`].
+fn render_one(
+    pages: &pdfium_render::prelude::PdfPages<'_>,
+    page_no: u32,
+    dpi: u32,
+    max_pixels: Option<u64>,
+) -> Result<RenderedPage, RasterError> {
+    let page = pages
+        .get(page_no as i32 - 1)
+        .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?;
+
+    // Ordinarily `dpi`. Lower only for a page whose pixels would be refused —
+    // see `dpi_for_page`.
+    let dpi = dpi_for_page(page.width().value, page.height().value, dpi, max_pixels);
+    let width = pixels_for(page.width().value, dpi);
+    let height = pixels_for(page.height().value, dpi);
+
+    // `set_fixed_size` rather than `set_target_size`: the dimensions are
+    // already computed from this page's own box, and letting pdfium
+    // re-derive them from an aspect ratio reintroduces the rounding
+    // disagreement with MuPDF that `pixels_for` exists to remove.
+    let config = PdfRenderConfig::new().set_fixed_size(width as Pixels, height as Pixels);
+
+    let bitmap = page
+        .render_with_config(&config)
+        .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?;
+
+    // `as_image` is what normalises pdfium's channel order (it renders
+    // reversed-byte-order by default); dropping to RGB8 matches what
+    // Python handed the embedder, which was PIL "RGB".
+    let rgb = bitmap
+        .as_image()
+        .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?
+        .into_rgb8();
+
+    let mut png = Vec::new();
+    // Fast compression, not best: these bytes live long enough to be
+    // base64'd into one HTTP request and are then dropped. Trading ~10%
+    // of body size for several times the encode speed is the right way
+    // round for a 166-file re-index.
+    PngEncoder::new_with_quality(
+        Cursor::new(&mut png),
+        CompressionType::Fast,
+        FilterType::Adaptive,
+    )
+    .write_image(rgb.as_raw(), rgb.width(), rgb.height(), ExtendedColorType::Rgb8)
+    .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?;
+
+    Ok(RenderedPage { page_no, width: rgb.width(), height: rgb.height(), png })
+}
+
+/// Renders a single 1-based page, and **only** that page.
+///
+/// It used to run [`render_pages`] over the whole document and keep the one it
+/// wanted, which rasterised a 191-page deck to answer a question about page 3.
+/// That was merely wasteful until [`SESSION`] arrived; now it would also hold
+/// the process's one pdfium session for the length of the sweep — and, since
+/// `render_pages` takes the same lock, deadlock on the way in.
 pub fn render_page(pdf: &Path, page_no: u32) -> Result<RenderedPage, RasterError> {
-    let mut found = None;
-    render_pages(pdf, |page| {
-        if page.page_no == page_no {
-            found = Some(page);
-        }
-        Ok(())
-    })?;
-    found.ok_or(RasterError::Page {
-        page_no,
-        message: "page number out of range".into(),
-    })
+    if page_no == 0 {
+        return Err(RasterError::Page { page_no, message: "pages are numbered from 1".into() });
+    }
+    let _session = session();
+    let pdfium = pdfium()?;
+    let document = pdfium.load_pdf_from_file(pdf, None).map_err(load_error)?;
+    let pages = document.pages();
+    let count = pages.len();
+    if count <= 0 {
+        return Err(RasterError::Empty);
+    }
+    if page_no > count as u32 {
+        return Err(RasterError::Page { page_no, message: "page number out of range".into() });
+    }
+    render_one(&pages, page_no, RENDER_DPI, None)
+}
+
+/// Every page's size in pixels at [`RENDER_DPI`], **without rendering any of
+/// them**.
+///
+/// This is the estimator's input, and it is a different call from
+/// [`render_pages`] on purpose. Voyage bills a page image by its pixels
+/// (capped at 2,000,000), so "what will this run cost and how long will it
+/// take" is answerable exactly from the page boxes — pdfium parses those out
+/// of the document structure, where rasterising 2,980 pages to find out would
+/// cost more than the embedding it is trying to predict.
+///
+/// The arithmetic is [`pixels_for`], the same function `render_pages_at_dpi`
+/// uses, so an estimate and the run it predicts cannot disagree about a page's
+/// size.
+///
+/// The one page they *can* disagree about costs nothing: a page over the
+/// backend's per-image ceiling is rendered at a lower DPI (see
+/// [`dpi_for_page`]) while this reports its full size. Both are past the
+/// 2,000,000-pixel cap the backend bills at, so the estimate is unchanged
+/// either way — and a `page_sizes` that guessed at a caller's ceiling would be
+/// a second place for that number to live.
+pub fn page_sizes(pdf: &Path) -> Result<Vec<(u32, u32)>, RasterError> {
+    let _session = session();
+    let pdfium = pdfium()?;
+    let document = pdfium.load_pdf_from_file(pdf, None).map_err(load_error)?;
+    let pages = document.pages();
+    let count = pages.len();
+    if count <= 0 {
+        return Err(RasterError::Empty);
+    }
+    let mut sizes = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        let page = pages.get(index).map_err(|error| RasterError::Page {
+            page_no: index as u32 + 1,
+            message: error.to_string(),
+        })?;
+        sizes.push((
+            pixels_for(page.width().value, RENDER_DPI),
+            pixels_for(page.height().value, RENDER_DPI),
+        ));
+    }
+    Ok(sizes)
 }
 
 /// pdfium's page count.
@@ -250,6 +403,7 @@ pub fn render_page(pdf: &Path, page_no: u32) -> Result<RenderedPage, RasterError
 /// to agree should compare them and treat a mismatch as a document error
 /// rather than embedding pages against the wrong numbers.
 pub fn page_count(pdf: &Path) -> Result<u32, RasterError> {
+    let _session = session();
     let pdfium = pdfium()?;
     let document = pdfium.load_pdf_from_file(pdf, None).map_err(load_error)?;
     let count = document.pages().len();
@@ -268,6 +422,7 @@ pub fn page_count(pdf: &Path) -> Result<u32, RasterError> {
 /// instead, and `embed::preflight` refuses the run **once**, before a single
 /// file, rather than failing two hundred of them with the same message.
 pub fn available() -> Result<(), RasterError> {
+    let _session = session();
     pdfium().map(|_| ())
 }
 
@@ -480,6 +635,41 @@ mod tests {
     }
 
     #[test]
+    fn an_oversized_page_is_rendered_smaller_rather_than_refused() {
+        // Voyage's ceiling, quoted rather than imported: raster does not know
+        // which backend is asking, and a test that read the constant from
+        // `batch.rs` would pass even if the two stopped meaning the same thing.
+        const MAX: u64 = 16_000_000;
+
+        // A0 landscape, 3370 x 2384 pt — the shape that stranded three real
+        // files. 200 DPI puts it at ~62M px, four times the ceiling.
+        let raw = u64::from(pixels_for(3370.0, RENDER_DPI)) * u64::from(pixels_for(2384.0, RENDER_DPI));
+        assert!(raw > MAX, "fixture is not actually oversized: {raw}");
+
+        let dpi = dpi_for_page(3370.0, 2384.0, RENDER_DPI, Some(MAX));
+        assert!(dpi < RENDER_DPI);
+        let clamped =
+            u64::from(pixels_for(3370.0, dpi)) * u64::from(pixels_for(2384.0, dpi));
+        assert!(clamped <= MAX, "still over the ceiling: {clamped} at {dpi} DPI");
+        // Only just under it: a clamp that overshot would cost detail for
+        // nothing. One DPI more must not fit.
+        let over = u64::from(pixels_for(3370.0, dpi + 1)) * u64::from(pixels_for(2384.0, dpi + 1));
+        assert!(over > MAX, "clamped further than it had to: {dpi} DPI");
+        // And it is still far past the 2M the backend bills and looks at.
+        assert!(clamped > 2_000_000 * 4);
+    }
+
+    #[test]
+    fn an_ordinary_page_is_untouched_by_the_clamp() {
+        // Every page in the library that embeds today must keep rendering at
+        // exactly 200 DPI — the stored vectors were made from those pixels.
+        assert_eq!(dpi_for_page(842.0, 595.0, RENDER_DPI, Some(16_000_000)), RENDER_DPI);
+        assert_eq!(dpi_for_page(612.0, 792.0, RENDER_DPI, Some(16_000_000)), RENDER_DPI);
+        // No ceiling means no clamp, whatever the size.
+        assert_eq!(dpi_for_page(3370.0, 2384.0, RENDER_DPI, None), RENDER_DPI);
+    }
+
+    #[test]
     fn renders_every_page_once_in_order() {
         if !library_present() {
             return;
@@ -487,7 +677,7 @@ mod tests {
         let pdf = synthetic_pdf(3);
 
         let mut seen = Vec::new();
-        let count = render_pages(&pdf.path, |page| {
+        let count = render_pages(&pdf.path, None, |page| {
             assert!(page.png.starts_with(b"\x89PNG\r\n\x1a\n"), "not a PNG");
             seen.push((page.page_no, page.width, page.height));
             Ok(())
@@ -496,6 +686,66 @@ mod tests {
 
         assert_eq!(count, 3);
         assert_eq!(seen, vec![(1, 1700, 2200), (2, 1700, 2200), (3, 1700, 2200)]);
+    }
+
+    /// The estimator's whole claim to be exact: the sizes it predicts from the
+    /// page boxes are the sizes the renderer produces. If these ever part
+    /// company the settings page quotes a cost for a run that bills something
+    /// else.
+    #[test]
+    fn measured_sizes_are_the_sizes_that_get_rendered() {
+        if !library_present() {
+            return;
+        }
+        let pdf = synthetic_pdf(3);
+
+        let measured = page_sizes(&pdf.path).unwrap();
+        let mut rendered = Vec::new();
+        render_pages(&pdf.path, None, |page| {
+            rendered.push((page.width, page.height));
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(measured, rendered);
+    }
+
+    /// The invariant [`SESSION`] exists for, pinned against the measurement
+    /// that found it: two threads over the same file used to produce
+    /// `PdfiumLibraryInternalError` and — worse — a confident `Encrypted`
+    /// verdict on documents that are not encrypted, because
+    /// `FPDF_GetLastError()` is process-global. Anything that removes the lock
+    /// brings both back, and the second one is a lie rather than a failure.
+    #[test]
+    fn two_threads_reading_the_same_document_both_get_the_truth() {
+        if !library_present() {
+            return;
+        }
+        let pdf = synthetic_pdf(6);
+        let expected = page_sizes(&pdf.path).unwrap();
+
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                let path = pdf.path.clone();
+                std::thread::spawn(move || {
+                    (0..12).map(|_| page_sizes(&path)).collect::<Vec<_>>()
+                })
+            })
+            .collect();
+
+        for worker in workers {
+            for attempt in worker.join().unwrap() {
+                assert_eq!(attempt.as_ref().map_err(|e| e.to_string()), Ok(&expected));
+            }
+        }
+    }
+
+    #[test]
+    fn a_missing_file_is_measurable_as_an_error_not_a_panic() {
+        if !library_present() {
+            return;
+        }
+        assert!(page_sizes(Path::new("/nope/does-not-exist.pdf")).is_err());
     }
 
     #[test]
@@ -515,7 +765,7 @@ mod tests {
         }
         let pdf = synthetic_pdf(5);
         let mut rendered = 0;
-        let result = render_pages(&pdf.path, |_| {
+        let result = render_pages(&pdf.path, None, |_| {
             rendered += 1;
             if rendered == 2 {
                 return Err(RasterError::Empty);
@@ -544,7 +794,7 @@ mod tests {
         let guard = tempdir::Guard::new("raster-not-a.pdf");
         std::fs::write(&guard.path, b"%PDF-1.7\nthis is not a pdf at all\n").unwrap();
         assert!(matches!(
-            render_pages(&guard.path, |_| Ok(())),
+            render_pages(&guard.path, None, |_| Ok(())),
             Err(RasterError::Unreadable(_) | RasterError::Empty)
         ));
     }
@@ -555,7 +805,7 @@ mod tests {
             return;
         }
         let missing = Path::new("/nonexistent/oculus/raster/missing.pdf");
-        assert!(render_pages(missing, |_| Ok(())).is_err());
+        assert!(render_pages(missing, None, |_| Ok(())).is_err());
         assert!(page_count(missing).is_err());
     }
 
@@ -566,7 +816,7 @@ mod tests {
         }
         let guard = tempdir::Guard::new("raster-empty.pdf");
         std::fs::write(&guard.path, b"").unwrap();
-        assert!(render_pages(&guard.path, |_| Ok(())).is_err());
+        assert!(render_pages(&guard.path, None, |_| Ok(())).is_err());
     }
 
     /// The real-library check, against a PDF that only exists on a machine
@@ -584,7 +834,7 @@ mod tests {
         }
         let path = PathBuf::from(path);
         let mut first = None;
-        let count = render_pages(&path, |page| {
+        let count = render_pages(&path, None, |page| {
             if page.page_no == 1 {
                 first = Some(page);
             }
@@ -611,6 +861,7 @@ mod tests {
             eprintln!("wrote {}", PathBuf::from(out).display());
         }
     }
+
 
     /// A self-deleting temp path. The repo has no dev-dependency for this and
     /// the tests need three lines of it, not a crate.

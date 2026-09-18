@@ -24,6 +24,8 @@ use serde::Serialize;
 use sqlx::Row;
 use tauri::{AppHandle, Manager};
 
+use super::estimate::EmbedEstimate;
+use super::voyage::ledger::{self, UsageLedger};
 use super::{Engine, EMBED_DIM, EMBED_MODEL};
 use crate::retrieval::IndexStats;
 use crate::store::{db_path, pool};
@@ -72,6 +74,73 @@ pub struct EngineOption {
     pub unavailable_reason: Option<&'static str>,
 }
 
+/// What the account has spent, what programme it turned out to be on, and
+/// where the spend guard sits.
+///
+/// **Every number here is Oculus's own count, not Voyage's books.** Voyage
+/// publishes no usage endpoint — the dashboard is the only place the real
+/// figure lives — so this is `voyage-usage.json`: what this app reserved before
+/// each request, settled upwards against the `usage.total_tokens` every
+/// response carries. It is deliberately pessimistic (a request that failed
+/// uncertainly still counts), so it drifts high rather than low, and the page
+/// that shows it says whose count it is.
+#[derive(Serialize)]
+pub struct VoyageUsage {
+    /// `"free"`, `"paid"` or `"unknown"` — the account's programme as far as
+    /// the rate-limit detector has got. `"unknown"` is an honest state and not
+    /// a failure: the tier opens at an optimistic guess and is corrected by the
+    /// first request or two, so a library that has never been indexed has never
+    /// had the chance to find out.
+    pub plan: &'static str,
+    /// How much `plan` is worth: `stated` is Voyage's own words in a 429 body,
+    /// `observed` is inferred from behaviour, `assumed` is the opening guess.
+    pub plan_source: &'static str,
+    pub rpm: f64,
+    pub tpm: f64,
+    /// Unix seconds the limits above were last learned.
+    pub learned_at: u64,
+
+    /// Cumulative, for the life of the account as this app has seen it.
+    pub requests: u64,
+    pub tokens: u64,
+    pub pixels: u64,
+    /// The grant every account gets, and what is left of it.
+    pub free_pixels: u64,
+    pub free_pixels_left: u64,
+    pub usd_per_billion_pixels: f64,
+
+    /// The spend guard: stop at this percentage of the grant. 0 is off.
+    pub stop_at_percent: u8,
+    /// Voyage itself said the allowance is gone, and the latch has not expired.
+    pub quota_latched: bool,
+}
+
+fn usage_view() -> VoyageUsage {
+    let usage = UsageLedger::shared().snapshot();
+    VoyageUsage {
+        // A free programme is a *fact about the account* when Voyage stated it
+        // and a guess otherwise, so the two travel together and the page is
+        // never allowed to print "Free" over an opening assumption.
+        plan: match (usage.tier.source, usage.tier.is_free()) {
+            (ledger::TierSource::Assumed, _) => "unknown",
+            (_, true) => "free",
+            (_, false) => "paid",
+        },
+        plan_source: usage.tier.source.as_str(),
+        rpm: usage.tier.rpm,
+        tpm: usage.tier.tpm,
+        learned_at: usage.tier.learned_at,
+        requests: usage.requests,
+        tokens: usage.tokens,
+        pixels: usage.pixels,
+        free_pixels: ledger::FREE_PIXELS,
+        free_pixels_left: ledger::FREE_PIXELS.saturating_sub(usage.pixels),
+        usd_per_billion_pixels: ledger::USD_PER_BILLION_PIXELS,
+        stop_at_percent: usage.stop_at_percent.min(100),
+        quota_latched: usage.latched(),
+    }
+}
+
 /// Everything Settings → Library needs to draw the embedding control and the
 /// consequence of changing it.
 #[derive(Serialize)]
@@ -90,6 +159,9 @@ pub struct EmbedSettings {
     pub engines: Vec<EngineOption>,
     /// What is in the index *now* — the number the confirmation quotes.
     pub index: IndexStats,
+    /// The account behind the selected engine. `None` for a local engine:
+    /// there is no allowance, no tier and nothing to guard against.
+    pub usage: Option<VoyageUsage>,
 }
 
 fn engines() -> Vec<EngineOption> {
@@ -131,6 +203,10 @@ async fn view(db: &Path) -> Result<EmbedSettings, String> {
         },
         engines: engines(),
         index: crate::retrieval::stats(db).await?,
+        usage: match config.engine {
+            Engine::Cloud => Some(usage_view()),
+            Engine::Local => None,
+        },
     })
 }
 
@@ -139,6 +215,59 @@ async fn view(db: &Path) -> Result<EmbedSettings, String> {
 #[tauri::command]
 pub async fn embed_settings(app: AppHandle) -> Result<EmbedSettings, String> {
     view(&db_path(&app)?).await
+}
+
+/// Move the spend guard, and hand back the settings so the page redraws from
+/// one answer rather than from its own optimistic copy.
+///
+/// The percentage is of Voyage's free pixel grant, and 0 turns the guard off.
+/// It lives in `voyage-usage.json` rather than in the `settings` row because
+/// the reservation that enforces it already reads that file on every request:
+/// one atomic read, and a process-wide singleton ledger that picks the change
+/// up without being rebuilt. See `UsageLedger::budget`.
+#[tauri::command]
+pub async fn embed_set_budget(app: AppHandle, percent: u8) -> Result<EmbedSettings, String> {
+    UsageLedger::shared().store_stop_at(percent);
+    view(&db_path(&app)?).await
+}
+
+/// Is something account-wide stopping the run right now, and what is it?
+///
+/// The message when yes, `None` when the next file may go ahead. It exists
+/// because the index loop is a loop: a spent allowance or a reached spend
+/// limit condemns every remaining file for the same reason, and a run that
+/// kept going would turn one fact into one error per file — 166 identical
+/// lines, five of them shown, and a "stopped" that reads like a crash.
+///
+/// Only the ledger's two latches, deliberately. This is not a general health
+/// check: it constructs no client, needs no key, costs no request, and answers
+/// the one question the loop can act on between files. A local engine has no
+/// allowance to be stopped by, so it is never blocked.
+#[tauri::command]
+pub fn embed_blocked() -> Option<String> {
+    match super::embed_config().engine {
+        Engine::Cloud => UsageLedger::shared().ensure_available(0).err().map(|e| e.to_string()),
+        Engine::Local => None,
+    }
+}
+
+/// What the outstanding run would cost and how long it would take.
+///
+/// Separate from `embed_settings` because it is **slow in a way the settings
+/// are not** — it opens every outstanding PDF to read its page boxes — and the
+/// page must be able to draw the rest of itself while this is still running.
+///
+/// `spawn_blocking` because pdfium is synchronous and a library-wide sweep on a
+/// runtime worker would park the async scheduler for seconds.
+#[tauri::command]
+pub async fn embed_estimate(app: AppHandle) -> Result<EmbedEstimate, String> {
+    let database = db_path(&app)?;
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::block_on(super::estimate::estimate(&database, &base))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ── Changing it ──────────────────────────────────────────────────────────────

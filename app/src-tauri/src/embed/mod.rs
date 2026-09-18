@@ -472,6 +472,16 @@ pub enum EmbedError {
     /// next reset, so it is worth retrying — later. Latching, because every
     /// other file draws on the same allowance.
     QuotaExhausted,
+    /// **We** stopped, not Voyage: the spend guard in Settings → Library is set
+    /// to `percent` of Voyage's free pixel grant and the ledger has reached it.
+    ///
+    /// Deliberately its own variant rather than a `QuotaExhausted` in disguise.
+    /// The two want opposite words — one says "wait", the other says "this
+    /// setting is what stopped you" — and they want opposite answers to
+    /// `retryable`: an allowance repairs itself, a setting does not, and
+    /// offering a retry on a limit the user chose would just spend the day
+    /// re-hitting it.
+    BudgetReached { percent: u8 },
     /// Could not reach the backend at all. Holds the *local* transport error (a
     /// connect/timeout message), never a response body.
     Offline(String),
@@ -505,6 +515,7 @@ impl EmbedError {
             EmbedError::RejectedCredentials { .. } => "rejected_credentials",
             EmbedError::RateLimited { .. } => "rate_limited",
             EmbedError::QuotaExhausted => "quota_exhausted",
+            EmbedError::BudgetReached { .. } => "budget_reached",
             EmbedError::Offline(_) => "offline",
             EmbedError::Document { .. } => "document",
             EmbedError::ModelMismatch { .. } => "model_mismatch",
@@ -534,6 +545,7 @@ impl EmbedError {
             EmbedError::MissingCredentials
             | EmbedError::RejectedCredentials { .. }
             | EmbedError::Document { .. }
+            | EmbedError::BudgetReached { .. }
             | EmbedError::ModelMismatch { .. } => false,
         }
     }
@@ -553,6 +565,7 @@ impl EmbedError {
             EmbedError::MissingCredentials
                 | EmbedError::RejectedCredentials { .. }
                 | EmbedError::QuotaExhausted
+                | EmbedError::BudgetReached { .. }
                 | EmbedError::ModelMismatch { .. }
         )
     }
@@ -598,6 +611,13 @@ impl fmt::Display for EmbedError {
             EmbedError::QuotaExhausted => write!(
                 f,
                 "Voyage's allowance is used up. Indexing resumes on its own after it resets."
+            ),
+            // Names the setting, because the setting is the whole story: the
+            // account is fine and nothing failed.
+            EmbedError::BudgetReached { percent } => write!(
+                f,
+                "Indexing stopped at the {percent}% spend limit set in Settings → Library. \
+                 Raise or turn off the limit there to carry on."
             ),
             EmbedError::Offline(_) => {
                 write!(f, "Could not reach Voyage. Check your connection, then try again.")
@@ -1056,5 +1076,7 @@ mod tests {
 /// Page rasterization — the page *images* everything above embeds. See
 /// `embed/raster.rs`.
 pub mod commands;
+pub mod estimate;
+pub mod events;
 pub mod raster;
 pub mod voyage;
