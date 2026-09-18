@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { getDb, matchSql } from "@/lib/db";
 
 /**
  * Projects: a piece of work — an assignment, a revision plan — scoped to one
@@ -13,7 +13,10 @@ import { getDb } from "@/lib/db";
  * same obligation: change a table's shape and both writers move together.
  *
  * Schema is migration 27 in `app/src-tauri/src/lib.rs`, plus migration 33
- * (`tags`, `event_id`).
+ * (`tags`, `event_id`) and migration 37, which lets a task belong to no
+ * project at all — `project_id` NULL, and the absence of a project rather than
+ * an "Inbox" project. Everything that reads a board for such a task goes
+ * through {@link boardOf}.
  */
 
 // ── Columns ──────────────────────────────────────────────────────────────────
@@ -54,6 +57,23 @@ export const DEFAULT_COLUMNS: readonly ProjectColumn[] = Object.freeze([
 /** A fresh, mutable copy of {@link DEFAULT_COLUMNS}. */
 function freshColumns(): ProjectColumn[] {
   return DEFAULT_COLUMNS.map((c) => ({ ...c }));
+}
+
+/**
+ * The board a task's column is checked and drawn against: the project's own,
+ * or the default one when the task belongs to no project.
+ *
+ * `column_id` is NOT NULL on every task, unfiled ones included, so a task with
+ * no project still has to name a column something can draw. It names one of
+ * {@link DEFAULT_COLUMNS}' four ids — which are also the ids a *new* project is
+ * born with, so filing an unfiled task into a default board later needs no
+ * translation. `board_of` in `app/src-tauri/src/projects.rs` is the same helper
+ * headless; {@link requireColumn}, {@link moveTask}, {@link createTask} and
+ * `StatusPill` all read the board through here rather than off a project that
+ * might not exist.
+ */
+export function boardOf(project: DbProject | null | undefined): ProjectColumn[] {
+  return project?.columns ?? freshColumns();
 }
 
 // ── Rows ─────────────────────────────────────────────────────────────────────
@@ -104,7 +124,10 @@ export interface DbProject {
 
 export interface DbProjectTask {
   id: number;
-  project_id: number;
+  /** `null` on an unfiled task — one that belongs to no project at all
+   *  (migration 37), rather than to a project called Inbox. Its board is
+   *  {@link boardOf}'s fallback. */
+  project_id: number | null;
   /** Non-null on a subtask. Subtasks are one level deep — see `createTask`. */
   parent_id: number | null;
   title: string;
@@ -122,13 +145,22 @@ export interface DbProjectTask {
   updated_at: string;
 }
 
-/** A dated, unfinished task with enough of its project attached to draw and
- *  open it — what the calendar's task layer reads. */
-export interface DbOpenTask extends DbProjectTask {
-  project_name: string;
+/**
+ * A task with enough of its project attached to draw and open it — the shape
+ * every cross-project read hands back.
+ *
+ * All three project fields are nullable, and not only because a project can be
+ * personal: an **unfiled** task has no project to join to at all, so the name
+ * is `null` as well as the subject. Callers label such a row by the task alone.
+ */
+export interface DbTaskWithProject extends DbProjectTask {
+  project_name: string | null;
   project_subject_id: number | null;
   project_subject_code: string | null;
 }
+
+/** A dated, unfinished task — what the calendar's task layer reads. */
+export type DbOpenTask = DbTaskWithProject;
 
 /** The row as SQLite returns it, before `columns` and `tags` are parsed. */
 type ProjectRow = Omit<DbProject, "columns" | "tags"> & {
@@ -253,6 +285,104 @@ export async function getProjects(opts: GetProjectsOptions = {}): Promise<DbProj
   return rows.map(toProject);
 }
 
+/** A project as a search result: enough to draw a row and build its href. */
+export interface ProjectHit {
+  id: number;
+  name: string;
+  subject_code: string | null;
+  /** 'active' | 'archived' — an archived project is still findable, and says
+   *  so, rather than being hidden from the one place you went looking. */
+  status: string;
+  due_at: string | null;
+}
+
+/** A task as a search result, carrying the project it needs to be a route —
+ *  or, on an unfiled task, the `null` that *is* its route (`taskHref`). */
+export interface TaskHit {
+  id: number;
+  title: string;
+  /** `null` on an unfiled task. */
+  project_id: number | null;
+  /** `null` on an unfiled task, which a row labels by the task alone. */
+  project_name: string | null;
+  subject_code: string | null;
+  done_at: string | null;
+  due_at: string | null;
+}
+
+/**
+ * Projects matching a search query, best first — the same word-anywhere,
+ * prefix-ranked rule as files and lectures (`matchSql` in `app/src/lib/db.ts`),
+ * so one field searching both cannot behave differently depending on what it
+ * happened to find.
+ *
+ * Active before archived, then soonest due: a search during semester is nearly
+ * always for the thing that is still running.
+ */
+export async function searchProjects(
+  query: string,
+  limit = 4,
+): Promise<ProjectHit[]> {
+  const db = await getDb();
+  const { where, rank, params } = matchSql(
+    `p.name || ' ' || COALESCE(s.code, '')`,
+    query,
+  );
+  return db.select<ProjectHit[]>(
+    `SELECT p.id, p.name, s.code AS subject_code, p.status, p.due_at
+       FROM projects p
+       LEFT JOIN subjects s ON s.id = p.subject_id
+      WHERE ${where}
+      ORDER BY ${rank} DESC,
+               (p.status = 'active') DESC,
+               p.due_at IS NULL, p.due_at ASC,
+               p.position ASC
+      LIMIT $${params.length + 1}`,
+    [...params, limit],
+  );
+}
+
+/**
+ * Tasks matching a search query. The project's name is part of the haystack —
+ * "essay draft" should find the draft task of the essay project — and comes
+ * back with the row, because a task title on its own ("Draft", "Read chapter
+ * 4") names a dozen different pieces of work across a semester.
+ *
+ * Unfinished first: a done task is history, and history is not usually what
+ * you are trying to open.
+ *
+ * **The project join is LEFT, and the name is COALESCEd into the haystack.**
+ * An unfiled task (migration 37) has no project row, so an inner join dropped
+ * it from ⌘K entirely — the one door a task with no board to find it on most
+ * needs. And `||` in SQLite yields NULL if either side is NULL, so an unfiled
+ * task's haystack was NULL and matched nothing even once the join was fixed:
+ * the same reason `searchProjects` wraps its subject code.
+ */
+export async function searchTasks(
+  query: string,
+  limit = 4,
+): Promise<TaskHit[]> {
+  const db = await getDb();
+  const { where, rank, params } = matchSql(
+    `t.title || ' ' || COALESCE(p.name, '')`,
+    query,
+  );
+  return db.select<TaskHit[]>(
+    `SELECT t.id, t.title, t.project_id, p.name AS project_name,
+            s.code AS subject_code, t.done_at, t.due_at
+       FROM project_tasks t
+       LEFT JOIN projects p ON p.id = t.project_id
+       LEFT JOIN subjects s ON s.id = p.subject_id
+      WHERE ${where}
+      ORDER BY ${rank} DESC,
+               t.done_at IS NOT NULL,
+               t.due_at IS NULL, t.due_at ASC,
+               t.position ASC
+      LIMIT $${params.length + 1}`,
+    [...params, limit],
+  );
+}
+
 /** One project, or `null` if it has been deleted out from under the caller. */
 export async function getProject(id: number): Promise<DbProject | null> {
   const db = await getDb();
@@ -290,24 +420,78 @@ export async function getTasks(projectId: number): Promise<DbProjectTask[]> {
   );
 }
 
+/** The project columns every cross-project read joins for, and the joins that
+ *  reach them. **LEFT**, both of them: an unfiled task has no project row, and
+ *  an inner join would drop exactly the tasks these reads exist to find. */
+const WITH_PROJECT = `SELECT t.*, p.name AS project_name, p.subject_id AS project_subject_id,
+            s.code AS project_subject_code
+       FROM project_tasks t
+       LEFT JOIN projects p ON p.id = t.project_id
+       LEFT JOIN subjects s ON s.id = p.subject_id`;
+
 /**
  * Dated, unfinished tasks across every project — the calendar's task layer.
  *
  * A task with no `due_at` has nowhere to be drawn, and a finished one is not a
  * deadline any more, so both are filtered in SQL rather than in the page. The
  * project's name and subject ride along because the calendar colours and
- * labels by subject and has no project list of its own.
+ * labels by subject and has no project list of its own — and are `null` for an
+ * unfiled task, which the calendar labels by the task alone.
  */
 export async function getAllOpenTasks(): Promise<DbOpenTask[]> {
   const db = await getDb();
   return db.select<DbOpenTask[]>(
-    `SELECT t.*, p.name AS project_name, p.subject_id AS project_subject_id,
-            s.code AS project_subject_code
-       FROM project_tasks t
-       JOIN projects p ON p.id = t.project_id
-       LEFT JOIN subjects s ON s.id = p.subject_id
+    `${WITH_PROJECT}
       WHERE t.due_at IS NOT NULL AND t.done_at IS NULL
       ORDER BY t.due_at ASC`,
+  );
+}
+
+/**
+ * The order a task list that spans projects is read in, and the reason it is
+ * not `position`.
+ *
+ * `position` is only comparable **inside one project's column** — it is a
+ * fractional slot in that one run of cards, so the midpoint between two
+ * projects' tasks means nothing. A universal view therefore sorts by what every
+ * task has: when it is due, nulls last, then which project it is on (unfiled
+ * first, as the list you are expected to empty), and only then `position`,
+ * which does order the tasks that do share a column.
+ */
+const UNIVERSAL_ORDER = `ORDER BY t.due_at IS NULL, t.due_at ASC,
+               t.project_id IS NOT NULL, t.project_id ASC,
+               t.position ASC, t.id ASC`;
+
+/**
+ * Every task that belongs to no project — what the universal view opens on.
+ *
+ * One query, with the project columns still selected (all `null` by
+ * definition), so a page can hand these rows to the same components that draw
+ * {@link getAllTasks}'.
+ */
+export async function getUnfiledTasks(): Promise<DbTaskWithProject[]> {
+  const db = await getDb();
+  return db.select<DbTaskWithProject[]>(
+    `${WITH_PROJECT}
+      WHERE t.project_id IS NULL
+      ${UNIVERSAL_ORDER}`,
+  );
+}
+
+/**
+ * Every task in the library, filed or not, with its project's name and subject
+ * where it has one.
+ *
+ * Unwindowed and unfiltered — including finished ones, because the universal
+ * board has a Done column and the universal table is sortable by status. A
+ * student has hundreds of these, not thousands, and the alternative is a query
+ * per project.
+ */
+export async function getAllTasks(): Promise<DbTaskWithProject[]> {
+  const db = await getDb();
+  return db.select<DbTaskWithProject[]>(
+    `${WITH_PROJECT}
+      ${UNIVERSAL_ORDER}`,
   );
 }
 
@@ -524,12 +708,17 @@ export async function deleteProject(id: number): Promise<void> {
  * just rendered the column; it stops being survivable at the CLI, where
  * `--column` is free text an agent typed. So the id is checked wherever a task
  * is placed ({@link createTask}, {@link moveTask}) rather than trusted.
+ *
+ * The board is {@link boardOf}'s, so an unfiled task is checked against the
+ * default columns — a real check, not a waiver.
  */
-function requireColumn(project: DbProject, columnId: string): ProjectColumn {
-  const column = project.columns.find((c) => c.id === columnId);
+function requireColumn(project: DbProject | null, columnId: string): ProjectColumn {
+  const board = boardOf(project);
+  const column = board.find((c) => c.id === columnId);
   if (!column) {
-    const known = project.columns.map((c) => c.id).join(", ");
-    throw new Error(`project ${project.id} has no column "${columnId}" (has: ${known})`);
+    const known = board.map((c) => c.id).join(", ");
+    const whose = project ? `project ${project.id}` : "an unfiled task";
+    throw new Error(`${whose} has no column "${columnId}" (has: ${known})`);
   }
   return column;
 }
@@ -541,9 +730,12 @@ function requireColumn(project: DbProject, columnId: string): ProjectColumn {
  * by "last touched" should not call a project untouched because the change was
  * a task on it. `create_tasks`, `update_task`, `move_task` and `delete_task`
  * in `app/src-tauri/src/projects.rs` do the same — same table, two writers, so
- * they have to agree.
+ * they have to agree. `null` — an unfiled task, or a row that has gone — is a
+ * no-op, so no call site has to spell the absence of a project twice.
  */
-async function touchProject(projectId: number): Promise<void> {
+async function touchProject(projectId: number | null): Promise<void> {
+  // An unfiled task has no project to have been touched.
+  if (projectId == null) return;
   const db = await getDb();
   await db.execute(
     `UPDATE projects SET updated_at = datetime('now') WHERE id = $1`,
@@ -551,10 +743,12 @@ async function touchProject(projectId: number): Promise<void> {
   );
 }
 
-/** The project a task belongs to, or `null` if the row has gone. */
+/** The project a task belongs to, or `null` if it is unfiled — or if the row
+ *  has gone. Both answers mean the same thing to every caller: there is no
+ *  project to touch. */
 async function projectOfTask(id: number): Promise<number | null> {
   const db = await getDb();
-  const rows = await db.select<{ project_id: number }[]>(
+  const rows = await db.select<{ project_id: number | null }[]>(
     `SELECT project_id FROM project_tasks WHERE id = $1`,
     [id],
   );
@@ -562,12 +756,13 @@ async function projectOfTask(id: number): Promise<number | null> {
 }
 
 export interface CreateTaskInput {
-  projectId: number;
+  /** `null` files the task nowhere — see {@link boardOf}. */
+  projectId: number | null;
   title: string;
   /** Makes this a subtask of that task. One level only — see below. */
   parentId?: number | null;
   body?: string | null;
-  /** Defaults to the project's first column. */
+  /** Defaults to the first column of the task's board. */
   columnId?: string;
   startsAt?: string | null;
   dueAt?: string | null;
@@ -584,14 +779,29 @@ export interface CreateTaskInput {
  * simply never be drawn. Both directions are checked: a task cannot be filed
  * under a subtask ({@link createTask}, {@link updateTask}), and a task that
  * already has children cannot itself be given a parent ({@link updateTask}).
+ *
+ * The parent must also be in the **same project** — and "no project" is one of
+ * the answers, since a subtask cannot sit where its parent does not. That check
+ * was `assert_can_parent`'s alone in `app/src-tauri/src/projects.rs` while every
+ * door here was a composer on the board the parent was drawn on; a task view
+ * that spans projects can offer a parent from another one, so both writers ask.
  */
-async function assertCanParent(parentId: number): Promise<string> {
+async function assertCanParent(
+  parentId: number,
+  projectId: number | null,
+): Promise<string> {
   const db = await getDb();
-  const rows = await db.select<{ parent_id: number | null; column_id: string }[]>(
-    `SELECT parent_id, column_id FROM project_tasks WHERE id = $1`,
-    [parentId],
-  );
+  const rows = await db.select<
+    { parent_id: number | null; project_id: number | null; column_id: string }[]
+  >(`SELECT parent_id, project_id, column_id FROM project_tasks WHERE id = $1`, [parentId]);
   if (!rows.length) throw new Error(`parent task ${parentId} does not exist`);
+  if (rows[0].project_id !== projectId) {
+    throw new Error(
+      rows[0].project_id == null
+        ? `parent task ${parentId} belongs to no project`
+        : `parent task ${parentId} belongs to project ${rows[0].project_id}`,
+    );
+  }
   if (rows[0].parent_id != null) {
     throw new Error("subtasks are one level deep: a subtask cannot have children");
   }
@@ -626,25 +836,38 @@ async function hasChildren(id: number): Promise<boolean> {
  * explicit `columnId` still wins: a subtask can legitimately be done while its
  * parent is not. `create_tasks` in `app/src-tauri/src/projects.rs` does the
  * same.
+ *
+ * `projectId: null` files the task nowhere at all, and everything above still
+ * holds: the board it is checked against is {@link boardOf}'s default one, and
+ * there is no project whose `updated_at` moves.
  */
 export async function createTask(input: CreateTaskInput): Promise<number> {
   const db = await getDb();
   const parentColumnId =
-    input.parentId != null ? await assertCanParent(input.parentId) : null;
+    input.parentId != null
+      ? await assertCanParent(input.parentId, input.projectId ?? null)
+      : null;
 
-  const project = await getProject(input.projectId);
-  if (!project) throw new Error(`project ${input.projectId} does not exist`);
+  // No project is not a missing project: there is nothing to look up and
+  // nothing to refuse.
+  const project = input.projectId != null ? await getProject(input.projectId) : null;
+  if (input.projectId != null && !project) {
+    throw new Error(`project ${input.projectId} does not exist`);
+  }
+  const board = boardOf(project);
   const column =
     input.columnId !== undefined
       ? requireColumn(project, input.columnId)
       : // A column the board has since dropped falls back rather than throwing:
         // the parent's row is already there either way.
-        project.columns.find((c) => c.id === parentColumnId) ?? project.columns[0];
+        board.find((c) => c.id === parentColumnId) ?? board[0];
   const columnId = column.id;
 
+  // `IS`, not `=`: an unfiled task's neighbours are the other unfiled tasks in
+  // that column, and `project_id = NULL` matches nothing at all.
   const [{ next }] = await db.select<{ next: number }[]>(
     `SELECT COALESCE(MAX(position), -1) + 1 AS next
-       FROM project_tasks WHERE project_id = $1 AND column_id = $2`,
+       FROM project_tasks WHERE project_id IS $1 AND column_id = $2`,
     [input.projectId, columnId],
   );
 
@@ -655,7 +878,7 @@ export async function createTask(input: CreateTaskInput): Promise<number> {
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
              CASE WHEN $10 THEN datetime('now') ELSE NULL END, $11)`,
     [
-      input.projectId,
+      input.projectId ?? null,
       input.parentId ?? null,
       input.title,
       input.body ?? null,
@@ -669,7 +892,7 @@ export async function createTask(input: CreateTaskInput): Promise<number> {
     ],
   );
   if (res.lastInsertId == null) throw new Error("task insert returned no id");
-  await touchProject(input.projectId);
+  await touchProject(input.projectId ?? null);
   notifyProjectsUpdated();
   return res.lastInsertId;
 }
@@ -706,7 +929,7 @@ export async function updateTask(id: number, patch: UpdateTaskInput): Promise<vo
   const db = await getDb();
   if (patch.parentId != null) {
     if (patch.parentId === id) throw new Error("a task cannot be its own parent");
-    await assertCanParent(patch.parentId);
+    await assertCanParent(patch.parentId, await projectOfTask(id));
     if (await hasChildren(id)) {
       throw new Error("subtasks are one level deep: a task with children cannot have a parent");
     }
@@ -730,8 +953,7 @@ export async function updateTask(id: number, patch: UpdateTaskInput): Promise<vo
       WHERE id = $${args.length}`,
     args,
   );
-  const projectId = await projectOfTask(id);
-  if (projectId != null) await touchProject(projectId);
+  await touchProject(await projectOfTask(id));
   notifyProjectsUpdated();
 }
 
@@ -741,7 +963,7 @@ export async function deleteTask(id: number): Promise<void> {
   const db = await getDb();
   const projectId = await projectOfTask(id);
   await db.execute(`DELETE FROM project_tasks WHERE id = $1`, [id]);
-  if (projectId != null) await touchProject(projectId);
+  await touchProject(projectId);
   notifyProjectsUpdated();
 }
 
@@ -757,11 +979,12 @@ export async function deleteTask(id: number): Promise<void> {
 const MIN_GAP = 1e-6;
 
 /** Renumber a column to 0, 1, 2, … so fractional positions have room again. */
-async function renumberColumn(projectId: number, columnId: string): Promise<void> {
+async function renumberColumn(projectId: number | null, columnId: string): Promise<void> {
   const db = await getDb();
+  // `IS`: the unfiled tasks of one column are a group like any other.
   const rows = await db.select<{ id: number }[]>(
     `SELECT id FROM project_tasks
-      WHERE project_id = $1 AND column_id = $2
+      WHERE project_id IS $1 AND column_id = $2
       ORDER BY position ASC, id ASC`,
     [projectId, columnId],
   );
@@ -798,6 +1021,10 @@ async function positionOf(id: number): Promise<number | null> {
  * Landing in a `kind: "done"` column stamps `done_at`; leaving one clears it.
  * That is why this reads the project's columns — the *kind* is what decides,
  * not the column's name or id, both of which are the user's to change.
+ *
+ * An unfiled task moves among the *unfiled* tasks of that column: `project_id
+ * IS NULL` is a group like any other here, and the board whose kinds decide is
+ * {@link boardOf}'s default one.
  */
 export async function moveTask(
   id: number,
@@ -806,15 +1033,17 @@ export async function moveTask(
   afterId: number | null,
 ): Promise<void> {
   const db = await getDb();
-  const rows = await db.select<{ project_id: number }[]>(
+  const rows = await db.select<{ project_id: number | null }[]>(
     `SELECT project_id FROM project_tasks WHERE id = $1`,
     [id],
   );
   if (!rows.length) throw new Error(`task ${id} does not exist`);
   const projectId = rows[0].project_id;
 
-  const project = await getProject(projectId);
-  if (!project) throw new Error(`project ${projectId} does not exist`);
+  const project = projectId != null ? await getProject(projectId) : null;
+  if (projectId != null && !project) {
+    throw new Error(`project ${projectId} does not exist`);
+  }
   const done = requireColumn(project, columnId).kind === "done";
 
   const midpoint = async (): Promise<number | null> => {
@@ -844,6 +1073,121 @@ export async function moveTask(
       WHERE id = $4`,
     [columnId, position, done ? 1 : 0, id],
   );
+  await touchProject(projectId);
+  notifyProjectsUpdated();
+}
+
+/**
+ * The kind a task's column means **on its own board**, and `"backlog"` for a
+ * column that board no longer has — `kindOf`'s fallback in
+ * `app/src/components/projects/universalTasks.ts`, and `kind_of`'s in
+ * `app/src-tauri/src/projects.rs`. All three have to agree: a refile must land
+ * a card in the column the universal board just drew it in.
+ */
+function kindOf(project: DbProject | null, columnId: string): ColumnKind {
+  return boardOf(project).find((c) => c.id === columnId)?.kind ?? "backlog";
+}
+
+/**
+ * File a task under another project, or under none at all — and take its
+ * subtasks with it.
+ *
+ * The only writer of `project_id` after a task exists, and the only operation
+ * allowed to move a parent and its children at once: a subtask sits in its
+ * parent's project ({@link assertCanParent} refuses both directions of the
+ * alternative), so moving one side of that pair would write the very row that
+ * check exists to forbid. A subtask on its own is refused and names its
+ * parent — there is no honest half of this move.
+ *
+ * **The column maps across by *kind*, never by id.** A column id only means
+ * something against the board it was checked against, and two boards share
+ * nothing but what a column *means*. The destination is the **first** column
+ * of that kind — `columnForKind`'s rule in
+ * `app/src/components/projects/universalTasks.ts`, the same one the universal
+ * board's drag writes — so entering a kind puts you at its start: a task filed
+ * into a default board lands in Todo rather than skipping to In progress. A
+ * board with no column of that kind is refused outright; there is no nearest
+ * kind to fall back to.
+ *
+ * `done_at` is still derived from the destination column's kind, as
+ * {@link moveTask} derives it. The kind is preserved by construction, so this
+ * normally changes nothing — except in the one case it must, a task whose old
+ * column its own board had dropped, which reads as `backlog` here and cannot
+ * be allowed to arrive in a work column still stamped finished.
+ *
+ * It **appends**, at the end of the destination column, because there is no
+ * slot there to aim at: `MAX(position) + 1` over `project_id IS <destination>`
+ * is exactly `appendNeighbour`'s neighbour plus one, and `IS` rather than `=`
+ * because filing *out* of every project is a group like any other and
+ * `project_id = NULL` matches nothing. `refile_task` in
+ * `app/src-tauri/src/projects.rs` is the same function headlessly; the two
+ * move together.
+ */
+export async function refileTask(id: number, projectId: number | null): Promise<void> {
+  const db = await getDb();
+  const rows = await db.select<
+    { project_id: number | null; parent_id: number | null; column_id: string }[]
+  >(`SELECT project_id, parent_id, column_id FROM project_tasks WHERE id = $1`, [id]);
+  if (!rows.length) throw new Error(`task ${id} does not exist`);
+  const existing = rows[0];
+
+  if (existing.parent_id != null) {
+    throw new Error(
+      `task ${id} is a subtask of task ${existing.parent_id}, and a subtask sits in its ` +
+        `parent's project — refile task ${existing.parent_id} and this one travels with it`,
+    );
+  }
+  // Already there: nothing to write, and writing anyway would append the task
+  // to the end of the column it is already in.
+  if (existing.project_id === projectId) return;
+
+  const source = existing.project_id != null ? await getProject(existing.project_id) : null;
+  if (existing.project_id != null && !source) {
+    throw new Error(`project ${existing.project_id} does not exist`);
+  }
+  const target = projectId != null ? await getProject(projectId) : null;
+  if (projectId != null && !target) throw new Error(`project ${projectId} does not exist`);
+
+  // The parent first, then its children in their own order, so the parent
+  // takes the lower position in any column the two end up sharing.
+  const children = await db.select<{ id: number; column_id: string }[]>(
+    `SELECT id, column_id FROM project_tasks
+      WHERE parent_id = $1
+      ORDER BY position ASC, id ASC`,
+    [id],
+  );
+  const moving = [{ id, column_id: existing.column_id }, ...children];
+
+  for (const row of moving) {
+    const kind = kindOf(source, row.column_id);
+    const column = boardOf(target).find((c) => c.kind === kind);
+    if (!column) {
+      const known = boardOf(target).map((c) => c.id).join(", ");
+      const whose = target ? `project ${target.id}` : "an unfiled task's board";
+      throw new Error(
+        `${whose} has no "${kind}" column, so task ${row.id} has nowhere to land (has: ${known})`,
+      );
+    }
+    const [{ next }] = await db.select<{ next: number }[]>(
+      `SELECT COALESCE(MAX(position), -1) + 1 AS next
+         FROM project_tasks WHERE project_id IS $1 AND column_id = $2`,
+      [projectId, column.id],
+    );
+    await db.execute(
+      `UPDATE project_tasks
+          SET project_id = $1,
+              column_id  = $2,
+              position   = $3,
+              done_at    = CASE WHEN $4 THEN COALESCE(done_at, datetime('now')) ELSE NULL END,
+              updated_at = datetime('now')
+        WHERE id = $5`,
+      [projectId, column.id, next, column.kind === "done" ? 1 : 0, row.id],
+    );
+  }
+
+  // Both boards changed: the one that lost the task and the one that gained
+  // it. `null` is a no-op, so neither side has to spell the absence out.
+  await touchProject(existing.project_id);
   await touchProject(projectId);
   notifyProjectsUpdated();
 }

@@ -4,7 +4,10 @@ A project is a piece of work you are doing — usually an assignment — scoped 
 one subject or to none, broken into tasks and one level of subtask. It opens on
 an **Overview** — what it is, the facts pinned to it, what is next — and its
 tasks are read three ways behind a **Tasks** tab: a board, a table or a
-timeline. Each task is a page of its own as well. Nothing here is
+timeline. Each task is a page of its own as well. There is also a view over
+*every* project at once, at `/tasks`, which is where the tasks that belong to
+**no** project live — see [the universal view](#the-universal-view) below.
+Nothing here is
 scraped: every row is the student's own planning, or a plan the chat agent
 wrote for them through the `oculus` CLI. That is what shapes most of the
 decisions below — nothing upstream has a copy, so nothing can be repaired by
@@ -16,11 +19,17 @@ syncing again.
 | --- | --- |
 | `projects` + `project_tasks` tables (migration 27) | `app/src-tauri/src/lib.rs` |
 | `projects.tags` + `projects.event_id` (migration 33) | `app/src-tauri/src/lib.rs` |
+| Nullable `project_tasks.project_id` (migration 37) | `app/src-tauri/src/lib.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/projects.rs` |
 | Frontend reads and writes | `app/src/lib/projects.ts` |
 | What is on screen | `app/src/stores/projectsStore.ts` |
 | Headless writes (CLI, and so the agent) | `app/src-tauri/src/projects.rs` |
 | `oculus project` / `oculus task` | `app/src-tauri/src/bin/oculus.rs` |
 | Index, one project, one task | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/TaskPage.tsx` |
+| Every task at once, filed or not | `app/src/pages/TasksPage.tsx`, `app/src/hooks/useTaskList.ts` |
+| Its two views, and the rules they share | `app/src/components/projects/TasksBoard.tsx`, `app/src/components/projects/TasksTable.tsx`, `app/src/components/projects/universalTasks.ts` |
+| Where a task is filed: the picker, and the composer over it | `app/src/components/projects/ProjectPicker.tsx`, `app/src/components/projects/NewTaskButton.tsx` |
+| The drag every board and table shares | `app/src/hooks/useCardDrag.ts` |
+| A board card's title: the fold, and the click into the task | `app/src/components/projects/CardTitle.tsx` |
 | A subject's Projects tab | `app/src/pages/subject/ProjectsPage.tsx` |
 | The Overview: About, properties, upcoming | `app/src/components/projects/ProjectOverview.tsx` |
 | Tags, and the pinned calendar event | `app/src/components/projects/TagEditor.tsx`, `app/src/components/projects/EventLink.tsx` |
@@ -70,6 +79,27 @@ from outside are these.
   before" a plain string compare everywhere else.
 - **`event_id` is a pointer, not a foreign key**, and that is the interesting
   part — see the calendar bullet below.
+- **`project_tasks.project_id` is nullable** (migration 37), and NULL is a task
+  that belongs to no project *at all* — not an "Inbox" project, which would be
+  a row the user could rename, archive or delete out from under the feature.
+  `column_id` stays NOT NULL, so such a task still names a column something can
+  draw: the ids of the **default board**, which are also the ids a new project
+  is born with, so filing it into one later needs no translation. Every reader
+  and writer reaches a board through one helper — `boardOf` in
+  `app/src/lib/projects.ts`, `board_of` in `app/src-tauri/src/projects.rs` —
+  which hands back the project's columns or those defaults, so "no project" is
+  a *checked* case rather than a waiver.
+
+  Making it nullable meant rebuilding the table (SQLite cannot ALTER a NOT NULL
+  away), and the rebuild has a trap worth knowing: the new table's `parent_id`
+  must self-reference **the new table**, not the `project_tasks` it is about to
+  replace. Pointed at the old one, the recipe's `DROP TABLE` fires that
+  clause's `ON DELETE CASCADE` and empties the copy it has just made — a drop
+  performs an implicit delete of every row while foreign keys are on, and
+  `defer_foreign_keys` defers the *check*, not the action. The SQL lives in
+  `UNFILED_TASKS_SQL` in `app/src-tauri/src/projects.rs` rather than inline in
+  the migration, so the test that catches this runs the exact string the app
+  runs.
 
 ## How it connects
 
@@ -116,6 +146,24 @@ from outside are these.
   `?n=` like a project's name, and committing a rename re-navigates to the new
   href so the tab you are looking at re-titles itself
   (`app/src/components/projects/taskHref.ts`).
+- **The body is markdown, and it can name a course file.** It was a plain
+  textarea on the argument that a task body is a paragraph and two reminders;
+  it is not — it is where the plan for one piece of work is written, so it
+  holds a checklist, a formula and the files the work is *about*. So the page
+  renders it through `CompactMd`, the chat timeline's own renderer
+  (`app/src/components/markdown/MdComponents.tsx`), and clicking it opens an
+  editor, the grammar the title one line above already uses. **Nothing was
+  written to render a mention**: the renderer already draws a backticked
+  library path as a clickable `FileChip` and a library-relative image as the
+  picture, so `@` needed only an *editor* — the composer's own box and the
+  shared `@` menu (`app/src/components/harness/MentionInput.tsx`,
+  `useMentionMenu.ts`, `docs/harness.md`), scoped to the project's subject
+  where there is one and to the whole library otherwise, since an unfiled task
+  has no project at all. Pasting or dropping a picture embeds it, which is the
+  one place a picture is written before a send because there is no send
+  (`docs/harness.md`). Saving is the textarea's rules unchanged: ⌘↵ writes
+  without leaving, blur writes, an unchanged body writes nothing, an empty one
+  writes `null` — and the body is `updateTask`, never `moveTask`.
 - **Until that page there was no way to set a due date in the app at all** —
   only `oculus task update --due`. Both editors of one go through
   `app/src/components/projects/DateTimeField.tsx`: a button showing what is
@@ -142,7 +190,11 @@ from outside are these.
   and not the other.
 - **The agent's writes get into that door through the harness.** `oculus
   project` / `oculus task` write from a subprocess with its own connection —
-  nothing in the webview's pool notices. So `app/src/hooks/useBackendEvents.ts`
+  nothing in the webview's pool notices. That subprocess is sandboxed, and
+  until its sandbox was given the database's three files by name it could not
+  write at all: SQLite answered every batch with "attempt to write a readonly
+  database" because `oculus.db-wal` was out of reach. See the containment
+  bullets in [harness.md](./harness.md). So `app/src/hooks/useBackendEvents.ts`
   watches the harness event stream, remembers tool calls whose command text
   matches `oculus project`/`oculus task`, and fires the same
   `PROJECTS_UPDATED_EVENT` when one finishes. It matches on the command text
@@ -193,7 +245,11 @@ from outside are these.
   at. The component is a Fragment rather than a wrapper so it drops into each
   page's existing crumb row and inherits that row's gap — the project page's
   toolbar is `gap-2.5`, the task page's line is `gap-1.5`, and both keep the
-  spacing they had.
+  spacing they had. The segments are buttons carrying a
+  `data-tab-href` (`app/src/lib/newTabClicks.ts`), not `Link`s — a plain click
+  follows the shell's departure rules at `navigateActive`
+  (`app/src/lib/tabRouters.ts`), and the attribute is what gives ⌘-click the
+  crumb in its own tab; the task page's project crumb is built the same way.
 - **The Backlog view is gone, and the board's drag is why.** It was the same
   pile read as a list with a promote button per stub, which earned its keep
   only while dragging a card out of the backlog column did not work — see the
@@ -204,15 +260,75 @@ from outside are these.
   that string and the stored value falls through to the board — an
   unrecognised view would otherwise render nothing at all, on the machine of
   whoever used the feature most.
-- **A card could not be dragged at all, for a one-line reason worth
-  remembering.** WebKit — which is what a Tauri WKWebView is — **aborts a drag
-  whose `dragstart` handler sets no data on the `dataTransfer`**: no `dragover`
-  and no `drop` ever fire, silently, with every handler correctly attached. So
-  `ProjectBoard` calls `e.dataTransfer.setData("text/plain", …)` purely to
-  keep the drag alive; the payload is never read, because the dragged id is
-  already in React state. It carries a comment saying so, because the call
-  looks like dead code and deleting it breaks the feature without breaking a
-  type or a test. The timeline packs
+- **The board's drag is a pointer gesture, not HTML5 drag-and-drop, and the
+  reason is worth keeping.** It was HTML5 DnD, and it worked *sometimes*: a
+  press that landed on a card's due chip or subtask counter — both `<span>`,
+  both handed `user-select: text` back inside `app/src/index.css`'s
+  `body { user-select: none }` — started a **text selection**, and in WebKit a
+  selection pre-empts the element drag, so `dragstart` never fired at all. From
+  the outside the card moved when you grabbed dead space and did nothing when
+  you grabbed a chip. Rather than patch the selection rule, the board, the
+  project table and the universal board all moved to the tab strip's gesture:
+  `useCardDrag` in `app/src/hooks/useCardDrag.ts` — a 4px threshold,
+  `setPointerCapture`, rects measured once at the lift, the card riding
+  `translate` under the pointer, neighbours transitioning out of its way, and
+  the store written once on drop. It is what the user asked the drag to look
+  like, and it is immune to the selection problem by construction.
+
+  Two edges of that gesture are load-bearing. The press must **not** be
+  cancelled: in WebKit a `click` is raised from a `mousedown`/`mouseup` pair,
+  so a `preventDefault()` on `pointerdown` — the obvious way to stop the
+  selection — also removes the only way into a task's page. The selection is
+  held off by CSS on the drag surface instead, and a `preventDefault()` on
+  `pointermove`, which suppresses the compatibility `mousemove` a selection is
+  *extended* by while leaving the click alone. The one HTML5 drag left in the
+  app is the dock's tab reorder (`app/src/components/ui/ViewTabs.tsx`), which
+  still needs its `dataTransfer.setData()` — see the root `CLAUDE.md`.
+
+  **A drop is not the end of the move, and treating it as one played the move
+  backwards.** The write goes to SQLite and the new order comes back as a
+  re-read tens of milliseconds later, so a gesture that ended on the release
+  took every transform off while the list was still in its old order: the item
+  snapped back into the slot it had been lifted out of, sat there, and then
+  jumped to its new one when the re-read landed — with the table's row numbers
+  all renumbering in that same frame, which is what made it read as a flicker
+  rather than as a move. So the release opens a third phase, the **settle**:
+  the item glides to the offset its neighbours have been holding open, the
+  view keeps drawing the list it had when the pointer went up
+  (`useSettledList`), and the two are swapped only once the glide has run *and*
+  the new order has arrived — at which point they are the same picture and the
+  swap cannot be seen. That needs two things from a caller: the list identity
+  to watch (`settleOn`), and an honest answer from its drop handler about
+  whether it wrote anything, since a refused drop has no new order coming and
+  must spring back instead of hanging over a slot nothing will fill. The row
+  numbers fade for the length of the gesture and fade back in already
+  renumbered, because a position in a list being rearranged is not a fact worth
+  showing mid-flight.
+- **A card is fixed-size furniture, and the whole of it opens the task.** A
+  title is one string the user pasted, so it is capable of being a single
+  unbreakable token — a tracking URL — which painted straight out through the
+  card's right edge and across the column beside it, or of being long enough to
+  make one card taller than the column. `app/src/components/projects/CardTitle.tsx`
+  is the one definition both boards draw it with: `break-words` inside a
+  `min-w-0` flex child so an unbreakable token wraps, a three-line clamp, and a
+  **Show more** toggle offered only when the clamp is *measured* to have hidden
+  something — a `ResizeObserver` against the element's own computed line
+  height, so the column's width is what decides rather than a character count
+  (the pattern `useOverflows` in `app/src/components/harness/Timeline.tsx`
+  set).
+
+  Clicking anywhere on the card that is not a control now opens the task; the
+  title alone used to be the way in, which is a link-sized target on a
+  card-sized affordance. The card stays a plain `<article>` that navigates on
+  click rather than becoming an anchor or a button, because it *contains*
+  controls — the title's anchor, the toggle — and interactive content nested in
+  either is invalid markup WebKit repairs by closing the outer control early.
+  It carries `data-tab-href` so ⌘-click gets the task in its own tab from
+  anywhere on the card (`app/src/lib/newTabClicks.ts`), the toggle carries
+  `data-tab-skip` and stops the click it does not want, and neither of them
+  cancels `pointerdown` — cancelling the press is what once removed every
+  card's click, per the drag bullet above.
+- The timeline packs
   overlapping bars with `packLanes` in `app/src/lib/lanes.ts` — lifted out of
   `app/src/components/calendar/WeekView.tsx`, which was its only caller until
   this needed the same packing, and made generic over the item because the two
@@ -284,3 +400,68 @@ from outside are these.
   `app/src/components/projects/projectHref.ts`), because `tabInfo` titles a tab
   from the path alone and has no project list to look one up in — the same
   trade the lecture route makes with `?t=`.
+
+## The universal view
+
+`/tasks` is every task there is — across every project, plus the ones filed
+nowhere — read as a board of three columns or as a flat table
+(`app/src/pages/TasksPage.tsx`). A project's board is where *one* plan is
+arranged; this answers the question a board cannot, which is what there is to
+do at all, and it is where a task with nowhere to go gets written down.
+
+- **It is not `projectsStore`.** That store holds one open project and that
+  project's tasks, which is exactly the wrong shape here: a view spanning every
+  project has no `activeId` to be, and an unfiled task would have to pretend to
+  belong to whatever was open last. `app/src/hooks/useTaskList.ts` is a plain
+  hook over `getAllTasks` / `getUnfiledTasks` plus the project list, refreshing
+  on the same `PROJECTS_UPDATED_EVENT` everything else does — so a click here
+  and a write the chat agent made through `oculus task` still arrive by one
+  door. The projects come along because a task carries its project's *name*,
+  not its board, and a column id only means something against a board.
+- **Its columns are column *kinds*** — Backlog / In progress / Done — because a
+  kind is the only vocabulary every board shares. A drop into another kind
+  calls `moveTask` with that task's **own** board's first column of that kind
+  (`columnForKind` in `app/src/components/projects/universalTasks.ts`), so a
+  project's Todo/In-progress distinction survives a drag that does not change
+  kind — such a drag writes nothing at all.
+- **There is no manual order in this view, and there cannot be.** `position` is
+  a fractional slot *inside one project's column*; two projects' positions are
+  two unrelated number lines, so a midpoint between them is arithmetic on
+  unrelated units, and a hand-set order would be scrambled the next time either
+  project renumbered. So a universal column is **sorted, not arranged** — due
+  date (nulls last), then project (unfiled first), then `position`, which is
+  `UNIVERSAL_ORDER` in `app/src/lib/projects.ts` — a same-column drag is a
+  no-op, and the table sorts by header instead of dragging by grip. A move into
+  another column therefore **appends**: `appendNeighbour` finds the last task
+  *of that task's own project* in the destination, because that is the only run
+  of cards its `position` is comparable with.
+- **A task's route depends on whether it has a project.** `taskHref`
+  (`app/src/components/projects/taskHref.ts`) writes
+  `/projects/:projectId/tasks/:taskId` for a filed task and `/tasks/:taskId`
+  for an unfiled one, and `app/src/pages/TaskPage.tsx` serves both: the project
+  is `null`, the board is `boardOf`'s default four, and the rows come from
+  `useTaskList` instead of the store. One page, because everything a task page
+  does is the same either way.
+- **⌘K finds an unfiled task, and that took two fixes.** `searchTasks` joins
+  the project **LEFT** — an inner join dropped exactly the tasks with no board
+  to find them on — and `COALESCE`s the project name into the haystack, because
+  `||` in SQLite yields NULL if either side is, so an unfiled task's haystack
+  was NULL and matched nothing even once the join was right. A hit with no
+  project reads **Unfiled**, the word the rest of the feature uses.
+- **Filing one is `refileTask`** (`app/src/lib/projects.ts`, `refile_task` in
+  `app/src-tauri/src/projects.rs`, `oculus task refile`), offered by the
+  Project cell in the table and the Project row on a task's page, both through
+  `app/src/components/projects/ProjectPicker.tsx`. Three rules make it the only
+  writer of `project_id` after a create:
+  - It **maps the column across by kind**, into the first column of that kind
+    on the destination's board — the same rule `columnForKind` applies to a
+    drag — and refuses a destination with no column of that kind rather than
+    picking the nearest, because there is no nearest kind. `done_at` still
+    follows the column it lands in.
+  - It **carries the task's subtasks with it**, each by its own column's kind.
+    A subtask sits in its parent's project — `assertCanParent` /
+    `assert_can_parent` refuse both directions of the alternative — so this is
+    the one operation allowed to move both sides at once, and a subtask on its
+    own is refused and told to refile its parent.
+  - It **appends** at the destination column's end, for the reason above: there
+    is no slot across projects to aim at. `moveTask` is then how it is placed.

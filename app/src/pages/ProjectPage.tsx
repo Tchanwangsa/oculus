@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
+import { PillTabs } from "@/components/ui/PillTabs";
 import { ViewTabs } from "@/components/ui/ViewTabs";
 import { ProjectBoard } from "@/components/projects/ProjectBoard";
 import { ProjectMenu } from "@/components/projects/ProjectMenu";
@@ -268,7 +269,7 @@ export default function ProjectPage() {
           thing it controls across two rows. */}
       {tab === "tasks" && (
         <div className="shrink-0 flex h-9 items-center gap-2.5 px-5">
-          <TaskViewTabs value={view} onChange={setView} />
+          <PillTabs tabs={TASK_VIEWS} value={view} onChange={setView} />
           <span className="flex-1" />
           {view === "timeline" && <TimelineZoomControl value={zoom} onChange={setZoom} />}
         </div>
@@ -307,49 +308,15 @@ export default function ProjectPage() {
  *
  * Tabs rather than a dropdown — they are still three peers — but deliberately
  * not a second `ViewTabs`: two identical underline strips stacked would read
- * as two levels of the same rank and fight each other for the indigo rule. So
- * this one is a step quieter in every dimension it can be: smaller, no
- * underline, and the active one marked by a fill rather than a colour.
+ * as two levels of the same rank and fight each other for the indigo rule.
+ * `PillTabs` (`app/src/components/ui/PillTabs.tsx`) is that quieter strip, and
+ * carries the rest of the reasoning; the universal Tasks page uses the same
+ * one for Board / Table.
  *
  * It sits on a row of its own rather than sharing the toolbar with the
  * project's name, which is where it started: next to a breadcrumb it read as
  * two more crumbs, and a long project name shoved it along the row.
  */
-function TaskViewTabs({
-  value,
-  onChange,
-  className,
-}: {
-  value: TaskView;
-  onChange: (value: TaskView) => void;
-  className?: string;
-}) {
-  return (
-    <div role="tablist" className={cn("flex items-center gap-0.5", className)}>
-      {TASK_VIEWS.map((v) => {
-        const active = v.value === value;
-        return (
-          <button
-            key={v.value}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            onClick={() => onChange(v.value)}
-            className={cn(
-              "cursor-pointer rounded-full px-2 py-0.5 text-[11.5px] font-medium transition-colors",
-              active
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {v.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 /**
  * The project's name, editable where it is drawn.
  *

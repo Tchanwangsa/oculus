@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { navigateActive } from "@/lib/tabRouters";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { displayCode } from "@/lib/format";
 import type { DbProject } from "@/lib/projects";
@@ -20,24 +20,37 @@ import type { DbProject } from "@/lib/projects";
  * page's own leaf — an editable title on one, a link on the other — and those
  * belong to the pages, not here.
  *
+ * Buttons with a `data-tab-href`, not `Link`s, like `SubjectCrumbs`: the plain
+ * click goes through the shell's departure rules at `navigateActive`, and the
+ * attribute is what gives the ⌘-click its own tab
+ * (`app/src/lib/newTabClicks.ts`). A `Link` gave ⌘-click to the anchor's
+ * default, which reloaded the whole webview at the crumb's path.
+ *
  * Personal stays plain text. Its only list is the one `Projects` already
  * points at, and a second crumb to the same place is not a trail.
  */
 export function ProjectCrumbs({ project }: { project: DbProject }) {
   return (
     <>
-      <Link to="/projects" className="shrink-0 transition-colors hover:text-foreground">
+      <button
+        type="button"
+        data-tab-href="/projects"
+        onClick={() => navigateActive("/projects")}
+        className="shrink-0 cursor-pointer transition-colors hover:text-foreground"
+      >
         Projects
-      </Link>
+      </button>
       <Separator />
       {project.subject_id != null && project.subject_code ? (
-        <Link
-          to={`/subjects/${project.subject_id}/projects`}
-          className="flex shrink-0 items-center gap-1.5 transition-colors hover:text-foreground"
+        <button
+          type="button"
+          data-tab-href={`/subjects/${project.subject_id}/projects`}
+          onClick={() => navigateActive(`/subjects/${project.subject_id}/projects`)}
+          className="flex shrink-0 cursor-pointer items-center gap-1.5 transition-colors hover:text-foreground"
         >
           <SubjectIcon code={project.subject_code} size={12} />
           {displayCode(project.subject_code)}
-        </Link>
+        </button>
       ) : (
         <span className="shrink-0">Personal</span>
       )}

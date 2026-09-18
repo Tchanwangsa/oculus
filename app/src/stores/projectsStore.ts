@@ -10,6 +10,7 @@ import {
   getTaskCounts,
   getTasks,
   moveTask,
+  refileTask,
   unarchiveProject,
   updateProject,
   updateTask,
@@ -93,6 +94,8 @@ interface ProjectsState {
   updateTask: (id: number, patch: UpdateTaskInput) => Promise<void>;
   deleteTask: (id: number) => Promise<void>;
   moveTask: (id: number, columnId: string, beforeId: number | null, afterId: number | null) => Promise<void>;
+  /** File a task under another project, or under none. `null` is unfiled. */
+  refileTask: (id: number, projectId: number | null) => Promise<void>;
 }
 
 export const useProjectsStore = create<ProjectsState>((set, get) => ({
@@ -171,6 +174,11 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
 
   moveTask: async (id, columnId, beforeId, afterId) =>
     moveTask(id, columnId, beforeId, afterId),
+
+  // Nothing to clear afterwards, even when the task leaves the open project:
+  // `tasks` is re-read by the event like every other write, and `activeId` is
+  // still a project to be looking at.
+  refileTask: async (id, projectId) => refileTask(id, projectId),
 }));
 
 /** The list and its counts, which are always read together — one query for the

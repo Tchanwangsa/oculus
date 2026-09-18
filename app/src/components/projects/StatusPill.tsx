@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Check } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import type { DbProject, ProjectColumn } from "@/lib/projects";
+import { boardOf, type DbProject, type ProjectColumn } from "@/lib/projects";
 
 /**
  * The tint a column's pill wears.
@@ -43,6 +43,10 @@ export function columnPillClass(columns: ProjectColumn[], columnId: string): str
  * It calls `moveTask` — never `updateTask`, which cannot write `column_id` at
  * all: the column and `done_at` are one fact, and only `moveTask` reads the
  * project's board to learn whether the destination is a `kind: "done"` one.
+ *
+ * `project` may be `null`: an unfiled task has no project, and its columns are
+ * the default board `boardOf` hands back — the same four `moveTask` will check
+ * the pick against.
  */
 export function StatusPill({
   project,
@@ -50,14 +54,16 @@ export function StatusPill({
   onPick,
   className,
 }: {
-  project: DbProject;
+  /** `null` for a task that belongs to no project. */
+  project: DbProject | null;
   columnId: string;
-  /** Given a column id from the project's own board — never an invented one. */
+  /** Given a column id from the task's own board — never an invented one. */
   onPick: (columnId: string) => void;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const column = project.columns.find((c) => c.id === columnId) ?? null;
+  const columns = boardOf(project);
+  const column = columns.find((c) => c.id === columnId) ?? null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -67,7 +73,7 @@ export function StatusPill({
           aria-label="Change status"
           className={cn(
             "inline-flex max-w-full cursor-pointer items-center rounded-full border px-2 py-0.5 text-[11px] font-medium transition-opacity hover:opacity-80",
-            columnPillClass(project.columns, columnId),
+            columnPillClass(columns, columnId),
             className,
           )}
         >
@@ -75,7 +81,7 @@ export function StatusPill({
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-44 p-1">
-        {project.columns.map((c) => (
+        {columns.map((c) => (
           <button
             key={c.id}
             type="button"
@@ -89,7 +95,7 @@ export function StatusPill({
               aria-hidden
               className={cn(
                 "size-2 shrink-0 rounded-full border",
-                columnPillClass(project.columns, c.id),
+                columnPillClass(columns, c.id),
               )}
             />
             <span className="min-w-0 flex-1 truncate">{c.name}</span>
