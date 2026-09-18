@@ -15,6 +15,7 @@ import {
   Megaphone,
   PencilLine,
   Stack,
+  UploadSimple,
   VideoCamera,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,7 @@ const TABS = [
   { to: "modules",       label: "Modules",       icon: Stack,          end: false },
   { to: "lectures",      label: "Lectures",      icon: VideoCamera,    end: false },
   { to: "downloads",     label: "Downloads",     icon: DownloadSimple, end: false },
+  { to: "uploads",       label: "Uploads",       icon: UploadSimple,   end: false },
   { to: "announcements", label: "Announcements", icon: Megaphone,      end: false },
   { to: "assignments",   label: "Assignments",   icon: PencilLine,     end: false },
   { to: "discussion",    label: "Discussion",    icon: ChatsCircle,    end: false },
@@ -157,7 +159,7 @@ export default function SubjectLayout() {
 
 /**
  * The tab row, as a strip that scrolls sideways rather than one that gets cut
- * off. Eight tabs already crowd the centred column, and the card is narrower
+ * off. Nine tabs already crowd the centred column, and the card is narrower
  * still whenever the side panel is docked open — so the row is a scroller with
  * its bar hidden and a fade over each live edge, which is the affordance the
  * sidebar's own scroller uses.

@@ -17,12 +17,22 @@ One Rust engine scrapes three services. It runs identically inside the app
 | App-side entry: thread + `AppReporter` | `app/src-tauri/src/scrape.rs` |
 | Headless DB writes | `app/src-tauri/src/store.rs` |
 | Subject list state | `app/src-tauri/src/subjects.rs` |
+| Chronological term ranking | `app/src-tauri/src/terms.rs` |
 | Agent docs written into the library | `app/src-tauri/src/agents.rs` |
 | Canvas calendar (class times, due dates) | `app/src-tauri/src/calendar.rs` |
 | Frontend sync page / runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 
 ## How it connects
 
+- **The current term is ranked, not compared as text.** `list_courses` marks
+  the newest term that still has available courses as current, and that flag
+  is what `oculus run` syncs by default, what `oculus list` marks, and what a
+  search with no named subject falls back to. Canvas term names do not sort
+  chronologically — `"2026 Summer Term"` beats `"2026 Semester 2"` as a
+  string while starting six months earlier — so `app/src-tauri/src/terms.rs`
+  ranks the term within its year (summer, semester 1, winter, semester 2).
+  Before that, one summer enrolment marked a whole year of real subjects as
+  past, and a default CLI sync fetched the summer subject alone.
 - **Modules are the driver.** The engine walks each course's modules and
   fetches pages and files through them, so nothing is downloaded twice. It
   was ported line-for-line in strategy from the old `scraper.js` (hidden
@@ -64,6 +74,35 @@ One Rust engine scrapes three services. It runs identically inside the app
   are always re-fetched and re-generated — the byte-compare in
   `paths::write_course_bytes` is what decides new/updated/unchanged, so e.g.
   a changed submission status still lands. "Re-download" bypasses the skip.
+- **Office documents are stored as themselves plus a derived PDF.** Everything
+  downstream — the parsers, the page-image embedder, the viewer — is
+  PDF-shaped, so `.pptx/.docx/.xlsx/.ppt/.doc/.xls` are downloaded intact and
+  LibreOffice headless writes `deck.pptx.pdf` beside the original
+  (`office_to_pdf` in `app/src-tauri/src/sync.rs`). The derived PDF is never
+  announced and never gets a `files` row — the original name is the library
+  row, which is what `paths::doc_pdf_rel` resolves for every consumer.
+  Migration 10 in `app/src-tauri/src/lib.rs` exists because those PDFs once
+  did get rows. **With LibreOffice absent the original is still stored**, the
+  run logs a warning, and the file stays out of `file-manifest.json` so the
+  next sync retries the conversion rather than skipping it. `office_to_pdf`
+  and `office_ext_of` are `pub(crate)` for one caller outside this engine:
+  the student's own uploads go through the very same conversion
+  (`app/src-tauri/src/files.rs`, [frontend.md](./frontend.md)), so a dropped
+  `.docx` is searchable on exactly the terms a scraped one is.
+- **A spreadsheet is exported as one page per sheet**, not with Calc's default
+  pagination (`convert_target` in `app/src-tauri/src/sync.rs`). Calc slices a
+  wide sheet into page-width column bands and gives the later bands no
+  headers: a 300-row × 25-column marks sheet exported as 54 pages, of which
+  only the first band carried the ID and name columns — the rest were bare
+  grids of numbers, which is both a meaningless page image and the markdown a
+  citation would hydrate from. `SinglePageSheets` keeps every row with its
+  headers; `MAX_RENDER_PIXELS` in `sidecar/embedder.py` is what stops the
+  resulting page being rendered at its full size.
+- **An untyped upload is judged by its extension.** Canvas reports whatever
+  content type the uploading browser claimed, so the same deck arrives typed
+  on one course and `application/octet-stream` on another. A generic type
+  falls back to the filename (`office_ext_of`), which is still an allowlist —
+  only the extensions the converter handles, plus `.pdf`.
 - **Changed bytes invalidate the parse.** An `updated` write purges the
   parse/embed artifacts (`.md`, `.pages.json`, `.emb.json` — see
   `paths::purge_parse_artifacts`), and the app clears the file's stored
@@ -98,6 +137,18 @@ One Rust engine scrapes three services. It runs identically inside the app
   lets the player run them off one clock (see [frontend.md](./frontend.md)).
   Only source 1 is fetched by a sync — the camera roughly doubles a semester
   on disk and is downloaded per lecture, on demand, from the player.
+- **A download can be cancelled, and a downloaded video deleted.**
+  `echo360_cancel_download` and `echo360_delete_video` in
+  `app/src-tauri/src/lectures.rs`, both keyed by media id and source like the
+  progress bars. The transfer is a blocking read loop, so cancelling is an
+  `AtomicBool` in `DownloadCancels` that `stream_to_file` checks between 64 KB
+  chunks; it then returns `echo360::CANCELLED`, and the existing error path
+  deletes the partial. The frontend tells that phase apart from a failure and
+  clears its bar without reporting one. **Deleting removes only the video
+  files** — the transcript, chapters and recap notes are kilobytes and cost an
+  agent turn each to rebuild, while the video re-downloads unattended. A
+  delete cancels an in-flight download for the same lecture first, so the
+  writer cannot recreate the file just after it is removed.
 - **Whether a camera exists is probed, not read.** `syllabus` looks for
   `secondaryFiles` anywhere under the lesson (the nesting has moved between
   Echo360 versions, so it searches for the key rather than a path), but this

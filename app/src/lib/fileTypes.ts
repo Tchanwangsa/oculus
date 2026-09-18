@@ -28,7 +28,14 @@ import {
  * Office formats the scraper stores as themselves plus a derived sibling PDF
  * ("deck.pptx" → "deck.pptx.pdf"). Mirrors OFFICE_EXTS in paths.rs.
  */
-export const OFFICE_EXTS = ["pptx", "docx", "ppt", "doc"];
+export const OFFICE_EXTS = ["pptx", "docx", "xlsx", "ppt", "doc", "xls"];
+
+/**
+ * The same set as a SQL list, for the queries that select the files the
+ * PDF pipeline owns (`lower(file_type) IN …`). Built from OFFICE_EXTS so a new
+ * format reaches the parse sweep and the embed queue by being added once.
+ */
+export const PDF_BACKED_SQL_LIST = `('pdf', ${OFFICE_EXTS.map((e) => `'${e}'`).join(", ")})`;
 
 function ext(filename: string): string {
   const i = filename.lastIndexOf(".");

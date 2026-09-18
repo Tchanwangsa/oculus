@@ -38,6 +38,7 @@ export function useSubjectFiles(subjectId: number | null) {
       module: files.filter((f) => f.category === "module"),
       page: files.filter((f) => f.category === "page"),
       file: files.filter((f) => f.category === "file"),
+      upload: files.filter((f) => f.category === "upload"),
       announcement: files.filter((f) => f.category === "announcement"),
       assignment: files.filter((f) => f.category === "assignment"),
       quiz: files.filter((f) => f.category === "quiz"),

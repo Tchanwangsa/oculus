@@ -90,7 +90,12 @@ live. Inside it:
 - `oculus.db` — SQLite, everything structured
 - `courses/<code>/…` — scraped files, mirrored to Canvas layout, plus `.md`,
   `.pages.json`, and `<stem>_images/` siblings the parser writes, and the
-  `.emb.json` sibling the embedder writes beside them
+  `.emb.json` sibling the embedder writes beside them. One subdirectory is not
+  the scraper's: `courses/<code>/uploads/` holds the student's own files,
+  copied in by hand (`import_uploads` in `app/src-tauri/src/files.rs`). They
+  are ordinary library files from there on — same conversion, parse,
+  embeddings and agent access — and being the one place a sync never writes is
+  what makes them the one place deleting is safe
 - `lectures/<uuid>/` — downloaded Echo360 media: `source1.mp4` and
   `source2.mp4` (the second when the capture has one and it has been asked
   for), plus `transcript.vtt`. Usually source 1 is the Presenter screen and

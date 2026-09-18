@@ -9,8 +9,13 @@ import { attachmentPath } from "@/lib/attachments";
 /** What the panel header shows: real filenames stay, slugs get prettified.
  *  Takes the two columns it reads rather than a whole row, so the chat's
  *  `@` menu labels files the same way the side panel does. */
+/** Categories whose rows are real files with real filenames — a download, an
+ *  inline image, one of the student's own uploads — as opposed to the Canvas
+ *  documents stored under a slug. */
+const REAL_FILENAME = new Set(["file", "image", "upload"]);
+
 export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
-  return file.category === "file" || file.category === "image"
+  return REAL_FILENAME.has(file.category ?? "")
     ? file.filename
     : humanizeSlug(file.filename);
 }
@@ -33,7 +38,10 @@ export function recordFileAccess(file: Pick<DbFile, "id">): void {
  */
 export function openFileSmart(file: DbFile): void {
   recordFileAccess(file);
-  if (file.category === "file" && !isPdfBacked(file.filename)) {
+  // An upload can be anything the student had lying around — a zip, a
+  // notebook, a recording — so it takes the same hand-off a download does.
+  const binary = file.category === "file" || file.category === "upload";
+  if (binary && !isPdfBacked(file.filename)) {
     invoke("open_course_file", { relativePath: file.relative_path }).catch(
       console.error,
     );

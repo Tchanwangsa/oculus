@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  clearLectureVideoPath,
   updateLectureVideoPath,
   updateLectureTranscriptPath,
   type Lecture,
@@ -87,6 +88,9 @@ export async function downloadLecture(
   }
 }
 
+/** Phases that mean the download is over, however it ended. */
+const SETTLED = ["complete", "error", "cancelled"];
+
 /** True while `id`'s given source is mid-download (read via the store hook). */
 export function isDownloading(
   s: LectureDownloadsState,
@@ -95,7 +99,44 @@ export function isDownloading(
 ): boolean {
   const key = dlKey(id, source);
   const p = s.progress[key];
-  return !!s.active[key] || (p != null && p.phase !== "complete" && p.phase !== "error");
+  return !!s.active[key] || (p != null && !SETTLED.includes(p.phase));
+}
+
+/**
+ * Ask Rust to stop an in-flight download. The flag is checked between 64 KB
+ * chunks, so the bar keeps ticking for a moment; `downloadLecture` then throws
+ * `cancelled`, which its caller swallows rather than reporting as a failure.
+ *
+ * Returns false when nothing was running — the download beat the click.
+ */
+export async function cancelLectureDownload(
+  id: string,
+  source: SourceNum = 1,
+): Promise<boolean> {
+  return invoke<boolean>("echo360_cancel_download", { mediaId: id, source });
+}
+
+/** True when a rejected `downloadLecture` was cancelled rather than broken. */
+export function wasCancelled(e: unknown): boolean {
+  return String(e).includes("cancelled");
+}
+
+/**
+ * Delete a lecture's downloaded video and forget its path. Both streams by
+ * default; the transcript, chapters and recap notes are deliberately kept.
+ * Resolves to the bytes freed.
+ */
+export async function deleteLectureVideo(
+  id: string,
+  source: SourceNum | null = null,
+): Promise<number> {
+  const freed = await invoke<number>("echo360_delete_video", {
+    mediaId: id,
+    source,
+  });
+  await clearLectureVideoPath(id, source);
+  window.dispatchEvent(new CustomEvent(LECTURE_DOWNLOADED_EVENT, { detail: id }));
+  return freed;
 }
 
 /** Subscribe the store to backend progress events. Mount once at the app root. */
@@ -104,7 +145,7 @@ export function watchLectureDownloads(): () => void {
     const p = e.payload;
     const key = dlKey(p.mediaId, p.source);
     useLectureDownloads.setState((s) => ({ progress: { ...s.progress, [key]: p } }));
-    if (p.phase === "complete" || p.phase === "error") {
+    if (SETTLED.includes(p.phase)) {
       setTimeout(() => {
         useLectureDownloads.setState((s) => {
           const progress = { ...s.progress };

@@ -7,6 +7,7 @@ const TABS = [
   { to: "storage", label: "Storage" },
   { to: "library", label: "Library" },
   { to: "browser", label: "Browser" },
+  { to: "appearance", label: "Appearance" },
 ] as const;
 
 /**

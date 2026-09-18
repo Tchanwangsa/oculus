@@ -13,6 +13,7 @@ import SubjectsIndexPage from "@/pages/SubjectsIndexPage";
 import SubjectOverviewPage from "@/pages/subject/OverviewPage";
 import SubjectModulesPage from "@/pages/subject/ModulesPage";
 import SubjectDownloadsPage from "@/pages/subject/DownloadsPage";
+import SubjectUploadsPage from "@/pages/subject/UploadsPage";
 import SubjectLecturesPage from "@/pages/subject/LecturesPage";
 import SubjectAnnouncementsPage from "@/pages/subject/AnnouncementsPage";
 import SubjectAssignmentsPage from "@/pages/subject/AssignmentsPage";
@@ -28,6 +29,7 @@ import SettingsAiPage from "@/pages/settings/AiPage";
 import SettingsStoragePage from "@/pages/settings/StoragePage";
 import SettingsLibraryPage from "@/pages/settings/LibraryPage";
 import SettingsBrowserPage from "@/pages/settings/BrowserPage";
+import SettingsAppearancePage from "@/pages/settings/AppearancePage";
 
 /**
  * The route table, shared by every tab. Each tab builds its own memory router
@@ -84,6 +86,7 @@ export const routes: RouteObject[] = [
           { index: true, element: <SubjectOverviewPage /> },
           { path: "modules", element: <SubjectModulesPage /> },
           { path: "downloads", element: <SubjectDownloadsPage /> },
+          { path: "uploads", element: <SubjectUploadsPage /> },
           { path: "lectures", element: <SubjectLecturesPage /> },
           { path: "announcements", element: <SubjectAnnouncementsPage /> },
           { path: "assignments", element: <SubjectAssignmentsPage /> },
@@ -107,6 +110,7 @@ export const routes: RouteObject[] = [
           { path: "storage", element: <SettingsStoragePage /> },
           { path: "library", element: <SettingsLibraryPage /> },
           { path: "browser", element: <SettingsBrowserPage /> },
+          { path: "appearance", element: <SettingsAppearancePage /> },
         ],
       },
       // Old top-level /lectures had no subject — send it to the picker.

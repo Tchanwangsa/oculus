@@ -68,7 +68,7 @@ export type IconSpec =
 export type SearchTarget =
   /** A route, opened in the surface's own way. */
   | { kind: "route"; path: string }
-  /** A binary the app cannot render — a .zip, a .xlsx — which leaves for the
+  /** A binary the app cannot render — a .zip, a .mp3 — which leaves for the
    *  system viewer the way any file row in the app does. */
   | { kind: "file"; file: LibraryFileHit }
   /** A web page: the in-app browser, never Safari. */
@@ -195,7 +195,7 @@ function fileItem(f: LibraryFileHit): SearchItem {
     icon: glyph(categoryIconFor(f)),
     label: fileTitle(f),
     meta: displayCode(f.subject_code),
-    // A binary we cannot render — a .zip, a .xlsx — has no page to go to.
+    // A binary we cannot render — a .zip, a .mp3 — has no page to go to.
     target:
       f.category === "file" && !isPdfBacked(f.filename)
         ? { kind: "file", file: f }
@@ -403,7 +403,7 @@ export interface OpenSearchOptions {
 export function openSearchItem(item: SearchItem, o: OpenSearchOptions): void {
   switch (item.target.kind) {
     case "file":
-      // Out to the system viewer: there is no route to take a .xlsx to, and
+      // Out to the system viewer: there is no route to take a .mp3 to, and
       // ⌘ changes nothing about where it opens.
       openFileSmart(item.target.file);
       return;

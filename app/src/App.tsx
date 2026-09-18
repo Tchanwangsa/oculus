@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { applyTheme, getStoredTheme } from "@/lib/theme";
+import { applyTheme, getStoredTheme, watchSystemTheme } from "@/lib/theme";
 import { getDb, reconcileStaleSyncRuns } from "@/lib/db";
 import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useQualitySweep } from "@/hooks/useQualitySweep";
@@ -32,12 +32,7 @@ export default function App() {
       })
       .catch((e) => console.error("db init failed", e));
 
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = () => {
-      if (getStoredTheme() === "system") applyTheme("system");
-    };
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
+    return watchSystemTheme();
   }, []);
 
   // The shell is no longer a route element: it is above every tab's router

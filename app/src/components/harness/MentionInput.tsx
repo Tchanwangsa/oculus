@@ -554,8 +554,13 @@ export function MentionInput({
         // `body` and hands it back per tag (`index.css`), and a `div` is not
         // one of the tags — a textarea was. Without it the box cannot be
         // selected in, which in WebKit means it can barely be edited in.
+        // `overflow-x-hidden` is load-bearing, not tidying. Setting the y axis
+        // to `auto` computes the x axis to `auto` too, and with macOS set to
+        // always show scrollbars rather than overlay them, WebKit reserves and
+        // paints a horizontal bar in a box one line tall — across the text.
+        // The content wraps, so there is never anything to scroll sideways.
         className={cn(
-          "max-h-[160px] min-h-[16px] w-full overflow-y-auto break-words whitespace-pre-wrap select-text text-[13px] leading-[16px] outline-none",
+          "max-h-[160px] min-h-[16px] w-full overflow-x-hidden overflow-y-auto break-words whitespace-pre-wrap select-text text-[13px] leading-[16px] outline-none",
           className,
         )}
         onInput={sync}

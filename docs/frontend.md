@@ -27,11 +27,14 @@ this page is the structure.
 | The card/row drag every board and table shares | `app/src/hooks/useCardDrag.ts` |
 | Overlap packing, shared by the week grid and the project timeline | `app/src/lib/lanes.ts` |
 | Agent/model/reasoning picker (settings rows + composer) | `app/src/components/harness/ModelPicker.tsx` |
+| A subject's own files (the Uploads tab) | `app/src/pages/subject/UploadsPage.tsx`, `app/src/lib/uploads.ts`, `app/src-tauri/src/files.rs` |
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
 | Library counts, and the page that composes the two engine sections | `app/src/pages/settings/LibraryPage.tsx` |
 | Parse engine, the MinerU token, the server address + status | `app/src/components/settings/ParserSection.tsx`, `app/src-tauri/src/parse/commands.rs` |
 | Embedding backend, the index run, the re-index it costs, the run estimate and the spend guard | `app/src/components/settings/EmbeddingSection.tsx`, `app/src/components/settings/ReindexConfirmDialog.tsx`, `app/src/stores/indexStore.ts`, `app/src-tauri/src/embed/commands.rs`, `app/src-tauri/src/embed/estimate.rs` |
+| Theme switch (light / dark / system) | `app/src/pages/settings/AppearancePage.tsx`, `app/src/components/settings/AppearanceSection.tsx`, `app/src/lib/theme.ts` |
+| Academic term ordering | `app/src/lib/terms.ts` |
 | Side panel (file/lecture preview) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser (route, toolbar, tab mirror, API) | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/stores/browserStore.ts`, `app/src/lib/browser.ts`, `app/src-tauri/src/browser.rs` |
 | Browser history, autocomplete ranking, site icons | `app/src/lib/browserHistory.ts`, `app/src/components/settings/BrowserHistorySection.tsx` |
@@ -53,8 +56,8 @@ half of a split tab — ⌥⌘T, described under **How it connects** below. `/` 
 redirect to `/chat`. Then `/chat`, `/calendar`, `/projects`,
 `/projects/:projectId` and `/projects/:projectId/tasks/:taskId`, `/tasks` and
 `/tasks/:taskId`, `/subjects`, `/subjects/:subjectId` (SubjectLayout →
-overview / modules / downloads / lectures / announcements / assignments /
-discussion / projects), `/subjects/:subjectId/file` and `/lecture` (the side
+overview / modules / downloads / uploads / lectures / announcements /
+assignments / discussion / projects), `/subjects/:subjectId/file` and `/lecture` (the side
 panel promoted to a full Notion-style page, outside SubjectLayout on purpose),
 `/sync`, and `/settings/*`. Legacy routes (`/lectures`, a subject's `files`
 tab) redirect.
@@ -227,6 +230,35 @@ tab is plainly *Chat*.
   ([parsing.md](./parsing.md)). A token MinerU refuses mid-parse shows as
   Expired, read from that latch in `parseStore` rather than polled: the state
   is session-scoped, because the next parse reads the keychain afresh.
+- A lecture row in `app/src/pages/subject/LecturesPage.tsx` carries its own
+  controls: download when there is no file, percentage plus a cancel while one
+  is transferring, and a ✓ plus a delete once it is on disk. Cancel disappears
+  during `trimming` — that phase is ffmpeg on a complete file, with no
+  transfer left to stop. Deleting asks first, because a download is minutes of
+  transfer, and says what it keeps. They are `div`s with a button role
+  (`RowAction`), not `<button>`s: the row itself is a button, nesting one is
+  invalid HTML and WebKit drops the inner element's clicks.
+- Settings → Appearance owns the theme. `applyTheme` in
+  `app/src/lib/theme.ts` is the only writer of both the `.dark` class and the
+  stored preference, so the control keeps no state of its own. `system`
+  resolves the OS preference *and* keeps following it — `watchSystemTheme`,
+  started once in `App.tsx`, re-applies on change so an evening switch to dark
+  lands without a relaunch. An explicit light/dark choice ignores the OS.
+- Subject lists order by term through `app/src/lib/terms.ts`, not by
+  comparing term names as text. Canvas names them `"2026 Summer Term"` /
+  `"2026 Semester 2"`, and `Su` > `Se`, so a plain string sort files Summer
+  *last* in its year when it runs first. `TERM_RANK_SQL` inlines the same
+  ranking as a `CASE` for the query in `getSubjects`.
+- **`getSubjects` derives `is_current`; it does not read the column.** The
+  stored flag is stamped at sync time by `list_courses` in
+  `app/src-tauri/src/sync.rs`, which takes the newest term with `.max()` over
+  term *names* — so a single summer enrolment outranks the semester actually
+  being studied and marks every real subject past. Recomputing at read time
+  costs one pass, cannot go stale between syncs, and keeps the current/past
+  split, the chat subject picker and the project pickers honest. The column
+  itself is written correctly too — `app/src-tauri/src/terms.rs` is the same
+  ranking, and the CLI reads the column — but deriving here means a database
+  stamped by an older build is not believed.
 - **Backend events are the write path.** `app/src/hooks/useBackendEvents.ts`
   (mounted once in `App.tsx`) listens for scrape/parse/auth Tauri events,
   upserts SQLite through `app/src/lib/db.ts`, and updates the stores. Pages
@@ -290,13 +322,51 @@ tab is plainly *Chat*.
   with the history table and interrupted runs never count as a sync.
 - `SubjectLayout` resolves the subject once and hands it to tab pages via
   outlet context — tab pages must not re-fetch it. Its underline tabs are a
-  **sideways scroller**, not a row that gets clipped: eight tabs already crowd
+  **sideways scroller**, not a row that gets clipped: nine tabs already crowd
   the centred column and the card is narrower still with the side panel docked
   open, so the row scrolls with its bar hidden, a fade over each live edge (the
   sidebar's affordance) and the active tab scrolled into view. The `-mb-px`
   that lands the active underline on the header's border sits on the scroller,
   not on the tabs: `overflow-x` clips on both axes, so inside it the underline
   would go with it.
+- **Uploads is the one subject tab whose rows nothing scraped**, and it is
+  thin because it has to add almost nothing. `import_uploads` copies the picked
+  bytes into `courses/<code>/uploads/` and converts Office documents there the
+  same way a download is converted; from that moment the file is an ordinary
+  library file, so the parse sweep, the embed hop, ⌘K, semantic search and the
+  chat agent's `courses/` all reach it without knowing it was never on Canvas.
+  What `app/src/lib/uploads.ts` adds is the `files` row and the first parse
+  kick — **in that order**, because `embedAfterParse` in `useBackendEvents`
+  resolves a finished parse back to a file by `(subject_id, relative_path)`,
+  and a file parsed before its row exists would never be indexed.
+  Three choices are worth keeping. The picker and the drag both hand back
+  **paths**, never bytes, so nothing large crosses the IPC bridge. A name
+  already taken steps aside (`notes.pdf` → `notes-2.pdf`) rather than
+  overwriting, except for byte-identical content under the same name, which is
+  the same file again and keeps its parse; adding the wrong file can therefore
+  never destroy the right one. And a Finder drag is a **native window event**
+  (`onDragDropEvent`) rather than an HTML drop — WebKit never sees those files
+  — which means it is the *window's* event, not the page's: every tab stays
+  mounted, so the page scopes it with `useTabActive` or a backgrounded Uploads
+  tab would claim a drop meant for whatever is in front.
+  Deleting is the only destructive control in the library, and its guard is
+  `is_upload_rel` in `app/src-tauri/src/paths.rs`, not a confirmation dialog:
+  only a path under some subject's `uploads/` can be removed at all. It takes
+  the converted PDF and `purge_parse_artifacts` with it, and the `pages` rows
+  too — which `deleteFileRow` writes out by hand, since nothing sets
+  `PRAGMA foreign_keys=ON` and the declared cascade is documentation rather
+  than a guarantee.
+  **A delete cannot fully clean up after itself, so the next write does the
+  rest.** The parse and embed skip checks — `parse_mode` and
+  `embed::is_embedded` — read those artifacts rather than the PDF's bytes, and
+  a parse still in flight when the delete lands writes its `{stem}.md` out
+  afterwards, beside a PDF that is gone — so a later upload handed that freed
+  name would inherit a stale parse. `store_upload` therefore purges the
+  artifacts on the name it is about to use whenever the bytes are not
+  byte-identical to what is there, which is the one case they provably are its
+  own. That purge is also why `purge_parse_artifacts` takes `{stem}_images/`:
+  those figures are referenced only from the markdown it deletes, so keeping
+  them is not a fallback, and both parse tiers rebuild the directory anyway.
 - **The shell is furniture around a floating document.** `AppLayout` puts the
   sidebar and `TopTabBar` straight onto the window ground and renders content
   as an inset rounded card, so neither needs a divider of its own. Two

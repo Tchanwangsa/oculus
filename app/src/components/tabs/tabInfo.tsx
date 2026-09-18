@@ -21,6 +21,7 @@ import type { Subject } from "@/lib/db";
 const SECTION_LABELS: Record<string, string> = {
   modules: "Modules",
   downloads: "Downloads",
+  uploads: "Uploads",
   lectures: "Lectures",
   announcements: "Announcements",
   assignments: "Assignments",

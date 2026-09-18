@@ -1623,7 +1623,10 @@ impl Ctx {
                     let _ = std::io::stdout().flush();
 
                     let outcome = app_lib::echo360::download_url(&session, &l.id, &l.lesson_id, 1)
-                        .and_then(|url| app_lib::echo360::stream_to_file(&url, &raw, &|_| {}))
+                        // Ctrl-C is the CLI's cancel; nothing here can ask to stop.
+                        .and_then(|url| {
+                            app_lib::echo360::stream_to_file(&url, &raw, &|_| {}, &|| false)
+                        })
                         .and_then(|bytes| {
                             if app_lib::echo360::trim_video(ffmpeg, &raw, &final_) {
                                 Ok(bytes)

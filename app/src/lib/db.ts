@@ -6,6 +6,8 @@ import Database from "@tauri-apps/plugin-sql";
 // `new Set(PROVIDERS.map(…))` — and whichever module evaluates second reads
 // `PROVIDERS` in its TDZ and throws at import time.
 import { isProvider, type Provider } from "@/lib/harness";
+import { PDF_BACKED_SQL_LIST } from "@/lib/fileTypes";
+import { compareTermsNewestFirst, TERM_RANK_SQL } from "@/lib/terms";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -159,9 +161,34 @@ export async function getSubjects(): Promise<Subject[]> {
              FROM sync_runs r, json_each(r.subject_codes) j
              WHERE r.status = 'completed' AND j.value = s.code) AS last_synced_at
      FROM subjects s
-     ORDER BY s.is_current DESC, s.term_name DESC, s.name ASC`
+     ORDER BY CAST(substr(s.term_name, 1, 4) AS INTEGER) DESC,
+              ${TERM_RANK_SQL("s.term_name")} DESC,
+              s.name ASC`
   );
-  return rows.map((r) => ({ ...r, is_current: !!r.is_current, selected: !!r.selected }));
+
+  // `is_current` is derived here rather than read from the column. The stored
+  // flag is stamped at sync time by `list_courses` in `sync.rs`, which picks
+  // the newest term with `.max()` over term *names* — and "2026 Summer Term"
+  // beats "2026 Semester 2" as a string while running six months earlier. So
+  // an enrolment in a summer subject silently marks the whole real semester
+  // as past. Recomputing from `terms.ts` costs one pass and cannot go stale
+  // between syncs; the column stays for Rust's own use.
+  const latest = rows
+    .filter((r) => r.workflow_state === "available")
+    .reduce<string | null>(
+      (best, r) => (compareTermsNewestFirst(r.term_name, best) < 0 ? r.term_name : best),
+      null,
+    );
+
+  return rows
+    .map((r) => ({
+      ...r,
+      is_current: r.workflow_state === "available" && r.term_name === latest,
+      selected: !!r.selected,
+    }))
+    // Current term first, then the newest-first order the query already put
+    // them in — Array.prototype.sort is stable, so the groups keep it.
+    .sort((a, b) => Number(b.is_current) - Number(a.is_current));
 }
 
 export async function setSubjectSelected(id: number, selected: boolean): Promise<void> {
@@ -552,6 +579,23 @@ export async function resetFilePipeline(
      WHERE subject_id = $1 AND relative_path = $2`,
     [subjectId, relativePath],
   );
+}
+
+/** Drop one file's row along with its indexed pages — what keeps search from
+ *  ranking a page of a file that is no longer on disk.
+ *
+ *  `pages.file_id` is declared `ON DELETE CASCADE`, but the delete is written
+ *  out anyway: SQLite enforces foreign keys only when `PRAGMA foreign_keys=ON`
+ *  is set per connection, and nothing here sets it — so the constraint is
+ *  documentation, not a guarantee, and orphaned embeddings would outlive the
+ *  file silently.
+ *
+ *  Only uploads are ever deleted this way; a scraped file's row belongs to the
+ *  sync that wrote it. */
+export async function deleteFileRow(id: number): Promise<void> {
+  const db = await getDb();
+  await db.execute(`DELETE FROM pages WHERE file_id = $1`, [id]);
+  await db.execute(`DELETE FROM files WHERE id = $1`, [id]);
 }
 
 export async function markFileAccessed(id: number): Promise<void> {
@@ -953,7 +997,7 @@ export async function getPdfPipelineRows(): Promise<PdfPipelineRow[]> {
     `SELECT subject_id, relative_path, parse_status, embed_status,
             scraped_at, parsed_at, embedded_at
      FROM files
-     WHERE lower(file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')
+     WHERE lower(file_type) IN ${PDF_BACKED_SQL_LIST}
      ORDER BY relative_path ASC`,
   );
 }
@@ -1171,6 +1215,25 @@ export async function updateLectureVideoPath(
     path,
     id,
   ]);
+}
+
+/**
+ * Forget a deleted download. Watch progress, chapters and recap notes stay —
+ * they describe the lecture, not the file, and a re-download restores the
+ * video without re-spending an agent turn on the notes.
+ *
+ * `source: null` clears both streams, matching `echo360_delete_video`.
+ */
+export async function clearLectureVideoPath(
+  id: string,
+  source: SourceNum | null = null
+): Promise<void> {
+  const db = await getDb();
+  const columns = source === null ? ([1, 2] as SourceNum[]) : [source];
+  for (const s of columns) {
+    // The column name is one of two literals, never user input.
+    await db.execute(`UPDATE lectures SET ${videoPathColumn(s)} = NULL WHERE id = $1`, [id]);
+  }
 }
 
 export async function updateLectureTranscriptPath(id: string, path: string): Promise<void> {
