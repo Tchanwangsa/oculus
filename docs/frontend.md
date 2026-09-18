@@ -247,8 +247,10 @@ tab is plainly *Chat*.
 - Subject lists order by term through `app/src/lib/terms.ts`, not by
   comparing term names as text. Canvas names them `"2026 Summer Term"` /
   `"2026 Semester 2"`, and `Su` > `Se`, so a plain string sort files Summer
-  *last* in its year when it runs first. `TERM_RANK_SQL` inlines the same
-  ranking as a `CASE` for the query in `getSubjects`.
+  *last* in its year when it runs first. A month-named term (`"2026 June"`)
+  ranks as the term it runs inside — winter — rather than as unknown, which
+  sorts after every real term. `TERM_RANK_SQL` inlines the same ranking as a
+  `CASE` for the query in `getSubjects`.
 - **`getSubjects` derives `is_current`; it does not read the column.** The
   stored flag is stamped at sync time by `list_courses` in
   `app/src-tauri/src/sync.rs`, which takes the newest term with `.max()` over

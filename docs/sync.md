@@ -31,6 +31,9 @@ One Rust engine scrapes three services. It runs identically inside the app
   chronologically — `"2026 Summer Term"` beats `"2026 Semester 2"` as a
   string while starting six months earlier — so `app/src-tauri/src/terms.rs`
   ranks the term within its year (summer, semester 1, winter, semester 2).
+  A term Canvas names after its month rather than a semester — `"2026 June"`
+  for a winter intensive — takes the rank of the term it falls inside, so it
+  cannot rank as unknown and outrank the semester being studied.
   Before that, one summer enrolment marked a whole year of real subjects as
   past, and a default CLI sync fetched the summer subject alone.
 - **Modules are the driver.** The engine walks each course's modules and
