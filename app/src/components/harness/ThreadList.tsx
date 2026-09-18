@@ -8,6 +8,7 @@ import { displayCode, displayName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const COLLAPSED_KEY = "oculus-chat-groups-collapsed";
+const ORDER_KEY = "oculus-chat-groups-order";
 
 /** How many threads a group shows before it has to be asked for more, and how
  *  many each ask adds. Long-running subjects accumulate dozens of threads, and
@@ -23,6 +24,19 @@ function loadCollapsed(): Set<string> {
     return new Set(Array.isArray(raw) ? raw.filter((k): k is string => typeof k === "string") : []);
   } catch {
     return new Set();
+  }
+}
+
+/** The order the groups have been dragged into, by group key. Only the keys
+ *  that have been arranged are stored — a subject scoped for the first time
+ *  has never been dragged anywhere, so it is not in here and sorts by recency
+ *  like it always did. */
+function loadOrder(): string[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(ORDER_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
   }
 }
 
@@ -60,6 +74,24 @@ function group(
     g.threads.push(t);
   }
   return out;
+}
+
+/**
+ * Recency, overruled by the arrangement the student dragged the headers into.
+ *
+ * Only the groups named in `order` are placed by it; anything else keeps the
+ * recency position it arrived in, **above** them — a subject scoped for the
+ * first time has a conversation in it right now, and burying it under an
+ * arrangement made before it existed would hide the thread that put it there.
+ * A drop writes every key back, so the surprise lasts exactly until the next
+ * drag. `sort` is stable in every engine this runs on, which is what keeps
+ * the unplaced ones in recency order among themselves.
+ */
+function arrange<T extends { key: string }>(groups: T[], order: string[]): T[] {
+  if (!order.length) return groups;
+  // `indexOf` answers -1 for a key nobody has placed, which is what sorts it
+  // above every key somebody has.
+  return groups.slice().sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 }
 
 /**
@@ -125,12 +157,90 @@ export const ThreadList = memo(function ThreadList({
   // How many threads each group has been asked to show, over the default page.
   // Deliberately not persisted: a fresh window starts every group short again.
   const [shown, setShown] = useState<Record<string, number>>({});
+  // The arrangement the headers have been dragged into, and the drag in
+  // flight: which group is lifted and which gap it would drop into.
+  const [order, setOrder] = useState<string[]>(loadOrder);
+  const [drag, setDrag] = useState<{ key: string; at: number } | null>(null);
+  // Each group's box, for the maths a drag does. A ref rather than state:
+  // it is read when a drag starts and never drawn from.
+  const boxes = useRef(new Map<string, HTMLDivElement>());
+  // A drag ends in a `click` on the header it started from, since the pointer
+  // went down and up on the same button. Without this that click would fold
+  // the group you had just finished moving.
+  const dragged = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...folded]));
   }, [folded]);
 
-  const groups = useMemo(() => group(threads, subjects), [threads, subjects]);
+  const groups = useMemo(
+    () => arrange(group(threads, subjects), order),
+    [threads, subjects, order],
+  );
+
+  /**
+   * Dragging a group header to rearrange the column, on pointer events rather
+   * than HTML5 drag-and-drop — the same shape the tab strip's reorder uses
+   * (`components/tabs/TopTabBar.tsx`), and for the same reason: a `dragstart`
+   * that sets no `dataTransfer` is cancelled outright by WebKit, and the
+   * payload nothing reads that buys it back is a trap to maintain.
+   *
+   * A group is as tall as the threads under it, so nothing slides out of the
+   * way here the way the tabs do: what moves is a line drawn in the gap the
+   * group would land in, which is Notion's own answer to the same problem and
+   * survives a list whose boxes are all different heights. Positions are all
+   * read once, when the lift starts, so nothing reflows mid-drag.
+   */
+  const onHeaderPointerDown = (e: React.PointerEvent<HTMLDivElement>, key: string) => {
+    if (e.button !== 0 || groups.length < 2) return;
+    const el = e.currentTarget;
+    const pointerId = e.pointerId;
+    const startY = e.clientY;
+    let edges: number[] = [];
+    let latest: number | null = null;
+    dragged.current = false;
+
+    const onMove = (ev: PointerEvent) => {
+      if (!dragged.current) {
+        if (Math.abs(ev.clientY - startY) < 4) return;
+        dragged.current = true;
+        // The gaps a group can land in: the top of the first box, then the
+        // bottom of each. One more edge than there are groups.
+        const rects = groups.map((g) => boxes.current.get(g.key)!.getBoundingClientRect());
+        edges = [rects[0].top, ...rects.map((r) => r.bottom)];
+      }
+      // The nearest gap to the pointer, which is how a drop reads at the
+      // boundary between two groups rather than only over a box's middle.
+      let at = 0;
+      for (let i = 1; i < edges.length; i++) {
+        if (Math.abs(ev.clientY - edges[i]) < Math.abs(ev.clientY - edges[at])) at = i;
+      }
+      latest = at;
+      setDrag({ key, at });
+    };
+    const end = () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", end);
+      el.removeEventListener("pointercancel", end);
+      if (el.hasPointerCapture(pointerId)) el.releasePointerCapture(pointerId);
+      if (latest != null) {
+        const from = groups.findIndex((g) => g.key === key);
+        const keys = groups.map((g) => g.key);
+        keys.splice(from, 1);
+        // The gap indices are into the list *with* the dragged group still in
+        // it, so a drop below its own position has shifted up by one now that
+        // it is out.
+        keys.splice(latest > from ? latest - 1 : latest, 0, key);
+        setOrder(keys);
+        localStorage.setItem(ORDER_KEY, JSON.stringify(keys));
+      }
+      setDrag(null);
+    };
+    el.setPointerCapture(pointerId);
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+  };
 
   const setGroupOpen = (key: string, open: boolean) =>
     setFolded((prev) => {
@@ -185,7 +295,7 @@ export const ThreadList = memo(function ThreadList({
             and is a no-op in this WebKit — measured: it reports support and
             computes to `stable`, and reserves nothing. Always-on overflow does. */}
         <div className="flex flex-1 flex-col overflow-y-scroll px-2 pb-2">
-          {groups.map((g) => {
+          {groups.map((g, gi) => {
             const open = !folded.has(g.key);
             const busy = g.threads.some((t) => runningIds.has(t.id));
             // The open thread is always drawn, however far down the group it
@@ -195,18 +305,47 @@ export const ThreadList = memo(function ThreadList({
             const limit = Math.max(shown[g.key] ?? PAGE, activeAt + 1);
             const rest = g.threads.length - limit;
             return (
-              <div key={g.key} className="mb-1.5">
+              <div
+                key={g.key}
+                ref={(el) => {
+                  if (el) boxes.current.set(g.key, el);
+                  else boxes.current.delete(g.key);
+                }}
+                className={cn(
+                  "relative mb-1.5",
+                  // The group being carried, lightened so the column reads as
+                  // one box lifted out of it rather than two in two places.
+                  drag?.key === g.key && "opacity-40",
+                )}
+              >
+                {/* Where the drop would land. Drawn on the group above or
+                    below the gap rather than as a row of its own, so nothing
+                    in the list changes height mid-drag and the edges the maths
+                    was captured from stay where they were measured. */}
+                {drag?.at === gi && <DropLine className="-top-1" />}
+                {/* The gap past the last group is the only one with nothing
+                    below it to carry the line. */}
+                {drag?.at === groups.length && gi === groups.length - 1 && (
+                  <DropLine className="-bottom-1" />
+                )}
                 {/* The label and its caret are one control on the left — the
                     caret says folded or not, which belongs beside the name and
                     not beside the `+`, where it read as a second button doing
                     something to the group. The right-hand slot holds the count
                     until hover swaps it for the new-thread `+`. */}
-                <div className="group/head flex items-center gap-1 pl-2.5 pr-1 py-1">
+                <div
+                  onPointerDown={(e) => onHeaderPointerDown(e, g.key)}
+                  className="group/head flex select-none items-center gap-1 pl-2.5 pr-1 py-1">
                   <button
                     type="button"
                     title={g.title}
                     aria-expanded={open}
-                    onClick={() => setGroupOpenAndReset(g.key, !open)}
+                    onClick={() => {
+                      // The click that ends a drag is not a click on the
+                      // header; it is the tail of the move.
+                      if (dragged.current) return;
+                      setGroupOpenAndReset(g.key, !open);
+                    }}
                     className="flex min-w-0 flex-1 items-center gap-0.5 text-left text-[11px] font-medium tracking-wide text-muted-foreground transition-colors hover:text-foreground"
                   >
                     <span className="truncate">{g.label}</span>
@@ -228,6 +367,7 @@ export const ThreadList = memo(function ThreadList({
                       /* A thread started from a folded group would be started out
                          of sight, so the group opens with it. */
                       onClick={() => {
+                        if (dragged.current) return;
                         setGroupOpen(g.key, true);
                         onNew(g.subjectId);
                       }}
@@ -350,6 +490,18 @@ export const ThreadList = memo(function ThreadList({
   );
 });
 
+/** Where a dragged group would land: the accent as a line, not the fill —
+ *  `brand`, since this is the in-flight version of something, and `primary`
+ *  is the colour of a button. Absolute, so it costs the list no height. */
+function DropLine({ className }: { className: string }) {
+  return (
+    <div
+      aria-hidden
+      className={cn("pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-brand", className)}
+    />
+  );
+}
+
 /**
  * The armed state of a row's delete: the confirm itself, and a way out.
  *
@@ -358,6 +510,16 @@ export const ThreadList = memo(function ThreadList({
  * fired, and the row simply stuck on the confirm with no way back. Escape
  * cancels too, and the ✕ is the visible version of the same, for when the way
  * out should not have to be guessed at.
+ *
+ * **Every button here commits on `mousedown`, and that is what makes the
+ * delete work at all.** The same WebKit rule cuts the other way once this
+ * button holds focus: pressing it is a mousedown on something WebKit will not
+ * focus, so it clears the focus it *had* — this button's — and the blur fires
+ * before the click does. The blur cancels, React unmounts the confirm
+ * synchronously, and the click then lands on a node no longer in the tree. So
+ * *Yes* was never delivered and deleting a thread silently did nothing, on
+ * every click, for the same reason the ✕ beside it was already written this
+ * way.
  */
 function ConfirmDelete({
   label,
@@ -377,10 +539,21 @@ function ConfirmDelete({
       <button
         ref={ref}
         type="button"
-        onClick={onConfirm}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          onConfirm();
+        }}
         onBlur={onCancel}
+        /* And the keyboard has to be handled here rather than left to the
+           click a button would normally synthesise, since there is no click
+           handler left to synthesise it into. It is focused on mount, so
+           Enter is the fastest way to confirm and Escape the way out. */
         onKeyDown={(e) => {
           if (e.key === "Escape") onCancel();
+          else if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onConfirm();
+          }
         }}
         className="rounded px-1 text-[10.5px] text-destructive hover:bg-destructive/10"
       >

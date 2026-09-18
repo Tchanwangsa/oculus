@@ -1574,7 +1574,7 @@ fn parse_models(v: &Value) -> Result<Vec<ModelInfo>, String> {
                 id: format!("{provider}/{id}"),
                 display_name: name.to_string(),
                 description: describe(m),
-                default_variant: variants.first().cloned(),
+                default_variant: default_variant(&variants),
                 variants,
                 is_default: false,
                 tool_call: flag(&caps["toolcall"]),
@@ -1603,6 +1603,24 @@ fn variant_ids(v: &Value) -> Vec<String> {
         Some(o) => o.keys().cloned().collect(),
         None => Vec::new(),
     }
+}
+
+/// Where a fresh pick of this model lands. The catalogue names no default
+/// among a model's variants, and the list above arrives in whatever order the
+/// spelling gave it — a JSON map's keys are alphabetical, so taking the first
+/// one *looked* like it meant "high" and would have meant "low" the day a
+/// provider dropped that level. This asks for a level by name instead:
+/// `high` where it exists, then down, since a level stronger than the one
+/// asked for is the expensive way to be wrong. A model whose levels are all
+/// exotic falls back to whatever it has.
+///
+/// The picker sorts the levels themselves (`sortReasoning` in
+/// `app/src/lib/harness.ts`); this only picks among them.
+fn default_variant(variants: &[String]) -> Option<String> {
+    ["high", "medium", "low", "minimal", "none"]
+        .iter()
+        .find_map(|p| variants.iter().find(|v| v.as_str() == *p).cloned())
+        .or_else(|| variants.first().cloned())
 }
 
 fn describe(m: &Value) -> String {
@@ -3112,6 +3130,20 @@ mod tests {
         // never produced.
         assert_eq!(models[1].variants, vec!["high".to_string(), "low".to_string()]);
         assert_eq!(models[1].default_variant.as_deref(), Some("high"));
+    }
+
+    /// The default level is asked for by name, not taken off the front of a
+    /// list whose order is a JSON map's alphabetical accident.
+    #[test]
+    fn the_default_level_is_high_or_the_nearest_below_it() {
+        let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(default_variant(&v(&["low", "medium", "high"])).as_deref(), Some("high"));
+        // Alphabetically first is "low"; the answer is the strongest level at
+        // or below high that the model actually has.
+        assert_eq!(default_variant(&v(&["low", "medium", "xhigh"])).as_deref(), Some("medium"));
+        assert_eq!(default_variant(&v(&["max", "xhigh"])).as_deref(), Some("max"));
+        assert_eq!(default_variant(&[]), None);
     }
 
 

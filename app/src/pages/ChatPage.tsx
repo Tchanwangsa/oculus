@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { SidebarSimple } from "@phosphor-icons/react";
 import { Composer } from "@/components/harness/Composer";
 import { ThreadList } from "@/components/harness/ThreadList";
@@ -83,6 +84,23 @@ export default function ChatPage() {
     store.getState().loadThreads();
     store.getState().loadSubjects();
   }, [store]);
+
+  // The tab wears the conversation's name, the way a project and a lecture tab
+  // wear theirs. `tabInfo` titles a tab from its path alone and has no thread
+  // list to look one up in, so the name travels in the query (`?n=`, the same
+  // spelling `projectHref` uses) and this page is what puts it there — on
+  // opening a thread, and again when the model's own name for it lands, since
+  // a thread is born titled with the first line of its first message and
+  // renamed once the first exchange is done. With nothing open the query goes
+  // and the tab is plainly "Chat". Replace, not push: the back arrow keeps
+  // pointing wherever it did, rather than at the same page under another name.
+  const navigate = useNavigate();
+  const here = useLocation();
+  const tabName = thread?.title?.trim() || "";
+  useEffect(() => {
+    const want = tabName ? `/chat?n=${encodeURIComponent(tabName)}` : "/chat";
+    if (`${here.pathname}${here.search}` !== want) navigate(want, { replace: true });
+  }, [tabName, here.pathname, here.search, navigate]);
 
   // Rate limits are per provider account; the stored snapshot draws the bars
   // straight away, before anything is asked of the provider.
@@ -169,7 +187,11 @@ export default function ChatPage() {
     (id: number) => {
       harnessDeleteThread(id)
         .then(() => store.getState().removed(id))
-        .catch(() => {});
+        // Never silently: a delete that fails leaves the row exactly where it
+        // was, which is indistinguishable from a click that never arrived —
+        // and that is what a swallowed rejection here cost the last time
+        // deleting stopped working.
+        .catch((e) => console.error("harness delete failed", e));
     },
     [store],
   );

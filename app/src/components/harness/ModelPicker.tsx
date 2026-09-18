@@ -22,6 +22,12 @@ export interface PickerProvider {
    *  (`app/src/hooks/useBridgeHealth.ts`). Optional, and absent reads as
    *  `unknown`: a picker given no health draws the way it always did. */
   health?: ProviderHealth;
+  /** What to say instead of "No models available" when this provider is
+   *  installed and its list is empty — `ProviderInfo.emptyNote` in
+   *  `app/src/lib/harness.ts`, carried through so the gate stays a field
+   *  rather than a test on an id. Unset for a provider whose empty list is
+   *  simply its CLI's answer. */
+  emptyNote?: string;
 }
 
 /**
@@ -30,9 +36,11 @@ export interface PickerProvider {
  *
  * The trigger reads `[mark] Model Name Level ⌄`; the menu is a strip of
  * provider tabs (marks, underlined when active), the models of the active
- * provider, and a row of reasoning levels under a rule. Picking a model
- * closes the menu, picking a level does not — the two are usually set
- * together, and the level is the fine adjustment after the coarse one.
+ * provider, and a row of reasoning levels under a rule. **Nothing inside
+ * closes it** — model, level and agent are one decision made in three clicks,
+ * and a menu that shut on the first of them sent you back to the trigger to
+ * finish the thought. It closes the way a menu you are done with closes:
+ * outside click, Escape, or the trigger again.
  *
  * There is no "default" on either row. A turn always names a model and a
  * level, so what the composer shows is what the CLI is told — nothing is
@@ -223,9 +231,32 @@ export function ModelPicker({
               {active?.loading ? (
                 <div className="px-2 py-1.5 text-xs text-muted-foreground">Loading models…</div>
               ) : filtered.length === 0 ? (
-                <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                  {query ? "No models match your search" : "No models available"}
-                </div>
+                query ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No models match your search
+                  </div>
+                ) : active?.emptyNote ? (
+                  // The CLI is here and its list is empty *because of something
+                  // the student can change* — opencode's catalogue is filtered
+                  // by what Settings has checked, so an untouched install
+                  // legitimately offers nothing. `missing` never reaches this
+                  // branch, so what is left is an installed agent, or one whose
+                  // health has not landed; both are the same dead end without
+                  // the note. This is the one place the gate becomes visible to
+                  // someone who never opened Settings, so it must read as a
+                  // step that is missing rather than as a broken menu.
+                  <EmptyNote
+                    note={active.emptyNote}
+                    onSettings={() => {
+                      setOpen(false);
+                      navigateActive("/settings/ai");
+                    }}
+                  />
+                ) : (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No models available
+                  </div>
+                )
               ) : (
                 filtered.map((m) => (
                   <ModelRow
@@ -241,7 +272,6 @@ export function ModelPicker({
                       if (!reasoning || !m.reasoningEfforts.includes(reasoning)) {
                         onReasoning(m.defaultReasoningEffort ?? m.reasoningEfforts[0] ?? null);
                       }
-                      setOpen(false);
                     }}
                   />
                 ))
@@ -309,6 +339,26 @@ function NotInstalled({ label, onSettings }: { label: string; onSettings: () => 
         Chat runs the CLI from this machine, so there is nothing to send to until it is
         on your PATH.
       </p>
+      <Button variant="outline" size="xs" className="mt-2.5" onClick={onSettings}>
+        Open Settings → AI
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * An empty catalogue that has a reason and a way out — `ProviderInfo.emptyNote`
+ * (`app/src/lib/harness.ts`), which today only opencode sets.
+ *
+ * It is the same panel as `NotInstalled` minus the claim about the binary: the
+ * sentence comes from the provider rather than from here, so the picker still
+ * names no provider, and the one action is the same route into Settings → AI
+ * through `navigateActive`, since a popover has no router of its own.
+ */
+function EmptyNote({ note, onSettings }: { note: string; onSettings: () => void }) {
+  return (
+    <div className="px-2 py-3">
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{note}</p>
       <Button variant="outline" size="xs" className="mt-2.5" onClick={onSettings}>
         Open Settings → AI
       </Button>

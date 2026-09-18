@@ -277,7 +277,7 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             .await
             .map(Some)
         }
-        HarnessEvent::ToolFinished { id, ok, output } => {
+        HarnessEvent::ToolFinished { id, ok, output, title } => {
             // Read-modify-write on the JSON: SQLite's json_set is there, but
             // a string round trip is one query fewer to get wrong.
             let row = sqlx::query(
@@ -298,16 +298,32 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
                 .unwrap_or_default();
             meta.ok = Some(*ok);
             meta.output = Some(output.clone());
-            sqlx::query("UPDATE harness_items SET meta = ?2 WHERE id = ?1")
-                .bind(item_id)
-                .bind(serde_json::to_string(&meta).ok())
-                .execute(pool)
-                .await
-                .map_err(|e| e.to_string())?;
+            // A title the bridge only learned on completion (Codex's web
+            // search) replaces the row's own. Skipped when absent or empty,
+            // so every other tool keeps the title it opened with rather than
+            // having it blanked by a finish that had nothing to say.
+            let retitle = title.as_deref().filter(|t| !t.trim().is_empty());
+            match retitle {
+                Some(t) => sqlx::query("UPDATE harness_items SET meta = ?2, content = ?3 WHERE id = ?1")
+                    .bind(item_id)
+                    .bind(serde_json::to_string(&meta).ok())
+                    .bind(t),
+                None => sqlx::query("UPDATE harness_items SET meta = ?2 WHERE id = ?1")
+                    .bind(item_id)
+                    .bind(serde_json::to_string(&meta).ok()),
+            }
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
             Ok(None)
         }
-        HarnessEvent::Error { message } => {
-            insert_item(pool, thread_id, "error", None, Some(message), None).await.map(Some)
+        // The row carries which provider's credentials failed, when they
+        // did: a reload has to be able to draw the same sign-in card the live
+        // event drew, and `meta` on an error row was otherwise unused, so this
+        // costs no migration.
+        HarnessEvent::Error { message, auth } => {
+            let meta = auth.map(|p| serde_json::json!({ "auth": p.as_str() }).to_string());
+            insert_item(pool, thread_id, "error", None, Some(message), meta).await.map(Some)
         }
         HarnessEvent::Usage {
             input_tokens,

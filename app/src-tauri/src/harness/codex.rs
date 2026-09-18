@@ -30,7 +30,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::event::{cap_output, classify, HarnessEvent, RateWindow, ToolKind};
+use super::event::{cap_output, classify, HarnessEvent, Provider, RateWindow, ToolKind};
 use super::{RawLog, Sink};
 
 /// A request that gets no answer in this long is a hung server, not a slow
@@ -47,10 +47,19 @@ pub struct CodexSpawn {
 }
 
 /// How to open a thread. `cwd` is the sandbox's writable root as well as
-/// the working directory — under `workspace-write`, that is the whole
-/// containment story.
+/// the working directory — under `workspace-write`, that plus `writable_files`
+/// is the whole containment story.
 pub struct CodexThreadOpts {
     pub cwd: PathBuf,
+    /// Single files that are writable besides everything under `cwd`: the
+    /// database and its WAL sidecars, so `oculus project` / `oculus task`
+    /// can write the student's board. Without them SQLite fails with
+    /// "attempt to write a readonly database" — see
+    /// `paths::db_write_paths`. Codex's sandbox is the only containment it
+    /// has (there are no per-path tool rules to pair with it, the way
+    /// Claude's `Edit` denies pair with its seatbelt), so this list is
+    /// deliberately three files and not the folder they live in.
+    pub writable_files: Vec<PathBuf>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     /// Appended to Codex's own instructions (`developerInstructions`).
@@ -168,7 +177,10 @@ impl CodexServer {
                 let mid_turn = r.state.lock().unwrap().active_turn.take().is_some();
                 if mid_turn {
                     let tail = stderr_tail.lock().unwrap().join("\n");
-                    (r.sink)(HarnessEvent::error(format!("codex app-server exited (code {code:?})\n{tail}")));
+                    (r.sink)(HarnessEvent::error_for(
+                        Provider::Codex,
+                        format!("codex app-server exited (code {code:?})\n{tail}"),
+                    ));
                     (r.sink)(HarnessEvent::TurnFinished {
                         status: "failed".into(),
                     });
@@ -303,6 +315,14 @@ impl CodexServer {
             // Native questions have no UI yet; a request for one would sit
             // unanswered and hang the turn.
             "features.default_mode_request_user_input": false,
+            // `thread/start` takes a sandbox *mode* and no policy, so the
+            // extra writable files have to arrive as config overrides here;
+            // `turn/start` below sends the same set as a policy object. Both,
+            // because which one governs a given call is the server's business
+            // and a thread that could not write the database would fail the
+            // student's first breakdown.
+            "sandbox_workspace_write.writable_roots": opts.writable_files,
+            "sandbox_workspace_write.network_access": true,
         });
         if let Some(e) = &opts.reasoning_effort {
             config["model_reasoning_effort"] = json!(e);
@@ -365,14 +385,17 @@ impl CodexServer {
         Ok(())
     }
 
-    pub fn start_turn(&self, thread_id: &str, text: &str, opts: &CodexThreadOpts) -> Result<(), String> {
+    /// The turn's own payload, including the sandbox policy that actually
+    /// governs it. A free function so a test can read the containment without
+    /// a server to send it to.
+    fn turn_params(thread_id: &str, text: &str, opts: &CodexThreadOpts) -> Value {
         let mut p = json!({
             "threadId": thread_id,
             "input": [{ "type": "text", "text": text, "text_elements": [] }],
             "approvalPolicy": "never",
             "sandboxPolicy": {
                 "type": "workspaceWrite",
-                "writableRoots": [],
+                "writableRoots": opts.writable_files,
                 "networkAccess": true,
                 "excludeTmpdirEnvVar": false,
                 "excludeSlashTmp": false,
@@ -381,6 +404,11 @@ impl CodexServer {
         if let Some(m) = &opts.model {
             p["model"] = json!(m);
         }
+        p
+    }
+
+    pub fn start_turn(&self, thread_id: &str, text: &str, opts: &CodexThreadOpts) -> Result<(), String> {
+        let p = Self::turn_params(thread_id, text, opts);
         let r = self.request("turn/start", p)?;
         // The turn id also arrives on the `turn/started` notification, but
         // not until the server has warmed its MCP servers and hooks — a
@@ -602,7 +630,7 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
                 _ => "completed",
             };
             if let Some(msg) = p.pointer("/turn/error/message").and_then(|m| m.as_str()) {
-                out.push(HarnessEvent::error(msg));
+                out.push(HarnessEvent::error_for(Provider::Codex, msg));
             }
             // Whatever the agent had said when the turn was cut short. It is
             // committed here rather than left as live text, so the row
@@ -750,6 +778,7 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
                         id,
                         ok: status == "completed" && exit.unwrap_or(0) == 0,
                         output: cap_output(&output),
+                        title: None,
                     });
                 }
                 "fileChange" => {
@@ -767,6 +796,7 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
                         id,
                         ok: status == "completed",
                         output: cap_output(&diffs.join("\n")),
+                        title: None,
                     });
                 }
                 "mcpToolCall" => {
@@ -781,14 +811,28 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
                         id,
                         ok: status == "completed",
                         output: cap_output(&output),
+                        title: None,
                     });
                 }
                 "webSearch" => {
                     ensure_open(&mut out, st, &id, "webSearch", json!({}));
+                    let (title, output) = web_search_detail(item);
                     out.push(HarnessEvent::ToolFinished {
                         id,
-                        ok: status == "completed",
-                        output: String::new(),
+                        // **A finished search carries no `status` at all** —
+                        // measured against 0.153.4, whose completed item is
+                        // the query, the action and the results and nothing
+                        // else. Comparing it to `"completed"` the way the
+                        // arms above do is why every web search the student
+                        // ever ran was drawn `failed` in red while the model
+                        // was quietly answering out of the results it got.
+                        // So: no status is a search that ran, and only a
+                        // status that says otherwise is a failure.
+                        ok: matches!(status.as_str(), "" | "completed"),
+                        output: cap_output(&output),
+                        // The queries are only known now: `item/started`
+                        // announces the search with an empty `query`.
+                        title: Some(title),
                     });
                 }
                 _ => {}
@@ -812,7 +856,7 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
             let msg = p.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or("codex error");
             let will_retry = p.get("willRetry").and_then(|b| b.as_bool()).unwrap_or(false);
             if !will_retry {
-                out.push(HarnessEvent::error(msg));
+                out.push(HarnessEvent::error_for(Provider::Codex, msg));
             }
         }
         // thread/status/changed, mcpServer/*, hook/*, warning, deprecationNotice,
@@ -831,6 +875,44 @@ fn return_label(s: String) -> &'static str {
 
 /// The server can complete an item it never announced (or announce it after
 /// its first delta). Give the timeline an open row to close.
+/// A finished web search, as a row title and an expandable body.
+///
+/// The item says what was searched for twice: `query` is the model's own
+/// summary of it, elided with an ellipsis, and `action.queries` is the list it
+/// actually sent. The list is the truthful one, so the title is its first
+/// entry (with a count of the rest, since one row cannot hold four searches)
+/// and the body is every query followed by every result — titles and URLs,
+/// which are what a student reads a search row to get at.
+fn web_search_detail(item: &Value) -> (String, String) {
+    let queries: Vec<String> = item
+        .pointer("/action/queries")
+        .and_then(|q| q.as_array())
+        .map(|a| a.iter().filter_map(|q| q.as_str()).map(String::from).collect())
+        .unwrap_or_default();
+    let title = match queries.split_first() {
+        Some((first, [])) => first.clone(),
+        Some((first, rest)) => format!("{first} (+{} more)", rest.len()),
+        None => s(item, "query"),
+    };
+
+    let mut body = String::new();
+    for q in &queries {
+        body.push_str(&format!("search: {q}\n"));
+    }
+    let results = item.get("results").and_then(|r| r.as_array());
+    for r in results.into_iter().flatten() {
+        let (t, url) = (s(r, "title"), s(r, "url"));
+        if t.is_empty() && url.is_empty() {
+            continue;
+        }
+        if !body.is_empty() && !body.ends_with("\n\n") {
+            body.push('\n');
+        }
+        body.push_str(&format!("{t}\n{url}\n"));
+    }
+    (title, body)
+}
+
 fn ensure_open(out: &mut Vec<HarnessEvent>, st: &mut ThreadState, id: &str, name: &str, input: Value) {
     if st.open_items.contains_key(id) {
         return;
@@ -849,6 +931,75 @@ fn ensure_open(out: &mut Vec<HarnessEvent>, st: &mut ThreadState, id: &str, name
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the sandbox is, in the two places Codex will read it.
+    ///
+    /// The database's three files are the only writable thing outside the
+    /// thread's cwd, and they are there because `oculus task add` is how a
+    /// plan reaches the board — see `paths::db_write_paths`. `thread/start`
+    /// takes a sandbox *mode* and no policy, so the same set has to go in as
+    /// config overrides as well as on the turn.
+    #[test]
+    fn a_thread_may_write_the_database_and_nothing_else_outside_its_cwd() {
+        let library = std::path::Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
+        let opts = CodexThreadOpts {
+            cwd: library.join("agents"),
+            writable_files: crate::paths::db_write_paths(library),
+            model: Some("gpt-5.3-codex".into()),
+            reasoning_effort: Some("high".into()),
+            instructions: String::new(),
+        };
+        let want = serde_json::json!([
+            "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db",
+            "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-wal",
+            "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-shm",
+        ]);
+
+        let thread = CodexServer::thread_params(&opts);
+        assert_eq!(thread["sandbox"], "workspace-write");
+        assert_eq!(thread["cwd"], library.join("agents").to_string_lossy().as_ref());
+        assert_eq!(thread["config"]["sandbox_workspace_write.writable_roots"], want);
+
+        let turn = CodexServer::turn_params("t1", "hello", &opts);
+        assert_eq!(turn["sandboxPolicy"]["writableRoots"], want);
+        assert_eq!(turn["sandboxPolicy"]["type"], "workspaceWrite");
+        assert_eq!(turn["approvalPolicy"], "never", "a prompt has nowhere to go");
+    }
+
+    /// A real web search, recorded from a thread that ran two of them
+    /// (0.153.4).
+    ///
+    /// The regression it pins: a finished `webSearch` item carries no
+    /// `status`, so comparing it to `"completed"` marked every successful
+    /// search `failed` in the timeline — and the query, which `item/started`
+    /// leaves empty, never reached the row at all.
+    #[test]
+    fn a_web_search_that_worked_is_not_drawn_as_a_failure() {
+        let raw = include_str!("../../fixtures/harness/codex-websearch.ndjson");
+        let mut st = ThreadState::default();
+        let mut events = Vec::new();
+        for line in raw.lines() {
+            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+            let Some(method) = v.get("method").and_then(|m| m.as_str()) else { continue };
+            events.extend(translate(method, &v["params"], &mut st));
+        }
+        assert!(matches!(
+            events.first(),
+            Some(HarnessEvent::ToolStarted { kind: ToolKind::Web, name, .. }) if name == "webSearch"
+        ));
+        let Some(HarnessEvent::ToolFinished { ok, output, title, .. }) = events.last() else {
+            panic!("no finish: {events:?}");
+        };
+        assert!(*ok, "a search with results is not a failure");
+        // Titled with the first real query, and told how many others rode
+        // with it — the row is one line and this search sent four.
+        let title = title.as_deref().unwrap_or_default();
+        assert!(title.starts_with("site:torproject.org bridges obfs4"), "{title}");
+        assert!(title.ends_with("(+3 more)"), "{title}");
+        // Every query, then the results, for the expanded card.
+        assert_eq!(output.matches("search: ").count(), 4);
+        assert!(output.contains("https://support.torproject.org/little-t-tor/circumvention/using-bridges/"));
+    }
 
     /// Replays a recorded `codex app-server` thread (0.153.4) asked to `ls`
     /// the library and describe it.

@@ -29,8 +29,8 @@ pub const SETTINGS_KEY: &str = "job_models";
 pub enum Job {
     /// `oculus lecture chapters` / `lecture_find_chapters`.
     LectureChapters,
-    /// `oculus lecture recap` / `lecture_write_recap`.
-    LectureRecap,
+    /// `oculus lecture reading` / `lecture_write_reading`.
+    LectureReading,
     /// The one-line naming turn after a thread's first exchange.
     ThreadNaming,
 }
@@ -41,7 +41,7 @@ impl Job {
     pub fn key(self) -> &'static str {
         match self {
             Job::LectureChapters => "lectureChapters",
-            Job::LectureRecap => "lectureRecap",
+            Job::LectureReading => "lectureReading",
             Job::ThreadNaming => "threadNaming",
         }
     }
@@ -76,7 +76,7 @@ pub fn default_selection(job: Job) -> JobSelection {
             model: "gpt-5.6-luna".into(),
             reasoning_effort: Some("xhigh".into()),
         },
-        Job::LectureRecap => JobSelection {
+        Job::LectureReading => JobSelection {
             provider: Provider::Codex,
             model: "gpt-5.6-luna".into(),
             reasoning_effort: Some("medium".into()),
@@ -155,16 +155,16 @@ mod tests {
     }
 
     #[test]
-    fn recap_has_its_own_registry_key() {
+    fn the_reading_copy_has_its_own_registry_key() {
         let s = from_json(
-            r#"{"lectureRecap":{"provider":"codex","model":"gpt-5.6-luna","reasoningEffort":"medium"}}"#,
-            Job::LectureRecap,
+            r#"{"lectureReading":{"provider":"codex","model":"gpt-5.6-luna","reasoningEffort":"medium"}}"#,
+            Job::LectureReading,
         )
-        .expect("the recap key resolves");
+        .expect("the reading key resolves");
         assert_eq!(s.provider, Provider::Codex);
         assert_eq!(s.effort(), Some("medium"));
         assert!(from_json(
-            r#"{"lectureRecap":{"provider":"codex","model":"gpt-5.6-luna","reasoningEffort":"medium"}}"#,
+            r#"{"lectureReading":{"provider":"codex","model":"gpt-5.6-luna","reasoningEffort":"medium"}}"#,
             Job::LectureChapters,
         )
         .is_none());
@@ -192,7 +192,7 @@ mod tests {
         let n = default_selection(Job::ThreadNaming);
         assert_eq!(n.provider, Provider::Claude);
         assert_eq!(n.model, "claude-haiku-4-5");
-        let r = default_selection(Job::LectureRecap);
+        let r = default_selection(Job::LectureReading);
         assert_eq!(
             (r.provider, r.model.as_str(), r.effort()),
             (Provider::Codex, "gpt-5.6-luna", Some("medium"))

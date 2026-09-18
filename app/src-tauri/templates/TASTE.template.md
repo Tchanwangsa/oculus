@@ -11,8 +11,9 @@ One bullet per preference, under its heading, written as an instruction —
 "lead with the verdict, then the evidence". Wait until it has been said twice;
 anything true of me that is not an instruction is a memory, not a line here.
 
-Oculus reads this file into the in-app chat's prompt on every message, so keep
-it to preferences that change what an answer looks like.
+The in-app chat is told to read this file before it writes anything for me, so
+keep it to preferences that change what an answer looks like — and short enough
+to be worth opening every time.
 
 ## Writing
 

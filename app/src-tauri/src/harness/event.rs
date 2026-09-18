@@ -141,6 +141,16 @@ pub enum HarnessEvent {
         ok: bool,
         /// Output or error text, capped by the bridge.
         output: String,
+        /// A row title the provider only knew once the call was over, which
+        /// replaces the one [`Self::ToolStarted`] opened with.
+        ///
+        /// Codex's web search is why it exists: its `item/started` carries an
+        /// empty `query` and the real queries arrive with the results, so a
+        /// search row could otherwise never say what was searched for — the
+        /// one thing Claude's `WebSearch` row says from its first event.
+        /// `None` everywhere else, and `None` leaves the row's title alone.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
     },
     Usage {
         input_tokens: u64,
@@ -186,17 +196,43 @@ pub enum HarnessEvent {
         /// `completed`, `interrupted`, `failed`.
         status: String,
     },
-    Error { message: String },
+    Error {
+        message: String,
+        /// Set when the message is the provider saying it has no usable
+        /// credentials. The timeline draws such a row as a sign-in card
+        /// rather than red text, so this is the difference between an error
+        /// a student can act on and one they can only read.
+        auth: Option<Provider>,
+    },
     /// The provider process is gone. The thread stays; the next message
     /// resumes it.
     Exited { code: Option<i32> },
 }
 
 impl HarnessEvent {
+    /// An error with no provider behind it — the manager failing to start a
+    /// bridge, a job that never reached a CLI. `auth` is `None` because there
+    /// is nothing for a student to sign in to.
     pub fn error(message: impl Into<String>) -> Self {
         HarnessEvent::Error {
             message: message.into(),
+            auth: None,
         }
+    }
+
+    /// An error the named provider reported, classified: if it reads as a
+    /// credentials failure, the row says which agent to sign in to.
+    ///
+    /// The classification lives in [`signin::is_auth_failure`](super::signin::is_auth_failure)
+    /// rather than here, because it is the same judgement the sign-in dialog
+    /// makes and there should only be one copy of it. It is deliberately
+    /// narrow: a row that offers a sign-in over an unrelated failure sends a
+    /// student to re-authenticate and leaves them with the same error and one
+    /// less reason to trust the card.
+    pub fn error_for(provider: Provider, message: impl Into<String>) -> Self {
+        let message = message.into();
+        let auth = super::signin::is_auth_failure(provider, &message).then_some(provider);
+        HarnessEvent::Error { message, auth }
     }
 }
 
@@ -231,8 +267,8 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
         "NotebookEdit" => (ToolKind::Edit, base(&s("notebook_path"))),
         "fileChange" => (ToolKind::Edit, s("title")),
         "Grep" | "Glob" | "grep" | "glob" => (ToolKind::Search, s("pattern")),
-        "WebSearch" | "websearch" => (ToolKind::Web, s("query")),
-        "WebFetch" | "webSearch" | "webfetch" => (ToolKind::Web, s("url")),
+        "WebSearch" | "websearch" | "webSearch" => (ToolKind::Web, s("query")),
+        "WebFetch" | "webfetch" => (ToolKind::Web, s("url")),
         // opencode's own file tools. `path`, not `file_path`.
         "read" => (ToolKind::Read, base(&s("path"))),
         "edit" => (ToolKind::Edit, base(&s("path"))),

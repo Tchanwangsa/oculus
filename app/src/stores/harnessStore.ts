@@ -369,7 +369,14 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
               if (rows[i].kind === "tool" && rows[i].ref_id === event.id) {
                 const meta = rows[i].meta ? JSON.parse(rows[i].meta!) : {};
                 rows = [...rows];
-                rows[i] = { ...rows[i], meta: JSON.stringify({ ...meta, ok: event.ok, output: event.output }) };
+                rows[i] = {
+                  ...rows[i],
+                  // A title the bridge only learned on completion replaces the
+                  // row's own, the same way Rust replaces it on the stored row
+                  // — see `ToolFinished` in `app/src-tauri/src/harness/event.rs`.
+                  content: event.title?.trim() ? event.title : rows[i].content,
+                  meta: JSON.stringify({ ...meta, ok: event.ok, output: event.output }),
+                };
                 break;
               }
             }
@@ -380,7 +387,11 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           break;
         }
         case "error":
-          push(rowFrom(env, "error", event.message));
+          // Rust persists the same fact on the row it just wrote
+          // (`meta` is `{"auth":"claude"}` for a credentials failure), so the
+          // live row has to carry it too — otherwise the sign-in card the
+          // student needs right now would only appear after a reload.
+          push(rowFrom(env, "error", event.message, event.auth ? { auth: event.auth } : undefined));
           break;
         // The queue is Rust's; this only draws it. `queued` is both "new" and
         // "edited" — the id is the key either way.

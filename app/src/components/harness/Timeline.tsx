@@ -15,15 +15,29 @@ import {
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import { MATH, MD_COMPONENTS, normalizeMath } from "@/components/markdown/MdComponents";
+import { FileChip } from "@/components/markdown/FileChip";
+import { openLibraryPath, splitLibraryPaths } from "@/lib/openFile";
+import { attachmentSrc } from "@/lib/attachments";
+import { selectionMarkdown } from "@/lib/selectionMarkdown";
+import { useDataDir } from "@/hooks/useDataDir";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format";
 import { fmtTime } from "@/lib/lectures";
-import { messageAt, parseToolMeta, type HarnessItem, type ToolKind } from "@/lib/harness";
+import {
+  messageAt,
+  parseErrorMeta,
+  parseToolMeta,
+  type HarnessItem,
+  type Provider,
+  type ToolKind,
+} from "@/lib/harness";
+import { useSignInStatus } from "@/hooks/useSignInStatus";
 import { useHarnessStore } from "@/stores/harnessStore";
 import { cn, copyText } from "@/lib/utils";
 import { ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
+import { SignInDialog, useSignIn } from "./SignInDialog";
 
 /** Editing a question, or one still waiting to be asked, both happen in the
  *  bubble itself rather than back in the composer: the thread is where the
@@ -214,6 +228,10 @@ function MessageActions({
 }) {
   return (
     <div
+      // Furniture, not the conversation: a selection dragged across several
+      // messages must not come out with a clock time between them
+      // (`selectionMarkdown`).
+      data-copy-skip
       className={cn(
         "-mt-0.5 flex h-8 items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100",
         side === "right" ? "justify-end" : "pl-1",
@@ -295,8 +313,15 @@ function QuestionBubble({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  // One IPC call for the whole app, so a thread of bubbles costs nothing
+  // (`useDataDir`). Only a bubble holding a picture ever reads it.
+  const dataDir = useDataDir();
   const [body, long] = useOverflows(text, editing === null);
   const box = useRef<HTMLTextAreaElement>(null);
+  // The mentions in the question, drawn as the chips they were picked as
+  // rather than as the paths the agent was sent. Split on shape, so a bubble
+  // costs no query — see `splitLibraryPaths`.
+  const parts = useMemo(() => splitLibraryPaths(text), [text]);
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -365,11 +390,36 @@ function QuestionBubble({
             )}
             style={long && !open ? { maxHeight: QUESTION_MAX_H } : undefined}
           >
-            {text}
+            {parts.map((p, i) => {
+              if (p.kind === "text") return p.text;
+              if (p.kind === "image") {
+                // The picture itself, not a chip: what was attached is what
+                // the question was about, and a filename of digits says
+                // nothing about it. Clicking opens it full size the way any
+                // other file in the library opens.
+                return (
+                  <img
+                    key={i}
+                    src={attachmentSrc(dataDir, p.path)}
+                    alt="Attached picture"
+                    onClick={() => openLibraryPath(p.path)}
+                    className="my-1 max-h-64 w-auto max-w-full cursor-pointer rounded-lg border border-border"
+                  />
+                );
+              }
+              return (
+                <FileChip
+                  key={i}
+                  path={p.path}
+                  onClick={(newTab) => openLibraryPath(p.path, newTab)}
+                />
+              );
+            })}
           </div>
           {long && (
             <button
               type="button"
+              data-copy-skip
               aria-expanded={open}
               onClick={() => setOpen((o) => !o)}
               className="mt-1.5 flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
@@ -488,6 +538,7 @@ const Item = memo(function Item({
   dim,
   actions,
   asked,
+  onSignIn,
 }: {
   item: HarnessItem;
   dim: boolean;
@@ -496,6 +547,11 @@ const Item = memo(function Item({
   /** For an answer: the question above it. Memoised with `items`, so the
    *  object identity is as stable as the rows are. */
   asked?: { id: number; text: string };
+  /** Opens the sign-in dialog for a signed-out agent. It is `setState` from
+   *  the `Timeline` below, so its identity is stable on the same terms
+   *  `actions` is — the dialog has to outlive this row re-rendering, and a
+   *  fresh closure per render would un-memoise every row in the thread. */
+  onSignIn?: (provider: Provider) => void;
 }) {
   switch (item.kind) {
     case "user":
@@ -507,7 +563,9 @@ const Item = memo(function Item({
     case "tool":
       return <Tool item={item} dim={dim} />;
     case "error":
-      return <ErrorRow text={item.content ?? ""} />;
+      return (
+        <ErrorRow text={item.content ?? ""} auth={parseErrorMeta(item).auth} onSignIn={onSignIn} />
+      );
     case "interrupted":
       return <Stopped />;
   }
@@ -577,6 +635,43 @@ function Pending({ threadId, actions }: { threadId: number; actions: PendingActi
   );
 }
 
+/**
+ * Copying out of a thread gives **markdown**, not the words as they are set.
+ *
+ * What the browser would put on the clipboard is the rendering: a heading
+ * without its `#`, a table as a run of words, a formula as KaTeX's glyphs. The
+ * Copy button under a message has the source string and hands that over; a
+ * selection dragged across half an answer has no source string, so the DOM
+ * inside it is read back into markdown instead (`lib/selectionMarkdown.ts`).
+ *
+ * Only `text/plain` is written, which is the flavour a notes app, an editor
+ * and another agent all take. Plain text is a later choice — the right-click
+ * menu this app does not have yet is where it belongs.
+ */
+function markdownFor(target: EventTarget | null): string {
+  // A selection inside a field belongs to the field, and it is already text.
+  if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) {
+    return "";
+  }
+  return selectionMarkdown(window.getSelection());
+}
+
+function copyAsMarkdown(e: React.ClipboardEvent) {
+  const md = markdownFor(e.target);
+  if (!md) return;
+  e.clipboardData.setData("text/plain", md);
+  // Without this the browser writes its own flavours over ours.
+  e.preventDefault();
+}
+
+/** The same text, dragged out instead of copied. **No `preventDefault` here**:
+ *  on `dragstart` that cancels the drag outright (CLAUDE.md) — `setData` alone
+ *  replaces what WebKit had already put on the transfer. */
+function dragAsMarkdown(e: React.DragEvent) {
+  const md = markdownFor(e.target);
+  if (md) e.dataTransfer.setData("text/plain", md);
+}
+
 export interface PendingActions {
   editQueued: (queueId: string, text: string) => void;
   unqueue: (queueId: string) => void;
@@ -596,6 +691,24 @@ export function Timeline({
   questions?: QuestionActions;
   pending?: PendingActions;
 }) {
+  /**
+   * Which agent's sign-in dialog is open, if any.
+   *
+   * Here rather than inside the row that offers it, for the reason the install
+   * run sits in its Settings section: the dialog and the flow behind it have
+   * to survive the row re-rendering — and a thread re-renders constantly, both
+   * ends of every turn. `setSignIn` is React's own setter, so handing it
+   * straight to a memoised `Item` costs that memoisation nothing.
+   *
+   * It lives in `Timeline` rather than in `ChatPage` because the timeline is
+   * the surface that is in two places: the chat page and the lecture player's
+   * dock. A failed turn shows the same card in both, so the dialog has to be
+   * in both too.
+   */
+  const [signIn, setSignIn] = useState<Provider | null>(null);
+  const { recheck } = useSignInStatus();
+  const run = useSignIn(recheck);
+
   const rows = useMemo(() => buildRows(items, running), [items, running]);
   // Which question each answer answered — what Retry asks again. Built with
   // the rows so the object handed to a memoised row keeps its identity.
@@ -609,7 +722,11 @@ export function Timeline({
     return map;
   }, [items]);
   return (
-    <div className="flex min-w-0 flex-col gap-2">
+    <div
+      className="flex min-w-0 flex-col gap-2"
+      onCopy={copyAsMarkdown}
+      onDragStart={dragAsMarkdown}
+    >
       {rows.map((r) =>
         r.kind === "bundle" ? (
           <Bundle key={r.id} items={r.items} />
@@ -620,12 +737,30 @@ export function Timeline({
             dim={r.dim}
             actions={questions}
             asked={asked.get(r.item.id)}
+            onSignIn={setSignIn}
           />
         ),
       )}
       {threadId != null && <ContextDrift threadId={threadId} />}
       {threadId != null && <LiveTail threadId={threadId} />}
       {threadId != null && pending && <Pending threadId={threadId} actions={pending} />}
+      {signIn && (
+        <SignInDialog
+          provider={signIn}
+          run={run.run?.provider === signIn ? run.run : null}
+          onStart={() => run.start(signIn)}
+          onCode={(code) => run.submitCode(code)}
+          onCancel={() => run.cancel()}
+          onClose={() => {
+            // A finished run is cleared with the dialog, so reopening the card
+            // offers the sign-in again rather than a log of what already
+            // happened. One still in flight is kept — the browser is still
+            // open on it — and reopening resumes the same run.
+            if (run.run?.result) run.clear();
+            setSignIn(null);
+          }}
+        />
+      )}
     </div>
   );
 }

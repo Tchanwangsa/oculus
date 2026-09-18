@@ -21,6 +21,15 @@
 //!   Bash while it does. That is what turns `echo x > ../courses/f` into
 //!   "operation not permitted" instead of a file, and what lets a piped
 //!   `oculus files | head` run without an approval it could never get.
+//!   The one exception is the database, which is writable *as three files*
+//!   (`oculus.db` and its WAL sidecars) because `oculus project` / `oculus
+//!   task` are how a plan becomes the board's rows, and SQLite answers a
+//!   sandbox that will not let it touch `oculus.db-wal` with "attempt to
+//!   write a readonly database" — which is what every `oculus task add` from
+//!   a thread used to do. The `Edit` deny on `oculus.db*` stays, so the file
+//!   tools still cannot open it, and `sqlite3` is denied by name: the CLI is
+//!   the only door, because it is the only thing that knows what a valid row
+//!   is.
 //! - Deny rules on `Edit` for every sibling of `agents/`, because `--add-dir`
 //!   would otherwise put the courses inside `acceptEdits`' reach. Deny beats
 //!   allow in the CLI's rule order, so the siblings are named rather than
@@ -40,7 +49,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::event::{cap_output, classify, HarnessEvent, RateWindow};
+use super::event::{cap_output, classify, HarnessEvent, Provider, RateWindow};
 use super::{RawLog, Sink};
 
 pub struct ClaudeSpawn {
@@ -197,7 +206,7 @@ impl ClaudeSession {
                 } else {
                     format!("claude exited (code {code:?}) mid-turn:\n{tail}")
                 };
-                sink(HarnessEvent::error(msg));
+                sink(HarnessEvent::error_for(Provider::Claude, msg));
                 sink(HarnessEvent::TurnFinished {
                     status: "failed".into(),
                 });
@@ -334,7 +343,7 @@ impl Drop for ClaudeSession {
 fn settings_json(library: &std::path::Path, cwd: &std::path::Path) -> String {
     let root = library.display().to_string();
     let abs = root.trim_start_matches('/');
-    let deny: Vec<String> = [
+    let mut deny: Vec<String> = [
         "courses/**",
         "lectures/**",
         "canvas-session/**",
@@ -347,6 +356,23 @@ fn settings_json(library: &std::path::Path, cwd: &std::path::Path) -> String {
         .iter()
         .map(|p| format!("Edit(//{abs}/{p})"))
         .collect();
+    // The database is writable at the OS level (see `allowWrite` below), so
+    // the one command that could go around the CLI with it is named here.
+    // `oculus task` knows that a column id must exist and that a breakdown is
+    // one transaction; a hand-written `UPDATE` knows neither, and a mangled
+    // board is the one thing in the library that no re-sync repairs.
+    deny.push("Bash(sqlite3:*)".to_string());
+
+    // The cwd — `agents/` — plus the database's three files. Nothing else in
+    // the library is writable from a thread; see `paths::db_write_paths` for
+    // why it is the files and not the folder they are in.
+    let write: Vec<String> = std::iter::once(cwd.display().to_string())
+        .chain(
+            crate::paths::db_write_paths(library)
+                .iter()
+                .map(|p| p.display().to_string()),
+        )
+        .collect();
     serde_json::json!({
         "permissions": { "deny": deny },
         "sandbox": {
@@ -355,7 +381,7 @@ fn settings_json(library: &std::path::Path, cwd: &std::path::Path) -> String {
             "autoAllowBashIfSandboxed": true,
             "allowUnsandboxedCommands": false,
             "network": { "allowLocalBinding": true },
-            "filesystem": { "allowWrite": [cwd.display().to_string()] },
+            "filesystem": { "allowWrite": write },
         },
         "autoMemoryEnabled": false,
     })
@@ -552,6 +578,7 @@ impl Translator {
                         id,
                         ok: !is_error,
                         output: cap_output(&output),
+                        title: None,
                     });
                 }
             }
@@ -610,7 +637,7 @@ impl Translator {
                         })
                         .filter(|s| !s.is_empty())
                         .unwrap_or_else(|| format!("claude: {subtype}"));
-                    out.push(HarnessEvent::error(msg));
+                    out.push(HarnessEvent::error_for(Provider::Claude, msg));
                 }
                 let status = if interrupted {
                     "interrupted"
@@ -788,6 +815,51 @@ fn tool_result_text(block: &Value, structured: Option<&Value>) -> String {
 mod tests {
     use super::*;
     use crate::harness::event::ToolKind;
+
+    /// The containment, as the CLI will read it — the counterpart of
+    /// opencode's `the_rendered_config_denies_the_right_things`.
+    ///
+    /// Two halves that have to agree: the seatbelt may write the thread's cwd
+    /// and the database's three files and nothing else, and the file tools are
+    /// denied every sibling of `agents/` *including* the database, so the only
+    /// way a row reaches the board is the `oculus` CLI. `sqlite3` is named
+    /// because the sandbox can no longer stop it.
+    #[test]
+    fn the_settings_document_opens_the_database_and_nothing_else() {
+        let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
+        let cwd = library.join("agents");
+        let v: serde_json::Value =
+            serde_json::from_str(&settings_json(library, &cwd)).expect("valid settings JSON");
+
+        let write = v.pointer("/sandbox/filesystem/allowWrite").unwrap();
+        assert_eq!(
+            write,
+            &serde_json::json!([
+                "/Users/x/Library/Application Support/com.tchan.oculus/agents",
+                "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db",
+                "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-wal",
+                "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db-shm",
+            ]),
+            "the cwd, then the database's three files — nothing else in the library"
+        );
+        assert_eq!(v["sandbox"]["enabled"], true);
+        assert_eq!(v["autoMemoryEnabled"], false);
+
+        let deny: Vec<&str> = v
+            .pointer("/permissions/deny")
+            .and_then(|d| d.as_array())
+            .unwrap()
+            .iter()
+            .filter_map(|r| r.as_str())
+            .collect();
+        for rule in [
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/courses/**)",
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/oculus.db*)",
+            "Bash(sqlite3:*)",
+        ] {
+            assert!(deny.contains(&rule), "missing {rule} in {deny:?}");
+        }
+    }
 
     /// Replays a recorded `claude -p` session and checks the folded shape.
     /// The fixture is the real output of `claude 2.1.267` asked to `ls` the

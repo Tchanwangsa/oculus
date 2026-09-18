@@ -14,8 +14,8 @@
     "external_directory": "allow",
     "task": "deny",
     "question": "deny",
-    "webfetch": "deny",
-    "websearch": "deny",
+    "webfetch": "allow",
+    "websearch": "allow",
     "doom_loop": "deny",
     "edit": {
       "*": "allow",

@@ -13,11 +13,13 @@ import { filterOffered, loadCatalogue } from "@/lib/opencodeCatalogue";
 
 export type Provider = "claude" | "codex" | "opencode";
 
-/** The reasoning levels a turn may ask for. `claude --effort` takes exactly
- *  these; Codex declares its own per model (`CodexModel.reasoningEfforts`),
- *  which is why the picker reads the level list off the *model*, not the
- *  provider. `null` is the absence of a level — the flag is left off and the
- *  agent's own default applies. Labels are bb's. */
+/** The reasoning levels a turn may ask for, **weakest first** — the key order
+ *  here is the canonical one, and `sortReasoning` below is the only thing that
+ *  decides how a level row reads. `claude --effort` takes exactly these; Codex
+ *  declares its own per model (`CodexModel.reasoningEfforts`), which is why
+ *  the picker reads the level list off the *model*, not the provider. `null`
+ *  is the absence of a level — the flag is left off and the agent's own
+ *  default applies. Labels are bb's. */
 export const REASONING_LABELS: Record<string, string> = {
   none: "None",
   minimal: "Minimal",
@@ -31,6 +33,33 @@ export const REASONING_LABELS: Record<string, string> = {
 
 export function reasoningLabel(level: string): string {
   return REASONING_LABELS[level] ?? level;
+}
+
+/** Weakest to strongest, from the key order of `REASONING_LABELS` so there is
+ *  one table rather than two that can drift. */
+const REASONING_ORDER = Object.keys(REASONING_LABELS);
+
+/**
+ * A model's levels in the one order a person expects to read them.
+ *
+ * **No provider hands them over sorted, and one of them hands them over
+ * alphabetically.** opencode's catalogue spells `variants` as an object keyed
+ * by level id, and a JSON map has no order worth keeping, so the levels
+ * arrived as High · Low · Max — which reads like a ranking and is not one.
+ * Sorting here rather than at each source covers all three catalogues,
+ * including a Codex that adds a level to an existing model tomorrow.
+ *
+ * A level this build has no name for keeps its place at the end, in the order
+ * the provider gave it: an unknown id is already shown verbatim by
+ * `reasoningLabel`, and guessing where it ranks would be worse than tacking
+ * it on.
+ */
+export function sortReasoning(levels: string[]): string[] {
+  const rank = (l: string) => {
+    const i = REASONING_ORDER.indexOf(l);
+    return i === -1 ? REASONING_ORDER.length : i;
+  };
+  return [...levels].sort((a, b) => rank(a) - rank(b));
 }
 
 /** One row of the model picker: the id the CLI is given, the name a person
@@ -428,7 +457,7 @@ export function codexAsModels(models: CodexModel[]): HarnessModel[] {
     id: m.id,
     label: m.displayName,
     description: m.description,
-    reasoningEfforts: m.reasoningEfforts,
+    reasoningEfforts: sortReasoning(m.reasoningEfforts),
     defaultReasoningEffort: m.defaultReasoningEffort,
     isDefault: m.isDefault,
   }));
@@ -463,17 +492,20 @@ export interface OpencodeModel {
 /** `opencode models` in the shape `CLAUDE_MODELS` has, so the picker renders
  *  all three catalogues without a special case. */
 export function opencodeAsModels(models: OpencodeModel[]): HarnessModel[] {
-  return models.map((m) => ({
-    id: m.id,
-    label: m.displayName || m.id,
-    description: m.description ?? "",
-    reasoningEfforts: m.variants ?? [],
-    defaultReasoningEffort: m.defaultVariant ?? m.variants?.[0] ?? null,
-    isDefault: m.isDefault ?? false,
-    toolCall: m.toolCall,
-    textInput: m.textInput,
-    textOutput: m.textOutput,
-  }));
+  return models.map((m) => {
+    const variants = sortReasoning(m.variants ?? []);
+    return {
+      id: m.id,
+      label: m.displayName || m.id,
+      description: m.description ?? "",
+      reasoningEfforts: variants,
+      defaultReasoningEffort: m.defaultVariant ?? variants[0] ?? null,
+      isDefault: m.isDefault ?? false,
+      toolCall: m.toolCall,
+      textInput: m.textInput,
+      textOutput: m.textOutput,
+    };
+  });
 }
 
 export function parseUsage(t: HarnessThread | null): ThreadUsage | null {

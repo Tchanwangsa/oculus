@@ -37,6 +37,9 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | Live state, event folding | `app/src/stores/harnessStore.ts` |
 | Page, thread list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` |
 | The `@` menu's candidate files | `searchMentionFiles` in `app/src/lib/db.ts` |
+| The `@` token, the menu and its keys, shared with a task body | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionMenu.tsx` |
+| Pictures pasted or dropped into the composer | `app/src-tauri/src/harness/attach.rs`, `app/src/lib/attachments.ts`, `app/src/hooks/useFileDrop.ts` |
+| A selection copied out of a thread as markdown | `app/src/lib/selectionMarkdown.ts` |
 | Health and the per-job model rows in Settings → AI | `app/src/pages/settings/AiPage.tsx` |
 | opencode's providers and models: the Settings line, the manager, the generic sign-in form | `app/src/components/settings/OpencodeProvidersSection.tsx`, `app/src/components/settings/OpencodeCatalogDialog.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeAuth.ts` |
 | Which opencode models the picker is allowed to offer | `app/src/lib/opencodeCatalogue.ts` |
@@ -362,6 +365,17 @@ often when switching threads quickly, which is when you stop settling on the
 text. The right-hand strip is the one exception and is meant to be: the delete
 control, and a spinner in its place while a turn runs.
 
+**Deleting commits on `mousedown`, and that is the whole feature.** The trash
+arms a *Yes* which takes focus on mount, so that clicking anywhere else backs
+out. But WebKit does not focus a button when you press it — it clears the
+focus it had — so pressing *Yes* blurred *Yes*, the blur cancelled, React
+unmounted the confirm synchronously, and the click then landed on a node no
+longer in the tree. Every delete was dropped, silently, and looked exactly like
+a click that never arrived. So the confirm commits on `mousedown` (with Enter
+and Space handled by hand, since there is no click handler left to synthesise
+them into) the way the ✕ beside it already did, and `ChatPage` no longer
+swallows the rejection if the command itself fails.
+
 **Switching does not blank the timeline.** `open` in `harnessStore` hands the
 rows of the thread being left to the one arriving, for the few milliseconds the
 read takes, and returns early rather than re-reading the thread already open.
@@ -381,6 +395,28 @@ spinner in place of its count while a thread inside it is running, since the
 row that would say so is folded away; and its `+` expands the group before
 opening the new thread, which would otherwise be started out of sight.
 
+**And the groups are the reader's to arrange.** Recency is the default and is
+right for the threads inside a group, but the *order of the subjects* is a
+standing preference — the one you are in this week belongs at the top whether
+or not it was the last one you typed in — so a header drags the group to
+another place in the column and the arrangement is kept in `localStorage`
+beside the folded set. Only the keys that have been dragged are stored: a
+subject scoped for the first time is in none of them and keeps its recency
+position **above** the arranged ones, because it has a conversation in it right
+now and burying it under an order made before it existed would hide the thread
+that created it. A drop writes every key back, so that exception lasts exactly
+until the next drag.
+
+The drag is pointer events, not HTML5 drag-and-drop — the shape the tab strip's
+reorder already uses (`app/src/components/tabs/TopTabBar.tsx`) — which sidesteps
+the `dataTransfer.setData` trap that WebKit cancels a drag over. What it does
+*not* borrow from the tab strip is the live shuffle: a group is as tall as the
+threads under it, so instead of the others sliding out of the way, a line is
+drawn in the gap the group would land in. Every edge is measured once when the
+lift starts and nothing changes height during the drag, so the maths stays
+true. The click that ends a drag is suppressed, or finishing a move would fold
+the group you had just finished moving.
+
 **A group shows five threads and offers the rest.** A subject accumulates
 dozens of conversations, and listing every one of them buries the groups under
 it, so each group draws a page at a time with a *Show N more* row at its tail
@@ -399,6 +435,18 @@ in a bare `WKWebView`: `CSS.supports` returns true and the property computes to
 `stable`, and the content box is the same width with it as without. Always-on
 overflow is the one that reserves; nothing is drawn in the gutter while the
 list fits.
+
+**The tab wears the conversation's name.** A project and a lecture tab are
+titled by the thing they hold, and a chat tab is no different — except that
+nothing links to a thread, so the page is what puts the name in its own route.
+`ChatPage` replaces `/chat` with `/chat?n=<title>` as the open thread changes
+and again when the naming turn below lands, and `tabInfo`
+(`app/src/components/tabs/tabInfo.tsx`) reads the query the way it reads a
+project's. Nothing open means no query, and the tab is plainly *Chat*. One
+thing to know before leaning on it: `activeId` lives in `harnessStore` and
+there is one of it, so two chat tabs are two views of the same open thread and
+will carry the same name. Making them independent means the page owning its
+thread id the way the lecture dock already does, not another query parameter.
 
 **The name is the model's own, and it costs a turn.** Neither CLI names a
 conversation over its protocol — Claude's `stream-json` carries no title
@@ -492,6 +540,39 @@ allowed in its ruleset for parity, since the two that carry a subscription
 have the web natively and an agent that cannot look anything up is a
 different agent.
 
+### Copying out of a thread
+
+**A selection copied or dragged out of the timeline is markdown**, not the
+words as they are set. What a browser would put on the clipboard is the
+*rendering*: a heading without its `#`, a table as a run of words, a formula as
+KaTeX's positioned glyphs — twice over, since KaTeX also emits MathML — and a
+fenced block with no fence. The Copy button under each message has never had
+this problem, because it hands over the message's own source string; a drag
+across half an answer has no source string, so `selectionMarkdown`
+(`app/src/lib/selectionMarkdown.ts`) walks the DOM inside the selection and
+writes markdown back out of it. `Timeline`'s root takes the `copy` and
+`dragstart` events and puts the result on `text/plain`.
+
+Three shapes are handled by name rather than by walking them. A `.katex`
+subtree is read for the `<annotation>` holding its TeX and never descended
+into, which is what keeps one formula from arriving as two unreadable ones. A
+mermaid diagram is an SVG whose labels in document order are not a diagram, so
+the figure carries its own fence source in `data-md`
+(`app/src/components/markdown/Mermaid.tsx`). And the furniture is *marked*, not
+guessed: a message's action row and a "Show more" toggle carry
+`data-copy-skip`, so a selection dragged across several messages does not come
+out with a clock time between them.
+
+Two details are load-bearing. Whitespace is collapsed the way the browser draws
+it **except** where the box says `white-space: pre-wrap`, which is the question
+bubble — its line breaks are the student's own. And the drag handler sets data
+without `preventDefault`, because on `dragstart` that cancels the drag outright
+(root `CLAUDE.md`); only the copy handler prevents the default, or the browser
+writes its own flavours back over ours.
+
+Plain text is deliberately not offered yet: the choice belongs in a right-click
+menu, which this app does not have.
+
 ### Maths in a reply
 
 Coursework here is formulas, so the appended prompt asks for LaTeX — `$…$`
@@ -525,8 +606,8 @@ go through the same components.
 
 A ```mermaid fence in a reply is **drawn**. The renderer is shared with every
 other markdown surface — `app/src/components/markdown/Mermaid.tsx`, reached
-from `MD_COMPONENTS.pre`, and [frontend.md](./frontend.md) has the four
-non-obvious things about how it draws. Two of them are chat's, though:
+from `MD_COMPONENTS.pre`, and [frontend.md](./frontend.md) has the non-obvious
+things about how it draws. Two of them are chat's, though:
 
 - **The prompt has to ask, the same way it does for maths.** A model does not
   volunteer a diagram into a chat it has no reason to think can show one, so
@@ -534,9 +615,9 @@ non-obvious things about how it draws. Two of them are chat's, though:
   a shape beats a sentence, and which diagram types are worth trusting. It
   says to keep LaTeX out of node labels, where KaTeX never runs, and it asks
   for a diagram that can be taken in at a glance — not because a big one
-  cannot be read (clicking it opens it full-window, zoomable and pannable)
-  but because a reply that needs a lightbox to be understood has moved the
-  work onto the reader.
+  cannot be read (the expand control in its corner opens it full-window,
+  zoomable and pannable) but because a reply that needs a lightbox to be
+  understood has moved the work onto the reader.
 - **A fence is seen while it is still being written.** The reply streams, so
   the component is handed `flowchart TD` before the arrows exist and a node
   before its closing bracket. It settles for 150ms, asks `mermaid.parse`
@@ -817,9 +898,11 @@ One control does agent, model and reasoning level —
 `app/src/components/harness/ModelPicker.tsx`, ported from bb's
 `ModelReasoningPicker`. The trigger reads `[mark] Model Name Level ⌄`; the
 menu is a strip of provider marks (underlined when active), the models of the
-active provider, and a row of levels under a rule. Choosing a model closes
-the menu, choosing a level does not — the level is the fine adjustment after
-the coarse one. The marks are the `currentColor` SVGs in
+active provider, and a row of levels under a rule. **Nothing inside the menu
+closes it** — agent, model and level are one decision made in three clicks,
+and a menu that shut on the first of them sent you back to the trigger to
+finish the thought; it closes on an outside click, Escape, or the trigger.
+The marks are the `currentColor` SVGs in
 `app/src/components/harness/ProviderMark.tsx`, monochrome like bb's so they
 sit in the palette rather than fighting the indigo. opencode's is the one
 two-tone mark, and it is still one colour: the vendor's light and dark files
@@ -858,7 +941,7 @@ is still "No models available". The gate is the `health` field and not a test
 on an id, so Claude's static catalogue is withheld on exactly the same terms as
 the two fetched ones, and a fourth agent costs nothing here.
 
-Four things about it are deliberate:
+Five things about it are deliberate:
 
 - **Nothing is defaulted out of sight.** There is no "default model" row and
   no "default" level: every turn names both, so what the composer shows is
@@ -874,13 +957,24 @@ Four things about it are deliberate:
   such list.
 - **Levels belong to the model, not the provider.** `claude --effort` takes
   five (`low`…`max`); Codex declares a subset per model; opencode calls them
-  *variants* and, in 1.18.2, declares none for any of the hundred-odd models
-  reachable here. The picker reads them off the selected row, so a model that
-  only reasons a little never offers a level it would reject — and an
-  opencode model simply draws no level row. That is the intended answer
-  rather than a gap: nothing is invented, the session is created without a
-  `variant`, and a later opencode that fills the field in lights the row up
-  with no code change.
+  *variants*, and the later versions that fill the field in declare a handful
+  per model (`high`/`low`/`max` on most, plus `medium`/`xhigh` on a few) —
+  which is what 1.18.2 declared for nothing and the row was built to light up
+  for. The picker reads them off the selected row, so a model that only
+  reasons a little never offers a level it would reject, and a model that
+  declares none simply draws no level row rather than being offered an
+  invented one.
+- **The levels are sorted here, because no provider hands them over ranked.**
+  opencode spells `variants` as an object keyed by level id, and a JSON map
+  has no order worth keeping, so the row arrived alphabetically — High · Low ·
+  Max, which reads like a ranking and is not one. `sortReasoning` in
+  `app/src/lib/harness.ts` puts every catalogue's levels in the one canonical
+  order, weakest first, taken from the key order of `REASONING_LABELS` so
+  there is one table rather than two that can drift; an id this build has no
+  name for keeps its place at the end. The *default* level is a separate
+  question with the same root — `default_variant` in
+  `app/src-tauri/src/harness/opencode.rs` asks for `high` by name and steps
+  down from there, rather than taking whichever key sorted first.
 - **opencode's list is a filtered one, and the filter is the provider's own
   business.** Its catalogue is the only one that advertises models which
   refuse every request, and the only one a single provider can add three
@@ -1387,6 +1481,20 @@ is a library path counts — a backticked command or flag is prose that happens
 to be fenced and stays monospace, since that is the one place monospace is
 still for code.
 
+**The `@` machinery is one piece, and it is not the composer's.** The token
+parser, the file lookup, the "no markdown" count, the selected row, the
+keyboard handling and the measured flip all live in
+`app/src/components/harness/useMentionMenu.ts` over
+`app/src/components/harness/MentionMenu.tsx`, because a **task body** wants the
+same mentions (`TaskBody` in `app/src/pages/TaskPage.tsx`, `docs/projects.md`).
+A call site supplies only the two things that are genuinely its own: the scope
+`@` narrows to, and what its own Enter means — the menu claims the keys it
+handles by `preventDefault`, so a box whose Enter sends, or saves, is guarded
+by a `defaultPrevented` check and the two never fight over a keystroke. A
+second copy of the menu would have stayed correct exactly until one of them
+grew a rule the other lacked, which is `FileChip`'s argument applied to the
+thing that produces the chip.
+
 That chip is why the composer's box is **no longer a `<textarea>`**: a
 textarea cannot draw an icon inside its text.
 `app/src/components/harness/MentionInput.tsx` is a contenteditable whose
@@ -1403,10 +1511,30 @@ a block, and the explicit `select-text` exists because `index.css` turns
 selection off on `body` and hands it back per *tag* — a `div` is not on that
 list and a `textarea` was.
 
-The menu **opens downwards and only flips up when it would not fit**
-(`Composer.tsx`). The same composer sits in three very different places — the
-middle of the home page, the middle of the chat hero, and pinned to the bottom
-of an open thread — so which way is out of the way is a fact about the
+**The menu hangs off the `@`, not off the box** — a completion popup where the
+token was typed rather than a panel as wide as the composer pinned under the
+whole thing. `app/src/components/harness/useMentionMenu.ts` reads the `@`'s own
+client rect and `app/src/components/harness/MentionMenu.tsx` draws itself
+`fixed` at it, portalled to the body, at a width of its own and clamped inside
+the viewport on both axes. Two decisions in there
+are load-bearing. It anchors on the **`@` and not the live caret**, because the
+query grows as it is typed and a caret-tracking list slides sideways while you
+read it — and because that makes a second reading idempotent, which is what
+lets a scroll re-measure instead of closing the menu (the editor is itself a
+scroller: a message long enough to fill it scrolls on every keystroke). And the
+rect comes from a range **extended back over the token**, from the `@` to the
+caret, because in WebKit a *collapsed* range's `getBoundingClientRect()` can
+come back all zeros; the token is known to sit inside one text node, so the
+`@` is addressable directly, and the fallbacks below it step down to the
+selection's own element rather than to 0,0 — a menu in the window's corner
+would be worse than one that is too wide. The arithmetic is plain CSS pixels,
+which is only safe because this app's zoom is the webview's page zoom and never
+a CSS `zoom` on a container (root `CLAUDE.md`).
+
+From there the menu **opens downwards and only flips up when it would not
+fit**, measured against the caret's line. The same composer sits in three very different places —
+the middle of the home page, the middle of the chat hero, and pinned to the
+bottom of an open thread — so which way is out of the way is a fact about the
 viewport, not about the call site, and it is measured after the menu is in the
 DOM rather than against its `max-height`, so a three-file list is judged on the
 90px it occupies and not the 256px it is allowed. Opening upwards
@@ -1418,6 +1546,77 @@ The earlier BYOK chat agent did the opposite — it read the file, embedded the
 query and packed the result into the request — because its model could only
 see what the prompt carried. A CLI agent can open the file itself, so that
 whole path was dropped rather than ported.
+
+## A picture in a message
+
+A screenshot of a worked solution, a photo of handwriting, a diagram from
+somewhere else: **pasting or dropping an image into the composer attaches it**,
+and it reaches the agent the same way a mention does — as a path.
+
+A CLI agent has no channel for an image. It reads files, so an image has to
+*be* a file before it can be talked about, which makes this the same move the
+`@` menu already makes and the same one a dock message's frame grab makes
+(`lecture_grab_frame`, below). `harness_attach_image` takes the clipboard's
+bytes as base64, `harness_attach_file` takes a dropped file's path, and both
+write into `agents/attachments/` and answer with `./attachments/<name>` —
+relative to `agents/`, because that is every thread's working directory
+(`app/src-tauri/src/harness/attach.rs`). The composer appends those paths to
+the message, fenced, so the bubble draws them and the agent opens them with the
+one matcher both already use. `HARNESS.template.md` says what such a path is
+and to open it before answering.
+
+**The reply draws pictures as well as the question does.** The shared renderer
+(`app/src/components/markdown/MdComponents.tsx`) resolves a markdown
+`![…](…)` whose src is a path in this library — an attachment, or an image
+under `courses/` — through the same asset URL the bubble builds, and draws a
+fenced `agents/attachments/…` as the picture rather than as a code span. So a
+picture reads the same whichever side of the conversation named it, and a
+markdown image is a thing an agent can actually write. A src that matches
+neither and has no URL scheme keeps its alt text: an image fails *visibly*
+where a link fails silently, and WebKit's broken-image glyph parked in the
+middle of a reply is worse than a word. `InlineMd` still refuses pictures
+outright — its output sits inside a button that seeks.
+
+**Inside `agents/` and nowhere else**, because that is the one folder every
+bridge can both read and write: a picture written beside `courses/` would be
+refused by Claude's and Codex's sandboxes at the moment the agent went to look
+at it.
+
+**Nothing is written until send.** The composer holds the clipboard's `File`
+or the dropped path and draws it from memory, so a screenshot pasted and then
+thought better of leaves nothing on disk to sweep up — and a write that fails
+keeps the message in the box and says why, since a path pointing at nothing is
+worse than a send that did not happen.
+
+**The claimed filename never reaches the filesystem.** The bytes are sniffed,
+the extension follows from what they actually are, and the stem is the app's
+own timestamp — which removes path traversal, the extension lie and the
+collision in one move. A file that is not a picture is refused rather than
+attached, and 20 MB is the cap, so a video dropped by mistake stops here.
+
+**The drop is the window's event, not the page's.** Tauri's own drag-and-drop
+handler sits in front of the webview, so a file dragged in from Finder never
+reaches a React `onDrop` — the page sees nothing at all. Switching that handler
+off would hand file drops to WebKit and take in-page dragging with it, which
+the project board still needs, so `useFileDrop`
+(`app/src/hooks/useFileDrop.ts`) listens to the window's events instead. They
+arrive with a **physical** cursor position and no target, so the element is
+found by arithmetic: physical pixels over `devicePixelRatio`, which carries
+both the retina scale and the webview's page zoom, gives CSS coordinates a
+`getBoundingClientRect` can be compared against.
+
+**A task body writes on paste instead**, and that is the one place this rule
+is reversed (`TaskBody` in `app/src/pages/TaskPage.tsx`). A body has no send to
+defer to — the picture has to be *in* the text while you are still writing
+around it — so it is written immediately and inserted at the caret as a
+markdown image, whose path is the same shape the composer fences. The cost is a
+file left in `agents/attachments/` if the picture is then deleted from the
+text, and that is the accepted trade against an image tag pointing at nothing.
+
+The lecture player's dock composer is a sibling rather than a variant of this
+one (`LectureChatComposer.tsx`) and takes no attachments: it is a plain
+textarea in a narrow panel, and the picture its messages carry is the frame
+grab below.
 
 ## Lecture scope, and the moment
 

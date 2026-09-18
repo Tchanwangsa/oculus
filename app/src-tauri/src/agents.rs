@@ -7,10 +7,25 @@
 //! what may be overwritten live here rather than in either caller.
 //!
 //! It also holds the memory layer an agent writes back into: `TASTE.md` for
-//! standing preferences and `memories/` for facts, once globally and once per
-//! course folder. Nothing here ever writes a memory — the shape of the layer
-//! lives here because [`user_context`] reads it back for the in-app chat, and
-//! a reader and a scaffolder that disagree would be the whole bug.
+//! standing preferences and `memories/` for facts — `memories/` itself for
+//! what holds across subjects, `memories/<CODE>/` for one subject. **Nothing
+//! here reads that layer back.** A thread's brief names the two buckets and
+//! the agent opens them with its own tools
+//! (`instructions` in `crate::harness`); the app never folds them into a
+//! prompt itself. It used to, for the BYOK chat that has since been deleted,
+//! and a second copy of the same files in every system prompt is a cost with
+//! no reader.
+//!
+//! **Both buckets live under the library's own `agents/`, and that is not a
+//! filing preference — it is the only place an in-app thread may write.** The
+//! subject bucket used to be `courses/<CODE>/agents/memories/`, which every
+//! template told the agent to use and no sandbox would let it touch: Codex's
+//! writable root is the thread's cwd and Claude's seatbelt and `Edit` denies
+//! say the same, so a subject fact was an instruction the app itself had made
+//! impossible to follow. [`link_dir`] now moves any of those files into the
+//! library bucket and leaves a symlink where they were, so an agent that
+//! remembers the old path still writes into the one store. Nothing here ever
+//! writes a memory.
 
 use std::path::{Path, PathBuf};
 
@@ -28,9 +43,8 @@ const MEMORY_INDEX_DOC: &str = include_str!("../templates/MEMORY.template.md");
 pub const AGENTS_DOC_NAME: &str = "AGENTS.md";
 pub const CLI_DOC_NAME: &str = "OCULUS-CLI.md";
 const TASTE_DOC_NAME: &str = "TASTE.md";
-/// The index beside the memories, in both buckets. Skipped by [`user_context`]:
-/// it is a table of contents for the files it sits with, so a reader that has
-/// the files themselves would only be reading their titles twice.
+/// The index beside the memories, in both buckets: a table of contents an
+/// agent reads before opening the files it sits with.
 const MEMORY_INDEX_NAME: &str = "MEMORY.md";
 const MEMORIES_DIR: &str = "memories";
 
@@ -94,109 +108,6 @@ pub fn ensure_library_docs(data_dir: &Path) -> Result<LibraryDocs, String> {
     Ok(docs)
 }
 
-// ── What the in-app chat reads back ──────────────────────────────────────────
-
-/// Cap on the whole injected block. It rides in the system prompt of every
-/// turn of every chat, so this is a per-message cost rather than a one-off —
-/// and the global bucket is meant to stay small enough that it never bites.
-const MAX_CONTEXT_CHARS: usize = 8_000;
-
-/// The global memory layer, as one block for the chat agent's system prompt.
-///
-/// `TASTE.md` plus the *bodies* of every cross-subject memory — bodies, not
-/// the index, because the in-app agent has no filesystem tool and a title it
-/// cannot open is worse than no title at all. Subject memories are left out
-/// on purpose: they are the other bucket, and a chat is not scoped to one
-/// subject.
-///
-/// `None` when there is nothing to say, so a library nobody has taught
-/// anything pays nothing for the feature.
-pub fn user_context(data_dir: &Path) -> Option<String> {
-    let dir = agents_dir(data_dir);
-    let mut out = String::new();
-
-    if let Some(taste) = authored(&dir.join(TASTE_DOC_NAME), TASTE_DOC) {
-        out.push_str("### Standing preferences, in the student's own words\n\n");
-        out.push_str(&taste);
-        out.push_str("\n\n");
-    }
-
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir.join(MEMORIES_DIR))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| {
-            p.extension().is_some_and(|e| e == "md")
-                && p.file_name().is_some_and(|n| n != MEMORY_INDEX_NAME)
-        })
-        .collect();
-    // Sorted so the same library produces the same prompt twice running, which
-    // is what makes a cached prefix worth anything.
-    files.sort();
-
-    for path in files {
-        let Ok(body) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let body = strip_frontmatter(&body).trim();
-        if body.is_empty() {
-            continue;
-        }
-        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-        out.push_str(&format!("### {stem}\n\n{body}\n\n"));
-    }
-
-    let out = out.trim();
-    if out.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "## What you already know about this student\n\n\
-         Written down over earlier sessions, by you and by the coding agents that \
-         work in the library folder. Treat it as true unless this conversation \
-         shows otherwise, and never read it aloud unprompted.\n\n{}",
-        truncate(out, MAX_CONTEXT_CHARS)
-    ))
-}
-
-/// A stub is a prompt to the user, not a fact about them: injecting one would
-/// tell the model the student prefers nothing in particular, which is a claim
-/// the empty file never made. Compared against the shipped template with the
-/// stub note removed, so deleting that note does not by itself count as
-/// having written something.
-fn authored(path: &Path, template: &str) -> Option<String> {
-    let body = std::fs::read_to_string(path).ok()?;
-    let body = without_blockquotes(&body);
-    (body != without_blockquotes(template)).then_some(body)
-}
-
-fn without_blockquotes(md: &str) -> String {
-    md.lines()
-        .filter(|l| !l.trim_start().starts_with('>'))
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string()
-}
-
-/// Drop a leading `---` YAML block. The frontmatter is addressing whoever
-/// files the memory — name, description, type — and the model needs the fact.
-fn strip_frontmatter(md: &str) -> &str {
-    md.strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---"))
-        .map_or(md, |(_, body)| body)
-}
-
-/// On a character boundary, and said out loud: a model that is silently handed
-/// half a memory should be told the other half exists.
-fn truncate(s: &str, max: usize) -> String {
-    match s.char_indices().nth(max) {
-        None => s.to_string(),
-        Some((end, _)) => format!("{}\n\n(Older memories omitted — the store is larger than fits here.)", &s[..end]),
-    }
-}
-
 /// What linking one course folder did.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Link {
@@ -220,7 +131,7 @@ pub fn link_course(data_dir: &Path, code: &str) -> Result<Link, String> {
     if !dir.is_dir() {
         return Ok(Link::Absent);
     }
-    link_dir(&dir)
+    link_dir(data_dir, &dir)
 }
 
 /// Point every existing course folder at the one `AGENTS.md`.
@@ -242,7 +153,7 @@ pub fn link_all(data_dir: &Path) -> Result<LinkReport, String> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_string();
-        match link_dir(&dir)? {
+        match link_dir(data_dir, &dir)? {
             Link::Linked => report.linked.push(name),
             Link::Current => report.current += 1,
             Link::Skipped => report.skipped.push(name),
@@ -254,18 +165,91 @@ pub fn link_all(data_dir: &Path) -> Result<LinkReport, String> {
     Ok(report)
 }
 
+/// One subject's memory bucket, under the library's `agents/` — the only
+/// folder a thread can write to.
+pub fn subject_memories(data_dir: &Path, course_dir: &str) -> PathBuf {
+    agents_dir(data_dir).join(MEMORIES_DIR).join(course_dir)
+}
+
+/// From `courses/<CODE>/agents/memories` back to that bucket. Relative for the
+/// same reason `AGENTS_DOC_REL` is: the library has to stay movable.
+const SUBJECT_MEMORIES_REL: &str = "../../../agents/memories";
+
+/// Move a course folder's old `agents/memories/` into the library bucket and
+/// leave a symlink pointing at it.
+///
+/// Two agents write this store — the in-app thread, which cannot reach a
+/// course folder, and a Claude Code or Codex the student runs in one from a
+/// terminal, which can — so the migration cannot simply relocate the files
+/// and hope: the second agent has the old path in its own memory, and would
+/// quietly rebuild a second store beside the first. The symlink is what makes
+/// the old path keep working, and it resolves *into* `agents/`, so even a
+/// sandboxed write through it lands inside the writable root.
+///
+/// Idempotent, since it runs on every sync: a link that already points at the
+/// bucket is left alone, and a course folder with real files in it is emptied
+/// once and then is a link like any other. Files that would collide are left
+/// where they are rather than overwriting what is already filed — the same
+/// rule the rest of this module follows about somebody's work.
+fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Result<(), String> {
+    let old = course_agents.join(MEMORIES_DIR);
+    match std::fs::symlink_metadata(&old) {
+        // Already a link. Repoint it if it aims somewhere else; a link is
+        // this module's, not the student's, so replacing it loses nothing.
+        Ok(meta) if meta.file_type().is_symlink() => {
+            let want = PathBuf::from(SUBJECT_MEMORIES_REL).join(name);
+            if std::fs::read_link(&old).is_ok_and(|t| t == want) {
+                return Ok(());
+            }
+            std::fs::remove_file(&old).map_err(|e| format!("cannot relink {name}/agents/memories: {e}"))?;
+        }
+        Ok(meta) if meta.is_dir() => {
+            for entry in std::fs::read_dir(&old).into_iter().flatten().flatten() {
+                let to = bucket.join(entry.file_name());
+                if to.exists() {
+                    continue;
+                }
+                std::fs::rename(entry.path(), &to)
+                    .map_err(|e| format!("cannot move {name}/agents/memories/{:?}: {e}", entry.file_name()))?;
+            }
+            // Only when it came out empty: anything left is a file this could
+            // not place, and a folder is better than a link that hides it.
+            if std::fs::read_dir(&old).into_iter().flatten().flatten().next().is_some() {
+                return Ok(());
+            }
+            std::fs::remove_dir(&old).map_err(|e| format!("cannot replace {name}/agents/memories: {e}"))?;
+        }
+        // A real file called `memories` is somebody's, and not ours to move.
+        Ok(_) => return Ok(()),
+        Err(_) => {}
+    }
+    let target = format!("{SUBJECT_MEMORIES_REL}/{name}");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, &old)
+        .map_err(|e| format!("cannot link {name}/agents/memories: {e}"))?;
+    #[cfg(not(unix))]
+    let _ = target;
+    Ok(())
+}
+
 /// A relative symlink, so the whole library stays movable, and skipped rather
 /// than clobbered when a real file is already sitting there.
-fn link_dir(dir: &Path) -> Result<Link, String> {
+fn link_dir(data_dir: &Path, dir: &Path) -> Result<Link, String> {
     let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
-    let memories = dir.join("agents").join(MEMORIES_DIR);
-    std::fs::create_dir_all(&memories)
+    let bucket = subject_memories(data_dir, &name);
+    std::fs::create_dir_all(&bucket)
+        .map_err(|e| format!("cannot create agents/memories/{name}: {e}"))?;
+    let course_agents = dir.join("agents");
+    std::fs::create_dir_all(&course_agents)
         .map_err(|e| format!("cannot create {name}/agents: {e}"))?;
+    adopt_course_memories(&course_agents, &bucket, &name)?;
 
-    // Named for the folder, because the one thing this index has to make
+    // Named for the subject, because the one thing this index has to make
     // obvious is which bucket it is — a subject memory filed globally, or the
-    // reverse, is the mistake the two-bucket split exists to prevent.
-    let index = memories.join(MEMORY_INDEX_NAME);
+    // reverse, is the mistake the two-bucket split exists to prevent. Written
+    // after the migration above, so a real index that came across from a
+    // course folder is not replaced by a stub.
+    let index = bucket.join(MEMORY_INDEX_NAME);
     if !index.exists() {
         let body = format!(
             "# Memories — {name}\n\n\
@@ -273,7 +257,8 @@ fn link_dir(dir: &Path) -> Result<Link, String> {
              library's own `agents/memories/`.\n\n\
              <!-- - [Title](file-name.md) — the hook, in a clause -->\n"
         );
-        std::fs::write(&index, body).map_err(|e| format!("cannot write {name}/{}: {e}", MEMORY_INDEX_NAME))?;
+        std::fs::write(&index, body)
+            .map_err(|e| format!("cannot write agents/memories/{name}/{MEMORY_INDEX_NAME}: {e}"))?;
     }
 
     let link = dir.join(AGENTS_DOC_NAME);
@@ -345,16 +330,54 @@ mod tests {
             std::fs::read_to_string(courses.join("handwritten/AGENTS.md")).unwrap(),
             "mine"
         );
-        assert!(courses.join("fresh/agents/memories").is_dir());
-        // Named for the folder, so the bucket a memory lands in is unambiguous.
-        let index =
-            std::fs::read_to_string(courses.join("fresh/agents/memories/MEMORY.md")).unwrap();
+        // The bucket itself is under the library's `agents/` — the only
+        // folder a thread can write to — and the course folder gets a link to
+        // it, so the path an agent may already have in its memory still works.
+        assert!(root.join("agents/memories/fresh").is_dir());
+        assert!(std::fs::symlink_metadata(courses.join("fresh/agents/memories"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(courses.join("fresh/agents/memories").is_dir(), "the link resolves");
+        // Named for the subject, so the bucket a memory lands in is unambiguous.
+        let index = std::fs::read_to_string(root.join("agents/memories/fresh/MEMORY.md")).unwrap();
         assert!(index.starts_with("# Memories — fresh"));
 
         // Second run is a no-op, which is what lets cli:install call it blind.
         let again = link_all(&root).unwrap();
         assert!(again.linked.is_empty());
         assert_eq!(again.current, 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The memories a terminal agent already filed in a course folder — the
+    /// path every template used to name — are moved into the library bucket
+    /// rather than stranded behind a link that hides them.
+    #[test]
+    fn memories_filed_in_a_course_folder_are_adopted() {
+        let root = scratch("adopt");
+        let old = root.join("courses/INFO30006_2026_SM2/agents/memories");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("info30006-mst.md"), "the MST is week 7").unwrap();
+        std::fs::write(old.join("MEMORY.md"), "# Memories — INFO30006\n\n- [MST](info30006-mst.md)").unwrap();
+
+        link_all(&root).unwrap();
+
+        let bucket = root.join("agents/memories/INFO30006_2026_SM2");
+        assert_eq!(
+            std::fs::read_to_string(bucket.join("info30006-mst.md")).unwrap(),
+            "the MST is week 7"
+        );
+        // The course's own index came across, so the stub never overwrote it.
+        assert!(std::fs::read_to_string(bucket.join("MEMORY.md")).unwrap().contains("[MST]"));
+        // And the old path now resolves to the same file, for whoever still
+        // writes there.
+        assert!(old.join("info30006-mst.md").is_file());
+        assert!(std::fs::symlink_metadata(&old).unwrap().file_type().is_symlink());
+
+        // Idempotent: a second sync neither re-moves nor re-links.
+        link_all(&root).unwrap();
+        assert!(old.join("info30006-mst.md").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -388,66 +411,6 @@ mod tests {
         let through_link =
             std::fs::read_to_string(root.join("courses/MULT20015_2026_SM2/AGENTS.md")).unwrap();
         assert_eq!(through_link, AGENTS_DOC);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// Nothing written yet must cost the chat nothing — and a stub is a prompt
-    /// to the user, not a statement that the user prefers nothing.
-    #[test]
-    fn a_library_nobody_has_taught_anything_contributes_no_prompt() {
-        let root = scratch("context-empty");
-        ensure_library_docs(&root).unwrap();
-        assert!(user_context(&root).is_none());
-
-        // Deleting the stub note is not the same as having written something.
-        let taste = agents_dir(&root).join("TASTE.md");
-        let body = std::fs::read_to_string(&taste).unwrap();
-        let stripped: String = body
-            .lines()
-            .filter(|l| !l.trim_start().starts_with('>'))
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(&taste, stripped).unwrap();
-        assert!(user_context(&root).is_none());
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// What the chat actually receives: preferences and memory *bodies*, with
-    /// the frontmatter and the index left behind.
-    #[test]
-    fn taste_and_global_memories_reach_the_prompt_without_their_bookkeeping() {
-        let root = scratch("context-full");
-        ensure_library_docs(&root).unwrap();
-        let dir = agents_dir(&root);
-        std::fs::write(
-            dir.join("TASTE.md"),
-            "# Preferences\n\n## Writing\n\n- Lead with the verdict.\n",
-        )
-        .unwrap();
-        std::fs::write(
-            dir.join("memories/study-workflow.md"),
-            "---\nname: study-workflow\ndescription: how he triages\n---\n\nTriages by ROI.\n",
-        )
-        .unwrap();
-        // The index names the files that follow it; sending both would be
-        // sending every title twice.
-        std::fs::write(dir.join("memories/MEMORY.md"), "- [Workflow](study-workflow.md) — ROI\n")
-            .unwrap();
-
-        let context = user_context(&root).unwrap();
-        assert!(context.contains("Lead with the verdict."));
-        assert!(context.contains("Triages by ROI."));
-        assert!(!context.contains("description: how he triages"));
-        assert!(!context.contains("[Workflow]"));
-
-        // A subject memory is the other bucket's business.
-        std::fs::create_dir_all(root.join("courses/COMP30026/agents/memories")).unwrap();
-        std::fs::write(
-            root.join("courses/COMP30026/agents/memories/exam.md"),
-            "Exam is open book.",
-        )
-        .unwrap();
-        assert!(!user_context(&root).unwrap().contains("open book"));
         let _ = std::fs::remove_dir_all(&root);
     }
 

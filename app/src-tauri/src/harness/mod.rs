@@ -23,6 +23,7 @@
 //! bug gets diagnosed without re-running an agent, and the recordings under
 //! `fixtures/harness/` that the bridge tests replay came from exactly this.
 
+pub mod attach;
 pub mod claude;
 pub mod codex;
 pub mod discover;
