@@ -4,7 +4,6 @@ import {
   CalendarBlank,
   ArrowsClockwise,
   CircleNotch,
-  Kanban,
   ListChecks,
   MagnifyingGlass,
   GearSix,
@@ -114,11 +113,17 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             badge={agentBusy ? <CircleNotch size={12} className="shrink-0 animate-spin text-muted-foreground" /> : null}
           />
           <NavItem to="/calendar" icon={CalendarBlank} label="Calendar" />
-          <NavItem to="/projects" icon={Kanban} label="Projects" />
-          {/* Under Projects because it is the same rows read the other way
-              round — every task at once instead of one project's board — and
-              because it is where a task that belongs to no project lives. */}
-          <NavItem to="/tasks" icon={ListChecks} label="Tasks" />
+          {/* One row for one section: Projects and Tasks were the same rows
+              read two ways, and the split was noise. It lands on `/projects`,
+              the section's landing view, while being labelled for the work —
+              and lights on both tabs and on a task's own page. The strip
+              between them is `components/projects/SectionHeader.tsx`. */}
+          <NavItem
+            to="/projects"
+            match={["/tasks"]}
+            icon={ListChecks}
+            label="Tasks"
+          />
         </div>
 
         <Rule />

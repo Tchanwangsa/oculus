@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PillTabs } from "@/components/ui/PillTabs";
 import { NewTaskButton } from "@/components/projects/NewTaskButton";
+import { SectionHeader } from "@/components/projects/SectionHeader";
 import { TasksBoard } from "@/components/projects/TasksBoard";
 import { TasksTable } from "@/components/projects/TasksTable";
 import {
@@ -32,6 +33,11 @@ import { useProjectsStore } from "@/stores/projectsStore";
  * then position) and a drag inside one is a no-op, and the table sorts by
  * header rather than by grip. `app/src/components/projects/universalTasks.ts`
  * is where that rule is written down and enforced.
+ *
+ * **The section's second tab**, under the `Projects · Tasks` strip the two
+ * share (`SectionHeader`) — one sidebar row leads to both. Its own title went
+ * with the strip's arrival: the strip names the section, and a heading on the
+ * same rule would be a second title.
  *
  * **Four filters, opening on Todo**, which is the question the page exists to
  * answer. They replaced an `All tasks · Unfiled` strip: Unfiled is a *value* of
@@ -194,12 +200,7 @@ export default function TasksPage() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Fixed-height toolbar: what the page is, then how it is going and what
-          you can do about it. */}
-      <div className="shrink-0 flex h-12 items-center gap-2.5 px-5 pt-2">
-        <span className="min-w-0 font-display text-[13px] font-semibold tracking-tight text-foreground">
-          Tasks
-        </span>
+      <SectionHeader>
         <span className="flex-1" />
         {/* `done/total` is a readout of everything you have on, so it stops
             being one the moment a filter is up: defaulting to Todo it would
@@ -217,7 +218,7 @@ export default function TasksPage() {
           )
         )}
         <NewTaskButton projects={projects} onCreate={create} />
-      </div>
+      </SectionHeader>
 
       <div className="shrink-0 flex h-9 items-center gap-2.5 px-5">
         <PillTabs tabs={VIEWS} value={view} onChange={setView} />

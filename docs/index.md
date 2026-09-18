@@ -48,8 +48,9 @@ CLI agent over it (Claude Code, Codex or opencode, driven as a subprocess — se
 [harness.md](./harness.md)), projects: assignments broken into tasks, each
 project opening on an Overview (a brief, tags, a pinned calendar event, what is
 next) with its tasks on a board, a table or a timeline behind a Tasks tab and a
-page per task — plus a **universal Tasks view** at `/tasks` over every project
-at once, where a task that belongs to no project at all lives until it is filed
+page per task — plus, on the same section's second tab, a **universal view** at `/tasks` over
+every project at once, filtered by status/project/subject/due, where a task that
+belongs to no project at all lives until it is filed
 — all of it writable by the agent through the CLI
 ([projects.md](./projects.md)), a
 **home launcher** at `/` — the composer over today's agenda, what you were
