@@ -73,11 +73,14 @@ export interface CalEvent {
    *  board simply stops being read here. `null` on every other layer. */
   taskId: number | null;
   /** The project a `task` belongs to, so its card can open the board it lives
-   *  on — the only place a task can be edited or deleted. `null` elsewhere. */
+   *  on — the only place a task can be edited or deleted. `null` elsewhere,
+   *  and `null` on a task that belongs to **no** project (migration 37): the
+   *  card then labels itself by the task alone and links nowhere. */
   projectId: number | null;
   /** That project's name, carried along because the calendar has no project
    *  list to look one up in, and a bare task title on a grid ("Draft the
-   *  intro") is not enough to act on. `null` elsewhere. */
+   *  intro") is not enough to act on. `null` elsewhere, and on an unfiled
+   *  task — which has no project whose name could be shown. */
   projectName: string | null;
 }
 
@@ -243,8 +246,9 @@ export async function loadCalendar(): Promise<CalEvent[]> {
       id: `task_${t.id}`,
       kind: "task",
       // The subject comes from the task's *project*, not the task: a personal
-      // project has none, and falls to NO_SUBJECT so it files under "Personal"
-      // and stays out of the subject colour palette.
+      // project has none, and neither does an unfiled task, which has no
+      // project at all. Both fall to NO_SUBJECT so they file under "Personal"
+      // and stay out of the subject colour palette.
       subjectId: t.project_subject_id ?? NO_SUBJECT,
       subjectCode: t.project_subject_code
         ? displayCode(t.project_subject_code)
@@ -264,6 +268,9 @@ export async function loadCalendar(): Promise<CalEvent[]> {
       localId: null,
       localSource: null,
       taskId: t.id,
+      // Both null on an unfiled task, which is the whole card: the title, the
+      // date and nothing to open — `EventPopover` and `EventRow` already draw
+      // the project line only when there is one.
       projectId: t.project_id,
       projectName: t.project_name,
     });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/useNow";
 import {
@@ -22,9 +22,24 @@ import { EventPopover } from "./EventPopover";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/** How many chips fit in a cell before the rest fold into "+N more". Four is
- *  what the shortest usable window height leaves room for. */
-const VISIBLE = 4;
+/**
+ * A cell's fixed furniture, in pixels: the `pt-1` above the date, the date's
+ * own 20px line, and the `gap-0.5` that follows it.
+ */
+const CELL_HEADER_PX = 26;
+/** One chip: a 16px line inside `py-px`, plus the `gap-0.5` above it. */
+const CHIP_PX = 20;
+/**
+ * How many chips a cell shows before the rest fold into "+N more", until the
+ * grid has been measured — one paint's worth, and what a full-height window
+ * fits anyway.
+ *
+ * It used to be the only answer, and it was wrong at every other size: four
+ * chips need 106px of cell, so a window with the side panel open (or simply a
+ * short one) drew the fourth sliced in half by the cell's `overflow-hidden`,
+ * with no "+N more" to say anything was missing. The count is measured now.
+ */
+const VISIBLE_FALLBACK = 4;
 
 export function MonthView({
   month,
@@ -38,6 +53,27 @@ export function MonthView({
   const weeks = monthGrid(month);
   const today = useNow();
   const todayStart = startOfDay(today).getTime();
+
+  // How many chips a cell can actually hold, measured rather than assumed.
+  // The six rows split the grid evenly, so one height answers for all of them;
+  // the observer is what keeps it true through a window resize, a page zoom
+  // and the side panel opening.
+  const body = useRef<HTMLDivElement>(null);
+  const [rowH, setRowH] = useState(0);
+  useEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    const measure = () => setRowH(el.clientHeight / weeks.length);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [weeks.length]);
+
+  const capacity =
+    rowH > 0
+      ? Math.max(1, Math.floor((rowH - CELL_HEADER_PX) / CHIP_PX))
+      : VISIBLE_FALLBACK;
 
   return (
     <div className="flex h-full flex-col">
@@ -54,7 +90,7 @@ export function MonthView({
 
       {/* Six equal rows: the grid keeps one height for every month, so paging
           through the year never makes the page jump. */}
-      <div className="grid flex-1 min-h-0 grid-rows-6">
+      <div ref={body} className="grid flex-1 min-h-0 grid-rows-6">
         {weeks.map((week, wi) => (
           <div key={wi} className="grid grid-cols-7 border-b border-border-subtle last:border-b-0">
             {week.map((day) => {
@@ -64,6 +100,8 @@ export function MonthView({
               // A day already behind us reads grey; today and everything after
               // keeps the subject colours.
               const dayGone = day.getTime() < todayStart;
+              const visible =
+                dayEvents.length > capacity ? Math.max(1, capacity - 1) : capacity;
               return (
                 <div
                   key={day.toISOString()}
@@ -87,7 +125,10 @@ export function MonthView({
                     </span>
                   </div>
 
-                  {dayEvents.slice(0, VISIBLE).map((e) => (
+                  {/* One chip's worth of the cell goes to "+N more" when
+                      there is a remainder — the link is shorter than a chip,
+                      so trading one for it always fits. */}
+                  {dayEvents.slice(0, visible).map((e) => (
                     <Chip
                       key={e.id}
                       event={e}
@@ -96,12 +137,12 @@ export function MonthView({
                     />
                   ))}
 
-                  {dayEvents.length > VISIBLE && (
+                  {dayEvents.length > visible && (
                     <MoreLink
                       day={day}
                       events={dayEvents}
                       colors={colors}
-                      hidden={dayEvents.length - VISIBLE}
+                      hidden={dayEvents.length - visible}
                     />
                   )}
                 </div>

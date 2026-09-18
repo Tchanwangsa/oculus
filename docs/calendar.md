@@ -3,9 +3,9 @@
 Class times, deadlines and lecture recordings on one grid. Most rows come from
 Canvas's calendar API during a sync; the page only reads them, so it works
 offline and pages between months without touching Canvas. Two further layers
-are Oculus's own: a `note` table it reads and can delete but nothing currently
-creates, and the tasks on a project's board, which it reads live and never
-copies — see the notes under "The five layers".
+are Oculus's own: a `note` table it writes, edits and deletes itself, and the
+tasks on a project's board, which it reads live and never copies — see the
+notes under "The five layers".
 
 ## Where
 
@@ -16,6 +16,7 @@ copies — see the notes under "The five layers".
 | `local_events` table (migration 22) | `app/src-tauri/src/lib.rs` |
 | Headless writes (CLI) | `app/src-tauri/src/store.rs` |
 | Frontend reads + writes | `app/src/lib/db.ts` |
+| The new/edit event dialog | `app/src/components/calendar/EventDialog.tsx`, `app/src/stores/eventEditorStore.ts` |
 | The task layer's read | `getAllOpenTasks` in `app/src/lib/projects.ts` |
 | The event a project is pinned to | `projects.event_id` (migration 33), `app/src/components/projects/EventLink.tsx` |
 | Event model, colours, date maths | `app/src/lib/calendar.ts` |
@@ -32,14 +33,26 @@ copies — see the notes under "The five layers".
 | `due` | Canvas `calendar_events?type=assignment` | Deadlines, including quizzes (a quiz has an assignment shell) |
 | `lecture` | The `lectures` table already synced from Echo360 | The fallback timetable for a subject Canvas is silent about |
 | `note` | The `local_events` table | Anything Oculus wrote itself, rather than read from Canvas or Echo360 |
-| `task` | The `project_tasks` table, read live | A deadline you set yourself: a dated, unfinished task on a project's board ([projects.md](./projects.md)) |
+| `task` | The `project_tasks` table, read live | A deadline you set yourself: a dated, unfinished task, on a project's board or on none at all ([projects.md](./projects.md)) |
 
-**Nothing writes the `note` layer today.** Its only writer was the automations
-feature (removed — see [index.md](./index.md)), so the layer holds whatever
-rows that left behind and is otherwise empty. Reading, rendering and deleting
-are all still wired, because those rows are real events on a real grid; the
-`local_events` table is where a reminder UI or a returning automation writes
-next.
+**The `note` layer is the one the user writes.** Its first writer was the
+automations feature (removed — see [index.md](./index.md)), which is why rows
+carry a `source` of `automation` or `manual` and why the card says which; for a
+while after that removal nothing wrote the layer at all. `EventDialog` writes it
+now, through `createLocalEvent` / `updateLocalEvent` in `app/src/lib/db.ts`, and
+`source` is always `manual` — an edit deliberately leaves the column alone, so
+fixing a typo on a row an automation left behind does not relabel it as
+something the user typed.
+
+**The dialog is mounted once, in `app/src/layouts/AppLayout.tsx`, and raised
+through a store.** Two things open it and they are not in one subtree: the
+Calendar header's New event button, and the Edit on an event's own card — which
+is `EventPopover`, rendered by all three calendar views *and* by Home's Today
+list. That is the shape `leaveLectureStore` already uses for the same reason.
+Nothing is read back first: a local row's kind, subject, dates and notes are all
+on the `CalEvent` the card is holding. The popover is controlled only so it can
+dismiss itself as it hands over — a popover and a modal trapping focus at once
+is a way to leave the page unclickable.
 
 ## How it connects
 
@@ -62,7 +75,7 @@ next.
   take your own rows with it. Subject-less rows file under a "Personal" key that
   is kept out of the subject colour palette, or one note would recolour
   everything. Because nothing else will ever clean these up, every local row is
-  deletable from `EventPopover`.
+  editable and deletable from `EventPopover`.
 - **A task is deliberately *not* copied into that table.** It would be the
   obvious move — a task has a date and a subject, and `local_events` is the
   table for rows Oculus owns — and it is wrong, for the reason the paragraph
@@ -90,13 +103,24 @@ next.
   a link they set and cannot see. `task` rows are excluded from the picker: a
   task event *is* a project's own row read back onto the grid, so pinning a
   project to one would be a loop. See [projects.md](./projects.md).
-- **Deletability now has three answers, not two.** A local row is deletable
-  because nothing else will ever clean it up. A Canvas row is not, since a sync
-  would only write it straight back. And a **task** is not either, for a third
-  reason: the calendar only *reads* `project_tasks`, and everything you
+- **Editability and deletability have the same three answers.** A local row is
+  both, because nothing else will ever clean it up and no sync will ever
+  overwrite it. A Canvas row is neither, since a sync would only write it
+  straight back. And a **task** is neither either, for a third reason: the
+  calendar only *reads* `project_tasks`, and everything you
   would do to a task — re-date it, finish it, delete it with its subtasks — is
   on its board. So the card links through to the project instead, carrying the
   project's name because a bare task title on a grid is not enough to act on.
+- **A task with no project labels itself by the task alone.** Since migration
+  37 a task can belong to no project at all ([projects.md](./projects.md)), so
+  `getAllOpenTasks` joins the project **LEFT** and `projectId`, `projectName`
+  and the subject all come back `null` for such a row. Nothing on the grid has
+  to special-case it: the card is the title and the date, `EventPopover` and
+  `EventRow` already draw the project line only when there is one, and a NULL
+  subject falls to the same "Personal" key a subject-less project does, which
+  keeps it out of the subject colour palette. It links nowhere, because there
+  is no board it came from — the one thing an unfiled task on the grid cannot
+  offer.
 - **A note is an instant, and so is a task** — the same rule deadlines follow,
   and the same machinery (`isInstant` in `app/src/lib/calendar.ts`). What the
   two of them share beyond that is `isSelfImposed`, the other predicate in that
@@ -199,6 +223,31 @@ next.
   remembers the choice — the guarantee is structural, but "these hours do not
   exist" reads as a limitation, and the whole day should be reachable when you
   want to look.
+- **The week has a floor width and scrolls sideways under it.** The page is not
+  the window: the docked side panel takes a resizable bite out of it, and seven
+  columns divided into what is left get small fast — small enough that a class
+  block was an ellipsis, and a block halved again by `packLanes` for an overlap
+  was not even that. Below `MIN_GRID_PX` in
+  `app/src/components/calendar/WeekView.tsx` the grid stops compressing and the
+  view scrolls horizontally instead. The scroller wraps **all three** stacked
+  grids — the day headers, the deadline strip and the hour grid — because they
+  share one column template and have to move together; the vertical scroller
+  stays inside it, on the hours alone, so the headers hold still.
+- **A month cell shows as many chips as it measures room for.** The count used
+  to be the constant four, which is right only at one window height: with the
+  side panel open, or simply a short window, the fourth chip was sliced in half
+  by the cell's `overflow-hidden` and no "+N more" said anything was missing.
+  `MonthView` observes the grid's own height, divides by the six rows it always
+  has, and works the capacity out from there — and trades one chip for the
+  "+N more" link whenever there is a remainder, which always fits because the
+  link is shorter than a chip.
+- **The header's controls wrap; they never clip.** Title, period, the week/month
+  stepper, the view switch, New event and Refresh had been one no-wrap row, so
+  the page's `overflow-hidden` simply cut the last pill in half once the panel
+  opened. The title shrinks and its period truncates, and the right-hand group
+  wraps onto as many lines as it needs. New event sits with the title rather
+  than at the end of that group: it is the page's one action, the rest are about
+  looking, and keeping it out of the run is what lets the run stay on one line.
 - **Times are stored exactly as each source gives them.** Canvas sends ISO8601
   UTC, Echo360 sends local wall clock with no zone marker, and `new Date` reads
   each correctly. A task's `due_at` is a third shape, and is two shapes at

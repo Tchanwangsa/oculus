@@ -1,8 +1,15 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowSquareOut, Kanban, MapPin, Play, Trash } from "@phosphor-icons/react";
+import {
+  ArrowSquareOut,
+  Kanban,
+  MapPin,
+  PencilSimple,
+  Play,
+  Trash,
+} from "@phosphor-icons/react";
 import {
   Popover,
   PopoverContent,
@@ -15,6 +22,7 @@ import {
   type CalEvent,
 } from "@/lib/calendar";
 import { deleteLocalEvent } from "@/lib/db";
+import { editEvent } from "@/stores/eventEditorStore";
 import { projectHref } from "@/components/projects/projectHref";
 
 const KIND_LABEL: Record<CalEvent["kind"], string> = {
@@ -38,13 +46,13 @@ const SOURCE_LABEL: Record<string, string> = {
  * Canvas event or deadline links out to Canvas, a recording opens the in-app
  * player — nothing is shown for a link the event does not have.
  *
- * It is also where a local event is deleted. Canvas rows need no such control
- * (the next sync would write them straight back), so the affordance belongs
- * with the one layer that owns its own lifetime rather than in a panel of its
- * own. A task is not deletable here either, for a different reason: the
- * calendar only *reads* `project_tasks`, and everything you would do to a task
- * — re-date it, move its column, drop it — belongs on its board, which the card
- * links through to.
+ * It is also where a local event is edited and deleted. Canvas rows need
+ * neither control (the next sync would write them straight back), so the
+ * affordances belong with the one layer that owns its own lifetime rather than
+ * in a panel of its own. A task is editable nowhere near here, for a different
+ * reason: the calendar only *reads* `project_tasks`, and everything you would
+ * do to a task — re-date it, move its column, drop it — belongs on its board,
+ * which the card links through to.
  */
 export function EventPopover({
   event,
@@ -55,6 +63,10 @@ export function EventPopover({
   color: string;
   children: ReactNode;
 }) {
+  // Controlled only so the card can dismiss itself when it hands over to the
+  // dialog: two overlapping focus traps — a popover and a modal — is a way to
+  // leave the page unclickable.
+  const [open, setOpen] = useState(false);
   const localId = event.localId;
   // A task's project, if this is one. The name travels in the href because the
   // tab strip titles a project tab from the query alone (`projectHref`).
@@ -72,8 +84,17 @@ export function EventPopover({
       .catch(console.error);
   };
 
+  /** The dialog is mounted once in `AppLayout`, so editing is a call into its
+   *  store rather than a second copy of the form in here. The card carries
+   *  everything the form needs — a local row's title, kind, subject, dates and
+   *  notes are all on the `CalEvent` — so no row is read back first. */
+  const edit = () => {
+    setOpen(false);
+    editEvent(event);
+  };
+
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
       <PopoverContent side="right" align="start" className="w-80 p-0">
         <div className="px-3.5 pt-3 pb-2.5">
@@ -129,8 +150,15 @@ export function EventPopover({
                 </span>
                 <button
                   type="button"
+                  onClick={edit}
+                  className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  <PencilSimple size={11} /> Edit
+                </button>
+                <button
+                  type="button"
                   onClick={remove}
-                  className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-destructive"
+                  className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-destructive"
                 >
                   <Trash size={11} /> Remove
                 </button>

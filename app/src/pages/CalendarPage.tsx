@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowsClockwise, CaretLeft, CaretRight } from "@phosphor-icons/react";
+import { ArrowsClockwise, CaretLeft, CaretRight, Plus } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,7 @@ import {
   type CalEvent,
 } from "@/lib/calendar";
 import { PROJECTS_UPDATED_EVENT } from "@/lib/projects";
+import { newEvent } from "@/stores/eventEditorStore";
 import { MonthView } from "@/components/calendar/MonthView";
 import { WeekView } from "@/components/calendar/WeekView";
 import { AgendaView } from "@/components/calendar/AgendaView";
@@ -126,63 +127,90 @@ export default function CalendarPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="shrink-0 border-b border-border-subtle px-6">
-        <div className="flex items-center gap-3 pt-5 pb-3">
-          <h1 className="text-[22px] font-semibold leading-none tracking-tight text-foreground">
-            Calendar
-          </h1>
-          {period && (
-            <span className="text-[13px] text-muted-foreground">{period}</span>
-          )}
-
-          <div className="flex-1" />
-
-          {view !== "agenda" && (
-            <div className="flex items-center gap-0.5">
-              <Button variant="ghost" size="icon-sm" onClick={() => step(-1)} aria-label="Previous">
-                <CaretLeft size={13} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-[12px]"
-                onClick={() => setAnchor(new Date())}
-              >
-                Today
-              </Button>
-              <Button variant="ghost" size="icon-sm" onClick={() => step(1)} aria-label="Next">
-                <CaretRight size={13} />
-              </Button>
+        {/* Two groups, not seven siblings. The title shrinks and its period
+            truncates; the controls never do — they wrap, right-aligned, onto as
+            many lines as they need. Every one of them used to sit in one
+            no-wrap row, so with the side panel open the page's
+            `overflow-hidden` simply cut the last pill in half. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-5 pb-3">
+          <div className="flex min-w-32 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="flex min-w-0 items-baseline gap-3">
+              <h1 className="shrink-0 text-[22px] font-semibold leading-none tracking-tight text-foreground">
+                Calendar
+              </h1>
+              {period && (
+                <span className="truncate text-[13px] text-muted-foreground">
+                  {period}
+                </span>
+              )}
             </div>
-          )}
 
-          <div className="flex items-center rounded-md border border-border p-0.5">
-            {VIEWS.map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                onClick={() => setView(v.id)}
-                className={cn(
-                  "rounded-[4px] px-2 py-1 text-[11.5px] font-medium transition-colors",
-                  view === v.id
-                    ? "bg-surface-raised text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {v.label}
-              </button>
-            ))}
+            {/* On the left, with the title, rather than out at the end of the
+                control run: it is the page's one action, and the six controls
+                over there are all about *looking*. It also keeps the right-hand
+                group narrow enough to stay on one line when the side panel
+                squeezes the page. The day the calendar is looking at, not
+                today — paging to October and pressing this means October. */}
+            <Button
+              variant="secondary"
+              size="sm"
+              className="shrink-0"
+              onClick={() => newEvent(anchor)}
+            >
+              <Plus size={13} />
+              New event
+            </Button>
           </div>
 
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={refresh}
-            disabled={refreshing}
-            aria-label="Refresh calendar"
-            className="text-muted-foreground/70 hover:text-foreground"
-          >
-            <ArrowsClockwise size={13} className={cn(refreshing && "animate-spin")} />
-          </Button>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {view !== "agenda" && (
+              <div className="flex shrink-0 items-center gap-0.5">
+                <Button variant="ghost" size="icon-sm" onClick={() => step(-1)} aria-label="Previous">
+                  <CaretLeft size={13} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-[12px]"
+                  onClick={() => setAnchor(new Date())}
+                >
+                  Today
+                </Button>
+                <Button variant="ghost" size="icon-sm" onClick={() => step(1)} aria-label="Next">
+                  <CaretRight size={13} />
+                </Button>
+              </div>
+            )}
+
+            <div className="flex shrink-0 items-center rounded-md border border-border p-0.5">
+              {VIEWS.map((v) => (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => setView(v.id)}
+                  className={cn(
+                    "rounded-[4px] px-2 py-1 text-[11.5px] font-medium transition-colors",
+                    view === v.id
+                      ? "bg-surface-raised text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={refresh}
+              disabled={refreshing}
+              aria-label="Refresh calendar"
+              className="shrink-0 text-muted-foreground/70 hover:text-foreground"
+            >
+              <ArrowsClockwise size={13} className={cn(refreshing && "animate-spin")} />
+            </Button>
+          </div>
         </div>
 
         {subjects.length > 0 && (
@@ -257,10 +285,18 @@ function Empty({
         Nothing on the calendar yet. Class times and due dates come from Canvas
         during a sync — fetch them now without a full scrape.
       </p>
-      <Button variant="secondary" size="sm" onClick={onRefresh} disabled={refreshing}>
-        <ArrowsClockwise size={13} className={cn(refreshing && "animate-spin")} />
-        Fetch from Canvas
-      </Button>
+      <div className="flex items-center gap-2">
+        <Button variant="secondary" size="sm" onClick={onRefresh} disabled={refreshing}>
+          <ArrowsClockwise size={13} className={cn(refreshing && "animate-spin")} />
+          Fetch from Canvas
+        </Button>
+        {/* The other way to have something here, and the only one that works
+            before a first sync. */}
+        <Button variant="ghost" size="sm" onClick={() => newEvent()}>
+          <Plus size={13} />
+          Add your own
+        </Button>
+      </div>
       <p className="max-w-md text-[11px] text-muted-foreground/70">
         A subject only appears here if its staff publish events to the Canvas
         calendar. Where they don't, Oculus falls back to the Echo360 lecture
