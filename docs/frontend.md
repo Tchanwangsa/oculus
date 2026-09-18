@@ -21,8 +21,9 @@ this page is the structure.
 | ⌘-click → a tab of its own, app-wide | `app/src/lib/newTabClicks.ts` |
 | Chat (a CLI agent's thread list, timeline, composer) | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/harnessStore.ts`, `app/src/lib/harness.ts` |
 | Calendar (month / week / upcoming, the new/edit event dialog) | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/`, `app/src/lib/calendar.ts`, `app/src/stores/eventEditorStore.ts` |
-| Projects (index, one board, a subject's tab) | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/subject/ProjectsPage.tsx`, `app/src/components/projects/`, `app/src/stores/projectsStore.ts`, `app/src/lib/projects.ts` |
-| Tasks across every project, and the ones filed nowhere | `app/src/pages/TasksPage.tsx`, `app/src/components/projects/TasksBoard.tsx`, `app/src/components/projects/TasksTable.tsx`, `app/src/components/projects/universalTasks.ts`, `app/src/hooks/useTaskList.ts` |
+| The Tasks section: one sidebar row, two tabs (`/projects`, `/tasks`) | `app/src/components/projects/SectionHeader.tsx`, `app/src/components/sidebar/NavItem.tsx` |
+| Its Projects tab (index, one board, a subject's own tab) | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/subject/ProjectsPage.tsx`, `app/src/components/projects/`, `app/src/stores/projectsStore.ts`, `app/src/lib/projects.ts` |
+| Its Tasks tab: every project's tasks and the ones filed nowhere, filtered | `app/src/pages/TasksPage.tsx`, `app/src/components/projects/TasksBoard.tsx`, `app/src/components/projects/TasksTable.tsx`, `app/src/components/projects/TaskFilters.tsx`, `app/src/components/projects/universalTasks.ts`, `app/src/hooks/useTaskList.ts` |
 | Writing a task down, and filing it later | `app/src/components/projects/NewTaskButton.tsx`, `app/src/components/projects/ProjectPicker.tsx` |
 | The card/row drag every board and table shares | `app/src/hooks/useCardDrag.ts` |
 | Overlap packing, shared by the week grid and the project timeline | `app/src/lib/lanes.ts` |
@@ -53,9 +54,10 @@ The route table is `app/src/routes.tsx`, and each **pane** builds its own
 memory router over it (`app/src/components/tabs/TabPane.tsx`) — the shell is
 above all of them, so there is no one router to name. A pane is a tab, or one
 half of a split tab — ⌥⌘T, described under **How it connects** below. `/` is **Home**; it used to
-redirect to `/chat`. Then `/chat`, `/calendar`, `/projects`,
-`/projects/:projectId` and `/projects/:projectId/tasks/:taskId`, `/tasks` and
-`/tasks/:taskId`, `/subjects`, `/subjects/:subjectId` (SubjectLayout →
+redirect to `/chat`. Then `/chat`, `/calendar`, the Tasks section's two tabs
+`/projects` and `/tasks` — plus `/projects/:projectId`,
+`/projects/:projectId/tasks/:taskId` and `/tasks/:taskId` under them —
+`/subjects`, `/subjects/:subjectId` (SubjectLayout →
 overview / modules / downloads / uploads / lectures / announcements /
 assignments / discussion / projects), `/subjects/:subjectId/file` and `/lecture` (the side
 panel promoted to a full Notion-style page, outside SubjectLayout on purpose),
@@ -65,6 +67,17 @@ tab) redirect.
 A project lives at the top level rather than under its subject even when it has
 one, because it can have none: the subject's Projects tab and the index are two
 filtered views of one list, and both link to the same `/projects/:projectId`.
+`/projects` and `/tasks` are the two tabs of **one section**, which has one
+sidebar row labelled **Tasks** and lands on `/projects`. The strip that
+switches them (`app/src/components/projects/SectionHeader.tsx`) *navigates*,
+because both pages render inside a tab's own memory router and every other
+thing that knows about these pages — `ProjectCrumbs`, `taskHref`'s two shapes,
+⌘-click, a restored tab, `tabInfo` — already keys off the two paths. A
+`localStorage` scope would have been a sixth source of truth for all of them.
+`NavItem`'s `match` is how one row lights on both tabs, since `/tasks` is not
+under `/projects`. A *subject's* Projects tab deliberately does not get the
+strip: it sits inside `SubjectLayout`'s own tabs, and a second strip offering
+to navigate out of the subject would be two strips on one page.
 Its name rides in the route's query (`?n=`, `projectHref`) for the tab strip's
 sake — `tabInfo` titles a tab from the path alone and has no project list to
 look one up in, the same trade `/lecture` makes with `?t=`.

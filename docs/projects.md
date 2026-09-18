@@ -7,6 +7,14 @@ tasks are read three ways behind a **Tasks** tab: a board, a table or a
 timeline. Each task is a page of its own as well. There is also a view over
 *every* project at once, at `/tasks`, which is where the tasks that belong to
 **no** project live — see [the universal view](#the-universal-view) below.
+
+The two are **one section** in the shell, with **one sidebar row, labelled
+Tasks**, leading to `/projects`: they were always the same rows read two ways,
+and the split was noise. Projects is the landing tab — today's index, where a
+project and a task are created — and Tasks is the second. The strip between
+them is `app/src/components/projects/SectionHeader.tsx`, and it *navigates*
+rather than swapping state, so both URLs survive with their history, their
+⌘-click and their restored tabs intact.
 Nothing here is
 scraped: every row is the student's own planning, or a plan the chat agent
 wrote for them through the `oculus` CLI. That is what shapes most of the
@@ -26,6 +34,8 @@ syncing again.
 | `oculus project` / `oculus task` | `app/src-tauri/src/bin/oculus.rs` |
 | Index, one project, one task | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/TaskPage.tsx` |
 | Every task at once, filed or not | `app/src/pages/TasksPage.tsx`, `app/src/hooks/useTaskList.ts` |
+| The section's two tabs, and the row that leads to them | `app/src/components/projects/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx`, `app/src/components/sidebar/NavItem.tsx` |
+| The universal view's four filters | `app/src/components/projects/TaskFilters.tsx` |
 | Its two views, and the rules they share | `app/src/components/projects/TasksBoard.tsx`, `app/src/components/projects/TasksTable.tsx`, `app/src/components/projects/universalTasks.ts` |
 | Where a task is filed: the picker, and the composer over it | `app/src/components/projects/ProjectPicker.tsx`, `app/src/components/projects/NewTaskButton.tsx` |
 | The drag every board and table shares | `app/src/hooks/useCardDrag.ts` |
@@ -405,7 +415,10 @@ from outside are these.
 
 `/tasks` is every task there is — across every project, plus the ones filed
 nowhere — read as a board of four columns or as a flat table
-(`app/src/pages/TasksPage.tsx`). A project's board is where *one* plan is
+(`app/src/pages/TasksPage.tsx`). It is the **second tab of the Projects/Tasks
+section**, under the strip both pages share, so neither page carries a heading
+of its own: the strip names the section, and a title on the same rule would be
+a second one. A project's board is where *one* plan is
 arranged; this answers the question a board cannot, which is what there is to
 do at all, and it is where a task with nowhere to go gets written down.
 
