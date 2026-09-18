@@ -32,6 +32,18 @@
 //!   native view cannot allow: it asks for that page to be hidden until the
 //!   popup is gone.
 //!
+//! The toolbar is the fourth: **what a page knows about itself, only the
+//! page can say.** Whether the back list has anywhere to go, what a find
+//! matched, what the zoom is — none of that is derivable from the URL, and
+//! Tauri exposes no API for the first two. They are read and driven on the
+//! WKWebView directly (`nav_state`, `find_string`), which means they arrive
+//! *late*: `with_webview` dispatches to the main thread and hands back
+//! nothing, so the answer is written into the tab and broadcast from inside
+//! the callback rather than returned to a command. Favicons are the same
+//! shape for a different reason — WebKit has no public icon API at all, so
+//! the icon is fetched over HTTP beside the page, once per host, and pushed
+//! out on its own event so it never rides in the snapshot.
+//!
 //! Signed in, not for free: `canvas_session` is HttpOnly *and* session-scoped,
 //! so WebKit holds it in memory only and it is gone when the app quits — the
 //! scraper's snapshot on disk is the only copy that survives.
@@ -41,9 +53,12 @@
 //! `docs/auth.md`.) Browsing Canvas then rolls the session forward, so every
 //! Canvas page load re-snapshots the cookie and the scraper inherits it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::sync::Mutex;
+use std::time::Duration;
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, Webview, WebviewBuilder};
 use tauri::{
@@ -59,6 +74,24 @@ pub const LABEL_PREFIX: &str = "browse-";
 
 pub const CANVAS_HOST: &str = "canvas.lms.unimelb.edu.au";
 
+/// What a page tells the web it is.
+///
+/// Without this a page webview sends WKWebView's bare default, which stops at
+/// `AppleWebKit/605.1.15 (KHTML, like Gecko)` — no `Version/… Safari/…` suffix,
+/// because nothing set `applicationNameForUserAgent`. Sites that sniff the UA
+/// read that as an engine they have never heard of and serve their fallback:
+/// google.com answers a no-JavaScript page of 86 KB instead of the real one at
+/// 221 KB, which is the 2004-looking grey-button Google this constant exists to
+/// stop. It is not a rendering problem — the engine is Safari's either way, so
+/// claiming Safari is true in kind and only the version number is a guess.
+///
+/// Keep the version roughly current (Safari 26.3 here); a stale one is read as
+/// an old browser and some sites start degrading again. The scraper's HTTP
+/// client has a string of its own for the same reason (`okta.rs`) — they are
+/// deliberately not shared, since bumping this one must not disturb a working
+/// SSO flow.
+const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15";
+
 fn label(id: u32) -> String {
     format!("{LABEL_PREFIX}{id}")
 }
@@ -69,6 +102,50 @@ pub struct Tab {
     pub url: String,
     pub title: String,
     pub loading: bool,
+    /// Whether the page's own back/forward list has anywhere left to go.
+    /// Read off the WKWebView after every page load: a URL says nothing
+    /// about the history behind it, so an arrow with no answer to this can
+    /// only lie in one direction or the other.
+    pub can_back: bool,
+    pub can_forward: bool,
+    /// Page zoom, where 1.0 is 100% — the WKWebView's own `pageZoom`, which
+    /// is what a browser's ⌘+ does. Per tab and for the tab's life only: a
+    /// zoom remembered per site is a second store to keep true, and this one
+    /// is a reading aid, not a preference.
+    pub zoom: f64,
+}
+
+impl Tab {
+    fn new(id: u32, url: String) -> Self {
+        Self {
+            id,
+            url,
+            title: String::new(),
+            loading: true,
+            can_back: false,
+            can_forward: false,
+            zoom: 1.0,
+        }
+    }
+}
+
+/// A site's icon, pushed on its own event rather than folded into the
+/// snapshot: the snapshot goes out on every page-load edge, and an icon is
+/// kilobytes that would ride along with each one for nothing.
+#[derive(Clone, Serialize)]
+struct FaviconFound {
+    host: String,
+    /// A `data:` URL — the bytes, so the frontend renders it without a second
+    /// fetch and without the page's own network identity.
+    icon: String,
+}
+
+/// What a find landed on, for the find bar that asked.
+#[derive(Clone, Serialize)]
+struct FindResult {
+    id: u32,
+    query: String,
+    found: bool,
 }
 
 /// Everything the frontend mirrors, sent whole on every change. Diffing
@@ -98,6 +175,11 @@ struct Inner {
     /// absent until its page has been placed once — it is hidden until
     /// then — and drops out again when the tab closes.
     viewports: HashMap<u32, Viewport>,
+    /// Hosts whose favicon has been looked for, found or not. One attempt per
+    /// host per run: a site with no icon must not cost two HTTP requests on
+    /// every page load, and the frontend keeps what was found in the database
+    /// so a restart is the only thing that asks again.
+    favicons_tried: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -357,6 +439,21 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     let title_app = app.clone();
     let popup_app = app.clone();
     let builder = WebviewBuilder::new(label(id), WebviewUrl::External(url))
+        .user_agent(PAGE_USER_AGENT)
+        // A page webview is a *child* view inside the main window, so it has
+        // no window of its own and WebKit reports `outerWidth`/`outerHeight`
+        // as 0. That zero is load-bearing for anyone who renders to a canvas:
+        // `outerWidth / innerWidth` is the usual way to detect browser zoom,
+        // and a degenerate ratio makes a renderer fall back to its minimum
+        // scale. Google Docs backed an 816x1056 CSS page tile with a 408x528
+        // canvas — a quarter of the resolution a 2x display wants, stretched
+        // 4x on the way to the screen, while its DOM chrome stayed crisp and
+        // made it look like the app was at fault. Reporting the viewport's
+        // own size is what a full-window browser would roughly say anyway.
+        // Measured: with this, the same tile comes back 1632x2112.
+        .initialization_script(
+            r#"(function(){try{var d=function(k,s){Object.defineProperty(window,k,{configurable:true,get:function(){return window[s];}});};d('outerWidth','innerWidth');d('outerHeight','innerHeight');}catch(e){}})()"#,
+        )
         // Page-load events, not `on_navigation`, are what the tab follows:
         // `on_navigation` fires for every frame, and a Canvas dashboard is a
         // nest of iframes — the tab would end up pointed at an LTI
@@ -374,10 +471,19 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
                 }
             });
             broadcast(&load_app);
-            // A Canvas page load rolls the session forward; the cookie the
-            // scraper replays is a snapshot, so take a fresh one.
-            if !started && payload.url().host_str() == Some(CANVAS_HOST) {
-                crate::auth::save_session_cookie(webview.app_handle());
+            // The back/forward list has just moved, whichever edge this is:
+            // a commit is what pushes an entry, and a finish is when the page
+            // that pushed it is really there. Both are cheap — one property
+            // read on the main thread — and asking twice is how the arrows
+            // stay right for a page that redirects on arrival.
+            refresh_nav(&load_app, id);
+            if !started {
+                // A Canvas page load rolls the session forward; the cookie the
+                // scraper replays is a snapshot, so take a fresh one.
+                if payload.url().host_str() == Some(CANVAS_HOST) {
+                    crate::auth::save_session_cookie(webview.app_handle());
+                }
+                ensure_favicon(&load_app, payload.url());
             }
         })
         .on_document_title_changed(move |_, title| {
@@ -428,12 +534,7 @@ fn hide_all(app: &AppHandle) {
 pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
     let id = with_state(app, |s| {
         s.next_id += 1;
-        s.tabs.push(Tab {
-            id: s.next_id,
-            url: url.to_string(),
-            title: String::new(),
-            loading: true,
-        });
+        s.tabs.push(Tab::new(s.next_id, url.to_string()));
         s.next_id
     });
     eprintln!("[oculus] browser: opening tab {id} → {url}");
@@ -443,6 +544,540 @@ pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
     }
     broadcast(app);
     Ok(id)
+}
+
+// ── The page's own state ────────────────────────────────────────────────
+//
+// Three things about a page live in the page and nowhere else: whether its
+// back/forward list has anywhere to go, what the zoom is, and what a find
+// matched. Tauri has an API for the zoom and none for the other two, so they
+// go through the WKWebView.
+//
+// `with_webview` is the only way in and it hands nothing back — it dispatches
+// a closure to the main thread and returns immediately. So every one of these
+// is written as a *push*: read the answer inside the closure, put it in the
+// tab, broadcast. Nothing here returns a value to its caller, and the frontend
+// learns what happened the same way it learns everything else.
+
+/// Reads `canGoBack`/`canGoForward` off the page and broadcasts them.
+///
+/// Called on both edges of every page load. The read is one Objective-C
+/// property each, so asking twice costs nothing and covers the page that
+/// redirects the moment it commits.
+#[cfg(target_os = "macos")]
+fn refresh_nav(app: &AppHandle, id: u32) {
+    use objc2_web_kit::WKWebView;
+
+    let Some(page) = page(app, id) else {
+        return;
+    };
+    let app = app.clone();
+    page.with_webview(move |platform| {
+        let ptr = platform.inner() as *mut WKWebView;
+        if ptr.is_null() {
+            return;
+        }
+        let (back, forward) = unsafe {
+            let view = &*ptr;
+            (view.canGoBack(), view.canGoForward())
+        };
+        let changed = with_state(&app, |s| {
+            let Some(tab) = s.tabs.iter_mut().find(|t| t.id == id) else {
+                return false;
+            };
+            if tab.can_back == back && tab.can_forward == forward {
+                return false;
+            }
+            tab.can_back = back;
+            tab.can_forward = forward;
+            true
+        });
+        if changed {
+            broadcast(&app);
+        }
+    })
+    .ok();
+}
+
+/// Elsewhere there is nothing to ask, so the arrows stay live rather than
+/// greying out on a guess — the pre-toolbar behaviour, kept where it is still
+/// the only honest one.
+#[cfg(not(target_os = "macos"))]
+fn refresh_nav(app: &AppHandle, id: u32) {
+    let changed = with_state(app, |s| {
+        let Some(tab) = s.tabs.iter_mut().find(|t| t.id == id) else {
+            return false;
+        };
+        let changed = !tab.can_back || !tab.can_forward;
+        tab.can_back = true;
+        tab.can_forward = true;
+        changed
+    });
+    if changed {
+        broadcast(app);
+    }
+}
+
+/// One step along the page's own back/forward list.
+///
+/// The native call, not `history.go(delta)`: session history is the
+/// *webview's*, and a page that has replaced `history` — or is simply a
+/// document with no script running — still has a back list WebKit will walk.
+#[cfg(target_os = "macos")]
+fn go_history(app: &AppHandle, id: u32, delta: i32) {
+    use objc2_web_kit::WKWebView;
+
+    let Some(page) = page(app, id) else {
+        return;
+    };
+    page.with_webview(move |platform| {
+        let ptr = platform.inner() as *mut WKWebView;
+        if ptr.is_null() {
+            return;
+        }
+        let view = unsafe { &*ptr };
+        // One step at a time is all the toolbar asks for; a longer jump would
+        // want `backForwardList` and an item, which no control here offers.
+        for _ in 0..delta.unsigned_abs() {
+            unsafe {
+                if delta < 0 {
+                    view.goBack();
+                } else {
+                    view.goForward();
+                }
+            }
+        }
+    })
+    .ok();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn go_history(app: &AppHandle, id: u32, delta: i32) {
+    if let Some(webview) = page(app, id) {
+        webview.eval(&format!("history.go({delta})")).ok();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn reload_page(app: &AppHandle, id: u32, hard: bool) {
+    use objc2_web_kit::WKWebView;
+
+    let Some(page) = page(app, id) else {
+        return;
+    };
+    page.with_webview(move |platform| {
+        let ptr = platform.inner() as *mut WKWebView;
+        if ptr.is_null() {
+            return;
+        }
+        let view = unsafe { &*ptr };
+        unsafe {
+            if hard {
+                view.reloadFromOrigin();
+            } else {
+                view.reload();
+            }
+        }
+    })
+    .ok();
+}
+
+/// Elsewhere there is only the script API, which has no cache-ignoring form —
+/// so a hard reload is an ordinary one, and says so by doing nothing extra.
+#[cfg(not(target_os = "macos"))]
+fn reload_page(app: &AppHandle, id: u32, _hard: bool) {
+    if let Some(webview) = page(app, id) {
+        webview.eval("location.reload()").ok();
+    }
+}
+
+/// How far a page may be zoomed. The same range the app's own window zoom
+/// takes, so the two controls feel like one idea at two scopes.
+const ZOOM_MIN: f64 = 0.5;
+const ZOOM_MAX: f64 = 3.0;
+
+/// Finds `query` in the page and selects the hit, WebKit's own way.
+///
+/// `findString:withConfiguration:completionHandler:` is the public search API
+/// a WKWebView has: it highlights and scrolls to the match itself, wraps at
+/// the end, and answers a `WKFindResult` whose one useful field is whether
+/// anything matched. There is **no match count** in that answer, so the find
+/// bar can say "no results" and nothing more precise — a counter would mean
+/// walking the DOM from script, in a page that is not ours.
+#[cfg(target_os = "macos")]
+fn find_string(app: &AppHandle, id: u32, query: String, backwards: bool) {
+    use block2::RcBlock;
+    use objc2::MainThreadMarker;
+    use objc2_foundation::NSString;
+    use objc2_web_kit::{WKFindConfiguration, WKFindResult, WKWebView};
+
+    let Some(page) = page(app, id) else {
+        return;
+    };
+    let app = app.clone();
+    page.with_webview(move |platform| {
+        let ptr = platform.inner() as *mut WKWebView;
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        if ptr.is_null() {
+            return;
+        }
+        let view = unsafe { &*ptr };
+        let needle = NSString::from_str(&query);
+        let config = unsafe { WKFindConfiguration::new(mtm) };
+        unsafe {
+            config.setBackwards(backwards);
+            config.setWraps(true);
+            // Case-insensitive, like every find bar: someone typing a word
+            // into a strip of chrome is not asking about its capitals.
+            config.setCaseSensitive(false);
+        }
+        let reply_app = app.clone();
+        let echo = query.clone();
+        // The completion handler is not optional here for the same reason it
+        // is not in `seed_canvas_session`: WebKit calls whatever it was given.
+        let done = RcBlock::new(move |result: std::ptr::NonNull<WKFindResult>| {
+            let found = unsafe { result.as_ref().matchFound() };
+            reply_app
+                .emit_to(
+                    EventTarget::webview(MAIN),
+                    "browser-find",
+                    FindResult {
+                        id,
+                        query: echo.clone(),
+                        found,
+                    },
+                )
+                .ok();
+        });
+        unsafe {
+            view.findString_withConfiguration_completionHandler(&needle, Some(&config), &done);
+        }
+    })
+    .ok();
+}
+
+/// Elsewhere: `window.find`, which highlights and scrolls the same way but
+/// tells us nothing, so the bar is told the search happened and left to say
+/// no more than that.
+#[cfg(not(target_os = "macos"))]
+fn find_string(app: &AppHandle, id: u32, query: String, backwards: bool) {
+    if let Some(webview) = page(app, id) {
+        let escaped = serde_json::to_string(&query).unwrap_or_else(|_| "\"\"".into());
+        webview
+            .eval(&format!(
+                "window.find({escaped}, false, {backwards}, true)"
+            ))
+            .ok();
+    }
+    app.emit_to(
+        EventTarget::webview(MAIN),
+        "browser-find",
+        FindResult {
+            id,
+            query,
+            found: true,
+        },
+    )
+    .ok();
+}
+
+// ── A still of the page ─────────────────────────────────────────────────
+//
+// A native view cannot interleave with the DOM, so the app cannot draw over a
+// page: an omnibox dropdown rendered in the frontend lands *beneath* the
+// WKWebView. Taking the page down for the length of the dropdown is what that
+// used to mean, and it blanked the card the moment you typed a character.
+//
+// A still is the way out of it. WebKit will render a page's visible area into
+// an image — `takeSnapshotWithConfiguration:`, the API a browser's tab
+// thumbnails come from — so the frontend paints that image in the slot, takes
+// the live page down behind it, and draws an ordinary DOM popover over it,
+// with its shadow and its rounded corners and its hover states. The page is
+// frozen for as long as the list is up, which is the second or two you spend
+// typing an address, and pixel-identical to what was there.
+//
+// Raw `msg_send!` rather than `objc2-web-kit`'s typed wrapper: the typed
+// `takeSnapshotWithConfiguration_completionHandler` hands back an `NSImage`
+// and is therefore gated behind a dependency on the whole of AppKit, for one
+// call whose result becomes bytes immediately. `round_corners` above reaches
+// for the runtime the same way and for the same reason.
+
+/// Hands the waiting command its answer, once. WebKit calls a completion
+/// handler exactly once, but the block it lives in is an `Fn` and the send
+/// consumes the sender, so the sender sits behind a lock either way.
+#[cfg(target_os = "macos")]
+fn deliver(
+    cell: &Mutex<Option<tokio::sync::oneshot::Sender<Option<Vec<u8>>>>>,
+    png: Option<Vec<u8>>,
+) {
+    if let Some(tx) = cell.lock().ok().and_then(|mut slot| slot.take()) {
+        let _ = tx.send(png);
+    }
+}
+
+/// The snapshot `NSImage` as PNG bytes. TIFF is the only representation an
+/// `NSImage` hands over directly; `NSBitmapImageRep` re-encodes it, at the
+/// image's own pixel size, so a 2x display's still stays 2x and the page
+/// does not go soft the moment the list opens.
+#[cfg(target_os = "macos")]
+unsafe fn png_bytes(image: *mut objc2::runtime::AnyObject) -> Option<Vec<u8>> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    if image.is_null() {
+        return None;
+    }
+    let tiff: *mut AnyObject = msg_send![image, TIFFRepresentation];
+    if tiff.is_null() {
+        return None;
+    }
+    let rep: *mut AnyObject = msg_send![class!(NSBitmapImageRep), imageRepWithData: tiff];
+    if rep.is_null() {
+        return None;
+    }
+    let props: *mut AnyObject = msg_send![class!(NSDictionary), dictionary];
+    // NSBitmapImageFileTypePNG. PNG rather than JPEG because the still stands
+    // in for the page itself: text on it is read, not glanced at.
+    let data: *mut AnyObject = msg_send![rep, representationUsingType: 4usize, properties: props];
+    if data.is_null() {
+        return None;
+    }
+    let len: usize = msg_send![data, length];
+    let bytes: *const u8 = msg_send![data, bytes];
+    if bytes.is_null() || len == 0 {
+        return None;
+    }
+    Some(std::slice::from_raw_parts(bytes, len).to_vec())
+}
+
+#[cfg(target_os = "macos")]
+fn snapshot_page(
+    app: &AppHandle,
+    id: u32,
+    reply: tokio::sync::oneshot::Sender<Option<Vec<u8>>>,
+) {
+    use block2::RcBlock;
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let cell = std::sync::Arc::new(Mutex::new(Some(reply)));
+    let Some(page) = page(app, id) else {
+        deliver(&cell, None);
+        return;
+    };
+    let outer = cell.clone();
+    let queued = page.with_webview(move |platform| {
+        let view = platform.inner() as *mut AnyObject;
+        if view.is_null() {
+            deliver(&outer, None);
+            return;
+        }
+        let inner = outer.clone();
+        let done = RcBlock::new(move |image: *mut AnyObject, _error: *mut AnyObject| {
+            deliver(&inner, unsafe { png_bytes(image) });
+        });
+        // A nil configuration means the defaults: the visible viewport, after
+        // pending screen updates — which is exactly "what is on screen now".
+        unsafe {
+            let config: *mut AnyObject = std::ptr::null_mut();
+            let _: () = msg_send![
+                view,
+                takeSnapshotWithConfiguration: config,
+                completionHandler: &*done,
+            ];
+        }
+    });
+    // `with_webview` fails on a page that has gone; nothing will call the
+    // block, so the waiting side has to be released here.
+    if queued.is_err() {
+        deliver(&cell, None);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn snapshot_page(
+    _app: &AppHandle,
+    _id: u32,
+    reply: tokio::sync::oneshot::Sender<Option<Vec<u8>>>,
+) {
+    let _ = reply.send(None);
+}
+
+// ── Favicons ────────────────────────────────────────────────────────────
+//
+// WebKit has no public favicon API — the icon a WKWebView draws in Safari
+// comes from SPI — so the icon is fetched beside the page, over plain HTTP,
+// by host.
+//
+// Two requests at worst and usually one: `/favicon.ico` is still what the
+// large majority of sites serve, and only when that comes back as nothing (or
+// as an HTML error page dressed as a 200, which is why the bytes are sniffed
+// rather than trusted) is the document itself fetched for the `<link rel=icon>`
+// it declares. The other way round would be correct in one more case and cost
+// a full HTML fetch every time.
+//
+// Once per host per run. What is found goes out as `browser-favicon` and the
+// frontend keeps it in the database, so the second run of the app has the
+// icons before any page loads.
+
+/// Bigger than this is not a favicon — it is somebody's hero image behind a
+/// misconfigured path, and it would be base64'd into an event.
+const FAVICON_MAX: usize = 256 * 1024;
+/// Enough of a document to hold its `<head>`.
+const FAVICON_HTML_MAX: u64 = 512 * 1024;
+
+fn favicon_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(8))
+        // Claim to be the page's own browser: a site that serves a different
+        // icon to a bot is a site whose icon we would rather not show.
+        .user_agent(PAGE_USER_AGENT)
+        .build()
+}
+
+/// Looks for `url`'s site icon in the background, unless this host has been
+/// asked about already.
+fn ensure_favicon(app: &AppHandle, url: &url::Url) {
+    let Some(host) = url.host_str().map(str::to_owned) else {
+        return;
+    };
+    // `insert` answers whether it was new, so the claim and the check are one
+    // operation and two page loads landing together cannot both go fetching.
+    let first = with_state(app, |s| s.favicons_tried.insert(host.clone()));
+    if !first {
+        return;
+    }
+    let origin = url.origin().ascii_serialization();
+    let page_url = url.to_string();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let Some((mime, bytes)) = favicon_for(&origin, &page_url) else {
+            return;
+        };
+        let icon = format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        );
+        app.emit_to(
+            EventTarget::webview(MAIN),
+            "browser-favicon",
+            FaviconFound { host, icon },
+        )
+        .ok();
+    });
+}
+
+fn favicon_for(origin: &str, page_url: &str) -> Option<(String, Vec<u8>)> {
+    if let Some(found) = fetch_icon(&format!("{origin}/favicon.ico")) {
+        return Some(found);
+    }
+    let html = fetch_head(page_url)?;
+    let href = declared_icon(&html)?;
+    let resolved = url::Url::parse(page_url).ok()?.join(&href).ok()?;
+    if !matches!(resolved.scheme(), "http" | "https") {
+        return None;
+    }
+    fetch_icon(resolved.as_str())
+}
+
+fn fetch_icon(url: &str) -> Option<(String, Vec<u8>)> {
+    let response = favicon_agent().get(url).call().ok()?;
+    let content_type = response.header("content-type").unwrap_or("").to_lowercase();
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(FAVICON_MAX as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.is_empty() || bytes.len() > FAVICON_MAX {
+        return None;
+    }
+    let mime = sniff_image(&content_type, &bytes)?;
+    Some((mime, bytes))
+}
+
+fn fetch_head(url: &str) -> Option<String> {
+    let response = favicon_agent().get(url).call().ok()?;
+    let mut body = Vec::new();
+    response
+        .into_reader()
+        .take(FAVICON_HTML_MAX)
+        .read_to_end(&mut body)
+        .ok()?;
+    Some(String::from_utf8_lossy(&body).into_owned())
+}
+
+/// What these bytes actually are, for the `data:` URL's media type.
+///
+/// Magic numbers first and the header second, because a 200 is not a promise:
+/// plenty of servers answer `/favicon.ico` with their HTML 404 page and the
+/// site's own content type, which would otherwise become a broken `<img>` in
+/// the tab strip. Unrecognised bytes are only accepted if the header at least
+/// claims an image.
+fn sniff_image(content_type: &str, bytes: &[u8]) -> Option<String> {
+    if bytes.starts_with(b"\x89PNG") {
+        return Some("image/png".into());
+    }
+    if bytes.starts_with(b"GIF8") {
+        return Some("image/gif".into());
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some("image/jpeg".into());
+    }
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        return Some("image/webp".into());
+    }
+    if bytes.starts_with(&[0x00, 0x00, 0x01, 0x00]) {
+        return Some("image/x-icon".into());
+    }
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(512)]).to_lowercase();
+    if head.contains("<svg") {
+        return Some("image/svg+xml".into());
+    }
+    if head.contains("<html") || head.contains("<!doctype html") {
+        return None;
+    }
+    content_type
+        .starts_with("image/")
+        .then(|| content_type.split(';').next().unwrap_or_default().trim().to_string())
+        .filter(|mime| !mime.is_empty())
+}
+
+/// The icon a document declares, largest first.
+///
+/// `rel~="icon"` is the whole-word match, so it takes `rel="icon"` and
+/// `rel="shortcut icon"` and leaves `apple-touch-icon` alone — a 180px iOS
+/// tile is the wrong picture for a 14px slot, and often a different one.
+/// Among what is left, the biggest declared `sizes` wins over document order,
+/// since a legacy 16x16 listed first would otherwise beat the SVG below it.
+fn declared_icon(html: &str) -> Option<String> {
+    let document = scraper::Html::parse_document(html);
+    let selector = scraper::Selector::parse(r#"link[rel~="icon"]"#).ok()?;
+    let mut best: Option<(u32, String)> = None;
+    for link in document.select(&selector) {
+        let Some(href) = link.value().attr("href").map(str::trim) else {
+            continue;
+        };
+        if href.is_empty() {
+            continue;
+        }
+        // "any" is what an SVG declares, and it is the one that scales.
+        let size = match link.value().attr("sizes").map(str::to_lowercase) {
+            Some(s) if s.contains("any") => u32::MAX,
+            Some(s) => s
+                .split_whitespace()
+                .filter_map(|pair| pair.split(['x', 'X']).next()?.parse::<u32>().ok())
+                .max()
+                .unwrap_or(0),
+            None => 0,
+        };
+        if best.as_ref().is_none_or(|(seen, _)| size > *seen) {
+            best = Some((size, href.to_string()));
+        }
+    }
+    best.map(|(_, href)| href)
 }
 
 // ── Commands ────────────────────────────────────────────────────────────
@@ -495,6 +1130,23 @@ pub fn browser_hide_tab(app: AppHandle, id: u32) {
     }
 }
 
+/// A still of tab `id`'s page as PNG bytes, for the frontend to paint in the
+/// slot while it draws something over it. Raw bytes rather than a data URL:
+/// a window-sized 2x still is megabytes, and base64 would add a third of that
+/// again to a string the frontend only wants as a blob.
+///
+/// An error means there is no still to be had — no page, or WebKit declined.
+/// The caller's fallback is what it did before stills existed: hide the page.
+#[tauri::command]
+pub async fn browser_snapshot(app: AppHandle, id: u32) -> Result<tauri::ipc::Response, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    snapshot_page(&app, id, tx);
+    match rx.await {
+        Ok(Some(png)) => Ok(tauri::ipc::Response::new(png)),
+        _ => Err("no snapshot".into()),
+    }
+}
+
 /// Every page off screen at once, for teardown — the app is leaving a state
 /// where any of them could be showing and does not want to name them.
 #[tauri::command]
@@ -514,20 +1166,72 @@ pub fn browser_navigate(app: AppHandle, id: u32, url: String) -> Result<(), Stri
     webview.navigate(target).map_err(|e| e.to_string())
 }
 
-/// Back / forward run as JavaScript in the page: `Webview` exposes no history
-/// API, and `history.go` needs no same-origin permission to drive the page's
-/// own session history.
+/// Back / forward, one entry at a time. `Webview` exposes no history API, so
+/// this walks the WKWebView's own back/forward list — see `go_history`, and
+/// `Tab::can_back` for how the arrows know whether to offer it.
 #[tauri::command]
 pub fn browser_history(app: AppHandle, id: u32, delta: i32) {
-    if let Some(webview) = page(&app, id) {
-        webview.eval(&format!("history.go({delta})")).ok();
-    }
+    go_history(&app, id, delta);
 }
 
+/// Reload, and — with `hard` — reload ignoring the cache.
+///
+/// The distinction is not a nicety. `location.reload()`, which this used to
+/// be, is cache-obeying, and a page served from WebKit's cache is how a
+/// *fixed* bug goes on reproducing: the user-agent change on 2026-09-17 looked
+/// broken for twenty minutes because every reload was serving the response
+/// fetched under the old one. `reloadFromOrigin` is the revalidating reload,
+/// and it exists only on the WKWebView.
 #[tauri::command]
-pub fn browser_reload(app: AppHandle, id: u32) {
+pub fn browser_reload(app: AppHandle, id: u32, hard: bool) {
+    reload_page(&app, id, hard);
+}
+
+/// Page zoom, as a browser's ⌘+ does it — the WKWebView's `pageZoom`, which
+/// scales the page's own layout viewport. Not the app's window zoom, which is
+/// a different control at a different scope (`AppLayout`), and not a CSS
+/// transform on the slot: the page is a native view over a hole in the DOM,
+/// and nothing this side can scale it.
+#[tauri::command]
+pub fn browser_set_zoom(app: AppHandle, id: u32, zoom: f64) {
+    let zoom = if zoom.is_finite() {
+        zoom.clamp(ZOOM_MIN, ZOOM_MAX)
+    } else {
+        1.0
+    };
+    let Some(webview) = page(&app, id) else {
+        return;
+    };
+    webview.set_zoom(zoom).ok();
+    with_state(&app, |s| {
+        if let Some(tab) = s.tabs.iter_mut().find(|t| t.id == id) {
+            tab.zoom = zoom;
+        }
+    });
+    broadcast(&app);
+}
+
+/// Find `query` in the page and select the next hit. The answer — matched or
+/// not — comes back as a `browser-find` event rather than a return value; see
+/// `find_string`.
+#[tauri::command]
+pub fn browser_find(app: AppHandle, id: u32, query: String, backwards: bool) {
+    if query.is_empty() {
+        browser_find_clear(app, id);
+        return;
+    }
+    find_string(&app, id, query, backwards);
+}
+
+/// Drops the find's selection when the bar closes. WebKit's find API has no
+/// "unhighlight" of its own — what it leaves behind is an ordinary selection,
+/// so clearing the selection is the whole of it.
+#[tauri::command]
+pub fn browser_find_clear(app: AppHandle, id: u32) {
     if let Some(webview) = page(&app, id) {
-        webview.eval("location.reload()").ok();
+        webview
+            .eval("try { window.getSelection().removeAllRanges(); } catch {}")
+            .ok();
     }
 }
 
@@ -535,9 +1239,33 @@ pub fn browser_reload(app: AppHandle, id: u32) {
 /// its audio — so closing the tab has to mean closing the webview. Which
 /// tab the strip lands on next is the frontend's call; it hears the change
 /// through `browser-state`.
+///
+/// **`close()` on its own does not stop the page.** wry's `Drop` for a macOS
+/// webview is `removeFromSuperview` followed by `retain` — a deliberate leak,
+/// with no matching release anywhere in the crate — and `removeFromSuperview`
+/// does not stop media. Meanwhile Tauri drops the label from its webview map
+/// first, so the handle below is the *last* one that will ever exist. Closing
+/// a playing tab that way left a WKWebView pinned alive off screen, still
+/// decoding, still holding the audio device, autoplaying whatever came next,
+/// with nothing in the app able to reach it again. So the document is torn
+/// down here, while there is still something to tear it down with.
 #[tauri::command]
 pub fn browser_close_tab(app: AppHandle, id: u32) {
     if let Some(webview) = page(&app, id) {
+        // Pause first, then navigate: `about:blank` destroys the media
+        // elements outright, but a navigation has to commit, and pausing
+        // lands immediately. Both are queued on the webview ahead of the
+        // close, and the leaked view outlives the drop — which for once
+        // works in our favour, since it means the blank page still commits.
+        webview
+            .eval(
+                "for (const m of document.querySelectorAll('video,audio')) \
+                 { try { m.pause(); m.removeAttribute('src'); m.load(); } catch {} }",
+            )
+            .ok();
+        if let Ok(blank) = "about:blank".parse() {
+            webview.navigate(blank).ok();
+        }
         webview.close().ok();
     }
     with_state(&app, |s| {
