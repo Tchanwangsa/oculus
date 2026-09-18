@@ -56,8 +56,8 @@ mod cli_tests {
         }
         assert!(markdown.contains("### `oculus auth login`"), "nested commands");
         assert!(
-            markdown.contains("### `oculus lecture recap`"),
-            "lecture recap command"
+            markdown.contains("### `oculus lecture reading`"),
+            "lecture reading command"
         );
         assert!(!markdown.contains('\u{1b}'), "no ANSI escapes in a file");
     }
@@ -73,11 +73,11 @@ mod cli_tests {
     }
 
     #[test]
-    fn lecture_recap_accepts_one_run_overrides() {
+    fn lecture_reading_accepts_one_run_overrides() {
         let cli = Cli::try_parse_from([
             "oculus",
             "lecture",
-            "recap",
+            "reading",
             "a1b2c3d4",
             "--force",
             "--provider",
@@ -87,12 +87,12 @@ mod cli_tests {
             "--effort",
             "medium",
         ])
-        .expect("recap flags");
+        .expect("reading flags");
         let Some(Command::Lecture {
-            action: LectureAction::Recap(args),
+            action: LectureAction::Reading(args),
         }) = cli.command
         else {
-            panic!("lecture recap command");
+            panic!("lecture reading command");
         };
         assert_eq!(args.id, "a1b2c3d4");
         assert_eq!(args.provider.as_deref(), Some("codex"));
@@ -130,7 +130,7 @@ enum Command {
         #[command(subcommand)]
         action: ProjectAction,
     },
-    /// Add, move, finish and delete the tasks on a project's board
+    /// Add, move, refile, finish and delete tasks, on a board or on none
     Task {
         #[command(subcommand)]
         action: TaskAction,
@@ -523,20 +523,30 @@ enum TaskAction {
     Add(TaskAddArgs),
     Update(TaskUpdateArgs),
     Move(TaskMoveArgs),
+    Refile(TaskRefileArgs),
     Rm(TaskRmArgs),
 }
 
-/// List a project's tasks.
+/// List tasks — one project's, or every task there is.
 ///
 /// Grouped by column in the board's order, subtasks under their parent. A task
 /// sitting in a `done` column carries the time it landed there.
+///
+/// Without `-p` this spans **every** project and includes the tasks that
+/// belong to none, printed as one board per project under its name, with the
+/// unfiled ones first. `--unfiled` lists only those: the pile with no board of
+/// its own, which is the one that needs looking at.
 #[derive(Args)]
 struct TaskListArgs {
-    /// Which project
+    /// Which project (omit for every task in the library)
     #[arg(short = 'p', long, value_name = "ID")]
-    project: i64,
-    /// Only this board column (its id, e.g. todo)
-    #[arg(short = 'c', long, value_name = "ID")]
+    project: Option<i64>,
+    /// Only tasks that belong to no project at all
+    #[arg(long, conflicts_with = "project")]
+    unfiled: bool,
+    /// Only this board column (its id, e.g. todo) — needs --project, since a
+    /// column id only means something against one board
+    #[arg(short = 'c', long, value_name = "ID", requires = "project")]
     column: Option<String>,
     /// Only tasks due before this ISO 8601 timestamp. Compared as text, so
     /// pass the same shape the dates were written in (UTC, usually).
@@ -546,12 +556,19 @@ struct TaskListArgs {
 
 /// Add one task, or a whole breakdown in one call.
 ///
-/// A task lands at the end of its column; without `--column` that is the
-/// project's first one. The column id is checked against the project's board
-/// and an unknown one is refused, listing the ids the board does have — a task
-/// filed under a column that does not exist is drawn by nothing, in any view.
-/// Landing in a `done` column marks the task finished, exactly as moving it
-/// there would.
+/// **Without `-p` the task belongs to no project at all** — the same thing the
+/// app's Tasks page writes by default, and the answer to "write this down, I
+/// have not decided where it goes". That is the absence of a project, not a
+/// project called Inbox, so nothing needs cleaning up if it is never filed;
+/// `oculus task refile` files it later. Its board is the default one
+/// (`backlog`, `todo`, `doing`, `done`), so filing it into a project created by
+/// this binary needs no translation.
+///
+/// A task lands at the end of its column; without `--column` that is the first
+/// column of its board. The column id is checked against that board and an
+/// unknown one is refused, listing the ids it does have — a task filed under a
+/// column that does not exist is drawn by nothing, in any view. Landing in a
+/// `done` column marks the task finished, exactly as moving it there would.
 ///
 /// `--parent` makes the task a subtask. Subtasks are one level deep: a subtask
 /// cannot itself be given children.
@@ -577,13 +594,13 @@ struct TaskListArgs {
 /// Prints the new task ids in the order they were given.
 #[derive(Args)]
 struct TaskAddArgs {
-    /// Which project
+    /// Which project (omit to file it nowhere)
     #[arg(short = 'p', long, value_name = "ID")]
-    project: i64,
+    project: Option<i64>,
     /// The task's title. Omit when using --batch.
     #[arg(value_name = "TITLE")]
     title: Option<String>,
-    /// Board column id (default: the project's first column)
+    /// Board column id (default: the first column of its board)
     #[arg(short = 'c', long, value_name = "ID")]
     column: Option<String>,
     /// Make this a subtask of that task id
@@ -661,6 +678,36 @@ struct TaskMoveArgs {
     before: Option<i64>,
 }
 
+/// File a task under another project, or under none at all.
+///
+/// The one command that changes which project a task belongs to. It takes the
+/// task's **subtasks with it** — a subtask sits in its parent's project, so
+/// there is no honest half of this move, and a subtask on its own is refused
+/// and names its parent instead.
+///
+/// The column maps across by *kind*: a task in a column that means "in flight"
+/// lands in the **first** column of that kind on the destination's board, so
+/// entering a kind puts you at its start. A board with no column of that kind —
+/// no Done column for a finished task — is refused rather than given the
+/// nearest one; there is no nearest kind. Whether the task is finished follows
+/// the column it lands in, as it does everywhere else.
+///
+/// It lands at the **end** of that column: `position` is an order inside one
+/// project's column and means nothing across two, so there is no slot in the
+/// destination to aim at. `oculus task move` is how it is then placed.
+#[derive(Args)]
+struct TaskRefileArgs {
+    /// Task id
+    #[arg(value_name = "ID")]
+    id: i64,
+    /// File it under this project
+    #[arg(short = 'p', long, value_name = "ID")]
+    project: Option<i64>,
+    /// Take it out of every project instead
+    #[arg(long, conflicts_with = "project")]
+    unfiled: bool,
+}
+
 /// Delete a task, and its subtasks with it.
 ///
 /// There is no undo, and nothing else cleans these up — a task that is merely
@@ -681,7 +728,7 @@ struct TaskRmArgs {
 enum LectureAction {
     Candidates(LectureCandidatesArgs),
     Chapters(LectureChaptersArgs),
-    Recap(LectureRecapArgs),
+    Reading(LectureReadingArgs),
 }
 
 /// Find where a recording plausibly changes topic
@@ -749,19 +796,21 @@ struct LectureChaptersArgs {
     source: Option<u8>,
 }
 
-/// Write a slide-by-slide recap of a recording with a CLI agent
+/// Write a recording's reading copy with a CLI agent
 ///
-/// Splits the lecture at its visual changes, groups those segments into
-/// roughly ten-minute windows, and asks a coding agent to describe what the
-/// slide shows and what the lecturer says over it. Each window is validated
-/// and written before the next starts, so a long run has useful partial
-/// results if a later window fails.
+/// Rewrites the transcript as text a student can read: one sentence per
+/// line, each pinned to the second it was said, with spoken maths set as
+/// maths and speech-recognition errors fixed from the slide. The lecture is
+/// split at its slide changes — which become paragraph breaks — and grouped
+/// into roughly ten-minute windows, one agent turn each. Each window is
+/// validated and written before the next starts, so a long run has useful
+/// partial results if a later window fails.
 ///
-/// Unlike chapter naming, this needs the transcript: a recap is about the
-/// explanation as well as the slide. The recording and transcript must both
-/// have been downloaded first.
+/// Unlike chapter naming, this needs the transcript: the reading copy is the
+/// transcript, rewritten. The recording and transcript must both have been
+/// downloaded first.
 #[derive(Args)]
-struct LectureRecapArgs {
+struct LectureReadingArgs {
     /// Lecture id, as `oculus list -l` prints it; a unique prefix is enough
     #[arg(value_name = "LECTURE_ID")]
     id: String,
@@ -778,7 +827,7 @@ struct LectureRecapArgs {
     /// configured one)
     #[arg(long)]
     effort: Option<String>,
-    /// Re-run over a lecture that already has recap notes, replacing them
+    /// Re-run over a lecture that already has a reading copy, replacing it
     #[arg(long)]
     force: bool,
     /// Which captured stream to read — 1 or 2. Default: source 1, unless it
@@ -844,12 +893,13 @@ fn main() {
             TaskAction::Add(a) => ctx.task_add(&a),
             TaskAction::Update(a) => ctx.task_update(&a),
             TaskAction::Move(a) => ctx.task_move(&a),
+            TaskAction::Refile(a) => ctx.task_refile(&a),
             TaskAction::Rm(a) => ctx.task_rm(&a),
         },
         Some(Command::Lecture { action }) => match action {
             LectureAction::Candidates(a) => ctx.lecture_candidates(&a),
             LectureAction::Chapters(a) => ctx.lecture_chapters(&a),
-            LectureAction::Recap(a) => ctx.lecture_recap(&a),
+            LectureAction::Reading(a) => ctx.lecture_reading(&a),
         },
         Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
@@ -1849,6 +1899,9 @@ impl Ctx {
                     }),
                 )
                 .await
+                // The discriminants are for the app's pipeline row; a terminal
+                // has one line and prints the sentence.
+                .map_err(|e| e.message)
             });
             print!("\r{stem}\x1b[K");
 
@@ -2654,11 +2707,14 @@ impl Ctx {
 
     fn task_list(&self, args: &TaskListArgs) -> Result<(), String> {
         let pool = self.planning_db()?;
+        let Some(project_id) = args.project else {
+            return self.task_list_across(&pool, args);
+        };
         let project = self
             .rt
-            .block_on(projects::project(&pool, args.project))?
-            .ok_or_else(|| format!("project {} does not exist", args.project))?;
-        let mut tasks = self.rt.block_on(projects::tasks(&pool, args.project))?;
+            .block_on(projects::project(&pool, project_id))?
+            .ok_or_else(|| format!("project {project_id} does not exist"))?;
+        let mut tasks = self.rt.block_on(projects::tasks(&pool, project_id))?;
 
         if let Some(column) = &args.column {
             if !project.columns.iter().any(|c| &c.id == column) {
@@ -2684,6 +2740,87 @@ impl Ctx {
             return Ok(());
         }
         print_board(&project, &tasks);
+        Ok(())
+    }
+
+    /// `task list` with no `-p`: every task there is, or only the unfiled ones.
+    ///
+    /// One board per project, under the project's own name, with the unfiled
+    /// pile first — the order `projects::all_tasks` comes back in, so the
+    /// grouping is one pass rather than a query per project. A column id could
+    /// not be filtered on here at all (it only means something against one
+    /// board), which is why `--column` `requires` `--project`.
+    fn task_list_across(&self, pool: &SqlitePool, args: &TaskListArgs) -> Result<(), String> {
+        let scope = if args.unfiled {
+            projects::TaskScope::Unfiled
+        } else {
+            projects::TaskScope::All
+        };
+        let mut tasks = self.rt.block_on(projects::all_tasks(pool, scope))?;
+        if let Some(before) = &args.due_before {
+            let before = projects::check_iso8601(before)?;
+            tasks.retain(|t| t.due_at.as_deref().is_some_and(|d| d < before.as_str()));
+        }
+        if self.json {
+            return self.emit(&tasks);
+        }
+        if tasks.is_empty() {
+            println!(
+                "{}",
+                paint(
+                    if args.unfiled {
+                        "nothing unfiled \u{2014} every task you have belongs to a project"
+                    } else {
+                        "no tasks yet \u{2014} oculus task add \"something to do\""
+                    },
+                    DIM
+                )
+            );
+            return Ok(());
+        }
+
+        // Read once and reused per group: a task carries its project's id, not
+        // its board, and the board is what the columns are printed in the
+        // order of. `status: "all"` — an archived project's tasks are still
+        // tasks, and dropping them would be a silently short list.
+        let all = self.rt.block_on(projects::projects(pool, projects::SubjectFilter::Any, "all"))?;
+
+        // A blank line *between* groups, never before the first one.
+        let mut written = false;
+        let unfiled: Vec<&projects::Task> =
+            tasks.iter().filter(|t| t.project_id.is_none()).collect();
+        if !unfiled.is_empty() {
+            println!("{}", paint("Unfiled", BOLD));
+            // The default board, which is the one an unfiled task's column is
+            // checked against (`projects::board_of`).
+            let rows: Vec<projects::Task> = unfiled.into_iter().cloned().collect();
+            print_columns(&projects::default_columns(), &rows);
+            written = true;
+        }
+        for project in &all {
+            let here: Vec<projects::Task> = tasks
+                .iter()
+                .filter(|t| t.project_id == Some(project.id))
+                .cloned()
+                .collect();
+            if here.is_empty() {
+                continue;
+            }
+            if written {
+                println!();
+            }
+            written = true;
+            println!(
+                "{} {}{}",
+                paint(&format!("#{}", project.id), DIM),
+                paint(&project.name, BOLD),
+                match &project.subject_code {
+                    Some(c) => paint(&format!("  {c}"), DIM),
+                    None => String::new(),
+                }
+            );
+            print_board(project, &here);
+        }
         Ok(())
     }
 
@@ -2791,6 +2928,57 @@ impl Ctx {
             args.before,
         ))?;
         self.print_task(&pool, args.id, Some(&args.column))
+    }
+
+    fn task_refile(&self, args: &TaskRefileArgs) -> Result<(), String> {
+        let pool = self.planning_db()?;
+        // Two ways to say it and no default: refiling somewhere and refiling
+        // nowhere are both deliberate, and a bare `task refile 12` could only
+        // guess which was meant.
+        let destination = match (args.project, args.unfiled) {
+            (Some(id), false) => Some(id),
+            (None, true) => None,
+            _ => {
+                return Err(
+                    "say where: -p <PROJECT_ID>, or --unfiled to take it out of every project"
+                        .to_string(),
+                )
+            }
+        };
+        let rows = self
+            .rt
+            .block_on(projects::refile_task(&pool, args.id, destination))?;
+
+        // The project's *name*, not its id: the id is what was typed, and the
+        // name is the confirmation that it was the right one.
+        let label = match destination {
+            Some(id) => self
+                .rt
+                .block_on(projects::project(&pool, id))?
+                .map(|p| p.name)
+                .unwrap_or_else(|| format!("project {id}")),
+            None => "unfiled".to_string(),
+        };
+        if self.json {
+            return self.emit(&serde_json::json!({
+                "refiled": args.id,
+                "project_id": destination,
+                "project": label,
+                "rows": rows,
+            }));
+        }
+        if rows == 0 {
+            println!("{}", paint(&format!("task {} is already there", args.id), DIM));
+            return Ok(());
+        }
+        self.print_task(&pool, args.id, Some(&label))?;
+        if rows > 1 {
+            println!(
+                "{}",
+                paint(&format!("  {} subtask(s) came with it", rows - 1), DIM)
+            );
+        }
+        Ok(())
     }
 
     fn task_rm(&self, args: &TaskRmArgs) -> Result<(), String> {
@@ -3083,13 +3271,13 @@ impl Ctx {
         Ok(())
     }
 
-    /// Write a recording's slide-by-slide recap with a CLI agent.
+    /// Write a recording's reading copy with a CLI agent.
     ///
-    /// `recap::run` is the one implementation shared with the app. It owns
+    /// `reading::run` is the one implementation shared with the app. It owns
     /// the file checks, segmentation, retries, per-window transactions and
     /// status changes; this door only resolves the lecture and model flags
     /// and turns its progress into terminal output.
-    fn lecture_recap(&self, args: &LectureRecapArgs) -> Result<(), String> {
+    fn lecture_reading(&self, args: &LectureReadingArgs) -> Result<(), String> {
         use app_lib::harness::{jobs, Provider};
 
         let pool = self.db().ok_or("lectures live in the database")?;
@@ -3098,10 +3286,10 @@ impl Ctx {
         // Give the CLI-specific escape hatch in the early error. The runner
         // repeats this guard because the app calls it directly too.
         if !args.force {
-            let existing = self.rt.block_on(store::recap(&pool, &id))?;
+            let existing = self.rt.block_on(store::reading(&pool, &id))?;
             if !existing.is_empty() {
                 return Err(format!(
-                    "{title} already has {} recap note(s) — `--force` re-runs and replaces them",
+                    "{title} already has a reading copy of {} line(s) — `--force` re-runs and replaces it",
                     existing.len()
                 ));
             }
@@ -3109,7 +3297,7 @@ impl Ctx {
 
         let mut selection = self
             .rt
-            .block_on(jobs::selection(&pool, jobs::Job::LectureRecap));
+            .block_on(jobs::selection(&pool, jobs::Job::LectureReading));
         if let Some(p) = &args.provider {
             selection.provider = Provider::parse(p).ok_or("unknown provider")?;
         }
@@ -3139,13 +3327,13 @@ impl Ctx {
             );
         }
 
-        // The reply text is machine-shaped JSON and becomes the notes below;
+        // The reply text is machine-shaped JSON and becomes the lines below;
         // tool rows remain useful while each sequential window is running.
         let printer = AgentPrinter::new(false);
-        let outcome = app_lib::recap::run(
+        let outcome = app_lib::reading::run(
             self.rt.handle(),
             &pool,
-            &app_lib::recap::Run {
+            &app_lib::reading::Run {
                 data_dir: &self.data_dir,
                 lecture_id: &id,
                 selection: &selection,
@@ -3157,7 +3345,7 @@ impl Ctx {
                     return;
                 }
                 match step {
-                    app_lib::recap::Step::Segmented {
+                    app_lib::reading::Step::Segmented {
                         title,
                         duration,
                         segments,
@@ -3167,7 +3355,7 @@ impl Ctx {
                         paint(&clock(duration), DIM),
                         paint(&format!("{segments} segment(s)"), DIM)
                     ),
-                    app_lib::recap::Step::Window {
+                    app_lib::reading::Step::Window {
                         done,
                         total,
                         start,
@@ -3205,7 +3393,7 @@ impl Ctx {
                 source: u8,
                 segments: usize,
                 windows: usize,
-                notes: &'a [app_lib::recap::RecapNote],
+                lines: &'a [app_lib::reading::ReadingLine],
             }
             return self.emit(&Out {
                 lecture: &id,
@@ -3217,29 +3405,20 @@ impl Ctx {
                 source: outcome.source,
                 segments: outcome.segments,
                 windows: outcome.windows,
-                notes: &outcome.notes,
+                lines: &outcome.lines,
             });
         }
 
         println!();
-        for note in &outcome.notes {
-            let label = match note.label.trim() {
-                "" => "Recap",
-                label => label,
-            };
-            println!(
-                "  {}  {}",
-                paint(&clock(note.start_seconds), DIM),
-                paint(label, BOLD)
-            );
-            println!("            {}", paint(&note.body, DIM));
+        for line in &outcome.lines {
+            println!("  {}  {}", paint(&clock(line.start_seconds), DIM), line.text);
         }
         println!(
             "{}",
             paint(
                 &format!(
-                    "{} recap note(s) written for {}",
-                    outcome.notes.len(),
+                    "{} line(s) written for {}",
+                    outcome.lines.len(),
                     outcome.title
                 ),
                 DIM
@@ -3928,7 +4107,7 @@ impl AgentPrinter {
                     .collect();
                 let _ = writeln!(out, "{}", paint(&format!("  limits: {}", parts.join(", ")), DIM));
             }
-            HarnessEvent::Error { message } => {
+            HarnessEvent::Error { message, .. } => {
                 end_line(&mut mid, &mut out);
                 let _ = writeln!(out, "{} {message}", paint("error:", RED));
             }
@@ -3947,7 +4126,14 @@ fn clock(secs: u32) -> String {
 }
 
 fn print_board(project: &projects::Project, tasks: &[projects::Task]) {
-    for column in &project.columns {
+    print_columns(&project.columns, tasks);
+}
+
+/// The same, given the columns alone — which is what an **unfiled** task's
+/// board is: `projects::default_columns()`, the four ids its `column_id` is
+/// checked against, with no project to read them off.
+fn print_columns(columns: &[projects::Column], tasks: &[projects::Task]) {
+    for column in columns {
         let here: Vec<&projects::Task> =
             tasks.iter().filter(|t| t.column_id == column.id).collect();
         if here.is_empty() {

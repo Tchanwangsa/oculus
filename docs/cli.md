@@ -24,13 +24,12 @@ own `--help` that there is no undo.
 `lecture` reads no upstream copy at all: it decodes a recording already on disk
 (see [chapters.md](./chapters.md)), which is why it has no cache to invalidate
 and re-running it is the whole story. `lecture candidates` writes nothing at
-all. `lecture chapters` and `lecture recap` write **derived** rows — not a
+all. `lecture chapters` and `lecture reading` write **derived** rows — not a
 copy of anything upstream and not the user's own work either, but something
 regenerable from the recording — so `--force` is the door for replacing them.
 These are also the commands that spend a model's quota, which is why each
-leaves an existing result alone unless asked. A recap additionally requires
-the transcript on disk: its notes describe what was said over a slide, not
-only what the frame shows.
+leaves an existing result alone unless asked. A reading copy additionally
+requires the transcript on disk: it *is* the transcript, rewritten.
 
 Two commands stand outside that split. `docs` documents the whole agent-facing
 surface to the agents that use it, and `agent` runs one of those agents for a
@@ -99,6 +98,11 @@ the instructions gets read without opening the window.
   is no migration between embedding spaces and there is not meant to be:
   `embed::is_embedded` compares model, dim and page coverage, so the files the
   local Qwen embedder wrote read as unfinished and rebuild on the next run.
+- **`index` obeys the spend guard the app sets**, because both processes read
+  the same `voyage-usage.json`. Past the configured percentage of Voyage's free
+  pixel grant the client refuses with `BudgetReached`, which names the setting
+  rather than blaming the account — it is not a rate limit and waiting will not
+  clear it. See [retrieval.md](./retrieval.md).
 - `oculus status` reports the **parser**, not a local process: the backend
   name, whether it is usable, and its `parser_version` — the handshake that
   decides whether artifacts written elsewhere can be read as this app's. It
@@ -111,11 +115,12 @@ the instructions gets read without opening the window.
   to gate it with, so it always runs. See [calendar.md](./calendar.md).
 - Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`).
 - Lecture ids match on a unique prefix, as printed by `oculus list -l`.
-  `lecture recap` resolves that prefix, then runs the configured
-  `Job::LectureRecap`; `--provider`, `--model` and `--effort` override one run
-  without changing the registry. Its roughly ten-minute windows run in
+  `lecture reading` resolves that prefix, then runs the configured
+  `Job::LectureReading`; `--provider`, `--model` and `--effort` override one
+  run without changing the registry. Its roughly ten-minute windows run in
   sequence and commit independently, so an error can leave the completed
-  windows from this run visible. See [chapters.md](./chapters.md#lecture-recap).
+  windows from this run visible. See
+  [chapters.md](./chapters.md#the-reading-copy).
 
 ## The query half
 
@@ -165,10 +170,30 @@ the instructions gets read without opening the window.
 
 - **`project` and `task` are the agent's write surface**, and the database is
   the only door: the app's board reads these same rows live, which is why
-  nothing here asks for `oculus.db` to be opened directly. Nine subcommands —
-  `project list|show|create|update` and `task list|add|update|move|rm` —
-  all honouring `--json`. The rules they enforce, and why, are in
+  nothing here asks for `oculus.db` to be opened directly. Ten subcommands —
+  `project list|show|create|update` and `task list|add|update|move|refile|rm`
+  — all honouring `--json`. The rules they enforce, and why, are in
   [projects.md](./projects.md); what is CLI-shaped about them is below.
+- **A task does not need a project.** `oculus task add` with no `-p` writes an
+  **unfiled** task — one that belongs to no project at all, which is the
+  absence of a project rather than a project called Inbox
+  ([projects.md](./projects.md)). It is the CLI's half of what the app's Tasks
+  page does by default, and it exists because "write this down, I have not
+  decided where it goes" is most of what gets said to an agent mid-conversation;
+  demanding a project id first turns a note into a planning session. Its board
+  is the app's default one, so filing it somewhere later needs no translation.
+- **`oculus task list` with no `-p` spans the library** — one board per
+  project under its name, the unfiled pile first, and `--unfiled` for that pile
+  alone. `--column` still requires `-p`: a column id only means something
+  against one board, so there is nothing across projects for it to filter.
+- **`oculus task refile` is the only thing that changes which project a task
+  is on**, and it takes the task's **subtasks with it** — a subtask sits in its
+  parent's project, so a lone subtask is refused and told to refile its parent.
+  The column maps across by *kind*, into the first column of that kind on the
+  destination's board, and a destination with no column of that kind is refused
+  rather than given the nearest one. It appends at the end of that column,
+  because `position` is an order inside one project's column and means nothing
+  across two; `task move` is how it is then placed.
 - **A breakdown goes in as one `--batch`, not a command per task.** `oculus
   task add -p <ID> --batch -` reads a JSON array from stdin (or a file) and
   writes it in a single transaction, so a rejected item rolls the whole thing
@@ -211,11 +236,20 @@ see the bullet on scaffolding in [sync.md](./sync.md).
   OCULUS.md       stub
   TASTE.md        stub — standing preferences
   memories/       cross-subject; MEMORY.md index stubbed beside them
+  memories/<code>/  one subject's, with its own MEMORY.md index
 <data>/courses/<code>/
   AGENTS.md → ../../agents/AGENTS.md
-  agents/memories/    subject-scoped, with its own MEMORY.md index;
-                      INSTRUCTIONS.md goes here too
+  agents/INSTRUCTIONS.md    hand-written, for this subject alone
+  agents/memories → ../../../agents/memories/<code>
 ```
+
+**Both memory buckets live under `agents/`, and that is containment rather
+than filing.** `agents/` is the only folder an in-app chat thread can write to
+(see [harness.md](./harness.md)), so a subject bucket in the course folder was
+a path every template named and no thread could use. The course folder keeps a
+symlink to it, and `agents.rs` moves any files it finds on the old path into
+the bucket the first time it runs — once, since what it leaves behind is a
+link.
 
 Three different lifetimes, which is the whole design:
 

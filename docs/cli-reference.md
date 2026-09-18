@@ -23,7 +23,7 @@ Commands:
   files     List the files in the library
   calendar  Class times and assignment due dates
   project   Plan work: projects, their boards, and what is on them
-  task      Add, move, finish and delete the tasks on a project's board
+  task      Add, move, refile, finish and delete tasks, on a board or on none
   lecture   Look inside a downloaded lecture recording
   docs      Write the agent-facing docs into the library
   agent     Run one prompt through a CLI agent (Claude Code, Codex or opencode)
@@ -605,15 +605,16 @@ Options:
 ## `oculus task`
 
 ```
-Add, move, finish and delete the tasks on a project's board
+Add, move, refile, finish and delete tasks, on a board or on none
 
 Usage: oculus task <COMMAND>
 
 Commands:
-  list    List a project's tasks
+  list    List tasks — one project's, or every task there is
   add     Add one task, or a whole breakdown in one call
   update  Change a task's title, notes, dates or estimate
   move    Move a task to another column, or reorder it within one
+  refile  File a task under another project, or under none at all
   rm      Delete a task, and its subtasks with it
   help    Print this message or the help of the given subcommand(s)
 
@@ -625,19 +626,28 @@ Options:
 ### `oculus task list`
 
 ```
-List a project's tasks.
+List tasks — one project's, or every task there is.
 
 Grouped by column in the board's order, subtasks under their parent. A task sitting in a
 `done` column carries the time it landed there.
 
-Usage: oculus task list [OPTIONS] --project <ID>
+Without `-p` this spans **every** project and includes the tasks that belong to none,
+printed as one board per project under its name, with the unfiled ones first.
+`--unfiled` lists only those: the pile with no board of its own, which is the one that
+needs looking at.
+
+Usage: oculus task list [OPTIONS]
 
 Options:
   -p, --project <ID>
-          Which project
+          Which project (omit for every task in the library)
+
+      --unfiled
+          Only tasks that belong to no project at all
 
   -c, --column <ID>
-          Only this board column (its id, e.g. todo)
+          Only this board column (its id, e.g. todo) — needs --project, since a column
+          id only means something against one board
 
       --due-before <ISO>
           Only tasks due before this ISO 8601 timestamp. Compared as text, so pass the
@@ -652,11 +662,18 @@ Options:
 ```
 Add one task, or a whole breakdown in one call.
 
-A task lands at the end of its column; without `--column` that is the project's first
-one. The column id is checked against the project's board and an unknown one is refused,
-listing the ids the board does have — a task filed under a column that does not exist is
-drawn by nothing, in any view. Landing in a `done` column marks the task finished,
-exactly as moving it there would.
+**Without `-p` the task belongs to no project at all** — the same thing the app's Tasks
+page writes by default, and the answer to "write this down, I have not decided where it
+goes". That is the absence of a project, not a project called Inbox, so nothing needs
+cleaning up if it is never filed; `oculus task refile` files it later. Its board is the
+default one (`backlog`, `todo`, `doing`, `done`), so filing it into a project created by
+this binary needs no translation.
+
+A task lands at the end of its column; without `--column` that is the first column of
+its board. The column id is checked against that board and an unknown one is refused,
+listing the ids it does have — a task filed under a column that does not exist is drawn
+by nothing, in any view. Landing in a `done` column marks the task finished, exactly as
+moving it there would.
 
 `--parent` makes the task a subtask. Subtasks are one level deep: a subtask cannot
 itself be given children.
@@ -680,7 +697,7 @@ board.
 
 Prints the new task ids in the order they were given.
 
-Usage: oculus task add [OPTIONS] --project <ID> [TITLE]
+Usage: oculus task add [OPTIONS] [TITLE]
 
 Arguments:
   [TITLE]
@@ -688,10 +705,10 @@ Arguments:
 
 Options:
   -p, --project <ID>
-          Which project
+          Which project (omit to file it nowhere)
 
   -c, --column <ID>
-          Board column id (default: the project's first column)
+          Board column id (default: the first column of its board)
 
       --parent <TASK_ID>
           Make this a subtask of that task id
@@ -786,6 +803,42 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+### `oculus task refile`
+
+```
+File a task under another project, or under none at all.
+
+The one command that changes which project a task belongs to. It takes the task's
+**subtasks with it** — a subtask sits in its parent's project, so there is no honest
+half of this move, and a subtask on its own is refused and names its parent instead.
+
+The column maps across by *kind*: a task in a column that means "in flight" lands in the
+**first** column of that kind on the destination's board, so entering a kind puts you at
+its start. A board with no column of that kind — no Done column for a finished task — is
+refused rather than given the nearest one; there is no nearest kind. Whether the task is
+finished follows the column it lands in, as it does everywhere else.
+
+It lands at the **end** of that column: `position` is an order inside one project's
+column and means nothing across two, so there is no slot in the destination to aim at.
+`oculus task move` is how it is then placed.
+
+Usage: oculus task refile [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+          Task id
+
+Options:
+  -p, --project <ID>
+          File it under this project
+
+      --unfiled
+          Take it out of every project instead
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ### `oculus task rm`
 
 ```
@@ -815,7 +868,7 @@ Usage: oculus lecture <COMMAND>
 Commands:
   candidates  Find where a recording plausibly changes topic
   chapters    Name a recording's chapters with a CLI agent, and store them
-  recap       Write a slide-by-slide recap of a recording with a CLI agent
+  reading     Write a recording's reading copy with a CLI agent
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -897,20 +950,22 @@ Options:
           Print help (see a summary with '-h')
 ```
 
-### `oculus lecture recap`
+### `oculus lecture reading`
 
 ```
-Write a slide-by-slide recap of a recording with a CLI agent
+Write a recording's reading copy with a CLI agent
 
-Splits the lecture at its visual changes, groups those segments into roughly ten-minute
-windows, and asks a coding agent to describe what the slide shows and what the lecturer
-says over it. Each window is validated and written before the next starts, so a long run
-has useful partial results if a later window fails.
+Rewrites the transcript as text a student can read: one sentence per line, each pinned
+to the second it was said, with spoken maths set as maths and speech-recognition errors
+fixed from the slide. The lecture is split at its slide changes — which become paragraph
+breaks — and grouped into roughly ten-minute windows, one agent turn each. Each window
+is validated and written before the next starts, so a long run has useful partial
+results if a later window fails.
 
-Unlike chapter naming, this needs the transcript: a recap is about the explanation as
-well as the slide. The recording and transcript must both have been downloaded first.
+Unlike chapter naming, this needs the transcript: the reading copy is the transcript,
+rewritten. The recording and transcript must both have been downloaded first.
 
-Usage: oculus lecture recap [OPTIONS] <LECTURE_ID>
+Usage: oculus lecture reading [OPTIONS] <LECTURE_ID>
 
 Arguments:
   <LECTURE_ID>
@@ -929,7 +984,7 @@ Options:
           Reasoning effort — low, medium, high, xhigh, max (default: the configured one)
 
       --force
-          Re-run over a lecture that already has recap notes, replacing them
+          Re-run over a lecture that already has a reading copy, replacing it
 
       --source <N>
           Which captured stream to read — 1 or 2. Default: source 1, unless it turns out
