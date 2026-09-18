@@ -54,6 +54,8 @@ pub fn run() {
             // place the parse path learns there is a window to emit to; a
             // headless run never calls it and every emit is a no-op.
             parse::events::bind(app.handle().clone());
+            // Same handshake for the embed seam — see `embed/events.rs`.
+            embed::events::bind(app.handle().clone());
 
             // ── Media HTTP server ──────────────────────────────────────
             // WebKit won't play <video> from the asset protocol (see
@@ -1134,6 +1136,101 @@ UPDATE settings
                             sql: crate::retrieval::PAGES_FTS_SQL,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        tauri_plugin_sql::Migration {
+                            version: 36,
+                            description: "in-app browser: visit history and cached site icons",
+                            // **One row per URL, not one per visit.** What the
+                            // address bar wants is "which page do you mean",
+                            // and that is answered by how often and how
+                            // recently a URL was opened — not by a log of
+                            // every time. A visit log would grow without
+                            // bound to answer a question nobody asks here,
+                            // and the history view in Settings groups by
+                            // `last_visit` either way, so a page revisited
+                            // today moves to today rather than appearing
+                            // twice.
+                            //
+                            // Icons are cached beside it because they are
+                            // fetched by *host* and wanted for hosts no tab
+                            // is on: a history row wants its icon as much as
+                            // an open tab does. `browser.rs` fetches them,
+                            // the frontend stores them, and a restart is the
+                            // only thing that asks the network again.
+                            sql: r#"
+CREATE TABLE IF NOT EXISTS browser_history (
+    id         INTEGER PRIMARY KEY,
+    url        TEXT    NOT NULL UNIQUE,
+    host       TEXT    NOT NULL,
+    title      TEXT    NOT NULL DEFAULT '',
+    visits     INTEGER NOT NULL DEFAULT 1,
+    last_visit TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_browser_history_recent
+    ON browser_history(last_visit DESC);
+
+CREATE TABLE IF NOT EXISTS browser_favicons (
+    host       TEXT PRIMARY KEY,
+    icon       TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+                        "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                        tauri_plugin_sql::Migration {
+                            version: 37,
+                            description: "project tasks: a task can belong to no project at all",
+                            // An unfiled task — something you have to do that
+                            // is not part of a piece of work yet. So
+                            // `project_tasks.project_id` becomes **nullable**,
+                            // and NULL means *no project*, the way
+                            // `projects.subject_id` NULL means no subject
+                            // (migration 27). Deliberately not an "Inbox"
+                            // project: a real row would need a board, a name,
+                            // a place in the index and a rule saying it cannot
+                            // be renamed or deleted, and every listing would
+                            // have to remember to leave it out.
+                            //
+                            // `project_id` cannot be ALTERed out of NOT NULL,
+                            // so the table is rebuilt — SQLite's 12-step
+                            // recipe, in the one shape that is safe inside a
+                            // migration's transaction. Three details carry it:
+                            //
+                            // - **`parent_id` self-references the table, and in
+                            //   the new one it must reference the *new* table.**
+                            //   That is the whole risk of this migration.
+                            //   Pointed at the table being replaced, the
+                            //   `DROP TABLE` fires the cascade — a drop
+                            //   performs an implicit delete of every row, and
+                            //   `defer_foreign_keys` defers the *check*, not
+                            //   the `ON DELETE CASCADE` action — and the copy
+                            //   is emptied of every subtask it had just made.
+                            //   Measured, not feared: the test flips that one
+                            //   table name and loses the rows.
+                            // - `PRAGMA foreign_keys = OFF` is not available
+                            //   here (it cannot take effect inside a
+                            //   transaction), so the copy runs under
+                            //   `defer_foreign_keys` and `ORDER BY id`, which a
+                            //   parent's id always satisfies — `create_tasks`
+                            //   writes a parent before the subtasks that name
+                            //   it. Belt and braces rather than one fix each:
+                            //   SQLite checks the copy's keys at the end of the
+                            //   single `INSERT … SELECT`, so either carries it
+                            //   alone. They are for the day the copy is split.
+                            // - the indexes are recreated, because dropping
+                            //   the old table drops them with it.
+                            //   `idx_project_tasks_project` stays exactly as it
+                            //   was: SQLite indexes NULLs, so "every unfiled
+                            //   task" is one seek like any other project's.
+                            //
+                            // The SQL lives beside the two writers it belongs
+                            // to (`crate::projects`) the way migration 35's
+                            // does, so the tests run the very string this
+                            // runs — including the trap about which table the
+                            // self-reference names.
+                            sql: crate::projects::UNFILED_TASKS_SQL,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -1207,6 +1304,8 @@ UPDATE settings
             harness::app::harness_edit_queued,
             harness::app::harness_interrupt,
             harness::app::harness_delete_thread,
+            harness::attach::harness_attach_image,
+            harness::attach::harness_attach_file,
             chapters::app::lecture_find_chapters,
             chapters::app::lecture_grab_frame,
             reading::app::lecture_write_reading,
@@ -1216,10 +1315,14 @@ UPDATE settings
             browser::browser_place,
             browser::browser_set_viewport,
             browser::browser_hide_tab,
+            browser::browser_snapshot,
             browser::browser_hide,
             browser::browser_navigate,
             browser::browser_history,
             browser::browser_reload,
+            browser::browser_set_zoom,
+            browser::browser_find,
+            browser::browser_find_clear,
             browser::browser_close_tab,
         ])
         .build(tauri::generate_context!())

@@ -8,10 +8,28 @@ export function getStoredTheme(): Theme {
 
 export function applyTheme(theme: Theme) {
   const root = document.documentElement;
-  const isDark =
+  const dark =
     theme === "dark" ||
     (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
-  root.classList.toggle("dark", isDark);
+  root.classList.toggle("dark", dark);
   localStorage.setItem(STORAGE_KEY, theme);
+}
+
+/** Whether the dark palette is the one currently in the cascade.
+ *
+ *  Anything that has to *read* a colour rather than name it in a class — an
+ *  SVG a library draws for us, a canvas — needs both this and
+ *  [`subscribeDark`], because the tokens it samples change under it when the
+ *  class on `<html>` flips and nothing re-renders on its own. */
+export function isDark(): boolean {
+  return document.documentElement.classList.contains("dark");
+}
+
+/** Call `onChange` whenever [`isDark`] would answer differently. Shaped for
+ *  `useSyncExternalStore`, which is the only caller so far. */
+export function subscribeDark(onChange: () => void): () => void {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
 }

@@ -138,13 +138,50 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   can see is a stale key, or a model behind the provider's own verification
   (Meta's Muse Spark) — both are allowed to fail once in the timeline. **Never
   re-add a per-model probe, and never let a settings page make a billed call.**
-- **A drag needs `dataTransfer.setData()` or WebKit cancels it.** A
-  `dragstart` handler that sets no data aborts the drag silently — no
-  `dragover`, no `drop`, every handler correctly attached and nothing moves.
-  That is why `app/src/components/projects/ProjectBoard.tsx` — the one place
-  left that drags — sets a `text/plain` payload nothing ever reads. It looks
-  like dead code; deleting it breaks the feature without breaking a type or a
-  test.
+- **A drag needs `dataTransfer.setData()` or WebKit cancels it — which is why
+  almost nothing here is on HTML5 drag-and-drop.** A `dragstart` handler that
+  sets no data aborts the drag silently: no `dragover`, no `drop`, every
+  handler correctly attached and nothing moves. Two places still use it and
+  both must keep their payload: the view-tab reorder in
+  `app/src/components/ui/ViewTabs.tsx`, whose `text/plain` payload nothing ever
+  reads — it looks like dead code, and deleting it breaks the drag without
+  breaking a type or a test — and `app/src/components/harness/Timeline.tsx`,
+  which drags a selection out as markdown and so *replaces* what WebKit already
+  put on the transfer (a `preventDefault()` on **that** `dragstart` cancels the
+  drag outright).
+  **Everything else drags on pointer events and never meets this**: the tab
+  strip's reorder (`app/src/components/tabs/TopTabBar.tsx`), the chat column's
+  group reorder (`app/src/components/harness/ThreadList.tsx`), and the three
+  card-and-row surfaces — `ProjectBoard.tsx`, `ProjectTable.tsx` and
+  `TasksBoard.tsx` in `app/src/components/projects/` — which share the
+  pointer-capture gesture in `app/src/hooks/useCardDrag.ts`. The cards had a
+  second reason to leave HTML5 DnD: a card is full of `<span>`s that
+  `index.css` hands `user-select: text` back to, and in WebKit a **text
+  selection pre-empts the element drag**, so a press on a due chip started a
+  selection, `dragstart` never fired, and the card lifted only when the grab
+  landed on dead space. Reach for HTML5 DnD only for something that must leave
+  the window; otherwise extend that hook.
+- **In WebKit a `click` is raised from a `mousedown`/`mouseup` pair, so
+  cancelling `pointerdown` kills the click.** The spec says cancelling the
+  press suppresses the compatibility mouse events but leaves `click` alone;
+  WebKit does not behave that way, and with no `mousedown` there is no pair to
+  raise one from. `useCardDrag` opened with `e.preventDefault()` on
+  `pointerdown` to stop the text selection above, and silently removed the only
+  way into a task's page — every card, deterministically. Hold the selection
+  off with CSS (`DRAG_SURFACE`), and cancel **`pointermove`** instead: that
+  suppresses the compatibility `mousemove` a selection is *extended* by while
+  leaving the click untouched.
+- **SQLite's `DROP TABLE` deletes every row first, so a table rebuilt with a
+  self-referencing foreign key must point that key at the *new* table.** With
+  foreign keys on — sqlx turns them on for both pools — a drop performs an
+  implicit `DELETE` of the table's rows, which fires any `ON DELETE CASCADE`
+  aimed at it. In the 12-step rebuild recipe, a new `project_tasks_new` whose
+  `parent_id` still referenced `project_tasks` therefore had the copy it had
+  just made cascaded empty the moment the old table was dropped: every subtask
+  gone, silently, with the migration reporting success. `PRAGMA
+  defer_foreign_keys` does not save you — it defers the *check*, not the
+  action. `UNFILED_TASKS_SQL` in `app/src-tauri/src/projects.rs` is the shape
+  that works, held as a constant so the test runs the string the app runs.
 - **Retrieval embeds page images, not extracted text** — measured, not
   aesthetic. Image embeddings roughly double recall on formula/diagram pages.
   Don't switch to text embeddings or average the two; see `docs/retrieval.md`.
@@ -206,7 +243,12 @@ docked side panel for files and lectures, top tab strip).
   rule silently beat *all* `border-<colour>` utilities app-wide — active tab
   underlines, destructive button outlines and selected-row borders all
   painted plain grey with the class present in the DOM and dead in the
-  cascade. In `@layer base` it stays the default and utilities win again.
+  cascade. In `@layer base` it stays the default and utilities win again. The
+  same section bit twice: `body { user-select: none }` and the
+  `p, span, li, td, th, input, textarea { user-select: text }` that hands it
+  back were written *after* the layer closed, which killed every `select-none`
+  and `select-text` utility that landed on one of those tags — including the
+  project board's drag. They are in the layer now; keep them there.
 - Dark mode is a `.dark` class on `<html>` driven by `app/src/lib/theme.ts`;
   `index.css` declares `@custom-variant dark` so `dark:` follows the class,
   not the OS.

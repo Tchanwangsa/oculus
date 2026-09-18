@@ -6,6 +6,7 @@ import { useQualitySweep } from "@/hooks/useQualitySweep";
 import { watchNewFiles } from "@/stores/newFilesStore";
 import { watchLectureDownloads } from "@/stores/lectureDownloadStore";
 import AppLayout from "@/layouts/AppLayout";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 function EventBridge() {
   useBackendEvents();
@@ -42,9 +43,9 @@ export default function App() {
   // The shell is no longer a route element: it is above every tab's router
   // (`app/src/routes.tsx`), and the tabs are mounted inside it.
   return (
-    <>
+    <ErrorBoundary>
       <EventBridge />
       <AppLayout />
-    </>
+    </ErrorBoundary>
   );
 }

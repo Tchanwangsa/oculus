@@ -1,11 +1,14 @@
 import { Navigate, Outlet, type RouteObject } from "react-router-dom";
+import { RouteError } from "@/components/ErrorBoundary";
 import SubjectLayout from "@/layouts/SubjectLayout";
 import HomePage from "@/pages/HomePage";
+import NewTabPage from "@/pages/NewTabPage";
 import ChatPage from "@/pages/ChatPage";
 import CalendarPage from "@/pages/CalendarPage";
 import ProjectsIndexPage from "@/pages/ProjectsIndexPage";
 import ProjectPage from "@/pages/ProjectPage";
 import TaskPage from "@/pages/TaskPage";
+import TasksPage from "@/pages/TasksPage";
 import SubjectsIndexPage from "@/pages/SubjectsIndexPage";
 import SubjectOverviewPage from "@/pages/subject/OverviewPage";
 import SubjectModulesPage from "@/pages/subject/ModulesPage";
@@ -24,6 +27,7 @@ import SettingsCanvasPage from "@/pages/settings/CanvasPage";
 import SettingsAiPage from "@/pages/settings/AiPage";
 import SettingsStoragePage from "@/pages/settings/StoragePage";
 import SettingsLibraryPage from "@/pages/settings/LibraryPage";
+import SettingsBrowserPage from "@/pages/settings/BrowserPage";
 
 /**
  * The route table, shared by every tab. Each tab builds its own memory router
@@ -42,8 +46,14 @@ export const routes: RouteObject[] = [
   {
     path: "/",
     element: <PaneRoot />,
+    // Caught here rather than per page: every route below is a pane's whole
+    // content area, so this is the smallest thing worth losing.
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <HomePage /> },
+      // Where the + button and ⌘T land. Not Home: a tab you opened to put
+      // something beside what you are reading does not want a dashboard.
+      { path: "new", element: <NewTabPage /> },
       { path: "chat", element: <ChatPage /> },
       { path: "calendar", element: <CalendarPage /> },
       { path: "projects", element: <ProjectsIndexPage /> },
@@ -53,6 +63,13 @@ export const routes: RouteObject[] = [
       // subtasks. Nested under the project because the page needs the
       // project's columns to say what a status is.
       { path: "projects/:projectId/tasks/:taskId", element: <TaskPage /> },
+      // Every task across every project, plus the ones filed nowhere at all.
+      { path: "tasks", element: <TasksPage /> },
+      // An unfiled task's own page. The same component as the filed route
+      // above, which reads its project as `null` and its board as the default
+      // one — there is no project segment to nest it under, and inventing an
+      // "Inbox" project to have one was the decision this route replaces.
+      { path: "tasks/:taskId", element: <TaskPage /> },
       { path: "subjects", element: <SubjectsIndexPage /> },
       // A file/lecture promoted to a full page (peek → expand). Outside
       // SubjectLayout: full pages take the whole content area, Notion-style.
@@ -89,6 +106,7 @@ export const routes: RouteObject[] = [
           { path: "ai", element: <SettingsAiPage /> },
           { path: "storage", element: <SettingsStoragePage /> },
           { path: "library", element: <SettingsLibraryPage /> },
+          { path: "browser", element: <SettingsBrowserPage /> },
         ],
       },
       // Old top-level /lectures had no subject — send it to the picker.

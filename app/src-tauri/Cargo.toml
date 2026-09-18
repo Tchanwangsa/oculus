@@ -41,7 +41,9 @@ half = "2"
 # platform store is an opt-in feature in keyring 3.
 keyring = { version = "3", features = ["apple-native"] }
 
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# `sync` is the browser's: a WKWebView snapshot answers on a completion
+# block, and the command awaits a oneshot for it (see src/browser.rs).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 scraper = "0.27"
 # wrap_help so `--help` and the generated agents/OCULUS-CLI.md wrap to a width
 # instead of emitting one very long line per option.
@@ -70,4 +72,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 block2 = "0.6"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSHTTPCookie", "NSString"] }
-objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore"] }
+# `WKWebView` and the two `WKFind*` types are the browser toolbar's: the
+# back/forward list and find-in-page have no Tauri API, so they are read
+# and driven on the WKWebView directly (see `src/browser.rs`).
+objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore", "WKWebView", "WKNavigation", "WKFindConfiguration", "WKFindResult"] }

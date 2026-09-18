@@ -99,17 +99,26 @@ live. Inside it:
   subfolder and an `outline.md` appear only when `oculus lecture
   candidates --frames` or `oculus lecture chapters` is run over it — a JPEG per
   detected topic boundary and the transcript merged with the slide changes,
-  both regenerable in seconds and neither anything's source of truth
+  both regenerable in seconds and neither anything's source of truth. Each job
+  owns its own folder of grabs (`frames/`, `frames/reading/`, `frames/live/`) and
+  sweeps the ones a re-run will not overwrite
 - `agents/` — the docs a coding agent reads, the `AGENTS.md` every course
   folder symlinks, and the memory layer it writes back (`TASTE.md`,
-  `memories/`); written by `oculus docs` and, for everything but the CLI
+  `memories/` across subjects and `memories/<CODE>/` for one, which each
+  course folder's `agents/memories` is a symlink to — both buckets are in here
+  because this is the only folder a thread may write); written by
+  `oculus docs` and, for everything but the CLI
   reference, by every sync (see [cli.md](./cli.md)). Also the working
   directory — and only writable root — of every chat thread, and
   `agents/threads/<id>.ndjson`, the raw provider output per thread (see
   [harness.md](./harness.md))
 - `mineru-usage.json` — persistent daily cloud reservations and quota latch
 - `voyage-usage.json` — the same, for embeddings: pixel and token
-  reservations, the quota latch, and the rate-limit tier the client learned
+  reservations, the quota latch, the rate-limit tier the client learned, and
+  the spend guard Settings → Library sets (a percentage of Voyage's free pixel
+  grant). The guard lives here rather than in the `settings` table because the
+  reservation that enforces it already reads this file on every request; see
+  [retrieval.md](./retrieval.md)
 - the session cookie and auth-flag files (see [auth.md](./auth.md))
 
 ## The database
@@ -126,7 +135,10 @@ current schema. Ownership is split deliberately:
   which is why a fresh machine must open the app once before the CLI works.
 
 The `pages` table (markdown + embedding blob per PDF page) is the retrieval
-substrate — see [retrieval.md](./retrieval.md). Its `embed_model` /
+substrate — see [retrieval.md](./retrieval.md). `pages_fts` (migration 35) is
+an FTS5 index over its markdown and the *other* search over the same rows: the
+embeddings answer a question and cost a cloud round trip, the index answers a
+keystroke and is local, and neither falls back to the other. Its `embed_model` /
 `embed_dim` columns are load-bearing rather than bookkeeping: every scan
 filters on them, because a dot product between vectors from two models is not
 a worse score but a meaningless one that still sorts. `lecture_chapters` (migration
@@ -195,6 +207,22 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   window-scoped capability would hand every Tauri command to whatever page
   the user browsed to. See [frontend.md](./frontend.md) for the tab strip
   and slot, and [auth.md](./auth.md) for why those pages are signed in.
+  Three things about a page live in the page and nowhere else — whether its
+  back list has anywhere to go, what a find matched, what the zoom is — and
+  Tauri has an API for only the zoom, so `browser.rs` reads and drives them on
+  the WKWebView through `with_webview`. That call dispatches to the main
+  thread and hands nothing back, so each of them is a *push*: the answer is
+  written into the tab and broadcast, or emitted on its own event, rather than
+  returned to the command that asked.
+- **Rust fetches favicons; the frontend keeps them.** WebKit has no public
+  icon API, so `browser.rs` fetches one over plain HTTP beside each page load
+  (`/favicon.ico`, then the document's `<link rel~="icon">`) and pushes it as
+  `browser-favicon`, keyed by host and once per host per run. The frontend
+  stores it in `browser_favicons`, which is the shape every other table has
+  here: Rust sees the events, the frontend owns the rows. Browsing history is
+  written the same way, from the `browser-state` snapshot — see
+  [frontend.md](./frontend.md) for what is deliberately *not* written into
+  it.
 - Everything Canvas-shaped was **moved out of hidden WebViews on purpose**:
   macOS suspends off-screen WKWebView content processes, which froze the old
   `scraper.js` mid-run with nothing to catch. The scrape engine is Rust

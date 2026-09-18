@@ -92,7 +92,7 @@ pub fn append_keepalive_log(data_dir: &std::path::Path, message: &str) {
 
 /// `YYYY-MM-DDTHH:MM:SS` from a Unix timestamp — civil-time arithmetic only, to
 /// keep a date crate out of a build that needs nothing else from one.
-fn iso8601_utc(secs: u64) -> String {
+pub fn iso8601_utc(secs: u64) -> String {
     let (days, rem) = (secs / 86_400, secs % 86_400);
     let (h, mi, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
 
@@ -113,6 +113,31 @@ fn iso8601_utc(secs: u64) -> String {
 
 pub fn db_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("oculus.db")
+}
+
+/// The database plus the two files SQLite keeps beside it in WAL mode.
+///
+/// This is the set a *writer* has to be able to open, and it is the one
+/// exception the harness's sandboxes make to "nothing outside `agents/` is
+/// writable": `oculus project` and `oculus task` are how an agent writes the
+/// student's board, and a process that may open `oculus.db` but not
+/// `oculus.db-wal` fails with SQLite's "attempt to write a readonly
+/// database" — measured under a seatbelt profile with only `agents/`
+/// writable, which is exactly what both bridges were handing the CLI.
+///
+/// Files, not the directory they sit in. Granting the directory would put the
+/// session cookie and the Ed token beside them inside the agent's reach, and
+/// the sidecars never need creating from in there: nothing runs an agent
+/// except the app and the CLI, and both hold the database open — which is
+/// what makes the two sidecars exist — for as long as the agent lives.
+pub fn db_write_paths(data_dir: &std::path::Path) -> Vec<PathBuf> {
+    let db = db_path(data_dir);
+    let sidecar = |suffix: &str| {
+        let mut p = db.clone().into_os_string();
+        p.push(suffix);
+        PathBuf::from(p)
+    };
+    vec![db.clone(), sidecar("-wal"), sidecar("-shm")]
 }
 
 // ── Course artifact paths ────────────────────────────────────────────────────

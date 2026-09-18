@@ -48,23 +48,35 @@ CLI agent over it (Claude Code, Codex or opencode, driven as a subprocess — se
 [harness.md](./harness.md)), projects: assignments broken into tasks, each
 project opening on an Overview (a brief, tags, a pinned calendar event, what is
 next) with its tasks on a board, a table or a timeline behind a Tasks tab and a
-page per task, all of it writable by the agent through the CLI
+page per task — plus a **universal Tasks view** at `/tasks` over every project
+at once, where a task that belongs to no project at all lives until it is filed
+— all of it writable by the agent through the CLI
 ([projects.md](./projects.md)), a
 **home launcher** at `/` — the composer over today's agenda, what you were
-last in, and your projects — and an in-app browser: external links open as
-tabs in Oculus's own tab strip, signed in to Canvas. When a doc or UI string
-implies more than this, the doc is wrong — fix it.
+last in, and your projects — a **new-tab landing screen** at `/new`, where +
+and ⌘T go: two doors (a browser tab, a new conversation) over your recent
+pages, and nothing else — and an in-app browser: external links open as
+tabs in Oculus's own tab strip, signed in to Canvas, with the site's own
+favicon on the tab, back/forward that grey out honestly, page zoom, find in
+page, and an address bar that suggests from where you have been. When a doc or
+UI string implies more than this, the doc is wrong — fix it.
 
 Built: **lecture chapters**. Boundaries are detected, named by a CLI agent and
 stored from the command line (`oculus lecture chapters`) or the app, then read
-as a dock list, a current-chapter strip and scrub-bar ticks in the player.
+as a dock list with a progress line on the playing entry, and a current-chapter
+name plus scrub-bar ticks in the player.
 
-Built: **lecture recap**. The backend job segments a recording at its visual
-changes, asks a CLI agent for short windowed notes and stores each validated
-window (`oculus lecture recap`, or the player's own Recap tab). Its model is
-configured in Settings → AI. [chapters.md](./chapters.md#lecture-recap)
-describes the shared pipeline; the tab is in
-[The recap tab](./chapters.md#the-recap-tab).
+Built: **the reading copy**, replacing the lecture recap. The backend job
+segments a recording at its slide changes, asks a CLI agent to rewrite each
+ten-minute window of the transcript as one sentence per line — pinned to its
+second, spoken maths set as maths — checks that every line covers a few cues
+and no more, and stores each window as it lands (`oculus lecture reading`, or
+the player's dock). Its model is configured in Settings → AI. In the player it
+is the Transcript tab's **Enhanced** register rather than a tab of its own, one
+pick from the standard cues — and that picker is where a lecture's copy is
+asked for in the first place.
+[chapters.md](./chapters.md#the-reading-copy) describes the shared pipeline;
+the dock is in [Reading them in the player](./chapters.md#reading-them-in-the-player).
 
 Removed: the **Python sidecar**, code and directory both. PDF parsing and page
 embedding run in Rust now, against MinerU and Voyage

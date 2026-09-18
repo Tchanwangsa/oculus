@@ -68,60 +68,21 @@ export interface IndexStats {
  * Embed every page of a PDF and store the vectors against `fileId`.
  *
  * `relativePath` is relative to the app data dir, same as `read_course_file`.
+ *
+ * `subjectId` is not used to find the file — `relativePath` already does that.
+ * It is there because the call narrates itself over `embed-status`, and the
+ * pipeline row that listens is keyed on `(subjectId, relativePath)` exactly as
+ * the parse path's rows are. Rust emits `queued`, a `running` per finished
+ * batch of pages, and one terminal `done` / `error`; see
+ * `app/src-tauri/src/embed/events.rs`.
  */
 export function embedFile(
   fileId: number,
+  subjectId: number,
   relativePath: string,
   force = false,
 ): Promise<IngestSummary> {
-  return invoke<IngestSummary>("embed_file", { fileId, relativePath, force });
-}
-
-/**
- * Embed everything parsed but not yet indexed, one at a time.
- *
- * Serial on purpose, for a different reason than it used to be: the local
- * sidecar held one model on the GPU, so parallel calls queued there anyway.
- * The cloud backend batches pages within a document and paces itself against
- * the account's per-minute ceiling, so running two documents at once would
- * only make them share the same tokens per minute — and on an account with no
- * payment method that ceiling is ~2.8 pages a minute, which means this loop
- * can legitimately run for hours.
- *
- * `shouldStop` is polled **between files, never during one.** A run that can
- * last most of a day has to be interruptible, but abandoning a document
- * mid-flight would throw away quota already spent on its pages without leaving
- * a record behind — and the next run would pay for them again. On a file
- * boundary the record and the page rows are both written, so stopping costs
- * nothing and resuming skips what is done.
- */
-export async function embedPending(
-  subjectId?: number,
-  onProgress?: (done: number, total: number, filename: string) => void,
-  shouldStop?: () => boolean,
-): Promise<{ files: number; pages: number; errors: string[]; stopped: boolean }> {
-  const pending = await getUnembeddedPdfs(subjectId);
-  const errors: string[] = [];
-  let pages = 0;
-  let done = 0;
-  let stopped = false;
-
-  for (const f of pending) {
-    if (shouldStop?.()) {
-      stopped = true;
-      break;
-    }
-    onProgress?.(done, pending.length, f.filename);
-    try {
-      const summary = await embedFile(f.id, f.relative_path);
-      pages += summary.pages_embedded;
-    } catch (e) {
-      errors.push(`${f.filename}: ${e}`);
-    }
-    done += 1;
-  }
-  onProgress?.(done, pending.length, "");
-  return { files: done - errors.length, pages, errors, stopped };
+  return invoke<IngestSummary>("embed_file", { fileId, subjectId, relativePath, force });
 }
 
 /** Rank indexed pages against a natural-language question. */
@@ -137,8 +98,45 @@ export function searchPages(
   });
 }
 
+/**
+ * Is there an embedder to send work to right now?
+ *
+ * The gate in front of auto-embed, and it asks Rust rather than guessing: a
+ * key in the keychain is the cloud engine's answer, and a selected engine that
+ * this build does not ship (`Engine::Local`) has none whatever the keychain
+ * says. Both halves have to hold, because a queue that fills against a
+ * backend which cannot run produces one failed row per parsed file.
+ */
+export async function embedReady(): Promise<boolean> {
+  try {
+    const settings = await invoke<{
+      engine: string;
+      credentials_ready: boolean;
+      engines: Array<{ id: string; available: boolean }>;
+    }>("embed_settings");
+    const engine = settings.engines.find((e) => e.id === settings.engine);
+    return settings.credentials_ready && (engine?.available ?? true);
+  } catch {
+    return false;
+  }
+}
+
 export function embeddingStats(): Promise<IndexStats> {
   return invoke<IndexStats>("embedding_stats");
+}
+
+/**
+ * Is something account-wide stopping the run — a spent Voyage allowance, or the
+ * spend limit in Settings → Library? The reason when yes, `null` when the next
+ * file may go ahead.
+ *
+ * Asked between files, never before one: it is cheap (it reads
+ * `voyage-usage.json`, constructs no client and sends nothing) but it is a
+ * *reaction*, not a precondition. The run is allowed to try and be refused;
+ * what it is not allowed to do is try 166 times for the same reason.
+ */
+export function embedBlocked(): Promise<string | null> {
+  return invoke<string | null>("embed_blocked");
 }
 
 // ── Queries against the pages table ──────────────────────────────────────────

@@ -240,7 +240,7 @@ export async function setSyncOptions(options: SyncOptions): Promise<void> {
 /** A job's key in the stored object. Mirrors `Job` in
  *  `app/src-tauri/src/harness/jobs.rs`; adding one is a key here, a variant
  *  there, and a row in `JOBS` below. */
-export type JobId = "lectureChapters" | "lectureRecap" | "threadNaming";
+export type JobId = "lectureChapters" | "lectureReading" | "threadNaming";
 
 /** What one job runs on. `reasoningEffort` is null only for a model that
  *  takes no level — never "whatever the agent defaults to". */
@@ -261,10 +261,10 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
       "Reads a recording's slide frames and transcript and names its topics. One long turn, eight to eleven minutes.",
   },
   {
-    id: "lectureRecap",
-    label: "Lecture recap",
+    id: "lectureReading",
+    label: "Lecture reading copy",
     description:
-      "Writes a short note for each visual change, using the slide frame and what was said over it.",
+      "Rewrites the transcript as readable text — one sentence per line, pinned to its second, with spoken maths set as maths. One agent turn per ten minutes.",
   },
   {
     id: "threadNaming",
@@ -279,7 +279,7 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
  *  be the one that resolves it. */
 export const DEFAULT_JOB_MODELS: JobModels = {
   lectureChapters: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
-  lectureRecap: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" },
+  lectureReading: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" },
   threadNaming: { provider: "claude", model: "claude-haiku-4-5", reasoningEffort: "low" },
 };
 
@@ -572,6 +572,43 @@ export interface MentionFile {
 }
 
 /**
+ * The `@` query's words as AND-ed `LIKE` predicates over `f.filename`, ready
+ * to drop into a `WHERE`, plus the parameters to bind from `$from` on.
+ *
+ * Shared by the two functions below, and shared deliberately: the menu and
+ * the "N matching files have no markdown" line underneath it have to agree
+ * about what *matching* means, or the line contradicts the list it is there
+ * to explain.
+ *
+ * Every word must appear in the filename, in any order — which is what makes
+ * a query with spaces in it worth allowing, since "week 3 workshop" is how a
+ * student names `week-03-workshop-solutions.pdf`. Splitting and escaping are
+ * the palette's own `terms` (below), so `%`, `_` and `\` in a filename are
+ * literal here too. An empty query matches everything and leaves the ordering
+ * to decide — and `prefix` is then `%`, which ranks every row alike for the
+ * same reason.
+ *
+ * `from` is where the caller's own parameters leave off, and every caller has
+ * to keep its numbering climbing in the order the *text* of the statement
+ * mentions it: SQLite treats `$1` as a parameter *named* `$1` and hands out
+ * indices by first appearance, so a placeholder used out of order silently
+ * binds a neighbour's value.
+ */
+function mentionMatch(
+  query: string,
+  from: number,
+): { where: string; params: string[]; prefix: string } {
+  const words = terms(query);
+  return {
+    where: words.length
+      ? words.map((_, i) => `f.filename LIKE $${from + i} ESCAPE '\\'`).join(" AND ")
+      : "1",
+    params: words.map((w) => `%${w}%`),
+    prefix: `${words[0] ?? ""}%`,
+  };
+}
+
+/**
  * Candidates for an `@` mention, narrowed to the chat's subject when it has
  * one.
  *
@@ -583,8 +620,10 @@ export interface MentionFile {
  * `oculus read` that comes back empty after the student picked it, which is
  * worse than not offering it.
  *
- * Ordered by prefix match, then by what they opened recently: with no query
- * typed the list is the handful of files they were just working in.
+ * Ordered by a prefix match on the **first** word, then by what they opened
+ * recently: with no query typed the list is the handful of files they were
+ * just working in, and with one typed a real title beats an incidental
+ * substring.
  */
 export async function searchMentionFiles(
   subjectId: number | null,
@@ -592,7 +631,7 @@ export async function searchMentionFiles(
   limit = 8,
 ): Promise<MentionFile[]> {
   const db = await getDb();
-  const esc = query.replace(/[%_\\]/g, (c) => `\\${c}`);
+  const { where, params, prefix } = mentionMatch(query, 2);
   return db.select<MentionFile[]>(
     `SELECT f.id, f.subject_id, s.code AS subject_code, f.filename,
             f.relative_path, f.category
@@ -600,12 +639,12 @@ export async function searchMentionFiles(
      JOIN subjects s ON s.id = f.subject_id
      WHERE (f.file_type = 'md' OR f.parse_status = 'quality')
        AND ($1 IS NULL OR f.subject_id = $1)
-       AND ($2 = '' OR f.filename LIKE $3 ESCAPE '\\')
-     ORDER BY (f.filename LIKE $4 ESCAPE '\\') DESC,
+       AND (${where})
+     ORDER BY (f.filename LIKE $${params.length + 2} ESCAPE '\\') DESC,
               f.last_accessed_at DESC,
               f.filename ASC
-     LIMIT $5`,
-    [subjectId, query, `%${esc}%`, `${esc}%`, limit],
+     LIMIT $${params.length + 3}`,
+    [subjectId, ...params, prefix, limit],
   );
 }
 
@@ -615,24 +654,28 @@ export async function searchMentionFiles(
  * The filter above is a capability, not a preference, so an unparsed deck is
  * simply absent — and absence in a type-ahead is indistinguishable from a
  * typo. This is what lets the menu say "two more match, they have no markdown
- * yet" instead of nothing at all. Only PDF-backed types are counted (the list
- * `useQualitySweep` parses): a zip or an image is not waiting on a parse and
- * never will be, so counting it would promise markdown that is not coming.
+ * yet" instead of nothing at all — which only holds if it counts what the
+ * menu searched, so it matches through `mentionMatch` too: the same words
+ * against the same column, the search above with its capability filter
+ * inverted rather than a second idea of what the student meant. Only
+ * PDF-backed types are counted (the list `useQualitySweep` parses): a zip or
+ * an image is not waiting on a parse and never will be, so counting it would
+ * promise markdown that is not coming.
  */
 export async function countUnparsedMentionMatches(
   subjectId: number | null,
   query: string,
 ): Promise<number> {
   const db = await getDb();
-  const esc = query.replace(/[%_\\]/g, (c) => `\\${c}`);
+  const { where, params } = mentionMatch(query, 2);
   const rows = await db.select<{ n: number }[]>(
     `SELECT COUNT(*) AS n
      FROM files f
      WHERE lower(f.file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')
        AND (f.parse_status IS NULL OR f.parse_status != 'quality')
        AND ($1 IS NULL OR f.subject_id = $1)
-       AND ($2 = '' OR f.filename LIKE $3 ESCAPE '\\')`,
-    [subjectId, query, `%${esc}%`],
+       AND (${where})`,
+    [subjectId, ...params],
   );
   return rows[0]?.n ?? 0;
 }
@@ -703,7 +746,7 @@ function terms(query: string): string[] {
  * prepended so the first word counts as one — which floats a real title match
  * above an incidental substring.
  */
-function matchSql(
+export function matchSql(
   haystack: string,
   query: string,
 ): { where: string; rank: string; params: string[] } {
@@ -779,6 +822,119 @@ export async function searchLibraryLectures(
   );
 }
 
+/**
+ * One file whose *pages* matched, with the prose that matched under it.
+ *
+ * Enough of a file to open it and to draw a row, plus the page the hit was on
+ * and the snippet FTS5 cut around it.
+ */
+export interface PageTextHit {
+  file_id: number;
+  subject_id: number;
+  subject_code: string;
+  relative_path: string;
+  filename: string;
+  category: string | null;
+  page_no: number;
+  /** The matched line, with each hit fenced by {@link SNIP_OPEN} /
+   *  {@link SNIP_CLOSE}. Parsed by `snippetParts`, never rendered raw. */
+  snippet: string;
+}
+
+/** The fences `snippet()` wraps a hit in. Two control characters, because the
+ *  markdown they are being spliced into can contain any printable delimiter
+ *  you might otherwise reach for — `**`, `<mark>`, `[[`. */
+export const SNIP_OPEN = "\u0001";
+export const SNIP_CLOSE = "\u0002";
+
+/** Below this a prefix term matches most of the library, and the scan is both
+ *  slow and useless. Two letters is where "ml" still works. */
+const MIN_TEXT_QUERY = 2;
+
+/** A term FTS5 can tokenise — one with a letter or a digit in it. `"--"` is
+ *  not one, and a phrase with no tokens in it is a syntax error, not an empty
+ *  result. */
+function ftsTerms(query: string): string[] {
+  return query
+    .trim()
+    .split(/\s+/)
+    .filter((w) => /[\p{L}\p{N}]/u.test(w))
+    .slice(0, MAX_TERMS);
+}
+
+/**
+ * The FTS5 MATCH expression for what was typed: every word required, each one
+ * a prefix so the last one answers while it is still being typed.
+ *
+ * Each term is wrapped in double quotes — as an FTS5 *string*, not as a phrase
+ * the user asked for — because unquoted input is a query language: `AND`, `OR`,
+ * `NOT`, `NEAR`, `^`, `-`, `(` and `:` all mean something in it, and a person
+ * typing `not-for-profit` into a search box means none of them.
+ */
+function ftsMatch(query: string): string | null {
+  const words = ftsTerms(query);
+  if (words.length === 0) return null;
+  if (words.join("").length < MIN_TEXT_QUERY) return null;
+  return words.map((w) => `"${w.replace(/"/g, '""')}"*`).join(" ");
+}
+
+/**
+ * Files whose page text matches, best first — the lexical half of search.
+ *
+ * This is the only way to find a phrase *inside* a document. Title search
+ * cannot see into a deck, and the page-image index answers a question rather
+ * than a keystroke: it is a cloud round trip per query (see
+ * `docs/retrieval.md`), which is not something a field you are typing in can
+ * do. The index is `pages_fts`, built by migration 35 over `pages.markdown`
+ * and kept in step by triggers — so only *parsed* documents are in it, which
+ * is the honest limit of this search and not a bug to work around.
+ *
+ * One row per file, not per page: five pages of the same deck is one answer
+ * repeated, and the best page is the one worth going to. `MIN(bm25(…))` is
+ * what picks it — SQLite takes the bare columns beside a single `min()` from
+ * that same row, so `page_no` and `snippet` belong to the page that scored.
+ *
+ * The join onto `pages` is load-bearing beyond the columns it fetches: an
+ * entry left behind by a cascade delete has no page to join to and drops out
+ * (see `retrieval::PAGES_FTS_SQL`).
+ */
+export async function searchPageText(
+  query: string,
+  limit = 5,
+): Promise<PageTextHit[]> {
+  const match = ftsMatch(query);
+  if (!match) return [];
+  const db = await getDb();
+  try {
+    return await db.select<PageTextHit[]>(
+      `SELECT p.file_id        AS file_id,
+              f.subject_id     AS subject_id,
+              s.code           AS subject_code,
+              f.relative_path  AS relative_path,
+              f.filename       AS filename,
+              f.category       AS category,
+              p.page_no        AS page_no,
+              snippet(pages_fts, 0, $1, $2, '…', 14) AS snippet,
+              MIN(bm25(pages_fts)) AS score
+         FROM pages_fts
+         JOIN pages p    ON p.id = pages_fts.rowid
+         JOIN files f    ON f.id = p.file_id
+         JOIN subjects s ON s.id = f.subject_id
+        WHERE pages_fts MATCH $3
+        GROUP BY p.file_id
+        ORDER BY score ASC, s.is_current DESC
+        LIMIT $4`,
+      [SNIP_OPEN, SNIP_CLOSE, match, limit],
+    );
+  } catch (e) {
+    // A malformed MATCH is the one error worth swallowing: it is the user
+    // still typing, not a broken index, and the rest of the search has
+    // answers for them either way.
+    console.warn("[oculus] page text search", e);
+    return [];
+  }
+}
+
 /** Every PDF on record, with where it got to — seeds the Sync page's pipeline
  *  table so files still awaiting a parse or embed show up as backlog. */
 export interface PdfPipelineRow {
@@ -814,6 +970,70 @@ export async function setParseStatus(
   const setParsedAt = status === "quality";
   await db.execute(
     `UPDATE files SET parse_status = $1${setParsedAt ? ", parsed_at = datetime('now')" : ""}
+     WHERE subject_id = $2 AND relative_path = $3`,
+    [status, subjectId, relativePath],
+  );
+}
+
+/**
+ * How much of each PDF is embedded **in the space passed in**, keyed by
+ * relative path — the seed for the pipeline table's third stage.
+ *
+ * Coverage, not `files.embed_status`, and the difference is the same one
+ * `getUnembeddedPdfs` is built on. `embed_status` is a sticky flag with no
+ * memory of which model wrote the vectors, so after an engine change it says
+ * `'done'` over a library where nothing is searchable. Counting current-space
+ * page vectors against the file's page rows makes the answer follow the space,
+ * and makes partial coverage — a document a rate limit stopped halfway —
+ * read as unfinished rather than silently permanent.
+ *
+ * `pages_total` is the file's page rows, which the parse writes. A file with
+ * none has not been parsed yet and cannot be embedded, so it is not covered
+ * by definition.
+ */
+export interface EmbedCoverageRow {
+  relative_path: string;
+  pages_total: number;
+  pages_current: number;
+}
+
+export async function getEmbedCoverage(
+  model: string | null,
+  dim: number | null,
+): Promise<EmbedCoverageRow[]> {
+  if (!model || dim == null) return [];
+  const db = await getDb();
+  return db.select<EmbedCoverageRow[]>(
+    `SELECT f.relative_path,
+            (SELECT COUNT(*) FROM pages p WHERE p.file_id = f.id) AS pages_total,
+            (SELECT COUNT(*) FROM pages p
+              WHERE p.file_id = f.id AND p.embedding IS NOT NULL
+                AND p.embed_model = $1 AND p.embed_dim = $2) AS pages_current
+     FROM files f
+     WHERE lower(f.file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')`,
+    [model, dim],
+  );
+}
+
+/**
+ * Update a PDF's embed status. status: 'queued' | 'running' | 'done' | 'error'.
+ *
+ * Written for the *failure*, mostly. A file that embedded is told by its page
+ * vectors — which is what `getEmbedCoverage` reads and what the backlog query
+ * counts — but a file that failed leaves no trace anywhere else, and a
+ * pipeline row that forgot its failure on restart would silently become a row
+ * that is merely waiting. Rust writes `'done'` here too, on its own, when the
+ * ingest commits.
+ */
+export async function setEmbedStatus(
+  subjectId: number,
+  relativePath: string,
+  status: string,
+): Promise<void> {
+  const db = await getDb();
+  const setEmbeddedAt = status === "done";
+  await db.execute(
+    `UPDATE files SET embed_status = $1${setEmbeddedAt ? ", embedded_at = datetime('now')" : ""}
      WHERE subject_id = $2 AND relative_path = $3`,
     [status, subjectId, relativePath],
   );
@@ -881,11 +1101,12 @@ export interface Lecture {
   /** Why the last run failed; cleared on success. A status column cannot
    *  carry a message, and the player has to be able to say what went wrong. */
   chapter_error: string | null;
-  /** The recap job's state, the same four values `chapter_status` takes. The
-   *  two jobs are independent: a lecture can have one, both or neither. */
-  recap_status: string | null;
-  recapped_at: string | null;
-  recap_error: string | null;
+  /** The reading-copy job's state, the same four values `chapter_status`
+   *  takes. The two jobs are independent: a lecture can have one, both or
+   *  neither. */
+  reading_status: string | null;
+  reading_written_at: string | null;
+  reading_error: string | null;
 }
 
 export interface LectureData {
@@ -1022,48 +1243,48 @@ export async function getChapterStatus(
   return rows[0] ?? null;
 }
 
-// ── Lecture recap ─────────────────────────────────────────────────────────────
+// ── Lecture reading copy ──────────────────────────────────────────────────────
 
 /**
- * One row of `lecture_recap` (migration 31), written by the recap job in
- * `app/src-tauri/src/recap.rs`.
+ * One row of `lecture_reading` (migration 34), written by the reading-copy job
+ * in `app/src-tauri/src/reading.rs`.
  *
- * The denser sibling of `Chapter`: a note per visual segment rather than per
- * topic, so a lecture has tens of these where it has eight chapters. `body` is
- * markdown — the job asks for two to four sentences and the model writes
- * formulas as `$…$` — which is why this is the one lecture reading that goes
- * through the markdown renderer.
+ * The lecture as text you can read: one sentence per line, pinned to the
+ * second it was said, with the spoken maths set as `$…$`. A line runs until
+ * the next one starts — no end column, for the reason `Chapter` has none —
+ * and a two-hour lecture has ~600 of them, which is why the Read tab renders
+ * them through the transcript's virtualised `FollowList`.
  *
- * There is no end here either, for the same reason there is none on a chapter:
- * a note runs until the next one starts.
+ * `para` is derived in Rust after validation, never asked of the model: 1 for
+ * a window's first line and for the first line at or after a slide change,
+ * which is where the panel breaks a paragraph.
  */
-export interface RecapNote {
+export interface ReadingLine {
   lecture_id: string;
   idx: number;
   start_seconds: number;
-  /** A short heading for the segment. The column is nullable — the agent may
-   *  omit one — so the panel falls back to the timestamp alone. */
-  label: string | null;
-  body: string;
+  para: number;
+  text: string;
 }
 
-export async function getRecap(lectureId: string): Promise<RecapNote[]> {
+export async function getReading(lectureId: string): Promise<ReadingLine[]> {
   const db = await getDb();
-  return db.select<RecapNote[]>(
-    `SELECT * FROM lecture_recap WHERE lecture_id = $1 ORDER BY idx ASC`,
+  return db.select<ReadingLine[]>(
+    `SELECT * FROM lecture_reading WHERE lecture_id = $1 ORDER BY idx ASC`,
     [lectureId],
   );
 }
 
-/** The recap job's state, read on its own for the reason `getChapterStatus`
- *  is: the player's `lecture` prop is a snapshot that predates the run. */
-export async function getRecapStatus(
+/** The reading-copy job's state, read on its own for the reason
+ *  `getChapterStatus` is: the player's `lecture` prop is a snapshot that
+ *  predates the run. */
+export async function getReadingStatus(
   lectureId: string,
-): Promise<{ recap_status: string | null; recap_error: string | null } | null> {
+): Promise<{ reading_status: string | null; reading_error: string | null } | null> {
   const db = await getDb();
   const rows = await db.select<
-    { recap_status: string | null; recap_error: string | null }[]
-  >(`SELECT recap_status, recap_error FROM lectures WHERE id = $1`, [lectureId]);
+    { reading_status: string | null; reading_error: string | null }[]
+  >(`SELECT reading_status, reading_error FROM lectures WHERE id = $1`, [lectureId]);
   return rows[0] ?? null;
 }
 
@@ -1262,6 +1483,85 @@ export async function getLocalEvents(): Promise<DbLocalEvent[]> {
        FROM local_events le
        LEFT JOIN subjects s ON s.id = le.subject_id
       ORDER BY le.start_at ASC`,
+  );
+}
+
+/**
+ * A local event's fields, as the editor holds them.
+ *
+ * `subjectId` is `null` for a row that belongs to no subject — the "Personal"
+ * key the calendar files those under. Dates are full ISO 8601 instants, the
+ * shape `DateTimeField` commits, so a row written here and one an automation
+ * left behind read identically.
+ */
+export interface LocalEventInput {
+  subjectId: number | null;
+  /** `note`, `class` or `due` — the three layers a local row can join. */
+  kind: string;
+  title: string;
+  startAt: string;
+  endAt: string | null;
+  allDay: boolean;
+  notes: string | null;
+}
+
+/**
+ * Write a local event and return its id.
+ *
+ * `source` is always `manual`: the only other value, `automation`, belongs to
+ * rows the removed automations feature left behind, and nothing writes it any
+ * more. The id comes from `execute()`'s own result rather than a follow-up
+ * `SELECT last_insert_rowid()`, which runs on whichever pooled connection is
+ * free and can hand back another statement's id.
+ */
+export async function createLocalEvent(input: LocalEventInput): Promise<number> {
+  const db = await getDb();
+  const res = await db.execute(
+    `INSERT INTO local_events
+       (subject_id, kind, title, start_at, end_at, all_day, notes, source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'manual')`,
+    [
+      input.subjectId,
+      input.kind,
+      input.title,
+      input.startAt,
+      input.endAt,
+      input.allDay ? 1 : 0,
+      input.notes,
+    ],
+  );
+  if (res.lastInsertId == null) throw new Error("local event insert returned no id");
+  return res.lastInsertId;
+}
+
+/**
+ * Rewrite a local event in place.
+ *
+ * Every editable column is replaced at once — the editor holds the whole row
+ * anyway, and a partial update would mean building a column list at runtime for
+ * no gain. `source` is deliberately not among them: editing a row an automation
+ * once left behind should not relabel it as something the user typed.
+ */
+export async function updateLocalEvent(
+  id: number,
+  input: LocalEventInput,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE local_events
+        SET subject_id = $1, kind = $2, title = $3, start_at = $4,
+            end_at = $5, all_day = $6, notes = $7
+      WHERE id = $8`,
+    [
+      input.subjectId,
+      input.kind,
+      input.title,
+      input.startAt,
+      input.endAt,
+      input.allDay ? 1 : 0,
+      input.notes,
+      id,
+    ],
   );
 }
 

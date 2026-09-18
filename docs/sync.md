@@ -111,9 +111,12 @@ One Rust engine scrapes three services. It runs identically inside the app
   requests stop.
 - **Scrape and parse are decoupled.** A scrape completes even when parsing
   is unavailable; parsing the PDFs it wrote is a separate, idempotent pass.
-  The frontend's two-stage view of it (`download → parse`), the `parse-status`
-  event vocabulary and the background sweep that picks up what was missed are
-  in [frontend.md](./frontend.md).
+  The frontend's view of it (`download → parse → embed`, the third stage drawn
+  only when a Voyage key is stored), the `parse-status` / `embed-status` event
+  vocabularies and the background sweep that picks up what was missed are in
+  [frontend.md](./frontend.md). A finished parse queues that file's embedding
+  behind it, so a sync run reaches all three stages without a button — see
+  [retrieval.md](./retrieval.md).
 - **The parse is in this process, and it takes minutes.** `parse_pdf` in
   `app/src-tauri/src/sync.rs` goes through the seam in
   `app/src-tauri/src/parse/mod.rs` and blocks until the chosen backend is done.
