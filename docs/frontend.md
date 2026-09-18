@@ -90,10 +90,12 @@ route because one is a prefix of the other. What this view gives up for
 spanning projects is manual order — `position` only orders one project's column
 — so its columns are sorted, a same-column drag is a no-op and the table sorts
 by header; [projects.md](./projects.md#the-universal-view) is where that rule
-and `refileTask` are written down. The page's chrome is `ProjectPage`'s: scope
-tabs (`ViewTabs`) on the container's rule, a fixed `h-12` toolbar, then the
-deliberately quieter `PillTabs` strip for the two views, so switching view
-cannot jolt the work below.
+and `refileTask` are written down. The page's chrome is a fixed `h-12`
+toolbar, then a row carrying the deliberately quiet `PillTabs` strip for the two
+views on the left and the four filters — status, project, subject, due, opening
+on Todo — on the right, so switching view cannot jolt the work below. The
+`All tasks · Unfiled` scope strip that used to sit above the toolbar is gone:
+Unfiled is a value of the project filter now.
 
 **`/chat` carries `?n=` on the same terms**, and it is the one page that writes
 its own query rather than being linked with it: the conversation is picked

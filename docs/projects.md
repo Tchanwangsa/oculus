@@ -417,7 +417,10 @@ do at all, and it is where a task with nowhere to go gets written down.
   on the same `PROJECTS_UPDATED_EVENT` everything else does — so a click here
   and a write the chat agent made through `oculus task` still arrive by one
   door. The projects come along because a task carries its project's *name*,
-  not its board, and a column id only means something against a board.
+  not its board, and a column id only means something against a board. This
+  page asks for `"all"`; `getUnfiledTasks` is still what resolves an **unfiled
+  task's own page** (`app/src/pages/TaskPage.tsx`), which is why the scope
+  outlived the strip that was named after it.
 - **Its columns are `DEFAULT_COLUMNS`** — Backlog / Todo / In progress / Done —
   aliased as `UNIVERSAL_COLUMNS` in
   `app/src/components/projects/universalTasks.ts` rather than written out a
@@ -438,6 +441,36 @@ do at all, and it is where a task with nowhere to go gets written down.
     still honestly refuses one. A drop that resolves to the column the card is
     already in writes nothing either — two universal columns can resolve to one
     column on a board that has only one active column.
+- **Four filters, opening on Todo** — status, project, subject, due
+  (`app/src/components/projects/TaskFilters.tsx`, state in the page). They
+  replaced an `All tasks · Unfiled` strip: **Unfiled is a value of the project
+  filter** now, which is strictly more useful, since there was previously no
+  way to ask for one project's tasks in this view at all. The filter is a
+  **read** — one `getAllTasks` narrowed by a predicate over the list the page
+  already has, not a query variant per question, which is how the old two-query
+  strip came to say two different things about the same rows.
+  - **The status set decides which columns the board has.** A filtered-out
+    status simply has no column, so filtering to Todo alone leaves one column
+    and nowhere to drag — deliberate, because a board that ignored a filter the
+    toolbar says is on would be worse. A status is changed from the table's
+    `StatusPill`, or by widening the filter. The set is never empty: the
+    control keeps the last checked status checked.
+  - **Due is asked through `sqliteUtcToMs`**, never by comparing the strings —
+    `due_at` is an ISO stamp from the UI and SQLite's `YYYY-MM-DD HH:MM:SS` from
+    the CLI, and the `T` beats the space and reorders a day. *This week* is the
+    calendar's own Monday-first week (`startOfWeek`), so it names the days the
+    calendar page draws.
+  - **Status and view persist** (`oculus-tasks-status`, `oculus-tasks-view`) —
+    they are how you like to work. Project, subject and due are per-question and
+    start at Any every time; carrying them would want the URL, which is also
+    what would make ⌘-click and a restored tab carry a filter, and is not worth
+    building until it is asked for. `oculus-tasks-scope` is the strip's dead
+    key: nothing reads it any more and nothing cleans it up, as with
+    `oculus-project-view`.
+  - The `done/total` counter **stops being one under a filter** — defaulting to
+    Todo it would read `0/12 done`, true of the rows on screen and nonsense as
+    a summary — and says `N shown` instead. An empty list likewise names the
+    filter rather than claiming you have no tasks.
 - **There is no manual order in this view, and there cannot be.** `position` is
   a fractional slot *inside one project's column*; two projects' positions are
   two unrelated number lines, so a midpoint between them is arithmetic on
