@@ -16,6 +16,13 @@ const STICK_PX = 80;
  * "did the reader scroll away" — the one thing the timeline gets wrong most
  * visibly.
  *
+ * Both boxes are watched, because the bottom moves for two reasons. The
+ * content grows — a token lands — and the scroller itself shrinks, which is
+ * what a composer does to the box above it as it wraps onto another line.
+ * Only the first changes `scrollHeight`, so watching the content alone left
+ * every ⇧⏎ pushing the last rows behind the composer with the scroll position
+ * untouched and the view no longer at the end.
+ *
  * `threadId` is what resets the pin: a thread you have just opened starts at
  * its end, whatever the last one was scrolled to. `live` re-hangs the observer
  * when the scroller itself is swapped out — an empty thread draws a different
@@ -42,6 +49,7 @@ export function useStickToBottom(threadId: number | null, live: boolean) {
       if (pinned.current) el.scrollTop = el.scrollHeight;
     });
     ro.observe(content);
+    ro.observe(el);
     return () => {
       el.removeEventListener("scroll", onScroll);
       ro.disconnect();

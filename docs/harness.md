@@ -707,7 +707,10 @@ in the preview harness:
 - **Following the stream watches for growth.** A `scrollTo` per delta forced a
   layout of the whole thread and yanked the page down whenever the reader
   had scrolled up; a `ResizeObserver` on the column scrolls only while the
-  bottom is already where they are.
+  bottom is already where they are. It watches the scroller as well as the
+  column, because a composer that wraps onto another line takes that height
+  off the box above it without changing anything about the content — the last
+  rows go behind the composer and no scroll event ever fires.
 
 Together: 400 deltas over that thread went from 402 React commits and 6.2s of
 render (15ms each — a dropped frame per token) to 34 commits and 55ms, and
