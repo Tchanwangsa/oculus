@@ -47,7 +47,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | Whether each CLI is installed, shared by every picker | `app/src/hooks/useBridgeHealth.ts` |
 | Which agent, model and level each headless job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/lib/db.ts` |
 | The lecture brief a dock thread is scoped to | `instructions` in `app/src-tauri/src/harness/mod.rs` |
-| The frame grab a message's moment carries | `lecture_grab_frame` in `app/src-tauri/src/chapters.rs`, `app/src/lib/lectures.ts` |
+| The frame grabs a message's moment carries | `lecture_grab_frames` in `app/src-tauri/src/chapters.rs`, `app/src/lib/lectures.ts` |
 | The lecture player's dock chat, and its composer | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx` |
 | `oculus agent` | `app/src-tauri/src/bin/oculus.rs` |
 
@@ -1737,9 +1737,12 @@ exists, it replaces the recipe.
 
 The section closes with the sentence the dock depends on: the student is
 watching this lecture, and a message may carry the moment it was sent at — a
-timestamp, the last minute of transcript, and a frame — and that the moment is
-usually enough, so the deck is for when a question needs the exact notation
-rather than a first move.
+timestamp, the last minute of transcript, and a frame of every stream the
+capture has — and that the moment is usually enough, so the deck is for when a
+question needs the exact notation rather than a first move. It also says what
+two frames are: two cameras on one second, either of which can be the one with
+the teaching on it, so both are worth opening before deciding a frame shows
+nothing.
 
 **The moment rides the prompt; it never becomes the message.**
 `SendOptions.context` is appended to what the CLI receives, after the
@@ -1752,16 +1755,37 @@ would be a timeline of something nobody asked. What does go on the row is
 it. `harness_edit_resend` and the rewind path carry both like any other
 option.
 
-**`lecture_grab_frame` is the picture half of that moment.** One JPEG of the
-playhead's second into `lectures/<id>/frames/live/<seconds>.jpg` — its own
-subfolder, so a message's grab can never collide with a chaptering run's
-frames in the folder above, and overwritten freely. It reuses that job's
-probe-and-grab rather than a bare ffmpeg call, because the splash-screen
-defence ([chapters.md](./chapters.md)) is exactly as load-bearing for a frame
-the *student* asked about. What it returns is the path the **agent** can read,
-`../lectures/<id>/frames/live/<seconds>.jpg`: the webview never opens the file
-— it puts the string in the message. A lecture with no downloaded recording is
-refused the way `chapters::run` refuses one.
+**`lecture_grab_frames` is the picture half of that moment.** One JPEG per
+downloaded stream of the playhead's second, into
+`lectures/<id>/frames/live/<seconds>-source<n>.jpg` — its own subfolder, so a
+message's grab can never collide with a chaptering run's frames in the folder
+above, and overwritten freely. It reuses that job's probe-and-grab rather than
+a bare ffmpeg call, because the splash-screen defence
+([chapters.md](./chapters.md)) is exactly as load-bearing for a frame the
+*student* asked about. What it returns are the paths the **agent** can read,
+`../lectures/<id>/frames/live/<seconds>-source<n>.jpg` with the stream's
+number beside each: the webview never opens the files — it puts the strings in
+the message. A lecture with no downloaded recording is refused the way
+`chapters::run` refuses one.
+
+**Every source is grabbed, not the one on screen.** Echo360 numbers the
+streams rather than naming them and neither is reliably the one being taught
+from: in a theatre where the lecturer works at the whiteboard, source 1 holds
+the room's idle splash for the hour and the derivation being asked about is
+only ever on source 2 — so a moment built from the visible pane alone hands
+the agent a picture of nothing to reason about, which is what it then says.
+The student is asking about the *second*, not about the pane they happen to
+have in front, so the moment carries every view of it and the brief tells the
+agent that two frames are two cameras on one second rather than two moments.
+A stream that will not decode drops its own line; only a lecture with nothing
+on disk is an error. The second grab costs ~200 ms.
+
+**The live grab is wider than a chaptering run's** — `LIVE_GRAB_WIDTH` (1536,
+a cap, so a 1280-wide stream passes through unscaled) against `GRAB_WIDTH`
+(768). A run writes fifty frames of slides into one prompt and wants them
+small; a message writes one or two and the question can be about a whiteboard,
+where 768px is the difference between the agent reading the notation and
+seeing grey marks.
 
 ## The dock's chat
 
@@ -1829,12 +1853,13 @@ built over stable values only.
 **The moment is built by the player at send time**
 (`buildMoment` in `LecturePlayer.tsx`): the second itself, the chapter the
 playhead is in, the transcript cues of the minute before inlined as plain text,
-and the path from `lectureGrabFrame`. It goes out as `SendOptions.context` with
+and the paths from `lectureGrabFrames`, listed by source number with the
+number's usual meaning (`SOURCE_HINT`) beside it. It goes out as `SendOptions.context` with
 the second as `SendOptions.at` — appended to the prompt, never the message, as
 above. A minute of transcript is a few hundred words where the file is twenty
 thousand, which is why this one is inlined and the file is only named. **A
 frame that cannot be grabbed drops its line and the message still goes**: a
-lecture whose video was never downloaded is refused by `lecture_grab_frame`,
+lecture whose video was never downloaded is refused by `lecture_grab_frames`,
 and losing the question over a missing picture would be the wrong half to lose.
 Sending does not touch playback.
 

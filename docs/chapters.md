@@ -164,8 +164,11 @@ Five measurements on real lectures in this library are the whole design.
   reflects the file on disk rather than a stale row.
 
 Seek-based frame extraction is likewise instant — ffmpeg jumps to a keyframe
-rather than decoding forward — and 768px wide lands around 30 KB with slide
-titles and formulas legible, which is the size a model will need.
+rather than decoding forward — and `GRAB_WIDTH` (768px) lands around 30 KB with
+slide titles and formulas legible, which is the size a model will need for
+fifty of them in one prompt. The chat dock reuses the same probe-and-grab at
+`LIVE_GRAB_WIDTH` instead, because one frame of a whiteboard is a different
+question from fifty of slides ([harness.md](./harness.md)).
 
 ## Details worth not rediscovering
 

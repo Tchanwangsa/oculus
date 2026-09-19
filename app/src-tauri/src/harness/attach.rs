@@ -5,7 +5,7 @@
 //! to *be* a file before it can be talked about. So a paste or a drop lands
 //! here as bytes, gets written into `agents/attachments/`, and the composer
 //! puts the path it gets back into the message — the same move
-//! [`crate::chapters::app::lecture_grab_frame`] already makes for the frame a
+//! [`crate::chapters::app::lecture_grab_frames`] already makes for the frames a
 //! dock message carries, and the same move the `@` menu makes for a course
 //! file. Nothing about the message format is special: it is a backticked
 //! path, and the agent opens it with its own image tool.

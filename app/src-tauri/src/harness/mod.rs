@@ -193,12 +193,17 @@ fn lecture_section(lec: &LectureBrief, scope: Option<&str>) -> String {
     }
     s.push_str(
         "\nThe student is watching this lecture, and a message may carry the moment it was \
-         sent at — a timestamp, the last minute of transcript, and a frame of the video — \
-         appended under a heading after their own words. When it is there, \"this\", \"that \
-         slide\" and \"what he just said\" mean that moment. It is usually enough on its \
-         own: read the frame and the transcript it carries before going looking for more, \
-         and go to the deck when the question needs the exact notation rather than as a \
-         matter of course.\n",
+         sent at — a timestamp, the last minute of transcript, and a frame of every stream \
+         the capture has — appended under a heading after their own words. When it is \
+         there, \"this\", \"that slide\" and \"what he just said\" mean that moment. It is \
+         usually enough on its own: open every frame and read the transcript it carries \
+         before going looking for more, and go to the deck when the question needs the \
+         exact notation rather than as a matter of course.\n\
+         \nTwo frames are two cameras on the same second, not two moments. Echo360 \
+         numbers the streams rather than naming them and either can be the one being \
+         taught from: a whiteboard derivation is often only on the room camera while the \
+         screen capture holds the theatre's idle splash for the hour, and the slides are \
+         only on the capture. Look at all of them before saying a frame shows nothing.\n",
     );
     s
 }

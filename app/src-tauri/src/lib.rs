@@ -1316,7 +1316,7 @@ CREATE TABLE IF NOT EXISTS browser_favicons (
             harness::attach::harness_attach_image,
             harness::attach::harness_attach_file,
             chapters::app::lecture_find_chapters,
-            chapters::app::lecture_grab_frame,
+            chapters::app::lecture_grab_frames,
             reading::app::lecture_write_reading,
             storage::storage_report,
             browser::browser_open_url,

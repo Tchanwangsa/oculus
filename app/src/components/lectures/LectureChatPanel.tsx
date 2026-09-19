@@ -51,9 +51,10 @@ export interface LectureChatPanelProps {
   atRef: RefObject<number>;
   /**
    * The moment, built by the player: the transcript of the minute before, the
-   * chapter the playhead is in, and the frame grab. Null when there is nothing
-   * to say about this second. It never throws — a lecture with no downloaded
-   * video has no frame, and a message must still go.
+   * chapter the playhead is in, and a frame of every stream the capture has
+   * downloaded. Null when there is nothing to say about this second. It never
+   * throws — a lecture with no downloaded video has no frame, and a message
+   * must still go.
    */
   buildMoment: (at: number) => Promise<string | null>;
 }
@@ -199,9 +200,10 @@ export const LectureChatPanel = memo(function LectureChatPanel({
       // Read the playhead now, not at the last render: the second this says is
       // the second the bubble will carry.
       const at = moment ? Math.max(0, Math.floor(atRef.current)) : null;
-      // A frame grab that cannot happen — no downloaded recording — drops the
-      // frame line and nothing else. Failing the message over a picture would
-      // be the wrong half to lose.
+      // A frame grab that cannot happen — no downloaded recording, or one
+      // stream of two that will not decode — drops that line and nothing
+      // else. Failing the message over a picture would be the wrong half to
+      // lose.
       const context = at == null ? null : await buildMoment(at);
       try {
         const newId = await harnessSend(id, activeProvider, text, {

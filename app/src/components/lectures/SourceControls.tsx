@@ -49,7 +49,9 @@ export const SOURCE_LABEL: Record<SourceNum, string> = {
   2: "Source 2",
 };
 
-const SOURCE_HINT: Record<SourceNum, string> = {
+/** The *usual* meaning of each number, which is as much as anyone can say —
+ *  the moment a dock message carries hedges it the same way. */
+export const SOURCE_HINT: Record<SourceNum, string> = {
   1: "Presenter screen",
   2: "Room camera",
 };

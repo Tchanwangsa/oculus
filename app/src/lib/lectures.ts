@@ -247,21 +247,41 @@ export function writeLectureReading(
   return invoke("lecture_write_reading", { lectureId, force, source });
 }
 
+/** One stream's frame of the moment a dock message carries. */
+export interface MomentFrame {
+  /** Which stream it came off, 1 and 2 as Echo360 numbers them — the same
+   *  numbering the player's picker shows (`SOURCE_LABEL`). */
+  source: SourceNum;
+  /** Relative to `agents/`, the thread's cwd. */
+  path: string;
+}
+
 /**
- * One JPEG of the moment the playhead is at, for a message sent from the
- * player's dock.
+ * One JPEG per downloaded stream of the moment the playhead is at, for a
+ * message sent from the player's dock.
  *
- * **What comes back is the path the agent reads, not one the webview can
- * open**: `../lectures/<id>/frames/live/<seconds>.jpg`, relative to `agents/`,
- * which every thread runs from. The page never opens the file — it puts this
- * string in the message and the CLI opens it.
+ * **Every source on disk, not the one on screen.** Which stream carries the
+ * teaching is the theatre's business: a lecturer at the whiteboard leaves
+ * source 1 on the room's idle splash for the hour while the derivation is
+ * only ever on source 2, so a moment built from the visible pane alone hands
+ * the agent a picture of nothing. The message carries every view of that
+ * second and the agent reads whichever answers the question.
  *
- * ~200 ms: the grab probes a few offsets first, the same defence against a
- * black frame or the room's AV splash that a chaptering run's frames get
- * (docs/chapters.md). A lecture with no downloaded recording is refused.
+ * **What comes back are paths the agent reads, not ones the webview can
+ * open**: `../lectures/<id>/frames/live/<seconds>-source<n>.jpg`, relative to
+ * `agents/`, which every thread runs from. The page never opens the files —
+ * it puts the strings in the message and the CLI opens them.
+ *
+ * ~200 ms per stream: each grab probes a few offsets first, the same defence
+ * against a black frame or the room's AV splash that a chaptering run's
+ * frames get (docs/chapters.md). A stream that will not decode drops its own
+ * line; only a lecture with nothing downloaded is refused.
  */
-export function lectureGrabFrame(lectureId: string, seconds: number): Promise<string> {
-  return invoke<string>("lecture_grab_frame", { lectureId, seconds: Math.max(0, Math.floor(seconds)) });
+export function lectureGrabFrames(lectureId: string, seconds: number): Promise<MomentFrame[]> {
+  return invoke<MomentFrame[]>("lecture_grab_frames", {
+    lectureId,
+    seconds: Math.max(0, Math.floor(seconds)),
+  });
 }
 
 /**

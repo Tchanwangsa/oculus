@@ -636,8 +636,8 @@ export interface SendOptions {
    *  lecture's row, so `subjectId` is not consulted alongside it. */
   lectureId?: string | null;
   /** The moment, built by the player at send time: the timestamp, the last
-   *  minute of transcript, the chapter, and the frame path from
-   *  `lectureGrabFrame`. It is appended to the prompt the CLI receives, after
+   *  minute of transcript, the chapter, and a frame path per downloaded
+   *  stream from `lectureGrabFrames`. It is appended to the prompt the CLI receives, after
    *  the student's text — it never becomes the message's content, so the
    *  timeline still shows only what was typed. */
   context?: string | null;

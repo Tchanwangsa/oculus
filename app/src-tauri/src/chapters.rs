@@ -91,6 +91,19 @@ const DEAD_SOURCE: usize = 2;
 /// grab landing exactly on a transition is the case this list exists for.
 const GRAB_OFFSETS: [u32; 4] = [2, 6, 12, 0];
 
+/// How wide a chaptering run's frames are. Fifty of them go to the agent in
+/// one prompt, and 768px lands around 30 KB while keeping a slide's title and
+/// formulas readable, which is all that stage has to decide.
+const GRAB_WIDTH: u32 = 768;
+
+/// How wide the dock's live grab is. One or two frames per message instead of
+/// fifty, and the question can be about a whiteboard rather than a slide —
+/// where 768px turns Dirac notation into grey marks and the 1280-wide room
+/// camera it came off does not. The cap is above every Echo360 stream
+/// measured here, so in practice it is the stream's own width; it is a cap
+/// rather than a width because past ~1.5K px a model downsamples anyway.
+const LIVE_GRAB_WIDTH: u32 = 1536;
+
 /// How close to the most detailed frame in the probe set a frame has to be to
 /// be taken instead of it. Relative, not absolute: what counts as a detailed
 /// frame depends on the deck, and a title slide and a dense one differ by far
@@ -519,7 +532,7 @@ pub fn detect(
 ///
 /// A seek-based single-frame grab is instant — ffmpeg jumps to the keyframe
 /// rather than decoding forward — so this stays a handful of processes per
-/// candidate rather than a second full pass. 768px wide lands around 30 KB and
+/// candidate rather than a second full pass. [`GRAB_WIDTH`] lands around 30 KB and
 /// keeps slide titles and formulas readable, which is what a model will need to
 /// name the chapter.
 ///
@@ -568,7 +581,7 @@ pub fn extract_frames(
     let mut written = Vec::with_capacity(secs.len());
     for &second in secs {
         let out = out_dir.join(format!("{second}.jpg"));
-        grab_frame(ffmpeg, video, second, &out)?;
+        grab_frame(ffmpeg, video, second, GRAB_WIDTH, &out)?;
         written.push(out);
         on_grab(written.len());
     }
@@ -602,20 +615,38 @@ fn sweep_orphans(out_dir: &Path, keep: &[u32]) {
     }
 }
 
-/// One probed JPEG of `second`, written to `out`.
+/// One probed JPEG of `second`, written to `out`, at most `width` px wide.
 ///
 /// Shared with the live grab the chat dock takes of the playhead's moment
-/// (`app::lecture_grab_frame`) rather than copied: the probing above is the
+/// (`app::lecture_grab_frames`) rather than copied: the probing above is the
 /// defence against handing a model the room's AV splash screen or a black
 /// frame, and a grab the *student* asked about wants it for exactly the same
 /// reason. The offset it picks stays out of the filename — the second asked
 /// for is the one everything else refers to.
-pub fn grab_frame(ffmpeg: &Path, video: &Path, second: u32, out: &Path) -> Result<(), String> {
+///
+/// **The width is the callers' one difference, and it is not cosmetic.** A
+/// chaptering run writes fifty of these to title slides with, so
+/// [`GRAB_WIDTH`] keeps each one small; a dock message writes one or two and
+/// the question may be about a whiteboard, where [`LIVE_GRAB_WIDTH`] is the
+/// difference between the agent reading `|0> ⊗ |0>` off the board and seeing
+/// grey marks. Either way the filter only ever shrinks: `min(width, iw)`, so
+/// a 1280-wide room camera is passed through rather than blown up into a
+/// bigger file with no more detail in it.
+pub fn grab_frame(
+    ffmpeg: &Path,
+    video: &Path,
+    second: u32,
+    width: u32,
+    out: &Path,
+) -> Result<(), String> {
     let at = best_offset(ffmpeg, video, second);
+    // The comma is inside a filter *expression*, so it is escaped — an
+    // unescaped one would end the filter and start another.
+    let scale = format!("scale=min({width}\\,iw):-2");
     let status = Command::new(ffmpeg)
         .args(["-v", "error", "-nostdin", "-y", "-ss", &at.to_string(), "-i"])
         .arg(video)
-        .args(["-frames:v", "1", "-vf", "scale=768:-2", "-q:v", "3"])
+        .args(["-frames:v", "1", "-vf", &scale, "-q:v", "3"])
         .arg(out)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1626,13 +1657,34 @@ pub mod app {
         Ok(())
     }
 
-    /// One JPEG of the moment the playhead is at, for a message sent from
-    /// the lecture player's dock ([`docs/harness.md`]).
+    /// One stream's frame of the moment a dock message carries.
+    #[derive(serde::Serialize, Clone)]
+    pub struct MomentFrame {
+        /// Which stream it came off, 1 and 2 as Echo360 numbers them — which
+        /// is all anyone can honestly say about which is which, and the same
+        /// thing the player's own picker says (`SourceControls.tsx`).
+        pub source: crate::echo360::SourceNum,
+        /// Relative to `agents/`, the thread's cwd.
+        pub path: String,
+    }
+
+    /// One JPEG **per downloaded stream** of the moment the playhead is at,
+    /// for a message sent from the lecture player's dock ([`docs/harness.md`]).
     ///
-    /// **It returns the path the *agent* can read**, not one the webview can
-    /// open: `../lectures/<id>/frames/live/<seconds>.jpg`, relative to
-    /// `agents/`, which every thread runs from. The page never opens the file
-    /// — it puts this string in the message, and the CLI opens it.
+    /// **Every source on disk is grabbed, not the one on screen.** Echo360
+    /// numbers the streams rather than naming them and neither is reliably the
+    /// one with the teaching on it: a theatre where the lecturer works at the
+    /// whiteboard leaves source 1 on the room's idle splash for the hour, and
+    /// the derivation the question is about exists only on source 2. The
+    /// student is asking about the *moment*, not about the pane they happen to
+    /// have in front, so the moment carries every view of it there is and the
+    /// agent reads whichever answers the question.
+    ///
+    /// **What comes back are paths the *agent* can read**, not ones the
+    /// webview can open: `../lectures/<id>/frames/live/<seconds>-source<n>.jpg`,
+    /// relative to `agents/`, which every thread runs from. The page never
+    /// opens the files — it puts the strings in the message, and the CLI opens
+    /// them.
     ///
     /// Frames live in their own `live/` subfolder so a message's grab can
     /// never collide with a chaptering run's, which are named by boundary
@@ -1641,39 +1693,86 @@ pub mod app {
     ///
     /// The probing is [`grab_frame`]'s, so a message sent while the screen
     /// share is between slides still attaches something with lecture content
-    /// on it rather than a black frame. Four probes and a grab is ~200 ms.
+    /// on it rather than a black frame. Four probes and a grab is ~200 ms, per
+    /// stream and one stream after another — the second one is the difference
+    /// between an answer and "the frame shows the room's idle screen", which
+    /// is worth 200 ms.
+    ///
+    /// **A stream that will not decode drops its own line and nothing else.**
+    /// Only a lecture with no frame at all is an error, for the reason the
+    /// whole moment is best-effort: losing the question over a picture would
+    /// be the wrong half to lose.
     #[tauri::command]
-    pub async fn lecture_grab_frame(lecture_id: String, seconds: u32) -> Result<String, String> {
+    pub async fn lecture_grab_frames(
+        lecture_id: String,
+        seconds: u32,
+    ) -> Result<Vec<MomentFrame>, String> {
         let pool = crate::store::open_pool().await?;
-        let row: Option<(String, Option<String>)> =
-            sqlx::query_as("SELECT title, video_path FROM lectures WHERE id = ?1")
+        let row: Option<(String, Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT title, video_path, video2_path FROM lectures WHERE id = ?1")
                 .bind(&lecture_id)
                 .fetch_optional(&pool)
                 .await
                 .map_err(|e| e.to_string())?;
-        let (title, video) = row.ok_or_else(|| format!("no lecture {lecture_id}"))?;
+        let (title, first, second) = row.ok_or_else(|| format!("no lecture {lecture_id}"))?;
+
+        let dir = crate::echo360::lecture_dir(&crate::paths::data_dir(), &lecture_id);
+        // The column when there is one and the stream's own name on disk when
+        // there is not — `detect` reads source 2 that way too, and for the
+        // same reason: a stream that was downloaded but never recorded is
+        // still one ffmpeg can open.
+        let sources: Vec<(crate::echo360::SourceNum, PathBuf)> = [(1, first), (2, second)]
+            .into_iter()
+            .map(|(n, column)| {
+                let path = column
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| crate::echo360::source_path(&dir, n));
+                (n, path)
+            })
+            .filter(|(_, path)| path.exists())
+            .collect();
         // The same refusal `run` makes, for the same reason: there is no
         // frame to take, and naming the download is more use than a missing
         // file's path.
-        let video = video.ok_or_else(|| {
-            format!("{title} is not downloaded — `oculus run -l --videos` fetches it")
-        })?;
-        let video = PathBuf::from(video);
-        if !video.exists() {
-            return Err(format!("{} is on record but missing from disk", video.display()));
+        if sources.is_empty() {
+            return Err(format!(
+                "{title} is not downloaded — `oculus run -l --videos` fetches it"
+            ));
         }
         let ffmpeg = crate::echo360::find_ffmpeg(None)
             .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
 
-        let dir = crate::echo360::lecture_dir(&crate::paths::data_dir(), &lecture_id)
-            .join("frames")
-            .join("live");
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let out = dir.join(format!("{seconds}.jpg"));
-        tokio::task::spawn_blocking(move || grab_frame(&ffmpeg, &video, seconds, &out))
-            .await
-            .map_err(|e| e.to_string())??;
-        Ok(format!("../lectures/{lecture_id}/frames/live/{seconds}.jpg"))
+        let out_dir = dir.join("frames").join("live");
+        std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
+        let grabbed: Vec<crate::echo360::SourceNum> = tokio::task::spawn_blocking(move || {
+            sources
+                .into_iter()
+                .filter_map(|(n, video)| {
+                    let out = out_dir.join(format!("{seconds}-source{n}.jpg"));
+                    match grab_frame(&ffmpeg, &video, seconds, LIVE_GRAB_WIDTH, &out) {
+                        Ok(()) => Some(n),
+                        Err(e) => {
+                            eprintln!("[oculus] frame: source {n} at {seconds}s: {e}");
+                            None
+                        }
+                    }
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        if grabbed.is_empty() {
+            return Err(format!("no frame of {title} at {seconds}s"));
+        }
+        Ok(grabbed
+            .into_iter()
+            .map(|source| MomentFrame {
+                source,
+                path: format!(
+                    "../lectures/{lecture_id}/frames/live/{seconds}-source{source}.jpg"
+                ),
+            })
+            .collect())
     }
 
     /// Startup: a run killed mid-turn left `running` on the row with no

@@ -43,7 +43,7 @@ import {
   fmtDuration,
   fmtTime,
   fmtLectureDate,
-  lectureGrabFrame,
+  lectureGrabFrames,
   type Cue,
 } from "@/lib/lectures";
 import { useLectureChapters } from "@/hooks/useLectureChapters";
@@ -57,6 +57,7 @@ import { usePlayerPrefs, type DockTab } from "@/stores/playerPrefsStore";
 import {
   LayoutControl,
   SOURCES,
+  SOURCE_HINT,
   SourceSwitcher,
   type SourceState,
   type SourceStates,
@@ -1239,9 +1240,17 @@ export function LecturePlayer({
    * few hundred words, where the whole file is twenty thousand and the agent
    * has the path for that in its instructions.
    *
+   * **Every downloaded stream's frame goes, not the one on screen.** Which
+   * source carries the teaching is the theatre's business: a lecturer working
+   * at the whiteboard leaves source 1 on the room's idle splash for the hour
+   * while the derivation being asked about is only ever on source 2, so a
+   * moment built from the visible pane alone hands the agent a picture of
+   * nothing. `lecture_grab_frames` grabs each one and they go out together,
+   * numbered the way the player's own picker numbers them.
+   *
    * **A frame that cannot be grabbed drops its line and nothing else.** A
    * lecture whose video has never been downloaded is refused by
-   * `lecture_grab_frame`, and losing the message over a missing picture would
+   * `lecture_grab_frames`, and losing the message over a missing picture would
    * be the wrong half to lose.
    */
   const buildMoment = useCallback(
@@ -1270,8 +1279,17 @@ export function LecturePlayer({
         );
       }
 
-      const frame = await lectureGrabFrame(lecture.id, at).catch(() => null);
-      if (frame) parts.push(`A frame of the screen at that second: \`${frame}\``);
+      const frames = await lectureGrabFrames(lecture.id, at).catch(() => []);
+      if (frames.length) {
+        const shots = frames
+          .map((f) => `- source ${f.source} (usually the ${SOURCE_HINT[f.source].toLowerCase()}): \`${f.path}\``)
+          .join("\n");
+        parts.push(
+          frames.length > 1
+            ? `Frames of every stream of this capture at that second. Echo360 numbers the streams rather than naming them and either may be the one being taught from — a board is often only on the camera, slides only on the screen capture — so read all of them:\n\n${shots}`
+            : `A frame of the recording at that second:\n\n${shots}`,
+        );
+      }
 
       return parts.join("\n\n");
     },
