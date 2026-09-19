@@ -1594,16 +1594,54 @@ own timestamp — which removes path traversal, the extension lie and the
 collision in one move. A file that is not a picture is refused rather than
 attached, and 20 MB is the cap, so a video dropped by mistake stops here.
 
-**The drop is the window's event, not the page's.** Tauri's own drag-and-drop
+**The drop is Tauri's event, not the page's.** Tauri's own drag-and-drop
 handler sits in front of the webview, so a file dragged in from Finder never
 reaches a React `onDrop` — the page sees nothing at all. Switching that handler
 off would hand file drops to WebKit and take in-page dragging with it, which
 the project board still needs, so `useFileDrop`
-(`app/src/hooks/useFileDrop.ts`) listens to the window's events instead. They
-arrive with a **physical** cursor position and no target, so the element is
-found by arithmetic: physical pixels over `devicePixelRatio`, which carries
-both the retina scale and the webview's page zoom, gives CSS coordinates a
-`getBoundingClientRect` can be compared against.
+(`app/src/hooks/useFileDrop.ts`) listens to Tauri's events instead. They arrive
+with no target, so the element is found by arithmetic against a
+`getBoundingClientRect` — and both the channel they arrive on and the units
+that arithmetic is in are traps, below.
+
+**The position is in points, whatever its type says.** Tauri hands it over as a
+`PhysicalPosition` and it is not one: wry reads macOS's `draggingLocation` and
+subtracts it from the view's frame height without ever multiplying by the
+backing scale factor, so what arrives is the window's own logical coordinates.
+Dividing those by `devicePixelRatio` — the conversion the type asks for —
+halves every point on a retina screen and folds the whole window into its
+top-left quarter, so a drop on a composer at the bottom of the window reports
+as the middle of the thread, hits nothing, and is swallowed in silence with
+every handler correctly attached. The hook measures the scale instead of
+assuming it: points to CSS pixels is the viewport's width over the window's own
+logical width (`innerSize` over `scaleFactor`), which is `1` unzoomed and stays
+right when the page is zoomed, re-read on a resize and as each drag enters.
+
+**The *webview's* events and not the window's**, which is a distinction with
+teeth here, and it runs the opposite way to what the API suggests. Tauri
+synthesizes a drop as a **window** event only when the runtime built that
+webview as the window's own content (`WebviewKind::WindowContent`); otherwise
+it is a **webview** event, emitted to `EventTarget::Webview` — and Tauri's
+`filter_target` has no arm matching a `Window` listener against a `Webview`
+emit. This app is never the first case. `app/src-tauri/Cargo.toml` turns on
+tauri's `unstable` feature, which is what `Window::add_child` needs for the
+in-app browser (`app/src-tauri/src/browser.rs`), and `tauri-runtime-wry` picks
+the main window's own webview kind under exactly that cfg: with `unstable` on
+it is `WindowChild`. So every drop here is webview-addressed whether or not a
+browser tab is open, and how many webviews the window holds never enters into
+it. A window listener subscribes cleanly, reports success and is then never
+called once — which is the whole difficulty: nothing to see but a drag that
+does nothing, with paste still fine.
+
+**A dropped path needs no scope entry; an attachment does.** The asset
+protocol refuses anything outside `assetProtocol.scope`
+(`app/src-tauri/tauri.conf.json`), and a picture in `agents/attachments/` is
+neither a course file nor a lecture — so the scope names it, or every picture
+in every thread draws as WebKit's broken-image glyph while the file sits
+happily on disk. The file the student *drops* is the exception that needs no
+entry: Tauri adds a dropped path to the runtime scope as it delivers the
+event, which is why the composer's strip can preview it straight from
+`convertFileSrc` before anything has been written.
 
 **A task body writes on paste instead**, and that is the one place this rule
 is reversed (`TaskBody` in `app/src/pages/TaskPage.tsx`). A body has no send to
