@@ -339,7 +339,7 @@ export function StorageSection() {
       {/* Largest files */}
       {largest.length > 0 && (
         <div className="mt-5">
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+          <p className="font-display text-[13px] font-semibold text-foreground mb-1.5">
             Largest files
           </p>
           <div>

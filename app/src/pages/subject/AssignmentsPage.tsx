@@ -164,7 +164,7 @@ export default function SubjectAssignmentsPage() {
           if (!tasks || tasks.length === 0) return null;
           return (
             <section key={group}>
-              <h2 className="mb-1.5 px-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <h2 className="mb-2 px-0.5 text-[13px] font-semibold text-foreground">
                 {GROUP_LABELS[group]}
               </h2>
               <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">

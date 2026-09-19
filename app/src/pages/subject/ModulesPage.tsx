@@ -138,7 +138,7 @@ function ModuleCard({
             <div key={i}>
               {section.heading && (
                 <div className="px-3 pt-2.5 pb-1">
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  <span className="font-display text-[11px] font-semibold text-muted-foreground">
                     {section.heading}
                   </span>
                 </div>

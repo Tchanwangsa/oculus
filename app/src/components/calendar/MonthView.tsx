@@ -245,7 +245,7 @@ function MoreLink({
         </button>
       </PopoverTrigger>
       <PopoverContent side="right" align="start" className="w-64 p-0">
-        <p className="px-3 pt-2.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="px-3 pt-2.5 pb-1.5 font-display text-[13px] font-semibold text-foreground">
           {day.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "short" })}
         </p>
         <div className="px-1 pb-2">
