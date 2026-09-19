@@ -31,7 +31,8 @@
         "enable": true,
         "scope": [
           "$APPDATA/courses/**",
-          "$APPDATA/lectures/**"
+          "$APPDATA/lectures/**",
+          "$APPDATA/agents/attachments/**"
         ]
       }
     }

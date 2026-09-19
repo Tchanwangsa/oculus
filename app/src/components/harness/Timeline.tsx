@@ -16,8 +16,9 @@ import {
 import type { Icon } from "@phosphor-icons/react";
 import { MATH, MD_COMPONENTS, normalizeMath } from "@/components/markdown/MdComponents";
 import { FileChip } from "@/components/markdown/FileChip";
-import { openLibraryPath, splitLibraryPaths } from "@/lib/openFile";
+import { openLibraryPath, splitLibraryPaths, type TextPart } from "@/lib/openFile";
 import { attachmentSrc } from "@/lib/attachments";
+import { ImageLightbox } from "@/components/ui/Lightbox";
 import { selectionMarkdown } from "@/lib/selectionMarkdown";
 import { useDataDir } from "@/hooks/useDataDir";
 import { Button } from "@/components/ui/button";
@@ -281,6 +282,54 @@ function useOverflows(text: string, shown: boolean) {
 }
 
 /**
+ * The pictures a question attached, lifted out of its prose, and the prose
+ * with the holes they left closed up.
+ *
+ * Attachments go *above* the words — the shape every chat UI has settled on,
+ * and the one the composer's own strip already draws. Inline they were a
+ * 240px block dropped into the middle of a sentence, and five of them turned
+ * a two-line question into a column of gaps.
+ *
+ * Closing the hole is this function's other half. The composer writes the
+ * paths on their own line under the message, so removing them leaves a
+ * trailing blank line `whitespace-pre-wrap` would faithfully draw; a picture
+ * quoted back *inside* a sentence leaves the two spaces that were around it.
+ * Both are swept here and not in `splitLibraryPaths`, which the composer's
+ * own editor shares and which must hand back the text exactly as it was.
+ */
+function liftPictures(parts: TextPart[]): [Extract<TextPart, { kind: "image" }>[], TextPart[]] {
+  const pictures = parts.filter((p) => p.kind === "image");
+  if (!pictures.length) return [pictures, parts];
+
+  // Two runs of prose that were only ever separated by a picture are one run
+  // now, and the seam between them collapses: a single space inside a line,
+  // nothing at all across a break.
+  const body: TextPart[] = [];
+  for (const p of parts) {
+    if (p.kind === "image") continue;
+    const last = body[body.length - 1];
+    if (p.kind === "text" && last?.kind === "text") {
+      const left = last.text.replace(/[ \t]+$/, "");
+      const right = p.text.replace(/^[ \t]+/, "");
+      const gap = !left || !right || /\n\s*$/.test(left) || /^\s*\n/.test(right) ? "" : " ";
+      body[body.length - 1] = { kind: "text", text: left + gap + right };
+    } else {
+      body.push(p);
+    }
+  }
+
+  // …and the ends, where the message's own last line used to be followed by
+  // a strip of paths.
+  const first = body[0];
+  if (first?.kind === "text") body[0] = { kind: "text", text: first.text.replace(/^\s+/, "") };
+  const last = body[body.length - 1];
+  if (last?.kind === "text")
+    body[body.length - 1] = { kind: "text", text: last.text.replace(/\s+$/, "") };
+
+  return [pictures, body.filter((p) => p.kind !== "text" || p.text.length > 0)];
+}
+
+/**
  * A question: the student's own words, on the right.
  *
  * Editing happens in the bubble itself rather than back in the composer —
@@ -313,6 +362,9 @@ function QuestionBubble({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  /** The picture being looked at, as the src the card already drew — opening
+   *  one is a viewer over the thread, not a trip out to the OS. */
+  const [shown, setShown] = useState<string | null>(null);
   // One IPC call for the whole app, so a thread of bubbles costs nothing
   // (`useDataDir`). Only a bubble holding a picture ever reads it.
   const dataDir = useDataDir();
@@ -322,6 +374,10 @@ function QuestionBubble({
   // rather than as the paths the agent was sent. Split on shape, so a bubble
   // costs no query — see `splitLibraryPaths`.
   const parts = useMemo(() => splitLibraryPaths(text), [text]);
+  // Attachments above, prose below — and the prose is what the fold measures
+  // and can hide, because a picture the student attached is the question's
+  // subject and never the part worth folding away.
+  const [pictures, prose] = useMemo(() => liftPictures(parts), [parts]);
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -370,65 +426,105 @@ function QuestionBubble({
 
   return (
     <div className="group/msg flex w-full flex-col">
-      <div data-msg-id={msgId} className="flex w-full justify-end">
-        <div
-          className={cn(
-            "max-w-[70%] min-w-0 rounded-xl border px-3.5 py-2 text-[13px] leading-relaxed",
-            pending
-              ? "border-dashed border-border bg-transparent text-muted-foreground"
-              : "border-border bg-surface text-foreground",
-          )}
-        >
+      {/* One viewer for the message, not one per card: only one picture can
+          be open at a time, and a dialog per thumbnail would be a portal per
+          thumbnail. */}
+      <ImageLightbox
+        src={shown ?? ""}
+        alt="Attached picture"
+        open={shown !== null}
+        onOpenChange={(o) => !o && setShown(null)}
+      />
+      {/* The landmark the rail measures is the question as drawn — its
+          pictures and its words, but not the action row under them, which
+          appears on hover and would make a tick jump. */}
+      <div data-msg-id={msgId} className="flex w-full flex-col items-end gap-1.5">
+        {pictures.length > 0 && (
+          // The pictures themselves, not chips, and **beside the bubble
+          // rather than inside it**: what was attached is what the question
+          // was about, a filename of digits says nothing about it, and every
+          // chat UI has settled on the same shape — cards of their own above
+          // the words. Clicking one opens it full size the way any other file
+          // in the library opens.
+          //
+          // One picture draws at its own size. Several become a three-across
+          // grid that wraps, each card letterboxing its picture on the
+          // bubble's own ground instead of cropping it square: what a student
+          // attaches here is a screenshot of a question, and a crop of one is
+          // unreadable, which is the whole point of drawing it at all.
+          <div className="flex max-w-[70%] flex-wrap justify-end gap-1.5">
+            {pictures.map((p, i) => (
+              <button
+                key={i}
+                type="button"
+                aria-label="Open the attached picture"
+                onClick={() => setShown(attachmentSrc(dataDir, p.path))}
+                className={cn(
+                  "cursor-pointer overflow-hidden rounded-xl border border-border bg-surface transition-colors hover:border-ring",
+                  pictures.length === 1
+                    ? "max-w-full"
+                    : "aspect-video w-[calc((100%-0.75rem)/3)]",
+                )}
+              >
+                <img
+                  src={attachmentSrc(dataDir, p.path)}
+                  alt="Attached picture"
+                  className={cn(
+                    "block",
+                    pictures.length === 1
+                      ? "max-h-72 w-auto max-w-full"
+                      : "h-full w-full object-contain",
+                  )}
+                />
+              </button>
+            ))}
+          </div>
+        )}
+        {(prose.length > 0 || pictures.length === 0) && (
           <div
-            ref={body}
-            // The fade is a mask rather than a gradient over the top: the
-            // bubble behind it is two different grounds (queued is
-            // transparent), and a mask does not need to know which.
             className={cn(
-              "whitespace-pre-wrap break-words",
-              long && !open && "overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-2.25rem),transparent)]",
+              "max-w-[70%] min-w-0 rounded-xl border px-3.5 py-2 text-[13px] leading-relaxed",
+              pending
+                ? "border-dashed border-border bg-transparent text-muted-foreground"
+                : "border-border bg-surface text-foreground",
             )}
-            style={long && !open ? { maxHeight: QUESTION_MAX_H } : undefined}
           >
-            {parts.map((p, i) => {
-              if (p.kind === "text") return p.text;
-              if (p.kind === "image") {
-                // The picture itself, not a chip: what was attached is what
-                // the question was about, and a filename of digits says
-                // nothing about it. Clicking opens it full size the way any
-                // other file in the library opens.
+            <div
+              ref={body}
+              // The fade is a mask rather than a gradient over the top: the
+              // bubble behind it is two different grounds (queued is
+              // transparent), and a mask does not need to know which.
+              className={cn(
+                "whitespace-pre-wrap break-words",
+                long && !open && "overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-2.25rem),transparent)]",
+              )}
+              style={long && !open ? { maxHeight: QUESTION_MAX_H } : undefined}
+            >
+              {prose.map((p, i) => {
+                if (p.kind === "text") return p.text;
                 return (
-                  <img
+                  <FileChip
                     key={i}
-                    src={attachmentSrc(dataDir, p.path)}
-                    alt="Attached picture"
-                    onClick={() => openLibraryPath(p.path)}
-                    className="my-1 max-h-64 w-auto max-w-full cursor-pointer rounded-lg border border-border"
+                    path={p.path}
+                    onClick={(newTab) => openLibraryPath(p.path, newTab)}
                   />
                 );
-              }
-              return (
-                <FileChip
-                  key={i}
-                  path={p.path}
-                  onClick={(newTab) => openLibraryPath(p.path, newTab)}
-                />
-              );
-            })}
+              })}
+            </div>
+            {long && (
+              <button
+                type="button"
+                data-copy-skip
+                aria-expanded={open}
+                onClick={() => setOpen((o) => !o)}
+                className="mt-1.5 flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {open ? "Show less" : "Show more"}
+                <CaretDown size={11} className={cn("transition-transform", open && "rotate-180")} />
+              </button>
+            )}
           </div>
-          {long && (
-            <button
-              type="button"
-              data-copy-skip
-              aria-expanded={open}
-              onClick={() => setOpen((o) => !o)}
-              className="mt-1.5 flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {open ? "Show less" : "Show more"}
-              <CaretDown size={11} className={cn("transition-transform", open && "rotate-180")} />
-            </button>
-          )}
-        </div>
+        )}
       </div>
       <MessageActions when={pending ? "Queued" : when} at={pending ? null : at} side="right">
         <CopyAction text={text} />

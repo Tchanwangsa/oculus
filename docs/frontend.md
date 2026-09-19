@@ -549,12 +549,21 @@ tab is plainly *Chat*.
     picture — measured against `scrollWidth`/`scrollHeight` behind a
     `ResizeObserver`, since the column resizes under it.
 
-  **The opened diagram is `DiagramLightbox.tsx`**, and the thing to know about
-  it is that **panning is the container's own scroll and only the scale is a
-  transform**: the picture sits in an `overflow-scroll` box, as `PDFViewer`
+  **The viewer is `app/src/components/ui/Lightbox.tsx`**, shared: a caller
+  hands over its content and that content's natural size, and the fit, the
+  zoom, the pan and the toolbar are the same whatever it is.
+  `DiagramLightbox.tsx` is a thin wrapper that puts an SVG in and keeps the
+  two things true only of a diagram — the markup goes in as markup, and its
+  labels stay selectable through a pan — while `ImageLightbox` puts a picture
+  in and measures its own natural size, which is what the thread's attachment
+  cards and the composer's chips open
+  (`app/src/components/harness/Timeline.tsx`,
+  `app/src/components/harness/Composer.tsx`). The thing to know about the
+  viewer is that **panning is the container's own scroll and only the scale is
+  a transform**: the content sits in an `overflow-scroll` box, as `PDFViewer`
   lays its pages out, so two-finger panning, momentum, scrollbars and keyboard
   scrolling all arrive for free, and plain scrolling stays the pan; what a zoom
-  changes is a `scale()` on an SVG host of fixed size, inside a layout box
+  changes is a `scale()` on a host of fixed size, inside a layout box
   carrying `natural × zoom` so the scroll extent still tells the truth. That
   split is not the CSS-`zoom` mistake `AppLayout` made once — under CSS `zoom`
   WebKit reports pointer coordinates in visual pixels and element rects in

@@ -1562,8 +1562,26 @@ write into `agents/attachments/` and answer with `./attachments/<name>` —
 relative to `agents/`, because that is every thread's working directory
 (`app/src-tauri/src/harness/attach.rs`). The composer appends those paths to
 the message, fenced, so the bubble draws them and the agent opens them with the
-one matcher both already use. `HARNESS.template.md` says what such a path is
+one matcher both already use. The bubble **lifts them out of the prose and
+draws them above it, as cards of their own rather than inside it**
+(`liftPictures`, `app/src/components/harness/Timeline.tsx`) — the shape every
+chat UI has settled on. One draws at its own size; several become a
+three-across grid that wraps, letterboxed on the bubble's ground rather than
+cropped square, because what is attached here is a screenshot of a question and
+a crop of one is unreadable. Lifting them also closes up the blank line and the
+doubled space the paths leave behind, and keeps them clear of the fold, since a
+picture is the question's subject and never the part worth hiding. A question
+that is *only* pictures draws no bubble at all. `HARNESS.template.md` says what such a path is
 and to open it before answering.
+
+**Clicking one opens it in the app, not in Preview.** A card a few centimetres
+wide and a 56px chip in the composer are both identifiers rather than
+something you can read, so each opens the shared viewer
+(`ImageLightbox`, `app/src/components/ui/Lightbox.tsx`) — the diagram
+lightbox generalised, so a screenshot gets the same fit, zoom and pan a
+mermaid figure does. It replaced handing the path to `openLibraryPath`, which
+found no library row for an attachment and fell through to opening the file in
+the OS: a window over the top of the app for something the app can draw.
 
 **The reply draws pictures as well as the question does.** The shared renderer
 (`app/src/components/markdown/MdComponents.tsx`) resolves a markdown
