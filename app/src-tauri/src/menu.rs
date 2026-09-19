@@ -13,13 +13,17 @@
 //! a tab is (`app/src/components/tabs/TopTabBar.tsx`), the palette owns what
 //! search is (`app/src/components/palette/CommandPalette.tsx`).
 
-use tauri::menu::{AboutMetadata, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{
+    AboutMetadata, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
+};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const SEARCH: &str = "search";
 const NEW_TAB: &str = "new-tab";
 const SPLIT: &str = "split";
 const CLOSE_TAB: &str = "close-tab";
+const REOPEN_TAB: &str = "reopen-tab";
+const LAST_TAB: &str = "last-tab";
 const CLOSE_WINDOW: &str = "close-window";
 const FIND: &str = "find";
 const FIND_NEXT: &str = "find-next";
@@ -33,11 +37,24 @@ const BACK: &str = "back";
 const FORWARD: &str = "forward";
 const ADDRESS: &str = "address";
 
+/// ⌘1…⌘8 each get an item of their own; their ids are this plus the number.
+/// `strip_prefix` in `handle` is why nothing else may start with it.
+const TAB_SLOT: &str = "tab-slot-";
+/// How many tabs the keyboard reaches **by position**. Eight, because the
+/// ninth key is spent on the last tab instead (`LAST_TAB`) — which is where
+/// Chrome and Safari both stop counting, and for the same reason: past eight
+/// you no longer know a tab's number without looking at the strip.
+const TAB_SLOTS: usize = 8;
+
 /// Events the frontend listens for; the menu is their only source.
 pub const SEARCH_EVENT: &str = "menu-search";
 pub const NEW_TAB_EVENT: &str = "menu-new-tab";
 pub const SPLIT_EVENT: &str = "menu-split";
 pub const CLOSE_TAB_EVENT: &str = "menu-close-tab";
+pub const REOPEN_TAB_EVENT: &str = "menu-reopen-tab";
+pub const LAST_TAB_EVENT: &str = "menu-last-tab";
+/// Carries the **zero-based** index of the slot pressed.
+pub const SELECT_TAB_EVENT: &str = "menu-select-tab";
 pub const FIND_EVENT: &str = "menu-find";
 pub const FIND_NEXT_EVENT: &str = "menu-find-next";
 pub const FIND_PREV_EVENT: &str = "menu-find-prev";
@@ -78,6 +95,17 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 Some("Alt+CmdOrCtrl+T"),
             )?,
             &MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
+            // Beside Close Tab rather than up with New Tab: it undoes the
+            // item above it. Always enabled — whether there is anything to
+            // put back is the frontend's stack to know, and greying this out
+            // would mean Rust holding a copy of it.
+            &MenuItem::with_id(
+                app,
+                REOPEN_TAB,
+                "Reopen Closed Tab",
+                true,
+                Some("Shift+CmdOrCtrl+T"),
+            )?,
             // Where Chrome and Safari both keep ⌘L. It means nothing outside a
             // browser tab, and the frontend simply ignores it there rather
             // than the item being disabled — a menu item that greys out as you
@@ -175,19 +203,48 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         ],
     )?;
 
-    let window = Submenu::with_items(
-        app,
-        "Window",
-        true,
-        &[
-            &PredefinedMenuItem::minimize(app, None)?,
-            &PredefinedMenuItem::maximize(app, None)?,
-            #[cfg(target_os = "macos")]
-            &PredefinedMenuItem::separator(app)?,
-            #[cfg(target_os = "macos")]
-            &PredefinedMenuItem::fullscreen(app, None)?,
-        ],
-    )?;
+    // ⌘1…⌘5 bring the nth tab forward. In the Window submenu because that is
+    // the menu about what is in front, and listed rather than left as bare key
+    // equivalents because a browser tab's native WebView has the keys — the
+    // one place you most want a way back to the tab you came from.
+    //
+    // Numbered, not titled: the frontend owns what a tab is called, and a menu
+    // that named them would need every title pushed into Rust and kept in step
+    // with a strip that re-titles itself on a rename.
+    let slots = (1..=TAB_SLOTS)
+        .map(|n| {
+            MenuItem::with_id(
+                app,
+                format!("{TAB_SLOT}{n}"),
+                format!("Tab {n}"),
+                true,
+                Some(format!("CmdOrCtrl+{n}")),
+            )
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
+
+    // ⌘9 is the *last* tab, not the ninth. It is the one position that still
+    // means something once the strip has outrun the numbers — and the strip
+    // does, at a tab a lecture and a tab a PDF. Chrome and Safari both spend
+    // the key this way.
+    let last = MenuItem::with_id(app, LAST_TAB, "Last Tab", true, Some("CmdOrCtrl+9"))?;
+
+    let minimize = PredefinedMenuItem::minimize(app, None)?;
+    let maximize = PredefinedMenuItem::maximize(app, None)?;
+    let slots_separator = PredefinedMenuItem::separator(app)?;
+    #[cfg(target_os = "macos")]
+    let fullscreen_separator = PredefinedMenuItem::separator(app)?;
+    #[cfg(target_os = "macos")]
+    let fullscreen = PredefinedMenuItem::fullscreen(app, None)?;
+
+    let mut window_items: Vec<&dyn IsMenuItem<R>> = vec![&minimize, &maximize];
+    #[cfg(target_os = "macos")]
+    window_items.extend([&fullscreen_separator as &dyn IsMenuItem<R>, &fullscreen]);
+    window_items.push(&slots_separator);
+    window_items.extend(slots.iter().map(|i| i as &dyn IsMenuItem<R>));
+    window_items.push(&last);
+
+    let window = Submenu::with_items(app, "Window", true, &window_items)?;
 
     Menu::with_items(
         app,
@@ -231,6 +288,12 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
         CLOSE_TAB => {
             app.emit(CLOSE_TAB_EVENT, ()).ok();
         }
+        REOPEN_TAB => {
+            app.emit(REOPEN_TAB_EVENT, ()).ok();
+        }
+        LAST_TAB => {
+            app.emit(LAST_TAB_EVENT, ()).ok();
+        }
         FIND => {
             app.emit(FIND_EVENT, ()).ok();
         }
@@ -269,6 +332,17 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
                 window.close().ok();
             }
         }
-        _ => {}
+        // The eight numbered slots, which carry their position rather than
+        // having eight events of their own. Zero-based on the way out: the
+        // frontend indexes a list, it does not count on its fingers.
+        other => {
+            if let Some(n) = other
+                .strip_prefix(TAB_SLOT)
+                .and_then(|n| n.parse::<usize>().ok())
+                .filter(|n| *n >= 1)
+            {
+                app.emit(SELECT_TAB_EVENT, n - 1).ok();
+            }
+        }
     }
 }

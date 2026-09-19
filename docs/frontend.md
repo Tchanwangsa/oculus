@@ -10,7 +10,7 @@ this page is the structure.
 | --- | --- |
 | Router + event bridge | `app/src/App.tsx` |
 | Shell: sidebar + top tab strip | `app/src/layouts/AppLayout.tsx`, `app/src/components/sidebar/`, `app/src/components/tabs/TopTabBar.tsx` |
-| App menu (⌘K / ⌘T / ⌘W and friends) | `app/src-tauri/src/menu.rs` |
+| App menu (⌘K / ⌘T / ⌘W / ⌘1–⌘9 / ⇧⌘T and friends) | `app/src-tauri/src/menu.rs` |
 | Search: what it finds, what a row does | `app/src/lib/search.ts`, `app/src/hooks/useSearch.ts`, `app/src/components/search/SearchList.tsx` |
 | ⌘K palette (the dialog around that search) | `app/src/components/palette/CommandPalette.tsx`, `app/src/stores/paletteStore.ts` |
 | Per-subject layout (underline tabs) | `app/src/layouts/SubjectLayout.tsx` |
@@ -809,6 +809,24 @@ tab is plainly *Chat*.
   because `app/src-tauri/capabilities/default.json` grants
   `core:window:allow-start-dragging`; `core:default` does not include it, and
   without it the attribute silently does nothing.
+- **⌘1–⌘8 are positions in the strip, ⌘9 is the last tab, and ⇧⌘T undoes a
+  close.** All three are menu items for the reason every window shortcut here
+  is one — ⌘1 typed on a browser tab has to reach the app, and that is the tab
+  you most want to leave — and all three keep their meaning on the frontend
+  side. The eight numbered slots share one event carrying the index
+  (`menu-select-tab`) rather than eight of their own, and a slot the strip does
+  not have is a **no-op**: jumping to the nearest tab instead lands somewhere
+  you have to look at to identify. ⌘9 is `menu-last-tab` and not a ninth slot,
+  which is what Chrome and Safari do with it — it is the one number that keeps
+  its meaning once the strip is longer than the keyboard counts, and it is why
+  the numbered run stops at eight. `tabStore` keeps the reopen stack (`closed`, `reopenTab`), ten deep, stored
+  with the strip so a reload does not quietly shorten it, and a reopened tab
+  goes back at the index it had. Two things never join it: an empty `/new` tab,
+  which ⌘T already makes, and a **browser** tab under its route — a
+  `/browse/<id>` path names a native page Rust destroys on the way out, so that
+  one is remembered by **URL** and reopened through `browser.open`, which means
+  `TopTabBar` has to record it *before* asking Rust to close the page rather
+  than in `closeTab`, where the snapshot has already taken the URL away.
 - **⌥⌘T splits a tab**: a second pane beside the first, inside the one tab —
   somewhere to keep a lecture, a PDF or a web page next to what you are
   working on. The strip still shows one tab, titled by its main half, because
@@ -1307,12 +1325,14 @@ tab is plainly *Chat*.
   to stay lit unconditionally, because from outside a native page there was
   nothing to ask.
 - **Window shortcuts are menu items, not key handlers.** macOS hands the menu
-  bar every ⌘-key before a webview sees it, so ⌘T (new tab), ⌘W (close tab)
-  and ⌘K (the palette) live in `app/src-tauri/src/menu.rs` and reach the
-  frontend as `menu-new-tab` / `menu-close-tab` / `menu-search` events. That
-  routing is a feature: they work while a browser tab's native page holds
-  focus and the app's own webview is receiving no keys at all — which for the
-  palette is the point, since ⌘K is how you get back out of a browser tab. It is also why the menu is built by
+  bar every ⌘-key before a webview sees it, so ⌘T (new tab), ⌘W (close tab),
+  ⇧⌘T (reopen the last closed one), ⌘1–⌘8 (the nth tab), ⌘9 (the last one) and
+  ⌘K (the palette) live in `app/src-tauri/src/menu.rs` and reach the frontend
+  as `menu-new-tab` / `menu-close-tab` / `menu-reopen-tab` / `menu-select-tab`
+  / `menu-last-tab` / `menu-search` events. That routing is a feature: they work while a browser
+  tab's native page holds focus and the app's own webview is receiving no keys
+  at all — which for the palette is the point, since ⌘K is how you get back out
+  of a browser tab. It is also why the menu is built by
   hand — Tauri's default spends ⌘W on Close Window, which moves to ⇧⌘W here
   — and why the Edit submenu must stay: without it ⌘C/⌘V stop working in
   every text field. The browser's own shortcuts joined them for exactly this

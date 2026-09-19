@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { browser, browseId } from "@/lib/browser";
 import { ownsPlayback, stopLecturePlayback } from "@/lib/lecturePlayback";
 import { useSidePanelStore } from "@/stores/sidePanelStore";
 import { navigateInTab } from "@/lib/tabRouters";
@@ -23,6 +24,11 @@ import { navigateInTab } from "@/lib/tabRouters";
  * an unsplit tab is indistinguishable from what it was — and a split gets an
  * id of its own from the same counter, which is why `AppTab extends PaneState`
  * rather than holding a pane.
+ *
+ * Closing one is not quite final: the store keeps a short stack of what was
+ * closed (`closed`, `reopenTab`) so ⇧⌘T can put the last one back at the
+ * index it had. A browser tab is the exception to the shape of that — see
+ * `ClosedTab` — because its route names a page Rust has already destroyed.
  *
  * A browser tab is a tab whose path is `/browse/<id>`: it stands for a native
  * page WebView that Rust holds, and its path never changes — the page
@@ -82,6 +88,32 @@ const FIRST = "/chat";
  */
 const STORE_KEY = "oculus-tabs";
 
+/** How far back ⇧⌘T reaches. Deep enough to undo a tidy-up, shallow enough
+ *  that the far end is not a tab from another sitting. */
+const CLOSED_LIMIT = 10;
+
+/**
+ * A tab that was closed, kept so ⇧⌘T can put it back where it was.
+ *
+ * A browser tab is remembered by **URL**, not by route: its `/browse/<id>`
+ * path names a native page Rust destroyed on the way out, so restoring the
+ * path would restore a tab with nothing behind it — the same reason
+ * `recentKey` refuses those paths in `app/src/stores/recentTabsStore.ts`.
+ * Which half of the entry is filled says which kind it is.
+ */
+export interface ClosedTab {
+  /** Where it sat in the strip, so reopening puts it back rather than at the
+   *  end. Clamped on the way out — the strip has moved on since. */
+  index: number;
+  /** The route its main pane held, or null for a browser tab. */
+  path: string | null;
+  /** The page it was showing, for a browser tab. */
+  url: string | null;
+  /** The split half's route, restored with it. A split holding a browser page
+   *  is dropped — the tab comes back whole rather than with an empty half. */
+  split: string | null;
+}
+
 interface StoredPane {
   id: number;
   path: string;
@@ -95,6 +127,9 @@ interface StoredTab extends StoredPane {
 interface StoredStrip {
   tabs: StoredTab[];
   activeId: number;
+  /** The reopen stack, kept with the strip: a dev reload that dropped it
+   *  would make ⇧⌘T quietly reach one sitting less far than it says. */
+  closed?: ClosedTab[];
 }
 
 function pane(id: number, path: string): PaneState {
@@ -107,10 +142,27 @@ function validPane<T extends StoredPane>(p: T | null | undefined): p is T {
   return !!p && Number.isInteger(p.id) && typeof p.path === "string";
 }
 
-function restore(): { tabs: AppTab[]; activeId: number } {
+/** Entries written before there was a stack, or half-written, are dropped:
+ *  one of `path`/`url` has to be there or there is nothing to reopen. */
+function validClosed(e: Partial<ClosedTab> | null | undefined): boolean {
+  return (
+    !!e &&
+    Number.isInteger(e.index) &&
+    (typeof e.path === "string" || typeof e.url === "string")
+  );
+}
+
+function restore(): { tabs: AppTab[]; activeId: number; closed: ClosedTab[] } {
+  let closed: ClosedTab[] = [];
   try {
     const raw = localStorage.getItem(STORE_KEY);
     const saved = raw ? (JSON.parse(raw) as StoredStrip) : null;
+    closed = (saved?.closed ?? []).filter(validClosed).map((e) => ({
+      index: e.index,
+      path: typeof e.path === "string" ? e.path : null,
+      url: typeof e.url === "string" ? e.url : null,
+      split: typeof e.split === "string" ? e.split : null,
+    }));
     const tabs = (saved?.tabs ?? []).filter(validPane).map((t) => {
       const split = validPane(t.split) ? pane(t.split.id, t.split.path) : null;
       return {
@@ -124,12 +176,16 @@ function restore(): { tabs: AppTab[]; activeId: number } {
       const activeId = tabs.some((t) => t.id === saved?.activeId)
         ? saved!.activeId
         : tabs[0].id;
-      return { tabs, activeId };
+      return { tabs, activeId, closed };
     }
   } catch {
     /* corrupt or unavailable — a fresh strip is a fine fallback */
   }
-  return { tabs: [{ ...pane(1, FIRST), split: null, focus: "main" }], activeId: 1 };
+  return {
+    tabs: [{ ...pane(1, FIRST), split: null, focus: "main" }],
+    activeId: 1,
+    closed,
+  };
 }
 
 const initial = restore();
@@ -145,6 +201,8 @@ let nextId =
 interface TabState {
   tabs: AppTab[];
   activeId: number;
+  /** Closed tabs, newest last — the stack ⇧⌘T pops. */
+  closed: ClosedTab[];
   /** Opens a fresh tab at `path` and makes it active. This *is* navigation
    *  into a new context: the pane is created seeded at that path. */
   addTab: (path: string) => void;
@@ -158,6 +216,15 @@ interface TabState {
    *  forward is already sitting at its own path, so there is nothing for the
    *  caller to navigate to. */
   closeTab: (id: number) => void;
+  /** Pushes a closed tab onto the reopen stack. `closeTab` calls this for an
+   *  app tab; a **browser** tab is remembered by the strip instead, before
+   *  Rust is asked to destroy the page — by the time the snapshot comes back
+   *  and closes the pane, the URL worth keeping is already gone. */
+  remember: (entry: ClosedTab) => void;
+  /** ⇧⌘T: puts the most recently closed tab back where it was, in front. A
+   *  browser tab reopens by URL, which Rust answers with a page the strip
+   *  adopts on the next snapshot — so nothing is added here for that case. */
+  reopenTab: () => void;
   /** Splits `tabId` and seeds the new half at `path`, or — already split —
    *  just moves the focus there. */
   openSplit: (tabId: number, path?: string) => void;
@@ -184,6 +251,7 @@ export function focusedPane(tab: AppTab): PaneState {
 export const useTabStore = create<TabState>((set, get) => ({
   tabs: initial.tabs,
   activeId: initial.activeId,
+  closed: initial.closed,
 
   addTab: (path) => {
     const id = nextId++;
@@ -266,11 +334,52 @@ export const useTabStore = create<TabState>((set, get) => ({
       return { tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, focus: side } : t)) };
     }),
 
+  remember: (entry) =>
+    set((s) => ({ closed: [...s.closed, entry].slice(-CLOSED_LIMIT) })),
+
+  reopenTab: () => {
+    const { closed } = get();
+    const entry = closed[closed.length - 1];
+    if (!entry) return;
+    set({ closed: closed.slice(0, -1) });
+    // A page, not a route: Rust makes the WebView and `useBrowserTabs` gives
+    // it a tab in front on the snapshot that follows. It cannot be put back at
+    // its old index — the strip only hears about it once it exists.
+    if (entry.url != null) {
+      void browser.open(entry.url).catch(() => {});
+      return;
+    }
+    if (entry.path == null) return;
+    const id = nextId++;
+    const tab: AppTab = {
+      ...pane(id, entry.path),
+      split: entry.split != null ? pane(nextId++, entry.split) : null,
+      focus: "main",
+    };
+    set((s) => {
+      const tabs = s.tabs.slice();
+      tabs.splice(Math.min(Math.max(entry.index, 0), tabs.length), 0, tab);
+      return { tabs, activeId: id };
+    });
+  },
+
   closeTab: (id) => {
     const { tabs, activeId } = get();
     const idx = tabs.findIndex((t) => t.id === id);
     if (idx === -1) return;
     const tab = tabs[idx];
+    // Worth putting back? A browser tab was remembered by the strip on the way
+    // in — its path names a page that no longer exists — and an empty new-tab
+    // page is what ⌘T already makes, so neither joins the stack.
+    if (browseId(tab.path) == null && !(tab.path === HOME && !tab.split)) {
+      const split = tab.split;
+      get().remember({
+        index: idx,
+        path: tab.path,
+        url: null,
+        split: split && browseId(split.path) == null ? split.path : null,
+      });
+    }
     // A lecture keeps playing when you switch away from its tab, so closing
     // that tab has to be what stops it — nothing downstream can tell the two
     // apart once the pane is gone. Either half can be the one playing. The
@@ -345,6 +454,7 @@ useTabStore.subscribe((s) => {
         focus: t.focus,
       })),
       activeId: s.activeId,
+      closed: s.closed,
     };
     localStorage.setItem(STORE_KEY, JSON.stringify(strip));
   } catch {

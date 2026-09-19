@@ -62,7 +62,7 @@ export default function TopTabBar({
   sidebarCollapsed,
   onToggleSidebar,
 }: TopTabBarProps) {
-  const { tabs, activeId, addTab, setActive, closeTab, toggleSplit } =
+  const { tabs, activeId, addTab, setActive, closeTab, toggleSplit, reopenTab } =
     useTabStore();
   const { subjects } = useSubjects();
   const browserTabs = useBrowserStore((s) => s.tabs);
@@ -153,6 +153,18 @@ export default function TopTabBar({
   const close = (id: number) => {
     const bid = browseId(tabs.find((t) => t.id === id)?.path);
     if (bid != null) {
+      // Remember the page here rather than in `closeTab`: the route is about
+      // to name a WebView that no longer exists, and by the time the snapshot
+      // comes back and closes the pane, Rust has already dropped the tab whose
+      // URL is the only thing worth keeping.
+      const url = browserTabs.find((t) => t.id === bid)?.url;
+      if (url)
+        useTabStore.getState().remember({
+          index: tabs.findIndex((t) => t.id === id),
+          path: null,
+          url,
+          split: null,
+        });
       browser.close(bid).catch(() => {});
       return;
     }
@@ -164,6 +176,20 @@ export default function TopTabBar({
 
   const newTab = () => addTab(NEW_TAB_PATH);
   const split = () => toggleSplit(activeId);
+  // ⌘1…⌘8 are positions in the strip, and a position the strip does not have
+  // is nothing — not the nearest tab, which would land you somewhere you did
+  // not ask for and have to look at to find out where.
+  const selectTab = (index: number) => {
+    const tab = tabs[index];
+    if (tab) switchTo(tab.id);
+  };
+  // ⌘9 is the *last* tab rather than the ninth, which is what Chrome and
+  // Safari do with it: it is the one number that keeps its meaning once the
+  // strip is longer than the keyboard counts.
+  const selectLastTab = () => {
+    const tab = tabs[tabs.length - 1];
+    if (tab) switchTo(tab.id);
+  };
   const splitOpen = !!activeTab?.split;
 
   // ⌘T, ⌘W and ⌥⌘T arrive as menu events rather than key presses: macOS hands
@@ -174,17 +200,26 @@ export default function TopTabBar({
   // in one half is exactly when you reach for the other. The strip does the
   // work either way.
   // ⌘[ and ⌘] are here for the same reason and route through the same `go`
-  // the arrows do, so "back" means one thing however it was asked for.
+  // the arrows do, so "back" means one thing however it was asked for. So are
+  // ⌘1…⌘9 and ⇧⌘T, and for them the browser case is the point twice over: a
+  // page you are reading is exactly when you want the tab you came from back,
+  // and a page you just closed is exactly what ⇧⌘T is for.
   const menuActions = useRef({
     newTab,
     split,
+    reopenTab,
     closeActive: () => {},
+    selectTab: (_: number) => {},
+    selectLastTab: () => {},
     go: (_: 1 | -1) => {},
   });
   menuActions.current = {
     newTab,
     split,
     go,
+    reopenTab,
+    selectTab,
+    selectLastTab,
     closeActive: () => {
       const tab = tabs.find((t) => t.id === activeId);
       // The same rule the × follows: a sole app tab doesn't offer one,
@@ -198,6 +233,11 @@ export default function TopTabBar({
     const pending = [
       listen("menu-new-tab", () => menuActions.current.newTab()),
       listen("menu-close-tab", () => menuActions.current.closeActive()),
+      listen("menu-reopen-tab", () => menuActions.current.reopenTab()),
+      listen<number>("menu-select-tab", (e) =>
+        menuActions.current.selectTab(e.payload),
+      ),
+      listen("menu-last-tab", () => menuActions.current.selectLastTab()),
       listen("menu-split", () => menuActions.current.split()),
       listen("menu-back", () => menuActions.current.go(-1)),
       listen("menu-forward", () => menuActions.current.go(1)),
