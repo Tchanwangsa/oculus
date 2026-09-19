@@ -149,282 +149,119 @@ export function WeekView({
   }, [fromHour, weekKey, weekHasToday]);
 
   return (
-    // One horizontal scroller around all three stacked grids — the day
-    // headers, the deadline strip and the hour grid — because they share a
-    // column template and have to stay aligned as it moves. The vertical
-    // scroller stays inside, on the hours alone, so the headers hold still.
-    <div className="h-full overflow-x-auto">
-      <div
-        className="flex h-full flex-col"
-        style={{ minWidth: MIN_GRID_PX }}
-      >
-        {/* Day headers */}
-        <div
-          className="grid shrink-0 border-b border-border-subtle"
-          style={{ gridTemplateColumns: `${GUTTER} repeat(7, minmax(0, 1fr))` }}
-        >
-          <div className="flex items-end justify-center pb-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                const next = !fullDay;
-                setFullDay(next);
-                localStorage.setItem(FULL_DAY_KEY, next ? "1" : "0");
-              }}
-              title={
-                fullDay
-                  ? "Fit the grid to the hours in use"
-                  : "Show all 24 hours"
-              }
-              className="rounded px-1 py-0.5 text-[10px] font-medium text-muted-foreground/70 hover:bg-surface hover:text-foreground"
-            >
-              {fullDay ? "Fit" : "24h"}
-            </button>
-          </div>
-          {days.map((d) => {
-            const isToday = sameDay(d, today);
-            return (
-              <div key={d.toISOString()} className="px-2 py-1.5 text-center">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {d.toLocaleDateString("en-AU", { weekday: "short" })}
-                </div>
-                <div
-                  className={cn(
-                    "mt-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] tabular-nums",
-                    isToday
-                      ? "bg-primary font-semibold text-primary-foreground"
-                      : "text-foreground",
-                  )}
-                >
-                  {d.getDate()}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Deadlines strip */}
-        {hasDue && (
+    // One scroller for the whole week, in both axes. The day headers, the
+    // deadline strip and the hour grid share a column template and have to
+    // stay aligned as it moves sideways, so they are stacked inside a single
+    // scrollport and pinned with `sticky`: the headers to the top, the hour
+    // gutter to the left. It was two nested scrollers before — horizontal
+    // outside, vertical around the hours alone — and that nesting is exactly
+    // what a sticky gutter cannot survive. Sticky resolves against the
+    // *nearest* scrollport, and the inner one never scrolled horizontally, so
+    // `left: 0` pinned the hours to the content's own left edge and they slid
+    // away with the columns.
+    <div ref={scroller} className="h-full overflow-auto">
+      <div style={{ minWidth: MIN_GRID_PX }}>
+        {/* Headers and strip travel together, so the strip needs no top
+            offset of its own — and nothing has to measure a header whose
+            height moves with the font. */}
+        <div className="sticky top-0 z-40 bg-card">
+          {/* Day headers */}
           <div
-            className="grid shrink-0 border-b border-border-subtle bg-surface/40"
+            className="grid border-b border-border-subtle"
             style={{ gridTemplateColumns: `${GUTTER} repeat(7, minmax(0, 1fr))` }}
           >
-            <div className="flex items-center justify-end gap-1 px-2 py-1.5 text-right text-[10px] font-medium text-muted-foreground">
-              <EventMark kind={stripKind} color="currentColor" size={10} />
-              {STRIP_LABEL[stripKind]}
-            </div>
-            {days.map((d) => (
-              <div
-                key={d.toISOString()}
-                className="min-w-0 border-l border-border-subtle px-1 py-1 space-y-0.5"
+            <div className="sticky left-0 z-10 flex items-end justify-center bg-card pb-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !fullDay;
+                  setFullDay(next);
+                  localStorage.setItem(FULL_DAY_KEY, next ? "1" : "0");
+                }}
+                title={
+                  fullDay
+                    ? "Fit the grid to the hours in use"
+                    : "Show all 24 hours"
+                }
+                className="rounded px-1 py-0.5 text-[10px] font-medium text-muted-foreground/70 hover:bg-surface hover:text-foreground"
               >
-                {eventsOn(stripDue, d).map((e) => {
-                    const gone = isPast(e, today);
-                    const tone = gone
-                      ? "var(--color-chart-other)"
-                      : (colors.get(e.subjectId) ?? "");
-                    return (
-                      <EventPopover key={e.id} event={e} color={colors.get(e.subjectId) ?? ""}>
-                        <button
-                          type="button"
-                          className="flex w-full min-w-0 items-center gap-1 rounded-[4px] border-l-2 px-1.5 py-0.5 text-left transition-colors hover:brightness-95 dark:hover:brightness-125"
-                          style={{
-                            borderLeftColor: tone,
-                            backgroundColor: `color-mix(in srgb, ${tone} ${tintPct(
-                              e,
-                              gone,
-                              20,
-                            )}%, var(--color-card))`,
-                          }}
-                        >
-                          <EventMark kind={e.kind} color={tone} size={9} />
-                          {!e.allDay && (
-                            <span className="shrink-0 text-[9.5px] tabular-nums leading-4 text-muted-foreground">
-                              {fmtEventTime(e)}
-                            </span>
-                          )}
-                          <span
-                            className={cn(
-                              "truncate text-[10.5px] font-medium leading-4",
-                              gone ? "text-muted-foreground" : "text-foreground",
-                            )}
-                          >
-                            {e.title}
-                          </span>
-                        </button>
-                      </EventPopover>
-                    );
-                  })}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Hour grid */}
-        <div ref={scroller} className="flex-1 min-h-0 overflow-y-auto">
-          <div
-            className="relative grid"
-            style={{ gridTemplateColumns: `${GUTTER} repeat(7, minmax(0, 1fr))` }}
-          >
-            {/* Hour labels */}
-            <div>
-              {hours.map((h) => (
-                <div
-                  key={h}
-                  className="relative text-right pr-2"
-                  style={{ height: HOUR_PX }}
-                >
-                  <span className="absolute -top-1.5 right-2 text-[10px] tabular-nums text-muted-foreground">
-                    {h === 0 ? "" : `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? "am" : "pm"}`}
-                  </span>
-                </div>
-              ))}
+                {fullDay ? "Fit" : "24h"}
+              </button>
             </div>
-
-            {days.map((day) => {
-              const laid = packLanes(
-                eventsOn(timed, day).filter(
-                  (e) => minutesFromMidnight(e.start) >= fromHour * 60,
-                ),
-                classSpan,
-              );
+            {days.map((d) => {
+              const isToday = sameDay(d, today);
               return (
+                <div key={d.toISOString()} className="px-2 py-1.5 text-center">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {d.toLocaleDateString("en-AU", { weekday: "short" })}
+                  </div>
+                  <div
+                    className={cn(
+                      "mt-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] tabular-nums",
+                      isToday
+                        ? "bg-primary font-semibold text-primary-foreground"
+                        : "text-foreground",
+                    )}
+                  >
+                    {d.getDate()}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Deadlines strip */}
+          {hasDue && (
+            <div
+              className="grid border-b border-border-subtle bg-surface/40"
+              style={{ gridTemplateColumns: `${GUTTER} repeat(7, minmax(0, 1fr))` }}
+            >
+              {/* The row's own tint, flattened onto the card: the strip's
+                  pills pass underneath this cell, and a translucent fill
+                  would show them through it. */}
+              <div
+                className="sticky left-0 z-10 flex items-center justify-end gap-1 px-2 py-1.5 text-right text-[10px] font-medium text-muted-foreground"
+                style={{
+                  backgroundColor:
+                    "color-mix(in srgb, var(--color-surface) 40%, var(--color-card))",
+                }}
+              >
+                <EventMark kind={stripKind} color="currentColor" size={10} />
+                {STRIP_LABEL[stripKind]}
+              </div>
+              {days.map((d) => (
                 <div
-                  key={day.toISOString()}
-                  className="relative border-l border-border-subtle"
+                  key={d.toISOString()}
+                  className="min-w-0 border-l border-border-subtle px-1 py-1 space-y-0.5"
                 >
-                  {hours.map((h) => (
-                    <div
-                      key={h}
-                      className="border-b border-border-subtle/60"
-                      style={{ height: HOUR_PX }}
-                    />
-                  ))}
-
-                  {/* Elapsed time, washed grey. Drawn before the blocks so it
-                      sits under them — each block carries its own past styling. */}
-                  <PastWash
-                    day={day}
-                    now={today}
-                    fromHour={fromHour}
-                    gridHeight={gridHeight}
-                  />
-
-                  {sameDay(day, today) && (
-                    <NowLine fromHour={fromHour} toHour={toHour} />
-                  )}
-
-                  {laid.map(({ item: event, lane, of }) => {
-                    // Blocks are clamped into the grid the way the deadline
-                    // markers below are, and for the same reason: Canvas
-                    // publishes cutoff-shaped *classes* (an 11:59pm–11:59pm peer
-                    // review), and one drawn at its own minute with the minimum
-                    // block height hangs off the bottom edge of the card. A block
-                    // with real length is shortened to the last row instead of
-                    // moved, so 11pm–12:30am still starts at 11pm.
-                    const exact =
-                      ((minutesFromMidnight(event.start) - fromHour * 60) / 60) * HOUR_PX;
-                    const wanted = Math.max(
-                      BLOCK_MIN_PX,
-                      (durationMinutes(event) / 60) * HOUR_PX - 2,
-                    );
-                    const height = Math.max(
-                      BLOCK_MIN_PX,
-                      Math.min(wanted, gridHeight - exact),
-                    );
-                    const top = Math.max(0, Math.min(exact, gridHeight - height));
-                    const color = colors.get(event.subjectId) ?? "";
-                    // A finished class keeps its shape but loses its subject
-                    // colour, so the eye lands on what is still ahead.
-                    const gone = isPast(event, today);
-                    const tone = gone ? "var(--color-chart-other)" : color;
-                    return (
-                      <EventPopover key={event.id} event={event} color={color}>
-                        <button
-                          type="button"
-                          className="absolute overflow-hidden rounded-[4px] border-l-2 px-1.5 py-0.5 text-left transition-colors hover:brightness-95 dark:hover:brightness-125"
-                          style={{
-                            top,
-                            height,
-                            left: `calc(${(lane / of) * 100}% + 2px)`,
-                            width: `calc(${100 / of}% - 4px)`,
-                            borderLeftColor: tone,
-                            // 18% of the subject's hue: a readable tint in light
-                            // mode and a dark wash in dark mode, from one value.
-                            backgroundColor: `color-mix(in srgb, ${tone} ${gone ? 12 : 18}%, var(--color-card))`,
-                          }}
-                        >
-                          <span
-                            className={cn(
-                              "block truncate text-[10.5px] font-medium leading-4",
-                              gone ? "text-muted-foreground" : "text-foreground",
-                            )}
-                          >
-                            {event.title}
-                          </span>
-                          {height > 30 && (
-                            <span className="block truncate text-[10px] leading-3.5 text-muted-foreground">
-                              {fmtEventTime(event)}
-                              {event.location ? ` · ${shortLocation(event.location)}` : ""}
-                            </span>
-                          )}
-                        </button>
-                      </EventPopover>
-                    );
-                  })}
-
-                  {/* Deadlines and notes land on the grid at their own time, over
-                      the classes rather than beside them — a submission is an
-                      instant, not a block competing for the hour. */}
-                  {eventsOn(inWeek, day)
-                    .filter(placeable)
-                    .map((e) => {
+                  {eventsOn(stripDue, d).map((e) => {
                       const gone = isPast(e, today);
                       const tone = gone
                         ? "var(--color-chart-other)"
                         : (colors.get(e.subjectId) ?? "");
-                      // Centred on the exact minute, then pulled back inside
-                      // the grid. Deadlines cluster at the edges of the day —
-                      // 11:59pm is the common one — and a marker centred there
-                      // hangs half off the bottom. Nudging by at most half its
-                      // own height keeps it whole and still on the right hour,
-                      // where snapping to 11pm or to midnight would move it to a
-                      // time it is not due.
-                      const exact =
-                        ((minutesFromMidnight(e.start) - fromHour * 60) / 60) * HOUR_PX;
-                      const top = Math.min(
-                        Math.max(exact - MARKER_PX / 2, MARKER_INSET),
-                        Math.max(
-                          MARKER_INSET,
-                          gridHeight - MARKER_PX - MARKER_INSET,
-                        ),
-                      );
                       return (
-                        <EventPopover
-                          key={e.id}
-                          event={e}
-                          color={colors.get(e.subjectId) ?? ""}
-                        >
+                        <EventPopover key={e.id} event={e} color={colors.get(e.subjectId) ?? ""}>
                           <button
                             type="button"
-                            className="absolute z-20 flex min-w-0 items-center gap-1 overflow-hidden rounded-[3px] border-l-2 px-1 text-left shadow-xs transition-colors hover:brightness-95 dark:hover:brightness-125"
+                            className="flex w-full min-w-0 items-center gap-1 rounded-[4px] border-l-2 px-1.5 py-0.5 text-left transition-colors hover:brightness-95 dark:hover:brightness-125"
                             style={{
-                              top,
-                              height: MARKER_PX,
-                              left: 2,
-                              right: 2,
                               borderLeftColor: tone,
                               backgroundColor: `color-mix(in srgb, ${tone} ${tintPct(
                                 e,
                                 gone,
-                                38,
+                                20,
                               )}%, var(--color-card))`,
                             }}
                           >
                             <EventMark kind={e.kind} color={tone} size={9} />
+                            {!e.allDay && (
+                              <span className="shrink-0 text-[9.5px] tabular-nums leading-4 text-muted-foreground">
+                                {fmtEventTime(e)}
+                              </span>
+                            )}
                             <span
                               className={cn(
-                                "truncate text-[10px] font-medium leading-4",
+                                "truncate text-[10.5px] font-medium leading-4",
                                 gone ? "text-muted-foreground" : "text-foreground",
                               )}
                             >
@@ -435,9 +272,188 @@ export function WeekView({
                       );
                     })}
                 </div>
-              );
-            })}
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Hour grid */}
+        <div
+          className="relative grid"
+          style={{ gridTemplateColumns: `${GUTTER} repeat(7, minmax(0, 1fr))` }}
+        >
+          {/* Hour labels, above the markers' own z-20 so a block sliding
+              past is covered rather than drawn over the times. */}
+          <div className="sticky left-0 z-30 bg-card">
+            {hours.map((h) => (
+              <div
+                key={h}
+                className="relative text-right pr-2"
+                style={{ height: HOUR_PX }}
+              >
+                <span className="absolute -top-1.5 right-2 text-[10px] tabular-nums text-muted-foreground">
+                  {h === 0 ? "" : `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? "am" : "pm"}`}
+                </span>
+              </div>
+            ))}
           </div>
+
+              {days.map((day) => {
+                const laid = packLanes(
+                  eventsOn(timed, day).filter(
+                    (e) => minutesFromMidnight(e.start) >= fromHour * 60,
+                  ),
+                  classSpan,
+                );
+                return (
+                  <div
+                    key={day.toISOString()}
+                    className="relative border-l border-border-subtle"
+                  >
+                    {hours.map((h) => (
+                      <div
+                        key={h}
+                        className="border-b border-border-subtle/60"
+                        style={{ height: HOUR_PX }}
+                      />
+                    ))}
+
+                    {/* Elapsed time, washed grey. Drawn before the blocks so it
+                        sits under them — each block carries its own past styling. */}
+                    <PastWash
+                      day={day}
+                      now={today}
+                      fromHour={fromHour}
+                      gridHeight={gridHeight}
+                    />
+
+                    {sameDay(day, today) && (
+                      <NowLine fromHour={fromHour} toHour={toHour} />
+                    )}
+
+                    {laid.map(({ item: event, lane, of }) => {
+                      // Blocks are clamped into the grid the way the deadline
+                      // markers below are, and for the same reason: Canvas
+                      // publishes cutoff-shaped *classes* (an 11:59pm–11:59pm peer
+                      // review), and one drawn at its own minute with the minimum
+                      // block height hangs off the bottom edge of the card. A block
+                      // with real length is shortened to the last row instead of
+                      // moved, so 11pm–12:30am still starts at 11pm.
+                      const exact =
+                        ((minutesFromMidnight(event.start) - fromHour * 60) / 60) * HOUR_PX;
+                      const wanted = Math.max(
+                        BLOCK_MIN_PX,
+                        (durationMinutes(event) / 60) * HOUR_PX - 2,
+                      );
+                      const height = Math.max(
+                        BLOCK_MIN_PX,
+                        Math.min(wanted, gridHeight - exact),
+                      );
+                      const top = Math.max(0, Math.min(exact, gridHeight - height));
+                      const color = colors.get(event.subjectId) ?? "";
+                      // A finished class keeps its shape but loses its subject
+                      // colour, so the eye lands on what is still ahead.
+                      const gone = isPast(event, today);
+                      const tone = gone ? "var(--color-chart-other)" : color;
+                      return (
+                        <EventPopover key={event.id} event={event} color={color}>
+                          <button
+                            type="button"
+                            className="absolute overflow-hidden rounded-[4px] border-l-2 px-1.5 py-0.5 text-left transition-colors hover:brightness-95 dark:hover:brightness-125"
+                            style={{
+                              top,
+                              height,
+                              left: `calc(${(lane / of) * 100}% + 2px)`,
+                              width: `calc(${100 / of}% - 4px)`,
+                              borderLeftColor: tone,
+                              // 18% of the subject's hue: a readable tint in light
+                              // mode and a dark wash in dark mode, from one value.
+                              backgroundColor: `color-mix(in srgb, ${tone} ${gone ? 12 : 18}%, var(--color-card))`,
+                            }}
+                          >
+                            <span
+                              className={cn(
+                                "block truncate text-[10.5px] font-medium leading-4",
+                                gone ? "text-muted-foreground" : "text-foreground",
+                              )}
+                            >
+                              {event.title}
+                            </span>
+                            {height > 30 && (
+                              <span className="block truncate text-[10px] leading-3.5 text-muted-foreground">
+                                {fmtEventTime(event)}
+                                {event.location ? ` · ${shortLocation(event.location)}` : ""}
+                              </span>
+                            )}
+                          </button>
+                        </EventPopover>
+                      );
+                    })}
+
+                    {/* Deadlines and notes land on the grid at their own time, over
+                        the classes rather than beside them — a submission is an
+                        instant, not a block competing for the hour. */}
+                    {eventsOn(inWeek, day)
+                      .filter(placeable)
+                      .map((e) => {
+                        const gone = isPast(e, today);
+                        const tone = gone
+                          ? "var(--color-chart-other)"
+                          : (colors.get(e.subjectId) ?? "");
+                        // Centred on the exact minute, then pulled back inside
+                        // the grid. Deadlines cluster at the edges of the day —
+                        // 11:59pm is the common one — and a marker centred there
+                        // hangs half off the bottom. Nudging by at most half its
+                        // own height keeps it whole and still on the right hour,
+                        // where snapping to 11pm or to midnight would move it to a
+                        // time it is not due.
+                        const exact =
+                          ((minutesFromMidnight(e.start) - fromHour * 60) / 60) * HOUR_PX;
+                        const top = Math.min(
+                          Math.max(exact - MARKER_PX / 2, MARKER_INSET),
+                          Math.max(
+                            MARKER_INSET,
+                            gridHeight - MARKER_PX - MARKER_INSET,
+                          ),
+                        );
+                        return (
+                          <EventPopover
+                            key={e.id}
+                            event={e}
+                            color={colors.get(e.subjectId) ?? ""}
+                          >
+                            <button
+                              type="button"
+                              className="absolute z-20 flex min-w-0 items-center gap-1 overflow-hidden rounded-[3px] border-l-2 px-1 text-left shadow-xs transition-colors hover:brightness-95 dark:hover:brightness-125"
+                              style={{
+                                top,
+                                height: MARKER_PX,
+                                left: 2,
+                                right: 2,
+                                borderLeftColor: tone,
+                                backgroundColor: `color-mix(in srgb, ${tone} ${tintPct(
+                                  e,
+                                  gone,
+                                  38,
+                                )}%, var(--color-card))`,
+                              }}
+                            >
+                              <EventMark kind={e.kind} color={tone} size={9} />
+                              <span
+                                className={cn(
+                                  "truncate text-[10px] font-medium leading-4",
+                                  gone ? "text-muted-foreground" : "text-foreground",
+                                )}
+                              >
+                                {e.title}
+                              </span>
+                            </button>
+                          </EventPopover>
+                        );
+                      })}
+                  </div>
+                );
+              })}
         </div>
       </div>
     </div>

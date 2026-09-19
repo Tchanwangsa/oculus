@@ -229,10 +229,15 @@ is a way to leave the page unclickable.
   block was an ellipsis, and a block halved again by `packLanes` for an overlap
   was not even that. Below `MIN_GRID_PX` in
   `app/src/components/calendar/WeekView.tsx` the grid stops compressing and the
-  view scrolls horizontally instead. The scroller wraps **all three** stacked
-  grids — the day headers, the deadline strip and the hour grid — because they
-  share one column template and have to move together; the vertical scroller
-  stays inside it, on the hours alone, so the headers hold still.
+  view scrolls horizontally instead. **One scroller carries both axes**, with
+  the day headers and the deadline strip pinned to its top and the hour gutter
+  pinned to its left, so the times stay readable however far the week is pushed
+  sideways. The three stacked grids — headers, strip and hour grid — share one
+  column template and have to move together, which is why they sit in the same
+  scrollport rather than one inside another: a `sticky` gutter resolves against
+  the *nearest* scrollport, so with the old vertical scroller wrapped around
+  the hours alone, `left: 0` only ever pinned the hours to the content's own
+  left edge and they slid away with the columns.
 - **A month cell shows as many chips as it measures room for.** The count used
   to be the constant four, which is right only at one window height: with the
   side panel open, or simply a short window, the fourth chip was sliced in half
