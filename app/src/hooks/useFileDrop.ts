@@ -91,6 +91,15 @@ export function useFileDrop(
     const inside = (p: { x: number; y: number }) => {
       const el = ref.current;
       if (!el) return false;
+      // **A background tab's box is still at these coordinates.** Panes are
+      // hidden with `visibility`, never `display: none`, so that an unmounted
+      // scroll position and a torn-down webview are not the price of switching
+      // tabs (`app/src/components/tabs/TabPane.tsx`) — which leaves every
+      // hidden composer holding a real rect under the visible one. Without
+      // this, one drop lands in two boxes and the invisible one keeps the
+      // picture until something sends it. `visibility` inherits, so asking the
+      // element answers for the pane above it.
+      if (getComputedStyle(el).visibility === "hidden") return false;
       const r = el.getBoundingClientRect();
       const x = p.x * ratio.current;
       const y = p.y * ratio.current;

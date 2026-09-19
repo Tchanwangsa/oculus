@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { PaperPlaneTilt, Stop, X } from "@phosphor-icons/react";
+import { PaperPlaneTilt, Stop } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/MentionInput";
 import { MentionMenu } from "@/components/harness/MentionMenu";
@@ -16,16 +16,9 @@ import {
   type ThreadUsage,
 } from "@/lib/harness";
 import { useProviderModels } from "@/hooks/useProviderModels";
-import { useFileDrop } from "@/hooks/useFileDrop";
-import { ImageLightbox } from "@/components/ui/Lightbox";
-import {
-  imagePaths,
-  pendingFromFile,
-  pendingFromPath,
-  releaseAttachment,
-  writeAttachment,
-  type PendingAttachment,
-} from "@/lib/attachments";
+import { useAttachments } from "@/hooks/useAttachments";
+import { AttachmentStrip } from "@/components/harness/AttachmentStrip";
+import { withAttachments } from "@/lib/attachments";
 import { signInState, useSignInStatus } from "@/hooks/useSignInStatus";
 import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
 import { cn } from "@/lib/utils";
@@ -120,20 +113,6 @@ export function Composer({
   /** The message the box would send: chips already back in their path form.
    *  Every emptiness check below reads this, not the editor. */
   const [text, setText] = useState("");
-  /**
-   * Pictures pasted or dropped in, still only in memory.
-   *
-   * They are written to the library on send and not before (`writeAttachment`,
-   * `app/src/lib/attachments.ts`), so a screenshot pasted and then removed
-   * leaves nothing on disk. What goes out is their paths, appended to the
-   * message — the agent opens them itself, exactly as it opens a mention.
-   */
-  const [attached, setAttached] = useState<PendingAttachment[]>([]);
-  /** Why a picture could not be attached or written — a drop that was not an
-   *  image, or a refusal from Rust. Never a reason to lose the message. */
-  const [attachError, setAttachError] = useState<string | null>(null);
-  /** True while the pictures for a send are being written. */
-  const [writing, setWriting] = useState(false);
   const ref = useRef<MentionInputHandle>(null);
   /** The `@` menu, scoped to this thread's subject — `null` being the general
    *  thread, which is the whole library. It positions itself at the caret and
@@ -144,6 +123,16 @@ export function Composer({
    *  editor's text. It is no longer the `@` menu's anchor — that is the caret
    *  now — so it is this file's own ref. */
   const wrapRef = useRef<HTMLDivElement>(null);
+  /**
+   * Pictures pasted or dropped in, still only in memory.
+   *
+   * They are written to the library on send and not before, so a screenshot
+   * pasted and then removed leaves nothing on disk; what goes out is their
+   * paths, appended to the message — the agent opens them itself, exactly as
+   * it opens a mention. The whole gesture is `useAttachments`, shared with the
+   * lecture dock's box so a drop means the same thing in both.
+   */
+  const att = useAttachments(wrapRef);
 
   // What stop gave back. It is put *before* anything already typed, because
   // it was typed first, and the box is focused with the caret at the end of
@@ -194,54 +183,7 @@ export function Composer({
   }, [model, active, onModel, onReasoning]);
 
   /** Whether there is a message at all: words, pictures, or both. */
-  const ready = text.trim().length > 0 || attached.length > 0;
-
-  /** Pictures from a paste, which arrive as `File`s the clipboard owns. */
-  function attach(files: File[]) {
-    if (!files.length) return;
-    setAttachError(null);
-    setAttached((a) => [...a, ...files.map(pendingFromFile)]);
-  }
-
-  /**
-   * …and from a drop, which arrives as paths (`useFileDrop`).
-   *
-   * A drop of something that is not an image says so rather than being
-   * ignored: a dropped PDF is a reasonable thing to try, and silence would
-   * read as a broken drop target. The course files it *would* mean are already
-   * reachable through `@`.
-   */
-  function attachPaths(paths: string[]) {
-    const pictures = imagePaths(paths);
-    if (!pictures.length) {
-      if (paths.length) setAttachError("Only images can be attached — use @ for a course file.");
-      return;
-    }
-    setAttachError(null);
-    setAttached((a) => [...a, ...pictures.map(pendingFromPath)]);
-  }
-
-  function detach(id: string) {
-    setAttached((a) => {
-      const gone = a.find((x) => x.id === id);
-      if (gone) releaseAttachment(gone);
-      return a.filter((x) => x.id !== id);
-    });
-  }
-
-  const dropping = useFileDrop(wrapRef, attachPaths);
-  /** The attached picture being looked at, as the src the chip already drew.
-   *  A chip is 56px of a screenshot, which is enough to tell two apart and
-   *  not enough to check one — so it opens the same viewer the thread's cards
-   *  do (`ImageLightbox`). */
-  const [shown, setShown] = useState<string | null>(null);
-
-  // Blob URLs outlive the component unless they are let go of. The list is
-  // read through a ref so the cleanup runs once, on unmount, rather than on
-  // every change to it.
-  const attachedRef = useRef(attached);
-  attachedRef.current = attached;
-  useEffect(() => () => attachedRef.current.forEach(releaseAttachment), []);
+  const ready = text.trim().length > 0 || att.items.length > 0;
 
   /**
    * Send, or queue.
@@ -253,44 +195,20 @@ export function Composer({
    */
   const send = async () => {
     const t = text.trim();
-    const pictures = attached;
-    if ((!t && !pictures.length) || writing) return;
+    if ((!t && !att.items.length) || att.writing) return;
 
-    let paths: string[] = [];
-    if (pictures.length) {
-      setWriting(true);
-      try {
-        paths = await Promise.all(pictures.map(writeAttachment));
-      } catch (e) {
-        setAttachError(String(e));
-        return;
-      } finally {
-        setWriting(false);
-      }
-      pictures.forEach(releaseAttachment);
-      setAttached([]);
-    }
+    const paths = await att.flush();
+    if (!paths) return;
 
     ref.current?.clear();
     mentions.close();
-    setAttachError(null);
-    // The paths go on their own line under what was typed, fenced the way a
-    // mention is, so the bubble draws them and the agent reads them with the
-    // one matcher both already use (`splitLibraryPaths`).
-    const body = [t, paths.map((p) => `\`${p}\``).join(" ")].filter(Boolean).join("\n\n");
     // Whether this goes out now or waits behind the running turn is Rust's
     // call, not this box's: it owns the queue and the order.
-    onSend(body);
+    onSend(withAttachments(t, paths));
   };
 
   return (
     <div ref={wrapRef} className="flex flex-col gap-1.5">
-      <ImageLightbox
-        src={shown ?? ""}
-        alt={attached.find((a) => a.preview === shown)?.name}
-        open={shown !== null}
-        onOpenChange={(o) => !o && setShown(null)}
-      />
       {!subjectLocked && (
         <div className="flex items-center px-0.5">
           <SubjectSelect
@@ -307,8 +225,8 @@ export function Composer({
           because this is the box it belongs to. */}
       <MentionMenu {...mentions.menu} />
 
-      {attachError && (
-        <div className="px-0.5 text-[11px] text-destructive">{attachError}</div>
+      {att.error && (
+        <div className="px-0.5 text-[11px] text-destructive">{att.error}</div>
       )}
 
       {signedOut && (
@@ -344,45 +262,11 @@ export function Composer({
           // A drag over the box says so on the box itself, in the same
           // vocabulary focus uses — there is nowhere else for a drop target
           // to be announced without a panel this app does not have.
-          dropping && "border-brand ring-[3px] ring-brand/25",
+          att.dropping && "border-brand ring-[3px] ring-brand/25",
         )}
       >
         <div className="flex flex-col gap-2">
-          {attached.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
-              {attached.map((a) => (
-                <div key={a.id} className="group/att relative">
-                  <button
-                    type="button"
-                    onClick={() => setShown(a.preview)}
-                    aria-label={`Open ${a.name}`}
-                    title={a.name}
-                    className="block cursor-pointer overflow-hidden rounded-lg border border-border transition-colors hover:border-ring"
-                  >
-                    {/* `object-cover` here and `object-contain` in the thread,
-                        and that is not an inconsistency: a chip this small is
-                        an identifier, where a crop that fills the square tells
-                        two screenshots apart better than a letterboxed
-                        thumbnail two thirds of which is ground. The full
-                        picture is one click away. */}
-                    <img
-                      src={a.preview}
-                      alt={a.name}
-                      className="block h-14 w-14 object-cover"
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${a.name}`}
-                    onClick={() => detach(a.id)}
-                    className="absolute -right-1.5 -top-1.5 flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 transition-opacity group-hover/att:opacity-100 hover:text-foreground focus-visible:opacity-100"
-                  >
-                    <X size={9} weight="bold" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <AttachmentStrip items={att.items} onDetach={att.detach} />
           <MentionInput
             ref={ref}
             autoFocus={autoFocus}
@@ -390,7 +274,7 @@ export function Composer({
               setText(next);
               mentions.track(next, caret);
             }}
-            onFiles={attach}
+            onFiles={att.attach}
             onBlur={mentions.close}
             onKeyDown={(e) => {
               // The menu's keys first, and only its own: anything it claims
@@ -430,7 +314,7 @@ export function Composer({
           {(!running || ready) && (
             <Button
               size="icon-xs"
-              disabled={!ready || writing}
+              disabled={!ready || att.writing}
               onClick={() => void send()}
               className="shrink-0"
               aria-label={running ? "Queue" : "Send"}

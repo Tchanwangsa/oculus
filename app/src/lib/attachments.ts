@@ -117,3 +117,16 @@ export function attachmentSrc(dataDir: string, path: string): string {
   if (!dataDir) return "";
   return convertFileSrc(`${dataDir}/${path}`.replace(/\/{2,}/g, "/"));
 }
+
+/**
+ * The message a composer actually sends: what was typed, then the written
+ * pictures' paths on their own line under it.
+ *
+ * Fenced the way a mention is, so the bubble draws them and the agent reads
+ * them with the one matcher both already use (`splitLibraryPaths`). It lives
+ * here rather than in either composer because a picture has to mean the same
+ * thing in every box that takes one.
+ */
+export function withAttachments(text: string, paths: string[]): string {
+  return [text, paths.map((p) => `\`${p}\``).join(" ")].filter(Boolean).join("\n\n");
+}

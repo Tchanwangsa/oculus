@@ -38,7 +38,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | Page, thread list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` |
 | The `@` menu's candidate files | `searchMentionFiles` in `app/src/lib/db.ts` |
 | The `@` token, the menu and its keys, shared with a task body | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionMenu.tsx` |
-| Pictures pasted or dropped into the composer | `app/src-tauri/src/harness/attach.rs`, `app/src/lib/attachments.ts`, `app/src/hooks/useFileDrop.ts` |
+| Pictures pasted or dropped into any composer | `app/src-tauri/src/harness/attach.rs`, `app/src/lib/attachments.ts`, `app/src/hooks/useAttachments.ts`, `app/src/hooks/useFileDrop.ts`, `app/src/components/harness/AttachmentStrip.tsx` |
 | A selection copied out of a thread as markdown | `app/src/lib/selectionMarkdown.ts` |
 | Health and the per-job model rows in Settings → AI | `app/src/pages/settings/AiPage.tsx` |
 | opencode's providers and models: the Settings line, the manager, the generic sign-in form | `app/src/components/settings/OpencodeProvidersSection.tsx`, `app/src/components/settings/OpencodeCatalogDialog.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeAuth.ts` |
@@ -1575,13 +1575,25 @@ whole path was dropped rather than ported.
 ## A picture in a message
 
 A screenshot of a worked solution, a photo of handwriting, a diagram from
-somewhere else: **pasting or dropping an image into the composer attaches it**,
+somewhere else: **pasting or dropping an image into a composer attaches it**,
 and it reaches the agent the same way a mention does — as a path.
+
+**Every composer, on the same terms.** The page box and the lecture dock's box
+are deliberately separate components — they answer different questions, and one
+of them is 300px wide beside a playing video — but a screenshot dragged onto
+either is the same gesture asking for the same thing, so the whole of it is
+shared: `app/src/hooks/useAttachments.ts` holds the pending list, the paste, the
+drop, the write on send and the refusals, and
+`app/src/components/harness/AttachmentStrip.tsx` draws the chips. What a box
+passes in is only the wording of a refusal (the dock has no `@` menu to point
+at) and whether its chips are the compact size. A drop that worked in one box
+and did nothing in the other read as the app being broken rather than as two
+boxes with different jobs.
 
 A CLI agent has no channel for an image. It reads files, so an image has to
 *be* a file before it can be talked about, which makes this the same move the
-`@` menu already makes and the same one a dock message's frame grab makes
-(`lecture_grab_frame`, below). `harness_attach_image` takes the clipboard's
+`@` menu already makes and the same one a dock message's frame grabs make
+(`lecture_grab_frames`, below). `harness_attach_image` takes the clipboard's
 bytes as base64, `harness_attach_file` takes a dropped file's path, and both
 write into `agents/attachments/` and answer with `./attachments/<name>` —
 relative to `agents/`, because that is every thread's working directory
@@ -1676,6 +1688,16 @@ it. A window listener subscribes cleanly, reports success and is then never
 called once — which is the whole difficulty: nothing to see but a drag that
 does nothing, with paste still fine.
 
+**A hidden tab's composer is still at those coordinates.** Because the events
+carry no target, every mounted `useFileDrop` tests the same point against its
+own rect — and a pane that is not the active tab is hidden with `visibility`,
+never `display: none`, so that switching tabs does not cost a scroll position
+or a torn-down webview (`app/src/components/tabs/TabPane.tsx`). Its rect is
+therefore live and in the same place as the visible one's. Without a check, one
+drop lands in two boxes, and the invisible one keeps the picture until
+something sends it. The hook reads the element's computed `visibility`, which
+inherits, so asking the box answers for the pane above it.
+
 **A dropped path needs no scope entry; an attachment does.** The asset
 protocol refuses anything outside `assetProtocol.scope`
 (`app/src-tauri/tauri.conf.json`), and a picture in `agents/attachments/` is
@@ -1695,9 +1717,12 @@ file left in `agents/attachments/` if the picture is then deleted from the
 text, and that is the accepted trade against an image tag pointing at nothing.
 
 The lecture player's dock composer is a sibling rather than a variant of this
-one (`LectureChatComposer.tsx`) and takes no attachments: it is a plain
-textarea in a narrow panel, and the picture its messages carry is the frame
-grab below.
+one (`LectureChatComposer.tsx`) — a plain textarea in a narrow panel, with the
+moment chip the page box has no playhead to build — but it takes attachments on
+exactly the same terms, through the same hook and the same strip. Its chips are
+the compact size and its refusal names a typed path rather than `@`; everything
+else is shared. The frame grabs below are *other* pictures its messages can
+carry, not the only ones.
 
 ## Lecture scope, and the moment
 
