@@ -21,6 +21,12 @@
 //!   Bash while it does. That is what turns `echo x > ../courses/f` into
 //!   "operation not permitted" instead of a file, and what lets a piped
 //!   `oculus files | head` run without an approval it could never get.
+//!   That auto-allow is the analyser's judgement of each command's *shape*,
+//!   though, and it does not stretch to a plan: a multi-line `--brief`, a loop
+//!   over subjects or a compound line falls through to a prompt nobody can
+//!   answer, and the denial sticks for the rest of the session. So
+//!   `Bash(oculus:*)` is allowed by name as well — the one binary a thread is
+//!   meant to write the board through, cleared however the command is shaped.
 //!   The one exception is the database, which is writable *as three files*
 //!   (`oculus.db` and its WAL sidecars) because `oculus project` / `oculus
 //!   task` are how a plan becomes the board's rows, and SQLite answers a
@@ -363,6 +369,21 @@ fn settings_json(library: &std::path::Path, cwd: &std::path::Path) -> String {
     // board is the one thing in the library that no re-sync repairs.
     deny.push("Bash(sqlite3:*)".to_string());
 
+    // `autoAllowBashIfSandboxed` clears a Bash call only when the CLI's own
+    // analyser can statically vouch for the command, and a plan is the thing it
+    // cannot vouch for: a `--brief` with newlines in it, a loop over subjects, a
+    // compound line. Those fall through to an approval prompt that
+    // `--permission-prompts none` then denies — and the denial is *sticky*, so
+    // one long brief costs the thread every write it had left. Measured: of 39
+    // `oculus` calls in one thread 36 cleared the analyser, and the 3 that did
+    // not included the `project create` the whole turn was for. So the board's
+    // own door is allowed by name rather than by the shape of each command,
+    // which is what opencode's ruleset already does (`oculus`, `oculus *`) and
+    // what Codex gets for free from `approvalPolicy: never`. This is a prompt
+    // rule, not a sandbox one: the seatbelt below still bounds what the command
+    // may touch, and deny still beats allow, so `sqlite3` stays shut.
+    let allow = vec!["Bash(oculus:*)".to_string()];
+
     // The cwd — `agents/` — plus the database's three files. Nothing else in
     // the library is writable from a thread; see `paths::db_write_paths` for
     // why it is the files and not the folder they are in.
@@ -374,7 +395,7 @@ fn settings_json(library: &std::path::Path, cwd: &std::path::Path) -> String {
         )
         .collect();
     serde_json::json!({
-        "permissions": { "deny": deny },
+        "permissions": { "allow": allow, "deny": deny },
         "sandbox": {
             "enabled": true,
             "failIfUnavailable": false,
@@ -859,6 +880,23 @@ mod tests {
         ] {
             assert!(deny.contains(&rule), "missing {rule} in {deny:?}");
         }
+
+        // The CLI is allowed by name, because the sandbox's own auto-allow only
+        // clears commands its analyser can vouch for and a breakdown is not one
+        // of those. `sqlite3` must not have followed it in: deny beats allow,
+        // but only while the two lists stay this far apart.
+        let allow: Vec<&str> = v
+            .pointer("/permissions/allow")
+            .and_then(|a| a.as_array())
+            .unwrap()
+            .iter()
+            .filter_map(|r| r.as_str())
+            .collect();
+        assert_eq!(
+            allow,
+            ["Bash(oculus:*)"],
+            "the board's door, and nothing else, is allowed by name"
+        );
     }
 
     /// Replays a recorded `claude -p` session and checks the folded shape.

@@ -203,6 +203,18 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   native user questions switched off, and the one server request that could
   still arrive is answered with a decline. This is the seam a later stage
   fills — the events and the row kinds are already there.
+- **A refusal there is sticky, which is why the CLI is allowed by name.**
+  Claude's sandbox auto-allows Bash only for commands its analyser can
+  statically vouch for, and a plan is what it cannot: a `--brief` carrying
+  newlines, a loop over subjects, a compound line. Measured on one thread, 36
+  of 39 `oculus` calls cleared it and the three that did not included the
+  `project create` the turn existed for — after which *every* remaining
+  approval in that session was auto-denied too. So `claude.rs` allows
+  `Bash(oculus:*)` outright. It is a prompt rule and not a sandbox one: the
+  seatbelt still bounds what the command may touch, deny still beats allow, and
+  `sqlite3` stays shut. The other two bridges already had this and needed no
+  change — opencode's ruleset allow-lists `oculus` / `oculus *` by name, and
+  Codex has no prompt to fall through to.
 - **Interrupt is a control message, not a kill.** Claude takes a
   `control_request` of subtype `interrupt` on stdin; Codex takes
   `turn/interrupt` with the active turn id. The process stays up either way,
