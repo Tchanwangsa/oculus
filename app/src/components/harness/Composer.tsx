@@ -17,6 +17,7 @@ import {
 } from "@/lib/harness";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { useFileDrop } from "@/hooks/useFileDrop";
+import { ImageLightbox } from "@/components/ui/Lightbox";
 import {
   imagePaths,
   pendingFromFile,
@@ -229,6 +230,11 @@ export function Composer({
   }
 
   const dropping = useFileDrop(wrapRef, attachPaths);
+  /** The attached picture being looked at, as the src the chip already drew.
+   *  A chip is 56px of a screenshot, which is enough to tell two apart and
+   *  not enough to check one — so it opens the same viewer the thread's cards
+   *  do (`ImageLightbox`). */
+  const [shown, setShown] = useState<string | null>(null);
 
   // Blob URLs outlive the component unless they are let go of. The list is
   // read through a ref so the cleanup runs once, on unmount, rather than on
@@ -279,6 +285,12 @@ export function Composer({
 
   return (
     <div ref={wrapRef} className="flex flex-col gap-1.5">
+      <ImageLightbox
+        src={shown ?? ""}
+        alt={attached.find((a) => a.preview === shown)?.name}
+        open={shown !== null}
+        onOpenChange={(o) => !o && setShown(null)}
+      />
       {!subjectLocked && (
         <div className="flex items-center px-0.5">
           <SubjectSelect
@@ -340,12 +352,25 @@ export function Composer({
             <div className="flex flex-wrap items-center gap-2">
               {attached.map((a) => (
                 <div key={a.id} className="group/att relative">
-                  <img
-                    src={a.preview}
-                    alt={a.name}
+                  <button
+                    type="button"
+                    onClick={() => setShown(a.preview)}
+                    aria-label={`Open ${a.name}`}
                     title={a.name}
-                    className="h-14 w-14 rounded-lg border border-border object-cover"
-                  />
+                    className="block cursor-pointer overflow-hidden rounded-lg border border-border transition-colors hover:border-ring"
+                  >
+                    {/* `object-cover` here and `object-contain` in the thread,
+                        and that is not an inconsistency: a chip this small is
+                        an identifier, where a crop that fills the square tells
+                        two screenshots apart better than a letterboxed
+                        thumbnail two thirds of which is ground. The full
+                        picture is one click away. */}
+                    <img
+                      src={a.preview}
+                      alt={a.name}
+                      className="block h-14 w-14 object-cover"
+                    />
+                  </button>
                   <button
                     type="button"
                     aria-label={`Remove ${a.name}`}
