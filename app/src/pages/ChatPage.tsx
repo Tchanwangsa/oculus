@@ -365,7 +365,13 @@ export default function ChatPage() {
         ) : (
           <>
             <div className="relative min-h-0 flex-1">
-              <div ref={scroll.outer} className="h-full overflow-y-auto px-6 py-6">
+              {/* `overflow-x-hidden` is load-bearing, not tidying: `overflow-y: auto`
+                  computes the *x* axis to `auto` as well, so one row wider than
+                  the column — a long tool path, a table in a reply — would give the
+                  whole conversation a horizontal axis and let it slide sideways.
+                  The things that genuinely need to scroll across (code blocks,
+                  tables) carry their own scroller. */}
+              <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 py-6">
                 <div ref={scroll.inner} className="mx-auto w-full max-w-[760px]">
                   <Timeline
                     items={items}

@@ -109,7 +109,23 @@ export function RowShell({
           )}
         >
           <IconC size={14} className="shrink-0" />
-          <span className="shrink-0">{title}</span>
+          {/* **Which part of the row gives way is the row's own answer.** With
+              an `em` the title is a verb — "Read", "Ran", "Looked up" — and the
+              path or command beside it is both the long part and the part
+              worth clipping, so the verb holds its width and the `em`
+              truncates. With no `em` the title *is* the long part: a bundle's
+              whole summary ("Explored 1 file, 1 search, looked up the library
+              once, ran 1 command") or an error's first line. Left at
+              `shrink-0` that row cannot narrow at all, and in a 300px dock it
+              does not merely overflow its own line — the scroller it sits in
+              gains a horizontal axis and the entire conversation slides
+              sideways under it. Nothing is lost to the clip: the row opens. */}
+          <span
+            className={cn("min-w-0", em ? "shrink-0" : "truncate")}
+            title={em ? undefined : title}
+          >
+            {title}
+          </span>
           {em && !path && (
             <span className="min-w-0 truncate font-medium text-foreground/80" title={em}>
               {em}

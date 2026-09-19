@@ -359,7 +359,10 @@ export const LectureChatPanel = memo(function LectureChatPanel({
         </button>
       </div>
 
-      <div ref={scroll.outer} className="min-h-0 flex-1 overflow-y-auto px-2">
+      {/* `overflow-x-hidden`: `overflow-y: auto` computes the x axis to
+          `auto` too, and this column is 300px — one row that will not narrow
+          took the whole conversation sideways with it. See `RowShell`. */}
+      <div ref={scroll.outer} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2">
         <div ref={scroll.inner} className="min-w-0 py-1">
           {empty ? (
             // The provider mark and one line. No suggestion chips: the dock is

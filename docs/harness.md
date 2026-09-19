@@ -495,6 +495,26 @@ under it, and "Working…" when nothing is streaming. A tool row is
 command or the arguments, then the output — behind it; reasoning is a row
 titled "Thought" with the text behind it.
 
+**Which part of a row gives way is the row's own answer**, and it has to be,
+because the same timeline draws in a 760px column and in the lecture dock's
+300px one. A row with an `em` — a path, a command — holds its verb and
+truncates the `em`, which is both the long part and the part worth clipping. A
+row *without* one has the long text in the title: a bundle's whole summary, an
+error's first line. That title truncates instead (`RowShell` in
+`app/src/components/harness/WorkRow.tsx`), and nothing is lost to the clip,
+since every one of those rows opens.
+
+The cost of getting it wrong is not the row. `overflow-y: auto` computes the
+**x** axis to `auto` as well, so a row that cannot narrow does not simply
+overflow its own line — the scroller it sits in gains a horizontal axis and the
+entire conversation slides sideways under it, bubbles and replies included.
+Both of the timeline's scrollers are pinned to one axis with an explicit
+`overflow-x-hidden` for that reason (`app/src/pages/ChatPage.tsx`,
+`app/src/components/lectures/LectureChatPanel.tsx`); the things that genuinely
+need to scroll across — code blocks, tables — carry their own scroller and are
+unaffected. It is the same computed-axis trap the one-line composers already
+carry a comment about.
+
 **A library path opens the file, in a tool row or in the answer itself.** When that title is a library path —
 `courses/<subject>/…`, optionally with the `../` the agent carries because
 every thread runs from `agents/` — it is a link into the side panel rather
