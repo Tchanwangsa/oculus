@@ -214,6 +214,106 @@ function toChunks(text: string): Chunk[] {
   });
 }
 
+/**
+ * True when the caret is at the end of the box: nothing after it but the
+ * placeholder `<br>` WebKit keeps there so the last line can be stood on.
+ *
+ * It is worth asking separately because the end is the one place the caret
+ * cannot be *measured* — see `revealCaret` — and the one place the answer is
+ * free: the bottom of the scroll.
+ */
+function atEnd(el: HTMLElement, caret: Range): boolean {
+  const tail = document.createRange();
+  tail.selectNodeContents(el);
+  tail.setStart(caret.startContainer, caret.startOffset);
+  if (tail.toString().replace(ZWSP_RE, "").replace(/\n/g, "").trim()) return false;
+  const rest = tail.cloneContents();
+  if (rest.querySelector("[data-path]")) return false;
+  // One break is the placeholder; more than one is blank lines the caret is
+  // sitting above, and the bottom of the box is no longer where it is.
+  return rest.querySelectorAll("br").length + (tail.toString().match(/\n/g)?.length ?? 0) <= 1;
+}
+
+/**
+ * A node's edge line, as a rectangle: the line its start sits on, or the line
+ * its end sits on. A run of text that wraps has one rect per line, and only
+ * the last of them is the line a caret sitting behind it is on.
+ */
+function edgeRect(node: Node, side: "start" | "end"): DOMRect | null {
+  let rects: DOMRectList;
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    rects = (node as HTMLElement).getClientRects();
+  } else {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    rects = range.getClientRects();
+  }
+  const rect = side === "end" ? rects[rects.length - 1] : rects[0];
+  return rect && rect.height ? rect : null;
+}
+
+/**
+ * The caret's own line, in viewport coordinates.
+ *
+ * A collapsed range usually measures itself, but not always: WebKit hands back
+ * *no* rects at all for a caret sitting between nodes rather than inside text
+ * — which is where a line break leaves it. The nodes on either side of that
+ * gap are on the caret's line, so they are measured instead.
+ *
+ * What must never be measured is the box itself: its rect is the viewport the
+ * caret is compared *against*, so a caret "found" there always looks
+ * comfortably in view and nothing ever scrolls.
+ */
+function caretRect(caret: Range): DOMRect | null {
+  const own = caret.getClientRects()[0];
+  if (own?.height) return own;
+  const node = caret.startContainer;
+  if (node.nodeType !== Node.ELEMENT_NODE) return null;
+  const before = node.childNodes[caret.startOffset - 1];
+  const after = node.childNodes[caret.startOffset];
+  return (before && edgeRect(before, "end")) || (after && edgeRect(after, "start")) || null;
+}
+
+/**
+ * Scroll the box so the caret is inside it.
+ *
+ * A `<textarea>` did this for free; a contenteditable does it only for the
+ * edits the browser thinks it made. A break inserted by `execCommand` on a box
+ * that has reached its `max-h` leaves the new line under the bottom edge —
+ * typing carries on out of sight — and a caret placed by hand after a
+ * structural re-render (`commit`) moves no scroll at all, because setting a
+ * range is not an edit. Both end here.
+ *
+ * The end of the box is answered by `atEnd` rather than by measuring, because
+ * the thing that would be measured there is WebKit's trailing placeholder
+ * `<br>`, whose rect sits on the caret's line sometimes and on the line below
+ * it the rest of the time — a reveal built on it lands a line short on every
+ * other press. The bottom of the scroll is the same answer and is always
+ * right.
+ *
+ * `scrollIntoView` is not what does any of it: that walks *every* scrollable
+ * ancestor, so a break in the composer would drag the thread behind it too.
+ */
+function revealCaret(el: HTMLElement) {
+  // Only a box being typed in has a caret to follow. A box that is merely
+  // being written *to* — a `clear()` on a composer nobody is in — keeps the
+  // scroll it had rather than jumping somewhere nobody is looking.
+  if (!el.contains(document.activeElement)) return;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.focusNode || !el.contains(sel.focusNode)) return;
+  const caret = sel.getRangeAt(0).cloneRange();
+  caret.collapse(false);
+  if (atEnd(el, caret)) {
+    el.scrollTop = el.scrollHeight;
+    return;
+  }
+  const rect = caretRect(caret);
+  if (!rect) return;
+  const view = el.getBoundingClientRect();
+  if (rect.bottom > view.bottom) el.scrollTop += rect.bottom - view.bottom;
+  else if (rect.top < view.top) el.scrollTop -= view.top - rect.top;
+}
+
 /** The caret that is placed once the DOM catches up with a structural change. */
 type Landing = { chunk: number; offset: number; focus: boolean };
 
@@ -379,6 +479,7 @@ export function MentionInput({
     range.collapse(true);
     sel.removeAllRanges();
     sel.addRange(range);
+    revealCaret(el);
   }, [version]);
 
   useImperativeHandle(ref, () => ({
@@ -524,6 +625,9 @@ export function MentionInput({
       if (!document.execCommand("insertLineBreak")) {
         document.execCommand("insertText", false, "\n");
       }
+      // The line the break just made is below the fold on a box that has
+      // reached its `max-h`, and WebKit does not follow it down.
+      revealCaret(el);
       sync();
       return;
     }
@@ -532,6 +636,7 @@ export function MentionInput({
       if (!chip) return;
       e.preventDefault();
       removeChip(chip);
+      revealCaret(el);
       sync();
     }
   }
@@ -583,6 +688,7 @@ export function MentionInput({
           }
           const plain = e.clipboardData.getData("text/plain");
           if (plain) document.execCommand("insertText", false, plain);
+          if (box.current) revealCaret(box.current);
           sync();
         }}
       >

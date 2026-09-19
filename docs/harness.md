@@ -1509,7 +1509,17 @@ and are not: the guard in front of a leading chip exists because WebKit has
 nowhere to put a caret before a `contenteditable="false"` element that starts
 a block, and the explicit `select-text` exists because `index.css` turns
 selection off on `body` and hands it back per *tag* — a `div` is not on that
-list and a `textarea` was.
+list and a `textarea` was. A third: **the box scrolls itself.** A
+contenteditable follows its caret only for the edits the browser believes it
+made, so a Shift+Enter inserted through `execCommand` on a box that has
+reached its `max-h` — and every caret placed by hand after a structural
+re-render, since setting a range is not an edit — leaves the caret under the
+bottom edge with the typing going on out of sight. `revealCaret` measures the
+caret's line and scrolls *that box* (`scrollIntoView` would drag the thread
+behind it), and answers the end of the box by going to the bottom rather than
+by measuring: the only thing to measure there is WebKit's trailing placeholder
+`<br>`, whose rect sits on the caret's line about half the time and one line
+below it the rest, which lands the reveal a line short on alternate presses.
 
 **The menu hangs off the `@`, not off the box** — a completion popup where the
 token was typed rather than a panel as wide as the composer pinned under the
