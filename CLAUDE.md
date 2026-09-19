@@ -203,14 +203,19 @@ docked side panel for files and lectures, top tab strip).
 - **Buttons and chips are pills** (`rounded-full` in
   `app/src/components/ui/button.tsx`); rectangles are for segmented toolbars
   that override the radius at the call site.
-- **Two primitives are deliberately a notch below stock shadcn**, whose sizes
+- **Three primitives are deliberately a notch below stock shadcn**, whose sizes
   are drawn for a 16px-base web page while this app's body text is 14px and its
   furniture is h-6/h-8 throughout. `button.tsx` has `default` at `h-8`, not
   `h-9` — a 36px button was the tallest thing in most rows. `dialog.tsx` is
   `p-5`/`rounded-xl` on `border-border-subtle` with a 16px title and 13px
-  description, instead of `p-6`/`rounded-lg` at 18/14. Every dialog in the app
-  overrides only `max-w`, so the scale lives in the primitive; don't "restore"
-  either to what `shadcn add` generates.
+  description, instead of `p-6`/`rounded-lg` at 18/14. `tooltip.tsx` adds a
+  `max-w-64` and `break-words` that stock has no opinion about: a tooltip
+  stands in for a label that did not fit, and the labels this app hangs one off
+  — a tab carrying a Canvas page title, a file's full name — draw a single line
+  most of the window wide, which is harder to read than the truncation it was
+  explaining. Every dialog in the app overrides only `max-w` and no call site
+  sets a tooltip width, so the scale lives in the primitive; don't "restore"
+  any of them to what `shadcn add` generates.
 - **`text-base md:text-sm` on a field is a trap, and it is why `input.tsx` and
   `textarea.tsx` now carry one unconditional `text-[13px]`.** The pair is
   shadcn's iOS fix — mobile Safari zooms the page when a focused field is under
