@@ -161,6 +161,32 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   selection, `dragstart` never fired, and the card lifted only when the grab
   landed on dead space. Reach for HTML5 DnD only for something that must leave
   the window; otherwise extend that hook.
+- **A native file drop reports its position in *points*, and Tauri types it
+  `PhysicalPosition`.** wry reads macOS's `draggingLocation` and subtracts it
+  from the view's frame height without ever multiplying by the backing scale
+  factor, so the number that arrives is the window's own logical coordinates.
+  Doing what the type asks — dividing by `devicePixelRatio` — halves every
+  point on a retina screen and folds the whole window into its top-left
+  quarter: a drop on the composer at the bottom of the window reports as the
+  middle of the thread, hits nothing, and is swallowed with every handler
+  correctly attached and no error anywhere. `useFileDrop`
+  (`app/src/hooks/useFileDrop.ts`) *measures* the scale instead — the
+  viewport's width over the window's own logical width.
+
+- **A drop here is a *webview* event, and a window listener for it is never
+  called.** Tauri delivers a drop as a window event only when the runtime
+  built that webview as `WebviewKind::WindowContent`; otherwise it emits to
+  `EventTarget::Webview`, and `filter_target` has no arm matching a `Window`
+  listener against a `Webview` emit. This app is never `WindowContent`:
+  `app/src-tauri/Cargo.toml` turns on tauri's `unstable` feature because
+  `Window::add_child` needs it for the in-app browser
+  (`app/src-tauri/src/browser.rs`), and `tauri-runtime-wry` picks the main
+  window's own webview kind under exactly that cfg — `unstable` on means
+  `WindowChild`. So `getCurrentWebview()` is the one to listen on, whatever
+  the window holds; the number of webviews never enters into it. A window
+  listener subscribes without error and reports success, which is what makes
+  this cost a day: there is nothing to see but a drag that does nothing.
+
 - **In WebKit a `click` is raised from a `mousedown`/`mouseup` pair, so
   cancelling `pointerdown` kills the click.** The spec says cancelling the
   press suppresses the compatibility mouse events but leaves `click` alone;
