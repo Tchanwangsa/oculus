@@ -141,16 +141,25 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
 - **A drag needs `dataTransfer.setData()` or WebKit cancels it — which is why
   almost nothing here is on HTML5 drag-and-drop.** A `dragstart` handler that
   sets no data aborts the drag silently: no `dragover`, no `drop`, every
-  handler correctly attached and nothing moves. Two places still use it and
-  both must keep their payload: the view-tab reorder in
-  `app/src/components/ui/ViewTabs.tsx`, whose `text/plain` payload nothing ever
-  reads — it looks like dead code, and deleting it breaks the drag without
-  breaking a type or a test — and `app/src/components/harness/Timeline.tsx`,
-  which drags a selection out as markdown and so *replaces* what WebKit already
-  put on the transfer (a `preventDefault()` on **that** `dragstart` cancels the
-  drag outright).
+  handler correctly attached and nothing moves. **One place still uses it**,
+  and must keep its payload: `app/src/components/harness/Timeline.tsx`, which
+  drags a selection out as markdown and so *replaces* what WebKit already put
+  on the transfer (a `preventDefault()` on **that** `dragstart` cancels the
+  drag outright). The dock's view-tab reorder
+  (`app/src/components/ui/ViewTabs.tsx`) was the second and is now on pointer
+  events with the rest: the native drag *worked* there, but the strip stood
+  still under a translucent copy of the label WebKit drew for itself until the
+  drop, which is not the gesture the window's own tab strip a few pixels above
+  it uses.
   **Everything else drags on pointer events and never meets this**: the tab
-  strip's reorder (`app/src/components/tabs/TopTabBar.tsx`), the chat column's
+  strip's reorder (`app/src/components/tabs/TopTabBar.tsx`), the dock's view
+  tabs (`app/src/components/ui/ViewTabs.tsx` — the same gesture, sized off
+  measured rects because a label's width is its own, and swapping on a
+  **leading edge** rather than on the centre `TopTabBar` compares: the clamp
+  stops a grabbed tab with its edge on the strip's, so a centre can only pass
+  the end tab's midpoint when that tab is strictly wider, which makes the far
+  slot unreachable for anything else — `TopTabBar`'s uniform widths land exactly
+  on it, where `>` is false), the chat column's
   group reorder (`app/src/components/harness/ThreadList.tsx`), and the three
   card-and-row surfaces — `ProjectBoard.tsx`, `ProjectTable.tsx` and
   `TasksBoard.tsx` in `app/src/components/projects/` — which share the

@@ -1662,7 +1662,25 @@ tab is plainly *Chat*.
   front is a player preference (`dockTab`) like the side it is docked to. So is
   **what order they sit in** (`dockTabOrder`): the tabs are dragged with each
   other, which is why `ViewTabs` grew an opt-in `onReorder` rather than a
-  second strip component. `orderDockTabs` reads a stored order tolerantly — a
+  second strip component. The drag is `TopTabBar`'s — pointer capture, the
+  grabbed tab riding the hand while its neighbours slide out of its way, the
+  order written once on release — with one change it had to make: a swap is
+  decided on the grabbed tab's **leading edge** crossing a neighbour's
+  midpoint, not on its centre. The clamp holds the grabbed tab inside the
+  strip, so at full travel its centre only reaches `last.right - width / 2` —
+  past `last.mid` only when the end tab is strictly wider than the one in hand,
+  and exactly *on* it at equal widths, where `>` is false. Chat cleared
+  Chapters by 13px of a 69px range and nothing wider cleared it at all, which
+  read as the tab jamming against the end of the strip. An edge is past the
+  midpoint by half a tab whatever the widths, at either end. It is not HTML5
+  drag-and-drop, which it
+  replaced: the native version worked but sat still until the drop, under a
+  translucent copy of the label WebKit drew itself, so it read as a different
+  gesture from the window's tab strip a few pixels above it. Since the write
+  goes to a synchronous store rather than to SQLite, the new order is on screen
+  in the same commit the transforms come off in and there is no *settle* to
+  play (which is the one thing `useCardDrag` has that this does not).
+  `orderDockTabs` reads a stored order tolerantly — a
   tab it has never heard of is dropped and one that is missing is appended — so
   a fourth tab needs no migration (a stored `recap` or `read`, from the two
   shapes that came between, is dropped the same way), and `reorderDockTabs`
