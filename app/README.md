@@ -52,7 +52,6 @@ oculus run -s --no-parse        # skip the sidecar entirely
 
 oculus index                    # re-parse + re-embed PDFs already on record
 oculus index MULT20015
-oculus index --memory-cap 8192   # live whole-sidecar-tree cap, MB; minimum 5120
 
 oculus run -l MULT20015                 # sync the lecture list
 oculus run -l MULT20015 --transcripts   # + download VTTs
@@ -121,11 +120,10 @@ is not in the database yet when the command exits; `oculus index` picks it up
 without re-downloading anything. If the sidecar is not running, the scrape
 still completes and says so.
 
-`--memory-cap` requires the sidecar to be running and changes its current
-budget without restarting it. It is not persisted; Settings → Library owns
-the saved budget and backend choice. The default is 8 GB for the entire
-sidecar tree, not per worker. The 5 GB floor is allowed but does not guarantee
-that local quality parsing will fit. Cloud processing is off by default.
+Settings → Library owns the parser choice: MinerU's cloud service, or a
+MinerU server you install and run yourself, reached over loopback. Neither is
+this app's child process, so there is no memory budget to set from here — the
+`--memory-cap` flag went with the Python sidecar it bounded.
 
 Subject codes match on the prefix, so `MULT20015` finds
 `MULT20015_2026_SM2`. The CLI reads the same session cookie and writes the

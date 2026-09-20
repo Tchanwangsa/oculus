@@ -104,6 +104,24 @@ oculus task list                                  # every task, unfiled ones fir
 oculus task refile 12 -p 3                        # file it, subtasks and all
 ```
 
+**Run one command per call.** The shell these commands go to refuses a
+compound invocation, and a refusal is final — there is nobody to approve it and
+the turn carries on without the answer. So:
+
+- **No loops and no substitution.** `for f in …`, `while`, `$(…)` and backticks
+  are all refused. Five files means five calls, which is cheaper than one
+  refusal.
+- **No shell variables.** `$CODE`, `$f`, `${x}` — write the value out. The
+  subject code is eight characters; expanding it saves nothing and costs the
+  command.
+- **No newline inside an argument.** A long `--brief` or task title is one
+  line. If it genuinely needs paragraphs, write the file first and pass the
+  path.
+- Pipes and `&&` are fine, and so is `| head`. It is the loops, the variables
+  and the multi-line arguments that fail.
+- `oculus` is already on `PATH`. Call it by name, never by an absolute path,
+  and do not `cd` out of this folder to reach it.
+
 Planning is a write, so it has its own rules. A project's board names its own
 columns (`oculus project show <ID>` prints their ids), and a breakdown goes in
 as one `--batch` JSON array rather than one command per task —

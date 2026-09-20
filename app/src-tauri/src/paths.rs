@@ -288,6 +288,28 @@ pub fn is_upload_rel(rel: &str) -> bool {
     !rel.contains("..") && parts.len() > 3 && parts[0] == "courses" && parts[2] == UPLOADS_DIR
 }
 
+/// Every category `category_from_path` can return, in the order a reader
+/// meets them: the two whole-course documents, then the folders.
+///
+/// Held here rather than beside the callers so there is one list to keep in
+/// step with the match below — a CLI flag that validates against a copy of
+/// its own would go stale the first time a scraper grew a folder, and the
+/// test under it fails if the two drift.
+pub const CATEGORIES: &[&str] = &[
+    "home",
+    "syllabus",
+    "upload",
+    "page",
+    "assignment",
+    "quiz",
+    "announcement",
+    "ed",
+    "file",
+    "module",
+    "image",
+    "other",
+];
+
 pub fn category_from_path(path: &str) -> &'static str {
     match path {
         "home.md" => "home",
@@ -326,6 +348,37 @@ mod tests {
         assert_eq!(safe_rel_path("files/a.pdf").unwrap(), "files/a.pdf");
         assert_eq!(safe_rel_path("../../x").unwrap(), "x");
         assert!(safe_rel_path("///").is_none());
+    }
+
+    /// `CATEGORIES` is what a `--category` flag validates against, so a
+    /// category the scraper can write but the list has forgotten becomes a
+    /// well-formed query the CLI refuses. Walk one path per arm and insist
+    /// the answer is listed.
+    #[test]
+    fn every_category_the_scraper_writes_is_listed() {
+        let paths = [
+            "home.md",
+            "syllabus.md",
+            "uploads/notes.pdf",
+            "pages/week-01.md",
+            "assignments/a2.md",
+            "quizzes/mid.md",
+            "announcements/2026-07-14-welcome.md",
+            "ed/0001-teams.md",
+            "files/week-01.pdf",
+            "modules/01-intro.md",
+            "images/fig-3.png",
+            "something-nobody-planned-for",
+        ];
+        for p in paths {
+            let c = category_from_path(p);
+            assert!(CATEGORIES.contains(&c), "{p} -> {c:?} is not in CATEGORIES");
+        }
+        // And nothing in the list is unreachable: every entry was just hit.
+        let hit: Vec<&str> = paths.iter().map(|p| category_from_path(p)).collect();
+        for c in CATEGORIES {
+            assert!(hit.contains(c), "{c:?} is listed but no path produces it");
+        }
     }
 
     #[test]

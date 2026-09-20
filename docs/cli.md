@@ -147,7 +147,23 @@ the instructions gets read without opening the window.
   PDF page text is only in the `pages` table. A caller reaching for ripgrep
   over `courses/` silently misses every slide deck. `grep` scans in subject
   then path order and stops at its limit, so the two sources interleave
-  instead of the database half crowding out the disk half.
+  instead of the database half crowding out the disk half. That ordering is
+  also why it takes `-c`: a truncated result is biased rather than sampled,
+  and narrowing to a category cuts the haystack *before* the limit applies.
+- **`-c/--category` is one filter behind two commands.** `grep` and `files`
+  share `filter_categories`, so the flag spelled the same way on sibling
+  commands cannot disagree about what it accepts, and the help both print is
+  built from the list it validates against. That list is
+  `paths::CATEGORIES`, beside the `category_from_path` that produces the
+  values, with a test tying the two together — a validator holding its own
+  copy goes stale the first time a scraper grows a folder.
+  A word that is **not** a category is refused, naming the real ones, for the
+  same reason an unknown board column is: an empty result from a typo reads
+  exactly like an empty library. A real category the selected subjects happen
+  not to have is a well-formed question and returns no matches — which is why
+  validity is the canonical list and not the categories the matched rows
+  carry. Reading it off the rows conflates the two and refuses
+  `-s INFO30006 -c quiz` for a subject that simply has no quizzes.
 - `read` addresses PDFs by the **same page numbers** `search` reports and the
   app's viewer shows, because all three read `pages.markdown` keyed on
   `(file_id, page_no)`. For an Office document that means the derived sibling
@@ -237,11 +253,22 @@ see the bullet on scaffolding in [sync.md](./sync.md).
   TASTE.md        stub — standing preferences
   memories/       cross-subject; MEMORY.md index stubbed beside them
   memories/<code>/  one subject's, with its own MEMORY.md index
+  skills/<name>/SKILL.md    one procedure, generated
+  .claude/skills/<name> → ../../skills/<name>
+  .agents/skills/<name>  → ../../skills/<name>
 <data>/courses/<code>/
   AGENTS.md → ../../agents/AGENTS.md
   agents/INSTRUCTIONS.md    hand-written, for this subject alone
   agents/memories → ../../../agents/memories/<code>
 ```
+
+**The skills are one directory reached three ways**, because the three CLIs
+disagree about where a skill lives. Two of the three disagree the same way:
+Claude Code scans `<cwd>/.claude/skills` and Codex scans
+`<cwd>/.agents/skills`, both walking up from the working directory, so both
+get a relative link beside the one copy. opencode takes a `skills.paths` key
+in its config and is linked for not at all. Every path is inside the library —
+nothing here writes to a home directory. See [harness.md](./harness.md).
 
 **Both memory buckets live under `agents/`, and that is containment rather
 than filing.** `agents/` is the only folder an in-app chat thread can write to
@@ -258,7 +285,11 @@ Three different lifetimes, which is the whole design:
   exists and a test asserts the coverage. Nothing is hand-written, because an
   agent trusts a file over `--help` — a stale reference is worse than none.
   `AGENTS.md` is overwritten too: it is one universal file, which is what
-  removes any per-course copy to keep in sync.
+  removes any per-course copy to keep in sync. So are the `skills/`, for a
+  sharper version of the same reason: a skill is read as a procedure rather
+  than as background, so one naming a flag this binary no longer has is
+  followed instead of weighed. There is exactly one copy of each and every
+  run rewrites it.
 - **Stubbed once, then the user's.** `OCULUS.md`, `TASTE.md` and the
   `MEMORY.md` index in each memory folder are written only when absent. They are the one thing in `agents/` a human authors, and
   overwriting them would be the only unrecoverable thing this command could
@@ -267,33 +298,39 @@ Three different lifetimes, which is the whole design:
   universal.
 - **Linked, never clobbered.** The course-folder `AGENTS.md` is a *relative*
   symlink, so the library stays movable. A wrong target is relinked; a real
-  file is left alone with a warning, because it is somebody's work.
+  file is left alone with a warning, because it is somebody's work. The two
+  skill links follow the same rule — Claude's relative, Codex's absolute
+  because its home is a different tree — so a student's own `oculus-plan` in
+  `~/.codex/skills` survives a sync.
 
 Details worth not rediscovering:
 
 - Rendering is pinned to 88 columns with colour off, so the output depends on
   the binary and not the terminal that ran it. Wrapping needs clap's
   `wrap_help` feature, which is why it is enabled in `Cargo.toml`.
-- Global `--json` and `--memory-cap` are hidden below the root: clap would
-  otherwise repeat their full text under all sixteen subcommands, which was a
-  third of the file.
+- Global `--json` is hidden below the root: clap would otherwise repeat its
+  full text under all sixteen subcommands, which was a third of the file.
 - At ~12 KB `OCULUS-CLI.md` is a *pull* document. `AGENTS.md` says when to
   open it rather than pasting it into every context — the same reason
   `AGENTS.md` itself stays short.
 - `bun run cli:install` runs `oculus docs`, so the reference always describes
   the binary actually on `PATH`. `bun run cli` deletes the old binary first:
   cargo will otherwise report success while leaving a stale one in place,
-  which would document the wrong build.
+  which would document the wrong build. `bun run cli:dev` is the same build in
+  the debug profile — the one the dev app's agents actually run, see
+  [development.md](./development.md#the-dev-cli).
 - The same rendering also lands in the repo as
   [cli-reference.md](./cli-reference.md), written by
   `app/scripts/gen-cli-docs.mjs` from `oculus docs --stdout`. It runs from
   `beforeBuildCommand`, straight after `stage-cli` has built the release
   binary — the one moment in the toolchain where a current binary is
   guaranteed to exist, so a bundle cannot ship a CLI its reference does not
-  describe. It is deliberately *not* on `beforeDevCommand`: `tauri dev` never
-  builds the CLI, so hooking it there would add a release build to every dev
-  start. Run `bun run docs:cli` by hand after changing the CLI if you want the
-  repo copy current before a bundle.
+  describe. It also runs from the dev preflight
+  (`app/scripts/predev.mjs`), against the debug binary that preflight has just
+  built: that used to be impossible because `tauri dev` never built the CLI at
+  all, and it is one process launch now that it does. Either way the generator
+  rewrites the file only when the help actually changed, so a clean tree stays
+  clean and a changed CLI is dirty in the same commit as its reference.
 - Why the repo needs a copy at all: `OCULUS-CLI.md` only exists on a machine
   where the CLI has been installed. The repo copy is for a reader — or an
   agent working on Oculus rather than on a library — with no built binary.

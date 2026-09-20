@@ -26,6 +26,19 @@
 //! library bucket and leaves a symlink where they were, so an agent that
 //! remembers the old path still writes into the one store. Nothing here ever
 //! writes a memory.
+//!
+//! **Skills are the third thing written here, and the one directory all three
+//! CLIs are pointed at.** `agents/skills/<name>/SKILL.md` is a procedure an
+//! agent loads by name when a request matches it, rather than prose every
+//! prompt carries. Each CLI finds them a different way, and two of the three
+//! ways are the same shape: Claude Code scans `<cwd>/.claude/skills` and
+//! Codex scans `<cwd>/.agents/skills`, both walking up from the working
+//! directory, so each gets a relative link beside the one copy. opencode
+//! takes a `skills.paths` key in its config instead, which is a line in the
+//! generated `opencode.json` rather than a link. Nothing here writes outside
+//! the library. They describe this binary, so they are generated and
+//! overwritten like `AGENTS.md`: a skill that documents a flag the CLI no
+//! longer has is worse than no skill.
 
 use std::path::{Path, PathBuf};
 
@@ -40,8 +53,30 @@ const TASTE_DOC: &str = include_str!("../templates/TASTE.template.md");
 
 const MEMORY_INDEX_DOC: &str = include_str!("../templates/MEMORY.template.md");
 
+/// The procedures an agent loads by name, generated for the same reason
+/// `AGENTS.md` is. Kept deliberately short: every one of them is in the
+/// index each CLI builds at startup, and all three read that index into the
+/// first prompt of every thread — including the headless jobs, which run from
+/// the same folder. A skill nobody loads still costs every turn.
+const SKILLS: [(&str, &str); 3] = [
+    (
+        "oculus-lectures",
+        include_str!("../templates/skills/oculus-lectures/SKILL.md"),
+    ),
+    (
+        "oculus-library",
+        include_str!("../templates/skills/oculus-library/SKILL.md"),
+    ),
+    (
+        "oculus-plan",
+        include_str!("../templates/skills/oculus-plan/SKILL.md"),
+    ),
+];
+
 pub const AGENTS_DOC_NAME: &str = "AGENTS.md";
 pub const CLI_DOC_NAME: &str = "OCULUS-CLI.md";
+const SKILLS_DIR: &str = "skills";
+const SKILL_DOC_NAME: &str = "SKILL.md";
 const TASTE_DOC_NAME: &str = "TASTE.md";
 /// The index beside the memories, in both buckets: a table of contents an
 /// agent reads before opening the files it sits with.
@@ -54,6 +89,11 @@ const AGENTS_DOC_REL: &str = "../../agents/AGENTS.md";
 
 pub fn agents_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("agents")
+}
+
+/// The one copy of the skills. Everything else about them is a route to here.
+pub fn skills_dir(data_dir: &Path) -> PathBuf {
+    agents_dir(data_dir).join(SKILLS_DIR)
 }
 
 /// What [`ensure_library_docs`] did, so a caller can report it.
@@ -105,7 +145,67 @@ pub fn ensure_library_docs(data_dir: &Path) -> Result<LibraryDocs, String> {
         std::fs::write(&path, body).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         docs.created.push(name);
     }
+
+    // Generated too, and for a sharper version of the same reason: a skill is
+    // read as a procedure rather than as background, so one describing a flag
+    // this binary no longer has is followed anyway.
+    let skills = skills_dir(data_dir);
+    for (name, body) in SKILLS {
+        let dir = skills.join(name);
+        std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        let path = dir.join(SKILL_DOC_NAME);
+        std::fs::write(&path, body)
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        docs.generated.push(name);
+    }
+    link_agent_skills(data_dir)?;
     Ok(docs)
+}
+
+/// Both scanning CLIs get the same link, because they are the same problem:
+/// Claude Code walks up from the working directory looking for
+/// `.claude/skills`, Codex walks up looking for `.agents/skills`, and the
+/// working directory of every thread and every headless job is `agents/`. So
+/// each directory sits inside the folder it points into, and the links are
+/// relative for the same reason the course folders' `AGENTS.md` is: the
+/// library has to stay movable.
+///
+/// Codex also reads `$CODEX_HOME/skills`, and an earlier version of this put
+/// the links there. That was wrong twice over — it wrote outside the library,
+/// so two Oculus skills turned up in every Codex session on the machine, and
+/// it treated Codex as the one needing special handling when it had the
+/// project-level directory all along. Nothing here leaves `agents/` now.
+const SCANNED_SKILL_DIRS: [&str; 2] = [".claude", ".agents"];
+
+fn link_agent_skills(data_dir: &Path) -> Result<(), String> {
+    for scanned in SCANNED_SKILL_DIRS {
+        let into = agents_dir(data_dir).join(scanned).join(SKILLS_DIR);
+        std::fs::create_dir_all(&into)
+            .map_err(|e| format!("cannot create {}: {e}", into.display()))?;
+        for (name, body) in SKILLS {
+            // Up out of `<scanned>/skills`, back down into `skills/` beside it.
+            link_skill(&into.join(name), &format!("../../{SKILLS_DIR}/{name}"), name, body)?;
+        }
+    }
+    Ok(())
+}
+
+fn link_skill(link: &Path, target: &str, name: &str, body: &str) -> Result<Link, String> {
+    match std::fs::symlink_metadata(link) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            if std::fs::read_link(link).is_ok_and(|t| t == Path::new(target)) {
+                return Ok(Link::Current);
+            }
+            std::fs::remove_file(link).map_err(|e| format!("cannot relink {name}: {e}"))?;
+        }
+        Ok(_) => {
+            eprintln!("[oculus] {} is not ours — left alone", link.display());
+            return Ok(Link::Skipped);
+        }
+        Err(_) => {}
+    }
+    link_skill_dir(target, link, body).map_err(|e| format!("cannot link {name}: {e}"))?;
+    Ok(Link::Linked)
 }
 
 /// What linking one course folder did.
@@ -296,6 +396,20 @@ fn symlink_or_copy(_target: &str, link: &Path, body: &str) -> std::io::Result<()
     std::fs::write(link, body)
 }
 
+/// The same trade for a skill, which is a *directory* with one file in it
+/// rather than a file: where there are no symlinks the copy has to rebuild
+/// that shape, not write the body at the link's own path.
+#[cfg(unix)]
+fn link_skill_dir(target: &str, link: &Path, _body: &str) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(not(unix))]
+fn link_skill_dir(_target: &str, link: &Path, body: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(link)?;
+    std::fs::write(link.join(SKILL_DOC_NAME), body)
+}
+
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
@@ -425,10 +539,113 @@ mod tests {
         std::fs::write(agents_dir(&root).join("TASTE.md"), "my notes").unwrap();
         let second = ensure_library_docs(&root).unwrap();
         assert!(second.created.is_empty());
-        assert_eq!(second.generated, [AGENTS_DOC_NAME]);
+        assert_eq!(
+            second.generated,
+            [AGENTS_DOC_NAME, "oculus-lectures", "oculus-library", "oculus-plan"]
+        );
         assert_eq!(
             std::fs::read_to_string(agents_dir(&root).join("TASTE.md")).unwrap(),
             "my notes"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The skills are the other half of "generated, always overwritten", and
+    /// the half where it matters most: they are read as a procedure, so a
+    /// copy an agent edited to suit itself would be followed rather than
+    /// weighed. There is exactly one copy, and every run rewrites it.
+    #[test]
+    fn skills_are_rewritten_over_whatever_is_there() {
+        let root = scratch("skills");
+        ensure_library_docs(&root).unwrap();
+
+        let plan = skills_dir(&root).join("oculus-plan/SKILL.md");
+        assert!(plan.is_file());
+        assert!(std::fs::read_to_string(&plan).unwrap().contains("name: oculus-plan"));
+
+        std::fs::write(&plan, "do whatever you like").unwrap();
+        ensure_library_docs(&root).unwrap();
+        assert!(std::fs::read_to_string(&plan).unwrap().contains("name: oculus-plan"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Three CLIs, three discovery paths, one directory — and two of the
+    /// three paths are the same shape, so they are built the same way.
+    #[test]
+    fn all_three_clis_reach_the_one_skills_directory() {
+        let root = scratch("skill-links");
+        ensure_library_docs(&root).unwrap();
+
+        // Claude Code scans `<cwd>/.claude/skills` and Codex scans
+        // `<cwd>/.agents/skills`, both walking up from the working directory
+        // — and the cwd of a thread, and of a headless job, is `agents/`.
+        for scanned in SCANNED_SKILL_DIRS {
+            let link = agents_dir(&root).join(scanned).join("skills/oculus-lectures");
+            assert_eq!(
+                std::fs::read_link(&link).unwrap(),
+                PathBuf::from("../../skills/oculus-lectures"),
+                "{scanned}: relative, so the library stays movable"
+            );
+            assert_eq!(
+                std::fs::read_to_string(link.join(SKILL_DOC_NAME)).unwrap(),
+                SKILLS[0].1,
+                "{scanned}: and it resolves to the one copy"
+            );
+        }
+
+        // opencode takes a config key instead of a link; `opencode.rs` owns
+        // that, and points it at this same directory.
+        assert!(skills_dir(&root).join("oculus-lectures").join(SKILL_DOC_NAME).is_file());
+
+        // Idempotent, because a sync calls this on every run.
+        ensure_library_docs(&root).unwrap();
+        for scanned in SCANNED_SKILL_DIRS {
+            let link = agents_dir(&root).join(scanned).join("skills/oculus-lectures");
+            assert!(link.join(SKILL_DOC_NAME).is_file(), "{scanned}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Nothing this module writes leaves the library. An earlier version put
+    /// Codex's links in `$CODEX_HOME/skills`, which meant a Canvas sync
+    /// reached into a directory shared with every other project on the
+    /// machine — two Oculus skills in every Codex session, course library or
+    /// not. Codex has a project-level directory; it gets that instead.
+    #[test]
+    fn nothing_is_written_outside_the_library() {
+        let root = scratch("skill-contained");
+        let home = root.join("home");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+
+        ensure_library_docs(&root).unwrap();
+
+        assert!(
+            !home.join(".codex/skills").exists(),
+            "reached into {}",
+            home.join(".codex/skills").display()
+        );
+        assert!(agents_dir(&root).join(".agents/skills/oculus-plan").is_symlink());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The same rule the course folders' `AGENTS.md` follows: a link is this
+    /// module's and gets repointed, a real file is somebody's and does not.
+    /// A student who wrote their own `oculus-plan` keeps it.
+    #[test]
+    fn a_real_skill_on_the_link_path_is_left_alone() {
+        let root = scratch("skill-mine");
+        let into = agents_dir(&root).join(".agents/skills");
+        std::fs::create_dir_all(&into).unwrap();
+        std::fs::write(into.join("oculus-plan"), "mine").unwrap();
+        // And a stale link, which is ours and must be repointed.
+        std::os::unix::fs::symlink("/nowhere", into.join("oculus-lectures")).unwrap();
+
+        ensure_library_docs(&root).unwrap();
+
+        assert_eq!(std::fs::read_to_string(into.join("oculus-plan")).unwrap(), "mine");
+        assert_eq!(
+            std::fs::read_link(into.join("oculus-lectures")).unwrap(),
+            PathBuf::from("../../skills/oculus-lectures")
         );
         let _ = std::fs::remove_dir_all(&root);
     }

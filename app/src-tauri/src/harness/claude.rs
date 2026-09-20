@@ -32,14 +32,21 @@
 //!   task` are how a plan becomes the board's rows, and SQLite answers a
 //!   sandbox that will not let it touch `oculus.db-wal` with "attempt to
 //!   write a readonly database" — which is what every `oculus task add` from
-//!   a thread used to do. The `Edit` deny on `oculus.db*` stays, so the file
-//!   tools still cannot open it, and `sqlite3` is denied by name: the CLI is
-//!   the only door, because it is the only thing that knows what a valid row
-//!   is.
+//!   a thread used to do. An `Edit` deny on `oculus.db*` cannot be the thing
+//!   that keeps the file tools off it: the CLI merges `Edit(...)` deny rules
+//!   into the sandbox's own `denyWrite`, so that rule denied the database at
+//!   the OS level too and cancelled the three paths it had just been given —
+//!   deny beats allow, so the sandbox half of this fix could never land while
+//!   the deny stood. `sqlite3` is denied by name instead: the CLI is the only
+//!   door, because it is the only thing that knows what a valid row is.
 //! - Deny rules on `Edit` for every sibling of `agents/`, because `--add-dir`
 //!   would otherwise put the courses inside `acceptEdits`' reach. Deny beats
 //!   allow in the CLI's rule order, so the siblings are named rather than
-//!   the root denied and `agents/` re-allowed.
+//!   the root denied and `agents/` re-allowed. Three paths *inside*
+//!   `agents/` are denied too — `skills/` and the `.claude/skills` and
+//!   `.agents/skills` links the scanning CLIs find them through
+//!   (`crate::agents`) — since all are generated and a thread could otherwise
+//!   edit the procedures it runs under.
 //!
 //! Auto-memory is switched off in the same settings: the library has its own
 //! memory layer under `agents/`, and asked to write there the CLI reached for
@@ -64,6 +71,10 @@ pub struct ClaudeSpawn {
     pub cwd: PathBuf,
     /// The library root, opened for reads with `--add-dir`.
     pub library: PathBuf,
+    /// Where the `oculus` binary actually is, so the permission rule can name
+    /// the absolute path as well as the bare command. `None` only when
+    /// discovery found nothing, in which case the name is all there is.
+    pub oculus: Option<PathBuf>,
     /// Resume this session rather than starting one.
     pub resume: Option<String>,
     pub model: Option<String>,
@@ -126,7 +137,7 @@ impl ClaudeSession {
             cmd.args(["--append-system-prompt", &cfg.system_append]);
         }
         cmd.args(["--add-dir", &cfg.library.display().to_string()]);
-        cmd.args(["--settings", &settings_json(&cfg.library, &cfg.cwd)]);
+        cmd.args(["--settings", &settings_json(&cfg.library, &cfg.cwd, cfg.oculus.as_deref())]);
         cmd.current_dir(&cfg.cwd)
             .env_clear()
             .envs(cfg.env.iter().map(|(k, v)| (k, v)))
@@ -346,18 +357,42 @@ impl Drop for ClaudeSession {
 /// files are named by suffix rather than with a bare `*`: measured, `*.log`
 /// at the root leaves `agents/memories/x.log` alone, but a bare `*` denied
 /// every write under `agents/` too.
-fn settings_json(library: &std::path::Path, cwd: &std::path::Path) -> String {
+fn settings_json(
+    library: &std::path::Path,
+    cwd: &std::path::Path,
+    oculus: Option<&std::path::Path>,
+) -> String {
     let root = library.display().to_string();
     let abs = root.trim_start_matches('/');
     let mut deny: Vec<String> = [
         "courses/**",
         "lectures/**",
         "canvas-session/**",
-        "oculus.db*",
+        // `oculus.db*` is deliberately NOT denied here. The CLI merges
+        // `Edit(...)` deny rules into the sandbox's own `denyWrite` — "Merged
+        // with paths from Edit(...) deny permission rules", its settings
+        // schema — so denying the database to the file tools denied it at the
+        // OS level as well, cancelling the three `allowWrite` paths below and
+        // handing every `oculus task add` from a thread SQLite's "attempt to
+        // write a readonly database". The two halves of the fix were fighting
+        // each other. `Bash(sqlite3:*)` below is what still guards the row
+        // format: the CLI stays the only door.
         "*.cookie",
         "*.token",
         "*.json",
         "*.log",
+        // The paths inside the writable root that are not the agent's work
+        // but the app's: the generated skills, and both directories a
+        // scanning CLI discovers them through. `agents/` is the one place a
+        // thread may write, so without these the agent can rewrite the
+        // procedures it is about to follow — and the next `oculus docs` would
+        // silently put them back, which is a confusing way to lose an
+        // afternoon. `.agents/` is denied here as well as in Codex's own
+        // sandbox: a thread's rules are about what *this* thread may touch,
+        // not about which CLI is running it.
+        "agents/skills/**",
+        "agents/.claude/**",
+        "agents/.agents/**",
     ]
         .iter()
         .map(|p| format!("Edit(//{abs}/{p})"))
@@ -382,7 +417,17 @@ fn settings_json(library: &std::path::Path, cwd: &std::path::Path) -> String {
     // what Codex gets for free from `approvalPolicy: never`. This is a prompt
     // rule, not a sandbox one: the seatbelt below still bounds what the command
     // may touch, and deny still beats allow, so `sqlite3` stays shut.
-    let allow = vec!["Bash(oculus:*)".to_string()];
+    let mut allow = vec!["Bash(oculus:*)".to_string()];
+    // And by absolute path, when discovery knows it. The match is on the
+    // command *name*, so `/…/target/release/oculus project create` is not
+    // `oculus` and falls straight through this rule — into an approval prompt
+    // that `--permission-prompts none` denies without a word and that sticks
+    // for the rest of the session. A thread reaches for the full path more
+    // often than it looks: any note or transcript that once learned it while
+    // the bare name was broken keeps using it long after the name is fixed.
+    if let Some(cli) = oculus {
+        allow.push(format!("Bash({}:*)", cli.display()));
+    }
 
     // The cwd — `agents/` — plus the database's three files. Nothing else in
     // the library is writable from a thread; see `paths::db_write_paths` for
@@ -850,7 +895,7 @@ mod tests {
         let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
         let cwd = library.join("agents");
         let v: serde_json::Value =
-            serde_json::from_str(&settings_json(library, &cwd)).expect("valid settings JSON");
+            serde_json::from_str(&settings_json(library, &cwd, None)).expect("valid settings JSON");
 
         let write = v.pointer("/sandbox/filesystem/allowWrite").unwrap();
         assert_eq!(
@@ -875,11 +920,23 @@ mod tests {
             .collect();
         for rule in [
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/courses/**)",
-            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/oculus.db*)",
+            // Inside the writable root, and the reason they have to be named:
+            // everything else in `agents/` is the agent's to write.
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/agents/skills/**)",
+            "Edit(//Users/x/Library/Application Support/com.tchan.oculus/agents/.claude/**)",
             "Bash(sqlite3:*)",
         ] {
             assert!(deny.contains(&rule), "missing {rule} in {deny:?}");
         }
+
+        // And the database must NOT be denied, however tempting it looks
+        // beside the others: an `Edit(...)` deny is merged into the sandbox's
+        // `denyWrite`, so this one rule cancels the `allowWrite` paths above
+        // and every board write from a thread fails as readonly.
+        assert!(
+            !deny.iter().any(|r| r.contains("oculus.db")),
+            "oculus.db must stay out of deny — it cancels allowWrite: {deny:?}"
+        );
 
         // The CLI is allowed by name, because the sandbox's own auto-allow only
         // clears commands its analyser can vouch for and a breakdown is not one
@@ -897,6 +954,24 @@ mod tests {
             ["Bash(oculus:*)"],
             "the board's door, and nothing else, is allowed by name"
         );
+
+        // Given the binary's location, the same door is allowed by path too:
+        // a thread that calls the CLI by its full path matches no name rule
+        // and is denied silently.
+        let v2: serde_json::Value = serde_json::from_str(&settings_json(
+            library,
+            &cwd,
+            Some(Path::new("/opt/oculus/bin/oculus")),
+        ))
+        .expect("valid settings JSON");
+        let allow2: Vec<&str> = v2
+            .pointer("/permissions/allow")
+            .and_then(|a| a.as_array())
+            .unwrap()
+            .iter()
+            .filter_map(|r| r.as_str())
+            .collect();
+        assert_eq!(allow2, ["Bash(oculus:*)", "Bash(/opt/oculus/bin/oculus:*)"]);
     }
 
     /// Replays a recorded `claude -p` session and checks the folded shape.

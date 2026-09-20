@@ -27,7 +27,11 @@
       "{{LIBRARY}}/*.token": "deny",
       "{{LIBRARY}}/*.json": "deny",
       "{{LIBRARY}}/*.log": "deny",
-      "opencode.json": "deny"
+      "opencode.json": "deny",
+      "skills/**": "deny",
+      ".claude/skills/**": "deny",
+      ".agents/skills/**": "deny",
+      ".opencode/**": "deny"
     },
     "bash": {
       "*": "deny",
@@ -36,6 +40,9 @@
       "oculus": "allow",
       "oculus *": "allow"
     }
+  },
+  "skills": {
+    "paths": ["skills"]
   },
   "agent": {
     "oculus": {

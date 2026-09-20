@@ -3,8 +3,8 @@
 
 # The `oculus` CLI
 
-`--json` and `--memory-cap` are global: they work on every command below,
-and are listed once here rather than repeated in each section.
+`--json` is the one global flag: it works on every command below,
+and is listed once here rather than repeated in each section.
 
 ```
 Sync Canvas subjects and lectures into your local Oculus library
@@ -342,6 +342,10 @@ Options:
   -s, --subject <SUBJECT_CODE>
           Restrict to these subjects; prefix codes are fine. Repeatable
 
+  -c, --category <CATEGORY>
+          Only these categories (home, syllabus, upload, page, assignment, quiz,
+          announcement, ed, file, module, image, other). Repeatable
+
   -F, --fixed
           Treat the pattern as literal text, not a regular expression
 
@@ -409,8 +413,8 @@ Options:
           Only this extension (pdf, md, pptx, docx, png …)
 
   -c, --category <CATEGORY>
-          Only this Canvas category (file, page, announcement, ed, module, assignment,
-          quiz, syllabus, home, image)
+          Only these categories (home, syllabus, upload, page, assignment, quiz,
+          announcement, ed, file, module, image, other). Repeatable
 
   -m, --match <TEXT>
           Only paths containing this text (case-insensitive)

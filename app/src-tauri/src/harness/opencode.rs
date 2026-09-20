@@ -142,7 +142,17 @@
 //!   *relative* to it; one for a path outside has to be absolute. An
 //!   absolute `<agents>/opencode.json` silently matched nothing, while a
 //!   bare `opencode.json` refused it. That last rule is what stops the agent
-//!   rewriting the permissions it runs under.
+//!   rewriting the permissions it runs under, and `skills/**` and
+//!   `.opencode/**` are denied the same relative way and for the same
+//!   reason: the generated skills (`crate::agents`) and the directory
+//!   opencode would read a hand-made one from both sit inside the session
+//!   directory, which is the one place the agent may write.
+//!
+//! Skills are the one thing here that is config rather than a link. opencode
+//! scans `.opencode/skill/` in the project root, and also takes a top-level
+//! `skills.paths`, so the config names `skills` — *relative*, by the same
+//! rule as the denies above — and the generated directory is read where it
+//! already is instead of being copied or linked into a second place.
 //!
 //! The prompt is the other difference. There is no `--append-system-prompt`
 //! here: an agent's `prompt` **replaces** the whole system prompt (opencode
@@ -2838,9 +2848,9 @@ mod tests {
     /// things that were measured to matter: the siblings of `agents/` are
     /// denied individually rather than the root being denied; the bash map's
     /// last rule is an allow, or the tool disappears from the model's list
-    /// entirely; and the agent's own config is named *relatively*, because an
-    /// absolute pattern for a path inside the session directory matches
-    /// nothing.
+    /// entirely; and the paths inside the session directory — the agent's own
+    /// config, and the skills it runs under — are named *relatively*, because
+    /// an absolute pattern for one of those matches nothing.
     #[test]
     fn the_rendered_config_denies_the_right_things() {
         let rendered = render_config(
@@ -2856,7 +2866,13 @@ mod tests {
             let key = format!("/Users/x/Library/Application Support/oculus/{sib}");
             assert_eq!(edit[&key], "deny", "{sib}");
         }
-        assert_eq!(edit["opencode.json"], "deny", "relative, because it is inside the cwd");
+        for inside in ["opencode.json", "skills/**", ".opencode/**"] {
+            assert_eq!(edit[inside], "deny", "{inside} is relative, being inside the cwd");
+        }
+        // The generated skills are read where they are, rather than linked
+        // into a second place — and the path is relative for the same reason
+        // the denies above are.
+        assert_eq!(v["skills"]["paths"], json!(["skills"]));
 
         let bash: Vec<(&String, &Value)> = v["permission"]["bash"].as_object().unwrap().iter().collect();
         assert_eq!(bash.first().unwrap().1, "deny", "the default is no");

@@ -32,6 +32,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–26, 28 and 30 in `app/src-tauri/src/lib.rs` |
 | Instructions appended to the provider's prompt | `app/src-tauri/templates/HARNESS.template.md` |
 | The library's own `AGENTS.md`, which Codex reads on its own | `app/src-tauri/templates/AGENTS.template.md` |
+| The skills, and the three routes into them | `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Frontend types, reads, commands | `app/src/lib/harness.ts` |
 | Live state, event folding | `app/src/stores/harnessStore.ts` |
@@ -86,8 +87,9 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   own sandbox setting with the cwd as the only write root, `--add-dir` for
   reads across the library (without it even `ls ../courses` is refused), and
   `Edit` deny rules on every sibling of `agents/` so `--add-dir` does not
-  put the courses back inside `acceptEdits`. `oculus.db` is named in those
-  rules; `courses/` heals on the next sync, the database does not. The
+  put the courses back inside `acceptEdits`. `oculus.db` is deliberately *not*
+  named in Claude's rules — see the deny/allow conflict below; `courses/` heals
+  on the next sync, the database does not. The
   module docs in `claude.rs` say what each part buys and what broke without
   it. Bash writes are refused by both sandboxes at the OS level, with one
   named exception: the database's three files, below.
@@ -128,8 +130,16 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   and granting the folder instead would put the session cookie and the Ed
   token inside the agent's reach. opencode needed nothing, having no sandbox
   to open.
-  The CLI stays the only door: `oculus.db` is still `Edit`-denied for
-  Claude and opencode, and `sqlite3` is denied by name, because the binary is
+  The CLI stays the only door — but for Claude that door cannot be held shut
+  with an `Edit` deny. Claude Code **merges `Edit(...)` deny rules into its own
+  sandbox's `denyWrite`** ("Merged with paths from Edit(...) deny permission
+  rules", its settings schema), so naming `oculus.db*` there denied the file at
+  the OS level as well and cancelled the `allowWrite` grant above. Deny beats
+  allow, so the two halves of this fix spent a day cancelling each other while
+  every board write from a thread came back readonly with both halves looking
+  correct in the source. That deny is gone for Claude; opencode keeps its own,
+  having no sandbox for it to leak into. `sqlite3` stays denied by name for
+  both, because the binary is
   what knows that a column id must exist, that `done_at` follows the
   destination column's kind, and that a whole breakdown belongs in one
   transaction — none of which a `sqlite3` a model reached for would honour.
@@ -141,6 +151,34 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   the command text rather than `classify`'s `ToolKind`, since `is_oculus_cli`
   only word-matches the first few words and `cd … && oculus task add` reads as
   plain Bash.
+- **Skills are one directory, found three different ways.**
+  `agents/skills/<name>/SKILL.md` holds the procedures too long to keep in
+  `AGENTS.md` and too easy to get wrong to leave to the model — reading a
+  lecture, putting work on the board. They are generated and overwritten with
+  the rest of `agents/` ([cli.md](./cli.md)), because they describe the CLI.
+  None of the three CLIs can be told to look in the same place, but two of
+  them take the same shape: Claude Code scans `<cwd>/.claude/skills` and Codex
+  scans `<cwd>/.agents/skills`, both walking up from the working directory —
+  and the cwd of every thread and every headless job is `agents/` — so each
+  gets a *relative* link beside the one copy and the library stays movable.
+  opencode is the odd one: it takes a top-level `skills.paths`, so
+  `OPENCODE.template.json` names `skills` and nothing is linked for it at all.
+  **Nothing is written outside the library.** Codex also reads
+  `$CODEX_HOME/skills`, and an earlier version of this linked there; that
+  reached into a directory shared with every other project on the machine, so
+  two Oculus skills appeared in every Codex session whether or not it had
+  anything to do with coursework. The project-level directory was there the
+  whole time.
+  **The generated paths are denied**, in the two places that have rules —
+  `agents/skills/**`, `agents/.claude/**` and `agents/.agents/**` in Claude's
+  settings, `skills/**`, `.claude/skills/**` and `.agents/skills/**`
+  (relative, per the rule above) in opencode's — because `agents/` is the one
+  place a thread may write, and
+  without them the agent can rewrite the procedure it is halfway through
+  following. **And the set is kept small on purpose:** every CLI reads its
+  skill index into the first prompt of every turn, and the headless jobs
+  (`oculus lecture chapters`, `lecture reading`) run from this same cwd, so a
+  skill nobody loads is still paid for on every job.
 - **The prompt is appended, not replaced — except on opencode, where it is
   the whole prompt.** `HARNESS.template.md`, rendered with the real data-dir
   path and the course folders on disk, goes in as `--append-system-prompt`
@@ -168,7 +206,12 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   soften this. And the `oculus` binary's
   directory is put first on PATH — `AGENTS.md` tells the agent to run
   `oculus grep`, and advice that resolves to "command not found" is worse
-  than none. Claude's auto-memory is switched off in the same settings
+  than none. Being first on PATH is also why *which* `oculus` that is matters
+  so much: in dev it is the sibling of the running app, which nothing used to
+  rebuild, and an agent met the gap as `unrecognized subcommand` rather than as
+  a stale binary. `oculus_cli` takes the newest candidate and says so when it
+  is older than its own sources; the dev preflight keeps it from happening at
+  all (see [development.md](./development.md#the-dev-cli)). Claude's auto-memory is switched off in the same settings
   document: asked to write to `memories/`, it reached for
   `~/.claude/projects/…/memory/` instead, and the library has its own layer.
 - **Finding the binaries is the sidecar's problem again.** A Dock-launched
