@@ -90,6 +90,15 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   HTTP, is the same boundary as MinerU cloud with a different hostname. Its
   `uv tool install` line lives in `docs/parsing.md` as an instruction *to a
   user*, never as a build step here.
+- **The `oculus` CLI is built by the dev preflight, not by `tauri dev`.**
+  `tauri dev` issues a bare `cargo run`, which builds `app` and no other bin
+  target, so `target/debug/oculus` used to be whatever a stray `cargo test`
+  last left there — while being the sibling of the running app and therefore
+  the first `oculus` on a coding agent's PATH. `app/scripts/predev.mjs` builds
+  it at every dev start and `app/scripts/watch-cli.mjs` keeps it current
+  through the session; `bun run cli:dev` is the same build by hand. Both delete
+  the binary first, because cargo reports "Finished" while leaving a stale one
+  in place. See `docs/development.md`.
 - `libpdfium` and `ffmpeg` are fetched, not vendored — `bun run pdfium` and
   `bun run ffmpeg` into the gitignored `app/src-tauri/binaries/`. The pdfium
   release tag is pinned to the Chromium revision `pdfium-render` binds

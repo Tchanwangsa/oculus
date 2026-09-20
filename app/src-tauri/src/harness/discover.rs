@@ -197,14 +197,16 @@ pub fn forget() {
 }
 
 /// The `oculus` binary the child should find on its PATH. In a bundle it is
-/// a sibling of the app executable; in `tauri dev` it is whatever the last
-/// `bun run cli` built, or the `~/.local/bin` symlink `cli:install` leaves.
+/// a sibling of the app executable; in `tauri dev` it is the debug binary the
+/// preflight builds (`app/scripts/predev.mjs`), the release one `bun run cli`
+/// leaves, or the `~/.local/bin` symlink from `cli:install`.
 pub fn oculus_cli() -> Option<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             for c in [dir.join("oculus"), dir.join("../release/oculus")] {
                 if is_executable(&c) {
-                    return c.canonicalize().ok();
+                    found.push(c.canonicalize().unwrap_or(c));
                 }
             }
         }
@@ -212,10 +214,99 @@ pub fn oculus_cli() -> Option<PathBuf> {
     if let Some(h) = home() {
         let c = h.join(".local/bin/oculus");
         if is_executable(&c) {
-            return Some(c);
+            found.push(c.canonicalize().unwrap_or(c));
         }
     }
-    search_path_env("oculus")
+    if found.is_empty() {
+        return search_path_env("oculus");
+    }
+    // Newest wins, rather than first-found. This is the second half of a fix
+    // whose first half is `app/scripts/predev.mjs`: `bun run cli` builds the
+    // *release* binary, and until that preflight existed nothing built
+    // `target/debug/oculus` at all, so under `tauri dev` the sibling of the
+    // running app was whatever a stray `cargo test` last left there —
+    // measured, ten days old with no `project` subcommand. Its directory goes
+    // to the front of the thread's PATH (see `child_env`), so a bare
+    // `oculus project create` from an agent died on `unrecognized subcommand`
+    // while the real CLI sat one entry further along, and the agent's own
+    // notes learned to reach past the name to an absolute path that no
+    // permission rule matches. The preflight should keep all the candidates
+    // current now; ordering them is what makes that safe rather than
+    // load-bearing. A bundle has a single candidate, so this changes nothing
+    // there.
+    found.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+    let chosen = found.pop();
+    if let Some(bin) = &chosen {
+        warn_if_stale(bin);
+    }
+    chosen
+}
+
+/// The `src/` directory of the checkout that built a
+/// `<root>/target/{debug,release}/oculus`, or `None` for a CLI that came from
+/// anywhere else — a bundle's sidecar, `~/.local/bin`, the PATH. Only a
+/// checkout can be *out of date with its own sources*; an installed binary has
+/// no sources to be behind.
+fn dev_checkout_src(bin: &Path) -> Option<PathBuf> {
+    let profile = bin.parent()?;
+    match profile.file_name()?.to_str()? {
+        "debug" | "release" => {}
+        _ => return None,
+    }
+    let target = profile.parent()?;
+    if target.file_name()?.to_str()? != "target" {
+        return None;
+    }
+    let src = target.parent()?.join("src");
+    src.is_dir().then_some(src)
+}
+
+/// The newest mtime under `dir`, counting `.rs` files only — the set cargo
+/// would rebuild from.
+fn newest_rs_mtime(dir: &Path) -> Option<std::time::SystemTime> {
+    let mut newest: Option<std::time::SystemTime> = None;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            let Ok(meta) = e.metadata() else { continue };
+            if meta.is_dir() {
+                stack.push(p);
+            } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
+                if let Ok(t) = meta.modified() {
+                    if newest.is_none_or(|n| t > n) {
+                        newest = Some(t);
+                    }
+                }
+            }
+        }
+    }
+    newest
+}
+
+/// Say so, once, when the CLI a coding agent is about to be handed was built
+/// before the sources sitting next to it.
+///
+/// `scripts/predev.mjs` builds the CLI at the start of every dev session and
+/// `scripts/watch-cli.mjs` keeps it current through one, so this should never
+/// fire. It exists because the failure it names is invisible from the other
+/// end: a stale `oculus` runs, answers `--version`, and rejects a subcommand
+/// it has simply never heard of, which reads as the agent doing something
+/// wrong. A line in the dev terminal is the difference between that and an
+/// afternoon. Nothing outside a checkout can reach here, so a bundle is
+/// silent by construction.
+fn warn_if_stale(bin: &Path) {
+    static CHECKED: OnceLock<()> = OnceLock::new();
+    CHECKED.get_or_init(|| {
+        let Some(src) = dev_checkout_src(bin) else { return };
+        let Ok(built) = std::fs::metadata(bin).and_then(|m| m.modified()) else { return };
+        let Some(newest) = newest_rs_mtime(&src) else { return };
+        if newest > built {
+            eprintln!("[oculus] {} is older than {}", bin.display(), src.display());
+            eprintln!("[oculus] agents this session will run a stale CLI — `bun run cli:dev`");
+        }
+    });
 }
 
 /// What Settings shows: found where, which version, and if not, why.
@@ -353,4 +444,65 @@ pub fn child_env() -> Vec<(String, String)> {
         env.push(("PATH".into(), joined.to_string_lossy().into_owned()));
     }
     env
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("oculus-discover-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    /// The whole point of the guard is that it fires in a checkout and nowhere
+    /// else: an installed binary has no `src/` to be behind, so reporting it as
+    /// stale would be a warning nobody could act on.
+    #[test]
+    fn only_a_checkout_has_sources_to_be_behind() {
+        let root = scratch("shapes");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        for profile in ["debug", "release"] {
+            std::fs::create_dir_all(root.join("target").join(profile)).unwrap();
+            let bin = root.join("target").join(profile).join("oculus");
+            assert_eq!(dev_checkout_src(&bin), Some(root.join("src")));
+        }
+
+        // A bundle's sidecar, and a cargo layout with no sources beside it.
+        assert_eq!(
+            dev_checkout_src(Path::new("/Applications/Oculus.app/Contents/MacOS/oculus")),
+            None
+        );
+        let bare = scratch("bare");
+        std::fs::create_dir_all(bare.join("target/debug")).unwrap();
+        assert_eq!(dev_checkout_src(&bare.join("target/debug/oculus")), None);
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&bare).ok();
+    }
+
+    #[test]
+    fn a_touched_source_is_newer_than_the_binary() {
+        let root = scratch("mtime");
+        std::fs::create_dir_all(root.join("src/harness")).unwrap();
+        std::fs::create_dir_all(root.join("target/debug")).unwrap();
+        let bin = root.join("target/debug/oculus");
+        std::fs::write(&bin, b"binary").unwrap();
+        let built = std::fs::metadata(&bin).unwrap().modified().unwrap();
+
+        // Nested, so the walk has to recurse to find it, and written after the
+        // binary the way an edit lands after a build.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(root.join("src/harness/discover.rs"), b"fn main() {}").unwrap();
+        let newest = newest_rs_mtime(&root.join("src")).unwrap();
+        assert!(newest > built, "an edit after the build reads as newer");
+
+        // Non-Rust files are not what cargo rebuilds from.
+        std::fs::remove_file(root.join("src/harness/discover.rs")).unwrap();
+        std::fs::write(root.join("src/notes.md"), b"# not a rebuild").unwrap();
+        assert_eq!(newest_rs_mtime(&root.join("src")), None);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
 }

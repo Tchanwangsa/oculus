@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.tchan.oculus",
   "build": {
-    "beforeDevCommand": "bun run ffmpeg && bun run pdfium && bun run dev",
+    "beforeDevCommand": "OCULUS_CLI_WATCH=1 bun run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run ffmpeg && bun run pdfium && bun run stage-cli && bun run docs:cli && bun run build",
     "frontendDist": "../dist"
