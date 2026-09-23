@@ -1,12 +1,13 @@
 # The harness: CLI agents as chat
 
-Chat is a coding agent the student already has — Claude Code, Codex or
-opencode — run as a subprocess from the library, with its output folded into
-one timeline. Claude Code and Codex carry the student's own subscription,
-which is the whole reason for driving them rather than the model APIs;
-opencode is the odd one out and carries whatever provider key `opencode auth`
-holds, so it is the one agent here that does spend per token — it earns its
-place by reaching every provider at once rather than by being free. The shape
+Chat is a coding agent the student already has — Claude Code, Codex,
+opencode or Antigravity — run as a subprocess from the library, with its
+output folded into one timeline. Claude Code, Codex and Antigravity carry the
+student's own subscription, which is the whole reason for driving them rather
+than the model APIs; opencode is the odd one out and carries whatever provider
+key `opencode auth` holds, so it is the one agent here that does spend per
+token — it earns its place by reaching every provider at once rather than by
+being free. The shape
 is bb's (get-bb/bb) with its plugin system taken out: one bridge per provider,
 one normalized event stream, a timeline that only ever sees the stream.
 
@@ -24,6 +25,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | Claude Code bridge (`claude -p`, stream-json) | `app/src-tauri/src/harness/claude.rs` |
 | Codex bridge (`codex app-server`, JSON-RPC) | `app/src-tauri/src/harness/codex.rs` |
 | opencode bridge (`opencode serve`, HTTP + SSE) | `app/src-tauri/src/harness/opencode.rs` |
+| Antigravity bridge (`agy -p`, stream-json) | `app/src-tauri/src/harness/antigravity.rs` |
 | opencode's containment ruleset and system prompt | `app/src-tauri/templates/OPENCODE.template.json` |
 | Finding the binaries from a GUI app | `app/src-tauri/src/harness/discover.rs` |
 | Installing a missing one from Settings → AI | `app/src-tauri/src/harness/install.rs`, `app/src/components/settings/InstallAgentDialog.tsx` |
@@ -68,6 +70,68 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   calls carry a provider-neutral `ToolKind` plus the raw name; `classify` in
   `event.rs` is the one table both bridges share, and it knows an `oculus …`
   command from any other Bash.
+- **Antigravity is Claude's shape with a different vocabulary.** `agy` takes
+  `--input-format stream-json` on stdin and answers `--output-format
+  stream-json` on stdout, one long-lived process per thread, resumed by
+  `--conversation <id>` where Claude uses `--resume`. Its whole middle is one
+  event: a `step_update` carries the incremental `text_delta`, the tool call
+  and its output, and a per-step `usage`, with `state` moving `ACTIVE` →
+  `DONE` and `step_type` saying which kind of step it is — so one arm in
+  `antigravity.rs` handles what Claude spreads over a stream event, an
+  `assistant` line and a `user` line. A step's `step_index` is its id, which
+  is why a tool row is keyed `step-<n>`: `tool_info` carries no call id of its
+  own and a step is exactly one call.
+  **Three things it cannot do, and says so rather than pretending.** It has no
+  control channel, so an *interrupt* is a signal to the child and the turn is
+  closed by the bridge, not by anything the CLI says — the conversation
+  survives because the next message resumes it by id. A *rewind* is refused
+  outright: nothing in the protocol drops a message and everything after it,
+  and answering `Ok(())` to a caller that is about to delete rows on the
+  strength of it would leave the timeline shorter than the agent's context. And
+  it takes no *settings document*: Claude's containment is an inline
+  `--settings` JSON, `agy`'s rules live in the student's own
+  `~/.gemini/antigravity-cli/settings.json`, and this app does not write other
+  programs' global config — so containment is `--sandbox` (whose writable root
+  is the workspace, and the workspace is `agents/`) plus
+  `--dangerously-skip-permissions`, which is the headless counterpart of
+  Claude's `--permission-prompts none` and is there for the same reason: under
+  `-p` a prompt with no answerer hangs the turn for ever. The two resolve it in
+  opposite directions — Claude auto-denies and is handed an allow list, `agy`
+  cannot take an allow list and so must auto-allow, leaving the sandbox as the
+  thing that actually bounds it. **That is weaker containment than the other
+  three bridges have**, and it is recorded in the module rather than smoothed
+  over.
+  **Its sandbox refuses `oculus` by name.** Measured: a thread's first
+  `oculus list` comes back `operation not permitted`, and the agent recovers by
+  running the binary by absolute path — one wasted turn. Claude answers the
+  same problem with `Bash(oculus:*)` plus the absolute path in its allow list,
+  and there is no allow list to write here, so this is the practical cost of
+  having no settings document. Two smaller ones: a command that exits non-zero
+  is still a *successful tool call* (`tool_info.error` is the tool failing, not
+  the command's exit status), and the database gets no hole punched for it the
+  way Claude's `allowWrite` and Codex's `writable_files` punch one.
+  **Two things its published reference gets wrong**, both measured off `agy`
+  1.2.9 and both costing a turn to find. `-p` takes the prompt as its *value*
+  (`--print <prompt>`), not as Claude's bare flag, so `-p --input-format
+  stream-json` makes `--input-format` the prompt and exits 2 — stream-json mode
+  wants `--print=` with an empty *attached* value. And its tool parameters are
+  **PascalCase**: `run_command` takes `CommandLine`, `view_file` takes
+  `AbsolutePath`, where the other three CLIs use `command` / `file_path` /
+  `path`. `fixtures/harness/antigravity-ls.ndjson` is a real session and the
+  bridge's `folds_a_recorded_session` replays it, which is what makes those
+  two statements measured rather than read.
+  It also has no `--append-system-prompt`. The library-wide brief needs none —
+  `agy` reads `agents/AGENTS.md` for itself from the directory it is spawned
+  in, the same free ride Codex gets — and the per-thread half rides the first
+  user message, the way opencode's `brief` does.
+- **Antigravity's own sign-in is not a flow this app can drive.** There is no
+  login subcommand: `agy` reads the system keyring on every run and, finding
+  nothing, opens Google Sign-In in a browser itself. So `harness_sign_in_start`
+  refuses it, `harness_sign_in_status` answers `signedIn: null`, and the
+  provider's `signIn` is `null` — the same answer opencode gives, for a
+  different reason. It is also why `status()` does not probe: the nearest thing
+  to a status command is `agy models`, which signs in *by running*, and every
+  other probe in that module is read-only and opens nothing.
 - **Claude is a process per thread; Codex and opencode are one server each.**
   A Claude thread is one long-lived `claude -p --input-format stream-json`
   process that takes user turns on stdin and is resumed by session id

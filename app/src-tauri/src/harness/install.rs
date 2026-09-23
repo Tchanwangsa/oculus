@@ -194,11 +194,22 @@ const OPENCODE: &[Route] = &[
     },
 ];
 
+/// Antigravity. One route only, and that is the vendor's doing rather than an
+/// omission here: `agy` is a Go binary its own installer places, with no
+/// Homebrew formula and no npm package to stand in for one — the npm route
+/// every other agent has does not exist for this one.
+const ANTIGRAVITY: &[Route] = &[Route {
+    manager: Manager::Curl,
+    command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    lands_in: "~/.local/bin",
+}];
+
 fn routes(provider: Provider) -> &'static [Route] {
     match provider {
         Provider::Claude => CLAUDE,
         Provider::Codex => CODEX,
         Provider::Opencode => OPENCODE,
+        Provider::Antigravity => ANTIGRAVITY,
     }
 }
 
@@ -468,7 +479,18 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
 
-    const ALL: [Provider; 3] = [Provider::Claude, Provider::Codex, Provider::Opencode];
+    const ALL: [Provider; 4] = [
+        Provider::Claude,
+        Provider::Codex,
+        Provider::Opencode,
+        Provider::Antigravity,
+    ];
+
+    /// The three agents a package manager can install. Antigravity is out, and
+    /// not by oversight: `agy` is a Go binary its own script places, with no
+    /// formula and no npm package, so the manager-shaped tests below have
+    /// nothing to assert about it. [`antigravity_is_curl_only`] is its half.
+    const PACKAGED: [Provider; 3] = [Provider::Claude, Provider::Codex, Provider::Opencode];
 
     /// A machine with Homebrew and nothing else runs the brew route, and is
     /// offered the others as text. `curl` is the interesting half: it is on
@@ -481,7 +503,7 @@ mod tests {
             brew: true,
             ..Default::default()
         };
-        for p in ALL {
+        for p in PACKAGED {
             let o = offer(p, have);
             assert!(o.runnable, "{p:?}");
             let runnable: Vec<Manager> = o
@@ -502,7 +524,7 @@ mod tests {
             npm: true,
             ..Default::default()
         };
-        for p in ALL {
+        for p in PACKAGED {
             let runnable: Vec<Manager> = offer(p, have)
                 .routes
                 .into_iter()
@@ -519,6 +541,35 @@ mod tests {
         assert!(offer(Provider::Opencode, bun).runnable);
         assert!(!offer(Provider::Claude, bun).runnable);
         assert!(!offer(Provider::Codex, bun).runnable);
+    }
+
+    /// Antigravity ships one way in, and a machine without `curl` is offered
+    /// the line to paste rather than a button that cannot work. The other
+    /// three each have a package manager to fall back on; this one does not,
+    /// which makes `curl` load-bearing rather than merely first.
+    #[test]
+    fn antigravity_is_curl_only() {
+        let managers: Vec<Manager> = routes(Provider::Antigravity)
+            .iter()
+            .map(|r| r.manager)
+            .collect();
+        assert_eq!(managers, vec![Manager::Curl]);
+
+        let curl = Managers {
+            curl: true,
+            ..Default::default()
+        };
+        assert!(offer(Provider::Antigravity, curl).runnable);
+        // Homebrew and node buy nothing here.
+        for have in [
+            Managers { brew: true, ..Default::default() },
+            Managers { npm: true, ..Default::default() },
+            Managers { bun: true, ..Default::default() },
+        ] {
+            let o = offer(Provider::Antigravity, have);
+            assert!(!o.runnable);
+            assert_eq!(o.routes.len(), 1, "the line is still there to copy");
+        }
     }
 
     /// A machine with no package manager at all — not even `curl` — is still

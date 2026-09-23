@@ -22,6 +22,7 @@ pub enum Provider {
     Claude,
     Codex,
     Opencode,
+    Antigravity,
 }
 
 impl Provider {
@@ -30,6 +31,7 @@ impl Provider {
             Provider::Claude => "claude",
             Provider::Codex => "codex",
             Provider::Opencode => "opencode",
+            Provider::Antigravity => "antigravity",
         }
     }
 
@@ -38,6 +40,7 @@ impl Provider {
             "claude" => Some(Provider::Claude),
             "codex" => Some(Provider::Codex),
             "opencode" => Some(Provider::Opencode),
+            "antigravity" => Some(Provider::Antigravity),
             _ => None,
         }
     }
@@ -49,6 +52,11 @@ impl Provider {
             // Lowercase is the project's own branding, and the frontend's
             // `PROVIDERS` entry spells it the same way.
             Provider::Opencode => "opencode",
+            // The product is "Antigravity"; the binary is `agy`. A student
+            // reads the former and types the latter, so the label is the
+            // product and `discover::binary_name` is the only place the
+            // three letters appear.
+            Provider::Antigravity => "Antigravity",
         }
     }
 }
@@ -250,8 +258,51 @@ impl HarnessEvent {
 /// rather than a wrong lookup.
 pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
     let s = |k: &str| input.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // Antigravity is the fourth spelling of the same handful of tools, and the
+    // only one that **PascalCases its parameters**: `run_command` takes
+    // `CommandLine` and `view_file` takes `AbsolutePath` — both read off the
+    // wire from `agy` 1.2.9, not from a schema. A lowercase fall-through would
+    // have titled every one of its rows with an empty string, which is exactly
+    // the failure opencode's `path`-vs-`file_path` arms are already here for.
+    //
+    // The two above are measured. The rest of the keys in each list are the
+    // same convention applied to the tool names in `agy`'s own `init.tools`,
+    // and are there so a row is titled rather than blank if the guess is
+    // right; narrow each list as a recording confirms it.
+    let any = |ks: &[&str]| {
+        ks.iter()
+            .find_map(|k| input.get(*k).and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .to_string()
+    };
     let base = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
     match name {
+        // Antigravity's own names, off the `tools` array its `init` event
+        // prints. `CommandLine` and `AbsolutePath` are measured; see above.
+        "run_command" => {
+            let cmd = any(&["CommandLine", "Command"]);
+            let kind = if is_oculus_cli(&cmd) { ToolKind::OculusCli } else { ToolKind::Bash };
+            (kind, cmd)
+        }
+        "view_file" | "read_resource" => (ToolKind::Read, base(&any(&["AbsolutePath", "TargetFile", "Path"]))),
+        "write_to_file" => (ToolKind::Write, base(&any(&["AbsolutePath", "TargetFile", "Path"]))),
+        "replace_file_content" | "multi_replace_file_content" | "sed_file" | "notebook_edit" => {
+            (ToolKind::Edit, base(&any(&["AbsolutePath", "TargetFile", "Path"])))
+        }
+        "list_dir" => (ToolKind::Search, base(&any(&["DirectoryPath", "AbsolutePath", "Path"]))),
+        "find_by_name" => (ToolKind::Search, any(&["Pattern", "Query", "SearchDirectory"])),
+        "grep_search" => (ToolKind::Search, any(&["Query", "SearchTerm", "Pattern"])),
+        "read_url_content" | "open_browser_url" => (ToolKind::Web, any(&["Url", "URL"])),
+        "search_web" => (ToolKind::Web, any(&["Query", "SearchTerm"])),
+        "manage_task" | "schedule" => (ToolKind::Plan, String::new()),
+        "invoke_subagent" | "define_subagent" | "browser_subagent" => {
+            (ToolKind::Task, any(&["Name", "Prompt", "TypeName"]))
+        }
+        // The agent asking the student something. There is nowhere for it to
+        // be answered from a timeline, so it is a row like any other.
+        "ask_question" | "ask_permission" | "ask_custom_permission" => {
+            (ToolKind::Other, any(&["Question", "Prompt"]))
+        }
         "Bash" | "commandExecution" | "bash" => {
             let cmd = s("command");
             let kind = if is_oculus_cli(&cmd) {

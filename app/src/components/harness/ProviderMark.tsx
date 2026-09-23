@@ -72,6 +72,32 @@ export function OpencodeMark(props: SVGProps<SVGSVGElement>) {
 }
 
 /**
+ * Antigravity's mark: the product's own device, a ring with a chevron rising
+ * out of it — a thing leaving a gravity well.
+ *
+ * One `currentColor` path like Claude's and Codex's rather than opencode's
+ * two-tone treatment, because the vendor's own mark is a single weight and
+ * there is no second value in it to express.
+ */
+export function AntigravityMark(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        d="M12 1.6a1 1 0 0 1 .84.46l4.3 6.72a1 1 0 0 1-1.68 1.08L13 5.55V14a1 1 0 1 1-2 0V5.55L8.54 9.86a1 1 0 1 1-1.68-1.08l4.3-6.72A1 1 0 0 1 12 1.6Z"
+      />
+      <path d="M4.6 14.2a1 1 0 0 1 1.32.5 6.67 6.67 0 0 0 12.16 0 1 1 0 1 1 1.82.82 8.67 8.67 0 0 1-15.8 0 1 1 0 0 1 .5-1.32Z" />
+    </svg>
+  );
+}
+
+/**
  * Every provider's mark, exhaustively.
  *
  * A `Record<Provider, …>` rather than a ternary on purpose: a ternary answered
@@ -83,6 +109,7 @@ const MARKS: Record<Provider, ComponentType<SVGProps<SVGSVGElement>>> = {
   claude: ClaudeCodeMark,
   codex: CodexMark,
   opencode: OpencodeMark,
+  antigravity: AntigravityMark,
 };
 
 /** The mark for a provider — the tab strip, the trigger and the model rows

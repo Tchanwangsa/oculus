@@ -23,13 +23,15 @@ use serde::Serialize;
 
 use super::event::Provider;
 
-/// `OCULUS_CLAUDE_BIN` / `OCULUS_CODEX_BIN` / `OCULUS_OPENCODE_BIN` — bb's
-/// `BB_CLAUDE_CODE_EXECUTABLE`, for a build that lives somewhere unusual.
+/// `OCULUS_CLAUDE_BIN` / `OCULUS_CODEX_BIN` / `OCULUS_OPENCODE_BIN` /
+/// `OCULUS_ANTIGRAVITY_BIN` — bb's `BB_CLAUDE_CODE_EXECUTABLE`, for a build
+/// that lives somewhere unusual.
 pub fn override_env(provider: Provider) -> &'static str {
     match provider {
         Provider::Claude => "OCULUS_CLAUDE_BIN",
         Provider::Codex => "OCULUS_CODEX_BIN",
         Provider::Opencode => "OCULUS_OPENCODE_BIN",
+        Provider::Antigravity => "OCULUS_ANTIGRAVITY_BIN",
     }
 }
 
@@ -38,13 +40,21 @@ fn binary_name(provider: Provider) -> &'static str {
         Provider::Claude => "claude",
         Provider::Codex => "codex",
         Provider::Opencode => "opencode",
+        // The product is Antigravity; the binary it installs is `agy`. This
+        // is the one place the short name is written.
+        Provider::Antigravity => "agy",
     }
 }
 
 /// Every provider, in the order Settings lists them. One array rather than a
 /// literal at each call site: a provider added to the enum without being
 /// added here is a bridge nobody can find.
-pub const PROVIDERS: [Provider; 3] = [Provider::Claude, Provider::Codex, Provider::Opencode];
+pub const PROVIDERS: [Provider; 4] = [
+    Provider::Claude,
+    Provider::Codex,
+    Provider::Opencode,
+    Provider::Antigravity,
+];
 
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)

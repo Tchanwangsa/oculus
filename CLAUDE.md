@@ -21,8 +21,8 @@ are provenance for ported behaviour and point there. Do not re-add a Python
 process, a `uv` step or a local inference tier to this repo.
 
 Ingestion and retrieval are built. Chat is a **CLI agent** — Claude Code,
-Codex or opencode, driven as a subprocess from the library's `agents/` folder
-(`docs/harness.md`). The BYOK API layer it replaced has been deleted rather
+Codex, opencode or Antigravity (`agy`), driven as a subprocess from the
+library's `agents/` folder (`docs/harness.md`). The BYOK API layer it replaced has been deleted rather
 than woken up: opencode is the API path, reached as a third bridge instead of
 as a parallel world. Its migrations stay, its code does not.
 Automations and the Inbox were built and then removed — the last commit that

@@ -147,12 +147,13 @@ enum Command {
 
 #[derive(Args)]
 #[command(
-    about = "Run one prompt through a CLI agent (Claude Code, Codex or opencode)",
+    about = "Run one prompt through a CLI agent (Claude Code, Codex, opencode or Antigravity)",
     long_about = "Run one prompt through a CLI agent and print what it does.\n\n\
 The same bridges the app's chat uses, without the window: the agent runs from \
 the library's agents/ folder with the app's instructions appended, can read the \
 whole library and write only there, and its normalized events are printed as they \
-arrive. Needs the provider's CLI installed and signed in (`claude`, `codex` or `opencode`). \
+arrive. Needs the provider's CLI installed and signed in (`claude`, `codex`, `opencode` or \
+`agy`). \
 Nothing is recorded in the database; this is for checking a bridge works."
 )]
 struct AgentArgs {
@@ -160,7 +161,7 @@ struct AgentArgs {
     #[arg(value_name = "PROMPT")]
     prompt: String,
     /// Which CLI to drive
-    #[arg(short, long, value_parser = ["claude", "codex", "opencode"], default_value = "claude")]
+    #[arg(short, long, value_parser = ["claude", "codex", "opencode", "antigravity"], default_value = "claude")]
     provider: String,
     /// Model to request (provider-specific name or alias)
     #[arg(short, long)]

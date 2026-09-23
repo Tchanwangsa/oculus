@@ -11,7 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getDb, getSetting } from "@/lib/db";
 import { filterOffered, loadCatalogue } from "@/lib/opencodeCatalogue";
 
-export type Provider = "claude" | "codex" | "opencode";
+export type Provider = "claude" | "codex" | "opencode" | "antigravity";
 
 /** The reasoning levels a turn may ask for, **weakest first** — the key order
  *  here is the canonical one, and `sortReasoning` below is the only thing that
@@ -232,6 +232,24 @@ export const PROVIDERS: ProviderInfo[] = [
     },
     signIn: null,
     emptyNote: "Sign in to a provider in Settings → AI to get models here.",
+  },
+  {
+    id: "antigravity",
+    label: "Antigravity",
+    staticModels: null,
+    // `agy models` prints what the account can actually use, and costs
+    // nothing to ask — it is a listing subcommand, not a turn. No filter in
+    // front of it: unlike opencode's 218 providers, this catalogue is one
+    // account's own entitlements, so a row in it is a row that works.
+    fetchModels: () => harnessAntigravityModels().then(antigravityAsModels),
+    // Not "no sign-in" so much as "no sign-in to drive". `agy` has no login
+    // subcommand: it reads the system keyring on every run and, finding
+    // nothing, opens Google Sign-In in the browser itself. So the flow exists
+    // — it is just the CLI's, triggered by the first message, and there is
+    // nothing for `SignInDialog` to wait on or type into.
+    signIn: null,
+    emptyNote:
+      "Send a message to finish Antigravity's Google sign-in, then its models appear here.",
   },
 ];
 
@@ -475,6 +493,31 @@ export function codexAsModels(models: CodexModel[]): HarnessModel[] {
  * tolerant of a stored row: a bridge that reports no variants for a model
  * costs that model its level row, not the list its rows.
  */
+/** One row of `agy models`. Antigravity bakes the reasoning level into most
+ *  of its slugs (`gemini-3.8-flash-high`), so the list it returns declares no
+ *  efforts and the picker offers none beside them — a level chosen next to a
+ *  slug that already names one could only contradict it. */
+export interface AntigravityModel {
+  id: string;
+  displayName: string;
+  reasoningEfforts: string[];
+  defaultReasoningEffort: string | null;
+}
+
+export function antigravityAsModels(models: AntigravityModel[]): HarnessModel[] {
+  return models.map((m) => ({
+    id: m.id,
+    label: m.displayName || m.id,
+    // `agy models` prints a slug and, sometimes, prose beside it. The prose
+    // is not a description of the model so much as a note about the row, and
+    // the bridge does not carry it across — an empty string is what every
+    // other provider's description field degrades to anyway.
+    description: "",
+    reasoningEfforts: sortReasoning(m.reasoningEfforts),
+    defaultReasoningEffort: m.defaultReasoningEffort,
+  }));
+}
+
 export interface OpencodeModel {
   id: string;
   displayName: string;
@@ -790,6 +833,10 @@ export function harnessSignInCode(provider: Provider, code: string): Promise<voi
 
 export function harnessSignInCancel(provider: Provider): Promise<void> {
   return invoke("harness_sign_in_cancel", { provider });
+}
+
+export function harnessAntigravityModels(): Promise<AntigravityModel[]> {
+  return invoke<AntigravityModel[]>("harness_antigravity_models");
 }
 
 export function harnessCodexModels(): Promise<CodexModel[]> {

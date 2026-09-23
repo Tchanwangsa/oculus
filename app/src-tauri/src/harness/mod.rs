@@ -23,6 +23,7 @@
 //! bug gets diagnosed without re-running an agent, and the recordings under
 //! `fixtures/harness/` that the bridge tests replay came from exactly this.
 
+pub mod antigravity;
 pub mod attach;
 pub mod claude;
 pub mod codex;
@@ -41,6 +42,7 @@ use std::sync::{mpsc, Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use antigravity::{AntigravitySession, AntigravitySpawn};
 use claude::{ClaudeSession, ClaudeSpawn};
 use codex::{CodexServer, CodexSpawn, CodexThreadOpts, ModelInfo};
 use opencode::{OpencodeServer, OpencodeSessionOpts, OpencodeSpawn, ProviderList};
@@ -511,6 +513,12 @@ enum Live {
         /// for a different one means a new session.
         variant: Option<String>,
     },
+    Antigravity {
+        session: Arc<AntigravitySession>,
+        /// `--effort` is a process flag here as it is for Claude, so a level
+        /// changed mid-thread costs a respawn.
+        effort: Option<String>,
+    },
 }
 
 impl Live {
@@ -519,6 +527,7 @@ impl Live {
             Live::Claude { session, .. } => session.is_alive(),
             Live::Codex { server, thread_id, .. } => server.is_alive() && server.has_thread(thread_id),
             Live::Opencode { server, session, .. } => server.is_alive() && server.has_session(session),
+            Live::Antigravity { session, .. } => session.is_alive(),
         }
     }
 
@@ -528,6 +537,7 @@ impl Live {
             Live::Claude { effort, .. } => effort.as_deref(),
             Live::Codex { opts, .. } => opts.reasoning_effort.as_deref(),
             Live::Opencode { variant, .. } => variant.as_deref(),
+            Live::Antigravity { effort, .. } => effort.as_deref(),
         }
     }
 }
@@ -537,6 +547,10 @@ enum Rewindable {
     Claude(Arc<ClaudeSession>),
     Codex(Arc<CodexServer>, String),
     Opencode(Arc<OpencodeServer>, String),
+    /// Refuses. Antigravity's protocol has no way back to an earlier message,
+    /// and the session says so rather than answering `Ok(())` to a caller that
+    /// is about to delete rows on the strength of it.
+    Antigravity(Arc<AntigravitySession>),
 }
 
 /// The set of live sessions plus the shared Codex server. One per app.
@@ -630,6 +644,14 @@ impl Harness {
 
     pub fn codex_models(&self) -> Result<Vec<ModelInfo>, String> {
         self.codex_server()?.list_models()
+    }
+
+    /// Antigravity's catalogue. No server and no session behind it — `agy
+    /// models` is a listing subcommand, so this is one short-lived process
+    /// and nothing is spent.
+    pub fn antigravity_models(&self) -> Result<Vec<antigravity::ModelInfo>, String> {
+        let bin = discover::binary(Provider::Antigravity)?;
+        antigravity::list_models(&bin, &discover::child_env())
     }
 
     /// The shared opencode server, started on first use.
@@ -736,6 +758,7 @@ impl Harness {
                 opts,
             } => server.start_turn(tid, text, opts),
             Live::Opencode { server, session, .. } => server.prompt(session, text),
+            Live::Antigravity { session, .. } => session.send(text),
         }
     }
 
@@ -803,12 +826,14 @@ impl Harness {
                 Live::Opencode { server, session, .. } => {
                     Rewindable::Opencode(server.clone(), session.clone())
                 }
+                Live::Antigravity { session, .. } => Rewindable::Antigravity(session.clone()),
             }
         };
         match handle {
             Rewindable::Claude(s) => s.rewind(anchor),
             Rewindable::Codex(server, tid) => server.revert(&tid, anchor),
             Rewindable::Opencode(server, ses) => server.revert(&ses, anchor),
+            Rewindable::Antigravity(s) => s.rewind(anchor),
         }
     }
 
@@ -923,6 +948,31 @@ impl Harness {
                     variant: opts.reasoning_effort.clone(),
                 }
             }
+            Provider::Antigravity => {
+                let s = AntigravitySession::spawn(
+                    AntigravitySpawn {
+                        bin: discover::binary(provider)?,
+                        cwd,
+                        library: self.data_dir.clone(),
+                        resume: resume.map(String::from),
+                        model: opts.model.clone(),
+                        effort: opts.reasoning_effort.clone(),
+                        // Only the per-thread half. The library-wide brief is
+                        // already `agents/AGENTS.md`, which `agy` reads for
+                        // itself from the directory it is spawned in — the
+                        // same free ride Codex gets, and the reason there is
+                        // no `--append-system-prompt` to miss.
+                        brief: thread_sections(opts.scope.as_deref(), opts.lecture.as_ref()),
+                        env: discover::child_env(),
+                        raw_log,
+                    },
+                    sink,
+                )?;
+                Live::Antigravity {
+                    session: s,
+                    effort: opts.reasoning_effort.clone(),
+                }
+            }
         };
         live.insert(thread_id, session);
         Ok(())
@@ -961,6 +1011,7 @@ impl Harness {
         let claude;
         let codex;
         let oc;
+        let agy;
         match provider {
             Provider::Claude => {
                 let s = ClaudeSession::spawn(
@@ -986,6 +1037,7 @@ impl Harness {
                 claude = Some(s);
                 codex = None;
                 oc = None;
+                agy = None;
             }
             Provider::Codex => {
                 let server = self.codex_server()?;
@@ -1004,6 +1056,7 @@ impl Harness {
                 claude = None;
                 codex = Some((server, tid));
                 oc = None;
+                agy = None;
             }
             Provider::Opencode => {
                 let server = self.opencode_server()?;
@@ -1022,6 +1075,31 @@ impl Harness {
                 claude = None;
                 codex = None;
                 oc = Some((server, ses));
+                agy = None;
+            }
+            Provider::Antigravity => {
+                // A throwaway process, the way Claude's namer is one. It gets
+                // no brief and asks for no tool: naming a thread is a single
+                // question about text that is already in the prompt.
+                let s = AntigravitySession::spawn(
+                    AntigravitySpawn {
+                        bin: discover::binary(provider)?,
+                        cwd,
+                        library: self.data_dir.clone(),
+                        resume: None,
+                        model: Some(sel.model.clone()),
+                        effort: sel.reasoning_effort.clone(),
+                        brief: String::new(),
+                        env: discover::child_env(),
+                        raw_log: None,
+                    },
+                    sink,
+                )?;
+                s.send(&prompt)?;
+                claude = None;
+                codex = None;
+                oc = None;
+                agy = Some(s);
             }
         }
 
@@ -1046,6 +1124,9 @@ impl Harness {
         if let Some(s) = claude {
             s.kill();
         }
+        if let Some(s) = agy {
+            s.kill();
+        }
         if let Some((server, tid)) = codex {
             server.detach(&tid);
         }
@@ -1068,6 +1149,7 @@ impl Harness {
             Some(Live::Claude { session, .. }) => session.interrupt(),
             Some(Live::Codex { server, thread_id, .. }) => server.interrupt(thread_id),
             Some(Live::Opencode { server, session, .. }) => server.interrupt(session),
+            Some(Live::Antigravity { session, .. }) => session.interrupt(),
             None => Ok(()),
         }
     }
@@ -1080,6 +1162,7 @@ impl Harness {
                 Live::Claude { session, .. } => session.kill(),
                 Live::Codex { server, thread_id, .. } => server.detach(&thread_id),
                 Live::Opencode { server, session, .. } => server.detach(&session),
+                Live::Antigravity { session, .. } => session.kill(),
             }
         }
     }
@@ -1551,6 +1634,16 @@ pub mod app {
     pub async fn harness_codex_models(state: State<'_, HarnessState>) -> Result<Vec<ModelInfo>, String> {
         let h = state.harness.clone();
         tokio::task::spawn_blocking(move || h.codex_models())
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn harness_antigravity_models(
+        state: State<'_, HarnessState>,
+    ) -> Result<Vec<antigravity::ModelInfo>, String> {
+        let h = state.harness.clone();
+        tokio::task::spawn_blocking(move || h.antigravity_models())
             .await
             .map_err(|e| e.to_string())?
     }

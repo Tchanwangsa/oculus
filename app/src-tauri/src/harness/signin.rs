@@ -129,6 +129,15 @@ pub fn status(provider: Provider) -> SignInStatus {
         // Not "no": not a question this door can answer. See the module docs.
         return SignInStatus::unknown(provider);
     }
+    if provider == Provider::Antigravity {
+        // Also not "no", for a different reason. `agy` has no status
+        // subcommand, and the nearest thing — `agy models` — signs in *by
+        // running*: it reads the system keyring and, finding nothing, opens
+        // Google Sign-In in a browser. Every other probe here is read-only
+        // and opens nothing (that is the rule this module states above), so
+        // the honest answer is that this door cannot ask.
+        return SignInStatus::unknown(provider);
+    }
 
     let bin = match discover::binary(provider) {
         Ok(p) => p,
@@ -143,7 +152,7 @@ pub fn status(provider: Provider) -> SignInStatus {
     let args: &[&str] = match provider {
         Provider::Claude => &["auth", "status", "--json"],
         Provider::Codex => &["login", "status"],
-        Provider::Opencode => unreachable!("returned above"),
+        Provider::Opencode | Provider::Antigravity => unreachable!("returned above"),
     };
 
     let out = Command::new(&bin)
@@ -197,7 +206,7 @@ pub fn status(provider: Provider) -> SignInStatus {
                 .flatten(),
             error: None,
         },
-        Provider::Opencode => unreachable!("returned above"),
+        Provider::Opencode | Provider::Antigravity => unreachable!("returned above"),
     }
 }
 
@@ -313,6 +322,17 @@ const OPENCODE: &[&str] = &[
     "invalid x-api-key",
 ];
 
+/// Antigravity's. It signs in through a Google account, so its refusals are
+/// Google's words rather than a CLI's, and the keyring is a third place a
+/// credential can be missing from.
+const ANTIGRAVITY: &[&str] = &[
+    "google sign-in",
+    "sign in to antigravity",
+    "not signed in",
+    "no credentials found in keyring",
+    "reauthenticate",
+];
+
 /// Whether `msg` is the provider saying it has no usable credentials, rather
 /// than any other kind of failure.
 ///
@@ -330,6 +350,7 @@ pub fn is_auth_failure(provider: Provider, msg: &str) -> bool {
         Provider::Claude => CLAUDE,
         Provider::Codex => CODEX,
         Provider::Opencode => OPENCODE,
+        Provider::Antigravity => ANTIGRAVITY,
     };
     if own.iter().any(|n| m.contains(n)) {
         return true;
@@ -397,6 +418,15 @@ fn login_args(provider: Provider) -> Result<&'static [&'static str], String> {
         Provider::Opencode => Err(
             "opencode signs in per provider, in Settings → AI → Providers, not through a login \
              command"
+                .into(),
+        ),
+        // `agy` has no login subcommand at all: it checks the system keyring
+        // on every run and, finding nothing, opens Google Sign-In itself. So
+        // there is no flow for this module to drive — the first message a
+        // student sends is the flow, and it happens in their browser.
+        Provider::Antigravity => Err(
+            "Antigravity signs itself in the first time it runs — send a message and finish \
+             the Google sign-in it opens in your browser"
                 .into(),
         ),
     }
