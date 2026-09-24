@@ -46,6 +46,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PillTabs } from "@/components/ui/PillTabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { OpencodeConnectDialog } from "./OpencodeConnectDialog";
 
@@ -732,7 +733,7 @@ function ModelsView({
   providerId,
   onBack,
   models,
-  filtered,
+  filtered: searched,
   loaded,
   catalogue,
   query,
@@ -751,6 +752,25 @@ function ModelsView({
   onHidden: (ids: string[], hidden: boolean) => void;
 }) {
   const entry = catalogue?.providers[providerId];
+
+  // *Selected* narrows the list to what is ticked — but to what was ticked
+  // when it was chosen, not live. A live filter would pull a row out from
+  // under the click that unticked it, and a mis-click would leave nothing to
+  // click back on. Choosing *Selected* again re-reads the ticks.
+  const [picked, setPicked] = useState<Set<string> | null>(null);
+  const scope = picked ? "selected" : "all";
+  const onScope = (next: "all" | "selected") =>
+    setPicked(
+      next === "all"
+        ? null
+        : new Set(
+            models
+              .filter((m) => blockedBecause(m) === null && entry?.models[m.id]?.hidden !== true)
+              .map((m) => m.id),
+          ),
+    );
+  const filtered = picked ? searched.filter((m) => picked.has(m.id)) : searched;
+
   // A blocked row — Zen, or missing a capability the agent needs — stays in
   // the list so the student can read why, but it is not offered and not
   // tickable. Counting it as offered would be the same wrong promise the
@@ -785,6 +805,14 @@ function ModelsView({
             className="pl-8"
           />
         </div>
+        <PillTabs
+          tabs={[
+            { value: "all", label: "All" },
+            { value: "selected", label: "Selected" },
+          ]}
+          value={scope}
+          onChange={onScope}
+        />
       </div>
 
       <div className="flex shrink-0 items-center justify-between gap-3">
@@ -818,16 +846,24 @@ function ModelsView({
         ) : filtered.length === 0 ? (
           <Empty
             message={
-              query.trim()
-                ? `No model here matches “${query.trim()}”.`
-                : provider
-                  ? `opencode lists no models for ${provider.name}.`
-                  : "opencode lists no models for this provider."
+              picked && query.trim()
+                ? `No ticked model matches “${query.trim()}”.`
+                : picked
+                  ? "No model here is ticked."
+                  : query.trim()
+                    ? `No model here matches “${query.trim()}”.`
+                    : provider
+                      ? `opencode lists no models for ${provider.name}.`
+                      : "opencode lists no models for this provider."
             }
           >
             {query.trim() ? (
               <Button variant="outline" size="sm" onClick={() => onQuery("")}>
                 Clear search
+              </Button>
+            ) : picked ? (
+              <Button variant="outline" size="sm" onClick={() => onScope("all")}>
+                Show every model
               </Button>
             ) : (
               <Button variant="outline" size="sm" onClick={onBack}>
