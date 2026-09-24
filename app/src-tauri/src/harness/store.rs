@@ -325,6 +325,20 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             let meta = auth.map(|p| serde_json::json!({ "auth": p.as_str() }).to_string());
             insert_item(pool, thread_id, "error", None, Some(message), meta).await.map(Some)
         }
+        // A row of its own rather than an error: the turn it ended finished
+        // normally, and what the row offers is a rule to allow, which a reload
+        // has to be able to offer again. `content` is the refused target.
+        HarnessEvent::PermissionNeeded { tool, action, target, rule } => {
+            let meta = serde_json::json!({
+                "tool": tool,
+                "action": action,
+                "target": target,
+                "rule": rule,
+            });
+            insert_item(pool, thread_id, "permission", None, target.as_deref(), Some(meta.to_string()))
+                .await
+                .map(Some)
+        }
         HarnessEvent::Usage {
             input_tokens,
             output_tokens,

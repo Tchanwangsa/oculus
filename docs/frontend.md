@@ -28,6 +28,7 @@ this page is the structure.
 | The card/row drag every board and table shares | `app/src/hooks/useCardDrag.ts` |
 | Overlap packing, shared by the week grid and the project timeline | `app/src/lib/lanes.ts` |
 | Agent/model/reasoning picker (settings rows + composer) | `app/src/components/harness/ModelPicker.tsx` |
+| Antigravity's refusal card in chat, and its approvals list in Settings → AI | `app/src/components/harness/PermissionCard.tsx`, `app/src/pages/settings/AiPage.tsx` |
 | A subject's own files (the Uploads tab) | `app/src/pages/subject/UploadsPage.tsx`, `app/src/lib/uploads.ts`, `app/src-tauri/src/files.rs` |
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
@@ -760,6 +761,29 @@ tab is plainly *Chat*.
   [harness.md](./harness.md#the-model-picker),
   [subject scope and `@`](./harness.md#subject-scope-and-) and
   [one turn at a time](./harness.md#one-turn-at-a-time).
+- **What a provider cannot do is a field on `PROVIDERS`, not a test on its
+  id.** `ProviderInfo.rewind` in `app/src/lib/harness.ts` is false for
+  Antigravity, whose CLI cannot take a question back out of its context, and
+  both timelines' owners (`ChatPage.tsx`,
+  `app/src/components/lectures/LectureChatPanel.tsx`) then hand `Timeline`
+  no edit, retry or rewind — all three truncate the thread, and offering them
+  would leave the agent remembering what the screen had dropped. What the
+  timeline always gets is `followUp`: a plain send on the open thread with its
+  own model and the composer's level.
+- **An Antigravity refusal is a card, not an error.** A `permission` row draws
+  as `app/src/components/harness/PermissionCard.tsx` — the sign-in card's
+  shape: what was refused (a command in the timeline's `$ …` code style, a
+  path or URL as text) and, on the thread's latest refusal only, one pill
+  naming the rule in words ("Allow python3", "Allow writes in notes"). It
+  stores the rule (`harnessAntigravityAllow`), then sends "Approved — go
+  ahead." through `followUp`, which resumes the conversation under the new
+  rules; a refusal from Rust (a turn still running, a rule an Oculus deny
+  already covers) is printed under the button, and a reload shows *Allowed*
+  for a rule already on the list. Settings → AI lists the approvals with a
+  Remove each (`AntigravityApprovalsSection` in
+  `app/src/pages/settings/AiPage.tsx`), and draws nothing until there is one.
+  See [harness.md](./harness.md) for why the approvals live in `agy`'s global
+  settings file.
 - Files and lectures open in the **side panel** (`sidePanelStore` +
   `app/src/components/panel/SidePanel.tsx`); "expand" navigates to the
   full-page route **in the same tab**, and to a new one on ⌘-click — the web's

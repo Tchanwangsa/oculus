@@ -4221,6 +4221,14 @@ impl AgentPrinter {
                 end_line(&mut mid, &mut out);
                 let _ = writeln!(out, "{} {message}", paint("error:", RED));
             }
+            // Antigravity stopped at a rule it lacks; the turn ends here. The
+            // rule is what the app would offer to allow.
+            HarnessEvent::PermissionNeeded { action, target, rule, .. } => {
+                end_line(&mut mid, &mut out);
+                let what = target.as_deref().unwrap_or(action.as_str());
+                let hint = rule.as_deref().map(|r| format!(" — allow {r}")).unwrap_or_default();
+                let _ = writeln!(out, "{} {what}{hint}", paint("refused:", RED));
+            }
             HarnessEvent::TurnFinished { status } => {
                 end_line(&mut mid, &mut out);
                 let _ = writeln!(out, "{}", paint(&format!("· turn {status}"), DIM));

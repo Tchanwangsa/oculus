@@ -199,6 +199,24 @@ pub enum HarnessEvent {
         /// original in its context and the timeline says so.
         context: bool,
     },
+    /// The agent was stopped at a permission it lacks. Only Antigravity
+    /// raises it: in print mode `agy` refuses any step its rules do not
+    /// allow, and the turn ends there — so by the time this arrives the turn
+    /// is already over, and what it carries is what to allow before the next
+    /// message (`harness_antigravity_allow`). Persisted as a `permission` row.
+    PermissionNeeded {
+        /// The provider's tool (`run_command`, `write_to_file`).
+        tool: String,
+        /// The permission it needed, in the provider's own word: `command`,
+        /// `write_file`, `read_file`, `read_url`.
+        action: String,
+        /// What it was refused on: the command line, or the path.
+        target: Option<String>,
+        /// A rule that would let it, in the provider's rule syntax
+        /// (`command(python3)`, `write_file(/abs/dir)`), when one can be
+        /// read off the refusal.
+        rule: Option<String>,
+    },
     /// The provider stopped working on the user's message.
     TurnFinished {
         /// `completed`, `interrupted`, `failed`.

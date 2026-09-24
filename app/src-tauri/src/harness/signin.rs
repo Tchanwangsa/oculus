@@ -119,24 +119,19 @@ impl SignInStatus {
 ///
 /// Blocking — spawns the CLI. Callers wrap it in `spawn_blocking`.
 ///
-/// Both probes are read-only and neither opens a browser: `claude auth status`
-/// prints and exits, `codex login status` prints and exits. The two disagree
-/// about how to say "no", which is why this is a match rather than a table —
-/// Claude answers exit 0 either way and puts the answer in JSON; Codex answers
-/// with its exit status and one line of prose.
+/// Every probe is read-only and none opens a browser: `claude auth status`
+/// prints and exits, `codex login status` prints and exits, and `agy models`
+/// lists or says "Please sign in" and exits. They disagree about how to say
+/// "no", which is why this is a match rather than a table — Claude answers
+/// exit 0 either way and puts the answer in JSON; Codex answers with its exit
+/// status and one line of prose; Antigravity with a sentence.
 pub fn status(provider: Provider) -> SignInStatus {
     if provider == Provider::Opencode {
         // Not "no": not a question this door can answer. See the module docs.
         return SignInStatus::unknown(provider);
     }
     if provider == Provider::Antigravity {
-        // Also not "no", for a different reason. `agy` has no status
-        // subcommand, and the nearest thing — `agy models` — signs in *by
-        // running*: it reads the system keyring and, finding nothing, opens
-        // Google Sign-In in a browser. Every other probe here is read-only
-        // and opens nothing (that is the rule this module states above), so
-        // the honest answer is that this door cannot ask.
-        return SignInStatus::unknown(provider);
+        return antigravity_status();
     }
 
     let bin = match discover::binary(provider) {
@@ -207,6 +202,50 @@ pub fn status(provider: Provider) -> SignInStatus {
             error: None,
         },
         Provider::Opencode | Provider::Antigravity => unreachable!("returned above"),
+    }
+}
+
+/// Antigravity's answer, off `agy models`.
+///
+/// There is no status subcommand, but the listing is as read-only as one:
+/// measured on 1.2.9, signed out it prints `Please sign in to view available
+/// models` and exits non-zero in about a second, opening nothing; signed in it
+/// lists. So a listing is a yes, that sentence is a no, and anything else — a
+/// network failure, a timeout — is not an answer either way. No account name:
+/// the listing does not print one.
+fn antigravity_status() -> SignInStatus {
+    let provider = Provider::Antigravity;
+    let run = discover::binary(provider)
+        .and_then(|bin| super::antigravity::run_models(&bin, &discover::child_env()));
+    let run = match run {
+        Ok(r) => r,
+        Err(e) => {
+            return SignInStatus {
+                error: Some(e),
+                ..SignInStatus::unknown(provider)
+            }
+        }
+    };
+    let said = format!("{}\n{}", run.stdout, run.stderr);
+    let signed_in = if run.success {
+        Some(true)
+    } else if said.to_lowercase().contains("please sign in") {
+        Some(false)
+    } else {
+        None
+    };
+    SignInStatus {
+        provider,
+        signed_in,
+        account: None,
+        error: signed_in.is_none().then(|| {
+            let said = said.trim();
+            if said.is_empty() {
+                "`agy models` failed and said nothing".to_string()
+            } else {
+                said.to_string()
+            }
+        }),
     }
 }
 
@@ -324,8 +363,10 @@ const OPENCODE: &[&str] = &[
 
 /// Antigravity's. It signs in through a Google account, so its refusals are
 /// Google's words rather than a CLI's, and the keyring is a third place a
-/// credential can be missing from.
+/// credential can be missing from. `please sign in` is the CLI's own, off
+/// `agy models` signed out.
 const ANTIGRAVITY: &[&str] = &[
+    "please sign in",
     "google sign-in",
     "sign in to antigravity",
     "not signed in",
@@ -420,13 +461,14 @@ fn login_args(provider: Provider) -> Result<&'static [&'static str], String> {
              command"
                 .into(),
         ),
-        // `agy` has no login subcommand at all: it checks the system keyring
-        // on every run and, finding nothing, opens Google Sign-In itself. So
-        // there is no flow for this module to drive — the first message a
-        // student sends is the flow, and it happens in their browser.
+        // `agy` has no login subcommand. Sign-in is the interactive CLI:
+        // `agy` with no arguments, in a terminal, which walks through Google
+        // sign-in and keeps the credential in the system keychain. Nothing
+        // headless starts it — `agy models` signed out only says "Please sign
+        // in" — so there is no flow here for this module to drive.
         Provider::Antigravity => Err(
-            "Antigravity signs itself in the first time it runs — send a message and finish \
-             the Google sign-in it opens in your browser"
+            "Antigravity has no sign-in command: run `agy` in a terminal and finish the Google \
+             sign-in it walks you through, then come back"
                 .into(),
         ),
     }

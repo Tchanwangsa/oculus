@@ -3,7 +3,7 @@ import { ClockCounterClockwise, NotePencil } from "@phosphor-icons/react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ProviderMark } from "@/components/harness/ProviderMark";
-import { Timeline } from "@/components/harness/Timeline";
+import { Timeline, type QuestionActions } from "@/components/harness/Timeline";
 import { LectureChatComposer } from "@/components/lectures/LectureChatComposer";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
@@ -17,6 +17,7 @@ import {
   harnessRewind,
   harnessSend,
   harnessUnqueue,
+  providerInfo,
   type HarnessThread,
   type Provider,
 } from "@/lib/harness";
@@ -115,6 +116,12 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   const thread = storeThread ?? threads.find((t) => t.id === threadId) ?? null;
   const activeProvider = thread?.provider ?? provider;
   const activeModel = thread ? thread.model : model;
+  /** What the composer would send on, for the stable actions below to read at
+   *  the moment they are used — the dock's thread may not be in the store's
+   *  list, so the store alone cannot answer. */
+  const selectionRef = useRef({ provider: activeProvider, model: activeModel });
+  selectionRef.current = { provider: activeProvider, model: activeModel };
+  const rewinds = providerInfo(activeProvider)?.rewind ?? false;
 
   // The Chat page may never have been opened, and `touchThread` only patches a
   // thread the list holds — a title arriving for one it does not would be
@@ -257,7 +264,18 @@ export const LectureChatPanel = memo(function LectureChatPanel({
 
   // Stable for the life of the panel, so the memoised rows in `Timeline` stay
   // memoised; the thread id is read off the ref at the moment one is used.
-  const questions = useMemo(() => {
+  // Only a provider that can rewind (`ProviderInfo.rewind`) gets edit, retry
+  // and rewind — each of them truncates the thread.
+  const questions = useMemo((): QuestionActions => {
+    // A plain send on the open thread — no moment attached: an approval is
+    // not a question about the recording.
+    const followUp = async (text: string) => {
+      const id = threadIdRef.current;
+      if (id == null) return;
+      const { provider, model } = selectionRef.current;
+      await harnessSend(id, provider, text, { model, reasoningEffort: store.getState().reasoning });
+    };
+    if (!rewinds) return { followUp };
     const resend = (itemId: number, text: string) => {
       const id = threadIdRef.current;
       if (id == null) return;
@@ -277,8 +295,9 @@ export const LectureChatPanel = memo(function LectureChatPanel({
           .then((text) => setRestore((r) => ({ text, n: (r?.n ?? 0) + 1 })))
           .catch((e) => console.error("harness rewind failed", e));
       },
+      followUp,
     };
-  }, [store]);
+  }, [store, rewinds]);
 
   const pending = useMemo(
     () => ({

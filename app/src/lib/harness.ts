@@ -47,7 +47,7 @@ const REASONING_ORDER = Object.keys(REASONING_LABELS);
  * alphabetically.** opencode's catalogue spells `variants` as an object keyed
  * by level id, and a JSON map has no order worth keeping, so the levels
  * arrived as High · Low · Max — which reads like a ranking and is not one.
- * Sorting here rather than at each source covers all three catalogues,
+ * Sorting here rather than at each source covers all four catalogues,
  * including a Codex that adds a level to an existing model tomorrow.
  *
  * A level this build has no name for keeps its place at the end, in the order
@@ -148,6 +148,15 @@ export interface ProviderInfo {
    *  the one place a provider is declared, and the picker stays provider-blind
    *  so a fourth agent costs it nothing. */
   emptyNote?: string;
+  /** Whether this CLI can take a question back out of its own context — the
+   *  capability behind Rewind, Edit and Retry, all three of which truncate the
+   *  thread and would otherwise leave the agent remembering what the screen
+   *  no longer shows. Claude and Codex rewind over their control channel and
+   *  opencode reverts its session; Antigravity cannot (measured on `agy`
+   *  1.2.9: `/rewind` answers "not available in print mode", and nothing in
+   *  its stream-json protocol drops a message), so its timeline offers none of
+   *  the three rather than one that always drifts. */
+  rewind: boolean;
 }
 
 /**
@@ -166,6 +175,7 @@ export const PROVIDERS: ProviderInfo[] = [
     staticModels: null,
     fetchModels: () => harnessClaudeModels().then(claudeAsModels),
     signIn: "code",
+    rewind: true,
   },
   {
     id: "codex",
@@ -173,6 +183,7 @@ export const PROVIDERS: ProviderInfo[] = [
     staticModels: null,
     fetchModels: () => harnessCodexModels().then(codexAsModels),
     signIn: "callback",
+    rewind: true,
   },
   {
     id: "opencode",
@@ -190,6 +201,7 @@ export const PROVIDERS: ProviderInfo[] = [
     },
     signIn: null,
     emptyNote: "Sign in to a provider in Settings → AI to get models here.",
+    rewind: true,
   },
   {
     id: "antigravity",
@@ -201,13 +213,15 @@ export const PROVIDERS: ProviderInfo[] = [
     // account's own entitlements, so a row in it is a row that works.
     fetchModels: () => harnessAntigravityModels().then(antigravityAsModels),
     // Not "no sign-in" so much as "no sign-in to drive". `agy` has no login
-    // subcommand: it reads the system keyring on every run and, finding
-    // nothing, opens Google Sign-In in the browser itself. So the flow exists
-    // — it is just the CLI's, triggered by the first message, and there is
-    // nothing for `SignInDialog` to wait on or type into.
+    // subcommand: signing in is the interactive CLI — `agy` with no
+    // arguments, in a terminal — and nothing headless starts it (`agy models`
+    // signed out only says "Please sign in", which is how Rust answers
+    // `harness_sign_in_status` for it). So there is nothing for
+    // `SignInDialog` to wait on or type into.
     signIn: null,
     emptyNote:
-      "Send a message to finish Antigravity's Google sign-in, then its models appear here.",
+      "Run agy in a terminal and finish its Google sign-in, then its models appear here.",
+    rewind: false,
   },
 ];
 
@@ -318,6 +332,20 @@ export type HarnessEvent =
    *  back. `context` is whether the agent was rewound with them; false means
    *  it still holds the original, and the timeline says so. */
   | { type: "rewound"; from_item_id: number; context: boolean }
+  /** The agent was stopped at a permission it lacks — Antigravity only, whose
+   *  print mode refuses what its rules do not allow and ends the turn there,
+   *  so this arrives with the turn already over. `action` is `agy`'s word for
+   *  the permission (`command`, `write_file`, `read_file`, `read_url`),
+   *  `target` what was refused (the command line, the path), and `rule` a
+   *  rule that would allow it, for `harnessAntigravityAllow`. Rust writes it
+   *  as a `permission` row with the same four fields in `meta`. */
+  | {
+      type: "permission_needed";
+      tool: string;
+      action: string;
+      target: string | null;
+      rule: string | null;
+    }
   | { type: "turn_finished"; status: "completed" | "interrupted" | "failed" }
   /** `auth` names the provider when the message is that CLI saying it has no
    *  usable credentials — an expired OAuth session, a login never done. It is
@@ -372,7 +400,16 @@ export interface HarnessThread {
 /** `interrupted` is the one row with nothing in it: a mark left where a turn
  *  was stopped, so the answer above it reads as cut short rather than given
  *  up on. */
-export type ItemKind = "user" | "assistant" | "thinking" | "tool" | "error" | "interrupted";
+export type ItemKind =
+  | "user"
+  | "assistant"
+  | "thinking"
+  | "tool"
+  | "error"
+  | "interrupted"
+  /** An Antigravity refusal: `content` is the refused target, `meta` is
+   *  `{tool, action, target, rule}` — see `permission_needed`. */
+  | "permission";
 
 /** A message typed while a turn was running. It is not in the conversation
  *  yet — Rust holds it in memory and writes no row until it goes out — which
@@ -508,10 +545,11 @@ export function codexAsModels(models: CodexModel[]): HarnessModel[] {
  * tolerant of a stored row: a bridge that reports no variants for a model
  * costs that model its level row, not the list its rows.
  */
-/** One row of `agy models`. Antigravity bakes the reasoning level into most
- *  of its slugs (`gemini-3.8-flash-high`), so the list it returns declares no
- *  efforts and the picker offers none beside them — a level chosen next to a
- *  slug that already names one could only contradict it. */
+/** One model out of `agy models`. Antigravity bakes the reasoning level into
+ *  most of its slugs (`gemini-3.8-flash-high`); the bridge splits the suffix
+ *  off and groups the rows, so `id` is the base (`gemini-3.8-flash`), the
+ *  suffixes arrive as `reasoningEfforts`, and Rust rebuilds the full slug at
+ *  spawn. A slug with no level suffix is a model with none. */
 export interface AntigravityModel {
   id: string;
   displayName: string;
@@ -548,7 +586,7 @@ export interface OpencodeModel {
 }
 
 /** `opencode models` in the `HarnessModel` shape, so the picker renders all
- *  three catalogues without a special case. */
+ *  four catalogues without a special case. */
 export function opencodeAsModels(models: OpencodeModel[]): HarnessModel[] {
   return models.map((m) => {
     const variants = sortReasoning(m.variants ?? []);
@@ -638,6 +676,45 @@ export function parseErrorMeta(item: HarnessItem): ErrorMeta {
   } catch {
     return {};
   }
+}
+
+/** A `permission` row's `meta`: what Antigravity was refused and the rule
+ *  that would allow it. Every field is optional because the row came out of
+ *  the database — a row that does not parse draws as a refusal with nothing
+ *  to approve, never as a button that sends a malformed rule. */
+export interface PermissionMeta {
+  tool?: string;
+  action?: string;
+  target?: string | null;
+  rule?: string | null;
+}
+
+export function parsePermissionMeta(item: HarnessItem): PermissionMeta {
+  if (!item.meta) return {};
+  try {
+    const m = JSON.parse(item.meta) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+    return {
+      tool: str(m.tool) ?? undefined,
+      action: str(m.action) ?? undefined,
+      target: str(m.target),
+      rule: str(m.rule),
+    };
+  } catch {
+    return {};
+  }
+}
+
+/** An `agy` rule taken apart: which permission, and what it names — the
+ *  command's first word, a folder, or a host. `null` for anything outside the
+ *  four shapes Rust accepts (`is_valid_rule` in
+ *  `app/src-tauri/src/harness/antigravity_rules.rs`). */
+export function splitRule(
+  rule: string,
+): { action: "command" | "read_file" | "write_file" | "read_url"; value: string } | null {
+  const m = /^(command|read_file|write_file|read_url)\((.+)\)$/.exec(rule);
+  if (!m) return null;
+  return { action: m[1] as "command" | "read_file" | "write_file" | "read_url", value: m[2] };
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────
@@ -852,6 +929,24 @@ export function harnessSignInCancel(provider: Provider): Promise<void> {
 
 export function harnessAntigravityModels(): Promise<AntigravityModel[]> {
   return invoke<AntigravityModel[]>("harness_antigravity_models");
+}
+
+/** Allow what an Antigravity thread was stopped at. Stores the rule with the
+ *  student's other approvals and drops the thread's `agy` process, which never
+ *  re-reads its rules — so the follow-up message, which is the caller's to
+ *  send, resumes the conversation under them. Resolves to every approval. */
+export function harnessAntigravityAllow(threadId: number, rule: string): Promise<string[]> {
+  return invoke<string[]>("harness_antigravity_allow", { threadId, rule });
+}
+
+/** The student's Antigravity approvals, in `agy`'s rule syntax. */
+export function harnessAntigravityRules(): Promise<string[]> {
+  return invoke<string[]>("harness_antigravity_rules");
+}
+
+/** Take an approval back; resolves to the ones left. */
+export function harnessAntigravityRevoke(rule: string): Promise<string[]> {
+  return invoke<string[]>("harness_antigravity_revoke", { rule });
 }
 
 export function harnessClaudeModels(): Promise<ClaudeModel[]> {

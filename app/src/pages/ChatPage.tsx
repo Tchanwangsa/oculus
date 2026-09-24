@@ -4,7 +4,7 @@ import { SidebarSimple } from "@phosphor-icons/react";
 import { Composer } from "@/components/harness/Composer";
 import { ThreadList } from "@/components/harness/ThreadList";
 import { ThreadMap } from "@/components/harness/ThreadMap";
-import { Timeline } from "@/components/harness/Timeline";
+import { Timeline, type QuestionActions } from "@/components/harness/Timeline";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -20,6 +20,7 @@ import {
   harnessSend,
   harnessUnqueue,
   parseUsage,
+  providerInfo,
 } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
 
@@ -227,8 +228,19 @@ export default function ChatPage() {
   // Asking the same question differently. The thread rewinds to that row —
   // it and everything after it stop being rows — and the new text goes as the
   // next turn. Rust rewinds the agent's own session to match before it
-  // deletes anything (`docs/harness.md`).
-  const questions = useMemo(() => {
+  // deletes anything (`docs/harness.md`). A provider that cannot do that half
+  // (`ProviderInfo.rewind`) is offered none of the three.
+  const rewinds = providerInfo(activeProvider)?.rewind ?? false;
+  const questions = useMemo((): QuestionActions => {
+    // The composer's own send on the open thread: its model, the session's
+    // level. What an approved Antigravity permission carries on with.
+    const followUp = async (text: string) => {
+      const s = store.getState();
+      const t = s.threads.find((x) => x.id === s.activeId);
+      if (!t) return;
+      await harnessSend(t.id, t.provider, text, { model: t.model, reasoningEffort: s.reasoning });
+    };
+    if (!rewinds) return { followUp };
     const resend = (itemId: number, text: string) => {
       const s = store.getState();
       if (s.activeId == null) return;
@@ -253,8 +265,9 @@ export default function ChatPage() {
           )
           .catch((e) => console.error("harness rewind failed", e));
       },
+      followUp,
     };
-  }, [store]);
+  }, [store, rewinds]);
 
   const pending = useMemo(
     () => ({

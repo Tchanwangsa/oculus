@@ -393,6 +393,18 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           // student needs right now would only appear after a reload.
           push(rowFrom(env, "error", event.message, event.auth ? { auth: event.auth } : undefined));
           break;
+        // The same row Rust wrote (`store::apply`), so a reload finds what
+        // the live timeline had.
+        case "permission_needed":
+          push(
+            rowFrom(env, "permission", event.target ?? "", {
+              tool: event.tool,
+              action: event.action,
+              target: event.target,
+              rule: event.rule,
+            }),
+          );
+          break;
         // The queue is Rust's; this only draws it. `queued` is both "new" and
         // "edited" — the id is the key either way.
         case "queued": {

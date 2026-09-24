@@ -27,6 +27,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | opencode bridge (`opencode serve`, HTTP + SSE) | `app/src-tauri/src/harness/opencode.rs` |
 | Antigravity bridge (`agy -p`, stream-json) | `app/src-tauri/src/harness/antigravity.rs` |
 | opencode's containment ruleset and system prompt | `app/src-tauri/templates/OPENCODE.template.json` |
+| Antigravity's permission rules, kept in `~/.gemini/antigravity-cli/settings.json` | `app/src-tauri/src/harness/antigravity_rules.rs` |
 | Finding the binaries from a GUI app | `app/src-tauri/src/harness/discover.rs` |
 | Installing a missing one from Settings → AI | `app/src-tauri/src/harness/install.rs`, `app/src/components/settings/InstallAgentDialog.tsx` |
 | Signing an installed one back in, and classifying an auth failure | `app/src-tauri/src/harness/signin.rs`, `app/src/components/harness/SignInDialog.tsx` |
@@ -81,35 +82,82 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   `assistant` line and a `user` line. A step's `step_index` is its id, which
   is why a tool row is keyed `step-<n>`: `tool_info` carries no call id of its
   own and a step is exactly one call.
-  **Three things it cannot do, and says so rather than pretending.** It has no
+  **Two things it cannot do, and says so rather than pretending.** It has no
   control channel, so an *interrupt* is a signal to the child and the turn is
   closed by the bridge, not by anything the CLI says — the conversation
   survives because the next message resumes it by id. A *rewind* is refused
   outright: nothing in the protocol drops a message and everything after it,
-  and answering `Ok(())` to a caller that is about to delete rows on the
-  strength of it would leave the timeline shorter than the agent's context. And
-  it takes no *settings document*: Claude's containment is an inline
-  `--settings` JSON, `agy`'s rules live in the student's own
-  `~/.gemini/antigravity-cli/settings.json`, and this app does not write other
-  programs' global config — so containment is `--sandbox` (whose writable root
-  is the workspace, and the workspace is `agents/`) plus
-  `--dangerously-skip-permissions`, which is the headless counterpart of
-  Claude's `--permission-prompts none` and is there for the same reason: under
-  `-p` a prompt with no answerer hangs the turn for ever. The two resolve it in
-  opposite directions — Claude auto-denies and is handed an allow list, `agy`
-  cannot take an allow list and so must auto-allow, leaving the sandbox as the
-  thing that actually bounds it. **That is weaker containment than the other
-  three bridges have**, and it is recorded in the module rather than smoothed
-  over.
-  **Its sandbox refuses `oculus` by name.** Measured: a thread's first
-  `oculus list` comes back `operation not permitted`, and the agent recovers by
-  running the binary by absolute path — one wasted turn. Claude answers the
-  same problem with `Bash(oculus:*)` plus the absolute path in its allow list,
-  and there is no allow list to write here, so this is the practical cost of
-  having no settings document. Two smaller ones: a command that exits non-zero
-  is still a *successful tool call* (`tool_info.error` is the tool failing, not
-  the command's exit status), and the database gets no hole punched for it the
-  way Claude's `allowWrite` and Codex's `writable_files` punch one.
+  the CLI's own `/rewind` answers "not available in print mode", and
+  answering `Ok(())` to a caller that is about to delete rows on the strength
+  of it would leave the timeline shorter than the agent's context.
+- **Antigravity's containment is rules in a file it does not own, plus a
+  terminal sandbox.** Measured on `agy` 1.2.9, and each fact is why the shape
+  is what it is. `--sandbox` bounds *shell* commands only: with the
+  `--dangerously-skip-permissions` this bridge first shipped beside it,
+  `write_to_file` wrote a file outside the library while the same write from
+  the shell was refused — so that flag is gone. Without it, print mode refuses
+  whatever its permission rules do not allow instead of prompting: with no
+  rules, reads in the library and edits in `agents/` work (`--mode
+  accept-edits`), and every `run_command`, `ls` included, is refused. `agy`
+  reads rules from **one place only** — the student's global
+  `~/.gemini/antigravity-cli/settings.json`; a workspace `.agents/hooks.json`,
+  a project file, environment variables and a `HOME` override were each tried
+  and none loads — so `app/src-tauri/src/harness/antigravity_rules.rs` keeps a
+  block of Oculus's own there, written before every spawn. It is Claude's
+  allow and deny lists in `agy`'s syntax: `write_file` on the database's three
+  files, `read_file` on the `oculus` binary's real directory and `command` on
+  both its spellings (the sandbox otherwise cannot *read* the binary behind the
+  `~/.local/bin` symlink and says `operation not permitted: oculus`), a handful
+  of read-only commands, the app's folders and `sqlite3` on the database
+  denied, and whatever the student approved. A `read_file`/`write_file` grant
+  widens the terminal sandbox too, which is what lets the shell reach them.
+  **These entries are global: they apply in the student's own interactive
+  `agy` too, where the sandbox is usually off**, which is what bounds them.
+  The read-only list (`ls`, `cat`, `head`, `tail`, `wc`, `grep`, `pwd`) holds
+  only commands no argument can turn into a write: the matcher is a
+  word-by-word prefix, and while a redirect is not covered (measured, unsandboxed,
+  `command(cat)` did not pass `cat … > <outside>/cat.txt`), flags are — so
+  `find` (`-delete`, `-exec`) and `rg` (`--pre <cmd>`) are out. `sqlite3` is
+  denied as `command(sqlite3 <library>/oculus.db)`, once per spelling of the
+  path (resolved, and quoted or escaped when it has a space, as the real
+  `Application Support` one does — those forms are unmeasured), not as
+  `command(sqlite3)`, which would ban the tool from every session
+  the student runs: measured, that prefix refused `sqlite3 <lib>/oculus.db
+  'select 1'` and let `sqlite3 :memory:` run, while a `command(regex:…)` deny
+  had no effect at all. A `cd` and a relative path still get past it — a speed
+  bump in front of the CLI, like Claude's `Bash(sqlite3:*)`, not a wall. The block is merged,
+  not written over: the module records which entries it wrote in
+  `antigravity-rules.json` at the library root — outside every agent's
+  writable roots, so no thread can make Oculus claim a rule the student wrote
+  — takes its own stale ones back out, never touches the student's, keeps
+  every other key in file order, refuses a file that is not valid JSON, and
+  fails the spawn rather than run `agy` without its rules.
+  **A refusal ends the turn, and the turn is `completed`.** The refused step
+  arrives with `state: "ERROR"` and a `tool_info.error.message` starting
+  `permission check failed`, and a `result` of `SUCCESS` with an empty
+  `response` and a `denied_actions` list follows at once. The bridge closes the
+  row failed and emits `PermissionNeeded` — the tool, `agy`'s word for the
+  permission, the refused target, and a suggested rule (`command(<first
+  word>)`, `write_file(<folder>)`) — which is written as a `permission` row.
+  A *deny* rule's refusal shares the prefix — ending `Matches
+  user-configured deny rule.`, or for a command reading `permission check
+  failed for unsandboxed "…"` — and is not a question: measured, the agent is
+  told and carries on in the same turn, and no allow could beat it.
+  **Approving one respawns the process**, because a live `agy` never re-reads
+  its rules — as does changing the thread's model, since `--model` is fixed at
+  spawn too (`start_turn` closes the process, as it does Claude's): `harness_antigravity_allow` stores the rule in `settings` under
+  `antigravity_allowed_rules` and drops the thread's process, and the next
+  message resumes the conversation with `--conversation` under the rewritten
+  file. `harness_antigravity_rules` and `harness_antigravity_revoke` are the
+  list and its undo. The approvals live in the student's own file, so their
+  own `agy` in a terminal gets them too — the price of the one door `agy` has.
+  In the timeline the row is a card with one allow button that stores the rule
+  and then sends a short "go ahead" as the next message
+  (`app/src/components/harness/PermissionCard.tsx`); Settings → AI lists the
+  approvals with a Remove each.
+  One smaller consequence of the shape: a command that exits non-zero is still
+  a *successful tool call* (`tool_info.error` is the tool failing or being
+  refused, not the command's exit status).
   **Two things its published reference gets wrong**, both measured off `agy`
   1.2.9 and both costing a turn to find. `-p` takes the prompt as its *value*
   (`--print <prompt>`), not as Claude's bare flag, so `-p --input-format
@@ -124,14 +172,17 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   `agy` reads `agents/AGENTS.md` for itself from the directory it is spawned
   in, the same free ride Codex gets — and the per-thread half rides the first
   user message, the way opencode's `brief` does.
-- **Antigravity's own sign-in is not a flow this app can drive.** There is no
-  login subcommand: `agy` reads the system keyring on every run and, finding
-  nothing, opens Google Sign-In in a browser itself. So `harness_sign_in_start`
-  refuses it, `harness_sign_in_status` answers `signedIn: null`, and the
-  provider's `signIn` is `null` — the same answer opencode gives, for a
-  different reason. It is also why `status()` does not probe: the nearest thing
-  to a status command is `agy models`, which signs in *by running*, and every
-  other probe in that module is read-only and opens nothing.
+- **Antigravity's own sign-in is not a flow this app can drive, but it can be
+  asked about.** There is no login subcommand: signing in is `agy` with no
+  arguments, in a terminal, which walks through Google sign-in. So
+  `harness_sign_in_start` refuses it with that instruction and the provider's
+  `signIn` is `null`. Status, though, has a read-only probe: `agy models`
+  signed out prints `Please sign in to view available models` and exits
+  non-zero in about a second, opening nothing, and signed in it lists — so
+  `harness_sign_in_status` answers yes, no, or unknown off it. The listing is
+  `<slug>\t<Display Name>` per row after a `Fetching available models...`
+  header; the name beside the slug is the one the picker shows, and both the
+  picker's call and the probe carry a 20 s deadline, the same as Claude's.
 - **Claude is a process per thread; Codex and opencode are one server each.**
   A Claude thread is one long-lived `claude -p --input-format stream-json`
   process that takes user turns on stdin and is resumed by session id
@@ -141,7 +192,8 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   thread would buy nothing here. opencode is the same shape again: one
   `opencode serve` on a loopback port, one HTTP *session* per thread, and one
   SSE connection to `GET /event?directory=` for the whole app, routed by
-  `properties.sessionID`. All three are handles behind the same `Harness`;
+  `properties.sessionID`. All four — Antigravity's `agy` is a process per
+  thread, like Claude's — are handles behind the same `Harness`;
   nothing above it assumes a process per thread.
 - **Every thread runs from `agents/`, and that is the containment.** Not the
   library root: measured, a Claude thread rooted there under `acceptEdits`
@@ -285,7 +337,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   re-asking a login shell on every send would make a missing CLI slow as
   well as absent. The `--version` probe behind `health` is cached beside it,
   because that answer is no longer read only by Settings → AI — every model
-  picker asks it now (below), and three process spawns per menu is the cost
+  picker asks it now (below), and four process spawns per menu is the cost
   the login-shell fallback was cached to avoid. So `harness_health` takes a
   `recheck` flag: Settings' button passes it and drops both caches, for right
   after an install, and nothing else does.
@@ -674,7 +726,7 @@ row can finally say what was searched for the way Claude's `WebSearch` row
 does from its first event. The verb comes off the provider's tool name rather
 than the kind (`toolVerb` in `app/src/lib/harness.ts`): a search and a fetch
 are both `ToolKind::Web`, and "Fetched" over a list of queries names the wrong
-thing. All three agents can search: opencode's `websearch` and `webfetch` are
+thing. All four agents can search: opencode's `websearch` and `webfetch` are
 allowed in its ruleset for parity, since the two that carry a subscription
 have the web natively and an agent that cannot look anything up is a
 different agent.
@@ -772,6 +824,9 @@ rest is still only what was said, and the pointer crossing a message never
 pushes the rest of the thread down a line.
 
 - A **question** carries when it was asked, then Copy, Edit and Rewind.
+  Edit, Retry and Rewind all truncate the thread, so a provider that cannot
+  take a question back out of its context — Antigravity, `ProviderInfo.rewind`
+  in `app/src/lib/harness.ts` — is offered Copy alone.
 - An **answer** carries Copy and Retry — Retry asks the question above it
   again, unchanged, which is the same move as an edit that changed nothing
   ([going back](#going-back)).
@@ -908,7 +963,7 @@ reads in order, and each CLI was measured getting it wrong in its own way:
   ends — and it was never used, nor is there an equivalent on the v1
   `prompt_async` the bridge runs on now. The harness owns the `Queued`/`Unqueued` rows and
   the one-turn-at-a-time rule; letting the server own the same invariant for
-  one provider out of three would put it in two places, and the half the
+  one provider out of four would put it in two places, and the half the
   webview draws would be the half that could not see the queue.
 
 So the queue is the manager's. A pending message is **not part of the
@@ -1119,7 +1174,11 @@ Five things about it are deliberate:
   *variants*, and the later versions that fill the field in declare a handful
   per model (`high`/`low`/`max` on most, plus `medium`/`xhigh` on a few) —
   which is what 1.18.2 declared for nothing and the row was built to light up
-  for. The picker reads them off the selected row, so a model that only
+  for; Antigravity has no level field at all and bakes the level into the
+  slug instead (`gemini-3.8-flash-high`), so `parse_models` in
+  `app/src-tauri/src/harness/antigravity.rs` splits the suffix off, groups
+  the rows by base into one named model with those levels, and `model_slug`
+  puts the pair back together for `--model` at spawn. The picker reads them off the selected row, so a model that only
   reasons a little never offers a level it would reject, and a model that
   declares none simply draws no level row rather than being offered an
   invented one.
@@ -1142,7 +1201,7 @@ Five things about it are deliberate:
   The gate lives inside opencode's `PROVIDERS` entry — `fetchModels` runs the
   CLI's answer through `filterOffered` — so `useProviderModels` and
   `ModelPicker` still name no provider, which is the rule that file states
-  about itself. An empty list is then not the same sentence for all three:
+  about itself. An empty list is then not the same sentence for all four:
   a provider may carry an `emptyNote`, and opencode's sends the student to
   Settings → AI rather than leaving a menu that reads as broken.
 
@@ -1394,7 +1453,7 @@ stage only the first one was on screen anywhere. An expired OAuth session
 surfaced as a red timeline row reading *"Failed to authenticate: OAuth session
 expired and could not be refreshed"* — true, unactionable, and identical in
 shape to a row about a syntax error in a file. The student's next move was to
-find a terminal, remember which of three CLIs the thread was on, and guess the
+find a terminal, remember which of four CLIs the thread was on, and guess the
 subcommand. `app/src-tauri/src/harness/signin.rs` is the way through, and it
 does two separable things.
 
@@ -1452,7 +1511,7 @@ button anyway: an `open` that silently failed must not be a dead end with a
 spinner on it.
 
 **Nothing here is cached, which is the difference from `discover::health`.**
-Health is asked by every model picker, three spawns a menu, so Rust memoises it
+Health is asked by every model picker, four spawns a menu, so Rust memoises it
 for the life of the process. Sign-in state is asked in three places — a
 settings row, the composer's line above the box, and an error row a student is
 looking at *because something just failed* — and a cached "signed out" that
@@ -1596,7 +1655,7 @@ symlink and a path the sandbox refuses is not an instruction
 (`instructions()` in `app/src-tauri/src/harness/mod.rs`); General appends
 nothing and gets the library-wide brief. The scope is stored on the thread
 (`harness_threads.subject_id`) and locks once the thread exists, for the same
-reason the provider does: all three CLIs bind the appended instructions at
+reason the provider does: all four CLIs bind the appended instructions at
 session start, so a re-scope would be a lie until the process was restarted. Rust
 reads it back off the row rather than trusting the payload, and joins
 `subjects` for the folder name so a renamed subject cannot leave a thread
@@ -1877,7 +1936,7 @@ A thread can also be scoped to one **recording** —
 player's dock holds beside the video. It is the subject scope's shape with a
 narrower subject and one thing it cannot do: NULL clears rather than cascades
 for the reason `subject_id` does — the conversation is the student's own and
-the lecture merely scopes it — and it is fixed at creation, because all three
+the lecture merely scopes it — and it is fixed at creation, because all four
 CLIs bind the appended instructions at session start.
 
 **Rust reads the subject off the lecture's row, not off the payload.** The
@@ -2054,7 +2113,7 @@ time the question was asked.
 
 ## Stages
 
-Built: the three bridges with recorded fixtures and replay tests, `oculus
+Built: the four bridges with recorded fixtures and replay tests, `oculus
 agent` as the headless proof, tables and lifecycle, the page, subject scope
 and the `@` file menu, the message queue, stopping a turn, going back
 (edit, retry, rewind), the per-job model registry above, [signing in to opencode's

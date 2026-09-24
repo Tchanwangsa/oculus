@@ -38,20 +38,29 @@ import { useSignInStatus } from "@/hooks/useSignInStatus";
 import { useHarnessStore } from "@/stores/harnessStore";
 import { cn, copyText } from "@/lib/utils";
 import { ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
+import { PermissionCard } from "./PermissionCard";
 import { SignInDialog, useSignIn } from "./SignInDialog";
 
 /** Editing a question, or one still waiting to be asked, both happen in the
  *  bubble itself rather than back in the composer: the thread is where the
  *  question is, and a box that opened somewhere else would lose its place in
- *  the conversation it is being asked about. */
+ *  the conversation it is being asked about.
+ *
+ *  The three that truncate the thread — edit, rewind, retry — are absent for
+ *  a provider that cannot take a question back out of its own context
+ *  (`ProviderInfo.rewind`): offering them there would shorten the screen and
+ *  leave the agent remembering what it no longer shows. */
 export interface QuestionActions {
   /** Ask it again, differently. The thread rewinds to this row. */
-  edit: (itemId: number, text: string) => void;
+  edit?: (itemId: number, text: string) => void;
   /** Take the thread back to just before this question and hand its words to
    *  the composer. Claude Code's rewind, without the branching. */
-  rewind: (itemId: number) => void;
+  rewind?: (itemId: number) => void;
   /** Ask the same question again, unchanged — what Retry under an answer is. */
-  retry: (itemId: number, text: string) => void;
+  retry?: (itemId: number, text: string) => void;
+  /** Send a new message on the open thread, on the thread's own model and
+   *  the composer's level — what an approved permission carries on with. */
+  followUp: (text: string) => Promise<void>;
 }
 
 /**
@@ -549,15 +558,16 @@ const User = memo(function User({
 }) {
   const busy = useHarnessStore((s) => s.live[item.thread_id]?.running ?? false);
   const text = item.content ?? "";
-  const live = actions && !busy;
+  const edit = busy ? undefined : actions?.edit;
+  const rewind = busy ? undefined : actions?.rewind;
   return (
     <QuestionBubble
       msgId={item.id}
       text={text}
       when={fmtClock(sqliteUtcToMs(item.created_at))}
       at={messageAt(item)}
-      onSubmit={live ? (next) => actions.edit(item.id, next) : undefined}
-      onRewind={live ? () => actions.rewind(item.id) : undefined}
+      onSubmit={edit ? (next) => edit(item.id, next) : undefined}
+      onRewind={rewind ? () => rewind(item.id) : undefined}
     />
   );
 });
@@ -577,16 +587,17 @@ const Reply = memo(function Reply({
 }) {
   const busy = useHarnessStore((s) => s.live[item.thread_id]?.running ?? false);
   const text = item.content ?? "";
+  const retry = actions?.retry;
   return (
     <div className="group/msg flex w-full min-w-0 flex-col">
       <Assistant text={text} />
       <MessageActions when={fmtClock(sqliteUtcToMs(item.created_at))} side="left">
         <CopyAction text={text} />
-        {actions && asked && !busy && (
+        {retry && asked && !busy && (
           <Action
             label="Retry"
             icon={ArrowClockwise}
-            onClick={() => actions.retry(asked.id, asked.text)}
+            onClick={() => retry(asked.id, asked.text)}
           />
         )}
       </MessageActions>
@@ -635,6 +646,7 @@ const Item = memo(function Item({
   actions,
   asked,
   onSignIn,
+  latest,
 }: {
   item: HarnessItem;
   dim: boolean;
@@ -648,6 +660,9 @@ const Item = memo(function Item({
    *  `actions` is — the dialog has to outlive this row re-rendering, and a
    *  fresh closure per render would un-memoise every row in the thread. */
   onSignIn?: (provider: Provider) => void;
+  /** For a `permission` row: whether it is the thread's latest refusal, the
+   *  one that still carries the allow button. */
+  latest?: boolean;
 }) {
   switch (item.kind) {
     case "user":
@@ -664,6 +679,8 @@ const Item = memo(function Item({
       );
     case "interrupted":
       return <Stopped />;
+    case "permission":
+      return <PermissionCard item={item} actionable={!!latest} onFollowUp={actions?.followUp} />;
   }
 });
 
@@ -817,6 +834,12 @@ export function Timeline({
     }
     return map;
   }, [items]);
+  // Only the newest refusal is still a question; the ones above it are what
+  // happened. Allowing is idempotent, so this is tidiness, not safety.
+  const latestPermission = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) if (items[i].kind === "permission") return items[i].id;
+    return undefined;
+  }, [items]);
   return (
     <div
       className="flex min-w-0 flex-col gap-2"
@@ -834,6 +857,7 @@ export function Timeline({
             actions={questions}
             asked={asked.get(r.item.id)}
             onSignIn={setSignIn}
+            latest={r.item.id === latestPermission}
           />
         ),
       )}

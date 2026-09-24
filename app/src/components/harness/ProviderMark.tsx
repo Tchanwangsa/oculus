@@ -72,27 +72,27 @@ export function OpencodeMark(props: SVGProps<SVGSVGElement>) {
 }
 
 /**
- * Antigravity's mark: the product's own device, a ring with a chevron rising
- * out of it — a thing leaving a gravity well.
+ * Antigravity's mark: the vendor's own arch, a single swept "A" whose legs
+ * flare out and curl up at the feet.
  *
  * One `currentColor` path like Claude's and Codex's rather than opencode's
- * two-tone treatment, because the vendor's own mark is a single weight and
- * there is no second value in it to express.
+ * two-tone treatment, because the vendor's mark is a single weight with no
+ * second value in it to express. The vendor file is filled white; that is
+ * swapped for `currentColor` so the theme colours it like the others.
+ *
+ * Its viewBox is 23:21 rather than square, so like opencode's it letterboxes
+ * inside the caller's `size-` box.
  */
 export function AntigravityMark(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
+      viewBox="0 0 23 21"
       fill="currentColor"
       aria-hidden
       {...props}
     >
-      <path
-        fillRule="evenodd"
-        d="M12 1.6a1 1 0 0 1 .84.46l4.3 6.72a1 1 0 0 1-1.68 1.08L13 5.55V14a1 1 0 1 1-2 0V5.55L8.54 9.86a1 1 0 1 1-1.68-1.08l4.3-6.72A1 1 0 0 1 12 1.6Z"
-      />
-      <path d="M4.6 14.2a1 1 0 0 1 1.32.5 6.67 6.67 0 0 0 12.16 0 1 1 0 1 1 1.82.82 8.67 8.67 0 0 1-15.8 0 1 1 0 0 1 .5-1.32Z" />
+      <path d="M20.111 19.9772C21.3499 20.9064 23.2083 20.2869 21.5048 18.5834C16.3943 13.6278 17.4784 0 11.129 0C4.7797 0 5.86372 13.6278 0.753279 18.5834C-1.10506 20.4418 0.908132 20.9064 2.14704 19.9772C6.94777 16.7251 6.63804 10.9952 11.129 10.9952C15.62 10.9952 15.3103 16.7251 20.111 19.9772Z" />
     </svg>
   );
 }

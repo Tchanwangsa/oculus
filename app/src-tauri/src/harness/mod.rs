@@ -24,6 +24,7 @@
 //! `fixtures/harness/` that the bridge tests replay came from exactly this.
 
 pub mod antigravity;
+pub mod antigravity_rules;
 pub mod attach;
 pub mod claude;
 pub mod codex;
@@ -272,6 +273,12 @@ pub struct SendOptions {
     /// row's `meta` so the bubble can say "at 3:40"; see
     /// [`HarnessEvent::UserMessage`].
     pub at: Option<i64>,
+    /// Antigravity only: the rules the student approved, read from the
+    /// database before a send so the spawn can write them into `agy`'s
+    /// settings (`antigravity_rules::install`). `None` from a caller with no
+    /// database to read, which keeps the last ones written.
+    #[serde(skip)]
+    pub antigravity_rules: Option<Vec<String>>,
 }
 
 /// What a lecture thread's appended instructions say about the recording.
@@ -1007,6 +1014,7 @@ impl Harness {
                         brief: thread_sections(opts.scope.as_deref(), opts.lecture.as_ref()),
                         env: discover::child_env(),
                         raw_log,
+                        approved: opts.antigravity_rules.clone(),
                     },
                     sink,
                 )?;
@@ -1134,6 +1142,10 @@ impl Harness {
                         brief: String::new(),
                         env: discover::child_env(),
                         raw_log: None,
+                        // No database here: the same approvals the last
+                        // thread's spawn wrote, so the global file is left as
+                        // it stands rather than rewritten without them.
+                        approved: None,
                     },
                     sink,
                 )?;
@@ -1207,6 +1219,22 @@ impl Harness {
                 Live::Antigravity { session, .. } => session.kill(),
             }
         }
+    }
+
+    /// The threads with a live process of this provider's.
+    pub fn live_threads(&self, provider: Provider) -> Vec<i64> {
+        self.live
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, l)| match l {
+                Live::Claude { .. } => provider == Provider::Claude,
+                Live::Codex { .. } => provider == Provider::Codex,
+                Live::Opencode { .. } => provider == Provider::Opencode,
+                Live::Antigravity { .. } => provider == Provider::Antigravity,
+            })
+            .map(|(id, _)| *id)
+            .collect()
     }
 
     pub fn is_live(&self, thread_id: i64) -> bool {
@@ -1485,10 +1513,12 @@ pub mod app {
         }
         if opts.model.is_some() && opts.model != row.model {
             store::set_model(&pool, thread_id, opts.model.as_deref()).await?;
-            // A different model means a different Claude process. Safe here
-            // and not at the moment the student picked it: the thread is
-            // between turns, so nothing is killed mid-answer.
-            if provider == Provider::Claude {
+            // A different model means a different process for the two CLIs
+            // that fix `--model` at spawn — Claude, and Antigravity, whose
+            // live `agy` keeps the model it started with. Safe here and not
+            // at the moment the student picked it: the thread is between
+            // turns, so nothing is killed mid-answer.
+            if matches!(provider, Provider::Claude | Provider::Antigravity) {
                 harness.close(thread_id);
             }
         }
@@ -1496,10 +1526,17 @@ pub mod app {
         // the model it was last set to, the subject it was created with, and
         // the lecture it was opened over.
         let lecture = lecture_brief(&pool, &row).await;
+        // Read on every send, though only a spawn uses them: which send will
+        // spawn is `ensure`'s call, and it is one indexed row.
+        let antigravity_rules = match provider {
+            Provider::Antigravity => Some(antigravity_rules::stored(&pool).await?),
+            _ => None,
+        };
         let opts = SendOptions {
             model: opts.model.or(row.model),
             scope: row.subject_code,
             lecture,
+            antigravity_rules,
             ..opts
         };
         let resume = row.provider_session_id;
@@ -1701,6 +1738,85 @@ pub mod app {
         tokio::task::spawn_blocking(move || h.antigravity_models())
             .await
             .map_err(|e| e.to_string())?
+    }
+
+    /// Allow what an Antigravity thread was just stopped at.
+    ///
+    /// `rule` is the one a `permission_needed` event suggested, or the
+    /// student's edit of it, in `agy`'s syntax. It is stored with the other
+    /// approvals and the thread's process is dropped, because a live `agy`
+    /// never re-reads its rules (measured): the next message resumes the
+    /// conversation with `--conversation` and the rules rewritten. Nothing is
+    /// sent from here — the follow-up is the webview's to send.
+    ///
+    /// Refused while a turn is running, since dropping the process would end
+    /// it; and refused for a rule one of Oculus's own denies covers, since
+    /// deny beats allow and the approval would silently do nothing.
+    #[tauri::command]
+    pub async fn harness_antigravity_allow(
+        state: State<'_, HarnessState>,
+        thread_id: i64,
+        rule: String,
+    ) -> Result<Vec<String>, String> {
+        let rule = rule.trim().to_string();
+        if !antigravity_rules::is_valid_rule(&rule) {
+            return Err(format!(
+                "not a rule Oculus can allow: {rule:?} — expected command(…), read_file(…), \
+                 write_file(…) or read_url(…)"
+            ));
+        }
+        if let Some(d) = antigravity_rules::denied_by(&crate::paths::data_dir(), &rule) {
+            return Err(format!("{rule} would change nothing: Oculus keeps {d} closed to every agent"));
+        }
+        let pool = crate::store::open_pool().await?;
+        let row = store::thread(&pool, thread_id).await?;
+        if row.provider != Provider::Antigravity {
+            return Err(format!("thread {thread_id} is a {} thread", row.provider.label()));
+        }
+        if state.queue.lock().unwrap().is_busy(thread_id) {
+            return Err("stop the current turn before allowing something new".into());
+        }
+        let mut rules = antigravity_rules::stored(&pool).await?;
+        if !rules.contains(&rule) {
+            rules.push(rule);
+            antigravity_rules::save(&pool, &rules).await?;
+        }
+        state.harness.close(thread_id);
+        Ok(rules)
+    }
+
+    /// The student's Antigravity approvals, for Settings to list.
+    #[tauri::command]
+    pub async fn harness_antigravity_rules() -> Result<Vec<String>, String> {
+        let pool = crate::store::open_pool().await?;
+        antigravity_rules::stored(&pool).await
+    }
+
+    /// Take an approval back. The settings file is rewritten now rather than
+    /// at the next spawn — it is the student's own file, and their own `agy`
+    /// in a terminal reads it too — and every idle Antigravity thread's
+    /// process is dropped so none keeps running under the rule.
+    #[tauri::command]
+    pub async fn harness_antigravity_revoke(
+        state: State<'_, HarnessState>,
+        rule: String,
+    ) -> Result<Vec<String>, String> {
+        let pool = crate::store::open_pool().await?;
+        let mut rules = antigravity_rules::stored(&pool).await?;
+        rules.retain(|r| r != rule.trim());
+        antigravity_rules::save(&pool, &rules).await?;
+        let written = rules.clone();
+        tokio::task::spawn_blocking(move || {
+            antigravity_rules::install(&crate::paths::data_dir(), Some(written))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        for id in state.harness.live_threads(Provider::Antigravity) {
+            if !state.queue.lock().unwrap().is_busy(id) {
+                state.harness.close(id);
+            }
+        }
+        Ok(rules)
     }
 
     /// Claude Code's catalogue, for the same picker — read off the CLI's

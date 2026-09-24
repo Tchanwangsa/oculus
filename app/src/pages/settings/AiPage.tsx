@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowsClockwise, CircleNotch } from "@phosphor-icons/react";
-import { defaultSelection, type Provider } from "@/lib/harness";
+import {
+  defaultSelection,
+  harnessAntigravityRevoke,
+  harnessAntigravityRules,
+  splitRule,
+  type Provider,
+} from "@/lib/harness";
 import { ModelPicker } from "@/components/harness/ModelPicker";
 import { useBridgeHealth } from "@/hooks/useBridgeHealth";
 import { useProviderModels } from "@/hooks/useProviderModels";
@@ -76,7 +82,7 @@ function CliAgentsSection() {
   return (
     <Section
       title="CLI agents"
-      description="Chat runs Claude Code, Codex or opencode from your own machine, signed in as you — no API key, no per-token billing."
+      description="Chat runs Claude Code, Codex, opencode or Antigravity from your own machine, signed in as you — no API key, no per-token billing."
     >
       <div className="divide-y divide-border-subtle">
         {(health ?? []).map((h) => {
@@ -296,12 +302,101 @@ function JobModelsSection() {
   );
 }
 
+/** An approval in the words the chat's allow button used, not `agy`'s
+ *  syntax. */
+function ruleWords(rule: string): string {
+  const r = splitRule(rule);
+  if (!r) return rule;
+  switch (r.action) {
+    case "command":
+      return `Run ${r.value}`;
+    case "write_file":
+      return `Write in ${r.value}`;
+    case "read_file":
+      return `Read ${r.value}`;
+    case "read_url":
+      return `Read pages on ${r.value}`;
+  }
+}
+
+/**
+ * What the student has let Antigravity do, from the allow button on a
+ * refusal in chat (`app/src/components/harness/PermissionCard.tsx`), and the
+ * way to take one back.
+ *
+ * Absent until there is something to list: most students never run
+ * Antigravity, and a section that only ever said "none" would be furniture.
+ * Once it has shown, it stays for the visit, so removing the last approval
+ * does not pull the page up under the pointer. Loading it is a settings-row
+ * read in Rust; nothing is spawned.
+ */
+function AntigravityApprovalsSection() {
+  const [rules, setRules] = useState<string[] | null>(null);
+  const [shown, setShown] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    harnessAntigravityRules()
+      .then((r) => {
+        setRules(r);
+        if (r.length) setShown(true);
+      })
+      .catch(() => setRules([]));
+  }, []);
+
+  const revoke = async (rule: string) => {
+    setRemoving(rule);
+    setError(null);
+    try {
+      setRules(await harnessAntigravityRevoke(rule));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRemoving(null);
+    }
+  };
+
+  if (!shown || !rules) return null;
+  return (
+    <Section
+      title="Antigravity approvals"
+      description="What you let Antigravity do when it stopped to ask. They are kept in agy's own global settings, so agy in your terminal follows them too."
+    >
+      <div className="divide-y divide-border-subtle">
+        {rules.map((rule) => (
+          <div key={rule} className="flex items-center justify-between gap-4 py-2.5">
+            <div className="min-w-0 truncate text-[13px] text-foreground" title={rule}>
+              {ruleWords(rule)}
+            </div>
+            <Button
+              variant="outline"
+              size="xs"
+              className="shrink-0"
+              disabled={removing !== null}
+              onClick={() => void revoke(rule)}
+            >
+              {removing === rule && <CircleNotch size={12} className="animate-spin" />}
+              Remove
+            </Button>
+          </div>
+        ))}
+        {rules.length === 0 && (
+          <div className="py-2.5 text-xs text-muted-foreground">No approvals.</div>
+        )}
+      </div>
+      {error && <p className="mt-2 break-words text-xs text-destructive">{error}</p>}
+    </Section>
+  );
+}
+
 export default function SettingsAiPage() {
   return (
     <div className="flex flex-col gap-8">
       <CliAgentsSection />
       <OpencodeProvidersSection />
       <JobModelsSection />
+      <AntigravityApprovalsSection />
     </div>
   );
 }
