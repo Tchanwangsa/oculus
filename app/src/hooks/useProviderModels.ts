@@ -44,8 +44,8 @@ import { useCatalogue } from "@/lib/opencodeCatalogue";
  * lands, since a tick should not blank the menu for a beat.
  *
  * **Health rides alongside the catalogue rather than replacing it.** A
- * provider whose binary was not found keeps the models it would have — Claude's
- * compiled-in list is still the list `claude --model` takes, and `modelsFor`
+ * provider whose binary was not found keeps the models it would have — a
+ * compiled-in list would still be the list its CLI takes, and `modelsFor`
  * is used to resolve a selection, not to draw one — and it is the picker that
  * refuses to offer them. That keeps the gate in one place for all three, and
  * it is the same gate: before health lands, `unknown` means every provider

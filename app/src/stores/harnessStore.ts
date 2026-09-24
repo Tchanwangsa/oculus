@@ -151,9 +151,9 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   provider: "claude",
   subjectId: null,
   subjects: [],
-  // A provider whose catalogue is compiled in — Claude's is the only one —
-  // lets the composer open already pointing at a real model. A fetched one
-  // (Codex, opencode) opens on nothing and is filled the moment its list
+  // A provider whose catalogue is compiled in would let the composer open
+  // already pointing at a real model. None is any more — every CLI reports
+  // its own — so this opens on nothing and is filled the moment the list
   // lands (`useProviderModels`).
   ...defaultSelectionFor("claude"),
 

@@ -571,6 +571,19 @@ pub struct Harness {
     /// types name no session, and `session.error`'s own id is optional. Same
     /// role as the Codex account sink above, and the same thread id 0.
     opencode_default_sink: Mutex<Option<Sink>>,
+    /// Claude Code's last catalogue, and which binary gave it. Every composer
+    /// that opens asks for the list and each ask would otherwise be a CLI
+    /// start of its own; the binary's resolved path and mtime are the key
+    /// because the list only moves when the CLI does — `claude update`
+    /// re-points the launcher at a new version directory. A sign-in drops it,
+    /// since the account decides what the CLI offers.
+    claude_models: Mutex<Option<ClaudeCatalogue>>,
+}
+
+struct ClaudeCatalogue {
+    bin: PathBuf,
+    modified: Option<std::time::SystemTime>,
+    models: Vec<claude::ModelInfo>,
 }
 
 impl Harness {
@@ -582,6 +595,7 @@ impl Harness {
             opencode: Mutex::new(None),
             codex_account_sink: Mutex::new(None),
             opencode_default_sink: Mutex::new(None),
+            claude_models: Mutex::new(None),
         }
     }
 
@@ -652,6 +666,34 @@ impl Harness {
     pub fn antigravity_models(&self) -> Result<Vec<antigravity::ModelInfo>, String> {
         let bin = discover::binary(Provider::Antigravity)?;
         antigravity::list_models(&bin, &discover::child_env())
+    }
+
+    /// Claude Code's catalogue. There is no shared server to ask, so this is
+    /// a short-lived CLI of its own (`claude::list_models`), run from the
+    /// threads' folder with the bridge's binary and environment so the list
+    /// is the one a thread will be offered — once per binary, then from
+    /// `claude_models` above. The lock is held across the probe so two
+    /// composers opening together start one CLI, not two. Only an answer is
+    /// kept; a failure is asked again next time.
+    pub fn claude_models(&self) -> Result<Vec<claude::ModelInfo>, String> {
+        let bin = discover::binary(Provider::Claude)?;
+        let resolved = std::fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
+        let modified = std::fs::metadata(&resolved).and_then(|m| m.modified()).ok();
+        let mut slot = self.claude_models.lock().unwrap();
+        if let Some(c) = slot.as_ref().filter(|c| c.bin == resolved && c.modified == modified) {
+            return Ok(c.models.clone());
+        }
+        let cwd = thread_cwd(&self.data_dir);
+        std::fs::create_dir_all(&cwd)
+            .map_err(|e| format!("cannot create {}: {e}", cwd.display()))?;
+        let models = claude::list_models(&bin, &cwd, &discover::child_env())?;
+        *slot = Some(ClaudeCatalogue { bin: resolved, modified, models: models.clone() });
+        Ok(models)
+    }
+
+    /// A sign-in may change the account, and with it the catalogue.
+    pub fn forget_claude_models(&self) {
+        *self.claude_models.lock().unwrap() = None;
     }
 
     /// The shared opencode server, started on first use.
@@ -1597,10 +1639,21 @@ pub mod app {
     /// The code Claude's flow ends on, pasted back from the browser. Codex
     /// finishes on its own loopback callback and never reaches this.
     #[tauri::command]
-    pub async fn harness_sign_in_code(provider: Provider, code: String) -> Result<(), String> {
-        tokio::task::spawn_blocking(move || signin::submit_code(provider, &code))
-            .await
-            .map_err(|e| e.to_string())?
+    pub async fn harness_sign_in_code(
+        state: State<'_, HarnessState>,
+        provider: Provider,
+        code: String,
+    ) -> Result<(), String> {
+        let h = state.harness.clone();
+        tokio::task::spawn_blocking(move || {
+            let signed_in = signin::submit_code(provider, &code);
+            if provider == Provider::Claude {
+                h.forget_claude_models();
+            }
+            signed_in
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
 
     /// The student closed the dialog. Nothing else ends a login — an OAuth
@@ -1631,7 +1684,9 @@ pub mod app {
     }
 
     #[tauri::command]
-    pub async fn harness_codex_models(state: State<'_, HarnessState>) -> Result<Vec<ModelInfo>, String> {
+    pub async fn harness_codex_models(
+        state: State<'_, HarnessState>,
+    ) -> Result<Vec<ModelInfo>, String> {
         let h = state.harness.clone();
         tokio::task::spawn_blocking(move || h.codex_models())
             .await
@@ -1644,6 +1699,18 @@ pub mod app {
     ) -> Result<Vec<antigravity::ModelInfo>, String> {
         let h = state.harness.clone();
         tokio::task::spawn_blocking(move || h.antigravity_models())
+            .await
+            .map_err(|e| e.to_string())?
+    }
+
+    /// Claude Code's catalogue, for the same picker — read off the CLI's
+    /// `initialize` answer, which starts no turn and bills nothing.
+    #[tauri::command]
+    pub async fn harness_claude_models(
+        state: State<'_, HarnessState>,
+    ) -> Result<Vec<claude::ModelInfo>, String> {
+        let h = state.harness.clone();
+        tokio::task::spawn_blocking(move || h.claude_models())
             .await
             .map_err(|e| e.to_string())?
     }

@@ -1056,10 +1056,10 @@ the union is a compile error until its mark exists — the ternary that used to
 be there answered "not Claude" with the Codex mark.
 
 Every picker in the app assembles its list through one hook,
-`app/src/hooks/useProviderModels.ts`, which names no provider: which
-catalogues are compiled in and which are fetched from a CLI is a property of
-the `PROVIDERS` entry in `app/src/lib/harness.ts`. That file is the one place
-a provider is declared.
+`app/src/hooks/useProviderModels.ts`, which names no provider: where a
+catalogue comes from — today every one is fetched from its CLI — is a property
+of the `PROVIDERS` entry in `app/src/lib/harness.ts`. That file is the one
+place a provider is declared.
 
 **The menu knows whether the agent is on the machine.** Discovery's answer used
 to reach only Settings → AI, so the composer offered Claude's compiled-in
@@ -1080,8 +1080,8 @@ that agent's mark in the strip without removing it — seeing that Codex exists
 and is absent is the point, and the mark stays clickable because the panel
 behind it is the only thing that says why; and *installed*, where an empty list
 is still "No models available". The gate is the `health` field and not a test
-on an id, so Claude's static catalogue is withheld on exactly the same terms as
-the two fetched ones, and a fourth agent costs nothing here.
+on an id, so every catalogue is withheld on exactly the same terms, and
+a fourth agent costs nothing here.
 
 Five things about it are deliberate:
 
@@ -1090,15 +1090,32 @@ Five things about it are deliberate:
   what the CLI is told. A fresh composer opens on a real model
   (`defaultSelection` in `app/src/lib/harness.ts`) and that model's own
   preferred level.
-- **Models are named, not aliased.** Rows read "Opus 5 (1M)", not "opus".
-  `claude --model` takes full names as happily as the moving aliases, so the
-  ids in `CLAUDE_MODELS` are the names themselves. Claude Code has no
-  model-list call over the stream-json protocol — bb probes it through the
-  Agent SDK instead — so that list mirrors bb's catalogue and is the one
-  thing here that goes stale by hand. Codex answers `model/list` and needs no
-  such list.
+- **Every catalogue is the CLI's own, and models are named, not aliased.**
+  Codex answers `model/list` on its shared server. Claude Code's list rides
+  the answer to the SDK's `initialize` control request — the handshake every
+  Agent SDK session opens with — so `list_models` in
+  `app/src-tauri/src/harness/claude.rs` starts a throwaway `claude -p` in
+  stream-json mode (no hooks, no MCP servers, no session persisted), writes
+  that one line, reads `response.response.models` off the matching
+  `control_response` and kills the child: about a second, no turn, no API
+  call. The answer is kept on the `Harness`, keyed on the binary's resolved
+  path and mtime — a `claude update` re-points the launcher, so it is asked
+  again — and dropped on a Claude sign-in, since the account decides the list;
+  every other composer that opens reads it back for nothing.
+  `claudeAsModels` in `app/src/lib/harness.ts` adapts it. Rows read
+  "Opus 5.5", not "opus": a thread and a job *store* their model, and an alias
+  stored today is a different model after the next release, so an alias row
+  (`sonnet`, `opus[1m]`, `default`) is stored as the concrete name it
+  resolves to, while a row that is already a full name keeps it, `[1m]` and
+  all. Aliases for the same model collapse into one row, the one from
+  `default` is where a fresh composer opens, and since the CLI reports no
+  default level the row starts on `medium`, as the CLI's own `/model` does.
+  There is no compiled-in fallback: a CLI that cannot answer draws "No models
+  available", like the others.
 - **Levels belong to the model, not the provider.** `claude --effort` takes
-  five (`low`…`max`); Codex declares a subset per model; opencode calls them
+  five (`low`…`max`) and Claude Code declares which each model accepts —
+  Haiku none, so a Haiku picked there is sent with no `--effort`; Codex
+  declares a subset per model; opencode calls them
   *variants*, and the later versions that fill the field in declare a handful
   per model (`high`/`low`/`max` on most, plus `medium`/`xhigh` on a few) —
   which is what 1.18.2 declared for nothing and the row was built to light up
@@ -1545,7 +1562,9 @@ agree on them: either can be the one resolving an unconfigured job.
   selection for one run, and with no flag `oculus lecture chapters` runs what
   the row says.
 - **Thread naming** was `TITLE_MODEL_CLAUDE`, a constant in `mod.rs`, and is
-  now a row like any other, defaulting to Claude on Haiku 4.5 at `low`. It
+  now a row like any other, defaulting to Claude on Haiku 4.5
+  (`claude-haiku-4-5-20251001`, the id the CLI's catalogue lists) with no
+  level, since Haiku declares none. It
   costs the rule that naming followed the thread's own provider: a thread now
   gets named by whichever CLI the row names, whatever it was itself run on.
   That is the point of the registry — the student has said who pays for the

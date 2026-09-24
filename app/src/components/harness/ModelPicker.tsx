@@ -56,8 +56,8 @@ export interface PickerProvider {
  * binary was not found (name the CLI and offer the way to Settings → AI), and
  * the CLI is there but reported nothing — an opencode with no credentials —
  * which is still "No models available". The first was the whole bug: Claude's
- * catalogue is compiled in, so a student without Claude Code browsed a full
- * list and learned the truth from an error row after sending. Health is a
+ * catalogue was compiled in then, so a student without Claude Code browsed a
+ * full list and learned the truth from an error row after sending. Health is a
  * field on `PickerProvider` rather than a test on an id, so this stays one
  * gate for three agents and costs a fourth nothing.
  */

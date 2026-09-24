@@ -352,6 +352,174 @@ impl Drop for ClaudeSession {
     }
 }
 
+/// One row of the CLI's own `/model` catalogue, as `initialize` reports it.
+/// Raw on purpose: which of `value` and `resolvedModel` becomes the id the
+/// picker stores, and how a row is labelled, is the frontend's adapter
+/// (`claudeAsModels` in `app/src/lib/harness.ts`), next to Codex's and
+/// opencode's.
+#[derive(serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    /// What `/model` would pass on: an alias (`sonnet`, `opus[1m]`,
+    /// `default`) or a full name (`claude-fable-5-1[1m]`).
+    pub value: String,
+    /// The concrete model the alias stands for today.
+    pub resolved_model: String,
+    pub display_name: String,
+    pub description: String,
+    /// Empty for a model that takes no `--effort` (Haiku).
+    pub supported_effort_levels: Vec<String>,
+}
+
+/// How long the model probe may take. It answers in well under a second; this
+/// is for a CLI that is wedged on something — a login prompt, an update — not
+/// for a slow one.
+const MODELS_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Ask the installed CLI which models it offers, without starting a turn.
+///
+/// The catalogue rides the answer to the SDK's `initialize` control request —
+/// the handshake the Agent SDK opens every session with — so one line in and
+/// one `control_response` out is the whole exchange, and no API call is made.
+/// It is a throwaway process rather than a question put to a live session
+/// because a session only exists per thread, and the picker needs the list
+/// before there is one. The flags keep that process inert: no hooks, no MCP
+/// servers, nothing written to `~/.claude`. `cwd` is the threads' own folder,
+/// so the catalogue is the one a thread will actually be offered.
+///
+/// The child is killed rather than left to exit: in stream-json mode it sits
+/// waiting for a user message that is never coming.
+pub fn list_models(
+    bin: &Path,
+    cwd: &Path,
+    env: &[(String, String)],
+) -> Result<Vec<ModelInfo>, String> {
+    const REQUEST_ID: &str = "oculus-models";
+    let mut child = Command::new(bin)
+        .arg("-p")
+        .args(["--input-format", "stream-json"])
+        .args(["--output-format", "stream-json"])
+        .arg("--verbose")
+        .arg("--no-session-persistence")
+        .arg("--strict-mcp-config")
+        .args(["--settings", r#"{"disableAllHooks":true}"#])
+        .current_dir(cwd)
+        .env_clear()
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        // As the bridge does, so the catalogue is the one a thread gets.
+        .env("CLAUDE_CODE_ENTRYPOINT", "cli")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cannot start {}: {e}", bin.display()))?;
+
+    // Held until the child is killed: closing stdin is end-of-input, and a
+    // CLI that sees it first may leave without answering.
+    let mut stdin = child.stdin.take().ok_or("no stdin on claude child")?;
+    let stdout = child.stdout.take().ok_or("no stdout on claude child")?;
+    let stderr = child.stderr.take().ok_or("no stderr on claude child")?;
+
+    let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    {
+        let tail = stderr_tail.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                let mut t = tail.lock().unwrap();
+                if t.len() >= 20 {
+                    t.remove(0);
+                }
+                t.push(line);
+            }
+        });
+    }
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if let Some(answer) = models_from_response(&v, REQUEST_ID) {
+                let _ = tx.send(Some(answer));
+                return;
+            }
+        }
+        // EOF with no answer: the process is gone.
+        let _ = tx.send(None);
+    });
+
+    let request = serde_json::json!({
+        "type": "control_request",
+        "request_id": REQUEST_ID,
+        "request": { "subtype": "initialize" },
+    });
+    let written = stdin
+        .write_all(format!("{request}\n").as_bytes())
+        .and_then(|_| stdin.flush())
+        .map_err(|e| format!("claude stdin: {e}"));
+    let answer = written.and_then(|()| {
+        rx.recv_timeout(MODELS_TIMEOUT).map_err(|_| {
+            format!(
+                "claude did not list its models within {}s",
+                MODELS_TIMEOUT.as_secs()
+            )
+        })
+    });
+
+    let _ = child.kill();
+    let code = child.wait().ok().and_then(|s| s.code());
+    drop(stdin);
+    match answer? {
+        Some(result) => result,
+        None => {
+            let tail = stderr_tail.lock().unwrap().join("\n");
+            Err(if tail.trim().is_empty() {
+                format!("claude exited (code {code:?}) before listing its models")
+            } else {
+                format!("claude exited (code {code:?}) before listing its models:\n{tail}")
+            })
+        }
+    }
+}
+
+/// The catalogue out of one stdout line, or None when the line is not the
+/// answer to `request_id`. Tolerant per row: a field a future CLI drops reads
+/// as empty, and a row with neither name is skipped rather than failing the
+/// list — the adapter decides what an empty field costs.
+fn models_from_response(v: &Value, request_id: &str) -> Option<Result<Vec<ModelInfo>, String>> {
+    if v.get("type").and_then(|t| t.as_str()) != Some("control_response")
+        || v.pointer("/response/request_id").and_then(|s| s.as_str()) != Some(request_id)
+    {
+        return None;
+    }
+    if v.pointer("/response/subtype").and_then(|s| s.as_str()) == Some("error") {
+        let why = v
+            .pointer("/response/error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("refused");
+        return Some(Err(format!("claude would not initialize: {why}")));
+    }
+    let Some(rows) = v.pointer("/response/response/models").and_then(|m| m.as_array()) else {
+        return Some(Err("claude's initialize answer has no models".into()));
+    };
+    Some(Ok(rows
+        .iter()
+        .map(|m| ModelInfo {
+            value: str_of(m, "value"),
+            resolved_model: str_of(m, "resolvedModel"),
+            display_name: str_of(m, "displayName"),
+            description: str_of(m, "description"),
+            supported_effort_levels: m
+                .get("supportedEffortLevels")
+                .and_then(|a| a.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+        })
+        .filter(|m| !m.value.is_empty() || !m.resolved_model.is_empty())
+        .collect()))
+}
+
 /// The inline `--settings` document: see the module docs for what each part
 /// buys. `//` prefixes an absolute path in the CLI's rule syntax. The root's
 /// files are named by suffix rather than with a bare `*`: measured, `*.log`
@@ -1125,5 +1293,48 @@ mod tests {
         });
         assert_eq!(message.as_deref(), Some(deltas.trim()));
         assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted"));
+    }
+
+    /// The `initialize` answer from CLI 2.1.281, cut down to its models (the
+    /// real line also carries the commands, agents and account). Haiku is the
+    /// row that declares no effort levels at all, and must still arrive.
+    #[test]
+    fn the_initialize_answer_lists_the_models() {
+        let line = r#"{"type":"control_response","response":{"subtype":"success","request_id":"oculus-models","response":{"models":[
+            {"value":"default","resolvedModel":"claude-opus-5-5[1m]","displayName":"Default (recommended)","description":"Opus 5.5 with 1M context · Best for everyday, complex tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},
+            {"value":"claude-fable-5-1[1m]","resolvedModel":"claude-fable-5-1","displayName":"Fable","description":"Fable 5.1 · Most capable for your hardest and longest-running tasks","supportedEffortLevels":["low","medium","high","xhigh","max"]},
+            {"value":"haiku","resolvedModel":"claude-haiku-4-5-20251001","displayName":"Haiku","description":"Haiku 4.5 · Fastest for quick answers"},
+            {"displayName":"nameless"}
+        ]}}}"#;
+        let v: Value = serde_json::from_str(line).unwrap();
+
+        assert!(models_from_response(&v, "someone-else").is_none(), "another request's answer");
+        let models = models_from_response(&v, "oculus-models").unwrap().unwrap();
+        assert_eq!(models.len(), 3, "a row with neither name is dropped, not fatal");
+        assert_eq!(models[0].value, "default");
+        assert_eq!(models[0].resolved_model, "claude-opus-5-5[1m]");
+        assert_eq!(models[0].supported_effort_levels.len(), 5);
+        assert_eq!(models[1].value, "claude-fable-5-1[1m]");
+        assert_eq!(models[2].resolved_model, "claude-haiku-4-5-20251001");
+        assert!(models[2].supported_effort_levels.is_empty());
+
+        let refused: Value = serde_json::from_str(
+            r#"{"type":"control_response","response":{"subtype":"error","request_id":"oculus-models","error":"not logged in"}}"#,
+        )
+        .unwrap();
+        assert!(models_from_response(&refused, "oculus-models").unwrap().is_err());
+    }
+
+    /// The probe against the installed CLI. Ignored because it needs one:
+    /// `cargo test --lib list_models_from_the_real_cli -- --ignored`.
+    #[test]
+    #[ignore]
+    fn list_models_from_the_real_cli() {
+        let bin = crate::harness::discover::binary(Provider::Claude).expect("claude on PATH");
+        let cwd = std::env::temp_dir();
+        let started = std::time::Instant::now();
+        let models = list_models(&bin, &cwd, &crate::harness::discover::child_env()).unwrap();
+        eprintln!("{} models in {:?}: {models:#?}", models.len(), started.elapsed());
+        assert!(!models.is_empty());
     }
 }

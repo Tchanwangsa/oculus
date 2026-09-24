@@ -241,7 +241,7 @@ function JobModelsSection() {
   }, [jobs]);
 
   /** A row sits without a model only while a provider's list is still coming
-   *  — every catalogue but Claude's is fetched — so it is filled the moment
+   *  — every catalogue is fetched from its CLI — so it is filled the moment
    *  one exists, exactly as the composer fills an empty selection. */
   useEffect(() => {
     if (!jobs) return;
@@ -254,8 +254,8 @@ function JobModelsSection() {
   }, [jobs, modelsFor]);
 
   /** Switching agent takes the model and the level with it: a Claude model id
-   *  means nothing to Codex. Claude's list is compiled in so the new selection
-   *  is immediate; a fetched one arrives with its list, above. */
+   *  means nothing to Codex. A list already fetched makes the new selection
+   *  immediate; one still coming arrives with its list, above. */
   const switchProvider = (id: JobId, provider: Provider) => {
     const pick = defaultSelection(modelsFor(provider));
     edit(id, { provider, model: pick.model ?? "", reasoningEffort: pick.reasoning });

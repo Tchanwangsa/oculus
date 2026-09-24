@@ -15,9 +15,10 @@ export type Provider = "claude" | "codex" | "opencode" | "antigravity";
 
 /** The reasoning levels a turn may ask for, **weakest first** — the key order
  *  here is the canonical one, and `sortReasoning` below is the only thing that
- *  decides how a level row reads. `claude --effort` takes exactly these; Codex
- *  declares its own per model (`CodexModel.reasoningEfforts`), which is why
- *  the picker reads the level list off the *model*, not the provider. `null`
+ *  decides how a level row reads. Every provider declares its levels per
+ *  model — Claude's Haiku takes none of the five `claude --effort` accepts,
+ *  and Codex's lists differ model to model — which is why the picker reads the
+ *  level list off the *model*, not the provider. `null`
  *  is the absence of a level — the flag is left off and the agent's own
  *  default applies. Labels are bb's. */
 export const REASONING_LABELS: Record<string, string> = {
@@ -97,67 +98,18 @@ export function defaultSelection(models: HarnessModel[]): {
   return { model: m.id, reasoning: m.defaultReasoningEffort ?? m.reasoningEfforts[0] ?? null };
 }
 
-/** Every level `claude --effort` accepts. */
-const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-
-/**
- * Claude Code has no model-list call over the CLI's stream-json protocol —
- * bb probes it through the Agent SDK instead — so this mirrors bb's active
- * catalogue (`plugins/provider-claude-code/src/model-catalog-data.ts`).
- * `--model` also accepts these full names directly, so the ids are the real
- * model names rather than the moving `opus`/`sonnet` aliases; a name that
- * outlives this list still works because it is passed through untouched.
- */
-export const CLAUDE_MODELS: HarnessModel[] = [
-  {
-    id: "claude-fable-5-1",
-    label: "Fable 5.1",
-    description: "Fable 5.1 for demanding reasoning",
-    reasoningEfforts: CLAUDE_EFFORTS,
-    defaultReasoningEffort: "high",
-  },
-  {
-    id: "claude-opus-5[1m]",
-    label: "Opus 5 (1M)",
-    description: "Opus 5 with 1M context for long, complex sessions",
-    reasoningEfforts: CLAUDE_EFFORTS,
-    defaultReasoningEffort: "high",
-    isDefault: true,
-  },
-  {
-    id: "claude-opus-5",
-    label: "Opus 5",
-    description: "Opus 5 for complex work",
-    reasoningEfforts: CLAUDE_EFFORTS,
-    defaultReasoningEffort: "high",
-  },
-  {
-    id: "claude-sonnet-5",
-    label: "Sonnet 5",
-    description: "Sonnet 5 for everyday tasks with deeper reasoning",
-    reasoningEfforts: CLAUDE_EFFORTS,
-    defaultReasoningEffort: "medium",
-  },
-  {
-    id: "claude-haiku-4-5",
-    label: "Haiku 4.5",
-    description: "Haiku 4.5 for quick answers",
-    reasoningEfforts: ["low"],
-    defaultReasoningEffort: "low",
-  },
-];
-
 /** One CLI agent the harness can drive: its id, the name a person reads, and
  *  where its catalogue comes from. */
 export interface ProviderInfo {
   id: Provider;
   label: string;
-  /** The models this provider has without being asked. Claude Code answers no
-   *  model-list call over `stream-json`, so its catalogue is compiled in
-   *  above; `null` says the CLI has to be asked, which is what
-   *  `fetchModels` below does. Everything that used to test
-   *  `provider === "claude"` — the composer's opening selection, what a
-   *  provider switch clears — is really asking this question. */
+  /** The models this provider has without being asked. Every agent today is
+   *  `null` — each CLI reports its own catalogue, and Claude Code's used to be
+   *  compiled in only until its `initialize` answer turned out to carry one —
+   *  so `fetchModels` below is how every list arrives. The field stays because
+   *  it is the question everything that used to test `provider === "claude"`
+   *  — the composer's opening selection, what a provider switch clears — was
+   *  really asking. */
   staticModels: HarnessModel[] | null;
   /** Ask the CLI for its catalogue. Present exactly when `staticModels` is
    *  null, and already adapted to the picker's shape, so a call site never
@@ -208,7 +160,13 @@ export interface ProviderInfo {
  * opencode brands itself lowercase, so the label is not title-cased.
  */
 export const PROVIDERS: ProviderInfo[] = [
-  { id: "claude", label: "Claude Code", staticModels: CLAUDE_MODELS, signIn: "code" },
+  {
+    id: "claude",
+    label: "Claude Code",
+    staticModels: null,
+    fetchModels: () => harnessClaudeModels().then(claudeAsModels),
+    signIn: "code",
+  },
   {
     id: "codex",
     label: "Codex",
@@ -468,8 +426,65 @@ export interface CodexModel {
   isDefault: boolean;
 }
 
-/** Codex reports its own catalogue over `model/list`; this is the same shape
- *  as `CLAUDE_MODELS` so the picker renders both without a special case. */
+/**
+ * One row of Claude Code's own `/model` catalogue, as the CLI's `initialize`
+ * answer reports it (`list_models` in `app/src-tauri/src/harness/claude.rs`).
+ * `value` is what `/model` would pass on — an alias such as `sonnet` or
+ * `opus[1m]`, or a full name — and `resolvedModel` is the model it stands for
+ * today.
+ */
+export interface ClaudeModel {
+  value: string;
+  resolvedModel: string;
+  displayName: string;
+  description: string;
+  /** Empty for a model that takes no `--effort` (Haiku). */
+  supportedEffortLevels?: string[];
+}
+
+/** "Opus 5.5 with 1M context · Best for…" → "Opus 5.5": the model's own name
+ *  and version, which is what a row reads as. */
+const CLAUDE_NAME = /^([A-Za-z]+)\s+(\d+(?:\.\d+)*)/;
+
+/**
+ * Claude Code's catalogue in `HarnessModel`'s shape.
+ *
+ * **The id is a real model name, never a moving alias.** A thread or a job
+ * stores its model, and `sonnet` stored today would silently be a different
+ * model after the next release. So an alias row is stored as the name it
+ * resolves to, and a row whose `value` is already a full name keeps it —
+ * including its `[1m]`, which `resolvedModel` drops. Two aliases for one model
+ * (`default` and `opus[1m]`) collapse into the first row, and the row that came
+ * from `default` is where a fresh composer opens.
+ *
+ * The CLI reports no default level; its own `/model` picker starts on medium,
+ * so this does too wherever the model takes one.
+ */
+export function claudeAsModels(models: ClaudeModel[]): HarnessModel[] {
+  const out: HarnessModel[] = [];
+  const seen = new Set<string>();
+  for (const m of models) {
+    const id = m.value?.startsWith("claude-") ? m.value : m.resolvedModel;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const description = m.description ?? "";
+    const name = CLAUDE_NAME.exec(description);
+    const sep = description.indexOf(" · ");
+    const efforts = sortReasoning(m.supportedEffortLevels ?? []);
+    out.push({
+      id,
+      label: name ? `${name[1]} ${name[2]}` : m.displayName || id,
+      description: sep === -1 ? description : description.slice(sep + 3),
+      reasoningEfforts: efforts,
+      defaultReasoningEffort: efforts.includes("medium") ? "medium" : (efforts[0] ?? null),
+      isDefault: m.value === "default",
+    });
+  }
+  return out;
+}
+
+/** Codex reports its own catalogue over `model/list`; this is the same
+ *  `HarnessModel` shape, so the picker renders both without a special case. */
 export function codexAsModels(models: CodexModel[]): HarnessModel[] {
   return models.map((m) => ({
     id: m.id,
@@ -532,8 +547,8 @@ export interface OpencodeModel {
   textOutput?: boolean;
 }
 
-/** `opencode models` in the shape `CLAUDE_MODELS` has, so the picker renders
- *  all three catalogues without a special case. */
+/** `opencode models` in the `HarnessModel` shape, so the picker renders all
+ *  three catalogues without a special case. */
 export function opencodeAsModels(models: OpencodeModel[]): HarnessModel[] {
   return models.map((m) => {
     const variants = sortReasoning(m.variants ?? []);
@@ -837,6 +852,10 @@ export function harnessSignInCancel(provider: Provider): Promise<void> {
 
 export function harnessAntigravityModels(): Promise<AntigravityModel[]> {
   return invoke<AntigravityModel[]>("harness_antigravity_models");
+}
+
+export function harnessClaudeModels(): Promise<ClaudeModel[]> {
+  return invoke<ClaudeModel[]>("harness_claude_models");
 }
 
 export function harnessCodexModels(): Promise<CodexModel[]> {

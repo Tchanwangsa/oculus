@@ -1297,6 +1297,7 @@ CREATE TABLE IF NOT EXISTS browser_favicons (
             harness::app::harness_sign_in_start,
             harness::app::harness_sign_in_code,
             harness::app::harness_sign_in_cancel,
+            harness::app::harness_claude_models,
             harness::app::harness_codex_models,
             harness::app::harness_antigravity_models,
             harness::app::harness_opencode_models,

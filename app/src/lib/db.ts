@@ -307,7 +307,7 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
 export const DEFAULT_JOB_MODELS: JobModels = {
   lectureChapters: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
   lectureReading: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" },
-  threadNaming: { provider: "claude", model: "claude-haiku-4-5", reasoningEffort: "low" },
+  threadNaming: { provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null },
 };
 
 const JOB_MODELS_KEY = "job_models";
