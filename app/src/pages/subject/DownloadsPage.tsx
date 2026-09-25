@@ -1,25 +1,23 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { ArrowsClockwise, CircleNotch, Paperclip } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
-import { useParseStore } from "@/stores/parseStore";
+import { useReconcileParseStatus } from "@/hooks/useReconcileParseStatus";
+import { useWindowEvent } from "@/hooks/useEvents";
+import { FILE_SCRAPED_EVENT, type FileScraped } from "@/lib/syncRunner";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { ParseStateBadge } from "@/components/files/ParseState";
-import { fileIconFor, isPdfBacked } from "@/lib/fileTypes";
+import { fileIconFor } from "@/lib/fileTypes";
 import { fmtSize } from "@/lib/format";
-import {
-  upsertFile,
-  setParseStatusByPath,
-  type DbFile,
-} from "@/lib/db";
+import type { DbFile } from "@/lib/db";
+import { ListCard } from "@/components/ui/PageParts";
 
 /**
  * Every file downloaded from Canvas, flat. PDFs peek in-app; other types hand
@@ -34,52 +32,22 @@ export default function SubjectDownloadsPage() {
   const [rescraping, setRescraping] = useState<Set<number>>(new Set());
   const [rescrapeError, setRescrapeError] = useState<string | null>(null);
 
-  const mergeParseStatuses = useParseStore((s) => s.merge);
+  useReconcileParseStatus(downloads);
 
-  // Reconcile parse status from disk: PDF-backed files with parse output get a
-  // badge even if parsed before status tracking existed.
-  useEffect(() => {
-    const pdfPaths = downloads
-      .filter((f) => isPdfBacked(f.filename))
-      .map((f) => f.relative_path);
-    if (pdfPaths.length === 0) return;
-    invoke<Array<[string, string]>>("scan_parsed_files", { relativePaths: pdfPaths })
-      .then((entries) => {
-        if (entries.length === 0) return;
-        mergeParseStatuses(Object.fromEntries(entries));
-        setParseStatusByPath(entries).catch(() => {});
-      })
-      .catch(() => {});
-  }, [downloads, mergeParseStatuses]);
-
-  // Rescrape completions arrive as scrape-file events.
-  useEffect(() => {
-    const unsub = listen<{
-      subject_id: number;
-      relative_path: string;
-      size_bytes: number;
-      category: string | null;
-      canvas_id: number | null;
-    }>("scrape-file", async (e) => {
-      const { subject_id, relative_path, size_bytes, category, canvas_id } = e.payload;
-      const filename = relative_path.split("/").pop() ?? relative_path;
-      const ext = filename.includes(".") ? filename.split(".").pop()! : "md";
-      try {
-        await upsertFile(subject_id, filename, relative_path, ext, size_bytes, category ?? undefined, canvas_id ?? undefined);
-      } catch { /* ignore */ }
-      if (canvas_id != null) {
-        setRescraping((prev) => {
-          const s = new Set(prev);
-          s.delete(canvas_id);
-          return s;
-        });
-      }
-      if (subject_id === subject.id) reload();
-    });
-    return () => {
-      unsub.then((f) => f()).catch(() => {});
-    };
-  }, [subject.id, reload]);
+  // The row is written by the app-level `scrape-file` handler in
+  // `useBackendEvents`, which raises FILE_SCRAPED_EVENT once it has; a
+  // rescrape's completion only refreshes the list and clears its spinner.
+  useWindowEvent(FILE_SCRAPED_EVENT, (e) => {
+    const { subject_id, canvas_id } = (e as CustomEvent<FileScraped>).detail;
+    if (canvas_id != null) {
+      setRescraping((prev) => {
+        const s = new Set(prev);
+        s.delete(canvas_id);
+        return s;
+      });
+    }
+    if (subject_id === subject.id) reload();
+  });
 
   const rescrape = async (file: DbFile) => {
     if (!file.canvas_id) return;
@@ -140,7 +108,7 @@ export default function SubjectDownloadsPage() {
           </Alert>
         )}
 
-        <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">
+        <ListCard>
           {downloads.map((f) => (
             <DownloadRow
               key={f.id}
@@ -149,7 +117,7 @@ export default function SubjectDownloadsPage() {
               onRescrape={() => rescrape(f)}
             />
           ))}
-        </div>
+        </ListCard>
       </div>
     </div>
   );
@@ -175,9 +143,8 @@ function DownloadRow({
         <span className="text-[12px] text-foreground truncate flex-1">
           {file.filename}
         </span>
-        {/* Fixed-width, right-aligned columns so every row lines up. The
-            parse column carries a word for every state a PDF can be in —
-            blank here means "this file has no parse", never "all is well". */}
+        {/* Fixed-width columns so rows line up. A blank parse column means
+            "no parse", never "all is well". */}
         <span className="shrink-0 w-20 flex items-center justify-end">
           <ParseStateBadge file={file} />
         </span>
@@ -189,8 +156,7 @@ function DownloadRow({
         </span>
       </button>
 
-      {/* Slot is always reserved so the columns don't shift on rows without
-          a Canvas id. */}
+      {/* Always reserved so rows without a Canvas id keep the columns. */}
       <span className="shrink-0 w-3 flex items-center justify-center">
         {file.canvas_id != null && (
           <button
