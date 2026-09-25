@@ -5,8 +5,7 @@ text. There is no graph and no vector index — both were considered and
 dropped, on measurement.
 
 Embedding runs in-process in Rust, behind a seam shaped exactly like the
-parser's (see [parsing.md](./parsing.md)). The Python sidecar and its local
-Qwen model are gone; `voyage-multimodal-3.5` took their place.
+parser's (see [parsing.md](./parsing.md)), against `voyage-multimodal-3.5`.
 
 ## Where
 
@@ -17,6 +16,7 @@ Qwen model are gone; `voyage-multimodal-3.5` took their place.
 | Voyage client — the `Embedder` | `app/src-tauri/src/embed/voyage/client.rs` |
 | Allowance, throttle, tier detection | `app/src-tauri/src/embed/voyage/ledger.rs` |
 | Which pages travel in one request | `app/src-tauri/src/embed/voyage/batch.rs` |
+| Token bucket, semaphore, retry ladder (shared with MinerU) | `app/src-tauri/src/ratelimit.rs` |
 | What an outstanding run will cost, before it runs | `app/src-tauri/src/embed/estimate.rs` |
 | Backend selection + throwing the index away | `app/src-tauri/src/embed/commands.rs` |
 | The `embed-status` event | `app/src-tauri/src/embed/events.rs` |
@@ -27,9 +27,9 @@ Qwen model are gone; `voyage-multimodal-3.5` took their place.
 | Lexical query path (frontend) | `searchPageText` in `app/src/lib/db.ts` |
 | Per-page markdown source | `app/src-tauri/src/parse/mod.rs` (`.pages.json`) |
 | Who writes `pages.markdown` | `app/src-tauri/src/sync.rs` (the parse path) |
-| `pages` table schema | migrations in `app/src-tauri/src/lib.rs` |
+| `pages` table schema | `app/src-tauri/src/migrations.rs` |
 | Frontend query path | `app/src/lib/retrieval.ts` |
-| Terminal query path | `app/src-tauri/src/bin/oculus.rs` (`oculus search`) |
+| Terminal query path | `app/src-tauri/src/bin/oculus/query.rs` (`oculus search`) |
 | Smoke test | `app/src-tauri/src/bin/retrieval_smoke.rs` |
 
 ## The flow
@@ -46,9 +46,8 @@ touches a vector** — a future LLM sees only markdown and citations.
 
 The `.emb.json` beside each PDF is the record that a file is indexed:
 `{pdf, model, dim, dtype, instruction, page_count, pages: [{page_no, vector}]}`,
-written temp-then-rename so it becomes visible in one step. It is the same wire
-shape Python wrote, so old records still deserialise — they simply do not
-*match*.
+written temp-then-rename so it becomes visible in one step. A record from
+another model still deserialises — it simply does not *match*.
 
 ## Decisions and the numbers behind them
 
@@ -93,8 +92,6 @@ thread concurrently.** Both failure modes matter:
 
 The hold can be long — an embed's render pass is a whole document — so the
 trade is explicit: a caller may wait, and no caller gets a torn answer.
-`render_page` renders one page instead of sweeping the document for it, which
-is both cheaper and a shorter hold on the interactive path.
 
 The trigger was React's StrictMode firing the settings page's estimate effect
 twice, so the app asked for two concurrent library-wide sweeps. That is fixed
@@ -196,11 +193,10 @@ tokens and requests are unchanged.
   rebuilt. It is a percentage of the free grant, defaulting to 100 — stop
   before this starts costing money — and `0` turns it off, because past the
   grant is a price, not a wall.
-- **It binds a paid account too, which reverses the older rule.** The grant
-  check used to be skipped when the tier read as free-plus, on the grounds that
-  refusing a paid account's work against a free pool would be a limit the app
-  invented. A percentage the user set is not invented, and past 150B pixels a
-  paid account is the one actually being billed. `EmbedError::BudgetReached`
+- **It binds a paid account too.** A limit the app invented would have no
+  business refusing a paid account's work, but a percentage the user set is not
+  invented, and past 150B pixels a paid account is the one actually being
+  billed. `EmbedError::BudgetReached`
   is its own variant rather than a `QuotaExhausted` in disguise: an allowance
   repairs itself and is worth retrying, a setting does not and is not.
 - **`embed_estimate` answers "what will this cost" without sending anything.**
@@ -300,10 +296,9 @@ write; do not add one.
 
 - The page is the chunk. Slide-deck pages run ~90–760 chars of markdown, so
   there is no sub-chunking anywhere.
-- **`pages.markdown` is the parse's write, not the embedder's.** It used to
-  arrive only as a side effect of `retrieval::ingest`, which made the text
-  `oculus grep` searches depend on the vector index having been built. A
-  finished parse writes its own page records now (`store::upsert_pages`), and
+- **`pages.markdown` is the parse's write, not the embedder's**, so the text
+  `oculus grep` searches never depends on the vector index having been built.
+  A finished parse writes its own page records (`store::upsert_pages`), and
   an `oculus index` over an already-parsed file folds its `.pages.json` in if
   nothing ever did. Ingest still upserts markdown alongside the vector, and
   both sides use the same conflict rule: an empty incoming page never
@@ -316,27 +311,23 @@ write; do not add one.
   deadline imposed from above could only abandon work that was still
   progressing. Same rule as the parse path. What the call site owes instead is
   an honest counter, which is what `ingest_reporting`'s `ProgressSink` carries
-  — `oculus index` renders it as an in-place line, and the app now emits it as
+  — `oculus index` renders it as an in-place line, and the app emits it as
   **`embed-status`** (`app/src-tauri/src/embed/events.rs`), a deliberate copy
-  of `parse-status` down to the field names. The app counted files and could
-  not count pages, and that was the whole of the gap: one document is one
-  blocking call, so a 200-page deck was an hour of a filename that never
-  changed. `embed_file` takes a `subject_id` purely so the event can be keyed
+  of `parse-status` down to the field names. It counts pages, because one
+  document is one blocking call and a 200-page deck is an hour of the same
+  filename otherwise. `embed_file` takes a `subject_id` purely so the event can be keyed
   the way a pipeline row is, and the events are emitted *around* `ingest` in
   the command rather than inside it, because `ingest` is also the CLI's path.
-- **A failure carries its discriminants out of the ingest now**, not just a
+- **A failure carries its discriminants out of the ingest**, not just a
   sentence. `retrieval::IngestError` is `{message, kind, retryable, latching}`
   — the same three questions `ParseError` answers, optional because a failure
   that never reached a backend (no file on disk, a refused write) has no
-  `EmbedError` behind it and unknown is its own case. The string alone was
-  enough while the only caller was a terminal printing it; a row that has to
-  decide whether to offer a retry cannot recover them from prose.
+  `EmbedError` behind it and unknown is its own case. A row that has to decide
+  whether to offer a retry cannot recover them from prose.
 - **The app runs the index itself, as a queue** (`app/src/stores/indexStore.ts`,
-  drawn by Settings → Library). `embedFile`, `searchPages`, `embeddingStats`
-  and `getUnembeddedPdfs` in `app/src/lib/retrieval.ts` had no caller at all
-  for a while — every one of them wired to Rust and reachable only from the
-  CLI — which is how a library ended up parsed, unsearchable, and silent about
-  it. The loop that replaced that is now **a queue with one worker**, because
+  drawn by Settings → Library) through `embedFile`, `embeddingStats` and
+  `getUnembeddedPdfs` in `app/src/lib/retrieval.ts`, so a library cannot end up
+  parsed, unsearchable, and silent about it. It is **a queue with one worker**, because
   work arrives from three places and must never become two runs: the Index
   button enqueues the whole backlog, a finished parse enqueues one file, and a
   row's retry in File Activity enqueues one. Stopping is polled between files,
@@ -380,14 +371,11 @@ write; do not add one.
 
 Honest gaps, so nobody goes looking for them:
 
-- **`searchPages` has no caller in the app.** Semantic search is reached from
-  the CLI (`oculus search`), because chat is a CLI agent now and it reads the
-  library through `oculus search` and `oculus grep` rather than through the
-  WebView. There is no in-app results page for it. It is the tested path the
-  CLI uses, reached from TypeScript, not dead code — but nothing in the UI
-  invokes it. The rest of `app/src/lib/retrieval.ts` does have callers now:
-  `embedFile` from `indexStore`'s worker, and `getUnembeddedPdfs` (and through
-  it `embeddingStats`) from the Index button and the Sync page's seed.
+- **Semantic search has no surface in the app.** It is reached from the CLI
+  (`oculus search`), because chat is a CLI agent and reads the library through
+  `oculus search` and `oculus grep` rather than through the WebView. The
+  `search_pages` command is still registered in
+  `app/src-tauri/src/lib.rs`, but nothing in the frontend calls it.
 - `Engine::Local` is a real arm of the seam pointing at a loopback server that
   ships from its own repo. It resolves to `EmbedError::NotReady` rather than
   silently falling back to the cloud, because embedding into a space the user
@@ -398,11 +386,10 @@ Honest gaps, so nobody goes looking for them:
 Nothing in the app measures this today — embedding is a cloud call and chat is
 a CLI agent. The method is kept here because it was **measured rather than
 reasoned**, and because it is what `Engine::Local` (and any local provider that
-comes back) will need on its first afternoon rather than rediscover. The
-deleted BYOK layer ran this preflight before every local model call, because a
-local model that does not fit is not slow — it is an OOM that takes the machine
-down, observed with a 17 GB Ollama model loading beside the old Qwen3-VL
-embedder on a 36 GB machine.
+comes back) will need on its first afternoon rather than rediscover. A local
+model that does not fit is not slow — it is an OOM that takes the machine
+down, observed with a 17 GB Ollama model loading beside a local embedder on a
+36 GB machine.
 
 - **Available memory is physical memory (`sysctl hw.memsize`) less wired
   pages, not free pages.** macOS keeps almost nothing free, compressing

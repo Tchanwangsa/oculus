@@ -13,7 +13,7 @@ session cookie.
 | Headless Okta sign-in, TOTP, stored credentials | `app/src-tauri/src/okta.rs` |
 | Cookie/flag file locations | `app/src-tauri/src/paths.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
-| The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus.rs` |
+| The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
 | In-app keep-alive loop + startup probe | `app/src-tauri/src/lib.rs` |
 | Ed token minting via LTI | `app/src-tauri/src/ed.rs` |
 | Echo360 session via LTI | `app/src-tauri/src/echo360.rs` |
@@ -77,12 +77,9 @@ something WebKit will read.
   non-zero exit would only read as a crashed job, so every outcome is a log
   line and exit 0.
 
-  The agent was once a standalone `/bin/sh` script that re-implemented the
-  cookie merge in awk, and it could only *ping*: on 401 it had nowhere to go,
-  so it logged the failure and gave up. Weeks of `ping failed: HTTP 401` is
-  what a keep-alive that cannot re-authenticate looks like. Running the CLI
-  means the agent shares one probe, one cookie merge, and one sign-in with the
-  app.
+  The agent runs the CLI rather than a script of its own so that it shares one
+  probe, one cookie merge, and one sign-in with the app: a keep-alive that can
+  only *ping* has nowhere to go on a 401 but a log line.
 
   **The CLI ships as a Tauri sidecar**, declared in `externalBin` alongside
   ffmpeg and staged by `app/scripts/stage-cli.mjs` from `beforeBuildCommand`.
@@ -185,8 +182,8 @@ Canvas (`app/src/components/settings/AutoSignIn.tsx`) or via
 **Every path that establishes a session must write the auth flag.** The
 startup probe reads it before it reads anything else — no flag means "fresh
 session" and the cookie beside it is never even looked at. `paths::
-mark_authenticated` is the one writer; `oculus auth auto` used to skip it,
-which left a valid cookie on disk and the app still opening disconnected.
+mark_authenticated` is the one writer; a path that skips it leaves a valid
+cookie on disk and the app still opening disconnected.
 
 A rejected password clears the stored one rather than letting the keep-alive
 replay a wrong password every six hours until Okta locks the account.

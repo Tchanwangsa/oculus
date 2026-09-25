@@ -21,9 +21,8 @@ also bun's lifecycle name for `dev`, so `bun run dev` runs it first and so does
 `OCULUS_CLI_WATCH=1 bun run dev`. `OCULUS_SKIP_PREDEV=1` skips it when you only
 want vite.
 
-**There is no Python step any more**, and no `sidecar/` directory: it left the
-tree in `f875bb1`, which is the commit the separate local-server repo forks
-from. If you have an orphaned `sidecar/.venv` from an older checkout it is
+**There is no Python step** and no `sidecar/` directory (see
+[index.md](./index.md)). An orphaned `sidecar/.venv` left in a checkout is
 1.2 GB of nothing — delete it.
 
 The two fetch steps (`bun run ffmpeg`, `bun run pdfium`) are still there to run
@@ -89,7 +88,7 @@ cover different windows:
   `target/` is older than the `.rs` files beside it. It should never fire; it
   exists because the failure is invisible from the agent's end, where a stale
   binary runs, answers `--version`, and rejects a subcommand it has never heard
-  of. A binary from anywhere else — a bundle's sidecar, `~/.local/bin`, the
+  of. A binary from anywhere else — the bundle's `externalBin`, `~/.local/bin`, the
   PATH — has no sources to be behind, so it is silent by construction.
 
 Both `predev` and the watcher delete the binary before building. Cargo reports
@@ -137,8 +136,8 @@ and which are never touched twice.
 - Rust: `cargo check` in `app/src-tauri` (or just let `tauri dev` rebuild).
 - Retrieval smoke test: `app/src-tauri/src/bin/retrieval_smoke.rs`.
 - Parse regressions: `cargo test` in `app/src-tauri`. The differential tests in
-  `parse/mineru/render.rs` pin the Python renderer's own output and are now the
-  only record of what it did; none of them touch the network.
+  `parse/mineru/render.rs` pin the output of the renderer it was ported from
+  (at `f875bb1`); none of them touch the network.
 - Real parse regression: the golden fixtures in `data/parse-fixtures/`
   (gitignored) — see [parsing.md](./parsing.md#debugging).
 - After UI changes, screenshot the running app (root `CLAUDE.md` has the
@@ -148,7 +147,6 @@ and which are never touched twice.
 
 | Variable | Meaning |
 | --- | --- |
-| `OCULUS_DATA_DIR` | The data directory, including both cloud usage ledgers |
 | `OCULUS_PDFIUM_LIB` | Explicit path to `libpdfium`, instead of the search relative to the executable |
 
 Which parser and which embedder run is a **setting, not an environment
@@ -163,9 +161,8 @@ API limits.
 ## Gotchas
 
 - `tauri dev` rebuilds SIGTERM the app in a way that bypasses Tauri's Exit
-  event. Nothing the app spawns outlives it any more — the one long-lived
-  child process was the sidecar — but a CLI-agent subprocess mid-turn is the
-  case to watch (see [harness.md](./harness.md)).
+  event, so a CLI-agent subprocess can outlive it — a turn mid-flight, or an
+  `opencode serve` that the next start sweeps (see [harness.md](./harness.md)).
 - User data lives in `~/Library/Application Support/com.tchan.oculus`
   (cookie, `oculus.db`, `courses/`, `lectures/`). Deleting it is a full
   reset, including auth.

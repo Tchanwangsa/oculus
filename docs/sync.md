@@ -37,10 +37,8 @@ One Rust engine scrapes three services. It runs identically inside the app
   Before that, one summer enrolment marked a whole year of real subjects as
   past, and a default CLI sync fetched the summer subject alone.
 - **Modules are the driver.** The engine walks each course's modules and
-  fetches pages and files through them, so nothing is downloaded twice. It
-  was ported line-for-line in strategy from the old `scraper.js` (hidden
-  WebView, now deleted) and keeps the same on-disk layout under
-  `courses/<code>/`.
+  fetches pages and files through them, so nothing is downloaded twice, and
+  mirrors Canvas's layout under `courses/<code>/`.
 - **Every converted body feeds one link crawl.** Each phase that converts a
   Canvas HTML body (home/syllabus, announcements, assignment/quiz
   descriptions, pages) reports the course pages and files it references into
@@ -84,7 +82,7 @@ One Rust engine scrapes three services. It runs identically inside the app
   (`office_to_pdf` in `app/src-tauri/src/sync.rs`). The derived PDF is never
   announced and never gets a `files` row — the original name is the library
   row, which is what `paths::doc_pdf_rel` resolves for every consumer.
-  Migration 10 in `app/src-tauri/src/lib.rs` exists because those PDFs once
+  Migration 10 in `app/src-tauri/src/migrations.rs` exists because those PDFs once
   did get rows. **With LibreOffice absent the original is still stored**, the
   run logs a warning, and the file stays out of `file-manifest.json` so the
   next sync retries the conversion rather than skipping it. `office_to_pdf`
@@ -99,8 +97,9 @@ One Rust engine scrapes three services. It runs identically inside the app
   only the first band carried the ID and name columns — the rest were bare
   grids of numbers, which is both a meaningless page image and the markdown a
   citation would hydrate from. `SinglePageSheets` keeps every row with its
-  headers; `MAX_RENDER_PIXELS` in `sidecar/embedder.py` is what stops the
-  resulting page being rendered at its full size.
+  headers; the backend's per-image pixel ceiling (`dpi_for_page` in
+  `app/src-tauri/src/embed/raster.rs`) is what stops the resulting page being
+  rendered at its full size.
 - **An untyped upload is judged by its extension.** Canvas reports whatever
   content type the uploading browser claimed, so the same deck arrives typed
   on one course and `application/octet-stream` on another. A generic type
@@ -174,19 +173,14 @@ One Rust engine scrapes three services. It runs identically inside the app
 - **The parse is in this process, and it takes minutes.** `parse_pdf` in
   `app/src-tauri/src/sync.rs` goes through the seam in
   `app/src-tauri/src/parse/mod.rs` and blocks until the chosen backend is done.
-  The Python used to return in seconds — as soon as a fast pass had produced
-  some markdown — and finish the real parse on its own thread. There is no fast
-  tier now, so the call spans the whole of it, and no deadline is imposed from
+  There is no fast tier, so the call spans the whole of it, and no deadline is imposed from
   here on either engine: the cloud client owns a 60-minute poll deadline, and a
   local parse is a connect timeout followed by minutes of silence on this
   machine's own CPU. Anything shorter could only abandon work still in
-  progress. A loopback POST does exist again, but it belongs to the local
-  backend behind the seam — `sync.rs` no longer knows a port is involved, which
-  is the part the sidecar's removal actually settled.
-- **Fire-and-forget is one detached thread per PDF**, and the bounded worker
-  pool that used to be here is gone. The pool existed because every parse was
-  an HTTP request and a full library meant a hundred simultaneous POSTs at ~2 GB
-  each. Concurrency is the backend's now, and the two answer it differently:
+  progress. The local engine's loopback POST belongs to the backend behind the
+  seam; `sync.rs` never knows a port is involved.
+- **Fire-and-forget is one detached thread per PDF**, with no worker pool.
+  Concurrency is the backend's, and the two answer it differently:
   the cloud batches (`app/src-tauri/src/parse/mineru/batch.rs` — a
   five-second/twenty-file window, eight batches in flight), while the local
   engine takes a single permit (`app/src-tauri/src/parse/mineru/local.rs`),
@@ -196,12 +190,11 @@ One Rust engine scrapes three services. It runs identically inside the app
   wait parked on a condvar or on that permit — no socket, no request in
   flight.
 - **Finishing a parse writes its own page records**, into `pages` via
-  `store::upsert_pages`. That write used to live on the embed path, which made
-  the markdown `oculus grep` searches a side effect of building the vector
-  index. Hitting an *already*-parsed file folds its `.pages.json` in too, but
+  `store::upsert_pages`, so the markdown `oculus grep` searches never waits on
+  the vector index. Hitting an *already*-parsed file folds its `.pages.json` in too, but
   only when the file has no page rows at all — the library holds files parsed
   before this write existed, and that is the repair path for them. See
   [retrieval.md](./retrieval.md).
 - `app/src-tauri/src/md.rs` converts Canvas HTML bodies to markdown by
-  refusing to descend into cruft nodes rather than stripping them first —
-  same output as the old DOM-mutating converter, no mutable tree.
+  refusing to descend into cruft nodes rather than stripping them first, so
+  there is no mutable tree.

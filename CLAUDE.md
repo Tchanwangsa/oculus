@@ -171,8 +171,9 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   on it, where `>` is false), the chat column's
   group reorder (`app/src/components/harness/ThreadList.tsx`), and the three
   card-and-row surfaces — `ProjectBoard.tsx`, `ProjectTable.tsx` and
-  `TasksBoard.tsx` in `app/src/components/projects/` — which share the
-  pointer-capture gesture in `app/src/hooks/useCardDrag.ts`. The cards had a
+  `TasksBoard.tsx` in `app/src/components/projects/` — which share
+  `app/src/hooks/useCardDrag.ts`. All of them sit on the one pointer-capture
+  gesture in `app/src/hooks/usePointerDrag.ts`. The cards had a
   second reason to leave HTML5 DnD: a card is full of `<span>`s that
   `index.css` hands `user-select: text` back to, and in WebKit a **text
   selection pre-empts the element drag**, so a press on a due chip started a
@@ -327,6 +328,21 @@ docked side panel for files and lectures, top tab strip).
   show Canvas codes via `displayCode` ("MULT20015", not "MULT20015_2026_SM2").
 - After UI changes, screenshot the running dev app to verify
   (`screencapture -x -o -l<windowid>`; the window owner is "app" in dev).
+
+# Comments
+
+- Say what the code does now and why — never how it got here. "Used to",
+  "was deleted", "an earlier version", old version numbers and incident
+  stories belong in the commit message.
+- A "why" is one fact and its consequence, three lines at most. A module
+  header is fifteen lines at most; anything longer goes in `docs/` and the
+  comment points there.
+- For an upstream quirk, state the rule and the tool version, not the
+  investigation. No timings or counts unless the number is a constant in the
+  code.
+- State a fact once; everywhere else points to it (or to CLAUDE.md / `docs/`).
+- No comments about removed code, future code, or "keep until X has run a
+  while". Don't restate what the next line plainly does.
 
 # Git
 
