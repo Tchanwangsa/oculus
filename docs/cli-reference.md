@@ -24,6 +24,7 @@ Commands:
   calendar  Class times and assignment due dates
   project   Plan work: projects, their boards, and what is on them
   task      Add, move, refile, finish and delete tasks, on a board or on none
+  memory    Read and write the memory store the agents keep in the library
   lecture   Look inside a downloaded lecture recording
   docs      Write the agent-facing docs into the library
   agent     Run one prompt through a CLI agent (Claude Code, Codex, opencode or
@@ -344,8 +345,8 @@ Options:
           Restrict to these subjects; prefix codes are fine. Repeatable
 
   -c, --category <CATEGORY>
-          Only these categories (home, syllabus, upload, page, assignment, quiz,
-          announcement, ed, file, module, image, other). Repeatable
+          Only these categories (home, syllabus, upload, document, page, assignment,
+          quiz, announcement, ed, file, module, image, other). Repeatable
 
   -F, --fixed
           Treat the pattern as literal text, not a regular expression
@@ -414,8 +415,8 @@ Options:
           Only this extension (pdf, md, pptx, docx, png …)
 
   -c, --category <CATEGORY>
-          Only these categories (home, syllabus, upload, page, assignment, quiz,
-          announcement, ed, file, module, image, other). Repeatable
+          Only these categories (home, syllabus, upload, document, page, assignment,
+          quiz, announcement, ed, file, module, image, other). Repeatable
 
   -m, --match <TEXT>
           Only paths containing this text (case-insensitive)
@@ -863,6 +864,277 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+## `oculus memory`
+
+```
+Read and write the memory store the agents keep in the library
+
+Usage: oculus memory <COMMAND>
+
+Commands:
+  list     What is already known, as the index shows it
+  read     Print one memory in full
+  write    Write a memory — front matter, dates and index included
+  rm       Delete a memory that turned out to be wrong
+  move     File a memory under a different bucket
+  reindex  Rebuild a bucket's `MEMORY.md` from the files in it
+  promote  Turn a memory into a standing preference in `TASTE.md`
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus memory list`
+
+```
+What is already known, as the index shows it.
+
+Read this before answering, not after: it is a few hundred bytes and it is the only
+thing that carries between conversations. Without `-s` it lists the cross-subject
+bucket; `--all` walks every bucket there is.
+
+Each line leads with the **name**, which is what `read`, `rm`, `move` and `--link` take,
+and what a second `write` under updates rather than duplicates. Its one-line description
+follows underneath.
+
+Usage: oculus memory list [OPTIONS]
+
+Options:
+  -s, --subject <CODE>
+          Only this subject's memories (a code, e.g. INFO30006)
+
+      --all
+          Every bucket: across subjects, then one per course
+
+      --type <TYPE>
+          Only memories of this type
+
+          [possible values: user, feedback, project, reference]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus memory read`
+
+```
+Print one memory in full.
+
+The name is the file's, without `.md` — `memory list` prints it. A close-enough spelling
+finds it anyway: the hyphens need not fall where the filename puts them, the title works
+in place of the name, and a prefix or a distinctive fragment works when only one memory
+answers to it. Both buckets are searched unless `-s` narrows it.
+
+Usage: oculus memory read [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Which memory
+
+Options:
+  -s, --subject <CODE>
+          Look only in this subject's bucket
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus memory write`
+
+```
+Write a memory — front matter, dates and index included.
+
+**This is the way to remember something, rather than writing the markdown by hand.** A
+memory is two files — the fact, and a line in that folder's `MEMORY.md` — and the second
+is the one that gets skipped, which is the one that decides whether the next
+conversation ever opens the first. Here the index is rewritten from the files every
+time, so it cannot go stale, and the front matter is built from the flags: pass the fact
+and how it is filed, and `name`, `created`, `updated` and the index are not yours to
+remember.
+
+**Filing is `-s` or nothing.** A fact that names one subject takes `-s <CODE>` and lands
+in that subject's bucket — always, including when it came up in a conversation scoped to
+nothing. Without `-s` it goes in the cross-subject bucket, which is for the student
+themselves and for what spans subjects.
+
+**A name that is already filed is updated, not duplicated**, keeping its `created` date
+and anything this call leaves out. That is what makes the store a record of what is true
+rather than a log of what was said.
+
+The body is one line as `--text`, or a file with `--body` (`-` for stdin) — the shell an
+in-app agent runs through refuses a newline inside an argument, so anything with
+paragraphs in it is written to a file first.
+
+oculus memory write --type reference --about "Ed answers are the marking authority for
+INFO30006; the brief is not" --text "Staff said in Ed #66 that everything in lectures
+and tutorials is assessable." -s INFO30006
+
+oculus memory write tchan-study-workflow --type feedback --about "Wants a verdict then
+the evidence, never a survey of options" --text "Triages by return on investment and
+does the arithmetic before asking." --why "He is asking for the missing evidence, not to
+be told what to do." --how "Lead with one recommendation, then the specific evidence
+under it."
+
+Usage: oculus memory write [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]
+          The file's name. Omit and it is taken from --about — but **name it to update
+          it**: a write that derives a name from a changed line is a new memory, the
+          same as it would be for any other file
+
+Options:
+  -s, --subject <CODE>
+          File it under this subject (omit for the cross-subject bucket)
+
+      --about <TEXT>
+          The one line the index shows — what a reader sees before opening it
+
+          [alias: --description]
+
+      --type <TYPE>
+          What kind of memory this is
+
+          [possible values: user, feedback, project, reference]
+
+      --title <TEXT>
+          What the index calls it (default: the name, read back as words)
+
+      --text <TEXT>
+          The fact itself, on one line
+
+      --body <FILE>
+          The fact, from a file — or `-` for stdin
+
+      --why <TEXT>
+          Why it is true, or why it matters. Required for feedback and project
+
+      --how <TEXT>
+          What a later session should do about it. Required for feedback and project
+
+      --source <TEXT>
+          Where the fact came from — a library path, an Ed number, a lecture
+
+      --link <NAME>
+          Another memory this one bears on, by name. Repeatable
+
+      --meta <K=V>
+          Any other front-matter field, as key=value. Repeatable
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus memory rm`
+
+```
+Delete a memory that turned out to be wrong.
+
+The store is what is true, not what was said, so a fact that has been overtaken is
+deleted rather than left to be read again. **There is no undo** — nothing upstream has a
+copy of this, the way a course file comes back on the next sync. The index is rewritten
+without it.
+
+Usage: oculus memory rm [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Which memory
+
+Options:
+  -s, --subject <CODE>
+          Look only in this subject's bucket
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus memory move`
+
+```
+File a memory under a different bucket.
+
+For the mistake the two buckets exist to make visible: a fact about one subject that
+ended up in the cross-subject store, or the reverse. The file moves whole — body, dates
+and all — and both indexes are rewritten, which is the part that made this worth a
+command rather than a delete and a retype.
+
+Usage: oculus memory move [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Which memory
+
+Options:
+  -s, --subject <CODE>
+          File it under this subject
+
+      --global
+          File it across subjects instead
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus memory reindex`
+
+```
+Rebuild a bucket's `MEMORY.md` from the files in it.
+
+Every write does this already, so it is here for the store as it stands today: memories
+written by hand before this command existed, or a file dropped in from somewhere.
+Whatever prose sits above the generated list is kept.
+
+Usage: oculus memory reindex [OPTIONS]
+
+Options:
+  -s, --subject <CODE>
+          Only this subject's bucket
+
+      --all
+          Every bucket there is
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus memory promote`
+
+```
+Turn a memory into a standing preference in `TASTE.md`.
+
+The second half of the rule that file states: the first time something is said about how
+work should be done it is a `feedback` memory, and when it comes up again it earns a
+line in `TASTE.md` and the memory goes. This does both ends of that in one call, so the
+promotion is not a hand-edit nobody makes.
+
+Usage: oculus memory promote [OPTIONS] --section <NAME> <NAME>
+
+Arguments:
+  <NAME>
+          Which memory
+
+Options:
+      --section <NAME>
+          Which heading it belongs under
+
+          [possible values: writing, working, study]
+
+      --as <TEXT>
+          The bullet, written as an instruction (default: the memory's own line)
+
+      --keep
+          Leave the memory in place instead of deleting it
+
+  -s, --subject <CODE>
+          Look only in this subject's bucket
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## `oculus lecture`
 
 ```
@@ -1005,13 +1277,17 @@ Options:
 Write the agent-facing docs into the library
 
 Fills `agents/` in the data directory: `OCULUS-CLI.md`, rendered from this binary's own
-`--help` so it can never drift from the flags it documents, and one `AGENTS.md`
-symlinked into every course folder. `OCULUS.md`, `TASTE.md` and the `MEMORY.md` index in
-each memory folder are stubbed on first run and never touched again — they are what an
-agent writes back to.
+`--help` so it can never drift from the flags it documents, one `AGENTS.md` symlinked
+into every course folder, and the skills.
 
-Idempotent, and run by `cli:install`, so the docs always describe the binary that is
-actually installed.
+It also brings the two generated-but-shared files up to date. `TASTE.md`'s guidance is
+re-rendered with the preferences you wrote in it carried across — a file that is half
+prompt and half content cannot be "written once and never again" without the prompt half
+going stale. Every `MEMORY.md` index is rewritten from the memories beside it.
+`OCULUS.md` is the one stub nothing here ever touches twice.
+
+Idempotent, and run by the dev preflight and by `cli:install`, so a library's
+instructions always match the binary that is installed.
 
 Usage: oculus docs [OPTIONS]
 

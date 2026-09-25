@@ -95,7 +95,16 @@ live. Inside it:
   copied in by hand (`import_uploads` in `app/src-tauri/src/files.rs`). They
   are ordinary library files from there on — same conversion, parse,
   embeddings and agent access — and being the one place a sync never writes is
-  what makes them the one place deleting is safe
+  what makes them the one place deleting is safe. `courses/<code>/documents/`
+  is its sibling for the student's own notes, markdown written inside the app
+  (`create_document` in `app/src-tauri/src/files.rs`): the same ordinary
+  library files, except that the app rewrites them in place and renames them
+  when their title changes, so the write, rename and delete commands are
+  scoped to that folder's shape (`is_document_rel` in
+  `app/src-tauri/src/paths.rs`) the way deleting an upload is. Pictures pasted
+  into a note sit under it in `documents/assets/`, which is what an
+  `![](assets/…)` in a note resolves against — beside the note rather than in
+  `agents/attachments/`, so the folder carries its own figures
 - `lectures/<uuid>/` — downloaded Echo360 media: `source1.mp4` and
   `source2.mp4` (the second when the capture has one and it has been asked
   for), plus `transcript.vtt`. Usually source 1 is the Presenter screen and

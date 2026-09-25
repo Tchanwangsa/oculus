@@ -43,6 +43,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | The `@` menu's candidate files | `searchMentionFiles` in `app/src/lib/db.ts` |
 | The `@` token, the menu and its keys, shared with a task body | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionMenu.tsx` |
 | Pictures pasted or dropped into any composer | `app/src-tauri/src/harness/attach.rs`, `app/src/lib/attachments.ts`, `app/src/hooks/useAttachments.ts`, `app/src/hooks/useFileDrop.ts`, `app/src/components/harness/AttachmentStrip.tsx` |
+| …and into one of the student's own notes, which keeps its own | `docs/frontend.md`, `app/src-tauri/src/files.rs` |
 | A selection copied out of a thread as markdown | `app/src/lib/selectionMarkdown.ts` |
 | Health and the per-job model rows in Settings → AI | `app/src/pages/settings/AiPage.tsx` |
 | opencode's providers and models: the Settings line, the manager, the generic sign-in form | `app/src/components/settings/OpencodeProvidersSection.tsx`, `app/src/components/settings/OpencodeCatalogDialog.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeAuth.ts` |
@@ -195,6 +196,21 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   `properties.sessionID`. All four — Antigravity's `agy` is a process per
   thread, like Claude's — are handles behind the same `Harness`;
   nothing above it assumes a process per thread.
+- **A server outlives an app that was signalled, so startup sweeps for
+  strays.** `RunEvent::Exit` (into `Harness::shutdown`) and `Drop` on the
+  handle both kill the opencode server on an ordinary quit, and neither of
+  them runs when the app is terminated outright — which `tauri dev` does on
+  every Rust rebuild, and a force-quit or a crash does in production. The
+  server is reparented to launchd and left listening for ever; they
+  accumulated one per rebuild, forty of them holding 5 GB. `opencode::sweep`
+  (`app/src-tauri/src/harness/opencode.rs`), called from
+  `harness::app::sweep_strays` at startup before anything can ask for a
+  server, kills what is left: SIGTERM, then SIGKILL on whatever is still
+  there two seconds later. A stray is recognised by two facts together —
+  **the argv `spawn` uses** (`SERVE_ARGS`, which a hand-run `opencode serve`
+  does not have) and **`ppid == 1`**, which says its app is gone. The second
+  is the safety: a server a living app owns is parented to that app, so a
+  second instance built from a worktree beside this one is never touched.
 - **Every thread runs from `agents/`, and that is the containment.** Not the
   library root: measured, a Claude thread rooted there under `acceptEdits`
   wrote straight into `courses/`. From `agents/` the two providers refuse
@@ -306,7 +322,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   first message of the session because there is nowhere else to put it.
   opencode reads `agents/AGENTS.md` natively, the way Codex does. It
   says where the library is, that `oculus` is on PATH and what it is for,
-  that writes stay in `agents/`, and where memory goes. Codex also reads
+  that writes stay in `agents/`, and the memory contract below. Codex also reads
   `agents/AGENTS.md` on its own, so that file's opener now covers both the
   course folders it is symlinked into and the folder it lives in.
 - **The child's environment is edited twice.** `ANTHROPIC_API_KEY` and
@@ -1662,6 +1678,84 @@ agree on them: either can be the one resolving an unconfigured job.
 - **Adding a job** is a `Job` variant with a key and a default in `jobs.rs`, a
   matching entry in `JOBS` and `DEFAULT_JOB_MODELS` in `db.ts`, and nothing
   else: the Settings section renders whatever is in that list.
+
+## Memory
+
+Nothing carries from one thread to the next but what the agent writes into
+`agents/`. The layer itself belongs to `app/src-tauri/src/agents.rs` —
+`TASTE.md`, `memories/` for what holds across subjects and the student
+themselves, `memories/<CODE>/` for one subject — and **nothing in the app ever
+reads it back into a prompt**; the brief points at `oculus memory` and the
+agent runs it. The contract for using it is the `## Memory` section of
+`app/src-tauri/templates/HARNESS.template.md`, so every chat thread carries it
+and no headless job does (`system_append` is empty for those).
+
+**It is in the brief rather than in a skill on purpose.** A skill loads when
+the model decides the request matches its description, which is exactly the
+judgement that fails here: nobody asks for a memory to be written, so a
+memory skill would load in the threads that were already going to remember.
+Something that has to happen without being asked for belongs in the prompt
+that is always there.
+
+**The contract is two halves, and the first is what makes the second
+happen.** The brief opens with a read — `TASTE.md` and the `MEMORY.md` index,
+plus the subject's index on a scoped thread — and then names the four moments
+that oblige a write: something the student said about themselves that the
+library does not record, something worked out that cost real effort, a
+correction, a plan that moved. A thread that never opened the index does not
+think of the store as a live thing at the end of the turn; the read is
+cheap — a few hundred bytes, once, on the first turn — and it is what puts
+the store in view.
+
+Both halves were rewritten because the first version did not work. Over a
+semester of real use — 51 threads — the library held nine memories, two
+subjects had an empty index, and a plainly subject-scoped fact sat in the
+cross-subject bucket. The old brief gave memory one bullet in a list of
+sandbox rules, phrased as a *location* (`memory goes in ./memories/`) with no
+trigger and no read, and `TASTE.md`'s own stub asked for a preference to have
+been "said twice" — a threshold nothing on disk could ever measure, since the
+first time was never written down. That one now routes a first statement into
+`memories/` as a `feedback` fact and promotes it on the second.
+
+**And the contract is a command, not a convention.** A memory used to be two
+writes — the file, and a line in that folder's `MEMORY.md` — and the second
+was the one that got skipped, which is the one that decides whether the next
+thread ever opens the first. `oculus memory` (`app/src-tauri/src/memory.rs`,
+[cli.md](./cli.md)) makes them one call: it writes the front matter, dates the
+fact, and **rewrites the index from the files beside it**, so an entry cannot
+go missing from it and a deleted memory cannot linger in it. The routing is a
+`-s` flag rather than a path the agent reasons its way to, which is what a
+subject fact in the cross-subject bucket was. `--why` and `--how` are refused
+as missing on the two types that are instructions rather than observations,
+because an instruction a later thread cannot act on is not worth keeping.
+
+**A name is what the store is addressed by, so the listing prints one.**
+`memory list` used to lead each line with the memory's *title*, which is the
+readable thing and the wrong thing: an agent that then wants to open one slugs
+the title back, and lands a hyphen away from the filename as often as on it —
+`info30006-topic-4-…` for a file called `info30006-topic4-…`. The listing now
+leads with the name, and `find` (`app/src-tauri/src/memory.rs`) matches on a
+ladder: the exact name, then the spellings a caller who only saw a title could
+have written, then a prefix, then a fragment, with the hyphens taken out of
+both sides below the first rung. A rung that matches several answers with
+their names instead of picking one — the failure worth avoiding is an `rm`
+that takes a neighbour, not a `read` typed twice — and a miss says what the
+bucket does hold, so recovering costs no second command.
+
+**A memory carries its own dates**, `created` and `updated` in the front
+matter, and a listing leads with the first. Every file written before the
+command existed has neither, so `reindex` stamps `created` from the
+filesystem — the same fallback the ordering already used, which is why the
+date on a line is the one that put the line where it is. `updated` gets no
+such fallback: an mtime moves when the index rewrite touches a file, and
+dating a fact by its housekeeping is worse than leaving a reader to see that
+nobody has revisited it.
+
+That command is also why the store is files and not a table. A thread runs
+sandboxed and cannot write `oculus.db` — SQLite answers "readonly database" —
+so a memory layer in the database would be one the agent that needs it most
+could not use. `Bash(oculus:*)` is already allowed by name, so no permission
+had to move to let a thread remember something.
 
 ## Subject scope and `@`
 

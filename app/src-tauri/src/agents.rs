@@ -24,8 +24,11 @@
 //! say the same, so a subject fact was an instruction the app itself had made
 //! impossible to follow. [`link_dir`] now moves any of those files into the
 //! library bucket and leaves a symlink where they were, so an agent that
-//! remembers the old path still writes into the one store. Nothing here ever
-//! writes a memory.
+//! remembers the old path still writes into the one store. **Nothing here ever
+//! writes a memory**: this module owns the shape of the folder, and
+//! [`crate::memory`] — behind `oculus memory` — owns what goes in it, down to
+//! the `MEMORY.md` index, which is stubbed here and rewritten from the files
+//! there.
 //!
 //! **Skills are the third thing written here, and the one directory all three
 //! CLIs are pointed at.** `agents/skills/<name>/SKILL.md` is a procedure an
@@ -104,6 +107,12 @@ pub struct LibraryDocs {
     pub generated: Vec<&'static str>,
     /// Stubs that were missing and have just been created.
     pub created: Vec<&'static str>,
+    /// Stubs whose *guidance* was brought up to date while what the user
+    /// wrote in them was carried across — see [`refresh_taste`].
+    pub refreshed: Vec<&'static str>,
+    /// Stubs that have been edited past the point where that merge is safe,
+    /// so they were left alone and said so.
+    pub diverged: Vec<&'static str>,
 }
 
 /// Fill `agents/` with everything that does not need the CLI's own help tree.
@@ -146,6 +155,19 @@ pub fn ensure_library_docs(data_dir: &Path) -> Result<LibraryDocs, String> {
         docs.created.push(name);
     }
 
+    // A stub that already exists is the user's, but only the half of it they
+    // wrote. The other half is instructions to an agent, and those go stale
+    // the moment the thing they describe changes — `TASTE.md` in this library
+    // spent a fortnight telling its reader that Oculus folded the file into
+    // every prompt, which had not been true since the BYOK chat was deleted.
+    // Written once and never again is the right rule for somebody's content
+    // and the wrong one for a prompt.
+    match refresh_taste(&dir.join(TASTE_DOC_NAME))? {
+        Refresh::Rewritten => docs.refreshed.push(TASTE_DOC_NAME),
+        Refresh::Diverged => docs.diverged.push(TASTE_DOC_NAME),
+        Refresh::Current => {}
+    }
+
     // Generated too, and for a sharper version of the same reason: a skill is
     // read as a procedure rather than as background, so one describing a flag
     // this binary no longer has is followed anyway.
@@ -161,6 +183,93 @@ pub fn ensure_library_docs(data_dir: &Path) -> Result<LibraryDocs, String> {
     link_agent_skills(data_dir)?;
     Ok(docs)
 }
+
+/// What [`refresh_taste`] decided to do.
+pub enum Refresh {
+    /// The guidance was behind; it has been replaced and the bullets kept.
+    Rewritten,
+    /// Already the current text, or empty of anything to keep.
+    Current,
+    /// Edited past what a merge can be sure about, so left alone.
+    Diverged,
+}
+
+/// Bring `TASTE.md`'s instructions up to date without touching what the user
+/// put in it.
+///
+/// The file is two things at once — a standing brief to the agent about when
+/// something earns a line, and the lines themselves — and only the second half
+/// is anybody's work. So the template is re-rendered and the bullets are
+/// carried into it under the headings they were under.
+///
+/// **It refuses rather than guesses.** A heading carrying anything that is not
+/// a bullet, or a file with none of the three headings left in it, has been
+/// written in a way this cannot take apart, and overwriting it would be the
+/// one unrecoverable thing this module does. Those are reported and left.
+pub fn refresh_taste(path: &Path) -> Result<Refresh, String> {
+    let Ok(current) = std::fs::read_to_string(path) else {
+        return Ok(Refresh::Current);
+    };
+    if current == TASTE_DOC {
+        return Ok(Refresh::Current);
+    }
+
+    let mut kept: Vec<(String, Vec<String>)> = TASTE_SECTIONS
+        .iter()
+        .map(|h| ((*h).to_string(), Vec::new()))
+        .collect();
+    let mut section: Option<usize> = None;
+    let mut seen = 0;
+    for line in current.lines() {
+        if let Some(name) = line.strip_prefix("## ") {
+            section = kept
+                .iter()
+                .position(|(h, _)| h.eq_ignore_ascii_case(name.trim()));
+            if section.is_some() {
+                seen += 1;
+            }
+            continue;
+        }
+        let Some(idx) = section else { continue };
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if !t.starts_with("- ") && !t.starts_with("* ") {
+            // Prose under a heading: somebody is using this file in a way the
+            // merge was not written for.
+            return Ok(Refresh::Diverged);
+        }
+        kept[idx]
+            .1
+            .push(format!("- {}", t.trim_start_matches(['-', '*']).trim()));
+    }
+    if seen == 0 {
+        return Ok(Refresh::Diverged);
+    }
+
+    let mut out = TASTE_DOC.to_string();
+    for (heading, bullets) in &kept {
+        if bullets.is_empty() {
+            continue;
+        }
+        let marker = format!("## {heading}\n");
+        let Some(at) = out.find(&marker) else {
+            continue;
+        };
+        let at = at + marker.len();
+        out.insert_str(at, &format!("\n{}\n", bullets.join("\n")));
+    }
+    if out == current {
+        return Ok(Refresh::Current);
+    }
+    std::fs::write(path, out).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    Ok(Refresh::Rewritten)
+}
+
+/// The headings `TASTE.md` ships with, and the only ones a bullet can be
+/// carried across under.
+const TASTE_SECTIONS: [&str; 3] = ["Writing", "Working", "Study"];
 
 /// Both scanning CLIs get the same link, because they are the same problem:
 /// Claude Code walks up from the working directory looking for
@@ -353,9 +462,11 @@ fn link_dir(data_dir: &Path, dir: &Path) -> Result<Link, String> {
     if !index.exists() {
         let body = format!(
             "# Memories — {name}\n\n\
-             Facts about this subject alone. Anything true across subjects goes in the\n\
-             library's own `agents/memories/`.\n\n\
-             <!-- - [Title](file-name.md) — the hook, in a clause -->\n"
+             Facts about this subject alone — including ones that came up while\n\
+             working on something else. Anything true across subjects, or about the\n\
+             student themselves, goes in the library's own `agents/memories/`.\n\n\
+             The list below is written by `oculus memory` from the files beside it,\n\
+             so it cannot fall behind them. Everything above the marker is yours.\n"
         );
         std::fs::write(&index, body)
             .map_err(|e| format!("cannot write agents/memories/{name}/{MEMORY_INDEX_NAME}: {e}"))?;
@@ -530,6 +641,79 @@ mod tests {
 
     /// The stubs are the only thing in `agents/` a human authors; a sync runs
     /// far more often than `oculus docs` and must never touch them.
+    /// The half of `TASTE.md` that is a prompt has to be able to move, and the
+    /// half that is the user's must not. This is the one file in `agents/`
+    /// where those two live together.
+    #[test]
+    fn taste_keeps_its_bullets_and_takes_the_new_guidance() {
+        let root = scratch("taste");
+        std::fs::create_dir_all(&root).unwrap();
+        ensure_library_docs(&root).unwrap();
+        let path = agents_dir(&root).join(TASTE_DOC_NAME);
+
+        // A stub from an older build, with two preferences written into it.
+        std::fs::write(
+            &path,
+            "# Preferences\n\nOculus reads this file into the chat's prompt on every message.\n\n## Writing\n\n- Lead with the verdict.\n\n## Working\n\n- Use bun, never npm.\n\n## Study\n",
+        )
+        .unwrap();
+
+        let docs = ensure_library_docs(&root).unwrap();
+        assert_eq!(docs.refreshed, vec![TASTE_DOC_NAME]);
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("- Lead with the verdict."),
+            "the bullets came across"
+        );
+        assert!(
+            after.contains("- Use bun, never npm."),
+            "under their own headings"
+        );
+        assert!(
+            after.find("- Lead with the verdict.").unwrap() < after.find("## Working").unwrap(),
+            "and in the right sections"
+        );
+        assert!(
+            !after.contains("into the chat's prompt on every message"),
+            "the stale line went"
+        );
+
+        // Idempotent: a second pass has nothing to do.
+        let again = ensure_library_docs(&root).unwrap();
+        assert!(
+            again.refreshed.is_empty(),
+            "a current file is not rewritten"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The refusal that makes the merge safe to run unattended. Prose under a
+    /// heading is somebody using the file in a way this cannot take apart, and
+    /// guessing at it would be the one unrecoverable thing here.
+    #[test]
+    fn a_taste_file_written_another_way_is_left_alone() {
+        let root = scratch("taste-diverged");
+        std::fs::create_dir_all(&root).unwrap();
+        ensure_library_docs(&root).unwrap();
+        let path = agents_dir(&root).join(TASTE_DOC_NAME);
+
+        let mine = "# Preferences\n\n## Writing\n\nI want short answers, and I will explain \
+                    why below.\n\n## Working\n\n## Study\n";
+        std::fs::write(&path, mine).unwrap();
+        let docs = ensure_library_docs(&root).unwrap();
+        assert_eq!(docs.diverged, vec![TASTE_DOC_NAME]);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "untouched");
+
+        // So is a file whose headings have gone entirely.
+        std::fs::write(&path, "# Preferences\n\nJust a paragraph.\n").unwrap();
+        let docs = ensure_library_docs(&root).unwrap();
+        assert_eq!(docs.diverged, vec![TASTE_DOC_NAME]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn stubs_are_written_once_and_then_left_alone() {
         let root = scratch("stubs");

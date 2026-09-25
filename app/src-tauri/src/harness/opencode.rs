@@ -188,6 +188,18 @@ const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(20);
 /// budget, it is the gap [`SessionState::awaiting_step`] describes.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The argv [`OpencodeServer::spawn`] hands the server, after the binary
+/// path. [`sweep`] recognises a stray by exactly this list, so the two are
+/// one thing and move together.
+const SERVE_ARGS: [&str; 6] = [
+    "serve",
+    "--port",
+    "0",
+    "--hostname",
+    "127.0.0.1",
+    "--print-logs",
+];
+
 /// The agent id the sessions run as, defined in the rendered config.
 pub const AGENT: &str = "oculus";
 /// The throwaway agent a naming turn runs as: the same permissions, a
@@ -465,10 +477,7 @@ pub struct OpencodeServer {
 impl OpencodeServer {
     pub fn spawn(cfg: OpencodeSpawn) -> Result<Arc<Self>, String> {
         let mut child = Command::new(&cfg.bin)
-            .arg("serve")
-            .args(["--port", "0"])
-            .args(["--hostname", "127.0.0.1"])
-            .arg("--print-logs")
+            .args(SERVE_ARGS)
             .env_clear()
             .envs(cfg.env.iter().map(|(k, v)| (k, v)))
             // Neither belongs in a server the app owns: an autoupdate would
@@ -1265,6 +1274,105 @@ impl Drop for OpencodeServer {
             let _ = c.kill();
         }
     }
+}
+
+// ── Strays ───────────────────────────────────────────────────────────────────
+
+/// How long a server gets to close its listener before it is killed outright.
+const STRAY_GRACE: Duration = Duration::from_secs(2);
+
+/// Kill the `opencode serve` processes this app started and then lost, and
+/// answer with the pids. Called once at startup, before anything can ask for
+/// a server.
+///
+/// Two paths already clean one up the ordinary way — `RunEvent::Exit` into
+/// [`super::Harness::shutdown`], and [`Drop`] on the handle — and **neither
+/// of them runs when the app is signalled**. `tauri dev` terminates the app
+/// outright to relaunch it after a Rust change, and a force-quit or a crash
+/// does the same in production: no `Drop`, no `RunEvent`, and the server is
+/// reparented to launchd, still listening, still holding its heap. Nothing
+/// ever collected them, so they accumulated one per rebuild — measured, forty
+/// of them holding 5 GB, the oldest two days old.
+///
+/// A stray is two facts together, and it takes both:
+///
+/// - **our own argv** ([`SERVE_ARGS`]) — a student's hand-run `opencode
+///   serve` takes the default port and none of these flags, and a `tui` is
+///   not a `serve` at all;
+/// - **`ppid == 1`**, which is launchd having adopted it because the process
+///   that started it is gone. This is the whole safety story: a server a
+///   *living* app owns is parented to that app, so a second instance built
+///   from a worktree and running beside this one is never touched.
+///
+/// The uid test is belt — `kill` would fail on another user's process anyway
+/// — and it keeps the sweep from reporting work it did not do.
+pub fn sweep() -> Vec<u32> {
+    let uid = unsafe { libc::getuid() };
+    let found = strays(&ps_listing(), uid);
+    if found.is_empty() {
+        return found;
+    }
+    send_signal(&found, libc::SIGTERM);
+    // Then take out whatever ignored it. The listing is read again rather
+    // than remembered, because between the two signals a pid could have been
+    // reused: one that is no longer a stray by the same two tests is not
+    // ours to SIGKILL.
+    let sent = found.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(STRAY_GRACE);
+        let left: Vec<u32> = strays(&ps_listing(), uid)
+            .into_iter()
+            .filter(|p| sent.contains(p))
+            .collect();
+        send_signal(&left, libc::SIGKILL);
+    });
+    found
+}
+
+fn ps_listing() -> String {
+    Command::new("/bin/ps")
+        .args(["-axww", "-o", "pid=,ppid=,uid=,command="])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+fn send_signal(pids: &[u32], sig: i32) {
+    for pid in pids {
+        unsafe { libc::kill(*pid as libc::pid_t, sig) };
+    }
+}
+
+/// The stray pids in a `ps -axww -o pid=,ppid=,uid=,command=` listing.
+///
+/// The command is matched from its *end* — the argv tail, then whatever is
+/// left is the binary path — so a home directory with a space in it still
+/// resolves, which splitting the line on whitespace would not.
+fn strays(listing: &str, uid: u32) -> Vec<u32> {
+    let tail = SERVE_ARGS.join(" ");
+    listing
+        .lines()
+        .filter_map(|line| {
+            let mut rest = line;
+            let pid: u32 = ps_field(&mut rest)?.parse().ok()?;
+            let ppid: u32 = ps_field(&mut rest)?.parse().ok()?;
+            let owner: u32 = ps_field(&mut rest)?.parse().ok()?;
+            if ppid != 1 || owner != uid || pid == std::process::id() {
+                return None;
+            }
+            let bin = rest.trim().strip_suffix(&tail)?.trim_end();
+            (Path::new(bin).file_name()? == "opencode").then_some(pid)
+        })
+        .collect()
+}
+
+/// One space-delimited field off the front, advancing `rest` past it.
+fn ps_field<'a>(rest: &mut &'a str) -> Option<&'a str> {
+    let trimmed = rest.trim_start();
+    let end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+    let (head, tail) = trimmed.split_at(end);
+    *rest = tail;
+    (!head.is_empty()).then_some(head)
 }
 
 // ── The config document ──────────────────────────────────────────────────────
@@ -3342,5 +3450,27 @@ mod tests {
         assert!(!server.busy());
 
         server.delete_session(&session);
+    }
+
+    /// The sweep's two tests, against a listing shaped like the real one.
+    /// Only a process with *our* argv **and** launchd for a parent is a
+    /// stray — everything else here is somebody's live server, somebody's
+    /// own opencode, or another user's.
+    #[test]
+    fn a_stray_is_our_own_argv_that_launchd_has_adopted() {
+        let ours = format!("serve {}", SERVE_ARGS[1..].join(" "));
+        let listing = format!(
+            "\
+  4011     1   501 /Users/s/.opencode/bin/opencode {ours}
+  4012 54983   501 /Users/s/.opencode/bin/opencode {ours}
+  4013     1   501 /Users/s/.opencode/bin/opencode serve
+  4014     1   501 /Users/s/.opencode/bin/opencode serve --port 4096
+  4015     1   501 /opt/homebrew/bin/opencode tui
+  4016     1     0 /Users/root/.opencode/bin/opencode {ours}
+  4017     1   501 /Users/some one/.opencode/bin/opencode {ours}
+  4018     1   501 /Users/s/.bun/bin/opencodex {ours}
+"
+        );
+        assert_eq!(strays(&listing, 501), vec![4011, 4017]);
     }
 }

@@ -288,6 +288,50 @@ pub fn is_upload_rel(rel: &str) -> bool {
     !rel.contains("..") && parts.len() > 3 && parts[0] == "courses" && parts[2] == UPLOADS_DIR
 }
 
+/// The other directory the scraper never writes to: the student's own notes,
+/// written inside the app as markdown. Where an upload arrives whole and is
+/// never touched again, a document is rewritten on every save and moves when
+/// its title changes — but downstream it is the same thing an upload is, an
+/// ordinary library file the agent, the mention menu and search reach by
+/// path, so this constant is again the whole of what makes it separate.
+pub const DOCUMENTS_DIR: &str = "documents";
+
+/// Where a note's pictures go: `documents/assets/`, one folder for the
+/// subject's notes rather than one per note.
+///
+/// The name is load-bearing in two places at once — it is the folder on disk
+/// and the prefix of the `![](assets/…)` a note carries — so a picture
+/// resolves for the editor's preview, for the file viewer and for anything
+/// else handed the folder. One folder because the names are stamps and never
+/// collide, and because a per-note folder would have to be moved by every
+/// rename.
+pub const DOCUMENT_ASSETS_DIR: &str = "assets";
+
+/// True only for `courses/<code>/documents/<name>.md`.
+///
+/// Which is also what keeps a note's pictures out: `documents/assets/<x>.png`
+/// is five segments and not markdown, so no save, rename or delete can land
+/// on one and [`list_documents`](crate::files::list_documents) does not offer
+/// the folder as a note.
+///
+/// The entire guard for writing, renaming and deleting a document, the way
+/// `is_upload_rel` is for `delete_upload`. A document is the one library file
+/// the app overwrites in place, and the caller hands over a path rather than
+/// bytes it already holds — so the shape is checked strictly: exactly four
+/// segments, no traversal, a `.md` at the end. A path that fails is a scraped
+/// file, a converted PDF or something outside `courses/`, none of which a
+/// save may land on.
+pub fn is_document_rel(rel: &str) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    !rel.contains("..")
+        && parts.len() == 4
+        && parts[0] == "courses"
+        && !parts[1].is_empty()
+        && parts[2] == DOCUMENTS_DIR
+        && parts[3].len() > 3
+        && parts[3].ends_with(".md")
+}
+
 /// Every category `category_from_path` can return, in the order a reader
 /// meets them: the two whole-course documents, then the folders.
 ///
@@ -299,6 +343,7 @@ pub const CATEGORIES: &[&str] = &[
     "home",
     "syllabus",
     "upload",
+    "document",
     "page",
     "assignment",
     "quiz",
@@ -315,6 +360,7 @@ pub fn category_from_path(path: &str) -> &'static str {
         "home.md" => "home",
         "syllabus.md" => "syllabus",
         p if p.starts_with("uploads/") => "upload",
+        p if p.starts_with("documents/") => "document",
         p if p.starts_with("pages/") => "page",
         p if p.starts_with("assignments/") => "assignment",
         p if p.starts_with("quizzes/") => "quiz",
@@ -360,6 +406,7 @@ mod tests {
             "home.md",
             "syllabus.md",
             "uploads/notes.pdf",
+            "documents/week-3-notes.md",
             "pages/week-01.md",
             "assignments/a2.md",
             "quizzes/mid.md",
@@ -401,6 +448,7 @@ mod tests {
         assert_eq!(category_from_path("quizzes/week-3.md"), "quiz");
         assert_eq!(category_from_path("ed/0031-welcome.md"), "ed");
         assert_eq!(category_from_path("uploads/tutor-notes.pdf"), "upload");
+        assert_eq!(category_from_path("documents/revision.md"), "document");
         assert_eq!(category_from_path("nope.txt"), "other");
     }
 
@@ -413,5 +461,24 @@ mod tests {
         assert!(!is_upload_rel("lectures/abc/source1.mp4"));
         assert!(!is_upload_rel("courses/../oculus.db"));
         assert!(!is_upload_rel("courses/X/uploads/../../../oculus.db"));
+    }
+
+    #[test]
+    fn only_a_markdown_note_in_a_subjects_documents_folder_is_writable() {
+        assert!(is_document_rel("courses/COMP30026/documents/week-3.md"));
+        assert!(is_document_rel("courses/COMP30026_2026_SM2/documents/Untitled-2.md"));
+        // Traversal, however it is spelled, never resolves to a document.
+        assert!(!is_document_rel("courses/COMP30026/documents/../../oculus.db"));
+        assert!(!is_document_rel("courses/../documents/x.md"));
+        // Exactly one level deep: a nested folder is not a place the app writes.
+        assert!(!is_document_rel("courses/COMP30026/documents/drafts/x.md"));
+        assert!(!is_document_rel("courses/COMP30026/documents"));
+        // Only markdown, and only with a name in front of the extension.
+        assert!(!is_document_rel("courses/COMP30026/documents/x.pdf"));
+        assert!(!is_document_rel("courses/COMP30026/documents/.md"));
+        // An upload is not a document, however it ends.
+        assert!(!is_document_rel("courses/COMP30026/uploads/x.md"));
+        assert!(!is_document_rel("courses//documents/x.md"));
+        assert!(!is_document_rel("lectures/abc/documents/x.md"));
     }
 }

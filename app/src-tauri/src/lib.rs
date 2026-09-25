@@ -6,27 +6,28 @@ pub mod canvas;
 pub mod chapters;
 pub mod echo360;
 pub mod ed;
+pub mod embed;
 mod files;
 pub mod harness;
 pub mod keepalive;
 mod lectures;
 pub mod md;
-pub mod menu;
-pub mod okta;
 mod media;
+pub mod memory;
+pub mod menu;
 pub mod mineru;
+pub mod okta;
 pub mod parse;
 pub mod paths;
 pub mod projects;
 pub mod reading;
 pub mod retrieval;
 mod scrape;
+mod storage;
 pub mod store;
+mod subjects;
 pub mod sync;
 pub mod terms;
-mod storage;
-mod subjects;
-pub mod embed;
 pub mod voyage;
 
 use std::sync::{Arc, Mutex};
@@ -77,6 +78,9 @@ pub fn run() {
             // ── CLI agents (Claude Code / Codex bridges) ────────────────
             app.manage(harness::app::init(app.handle()));
             harness::app::reconcile(app.handle());
+            // An opencode server outlives an app that was signalled rather
+            // than quit — one per `tauri dev` rebuild, listening for ever.
+            harness::app::sweep_strays();
             // A chaptering run killed mid-turn leaves `running` on the
             // lecture row; nothing else will ever clear it.
             chapters::app::reconcile(app.handle());
@@ -1263,6 +1267,13 @@ CREATE TABLE IF NOT EXISTS browser_favicons (
             files::scan_parsed_files,
             files::import_uploads,
             files::delete_upload,
+            files::create_document,
+            files::write_document,
+            files::rename_document,
+            files::delete_document,
+            files::list_documents,
+            files::attach_document_image,
+            files::attach_document_file,
             calendar::calendar_sync_events,
             lectures::echo360_sync_lectures,
             lectures::echo360_download_video,

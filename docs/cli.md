@@ -31,6 +31,13 @@ These are also the commands that spend a model's quota, which is why each
 leaves an existing result alone unless asked. A reading copy additionally
 requires the transcript on disk: it *is* the transcript, rewritten.
 
+`memory` writes a **fourth** kind: the agents' own notes about the student,
+in `agents/memories/`. Like a task, nothing upstream has a copy; unlike a
+task, it lives in files rather than in the database, because the thread that
+writes it runs in a sandbox that cannot open one. See
+[harness.md](./harness.md#memory) for why that store is reached through a
+command at all rather than written as markdown by whoever is holding the pen.
+
 Two commands stand outside that split. `docs` documents the whole agent-facing
 surface to the agents that use it, and `agent` runs one of those agents for a
 single turn through the app's own bridges — the headless proof that a bridge works, with nothing recorded
@@ -46,6 +53,7 @@ the instructions gets read without opening the window.
 | Ranking behind `search` | `app/src-tauri/src/retrieval.rs` |
 | Shared path resolution | `app/src-tauri/src/paths.rs` |
 | Agent docs: templates, stubs, linking | `app/src-tauri/src/agents.rs` |
+| The memory store `memory` reads and writes | `app/src-tauri/src/memory.rs` |
 | `agent`: the bridges it drives | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes (scrape tables) | `app/src-tauri/src/store.rs` |
 | Headless DB writes (projects and tasks) | `app/src-tauri/src/projects.rs` |
@@ -251,7 +259,7 @@ see the bullet on scaffolding in [sync.md](./sync.md).
   OCULUS-CLI.md   rendered from this binary's own help
   OCULUS.md       stub
   TASTE.md        stub — standing preferences
-  memories/       cross-subject; MEMORY.md index stubbed beside them
+  memories/       cross-subject; MEMORY.md index generated beside them
   memories/<code>/  one subject's, with its own MEMORY.md index
   skills/<name>/SKILL.md    one procedure, generated
   .claude/skills/<name> → ../../skills/<name>
@@ -290,10 +298,19 @@ Three different lifetimes, which is the whole design:
   than as background, so one naming a flag this binary no longer has is
   followed instead of weighed. There is exactly one copy of each and every
   run rewrites it.
-- **Stubbed once, then the user's.** `OCULUS.md`, `TASTE.md` and the
-  `MEMORY.md` index in each memory folder are written only when absent. They are the one thing in `agents/` a human authors, and
-  overwriting them would be the only unrecoverable thing this command could
-  do. So is `agents/INSTRUCTIONS.md` in a course folder, which nothing writes
+- **Stubbed once, then the user's.** `OCULUS.md` is written only when absent.
+  It is the one thing in `agents/` a human authors outright, and overwriting
+  it would be the only unrecoverable thing this command could do.
+- **Merged — the half that is a prompt is regenerated, the half that is
+  content is kept.** Two files are both at once, and "written once and never
+  again" leaves their prompt half to rot: this library's `TASTE.md` spent a
+  fortnight telling its reader that Oculus folded the file into every message,
+  which had not been true since the BYOK chat was deleted. So `docs` re-renders
+  `TASTE.md`'s guidance and carries the bullets across under their headings,
+  and every `MEMORY.md` is rewritten below its marker from the memories beside
+  it (`oculus memory`, which does the same on every write). **Both refuse
+  rather than guess**: prose under a `TASTE.md` heading, or a file whose
+  headings are gone, is reported and left alone. So is `agents/INSTRUCTIONS.md` in a course folder, which nothing writes
   at all — it is where per-subject instruction lives now that `AGENTS.md` is
   universal.
 - **Linked, never clobbered.** The course-folder `AGENTS.md` is a *relative*
