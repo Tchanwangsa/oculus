@@ -1,42 +1,25 @@
 //! The memory store the agents write back into, and the one writer for it.
 //!
-//! [`crate::agents`] scaffolds the layer — the two buckets, the `MEMORY.md`
-//! index stubbed in each — and deliberately never writes a memory. This
-//! module does, on an agent's behalf, through `oculus memory`. The split is
-//! the same one the rest of the library keeps: the app owns the shape of the
-//! folder, the CLI is the door anything writes through.
+//! [`crate::agents`] scaffolds the layer and never writes a memory; this module
+//! does, on an agent's behalf, through `oculus memory`.
 //!
-//! **Why a command at all, when a memory is a markdown file any agent can
-//! write with its own tools.** Because in practice they did not. A memory is
-//! two writes — the file, and a line in that folder's `MEMORY.md` — and the
-//! second is the one that gets skipped, which is exactly the one that decides
-//! whether the next conversation ever opens the first. Measured over a
-//! semester of real use, the store held nine files against fifty-one threads,
-//! two subjects had an index with nothing in it, and a plainly subject-scoped
-//! fact sat in the cross-subject bucket. So the index stopped being something
-//! an agent is asked to remember: it is **derived from the files beside it**
-//! and rewritten on every write, and the routing is a flag rather than a path
-//! the agent has to reason its way to.
+//! A memory is two writes — the file and its line in `MEMORY.md` — and agents
+//! skip the second. So the index is **derived from the files** and rewritten on
+//! every write, and routing is a flag, not a path to reason out.
 //!
-//! **Nothing here touches the database**, which is not an accident either. An
-//! in-app thread runs sandboxed and cannot write `oculus.db` — a write there
-//! comes back as "readonly database" — so a memory store that lived in SQLite
-//! would be one the agent that needs it most could not use. Files under
-//! `agents/` are the one thing that sandbox allows.
+//! Nothing here touches the database: a sandboxed in-app thread cannot write
+//! `oculus.db`, but may write files under `agents/`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::agents;
 
-/// The four kinds a memory can be, and the same vocabulary the templates
-/// teach. `feedback` and `project` additionally owe a **Why** and a **How to
-/// apply** — see [`WriteSpec`].
+/// The four kinds a memory can be, the templates' vocabulary. `feedback` and
+/// `project` also owe a **Why** and a **How to apply** — see [`WriteSpec`].
 pub const TYPES: [&str; 4] = ["user", "feedback", "project", "reference"];
 
-/// The generated half of a `MEMORY.md` starts here. Everything above it is
-/// whoever's prose it was — the stub's, or the student's — and is copied
-/// through untouched.
+/// The generated half of a `MEMORY.md` starts here; prose above it is kept.
 const INDEX_MARK: &str =
     "<!-- Written by `oculus memory` from the files beside this one — edit a memory, not this list. -->";
 
@@ -52,12 +35,9 @@ pub fn bucket_dir(data_dir: &Path, code: Option<&str>) -> PathBuf {
 
 /// A subject code to the course folder its bucket is named for.
 ///
-/// Resolved against the **filesystem**, not the subjects table, for the same
-/// reason nothing else here opens the database: this has to work from a
-/// sandbox, and on a machine where the app has never run. A bare code
-/// (`INFO30006`) matches the folder it prefixes; the full folder name matches
-/// itself. A bucket that exists without a course folder still resolves, so a
-/// subject that has been unsynced does not strand what was learned about it.
+/// Resolved on the filesystem, not the subjects table, so it works from a
+/// sandbox. A bare code matches the folder it prefixes; a bucket without a
+/// course folder still resolves, so an unsynced subject keeps its memories.
 pub fn resolve_subject(data_dir: &Path, code: &str) -> Result<String, String> {
     let wanted = code.trim().to_ascii_uppercase();
     if wanted.is_empty() {
@@ -109,9 +89,7 @@ pub fn resolve_subject(data_dir: &Path, code: &str) -> Result<String, String> {
 
 /// A filename for a fact, from whatever the caller had to hand.
 ///
-/// Lossy on purpose: an agent that passes a whole sentence gets a usable slug
-/// rather than a refusal, which is the difference between a memory written and
-/// a memory abandoned halfway.
+/// Lossy on purpose: a whole sentence gets a usable slug, not a refusal.
 pub fn slug(input: &str) -> String {
     let mut out = String::new();
     for ch in input.chars() {
@@ -122,10 +100,7 @@ pub fn slug(input: &str) -> String {
         }
     }
     let out = out.trim_matches('-').to_string();
-    // Long enough to stay readable in a directory listing, short enough that
-    // a sentence passed by mistake does not become the filename entire. Cut
-    // back to a word: a name ending mid-word reads as a truncated file rather
-    // than as a short one.
+    // Readable in a listing, cut back to a whole word.
     match out.char_indices().nth(64) {
         None => out,
         Some((cut, _)) => {
@@ -138,9 +113,7 @@ pub fn slug(input: &str) -> String {
     }
 }
 
-/// A filename from the one-line description, for a write that did not name
-/// itself. The first clause, and at most six words of it — enough to be
-/// recognisable in a listing, short of being the sentence again.
+/// A filename from the description's first clause, at most six words.
 fn name_from(about: &str) -> String {
     let clause = about
         .split(['.', ';', ':', '—', ','])
@@ -150,8 +123,7 @@ fn name_from(about: &str) -> String {
     slug(&words.join(" "))
 }
 
-/// A slug back to something with spaces in it, for an index line whose file
-/// never said what it would like to be called.
+/// A slug back to words, for an index line whose file has no title.
 pub fn humanize(name: &str) -> String {
     let mut s = name.replace(['-', '_'], " ");
     if let Some(first) = s.get_mut(0..1) {
@@ -160,19 +132,15 @@ pub fn humanize(name: &str) -> String {
     s
 }
 
-/// The front matter of one memory: the two fields every file has, an optional
-/// display title, and the `metadata:` block, kept as an ordered list so a key
-/// this build does not know about survives a rewrite.
+/// The front matter of one memory.
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct Front {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub description: String,
-    /// Ordered, so the file keeps `type` above the bookkeeping — and a key
-    /// this build does not know about survives a rewrite in place. Serialized
-    /// as an object, because a consumer of `--json` wants
-    /// `metadata.type`, not a list of pairs to walk.
+    /// Ordered, so `type` stays on top and an unknown key survives a rewrite.
+    /// Serialized as an object so `--json` offers `metadata.type`.
     #[serde(serialize_with = "as_map")]
     pub metadata: Vec<(String, String)>,
 }
@@ -199,8 +167,7 @@ impl Front {
         }
     }
 
-    /// What the index calls it: what the file asked to be called, else the
-    /// slug read back as words.
+    /// The file's title, else the slug read back as words.
     pub fn display(&self) -> String {
         self.title.clone().unwrap_or_else(|| humanize(&self.name))
     }
@@ -219,20 +186,11 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// The two dates a reader judges a memory by — how long this has been
-    /// sitting here, and when somebody last said it was still true.
+    /// When the memory was created and when it was last revised.
     ///
-    /// `created` falls back to the filesystem, because every memory written
-    /// before `oculus memory` existed is undated and the same fallback
-    /// already decides where such a file lands in a listing — so what the
-    /// listing *shows* is what put it there. [`reindex`] stamps it into the
-    /// file, once.
-    ///
-    /// **`updated` has no fallback**, and that is the point. An mtime moves
-    /// when this module rewrites front matter, when a file is copied, when
-    /// anything at all touches the file; reading one as "revised" would date
-    /// a fact by its housekeeping. A memory nobody has revisited through the
-    /// command says so by having nothing here.
+    /// `created` falls back to the filesystem, as the listing order does;
+    /// [`reindex`] stamps it into the file once. `updated` has no fallback: an
+    /// mtime would date a fact by its housekeeping.
     pub fn dates(&self) -> (Option<String>, Option<String>) {
         (
             self.front
@@ -246,11 +204,9 @@ impl Entry {
 
 /// Split a memory file into its front matter and everything after it.
 ///
-/// A hand-rolled reader rather than a YAML dependency, because the shape is
-/// fixed and shallow — three scalars and a one-level `metadata:` block — and
-/// because a file an agent wrote by hand before this command existed still has
-/// to load. Anything unparseable is reported as `None` and the caller decides;
-/// nothing here rewrites a file it did not understand.
+/// Hand-rolled rather than a YAML dependency: the shape is fixed and shallow,
+/// and hand-written files must still load. Unparseable is `None`; nothing here
+/// rewrites a file it did not understand.
 pub fn parse(text: &str) -> Option<(Front, String)> {
     let rest = text.strip_prefix("---\n")?;
     let end = rest.find("\n---")?;
@@ -298,8 +254,7 @@ fn unquote(value: &str) -> String {
     v.to_string()
 }
 
-/// A scalar that will read back as itself. Only the shapes YAML would
-/// otherwise take for structure need the quotes.
+/// A scalar that reads back as itself; quoted only where YAML would see structure.
 fn scalar(value: &str) -> String {
     let v = value.replace(['\n', '\r'], " ");
     let needs = v.is_empty()
@@ -337,11 +292,8 @@ pub fn render(front: &Front, body: &str) -> String {
     s
 }
 
-/// What `oculus memory write` was asked for. Every field but the body and the
-/// type is optional, and the ones that are absent are either kept from the
-/// file already there or derived — which is the point of the command: the
-/// agent supplies the fact and the flag that files it, and the front matter,
-/// the dates and the index are somebody else's job.
+/// What `oculus memory write` was asked for. Absent fields are kept from the
+/// existing file or derived.
 #[derive(Default)]
 pub struct WriteSpec {
     pub name: Option<String>,
@@ -356,16 +308,14 @@ pub struct WriteSpec {
     pub extra: Vec<(String, String)>,
 }
 
-/// What [`write`] did, in the shape both the human and the `--json` output
-/// want.
+/// What [`write`] did, for human and `--json` output.
 #[derive(Debug, serde::Serialize)]
 pub struct Written {
     pub name: String,
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
-    /// False when this replaced a memory that was already there — the case
-    /// the templates ask for over writing a second file about one fact.
+    /// False when this replaced an existing memory.
     pub created: bool,
     /// How many entries the index has now.
     pub indexed: usize,
@@ -373,20 +323,16 @@ pub struct Written {
 
 /// Write one memory, and rewrite the index it belongs to.
 ///
-/// An **upsert**: a name that is already filed is updated in place, keeping
-/// its `created` date and anything the caller did not pass. That is the
-/// behaviour the templates ask for in prose ("update the file that already
-/// covers it rather than adding a second") and the one an agent is least
-/// likely to perform unprompted, since it would first have to look.
+/// An upsert: an existing name is updated in place, keeping its `created` and
+/// anything the caller did not pass — the templates' "update the file that
+/// already covers it".
 pub fn write(data_dir: &Path, code: Option<&str>, spec: WriteSpec) -> Result<Written, String> {
     let dir = bucket_dir(data_dir, code);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
     let name = match spec.name.as_deref().map(slug).filter(|s| !s.is_empty()) {
         Some(name) => name,
-        // Naming a fact is the part an agent is worst at and the part that
-        // matters least, so a missing name is derived from the one-liner
-        // rather than refused.
+        // A missing name is derived from the one-liner rather than refused.
         None => {
             let derived = name_from(spec.description.as_deref().unwrap_or_default());
             if derived.is_empty() {
@@ -448,10 +394,8 @@ pub fn write(data_dir: &Path, code: Option<&str>, spec: WriteSpec) -> Result<Wri
     if body.trim().is_empty() {
         return Err("a memory with no body is an index line — pass --text or --body".into());
     }
-    // The two types that are instructions rather than observations owe the
-    // reader the reason and the application, because a bare "he prefers X" is
-    // not something a later session can act on or argue with. The flags exist
-    // so this is a fill-in rather than a refusal.
+    // Instructions rather than observations owe the reason and the application,
+    // or a later session cannot act on them.
     if matches!(kind.as_str(), "feedback" | "project")
         && !(body.contains("**Why:**") && body.contains("**How to apply:**"))
     {
@@ -460,7 +404,8 @@ pub fn write(data_dir: &Path, code: Option<&str>, spec: WriteSpec) -> Result<Wri
         ));
     }
 
-    let today = today();
+    // UTC, the clock `datetime('now')` reads, so memory and task dates line up.
+    let today = crate::clock::today_utc();
     if front.meta("created").is_none() {
         front.set_meta("created", &today);
     }
@@ -489,10 +434,8 @@ pub fn write(data_dir: &Path, code: Option<&str>, spec: WriteSpec) -> Result<Wri
 
 /// Every memory in one bucket, oldest first.
 ///
-/// Ordered by the `created` date rather than by name, so the index reads as
-/// the store grew and a rewrite does not shuffle what was already there. A
-/// file from before this command existed has no date and falls back to its
-/// mtime.
+/// By `created` (an undated file falls back to its mtime), so the index reads
+/// as the store grew and a rewrite does not shuffle it.
 pub fn list(data_dir: &Path, code: Option<&str>) -> Result<Vec<Entry>, String> {
     let dir = bucket_dir(data_dir, code);
     let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -520,8 +463,7 @@ pub fn list(data_dir: &Path, code: Option<&str>) -> Result<Vec<Entry>, String> {
         if front.name.trim().is_empty() {
             front.name = stem;
         }
-        // The same fallback [`Entry::dates`] displays, so the date on a line
-        // is the one that put the line where it is.
+        // The same fallback [`Entry::dates`] displays.
         let key = front
             .meta("created")
             .map(String::from)
@@ -557,23 +499,12 @@ pub fn buckets(data_dir: &Path) -> Vec<Option<String>> {
 }
 
 /// One memory by name, with its body, from the bucket given or from whichever
-/// one holds it.
 ///
-/// The search across buckets is what makes a half-remembered name usable: an
-/// agent that knows a fact exists rarely knows which of the two buckets it
-/// ended up in, and a wrong guess would otherwise read as an absence.
-///
-/// **The spelling is half-remembered too, and this store is what makes it
-/// so.** A listing shows the title before anything else, and a caller who
-/// slugs the title back lands a hyphen away from the filename — typing
-/// `info30006-topic-4-group-report-progress` for a file called
-/// `info30006-topic4-group-report-progress`, which is a correct reading of
-/// what it was shown. So the match is a ladder: the exact name, then the
-/// spellings a caller who only saw the title could have written, then a
-/// prefix, then a fragment. A rung is tried only when the one above it found
-/// nothing, and a rung that finds several answers with their names instead of
-/// picking one — the failure worth avoiding is an `rm` that takes a
-/// neighbour, not a `read` that has to be typed twice.
+/// Searched across buckets, since a caller rarely knows which one. The match is
+/// a ladder: exact name, then spellings slugged from the title, then prefix,
+/// then fragment; a lower rung runs only if the one above found nothing. A rung
+/// with several answers lists them rather than picking, so `rm` never takes a
+/// neighbour.
 pub fn find(data_dir: &Path, name: &str, code: Option<&str>) -> Result<Entry, String> {
     let wanted = slug(name);
     if wanted.is_empty() {
@@ -591,10 +522,8 @@ pub fn find(data_dir: &Path, name: &str, code: Option<&str>) -> Result<Entry, St
         pool.extend(list(data_dir, bucket.as_deref())?);
     }
 
-    // Below the first rung the hyphens come out of both sides: where they
-    // fall is the one thing a caller reading a title cannot know, and it is
-    // the only difference a slug still carries once the case and the
-    // punctuation are gone.
+    // Below the first rung hyphens are ignored on both sides: where they fall is
+    // all a slug from a title cannot know.
     let bare = |s: &str| s.replace('-', "");
     let want = bare(&wanted);
     let rung = |test: &dyn Fn(&str) -> bool| -> Vec<Entry> {
@@ -632,8 +561,7 @@ pub fn find(data_dir: &Path, name: &str, code: Option<&str>) -> Result<Entry, St
             Ok(entry)
         }
         0 => Err(format!("no memory called {name}{}", nearby(&pool, &wanted))),
-        // One name in two buckets is a different question from two names
-        // answering to one guess, and takes a different flag to settle.
+        // One name in two buckets needs a different flag than an ambiguous guess.
         _ if hits.iter().all(|h| h.front.name == hits[0].front.name) => Err(format!(
             "{name} is filed in {} buckets ({}) — pass -s",
             hits.len(),
@@ -656,10 +584,7 @@ pub fn find(data_dir: &Path, name: &str, code: Option<&str>) -> Result<Entry, St
     }
 }
 
-/// What the scope does hold, for an error that would otherwise send the
-/// caller back for a listing it has already paid for. Ordered by the words
-/// the guess and the name share, so the one that was meant is at the front,
-/// and capped, because this is a line in a terminal rather than the store.
+/// What the scope does hold, most words shared with the guess first, capped.
 fn nearby(pool: &[Entry], wanted: &str) -> String {
     if pool.is_empty() {
         return String::new();
@@ -696,9 +621,7 @@ pub fn remove(data_dir: &Path, name: &str, code: Option<&str>) -> Result<Entry, 
 
 /// Move a memory from the bucket it is in to another one.
 ///
-/// Both indexes are rewritten, which is the half a delete-and-retype would
-/// get wrong, and the file itself is carried across unchanged — a fact that
-/// was filed in the wrong place is still the same fact.
+/// Both indexes are rewritten and the file carried across unchanged.
 pub fn relocate(data_dir: &Path, entry: &Entry, to: Option<&str>) -> Result<Written, String> {
     if entry.subject.as_deref() == to {
         return Err(format!("{} is already filed there", entry.front.name));
@@ -727,19 +650,15 @@ pub fn relocate(data_dir: &Path, entry: &Entry, to: Option<&str>) -> Result<Writ
 
 /// Rewrite one bucket's `MEMORY.md` from the files in it.
 ///
-/// **The index is derived, which is the whole reason this module exists.** An
-/// entry cannot go missing from it, a deleted memory cannot linger in it, and
-/// neither outcome depends on an agent remembering a second write. Whatever
-/// prose sits above the generated block is kept — that half is the stub's, or
-/// the student's.
+/// The index is derived, so an entry cannot go missing or linger. Prose above
+/// the generated block is kept.
 pub fn reindex(data_dir: &Path, code: Option<&str>) -> Result<usize, String> {
     let dir = bucket_dir(data_dir, code);
     let path = dir.join(INDEX_NAME);
     let old = std::fs::read_to_string(&path).unwrap_or_default();
     let entries = list(data_dir, code)?;
 
-    // Titles an earlier hand wrote are adopted rather than replaced: the first
-    // run of this must not rename everything already filed.
+    // Titles already written in the index are adopted, not replaced.
     let inherited = index_titles(&old);
 
     let mut out = String::new();
@@ -754,12 +673,8 @@ pub fn reindex(data_dir: &Path, code: Option<&str>) -> Result<usize, String> {
         for e in &entries {
             let file = format!("{}.md", e.front.name);
             let inherited_title = inherited.get(&file).map(String::as_str);
-            // What the file is missing is stamped back into it, once: a title
-            // somebody wrote by hand in this index, and the dates a memory
-            // written before this command existed never had. After this the
-            // index is derived from the files alone, which is the property
-            // the whole module is for — and a memory keeps its title and its
-            // age when it moves buckets.
+            // Stamp what the file is missing (a hand-written index title, undated
+            // creation) into it once, so the index derives from files alone.
             backfill(&e.path, inherited_title);
             let title = match (&e.front.title, inherited_title) {
                 (Some(title), _) => title.clone(),
@@ -776,8 +691,8 @@ pub fn reindex(data_dir: &Path, code: Option<&str>) -> Result<usize, String> {
     Ok(entries.len())
 }
 
-/// The part of an index that is not the list: down to the marker if there is
-/// one, else down to the first entry a previous hand wrote, else a stub.
+/// The part of an index that is not the list: down to the marker, else to the
+/// first hand-written entry, else a stub.
 fn preamble(old: &str, code: Option<&str>) -> String {
     if let Some(cut) = old.find(INDEX_MARK) {
         return old[..cut].to_string();
@@ -794,8 +709,7 @@ fn preamble(old: &str, code: Option<&str>) -> String {
     if !kept.trim().is_empty() {
         return kept;
     }
-    // Only reached for a bucket that was written to before `oculus docs` ever
-    // stubbed it. Says the same thing those stubs do.
+    // A bucket written before it was ever stubbed.
     let scope = match code {
         Some(code) => format!(
             "# Memories — {code}\n\nFacts about this subject alone — including ones that \
@@ -814,13 +728,9 @@ fn preamble(old: &str, code: Option<&str>) -> String {
     )
 }
 
-/// Write a title into a file that does not have one. Best-effort: a memory
-/// that cannot be parsed or written keeps whatever the index says about it,
-/// because an index rewrite is not the place to fail over somebody's file.
-/// Stamp back into a memory what its file does not carry: a title an earlier
-/// hand wrote in the index, and the `created` date a file written before this
-/// command existed never had. Only `created` — see [`Entry::dates`] for why
-/// an mtime is not an `updated`.
+/// Stamp into a memory a title from the index and a missing `created` date
+/// (never `updated` — see [`Entry::dates`]). Best-effort: an index rewrite is
+/// not the place to fail over somebody's file.
 fn backfill(path: &str, title: Option<&str>) {
     let Ok(text) = std::fs::read_to_string(path) else {
         return;
@@ -848,8 +758,7 @@ fn backfill(path: &str, title: Option<&str>) {
     }
 }
 
-/// `type` first, then the dates: the one a reader cares about should not sit
-/// below the bookkeeping.
+/// `type` first, then the dates.
 fn order_meta(front: &mut Front) {
     front.metadata.sort_by_key(|(k, _)| match k.as_str() {
         "type" => 0,
@@ -878,22 +787,8 @@ fn index_titles(old: &str) -> BTreeMap<String, String> {
     map
 }
 
-/// Today, UTC, as `YYYY-MM-DD`.
-///
-/// The same clock the database's `datetime('now')` reads, so a memory's date
-/// and a task's line up. Day granularity is all a memory has any use for.
-fn today() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    civil(secs / 86_400)
-}
-
-/// When an undated file most plausibly began: its birth time, except where
-/// that is later than its last write — a copied or restored file carries a
-/// birth time from the copy, and a memory cannot have been written after it
-/// was last edited.
+/// When an undated file most plausibly began: its birth time, unless that is
+/// after its last write (a copy carries the copy's birth time).
 fn born(path: &Path) -> Option<String> {
     let modified = stat_date(path, std::fs::Metadata::modified);
     match (
@@ -915,32 +810,16 @@ fn stat_date(
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
         .as_secs() as i64;
-    Some(civil(secs / 86_400))
-}
-
-/// Days since the epoch to a civil date — Howard Hinnant's `civil_from_days`,
-/// which is the whole reason this file needs no date crate.
-fn civil(days: i64) -> String {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m:02}-{d:02}")
+    Some(crate::clock::ymd(secs / 86_400))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
 
-    fn scratch(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("oculus-memory-{name}"));
-        let _ = std::fs::remove_dir_all(&root);
+    fn scratch(name: &str) -> Scratch {
+        let root = Scratch::new(&format!("memory-{name}"));
         std::fs::create_dir_all(root.join("courses/INFO30006_2026_SM2")).unwrap();
         root
     }
@@ -958,8 +837,7 @@ mod tests {
         std::fs::read_to_string(bucket_dir(root, code).join(INDEX_NAME)).unwrap()
     }
 
-    /// The whole point of the command: the file and its index line are one
-    /// call, so the half that was always skipped cannot be.
+    /// The file and its index line are one call.
     #[test]
     fn a_memory_and_its_index_are_written_together() {
         let root = scratch("one-write");
@@ -994,8 +872,7 @@ mod tests {
         assert_eq!(out.indexed, 1);
     }
 
-    /// Derived, not appended — which is what makes a deletion complete and an
-    /// index impossible to leave stale.
+    /// Derived, not appended, so a deletion is complete.
     #[test]
     fn the_index_is_derived_from_the_files_beside_it() {
         let root = scratch("derived");
@@ -1011,8 +888,7 @@ mod tests {
             "a deleted memory leaves no line behind"
         );
 
-        // A file dropped in by hand — or by an agent that wrote markdown the
-        // old way — is picked up by the next rewrite without being announced.
+        // A file dropped in by hand is picked up by the next rewrite.
         std::fs::write(
             bucket_dir(&root, None).join("by-hand.md"),
             "---\nname: by-hand\ndescription: Written without the command\nmetadata:\n  type: user\n---\n\nStill a memory.\n",
@@ -1022,18 +898,14 @@ mod tests {
         assert!(index(&root, None).contains("](by-hand.md)"));
     }
 
-    /// "Update the file that already covers it rather than adding a second" is
-    /// the templates' rule and the one an agent would have to look first to
-    /// follow. Here it is the default, and what the caller leaves out is kept.
+    /// An update keeps what the caller leaves out.
     #[test]
     fn a_name_already_filed_is_updated_and_keeps_what_was_not_passed() {
         let root = scratch("upsert");
         let first = write(&root, None, spec("A fact", "The body.", "reference")).unwrap();
         assert!(first.created);
 
-        // Naming it is what says "this one", so an update passes the name; a
-        // write that only derives one from a changed line is a new memory,
-        // which is the same rule any file has.
+        // Passing the name says "this one"; a derived name from a new line is a new memory.
         let second = write(
             &root,
             None,
@@ -1056,9 +928,7 @@ mod tests {
         assert!(file.contains("type: reference"), "and so did the type");
     }
 
-    /// The two types that are instructions rather than observations owe a
-    /// reason and an application, because a later session can act on neither
-    /// without them. The flags make it a fill-in; the check makes it happen.
+    /// Instruction types must carry a reason and an application.
     #[test]
     fn an_instruction_memory_without_its_why_is_refused() {
         let root = scratch("why");
@@ -1080,9 +950,7 @@ mod tests {
         assert!(file.contains("**How to apply:** Reach for bun"));
     }
 
-    /// A subject code files a fact where a scoped thread will look for it, and
-    /// the code is resolved on disk rather than in the database — this has to
-    /// work from a sandbox that cannot open one.
+    /// A subject code resolves on disk, not in the database.
     #[test]
     fn a_subject_fact_is_filed_under_the_subject() {
         let root = scratch("buckets");
@@ -1121,9 +989,7 @@ mod tests {
         );
     }
 
-    /// A misfiling is the mistake the two buckets exist to make visible, so
-    /// correcting one is a command rather than a retype — and both indexes
-    /// have to follow the file.
+    /// Moving a misfiled memory rewrites both indexes.
     #[test]
     fn moving_a_memory_rewrites_both_indexes() {
         let root = scratch("move");
@@ -1153,9 +1019,7 @@ mod tests {
         );
     }
 
-    /// The store as it stands today: indexes somebody wrote by hand, above
-    /// prose that is theirs. The rewrite keeps both — and adopts the titles
-    /// into the files, so the next one does not have to find them here.
+    /// Hand-written indexes and prose are kept, and their titles adopted into files.
     #[test]
     fn a_hand_written_index_keeps_its_prose_and_its_titles() {
         let root = scratch("legacy");
@@ -1189,9 +1053,7 @@ mod tests {
             "adopted into the file: {file}"
         );
 
-        // And its dates, which a file written before this command had no way
-        // to carry: the filesystem is the only witness left, and stamping it
-        // once means the answer stops depending on a copy's mtime.
+        // And its dates, stamped once from the filesystem.
         assert!(
             file.contains("created: 20"),
             "dated from the filesystem: {file}"
@@ -1209,9 +1071,7 @@ mod tests {
         );
     }
 
-    /// Naming a fact is the part an agent is worst at and the part that
-    /// matters least, so it is derived rather than demanded — and derived to
-    /// something a directory listing can still be read.
+    /// A name is derived, and stays readable in a listing.
     #[test]
     fn a_write_that_names_nothing_takes_a_name_from_its_line() {
         let root = scratch("naming");
@@ -1238,10 +1098,7 @@ mod tests {
         assert!(slug(&"word ".repeat(40)).len() <= 64);
     }
 
-    /// The name is the one thing in a listing that cannot be derived from the
-    /// rest, and the title is what a caller sees first — so a guess slugged
-    /// from the title has to land, and a guess that lands nowhere has to say
-    /// what is there instead of only what is not.
+    /// A guess slugged from the title lands, and a miss lists what is there.
     #[test]
     fn a_name_read_off_the_title_still_finds_the_file() {
         let root = scratch("find");
@@ -1290,15 +1147,13 @@ mod tests {
             name("group-report").is_ok(),
             "and a fragment, from the middle of one"
         );
-        // The description is not searched: it is a sentence, and a sentence
-        // matches too much for a command that also deletes.
+        // The description is not searched: a sentence matches too much for `rm`.
         assert!(
             name("great-firewall").is_err(),
             "a fragment of the description is not a name"
         );
 
-        // What must not happen: a guess that fits two memories picking one of
-        // them, which for `rm` would be somebody else's fact deleted.
+        // A guess that fits two memories must not pick one.
         write(
             &root,
             None,
@@ -1323,8 +1178,7 @@ mod tests {
         );
     }
 
-    /// Front matter survives a round trip, including a key this build does not
-    /// know about — a rewrite must not quietly drop somebody's field.
+    /// Front matter round-trips, including an unknown key.
     #[test]
     fn front_matter_round_trips_including_what_this_build_does_not_know() {
         let text = "---\nname: a-fact\ntitle: A fact\ndescription: \"One line: with a colon\"\nmetadata:\n  type: user\n  provenance: thread 26\n---\n\nThe body.\n";

@@ -20,11 +20,10 @@ pub fn canvas_cookie_header(app: &AppHandle) -> String {
     }
 }
 
-/// Cookie to use for server-side Canvas requests. Prefers the persisted
-/// snapshot (survives restart); falls back to the live login WebView if it
-/// happens to be open and nothing was saved yet.
+/// Cookie for server-side Canvas requests: the persisted snapshot, else the
+/// live login WebView.
 pub fn proxy_cookie(app: &AppHandle) -> String {
-    let saved = crate::auth::saved_cookie_header(app);
+    let saved = crate::auth::saved_cookie_header();
     if !saved.is_empty() {
         return saved;
     }
@@ -34,34 +33,24 @@ pub fn proxy_cookie(app: &AppHandle) -> String {
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn read_course_file(app: AppHandle, relative_path: String) -> Result<String, String> {
-    let path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join(&relative_path);
+pub fn read_course_file(relative_path: String) -> Result<String, String> {
+    let path = crate::paths::data_dir().join(&relative_path);
     std::fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn open_course_file(app: AppHandle, relative_path: String) -> Result<(), String> {
-    let path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join(&relative_path);
+pub fn open_course_file(relative_path: String) -> Result<(), String> {
+    let path = crate::paths::data_dir().join(&relative_path);
     tauri_plugin_opener::open_path(path.to_str().unwrap_or(""), None::<&str>)
         .map_err(|e| e.to_string())
 }
 
 // ── The student's own files ───────────────────────────────────────────────────
 //
-// An upload is a library file that no sync put there. It is copied into
-// `courses/<code>/uploads/`, which is enough for the entire pipeline to pick it
-// up: the Office converter, the parser, the embedder, search and the chat
-// agent all key off the path and know nothing about where the bytes came from.
+// Copied into `courses/<code>/uploads/`; the rest of the pipeline keys off the
+// path alone.
 
-/// One file that landed, in the shape the frontend needs to write its row.
+/// One file that landed, in the shape the frontend writes its row from.
 #[derive(serde::Serialize)]
 pub struct ImportedFile {
     pub filename: String,
@@ -71,27 +60,23 @@ pub struct ImportedFile {
 }
 
 /// What became of one picked file. `file` and `error` are both set when the
-/// bytes landed but the PDF conversion did not: the row is real and the
-/// original opens, it just has nothing for the parser to read.
+/// bytes landed but the PDF conversion did not.
 #[derive(serde::Serialize)]
 pub struct ImportOutcome {
-    /// The name the user picked it under, so a failure can name itself.
+    /// The name the user picked it under.
     pub source: String,
     pub file: Option<ImportedFile>,
     pub error: Option<String>,
 }
 
-/// Copy files the user picked into a subject's uploads folder.
-///
-/// Per-file results rather than one `Result`: picking six files and having the
-/// fifth fail must still leave the other five in the library.
+/// Copy picked files into a subject's uploads folder; one failure does not
+/// fail the rest.
 #[tauri::command]
 pub fn import_uploads(
-    app: AppHandle,
     subject_code: String,
     paths: Vec<String>,
 ) -> Result<Vec<ImportOutcome>, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = crate::paths::data_dir();
     Ok(paths
         .iter()
         .map(|p| {
@@ -129,19 +114,13 @@ fn store_upload(
     let (rel, size, action) =
         crate::paths::write_course_bytes(data_dir, code, &course_rel, &bytes)?;
 
-    // A name freed by a delete can be handed out again, and a quality pass that
-    // was still in flight when that delete landed writes its `{stem}.md` out
-    // afterwards — beside a PDF that no longer exists. Whatever is sitting on
-    // this name is therefore not necessarily ours. `Unchanged` is the one case
-    // it provably is: identical bytes under the same name, keeping the parse
-    // and embeddings they already earned.
+    // A reused name may hold a stale parse (a pass in flight across a delete).
+    // Only `Unchanged` — identical bytes — provably keeps its own.
     if action != crate::paths::WriteAction::Unchanged {
         crate::paths::purge_parse_artifacts(data_dir, &rel);
     }
 
-    // The derived sibling PDF the scraper writes for Office documents, written
-    // here for the same reason: it is what the parser, the embedder and the
-    // in-app viewer actually read (`doc_pdf_rel` in paths.rs).
+    // The derived sibling PDF for Office documents (`doc_pdf_rel` in paths.rs).
     let warning = match crate::sync::office_ext_of(&name) {
         None => None,
         Some(ext) => match crate::sync::office_to_pdf(&bytes, ext) {
@@ -166,21 +145,14 @@ fn store_upload(
     Ok((ImportedFile { filename: name, relative_path: rel, file_type, size_bytes: size }, warning))
 }
 
-/// A name in `dir` these bytes may have.
-///
-/// An upload never overwrites one already there — a second `notes.pdf` becomes
-/// `notes-2.pdf`, so adding the wrong file cannot destroy the right one.
-/// Identical bytes under the same name are the one exception: that is the same
-/// file again, and it keeps its row, its parse and its embeddings instead of
-/// growing a copy.
+/// A name in `dir` for these bytes: never overwrites a different file
+/// (`notes-2.pdf`), but identical bytes reuse the name and keep their parse.
 fn free_name(dir: &Path, name: &str, bytes: &[u8]) -> String {
     step_aside(dir, name, |existing| existing == bytes)
 }
 
-/// The step-aside rule itself: `name`, else `stem-2.ext`, `stem-3.ext`… —
-/// the first that nothing occupies, or that `ours` says is occupied by the
-/// very file being placed. Uploads pass a byte comparison; a document passes
-/// `|_| false`, because two empty notes are two notes, not one twice.
+/// `name`, else `stem-2.ext`, `stem-3.ext`… — the first free, or that `ours`
+/// says already holds this file.
 fn step_aside(dir: &Path, name: &str, ours: impl Fn(&[u8]) -> bool) -> String {
     let (stem, ext) = match name.rsplit_once('.') {
         Some((s, e)) if !s.is_empty() => (s, format!(".{e}")),
@@ -197,22 +169,18 @@ fn step_aside(dir: &Path, name: &str, ours: impl Fn(&[u8]) -> bool) -> String {
     name.to_string()
 }
 
-/// Remove an uploaded file and everything derived from it.
-///
-/// Scoped to `uploads/` by `is_upload_rel` — see the note there. It takes the
-/// converted PDF, the parse artifacts and the page images with it, because the
-/// sidecar's skip checks are plain existence checks: a leftover `{stem}.md`
-/// would be served as the parse of whatever lands on that name next.
+/// Remove an upload and everything derived from it: the parse's skip checks
+/// are existence checks, so a leftover `{stem}.md` would be served as the
+/// parse of whatever lands on that name next.
 #[tauri::command]
-pub fn delete_upload(app: AppHandle, relative_path: String) -> Result<(), String> {
+pub fn delete_upload(relative_path: String) -> Result<(), String> {
     if !crate::paths::is_upload_rel(&relative_path) {
         return Err(format!("{relative_path} is not one of your uploads"));
     }
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let base = crate::paths::data_dir();
 
     crate::paths::purge_parse_artifacts(&base, &relative_path);
-    // The converted sibling, for an Office document. `doc_pdf_rel` returns the
-    // file itself for a real PDF, which the final remove already covers.
+    // The converted sibling of an Office document (a real PDF is itself).
     if let Some(pdf_rel) = crate::paths::doc_pdf_rel(&relative_path) {
         if pdf_rel != relative_path {
             let _ = std::fs::remove_file(base.join(&pdf_rel));
@@ -223,27 +191,14 @@ pub fn delete_upload(app: AppHandle, relative_path: String) -> Result<(), String
 
 // ── The student's own documents ───────────────────────────────────────────────
 //
-// A document is a markdown note written inside the app. It lives in
-// `courses/<code>/documents/`, beside `uploads/`, and works the same way: Rust
-// moves the bytes, the frontend writes the `files` row, and from then on the
-// path is all the rest of the app needs — `read_course_file`, the mention
-// menu, search and the chat agent's `courses/` reach it with no further work.
-//
-// Two things an upload never does. A document is rewritten on every save, and
-// it moves when its title changes — so its relative path is its identity, and
-// every command that mutates one takes that path and checks its shape
-// (`is_document_rel`) before resolving it against the data dir. The caller's
-// string never becomes a filesystem path on its own.
+// Markdown notes in `courses/<code>/documents/`: Rust moves the bytes, the
+// frontend writes the `files` row. A note is rewritten on save and moves on
+// rename, so every mutating command checks the path's shape (`is_document_rel`)
+// before resolving it.
 
-/// The filename a title earns: sanitised the way every course path is,
-/// `Untitled` when nothing survives the sanitising, and `.md` always.
-///
-/// "Survives" means a character that is not the underscore every unsafe one
-/// becomes — `???` earns `Untitled.md`, not `___.md`, for the same reason
-/// `safe_rel_path` drops a bare `_` segment. A trailing dot goes too:
-/// `safe_filename` collapses `..` but leaves a lone one, and `notes.` + `.md`
-/// would be `notes..md` — which `write_course_bytes` sanitises again on the
-/// way to disk, landing the file under a name other than the one announced.
+/// A title's filename: sanitised, `Untitled` when only underscores survive,
+/// `.md` always. A trailing dot is dropped, or `notes..md` would be sanitised
+/// again on write and land under a different name.
 fn document_name(title: &str) -> String {
     let stem = crate::paths::safe_filename(title.trim());
     let stem = stem.trim_end_matches('.');
@@ -259,35 +214,22 @@ fn documents_dir(data_dir: &Path, code: &str) -> std::path::PathBuf {
 }
 
 /// A document's absolute path, or an error — the one place the guard runs.
-fn document_path(app: &AppHandle, relative_path: &str) -> Result<std::path::PathBuf, String> {
+fn document_path(relative_path: &str) -> Result<std::path::PathBuf, String> {
     if !crate::paths::is_document_rel(relative_path) {
         return Err(format!("{relative_path} is not one of your documents"));
     }
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(base.join(relative_path))
+    Ok(crate::paths::data_dir().join(relative_path))
 }
 
-/// Where a note's pictures live: `assets/`, in the folder the note is in.
-///
-/// Beside the note and not in `agents/attachments/`, where a composer's
-/// picture goes, because a note is a *library* file and what it holds has to
-/// resolve for everything that reads it. The editor's preview and the file
-/// viewer both resolve a relative image against the note's own directory
-/// (`useLibraryMdComponents` in `app/src/components/files/FileViewer.tsx`),
-/// and an agent — or a text editor, or Finder — handed `documents/` is handed
-/// the pictures with it.
-///
-/// The argument is the note's *guarded* path, so the folder can only ever be
-/// under some subject's `documents/`: `document_path` is what proves that,
-/// and this only walks up one level from what it returned.
+/// A note's pictures: `assets/` beside it, so they resolve relative to the note
+/// for every reader (`useLibraryMdComponents` in `FileViewer.tsx`). Takes the
+/// path `document_path` guarded.
 fn document_assets_dir(note: &Path) -> Result<std::path::PathBuf, String> {
     let dir = note.parent().ok_or_else(|| format!("{} has no folder", note.display()))?;
     Ok(dir.join(crate::paths::DOCUMENT_ASSETS_DIR))
 }
 
-/// What the editor puts in the note: `assets/<name>`, relative to the note
-/// itself. A rename moves the note inside the same folder, so the link it
-/// carries keeps resolving without being rewritten.
+/// The link the editor writes, relative to the note (survives a rename).
 fn document_asset_ref(name: &str) -> String {
     format!("{}/{name}", crate::paths::DOCUMENT_ASSETS_DIR)
 }
@@ -297,10 +239,8 @@ fn document_file(relative_path: String, size_bytes: u64) -> ImportedFile {
     ImportedFile { filename, relative_path, file_type: "md".to_string(), size_bytes }
 }
 
-/// Whether `wanted` already names the file at `current`. On a
-/// case-insensitive volume — the macOS default — a title that only changed
-/// case would otherwise be found on disk by the step-aside rule and moved
-/// from `Notes.md` to `Notes-2.md` for no reason.
+/// Whether `wanted` already names the file at `current` — on a
+/// case-insensitive volume a case-only rename would otherwise step aside.
 fn same_entry(current: &Path, wanted: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -317,18 +257,15 @@ fn same_entry(current: &Path, wanted: &Path) -> bool {
     }
 }
 
-/// Create an empty note under a subject. The frontend writes its row from the
-/// result, exactly as it does for an upload.
+/// Create an empty note under a subject.
 #[tauri::command]
 pub fn create_document(
-    app: AppHandle,
     subject_code: String,
     title: String,
 ) -> Result<ImportedFile, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = crate::paths::data_dir();
     let dir = documents_dir(&data_dir, &subject_code);
-    // Unconditional: an empty file already under this name is somebody's note
-    // with nothing in it yet, not this one arriving twice.
+    // Never "ours": an existing empty note is still another note.
     let name = step_aside(&dir, &document_name(&title), |_| false);
     let (rel, size, _) = crate::paths::write_course_bytes(
         &data_dir,
@@ -339,15 +276,13 @@ pub fn create_document(
     Ok(document_file(rel, size))
 }
 
-/// Save a note's text. Returns the byte count, which is what the row's
-/// `size_bytes` holds.
+/// Save a note's text; returns the byte count for `size_bytes`.
 #[tauri::command]
 pub fn write_document(
-    app: AppHandle,
     relative_path: String,
     content: String,
 ) -> Result<u64, String> {
-    let path = document_path(&app, &relative_path)?;
+    let path = document_path(&relative_path)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -355,16 +290,13 @@ pub fn write_document(
     Ok(content.len() as u64)
 }
 
-/// Give a note a new title, which is a new filename. The same title yields
-/// the same file untouched; a title another note already holds steps aside
-/// like a colliding upload does.
+/// Retitle (rename) a note; a title another note holds steps aside.
 #[tauri::command]
 pub fn rename_document(
-    app: AppHandle,
     relative_path: String,
     title: String,
 ) -> Result<ImportedFile, String> {
-    let path = document_path(&app, &relative_path)?;
+    let path = document_path(&relative_path)?;
     let size = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
     let (dir_rel, current) = relative_path
         .rsplit_once('/')
@@ -383,22 +315,18 @@ pub fn rename_document(
     Ok(document_file(format!("{dir_rel}/{name}"), size))
 }
 
-/// Remove a note. Nothing is derived from a markdown file — no parse, no
-/// embeddings — so the file is the whole of it.
+/// Remove a note (nothing is derived from it).
 #[tauri::command]
-pub fn delete_document(app: AppHandle, relative_path: String) -> Result<(), String> {
-    let path = document_path(&app, &relative_path)?;
+pub fn delete_document(relative_path: String) -> Result<(), String> {
+    let path = document_path(&relative_path)?;
     std::fs::remove_file(path).map_err(|e| e.to_string())
 }
 
-/// Every note in a subject's folder, by name. This is what the Documents tab
-/// reconciles its rows against, so a note something else wrote straight into
-/// the folder — the chat agent, the student in a text editor — shows up too.
-/// Only names the guard would accept are listed: a file it would refuse to
-/// save is not one the tab can offer to edit.
+/// Every note in a subject's folder, for the Documents tab to reconcile
+/// against — including ones written outside the app. Only guard-accepted names.
 #[tauri::command]
-pub fn list_documents(app: AppHandle, subject_code: String) -> Result<Vec<ImportedFile>, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+pub fn list_documents(subject_code: String) -> Result<Vec<ImportedFile>, String> {
+    let data_dir = crate::paths::data_dir();
     let dir = documents_dir(&data_dir, &subject_code);
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -424,27 +352,15 @@ pub fn list_documents(app: AppHandle, subject_code: String) -> Result<Vec<Import
     Ok(out)
 }
 
-/// A picture pasted into a note, written beside it and answered as the path
-/// the note links it by.
-///
-/// The picture is written *now*, while the note is still being typed, rather
-/// than deferred the way a composer defers its attachments until send: there
-/// is no send here, and an image tag cannot point at a file that will be
-/// written later. The cost is a file left in `assets/` when its tag is then
-/// deleted from the text, and that is the accepted trade — the same one
-/// `TaskPage` makes for a task body.
-///
-/// The bytes are the clipboard's, base64 across the IPC, and everything that
-/// is true of a composer's picture is true here: the cap, the sniff, and a
-/// filename that is this app's own stamp rather than anything the caller
-/// claimed (`crate::harness::attach`).
+/// A picture pasted into a note (base64), written now into `assets/` and
+/// returned as the link. A tag later deleted leaves an orphan file — accepted.
+/// Cap, sniff and naming are `crate::harness::attach`'s.
 #[tauri::command]
 pub async fn attach_document_image(
-    app: AppHandle,
     relative_path: String,
     data: String,
 ) -> Result<String, String> {
-    let dir = document_assets_dir(&document_path(&app, &relative_path)?)?;
+    let dir = document_assets_dir(&document_path(&relative_path)?)?;
     let bytes = crate::harness::attach::decode(&data)?;
     tokio::task::spawn_blocking(move || {
         crate::harness::attach::write_image(&dir, &bytes).map(|name| document_asset_ref(&name))
@@ -453,15 +369,13 @@ pub async fn attach_document_image(
     .map_err(|e| e.to_string())?
 }
 
-/// The same, for a picture dropped onto a note from Finder: the OS hands the
-/// webview a path, so the bytes are read here instead of crossing the IPC.
+/// The same, for a picture dropped from Finder (a path, read here).
 #[tauri::command]
 pub async fn attach_document_file(
-    app: AppHandle,
     relative_path: String,
     path: String,
 ) -> Result<String, String> {
-    let dir = document_assets_dir(&document_path(&app, &relative_path)?)?;
+    let dir = document_assets_dir(&document_path(&relative_path)?)?;
     tokio::task::spawn_blocking(move || {
         let bytes = crate::harness::attach::read_dropped(&path)?;
         crate::harness::attach::write_image(&dir, &bytes).map(|name| document_asset_ref(&name))
@@ -475,10 +389,9 @@ pub async fn attach_document_file(
 /// Returns (relative_path, status); paths with no parse output are omitted.
 #[tauri::command]
 pub fn scan_parsed_files(
-    app: AppHandle,
     relative_paths: Vec<String>,
 ) -> Result<Vec<(String, String)>, String> {
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let base = crate::paths::data_dir();
     Ok(relative_paths
         .into_iter()
         .filter_map(|rel| {
@@ -492,9 +405,7 @@ pub fn scan_parsed_files(
 mod tests {
     use super::*;
 
-    /// A note's pictures sit in one `assets/` folder beside it — and that
-    /// folder is not itself reachable as a note, which is what keeps a save
-    /// or a delete off a picture and keeps the Documents list free of one.
+    /// `assets/` sits beside the note and is not itself reachable as a note.
     #[test]
     fn a_note_s_pictures_sit_beside_it() {
         let note = Path::new("/data/courses/MULT20015/documents/Week 3.md");
@@ -502,7 +413,6 @@ mod tests {
             document_assets_dir(note).unwrap(),
             Path::new("/data/courses/MULT20015/documents/assets")
         );
-        // Two notes in a subject share the folder: the names are stamps.
         let other = Path::new("/data/courses/MULT20015/documents/Ideas.md");
         assert_eq!(document_assets_dir(note).unwrap(), document_assets_dir(other).unwrap());
 
@@ -514,57 +424,39 @@ mod tests {
 
     #[test]
     fn an_upload_never_lands_on_a_name_already_taken() {
-        let dir = std::env::temp_dir().join(format!("oculus-uploads-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::Scratch::new("uploads");
 
-        // Nothing there: the picked name is the name.
         assert_eq!(free_name(&dir, "notes.pdf", b"one"), "notes.pdf");
         std::fs::write(dir.join("notes.pdf"), b"one").unwrap();
 
-        // The same file again is the same file, not a second copy.
         assert_eq!(free_name(&dir, "notes.pdf", b"one"), "notes.pdf");
-        // A different file under a taken name steps aside rather than overwrite.
         assert_eq!(free_name(&dir, "notes.pdf", b"two"), "notes-2.pdf");
-        // Extensionless names count too, and a dotfile is all stem.
         assert_eq!(free_name(&dir, "README", b"x"), "README");
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_title_becomes_a_markdown_filename() {
         assert_eq!(document_name("Week 3 notes"), "Week_3_notes.md");
         assert_eq!(document_name("  padded  "), "padded.md");
-        // Nothing to name it by: not an empty stem, and not a dotfile.
         assert_eq!(document_name(""), "Untitled.md");
         assert_eq!(document_name("   "), "Untitled.md");
         assert_eq!(document_name("..."), "Untitled.md");
         assert_eq!(document_name("???"), "Untitled.md");
-        // A trailing dot would read as `..md` once the extension lands.
         assert_eq!(document_name("Draft."), "Draft.md");
-        // Separators and traversal are sanitised, never honoured.
         assert_eq!(document_name("../../etc/passwd"), "____etc_passwd.md");
         assert_eq!(document_name("a/b"), "a_b.md");
     }
 
     #[test]
     fn a_new_document_never_lands_on_a_name_already_taken() {
-        let dir =
-            std::env::temp_dir().join(format!("oculus-documents-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::Scratch::new("documents");
 
         let name = document_name("notes");
         assert_eq!(step_aside(&dir, &name, |_| false), "notes.md");
         std::fs::write(dir.join("notes.md"), b"").unwrap();
 
-        // An empty note under the name is not "the same file again": a second
-        // note with the same title is a second note.
         assert_eq!(step_aside(&dir, &name, |_| false), "notes-2.md");
         std::fs::write(dir.join("notes-2.md"), b"some text").unwrap();
         assert_eq!(step_aside(&dir, &name, |_| false), "notes-3.md");
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

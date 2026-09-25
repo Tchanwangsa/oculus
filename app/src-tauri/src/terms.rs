@@ -1,30 +1,13 @@
-//! Chronological ordering for Canvas term names.
+//! Chronological ordering for Canvas term names, which do not sort as text
+//! (`"Summer"` > `"Semester"`, yet Summer opens the year). Month-named
+//! intensives (`"2026 June"`) rank as the term they fall inside.
 //!
-//! Canvas names a term `"2026 Semester 2"` or `"2026 Summer Term"`, and those
-//! strings do *not* sort chronologically: `"Summer"` beats `"Semester"` on the
-//! third character (`u` > `e`), so comparing them as text files Summer last in
-//! a year it actually starts. Taking the plain `.max()` of the names therefore
-//! elected a single summer enrolment over the semester being studied, and
-//! every real subject was stamped as past.
-//!
-//! Not every term is named after a semester either. A short intensive comes
-//! back as the month it runs in — `"2026 June"` for `THTR30042_2026_JUN_STH_2`
-//! — so the months map onto the term they fall inside: January/February are
-//! Summer, June/July are Winter. Left unranked they sorted after every real
-//! term, and the same `.max()` elected a one-off intensive over the semester
-//! being studied.
-//!
-//! The year prefix compares fine either way; only the term within a year needs
-//! a rank. Mirrored in `app/src/lib/terms.ts`, which the frontend uses to
-//! derive the same answer at read time — both sides have to agree, because a
-//! stored flag written here is what the CLI and the agent read back.
+//! Mirrored in `app/src/lib/terms.ts` — both must agree, since the flag stored
+//! from here is what the CLI and the agent read back.
 
-/// Chronological position within one academic year. UniMelb runs Summer Term
-/// in January–February, ahead of Semester 1, with Winter Term between the two
-/// semesters. A term named after its month takes the rank of the term it falls
-/// inside; the semesters are tested first, so a `"Semester 2 (July)"` is still
-/// a semester. An unrecognised term sorts after every real one rather than
-/// silently taking a real term's place.
+/// Position within one academic year: Summer (Jan–Feb), Semester 1, Winter,
+/// Semester 2. Semesters are tested before months, so `"Semester 2 (July)"`
+/// stays a semester. Unrecognised terms sort after every real one.
 pub fn term_rank(name: &str) -> u8 {
     let lower = name.to_lowercase();
     if lower.contains("summer") {
@@ -60,9 +43,7 @@ mod tests {
 
     #[test]
     fn summer_opens_the_year_it_names() {
-        // The bug in one line: as text, Summer wins its year.
         assert!("2026 Summer Term" > "2026 Semester 2");
-        // Ranked, it does not.
         assert!(term_key("2026 Summer Term") < term_key("2026 Semester 2"));
         assert!(term_key("2026 Summer Term") < term_key("2026 Semester 1"));
     }
@@ -107,13 +88,10 @@ mod tests {
 
     #[test]
     fn a_month_named_intensive_ranks_as_the_term_it_runs_in() {
-        // The June intensive is a winter term, not an unknown one — otherwise
-        // it outranks Semester 2 and steals "current" from the real enrolment.
         assert_eq!(term_rank("2026 June"), term_rank("2026 Winter Term"));
         assert!(term_key("2026 June") < term_key("2026 Semester 2"));
         assert!(term_key("2026 June") > term_key("2026 Semester 1"));
         assert_eq!(term_rank("2026 January"), term_rank("2026 Summer Term"));
-        // A semester wins its own name back from the month in the brackets.
         assert_eq!(term_rank("2026 Semester 2 (July start)"), 3);
     }
 

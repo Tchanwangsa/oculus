@@ -15,7 +15,7 @@ pub fn get_subjects(state: tauri::State<SubjectsState>) -> Vec<serde_json::Value
 /// otherwise — the same contract as before, now without a WebView in the middle.
 #[tauri::command]
 pub async fn sync_subjects(app: AppHandle) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = crate::paths::data_dir();
 
     // Canvas can take a few seconds and this is a command, so do it off-thread
     // and let the frontend follow the events.

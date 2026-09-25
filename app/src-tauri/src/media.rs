@@ -1,17 +1,9 @@
-//! Localhost HTTP server for media playback.
+//! Localhost HTTP server for media playback. WebKit's media element rejects
+//! custom-scheme sources (`asset://` fails with MEDIA_ERR_SRC_NOT_SUPPORTED on
+//! macOS 26; cf. tauri-apps/tauri#3725), so lecture video is served over HTTP.
 //!
-//! WebKit's media pipeline refuses to load `<video>`/`<audio>` sources from
-//! custom URL schemes — `fetch()` of an `asset://` URL returns the bytes
-//! fine, but the media element fails instantly with
-//! MEDIA_ERR_SRC_NOT_SUPPORTED before making a single request (observed on
-//! macOS 26; the same class of failure is tauri-apps/tauri#3725). Real HTTP
-//! is the only origin the media stack accepts for local files, so lecture
-//! video is served from this tiny server instead of the asset protocol.
-//!
-//! Scope: only files under the data dir's `lectures/` and `courses/` trees
-//! (the same scope as the asset protocol), and only with the per-launch
-//! token in the URL path — the port is reachable by any local process, so
-//! requests without the token are rejected outright.
+//! Scope: files under the data dir's `lectures/` and `courses/`, and only with
+//! the per-launch token in the path — any local process can reach the port.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -26,8 +18,7 @@ pub struct MediaServer {
     pub token: String,
 }
 
-/// Concurrent range requests happen on every seek; a few workers keep one
-/// slow disk read from stalling playback.
+/// A few workers, so one slow range read does not stall a seek.
 const MEDIA_WORKERS: usize = 4;
 
 #[derive(serde::Serialize)]
@@ -79,8 +70,7 @@ fn handle(request: tiny_http::Request, data_dir: &PathBuf, token: &str) {
         return respond_status(request, 405);
     }
 
-    // URL shape: /{token}?path=<absolute path>. Url::parse handles the
-    // percent-decoding of the query pair.
+    // URL shape: /{token}?path=<absolute path>.
     let Ok(url) = url::Url::parse(&format!("http://localhost{}", request.url())) else {
         return respond_status(request, 400);
     };
@@ -165,9 +155,8 @@ fn handle(request: tiny_http::Request, data_dir: &PathBuf, token: &str) {
     }
 }
 
-/// Parse a single-range `Range: bytes=a-b` header into inclusive (start, end).
-/// Returns None for anything malformed or unsatisfiable — the caller then
-/// serves the whole file, which every media client copes with.
+/// Parse `Range: bytes=a-b` into inclusive (start, end); `None` for anything
+/// malformed or unsatisfiable, and the caller serves the whole file.
 fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
     let spec = value.strip_prefix("bytes=")?.split(',').next()?.trim();
     let (start_s, end_s) = spec.split_once('-')?;
@@ -195,9 +184,7 @@ fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
     (start <= end).then_some((start, end))
 }
 
-/// Per-launch bearer token. /dev/urandom is always present on macOS; the
-/// fallback only exists so a broken read degrades to "still unguessable in
-/// practice" instead of a panic.
+/// Per-launch bearer token from /dev/urandom; the fallback avoids a panic.
 fn random_token() -> String {
     let mut buf = [0u8; 16];
     if let Ok(mut f) = File::open("/dev/urandom") {
@@ -205,12 +192,5 @@ fn random_token() -> String {
             return buf.iter().map(|b| format!("{b:02x}")).collect();
         }
     }
-    format!(
-        "{:x}{:x}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    )
+    format!("{:x}{:x}", std::process::id(), crate::clock::now_nanos())
 }

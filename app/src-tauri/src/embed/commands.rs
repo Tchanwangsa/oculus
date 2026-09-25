@@ -1,28 +1,13 @@
 //! Tauri commands for the embedding settings — Settings → Library.
 //!
-//! One backend is *selected*, and search runs against that one. There is no
-//! automatic fallback between engines and no fusing of two spaces at query
-//! time: `embed_config()` names one engine, every page vector in the `pages`
-//! table came from it, and a query is embedded by the same one.
-//!
-//! That is what makes this a settings page with teeth rather than a dropdown.
-//! **Changing the engine invalidates every stored vector**, because the two
-//! spaces are not comparable — `Health::check` refuses a mismatch precisely
-//! because mixing them yields confident, well-formatted, meaningless
-//! rankings. So `embed_set_engine` does not just write a row: it throws the
-//! index away in the same call, and the UI has to have said so first.
-//!
-//! The order of operations in `embed_set_engine` is the whole safety
-//! argument, and it is written out at the call site: the setting is the *last*
-//! thing to move, so a failure anywhere can leave the app with an index it
-//! must rebuild, but never with a setting that claims one space while the
-//! table holds another.
+//! One engine is selected; every stored vector came from it and queries are
+//! embedded by it — no fallback, no fusing of spaces. Changing the engine
+//! therefore discards the index in the same call (see `embed_set_engine`).
 
 use std::path::Path;
 
 use serde::Serialize;
 use sqlx::Row;
-use tauri::{AppHandle, Manager};
 
 use super::estimate::EmbedEstimate;
 use super::voyage::ledger::{self, UsageLedger};
@@ -30,38 +15,22 @@ use super::{Engine, EMBED_DIM, EMBED_MODEL};
 use crate::retrieval::IndexStats;
 use crate::store::{db_path, pool};
 
-/// The `settings` row this module owns. Shared with `embed::embed_config`,
-/// which reads it; nothing else writes it.
+/// The `settings` row this module writes and `embed::embed_config` reads.
 const SETTINGS_KEY: &str = "embed";
 
-/// Is there a backend behind `Engine::Local` in this build?
-///
-/// **No, and the constant is the honest way to say so.** The local arm of the
-/// seam is real — the enum has it, `embed_config` resolves a base URL and a
-/// credential source for it, and this command will write it — but the program
-/// it talks to over loopback on 9548 is a separate repo that does not ship
-/// with the app. So the option is offered and disabled with a reason, rather
-/// than hidden (which would misrepresent the architecture) or left live
-/// (which would be a control that points the indexer at a closed port).
-///
-/// When that server lands, this flips to `true` and the seam gains a local
-/// `Embedder`; nothing else on this path changes.
+/// Is there a backend behind `Engine::Local` in this build? No: the local
+/// embedder is a separate program with no client here yet, so the option is
+/// shown disabled with a reason.
 const LOCAL_READY: bool = false;
 
-/// What a student is told when they reach for the option they cannot have.
-/// One sentence, naming the reason rather than a ticket, and written so it
-/// reads on its own line under the control.
+/// Shown under the disabled option, and as the refusal if it is chosen anyway.
 const LOCAL_UNAVAILABLE: &str =
     "The local embedder is a separate program that runs on this Mac, and Oculus does not ship \
      one yet.";
 
 // ── The view ─────────────────────────────────────────────────────────────────
 
-/// One selectable backend, with everything the row needs to draw itself.
-///
-/// The labels and the reason live in Rust rather than in the page so that the
-/// thing which refuses an engine and the thing which explains the refusal
-/// cannot drift apart.
+/// One selectable backend. Labels live beside the refusal so they cannot drift.
 #[derive(Serialize)]
 pub struct EngineOption {
     /// The value `embed_set_engine` takes, and what lands in the settings row.
@@ -74,26 +43,15 @@ pub struct EngineOption {
     pub unavailable_reason: Option<&'static str>,
 }
 
-/// What the account has spent, what programme it turned out to be on, and
-/// where the spend guard sits.
+/// What the account has spent, its programme, and the spend guard.
 ///
-/// **Every number here is Oculus's own count, not Voyage's books.** Voyage
-/// publishes no usage endpoint — the dashboard is the only place the real
-/// figure lives — so this is `voyage-usage.json`: what this app reserved before
-/// each request, settled upwards against the `usage.total_tokens` every
-/// response carries. It is deliberately pessimistic (a request that failed
-/// uncertainly still counts), so it drifts high rather than low, and the page
-/// that shows it says whose count it is.
+/// Oculus's own count (`voyage-usage.json`), not Voyage's books: Voyage has no
+/// usage endpoint. Pessimistic by construction, so it drifts high.
 #[derive(Serialize)]
 pub struct VoyageUsage {
-    /// `"free"`, `"paid"` or `"unknown"` — the account's programme as far as
-    /// the rate-limit detector has got. `"unknown"` is an honest state and not
-    /// a failure: the tier opens at an optimistic guess and is corrected by the
-    /// first request or two, so a library that has never been indexed has never
-    /// had the chance to find out.
+    /// `"free"`, `"paid"` or `"unknown"` (the tier is still the opening guess).
     pub plan: &'static str,
-    /// How much `plan` is worth: `stated` is Voyage's own words in a 429 body,
-    /// `observed` is inferred from behaviour, `assumed` is the opening guess.
+    /// `ledger::TierSource`: how much `plan` is worth.
     pub plan_source: &'static str,
     pub rpm: f64,
     pub tpm: f64,
@@ -118,9 +76,7 @@ pub struct VoyageUsage {
 fn usage_view() -> VoyageUsage {
     let usage = UsageLedger::shared().snapshot();
     VoyageUsage {
-        // A free programme is a *fact about the account* when Voyage stated it
-        // and a guess otherwise, so the two travel together and the page is
-        // never allowed to print "Free" over an opening assumption.
+        // Never "free" over an opening assumption.
         plan: match (usage.tier.source, usage.tier.is_free()) {
             (ledger::TierSource::Assumed, _) => "unknown",
             (_, true) => "free",
@@ -149,18 +105,15 @@ pub struct EmbedSettings {
     pub engine: &'static str,
     /// The API root in force, default or overridden.
     pub base_url: String,
-    /// The space this app writes into and searches. Both halves, because
-    /// "model changed" means nothing without the width beside it.
+    /// The space this app writes into and searches.
     pub model: &'static str,
     pub dim: usize,
-    /// Cloud: a key is in the keychain. Local: nothing to authenticate, so
-    /// this is true by construction.
+    /// Cloud: a key is in the keychain. Local: always true.
     pub credentials_ready: bool,
     pub engines: Vec<EngineOption>,
     /// What is in the index *now* — the number the confirmation quotes.
     pub index: IndexStats,
-    /// The account behind the selected engine. `None` for a local engine:
-    /// there is no allowance, no tier and nothing to guard against.
+    /// The account behind the selected engine; `None` for a local engine.
     pub usage: Option<VoyageUsage>,
 }
 
@@ -213,36 +166,22 @@ async fn view(db: &Path) -> Result<EmbedSettings, String> {
 /// Read the current selection, the engines on offer, and the index it would
 /// cost to change.
 #[tauri::command]
-pub async fn embed_settings(app: AppHandle) -> Result<EmbedSettings, String> {
-    view(&db_path(&app)?).await
+pub async fn embed_settings() -> Result<EmbedSettings, String> {
+    view(&db_path()).await
 }
 
-/// Move the spend guard, and hand back the settings so the page redraws from
-/// one answer rather than from its own optimistic copy.
-///
-/// The percentage is of Voyage's free pixel grant, and 0 turns the guard off.
-/// It lives in `voyage-usage.json` rather than in the `settings` row because
-/// the reservation that enforces it already reads that file on every request:
-/// one atomic read, and a process-wide singleton ledger that picks the change
-/// up without being rebuilt. See `UsageLedger::budget`.
+/// Move the spend guard (percent of the free pixel grant; 0 is off) and hand
+/// back the settings so the page redraws from one answer. Stored in the ledger:
+/// see `ledger::Usage::stop_at_percent`.
 #[tauri::command]
-pub async fn embed_set_budget(app: AppHandle, percent: u8) -> Result<EmbedSettings, String> {
+pub async fn embed_set_budget(percent: u8) -> Result<EmbedSettings, String> {
     UsageLedger::shared().store_stop_at(percent);
-    view(&db_path(&app)?).await
+    view(&db_path()).await
 }
 
-/// Is something account-wide stopping the run right now, and what is it?
-///
-/// The message when yes, `None` when the next file may go ahead. It exists
-/// because the index loop is a loop: a spent allowance or a reached spend
-/// limit condemns every remaining file for the same reason, and a run that
-/// kept going would turn one fact into one error per file — 166 identical
-/// lines, five of them shown, and a "stopped" that reads like a crash.
-///
-/// Only the ledger's two latches, deliberately. This is not a general health
-/// check: it constructs no client, needs no key, costs no request, and answers
-/// the one question the loop can act on between files. A local engine has no
-/// allowance to be stopped by, so it is never blocked.
+/// Is something account-wide stopping the run? The message, or `None` when the
+/// next file may go. Lets the index loop stop once instead of failing every
+/// remaining file. Only the ledger's latches: no client, no key, no request.
 #[tauri::command]
 pub fn embed_blocked() -> Option<String> {
     match super::embed_config().engine {
@@ -251,18 +190,13 @@ pub fn embed_blocked() -> Option<String> {
     }
 }
 
-/// What the outstanding run would cost and how long it would take.
-///
-/// Separate from `embed_settings` because it is **slow in a way the settings
-/// are not** — it opens every outstanding PDF to read its page boxes — and the
-/// page must be able to draw the rest of itself while this is still running.
-///
-/// `spawn_blocking` because pdfium is synchronous and a library-wide sweep on a
-/// runtime worker would park the async scheduler for seconds.
+/// What the outstanding run would cost and how long it would take. Separate
+/// from `embed_settings` because it opens every outstanding PDF; blocking
+/// because pdfium is synchronous.
 #[tauri::command]
-pub async fn embed_estimate(app: AppHandle) -> Result<EmbedEstimate, String> {
-    let database = db_path(&app)?;
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+pub async fn embed_estimate() -> Result<EmbedEstimate, String> {
+    let database = db_path();
+    let base = crate::paths::data_dir();
     tauri::async_runtime::spawn_blocking(move || {
         tauri::async_runtime::block_on(super::estimate::estimate(&database, &base))
     })
@@ -272,53 +206,36 @@ pub async fn embed_estimate(app: AppHandle) -> Result<EmbedEstimate, String> {
 
 // ── Changing it ──────────────────────────────────────────────────────────────
 
-/// Select an embedding backend, **and throw the index away** when that is a
-/// change.
+/// Select an embedding backend, and discard the index when that is a change:
+/// two spaces in one table rank noise (see `Health::check`).
 ///
-/// The discard is not a side effect to be tidied away later; it is what the
-/// change *is*. Vectors from two models share a table, a width and a dot
-/// product, and share no geometry at all — a search over the mixture returns
-/// a confident ranking of unrelated pages, which is worse than an error
-/// because nothing looks broken. So every vector goes, on the way through,
-/// and the library is re-indexed against the new engine.
+/// The order is the safety argument — a failure can leave an index to rebuild,
+/// never a setting naming one space over a table holding another:
 ///
-/// Three steps, in this order, and the order is the safety argument:
-///
-/// 1. **The on-disk records first.** `<stem>.emb.json` is what `is_embedded`
-///    reads to skip a file; leave one behind and the re-index skips the very
-///    page it exists to redo. Failing here leaves the old vectors *and* the
-///    old setting intact, which is a consistent state.
-/// 2. **Then the table**, in one transaction: the vectors and the per-file
-///    `embed_status` that says they are there.
-/// 3. **The setting last.** If this fails the app still names the old engine
-///    with an empty index — an afternoon of re-indexing, not a corrupt one.
-///    Written first, a failure at step 2 would leave the setting claiming one
-///    space while the table held another, which is the one outcome that must
-///    be impossible.
+/// 1. The `.emb.json` records, which `is_embedded` would otherwise skip on.
+/// 2. The table, in one transaction: vectors and per-file `embed_status`.
+/// 3. The setting, last.
 #[tauri::command]
-pub async fn embed_set_engine(app: AppHandle, engine: String) -> Result<EmbedSettings, String> {
+pub async fn embed_set_engine(engine: String) -> Result<EmbedSettings, String> {
     let chosen = match engine.trim() {
         "cloud" => Engine::Cloud,
         "local" => Engine::Local,
         other => return Err(format!("not an embedding engine: {other}")),
     };
     if !available(chosen) {
-        // The same sentence the row is disabled with, so a request that got
-        // past a stale UI is refused in the words the UI would have used.
         return Err(match chosen {
             Engine::Local => LOCAL_UNAVAILABLE.to_string(),
             Engine::Cloud => unreachable!("cloud is always available"),
         });
     }
 
-    let database = db_path(&app)?;
+    let database = db_path();
     if super::embed_config().engine == chosen {
-        // Re-selecting what is already selected costs nothing. Clearing here
-        // would turn a stray click into a re-index.
+        // A stray re-selection must not trigger a re-index.
         return view(&database).await;
     }
 
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let base = crate::paths::data_dir();
     let db = pool(&database).await?;
 
     // 1. The records beside the PDFs.
@@ -347,8 +264,7 @@ pub async fn embed_set_engine(app: AppHandle, engine: String) -> Result<EmbedSet
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("could not clear the page vectors: {e}"))?;
-    // The markdown in `pages` stays: it is the citation substrate and the file
-    // viewer's per-page source, and it has nothing to do with the model.
+    // The page markdown stays; it is independent of the model.
     sqlx::query("UPDATE files SET embed_status = NULL, embedded_at = NULL WHERE embed_status IS NOT NULL")
         .execute(&mut *tx)
         .await
@@ -363,9 +279,8 @@ pub async fn embed_set_engine(app: AppHandle, engine: String) -> Result<EmbedSet
     view(&database).await
 }
 
-/// Every library file that could have a `.emb.json` beside it — PDFs and the
-/// Office documents that get a converted PDF sibling. The same predicate the
-/// index queue uses, so nothing it would re-embed is left holding a record.
+/// Every library file that could have a `.emb.json` beside it — PDFs and
+/// Office documents with a PDF sibling; the index queue's predicate.
 async fn embeddable_paths(db: &sqlx::SqlitePool) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
         "SELECT relative_path FROM files
@@ -377,13 +292,8 @@ async fn embeddable_paths(db: &sqlx::SqlitePool) -> Result<Vec<String>, String> 
     Ok(rows.iter().filter_map(|row| row.try_get::<String, _>("relative_path").ok()).collect())
 }
 
-/// Write the engine into the `embed` row without disturbing the rest of it.
-///
-/// The row is a shared blob — this seam reads two keys out of it and has no
-/// opinion on anything else in there — so it is edited as JSON rather than
-/// replaced. `engineUrl` is the exception and is deliberately dropped: an
-/// override points at one engine's API, and carrying it across a switch would
-/// silently aim the new engine at the old one's address.
+/// Write the engine into the `embed` row, editing the shared JSON blob in
+/// place. `engineUrl` is dropped: it pointed at the old engine.
 async fn write_engine(db: &sqlx::SqlitePool, engine: Engine) -> Result<(), String> {
     let stored = sqlx::query("SELECT value FROM settings WHERE key = ?1")
         .bind(SETTINGS_KEY)

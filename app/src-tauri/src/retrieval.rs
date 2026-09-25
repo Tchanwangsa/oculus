@@ -1,59 +1,25 @@
-//! Semantic page retrieval.
+//! Semantic page retrieval over page *images* (see CLAUDE.md and
+//! `docs/retrieval.md`).
 //!
-//! The index is built from page *images*, not scraped text — measured on the
-//! MULT20015 decks, image embeddings roughly double recall on formula slides,
-//! screenshots and diagrams, where text extraction returns things like
-//! `56 = 7(( 7() 7)(`. That constraint is in `CLAUDE.md` and it binds the
-//! cloud path exactly as it bound the local one: `embed/raster.rs` rasterises
-//! the page and the pixels are what get embedded.
+//! `embed::backend` embeds each page -> blobs land in `pages` beside the
+//! page's markdown -> a query is embedded by the same backend and ranked by
+//! dot product in a brute-force scan -> hits carry markdown and (file, page).
 //!
-//! Flow: the seam's backend (`embed::backend`) rasterises and embeds each page
-//! -> blobs land in `pages` alongside that page's markdown -> a query is
-//! embedded by the *same* backend and ranked by dot product -> hits carry the
-//! markdown for the answer and (file, page) for the deep link. Nothing
-//! downstream of ranking touches a vector.
-//!
-//! This is deliberately a brute-force scan. A degree of coursework is a few
-//! thousand pages; at 512 dims that is single-digit MB and a few milliseconds,
-//! so an index would be machinery without a payoff.
-//!
-//! **One space, or the ranking is noise.** Every scan below filters on
-//! `pages.embed_model` and `pages.embed_dim` against the space the seam is
-//! currently embedding into. This is not tidiness. A dot product between a
-//! Voyage vector and a Qwen one is not a worse score, it is a meaningless one,
-//! and it still sorts — a search that returns confident, well-formatted,
-//! unrelated slides with nothing anywhere looking broken. The columns exist
-//! for this; `embed::Health::check` refuses a backend that disagrees about the
-//! space for the same reason. Vectors from a retired model stay in the table
-//! (they are free, and dropping them is `embed_set_engine`'s job) but they are
-//! never scanned, and `IndexStats` reports them separately so "2,980 pages
-//! indexed" can never mean "2,980 pages searchable".
+//! **One space, or the ranking is noise.** Every scan filters on
+//! `pages.embed_model` and `pages.embed_dim`: a dot product across two models
+//! still sorts, confidently and meaninglessly. Vectors from a retired model
+//! stay in the table but are never scanned, and `IndexStats` counts them apart.
 
-/// The lexical half of search, as SQL: an FTS5 index over `pages.markdown`.
+/// The lexical half of search: an FTS5 index over `pages.markdown`, for exact
+/// words. Queried from the frontend (`searchPageText` in `app/src/lib/db.ts`).
 ///
-/// Page *images* are what the semantic index embeds, for the reason at the top
-/// of this file — but the markdown beside them is the only place a person's
-/// exact words ("Nash equilibrium", a lecturer's turn of phrase) can be found
-/// verbatim, and a title search cannot see inside a deck at all. So the two
-/// live side by side: this one answers as you type, the embeddings answer a
-/// question. Read from the frontend
-/// (`searchPageText` in `app/src/lib/db.ts`), which is why it is SQL here and
-/// not a command — the app's SQLite and this one are the same file.
-///
-/// External content (`content='pages'`): the index stores terms, not a second
-/// copy of every page, and the triggers keep it in step with whichever writer
-/// moved — the app through `tauri-plugin-sql`, the CLI through
-/// `app/src-tauri/src/store.rs`. `UPDATE OF markdown` and not a bare `UPDATE`,
-/// because every embed writes a blob to these rows and re-indexing the text
-/// for that would be work for nothing.
+/// External content (`content='pages'`), kept in step by triggers whichever
+/// process writes. `UPDATE OF markdown`, so an embed's blob write re-indexes
+/// nothing.
 ///
 /// **A page deleted by `files`' `ON DELETE CASCADE` does not fire the delete
-/// trigger** — SQLite only runs triggers for foreign-key actions with
-/// `recursive_triggers` on — so the index can hold entries whose page is gone.
-/// That costs ranking, never correctness: every read joins
-/// `pages ON pages.id = pages_fts.rowid`, and an entry with no page behind it
-/// drops out of the join. `INSERT INTO pages_fts(pages_fts) VALUES('rebuild')`
-/// is the cure if one is ever wanted.
+/// trigger** (SQLite needs `recursive_triggers`), so the index can hold dead
+/// entries. Harmless: every read joins `pages ON pages.id = pages_fts.rowid`.
 pub const PAGES_FTS_SQL: &str = r#"
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
     markdown,
@@ -82,34 +48,17 @@ use std::sync::Arc;
 use base64::Engine;
 use serde::Serialize;
 use sqlx::Row;
-use tauri::{AppHandle, Manager};
 
 use crate::embed;
+use crate::store::{db_path, pool};
 
-/// Somewhere for a long-running embed to report to.
-///
-/// Owned rather than borrowed (`&dyn Fn`, which is what the seam takes)
-/// because the embedding itself runs on a blocking thread and the callback has
-/// to move there with it. The app has no listener for this today — there is no
-/// embed stage in the pipeline table, and nothing in `useBackendEvents.ts`
-/// subscribes to an embed event — so the only real consumer is the CLI's
-/// in-place progress line. That is the honest shape: a cloud embed on the free
-/// programme can take hours, and a silent terminal looks like a hang.
+/// Somewhere for a long-running embed to report to. Owned, because the embed
+/// runs on a blocking thread and the callback moves there with it.
 pub type ProgressSink = Arc<dyn Fn(embed::Progress) + Send + Sync>;
 
-/// Why an ingest failed, with the discriminants intact.
-///
-/// The string alone was enough while the only caller was a terminal that
-/// printed it. It is not enough for the pipeline row: whether to offer a retry
-/// at all is `retryable`, and whether the run should stop rather than report
-/// one account-wide fact once per file is `latching` — neither is recoverable
-/// from prose, and guessing at them from the message is how a spent quota
-/// turns into 166 red rows.
-///
-/// The three are **optional** for the same reason `ParseError`'s are on the
-/// parse side: a failure that never reached a backend (the file is not on
-/// disk, the database refused the write) has no `EmbedError` behind it, and
-/// unknown is its own case rather than a coerced `false`.
+/// Why an ingest failed, with `EmbedError`'s discriminants intact for the
+/// pipeline row. They are `None` for a failure that never reached a backend
+/// (file missing, database write refused): unknown, not `false`.
 #[derive(Debug, Clone)]
 pub struct IngestError {
     pub message: String,
@@ -162,15 +111,8 @@ pub struct SearchHit {
     pub markdown: String,
 }
 
-/// What the index contains, split into what can be searched **now** and what
-/// is merely stored.
-///
-/// The split is the whole point of the type. `files_embedded` /
-/// `pages_embedded` count only vectors in the current space, because those are
-/// the only ones a query can be compared against; `pages_stored` counts every
-/// blob in the table. When a library has been embedded by a model the app no
-/// longer uses, the first number is zero and the second is not, and a UI that
-/// only had one of them would say something false either way.
+/// What the index contains, split into what can be searched **now** (the
+/// current space) and what is merely stored (every blob in the table).
 #[derive(Serialize)]
 pub struct IndexStats {
     /// Searchable now: distinct files with at least one current-space vector.
@@ -179,15 +121,13 @@ pub struct IndexStats {
     pub pages_embedded: i64,
     /// Of those, how many also carry markdown to hydrate an answer from.
     pub pages_with_markdown: i64,
-    /// The space the counts above are counted in — the seam's model and width,
-    /// not whatever happens to be in the table.
+    /// The space the counts above are counted in.
     pub model: Option<String>,
     pub dim: Option<i64>,
     /// Every vector in the table, whichever model wrote it.
     pub files_stored: i64,
     pub pages_stored: i64,
-    /// Stored but not searchable: a different model or a different width.
-    /// These re-embed on the next `oculus index`; nothing migrates them.
+    /// Stored but not searchable; these re-embed on the next `oculus index`.
     pub pages_stale: i64,
     /// Which models those came from, so a message can name them.
     pub stale_models: Vec<String>,
@@ -195,29 +135,15 @@ pub struct IndexStats {
 
 // ── Plumbing ─────────────────────────────────────────────────────────────────
 
-// The pool helpers this module used to own now live in `store.rs`, which the
-// parse path needs too; re-exported here only so the call sites below read
-// unchanged.
-use crate::store::{db_path, pool};
-
-/// The space this app searches in.
-///
-/// Read off the seam's constants rather than a backend, because `stats` has to
-/// answer on an install with no API key — the settings page shows the index
-/// *before* a key is stored, and constructing a cloud client would fail there.
-/// That is not a shortcut around `Health`: `embed::Health::check` refuses any
-/// backend whose model or dim differs from these two, so a backend that is
-/// usable at all agrees with them by construction. `search_in` still takes its
-/// pair from the preflighted health, which is the same answer arrived at the
-/// stricter way.
+/// The space this app searches in, off the seam's constants: `stats` must
+/// answer with no API key stored. `embed::Health::check` refuses any backend
+/// that disagrees, so the two agree by construction.
 fn current_space() -> (&'static str, i64) {
     (embed::EMBED_MODEL, embed::EMBED_DIM as i64)
 }
 
-/// The stored blob *is* the wire string, base64-decoded: little-endian f16,
-/// `EMBED_DIM` wide. Decoding straight to bytes rather than through
-/// `embed::decode_vector` keeps the record on disk and the column byte-equal —
-/// a round trip through floats would re-normalise and could move the last bit.
+/// The stored blob *is* the wire string, base64-decoded. Not through floats,
+/// which would re-normalise and could move the last bit.
 fn blob_from_wire(page_no: u32, encoded: &str) -> Result<Vec<u8>, String> {
     base64::engine::general_purpose::STANDARD
         .decode(encoded)
@@ -226,20 +152,10 @@ fn blob_from_wire(page_no: u32, encoded: &str) -> Result<Vec<u8>, String> {
 
 // ── Ingest ───────────────────────────────────────────────────────────────────
 
-/// Embed one PDF's pages and store them against `file_id`.
-///
-/// Idempotent, and the two halves of that are separate on purpose. A PDF whose
-/// `.emb.json` is already in this app's space is not re-embedded — but its
-/// record is still folded into `pages`, because an artifact on disk is no
-/// promise the database can see it (the same reasoning as `backfill_pages` on
-/// the parse path). So a re-run costs a file read and an upsert, not a cloud
-/// round trip.
-///
-/// **A record from a retired model does not count as embedded.**
-/// `embed::is_embedded` compares model, dim and instruction and also checks
-/// page coverage against the parse record, so the 166 files the Python
-/// embedder wrote all read as needing work and re-embed here without a
-/// migration script.
+/// Embed one PDF's pages and store them against `file_id`. Idempotent: a PDF
+/// whose `.emb.json` is current (`embed::is_embedded`) is not re-embedded, but
+/// its record is still folded into `pages`, since an artifact on disk is no
+/// promise the database has it.
 pub async fn ingest(
     db_file: &Path,
     file_id: i64,
@@ -251,15 +167,8 @@ pub async fn ingest(
         .map_err(|e| e.message)
 }
 
-/// `ingest`, plus a callback for a caller that renders its own progress.
-///
-/// **This blocks for the whole cloud round trip**, which on an account with no
-/// payment method on file is measured in hours for a large deck: 10K tokens a
-/// minute against ~3,571 tokens for a 200-DPI page is under three pages a
-/// minute, and the backend spends most of its wall clock inside a 429 it is
-/// correctly waiting out. There is deliberately no timeout here — the client
-/// owns its own deadlines, and a second limit that disagreed would silently
-/// abandon work the first one was still doing. Same rule as `sync::parse_pdf`.
+/// `ingest`, plus a progress callback. **Blocks for the whole cloud round
+/// trip, with no timeout** — the client owns its pacing (see CLAUDE.md).
 pub async fn ingest_reporting(
     db_file: &Path,
     file_id: i64,
@@ -272,10 +181,8 @@ pub async fn ingest_reporting(
         return Err(format!("not on disk: {}", pdf.display()).into());
     }
 
-    // Markdown is optional here: a PDF can be embedded before the parse has
-    // landed, and the text gets filled in on the next run. The record is also
-    // where the expected page count comes from — it is the same `page_no`
-    // space the join below rests on.
+    // Markdown is optional: a PDF can embed before its parse lands. The parse
+    // record also gives the expected page count.
     let parsed = crate::parse::read_record(&pdf);
     let page_count = parsed.as_ref().map(|p| p.page_count).unwrap_or(0);
     let markdown: std::collections::HashMap<i64, String> = parsed
@@ -289,21 +196,15 @@ pub async fn ingest_reporting(
     } else {
         let target = pdf.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            // Never a concrete client at a call site: which backend this is, is
-            // a setting. `preflight` is what refuses one that embeds into a
-            // different space than the table holds.
             let backend = embed::backend()?;
             embed::preflight(backend.as_ref())?;
             let output = backend.embed(&target, page_count, &|progress| on_progress(progress))?;
-            // The record lands before the database hears about it: it is the
-            // only evidence the embedding finished, and it is written
-            // atomically for exactly that reason.
+            // The record lands (atomically) before the database hears of it.
             output.write(&target)?;
             Ok::<_, embed::EmbedError>(output)
         })
         .await
-        // The join itself failing is a panic in the blocking thread, which is
-        // ours and not the backend's — so it keeps no discriminants.
+        // A join failure is our panic, not the backend's: no discriminants.
         .map_err(|e| IngestError::from(e.to_string()))?
         .map_err(IngestError::from)?
     };
@@ -320,11 +221,9 @@ pub async fn ingest_reporting(
             with_md += 1;
         }
 
-        // COALESCE on markdown so a re-embed before the parse lands does not
-        // wipe text we already have. `embed_model` / `embed_dim` come off the
-        // record rather than off the seam's constants: the row must say which
-        // space its bytes are actually in, because that is what the scan
-        // filters on.
+        // Keep existing markdown if the parse has not landed. `embed_model` /
+        // `embed_dim` come off the record: the row must say which space its
+        // bytes are actually in.
         sqlx::query(
             r#"INSERT INTO pages (file_id, page_no, markdown, embedding, embed_model, embed_dim, embedded_at)
                VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
@@ -380,11 +279,8 @@ pub async fn search(
     search_in(db_file, query, limit, &ids).await
 }
 
-/// `search`, but over a set of subjects. An empty set means every subject.
-///
-/// Several ids matter for the CLI, which takes prefix codes: `MULT20015`
-/// legitimately matches the same subject in two terms, and ranking each course
-/// separately then merging would embed the query once per course.
+/// `search`, but over a set of subjects (empty means every subject), so the
+/// CLI's prefix codes embed the query once.
 pub async fn search_in(
     db_file: &Path,
     query: String,
@@ -393,10 +289,7 @@ pub async fn search_in(
 ) -> Result<Vec<SearchHit>, String> {
     let (qvec, model, dim) = tauri::async_runtime::spawn_blocking(move || {
         let backend = embed::backend()?;
-        // The handshake, before the query costs anything. What it returns is
-        // also the space the scan is allowed to look at — asking the backend
-        // rather than assuming means a query is never compared against vectors
-        // some other backend wrote.
+        // Before the query costs anything; also names the space to scan.
         let health = embed::preflight(backend.as_ref())?;
         let vector = backend.embed_query(&query)?;
         Ok::<_, embed::EmbedError>((vector, health.model, health.dim))
@@ -411,11 +304,8 @@ pub async fn search_in(
     rank(db_file, &qvec, &model, dim as i64, limit, subject_ids).await
 }
 
-/// The brute-force half, with the query already embedded.
-///
-/// Split out so the ranking — including the space filter, which is the part
-/// that can be silently wrong — is exercisable without a key, a network or a
-/// rendered page.
+/// The brute-force half, with the query already embedded; split out so the
+/// space filter tests without a key or a network.
 async fn rank(
     db_file: &Path,
     qvec: &[f32],
@@ -426,17 +316,14 @@ async fn rank(
 ) -> Result<Vec<SearchHit>, String> {
     let limit = limit.clamp(1, 50) as usize;
     let db = pool(db_file).await?;
-    // Inlined rather than bound: sqlx has no list binding, and these are i64s
-    // that came out of this same database, so there is nothing to escape.
+    // Inlined: sqlx has no list binding, and these are i64s.
     let filter = if subject_ids.is_empty() {
         String::new()
     } else {
         let list: Vec<String> = subject_ids.iter().map(|i| i.to_string()).collect();
         format!(" AND f.subject_id IN ({})", list.join(","))
     };
-    // The model/dim predicate is the one that keeps the ranking meaningful.
-    // It is bound, not inlined, and it is in SQL rather than in the loop below
-    // so a library that is mostly a retired space does not pay to decode it.
+    // The space predicate, in SQL so retired vectors are never decoded.
     let sql = format!(
         r#"
         SELECT p.file_id, p.page_no, p.embedding, p.markdown,
@@ -460,8 +347,7 @@ async fn rank(
     for row in rows {
         let blob: Vec<u8> = row.try_get("embedding").map_err(|e| e.to_string())?;
         let v = embed::unpack_vector(&blob);
-        // Second lock on the same door: a row can claim the current dim and
-        // hold a blob of another width if something wrote the two apart.
+        // A row can claim the current dim and hold another width.
         if v.len() != qvec.len() {
             continue;
         }
@@ -484,16 +370,13 @@ async fn rank(
 
 // ── Stats ────────────────────────────────────────────────────────────────────
 
-/// What the index actually contains — used by the UI to tell "nothing indexed"
-/// apart from "indexed, no matches", and now also apart from "indexed by a
-/// model this app no longer speaks".
+/// What the index actually contains — "nothing indexed", "indexed, no
+/// matches" and "indexed by a retired model" are different answers.
 pub async fn stats(db_file: &Path) -> Result<IndexStats, String> {
     let (model, dim) = current_space();
     let db = pool(db_file).await?;
 
-    // One pass, two questions: the current space and the whole table. Doing it
-    // as conditional aggregates rather than two scans keeps them consistent
-    // with each other even if something writes between them.
+    // One pass, so the current-space and whole-table counts are consistent.
     let row = sqlx::query(
         r#"SELECT COUNT(DISTINCT CASE WHEN embed_model = ?1 AND embed_dim = ?2
                                       THEN file_id END)                    AS files_embedded,
@@ -511,8 +394,7 @@ pub async fn stats(db_file: &Path) -> Result<IndexStats, String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    // Named, not just counted: "2,980 pages were embedded by
-    // Qwen3-VL-Embedding-2B" is actionable where "2,980 stale pages" is not.
+    // Named, not just counted, so a message can say which model.
     let stale_models: Vec<String> = sqlx::query(
         r#"SELECT DISTINCT embed_model FROM pages
            WHERE embedding IS NOT NULL
@@ -553,33 +435,21 @@ pub async fn stats(db_file: &Path) -> Result<IndexStats, String> {
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
 //
-// Thin wrappers. The logic above takes a database path rather than an
-// AppHandle so it can be exercised headlessly — see `src/bin/retrieval_smoke.rs`.
+// Thin wrappers: the logic above takes a database path, not an AppHandle, so
+// it runs headlessly (`src/bin/retrieval_smoke.rs`, the CLI).
 
-/// `relative_path` is relative to the app data dir, matching `read_course_file`
-/// and `open_course_file` — the frontend never handles absolute paths.
-///
-/// **It narrates itself over `embed-status`**, which is the whole reason it
-/// takes a `subject_id` it never otherwise needs: the pipeline row is keyed on
-/// `(subject_id, relative_path)` exactly as the parse path's is, and a stage
-/// that could not say which file it was moving would be a spinner, not a
-/// progress story. The return value is unchanged — the caller still gets its
-/// summary or its error string — so the events are additive: a caller that
-/// listens to nothing behaves as before.
-///
-/// The events are emitted around the call rather than from inside `ingest`,
-/// because `ingest` is also the CLI's path and the CLI has no window to emit
-/// to. `embed::events` no-ops there anyway, but keeping the seam clean is
-/// cheaper than relying on that.
+/// `relative_path` is relative to the app data dir; the frontend never
+/// handles absolute paths. Narrates itself over `embed-status`, keyed on
+/// `(subject_id, relative_path)` like the parse row — emitted here rather than
+/// in `ingest`, which the CLI also runs.
 #[tauri::command]
 pub async fn embed_file(
-    app: AppHandle,
     file_id: i64,
     subject_id: i64,
     relative_path: String,
     force: Option<bool>,
 ) -> Result<IngestSummary, String> {
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let base = crate::paths::data_dir();
     let pdf_rel = match crate::paths::doc_pdf_rel(&relative_path) {
         Some(rel) => rel,
         None => {
@@ -589,7 +459,7 @@ pub async fn embed_file(
         }
     };
     let pdf = base.join(&pdf_rel);
-    let db = db_path(&app)?;
+    let db = db_path();
 
     embed::events::queued(&relative_path, subject_id);
 
@@ -611,8 +481,7 @@ pub async fn embed_file(
             Ok(summary)
         }
         Err(error) => {
-            // The discriminants the row needs travel on the event; the caller
-            // still gets the sentence, which is all a `catch` can use.
+            // Discriminants travel on the event; the caller gets the sentence.
             embed::events::failed_with(
                 &relative_path,
                 subject_id,
@@ -628,64 +497,32 @@ pub async fn embed_file(
 
 #[tauri::command]
 pub async fn search_pages(
-    app: AppHandle,
     query: String,
     limit: Option<i64>,
     subject_id: Option<i64>,
 ) -> Result<Vec<SearchHit>, String> {
-    let db = db_path(&app)?;
+    let db = db_path();
     search(&db, query, limit.unwrap_or(5), subject_id).await
 }
 
 #[tauri::command]
-pub async fn embedding_stats(app: AppHandle) -> Result<IndexStats, String> {
-    let db = db_path(&app)?;
+pub async fn embedding_stats() -> Result<IndexStats, String> {
+    let db = db_path();
     stats(&db).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use crate::test_support::Scratch;
 
     use sqlx::sqlite::SqliteConnectOptions;
     use sqlx::SqlitePool;
 
-    /// The model every stored vector in the library was written by, until this
-    /// port. Hardcoded *here* on purpose: these tests are about the app
-    /// refusing to rank against it, so the name has to be a literal rather
-    /// than something the code under test could quietly change.
+    /// A retired model, as a literal the code under test cannot change.
     const RETIRED_MODEL: &str = "Qwen3-VL-Embedding-2B";
 
-    struct Scratch {
-        root: PathBuf,
-    }
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let stamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default();
-            let root = std::env::temp_dir().join(format!("oculus-retrieval-{name}-{stamp}"));
-            std::fs::create_dir_all(&root).unwrap();
-            Self { root }
-        }
-
-        fn db(&self) -> PathBuf {
-            self.root.join("oculus.db")
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            std::fs::remove_dir_all(&self.root).ok();
-        }
-    }
-
-    /// Just enough of the schema for the scan: the two tables it joins, with
-    /// the columns it reads. Deliberately not the app's migration list — this
-    /// is testing the predicate, not the schema.
+    /// Just enough schema for the scan; this tests the predicate, not the schema.
     async fn fixture(path: &Path) -> SqlitePool {
         let options = SqliteConnectOptions::new().filename(path).create_if_missing(true);
         let db = SqlitePool::connect_with(options).await.unwrap();
@@ -721,8 +558,7 @@ mod tests {
             .unwrap();
     }
 
-    /// A unit vector pointing along one axis, so a dot product against it is
-    /// exactly that component and every score in these tests is predictable.
+    /// A unit vector along one axis, so every score is predictable.
     fn axis(index: usize) -> Vec<f32> {
         let mut v = vec![0.0f32; embed::EMBED_DIM];
         v[index] = 1.0;
@@ -752,15 +588,11 @@ mod tests {
         .unwrap();
     }
 
-    /// The whole correctness argument of this port, as a test.
-    ///
-    /// A stale vector aimed *straight at* the query is the adversarial case:
-    /// it would win every ranking if it were scanned, and nothing about the
-    /// result would look wrong.
+    /// A stale vector aimed straight at the query would win if it were scanned.
     #[tokio::test]
     async fn the_scan_never_sees_another_models_vectors() {
-        let scratch = Scratch::new("space");
-        let db = fixture(&scratch.db()).await;
+        let scratch = Scratch::new("retrieval-space");
+        let db = fixture(&scratch.join("oculus.db")).await;
         add_file(&db, 1, 10, "current.pdf").await;
         add_file(&db, 2, 10, "retired.pdf").await;
         // Current space, a middling match.
@@ -771,24 +603,23 @@ mod tests {
         add_page(&db, 2, 1, &axis(0), RETIRED_MODEL, embed::EMBED_DIM as i64).await;
         db.close().await;
 
-        let hits = rank(&scratch.db(), &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 5, &[])
+        let hits = rank(&scratch.join("oculus.db"), &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 5, &[])
             .await
             .unwrap();
         assert_eq!(hits.len(), 1, "a retired model's vectors were ranked");
         assert_eq!(hits[0].file_id, 1);
     }
 
-    /// Same width, same model name, different *dim* column: the pair is the
-    /// key, not either half.
+    /// Same model, different `embed_dim`: the pair is the key.
     #[tokio::test]
     async fn a_truncation_is_a_different_space_too() {
-        let scratch = Scratch::new("dim");
-        let db = fixture(&scratch.db()).await;
+        let scratch = Scratch::new("retrieval-dim");
+        let db = fixture(&scratch.join("oculus.db")).await;
         add_file(&db, 1, 10, "narrow.pdf").await;
         add_page(&db, 1, 1, &axis(0), embed::EMBED_MODEL, 256).await;
         db.close().await;
 
-        let hits = rank(&scratch.db(), &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 5, &[])
+        let hits = rank(&scratch.join("oculus.db"), &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 5, &[])
             .await
             .unwrap();
         assert!(hits.is_empty(), "a vector of another width was ranked");
@@ -796,8 +627,8 @@ mod tests {
 
     #[tokio::test]
     async fn the_subject_filter_still_applies_within_the_space() {
-        let scratch = Scratch::new("subject");
-        let db = fixture(&scratch.db()).await;
+        let scratch = Scratch::new("retrieval-subject");
+        let db = fixture(&scratch.join("oculus.db")).await;
         add_file(&db, 1, 10, "mine.pdf").await;
         add_file(&db, 2, 20, "theirs.pdf").await;
         add_page(&db, 1, 1, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
@@ -805,20 +636,17 @@ mod tests {
         db.close().await;
 
         let hits =
-            rank(&scratch.db(), &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 5, &[20])
+            rank(&scratch.join("oculus.db"), &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 5, &[20])
                 .await
                 .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].subject_id, 20);
     }
 
-    /// `IndexStats` has to be able to say "nothing is searchable" about a
-    /// table with thousands of rows in it, which is exactly the state this
-    /// port leaves the real library in.
     #[tokio::test]
     async fn stats_separate_searchable_from_merely_stored() {
-        let scratch = Scratch::new("stats");
-        let db = fixture(&scratch.db()).await;
+        let scratch = Scratch::new("retrieval-stats");
+        let db = fixture(&scratch.join("oculus.db")).await;
         add_file(&db, 1, 10, "old.pdf").await;
         add_file(&db, 2, 10, "new.pdf").await;
         for page in 1..=3 {
@@ -827,7 +655,7 @@ mod tests {
         add_page(&db, 2, 1, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
         db.close().await;
 
-        let stats = stats(&scratch.db()).await.unwrap();
+        let stats = stats(&scratch.join("oculus.db")).await.unwrap();
         assert_eq!(stats.pages_embedded, 1, "stale pages counted as searchable");
         assert_eq!(stats.files_embedded, 1);
         assert_eq!(stats.pages_stored, 4);
@@ -838,14 +666,12 @@ mod tests {
         assert_eq!(stats.dim, Some(embed::EMBED_DIM as i64));
     }
 
-    /// An empty table must not report the current model as if it had rows, but
-    /// it must still name the space it would search — the settings page draws
-    /// that line before anything is indexed.
+    /// Empty, but still names the space it would search.
     #[tokio::test]
     async fn an_empty_index_is_zero_everywhere() {
-        let scratch = Scratch::new("empty");
-        fixture(&scratch.db()).await.close().await;
-        let stats = stats(&scratch.db()).await.unwrap();
+        let scratch = Scratch::new("retrieval-empty");
+        fixture(&scratch.join("oculus.db")).await.close().await;
+        let stats = stats(&scratch.join("oculus.db")).await.unwrap();
         assert_eq!(stats.pages_embedded, 0);
         assert_eq!(stats.pages_stored, 0);
         assert_eq!(stats.pages_stale, 0);
@@ -861,9 +687,7 @@ mod fts_tests {
 
     use super::PAGES_FTS_SQL;
 
-    /// A `pages` table and the FTS index over it, built from the very SQL
-    /// migration 35 runs — so a change to that string is a change to what
-    /// this asserts.
+    /// A `pages` table and the FTS index over it, from the SQL migration 35 runs.
     async fn pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -883,9 +707,7 @@ mod fts_tests {
         .execute(&pool)
         .await
         .expect("pages");
-        // `raw_sql`, not `query`: this is several statements including
-        // triggers with semicolons of their own, and it is how the migration
-        // runner executes it too.
+        // `raw_sql`: several statements, as the migration runner executes it.
         sqlx::raw_sql(PAGES_FTS_SQL)
             .execute(&pool)
             .await
@@ -906,10 +728,8 @@ mod fts_tests {
         .expect("match")
     }
 
-    /// The whole dependency in one line: without FTS5 compiled into the
-    /// SQLite this links, migration 35 cannot run and the app cannot open its
-    /// database at all. `libsqlite3-sys`' bundled build defines
-    /// `SQLITE_ENABLE_FTS5`; this is the assertion that it still does.
+    /// Without FTS5 in the linked SQLite, migration 35 fails and the app cannot
+    /// open its database; `libsqlite3-sys`' bundled build must keep it.
     #[tokio::test]
     async fn fts5_indexes_inserts_updates_and_deletes() {
         let pool = pool().await;
@@ -920,8 +740,7 @@ mod fts_tests {
             .expect("insert");
         assert_eq!(hits(&pool, "nash").await, vec![1], "insert trigger");
 
-        // An embed writes a blob to the same row. `UPDATE OF markdown` means
-        // that costs no re-indexing — and must not drop the row either.
+        // An embed's blob write must not drop the row from the index.
         sqlx::query("UPDATE pages SET embedding = ?1 WHERE page_no = 1")
             .bind(vec![0u8; 8])
             .execute(&pool)
@@ -945,9 +764,7 @@ mod fts_tests {
         assert!(hits(&pool, "dominant").await.is_empty(), "delete trigger");
     }
 
-    /// `snippet()` is what puts the matched prose under a search row, and
-    /// prefix terms are what make it answer while the word is still being
-    /// typed.
+    /// `snippet()` marks matched prose; prefix terms answer mid-word.
     #[tokio::test]
     async fn snippet_marks_the_matched_words() {
         let pool = pool().await;

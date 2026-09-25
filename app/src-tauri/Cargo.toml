@@ -26,6 +26,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset", "devtools", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+# Tauri's own `app_data_dir()` base, so `paths::data_dir` is that path with no AppHandle.
+dirs = "6"
 serde = { version = "1", features = ["derive"] }
 # `raw_value`: `harness/antigravity_rules.rs` rewrites two lists in agy's
 # settings file and hands every other value back verbatim, in file order.

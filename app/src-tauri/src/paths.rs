@@ -1,36 +1,20 @@
 //! App data locations, resolved without a Tauri `AppHandle`.
 //!
-//! The scrape engine and the `oculus` CLI both need the same directory the app
-//! writes to. Tauri computes it from the bundle identifier, so we do too —
-//! keeping one definition means the CLI and the app can never disagree about
-//! where the cookie, the database, and `courses/` live.
+//! One definition of the app's data directory, computed from the bundle
+//! identifier as Tauri does, so the CLI and the app agree on where the cookie,
+//! the database and `courses/` live.
 
 use std::path::PathBuf;
 
-/// Must match `identifier` in tauri.conf.json.
+/// `identifier` in tauri.conf.json; a test holds them together.
 pub const IDENTIFIER: &str = "com.tchan.oculus";
 
 pub const CANVAS_BASE: &str = "https://canvas.lms.unimelb.edu.au";
 
-/// Same directory Tauri's `app.path().app_data_dir()` returns.
+/// Tauri's `app.path().app_data_dir()`, reachable without an `AppHandle`; the
+/// one way every module and the CLI find the data directory.
 pub fn data_dir() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    #[cfg(target_os = "macos")]
-    let base = home.join("Library/Application Support");
-    #[cfg(target_os = "windows")]
-    let base = std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join("AppData/Roaming"));
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".local/share"));
-
-    base.join(IDENTIFIER)
+    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join(IDENTIFIER)
 }
 
 pub fn cookie_path(data_dir: &std::path::Path) -> PathBuf {
@@ -43,11 +27,8 @@ pub fn auth_flag_path(data_dir: &std::path::Path) -> PathBuf {
 
 /// Record that we hold a session Canvas has accepted.
 ///
-/// The app's startup probe reads this before it reads anything else — no flag
-/// means "fresh session", and it will not even look at the cookie beside it. So
-/// every path that establishes a session must write it, the CLI included;
-/// otherwise `oculus auth auto` leaves a perfectly good cookie on disk and the
-/// app still opens disconnected.
+/// The app's startup probe ignores the cookie without this flag, so every path
+/// that establishes a session must write it, the CLI included.
 pub fn mark_authenticated(data_dir: &std::path::Path) {
     let flag = auth_flag_path(data_dir);
     if let Some(parent) = flag.parent() {
@@ -56,29 +37,24 @@ pub fn mark_authenticated(data_dir: &std::path::Path) {
     std::fs::write(&flag, b"1").ok();
 }
 
-/// Where the LaunchAgent keep-alive reports what it did. Read back into
-/// Settings → Canvas, so the user can see the agent is alive without launchctl.
+/// Where the LaunchAgent keep-alive logs; shown in Settings → Canvas.
 pub fn keepalive_log_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("session-keepalive.log")
 }
 
-/// Append one timestamped line, keeping the file bounded — it is written every
-/// few hours forever and nobody prunes it.
+/// Append one timestamped line, keeping the file bounded.
 pub fn append_keepalive_log(data_dir: &std::path::Path, message: &str) {
     use std::io::Write;
 
     let path = keepalive_log_path(data_dir);
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let stamp = crate::clock::now_secs();
     let line = format!("{}Z {message}\n", iso8601_utc(stamp));
 
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         f.write_all(line.as_bytes()).ok();
     }
 
-    // Cheap trim: only rewrite once the file has actually grown past the cap.
+    // Only rewrite once the file has grown past the cap.
     if let Ok(meta) = std::fs::metadata(&path) {
         if meta.len() > 64 * 1024 {
             if let Ok(text) = std::fs::read_to_string(&path) {
@@ -90,24 +66,12 @@ pub fn append_keepalive_log(data_dir: &std::path::Path, message: &str) {
     }
 }
 
-/// `YYYY-MM-DDTHH:MM:SS` from a Unix timestamp — civil-time arithmetic only, to
-/// keep a date crate out of a build that needs nothing else from one.
+/// `YYYY-MM-DDTHH:MM:SS` from a Unix timestamp, without a date crate.
 pub fn iso8601_utc(secs: u64) -> String {
     let (days, rem) = (secs / 86_400, secs % 86_400);
     let (h, mi, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
 
-    // Days since 1970-01-01 → civil date (Howard Hinnant's algorithm).
-    let z = days as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
+    let (y, m, d) = crate::clock::civil_from_days(days as i64);
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}")
 }
 
@@ -117,19 +81,10 @@ pub fn db_path(data_dir: &std::path::Path) -> PathBuf {
 
 /// The database plus the two files SQLite keeps beside it in WAL mode.
 ///
-/// This is the set a *writer* has to be able to open, and it is the one
-/// exception the harness's sandboxes make to "nothing outside `agents/` is
-/// writable": `oculus project` and `oculus task` are how an agent writes the
-/// student's board, and a process that may open `oculus.db` but not
-/// `oculus.db-wal` fails with SQLite's "attempt to write a readonly
-/// database" — measured under a seatbelt profile with only `agents/`
-/// writable, which is exactly what both bridges were handing the CLI.
-///
-/// Files, not the directory they sit in. Granting the directory would put the
-/// session cookie and the Ed token beside them inside the agent's reach, and
-/// the sidecars never need creating from in there: nothing runs an agent
-/// except the app and the CLI, and both hold the database open — which is
-/// what makes the two sidecars exist — for as long as the agent lives.
+/// The harness sandboxes' one exception to "nothing outside `agents/` is
+/// writable", so `oculus project`/`task` can write: SQLite needs the `-wal` and
+/// `-shm` files too, or it reports a readonly database. Files, not the
+/// directory, which also holds the session cookie and the Ed token.
 pub fn db_write_paths(data_dir: &std::path::Path) -> Vec<PathBuf> {
     let db = db_path(data_dir);
     let sidecar = |suffix: &str| {
@@ -141,9 +96,7 @@ pub fn db_write_paths(data_dir: &std::path::Path) -> Vec<PathBuf> {
 }
 
 // ── Course artifact paths ────────────────────────────────────────────────────
-//
-// Canvas titles become filenames, so every component is sanitised: they arrive
-// with slashes, colons and the occasional "..".
+// Canvas titles become filenames, so every component is sanitised.
 
 pub fn safe_dir(s: &str) -> String {
     s.chars()
@@ -168,16 +121,14 @@ pub fn safe_rel_path(rel: &str) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
-/// The data-dir-relative path an artifact will occupy, computable before any
-/// bytes move — lets the scraper announce a download while it is in flight
-/// under the same key the write event will use.
+/// The data-dir-relative path an artifact will occupy, known before any bytes
+/// move, so an in-flight download uses the write event's key.
 pub fn course_rel_path(code: &str, rel_path: &str) -> Option<String> {
     safe_rel_path(rel_path).map(|safe| format!("courses/{}/{}", safe_dir(code), safe))
 }
 
-/// What a write did to the file already on disk. The scraper re-fetches
-/// everything each run, so this comparison is the only place "nothing actually
-/// changed" is knowable.
+/// What a write did to the file on disk: the only place "nothing changed" is
+/// knowable, since the scraper re-fetches everything.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteAction {
     New,
@@ -195,9 +146,8 @@ impl WriteAction {
     }
 }
 
-/// Write one course artifact. Returns its path relative to `data_dir` (what the
-/// database stores), the byte count, and whether the content was new, changed,
-/// or identical to what was there. Identical content is not rewritten.
+/// Write one course artifact; returns the data-dir-relative path, the byte count
+/// and whether the content was new, changed or identical (and not rewritten).
 pub fn write_course_bytes(
     data_dir: &std::path::Path,
     code: &str,
@@ -220,19 +170,10 @@ pub fn write_course_bytes(
     Ok((rel, content.len() as u64, action))
 }
 
-/// Delete the parse/embed artifacts a PDF-backed file leaves beside its PDF —
-/// `{stem}.md`, `{stem}.pages.json`, `{stem}.emb.json` and the `{stem}_images/`
-/// directory the markdown's figures live in. Both skip checks — `parse_mode`
-/// and `embed::is_embedded` — read those records rather than the PDF's bytes,
-/// so without this a re-scrape that finds changed bytes would keep serving the
-/// old parse and embeddings forever.
-///
-/// The images go with them because they are only ever referenced *from* that
-/// markdown: leaving them is not a fallback, it is a directory of figures for
-/// a document that no longer says anything about them, and either engine
-/// rebuilds it from scratch anyway.
-///
-/// `library_rel` is the library file, data-dir-relative (`courses/…`).
+/// Delete a PDF-backed file's parse/embed artifacts (`{stem}.md`,
+/// `.pages.json`, `.emb.json`, `{stem}_images/`). The skip checks read those
+/// records, not the PDF, so changed bytes would otherwise keep the old parse.
+/// `library_rel` is data-dir-relative (`courses/…`).
 pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
     let Some(pdf_rel) = doc_pdf_rel(library_rel) else { return };
     let pdf = data_dir.join(&pdf_rel);
@@ -250,14 +191,11 @@ pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
     let _ = std::fs::remove_dir_all(parent.join(format!("{stem}_images")));
 }
 
-/// Extensions LibreOffice converts to PDF at download time. The original is
-/// the library file; the conversion lives beside it as `{name}.pdf`.
+/// Extensions LibreOffice converts to PDF at download, as `{name}.pdf` beside it.
 pub const OFFICE_EXTS: &[&str] = &[".pptx", ".docx", ".xlsx", ".ppt", ".doc", ".xls"];
 
-/// The PDF that parsing, embedding and in-app viewing operate on for a library
-/// file: the file itself for real PDFs, the converted sibling
-/// (`deck.pptx` → `deck.pptx.pdf`) for Office documents, `None` for anything
-/// else (markdown, images).
+/// The PDF that parsing, embedding and viewing use: the file itself, the
+/// converted sibling for Office documents, `None` otherwise.
 pub fn doc_pdf_rel(rel: &str) -> Option<String> {
     let lower = rel.to_ascii_lowercase();
     if lower.ends_with(".pdf") {
@@ -270,57 +208,34 @@ pub fn doc_pdf_rel(rel: &str) -> Option<String> {
 }
 
 
-/// The one directory inside a course folder the scraper never writes to: the
-/// student's own files, added by hand. Everything downstream — conversion,
-/// parsing, embedding, search, the agent's view of `courses/` — treats them as
-/// ordinary library files, so this constant is the whole of what makes them
-/// separate.
+/// The student's own files, which the scraper never writes to; downstream they
+/// are ordinary library files.
 pub const UPLOADS_DIR: &str = "uploads";
 
 /// True for a data-dir-relative path inside some subject's uploads folder.
 ///
-/// This is the delete command's entire guard. Nothing else under `courses/` is
-/// the user's to throw away — a scraped file deleted from disk comes back on
-/// the next sync, minus its parse — so deletion is scoped here by construction
-/// rather than by asking the caller to be careful.
+/// The delete command's entire guard: nothing else under `courses/` is the
+/// user's to throw away.
 pub fn is_upload_rel(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').collect();
     !rel.contains("..") && parts.len() > 3 && parts[0] == "courses" && parts[2] == UPLOADS_DIR
 }
 
-/// The other directory the scraper never writes to: the student's own notes,
-/// written inside the app as markdown. Where an upload arrives whole and is
-/// never touched again, a document is rewritten on every save and moves when
-/// its title changes — but downstream it is the same thing an upload is, an
-/// ordinary library file the agent, the mention menu and search reach by
-/// path, so this constant is again the whole of what makes it separate.
+/// The student's own notes, written in the app as markdown; the other folder
+/// the scraper never writes to. Downstream, ordinary library files.
 pub const DOCUMENTS_DIR: &str = "documents";
 
 /// Where a note's pictures go: `documents/assets/`, one folder for the
-/// subject's notes rather than one per note.
 ///
-/// The name is load-bearing in two places at once — it is the folder on disk
-/// and the prefix of the `![](assets/…)` a note carries — so a picture
-/// resolves for the editor's preview, for the file viewer and for anything
-/// else handed the folder. One folder because the names are stamps and never
-/// collide, and because a per-note folder would have to be moved by every
-/// rename.
+/// The folder on disk and the `![](assets/…)` prefix a note carries. One folder
+/// because the names are stamps and a per-note folder would move on rename.
 pub const DOCUMENT_ASSETS_DIR: &str = "assets";
 
 /// True only for `courses/<code>/documents/<name>.md`.
 ///
-/// Which is also what keeps a note's pictures out: `documents/assets/<x>.png`
-/// is five segments and not markdown, so no save, rename or delete can land
-/// on one and [`list_documents`](crate::files::list_documents) does not offer
-/// the folder as a note.
-///
-/// The entire guard for writing, renaming and deleting a document, the way
-/// `is_upload_rel` is for `delete_upload`. A document is the one library file
-/// the app overwrites in place, and the caller hands over a path rather than
-/// bytes it already holds — so the shape is checked strictly: exactly four
-/// segments, no traversal, a `.md` at the end. A path that fails is a scraped
-/// file, a converted PDF or something outside `courses/`, none of which a
-/// save may land on.
+/// The entire guard for writing, renaming and deleting a document: exactly
+/// four segments, no traversal, a `.md` at the end — which also keeps
+/// `documents/assets/` out.
 pub fn is_document_rel(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').collect();
     !rel.contains("..")
@@ -333,12 +248,8 @@ pub fn is_document_rel(rel: &str) -> bool {
 }
 
 /// Every category `category_from_path` can return, in the order a reader
-/// meets them: the two whole-course documents, then the folders.
-///
-/// Held here rather than beside the callers so there is one list to keep in
-/// step with the match below — a CLI flag that validates against a copy of
-/// its own would go stale the first time a scraper grew a folder, and the
-/// test under it fails if the two drift.
+/// One list, in reading order, that the `--category` flags validate against;
+/// the test below fails if it drifts from the match.
 pub const CATEGORIES: &[&str] = &[
     "home",
     "syllabus",
@@ -378,6 +289,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn identifier_matches_tauri_conf() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["identifier"], IDENTIFIER);
+    }
+
+    #[test]
     fn timestamps_match_the_shell_agent_they_replaced() {
         // `date -u +%Y-%m-%dT%H:%M:%SZ` at these instants.
         assert_eq!(iso8601_utc(0), "1970-01-01T00:00:00");
@@ -396,10 +314,7 @@ mod tests {
         assert!(safe_rel_path("///").is_none());
     }
 
-    /// `CATEGORIES` is what a `--category` flag validates against, so a
-    /// category the scraper can write but the list has forgotten becomes a
-    /// well-formed query the CLI refuses. Walk one path per arm and insist
-    /// the answer is listed.
+    /// Every category the scraper can write is listed.
     #[test]
     fn every_category_the_scraper_writes_is_listed() {
         let paths = [

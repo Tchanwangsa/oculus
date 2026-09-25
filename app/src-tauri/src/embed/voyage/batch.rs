@@ -1,35 +1,14 @@
 //! How pages are packed into requests, and how many requests run at once.
 //!
-//! **This is the piece of the MinerU batcher that changed shape.** There, the
-//! API batches *documents* — one `POST` carries fifty files and returns one
-//! batch id — so the queue's whole job was to hold a document back for five
-//! seconds in the hope that nineteen more would arrive. Voyage batches *pages*:
-//! one document is already many requests, and there is nothing to wait for.
+//! Voyage batches pages, not documents, and never across documents: TPM binds
+//! at every tier, so cross-document packing would buy nothing and cost a
+//! failure spanning two files.
 //!
-//! Packing pages from two documents into one request would still save
-//! requests, and it is deliberately not done, because **TPM is the governor at
-//! every tier and RPM never is.** On the free programme 3 RPM against 10K TPM
-//! is ~2.8 pages a minute — one request can hold 89, so the request budget is
-//! never the thing that runs out. On tier 1, 2000 RPM against 2M TPM is ~560
-//! pages a minute, and one page is still ~3,572 tokens: TPM again. Cross-
-//! document packing would buy nothing measurable and would cost a queue, a
-//! window, and a failure that spans two files. So the queue does not transfer;
-//! the *rules around* it do — bounded concurrency, per-document isolation, and
-//! a panic in a worker that never parks its caller forever.
-//!
-//! What stayed, exactly:
-//!
-//! * **Both ceilings, per request.** 1000 inputs *and* 320,000 tokens, and the
-//!   token one is computed from each page's real pixel count — never a page
-//!   count. Pages are not the same size within a document, let alone across
-//!   one, and a fixed "46 pages" would be wrong in the expensive direction on
-//!   the first A3 diagram it met.
-//! * **Progress is summed from finished work**, never inferred from how far
-//!   the renderer has got.
-//! * **Nothing partial escapes.** A document that could not embed every page
-//!   returns an error; `client.rs` writes no record. `embed::is_embedded` now
-//!   checks page coverage, so a short record would re-embed rather than lie —
-//!   but a short record should not exist in the first place.
+//! * Both per-request ceilings apply (inputs and tokens), with tokens computed
+//!   from each page's real pixels, never a page count.
+//! * Progress is summed from finished requests.
+//! * Nothing partial escapes: a document that did not embed every page is an
+//!   error and no record is written.
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
@@ -37,64 +16,45 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use crate::embed::raster::{self, RasterError, RenderedPage};
 use crate::embed::{EmbedError, EmbedPage, Progress};
-
-use super::ledger::hold;
+use crate::ratelimit::{hold, Permits};
 
 // ── The documented ceilings ──────────────────────────────────────────────────
-//
-// Verified against the live API on 2026-09-17. They are `pub` because the
-// tests pack against them and because `client.rs` reserves against them.
 
-/// Inputs per request. Never the binding constraint at 200 DPI — a request is
-/// full at ~89 pages — but it binds immediately for anything small, and a
-/// thumbnail-sized page is not hypothetical (a scanned insert, a cover).
+/// Inputs per request. Binds only for small pages.
 pub const MAX_INPUTS_PER_REQUEST: usize = 1_000;
 
-/// Tokens per request. This is the ceiling that actually closes a batch.
+/// Tokens per request — the API's, not the account's (see
+/// `RequestRun::max_tokens`).
 pub const MAX_TOKENS_PER_REQUEST: u64 = 320_000;
 
-/// Tokens in one input. A page past this cannot be split — it is one image —
-/// so it is a document error rather than something to work around.
+/// Tokens in one input. A page cannot be split, so past this is a document
+/// error.
 pub const MAX_TOKENS_PER_INPUT: u64 = 32_000;
 
-/// Pixels in one image, and the limit that actually bites first: 16M pixels is
-/// 28,571 tokens, below `MAX_TOKENS_PER_INPUT`.
+/// Pixels in one image; `run_document` renders oversized pages at a lower DPI
+/// to stay under it.
 pub const MAX_PIXELS_PER_IMAGE: u64 = 16_000_000;
 
 /// Bytes in one image.
 pub const MAX_BYTES_PER_IMAGE: u64 = 20 * 1024 * 1024;
 
-/// **Images bill one token per 560 pixels.**
+/// Images bill one token per this many pixels.
 pub const PIXELS_PER_TOKEN: u64 = 560;
 
-/// **Voyage downscales before it bills, and the cap is 2M pixels.** Measured
-/// live: two copies of a 2339 x 1653 page — 3,866,367 px each — came back as
-/// `image_pixels: 4,000,000` total, i.e. exactly 2,000,000 apiece.
-///
-/// This is the single most consequential number in the module, and the
-/// arithmetic without it is wrong by ~2x in the direction that hurts most. A
-/// 200-DPI landscape-A4 slide costs **~3,572 tokens, not 6,905**, so a
-/// 320,000-token request holds about **89 pages, not 46** — an uncapped
-/// estimate underfills every request by half while overstating every
-/// reservation by double.
-///
-/// Sending more pixels than this buys nothing: they are thrown away before the
-/// encoder sees them. The pipeline still renders at `RENDER_DPI` for the
-/// reasons on that constant, and this is only what the *estimate* believes.
+/// Voyage downscales an image to this many pixels before it bills (observed in
+/// its `usage.image_pixels`). A full-DPI slide is over it, so every such page
+/// costs `tokens_for` the cap; an uncapped estimate would be ~2x wrong. This
+/// affects only the estimate — rendering still happens at `RENDER_DPI`.
 pub const BILLED_PIXEL_CAP: u64 = 2_000_000;
 
-/// What one page costs, from its own dimensions, after the downscale.
-///
-/// Rounded up, because a partial token is a token and the estimate must never
-/// come in under what is billed — the ledger's reservation is taken from this
-/// before the request goes out.
+/// What one page costs after the downscale, rounded up: the ledger reserves
+/// from this and must never come in under what is billed.
 pub fn tokens_for(width: u32, height: u32) -> u64 {
     let pixels = u64::from(width) * u64::from(height);
     pixels.min(BILLED_PIXEL_CAP).div_ceil(PIXELS_PER_TOKEN)
 }
 
-/// The pixels actually on the page. Only the hard API rejections are measured
-/// against this — what gets *billed* is [`billed_pixels`].
+/// The pixels on the page, for the hard API limits; billing is [`billed_pixels`].
 pub fn raw_pixels(page: &RenderedPage) -> u64 {
     u64::from(page.width) * u64::from(page.height)
 }
@@ -104,26 +64,13 @@ pub fn billed_pixels(page: &RenderedPage) -> u64 {
     raw_pixels(page).min(BILLED_PIXEL_CAP)
 }
 
-/// Why this one page cannot be sent, if it cannot.
-///
-/// A page that is too big is a **document** failure and not a run failure: the
-/// next file is very probably fine. It is also not something to skip — skipping
-/// would produce exactly the short record this module exists to prevent.
-///
-/// **Pixels rarely reach here any more, and that is the point.** `run_document`
-/// hands [`MAX_PIXELS_PER_IMAGE`] to the rasterizer, which renders a page over
-/// it at a lower DPI rather than at 200 — costing nothing, since Voyage
-/// downscales to [`BILLED_PIXEL_CAP`] before it encodes or bills. So this is
-/// the floor under that: a page the clamp could not save (one DPI wide is
-/// still too big), a PNG over the byte ceiling, a token cost the estimate did
-/// not predict.
+/// Why this one page cannot be sent, if it cannot — a document failure, never
+/// a skip (that would be a short record). The rasterizer's DPI clamp usually
+/// keeps pixels under the limit; this catches what it cannot, plus bytes.
 pub fn refuse_oversized(page: &RenderedPage) -> Result<u64, EmbedError> {
     let tokens = tokens_for(page.width, page.height);
-    // Note the token check below is unreachable now that the estimate is
-    // capped — `BILLED_PIXEL_CAP / PIXELS_PER_TOKEN` is 3,572, a ninth of
-    // `MAX_TOKENS_PER_INPUT`. It stays because the *documented* limit is the
-    // one the server enforces and the cap is a measurement; if Voyage ever
-    // stops downscaling, this is the check that already exists.
+    // The token check cannot fire while the billing cap holds; it enforces the
+    // documented limit in case Voyage stops downscaling.
     let code = if raw_pixels(page) > MAX_PIXELS_PER_IMAGE {
         "page-too-many-pixels"
     } else if page.png.len() as u64 > MAX_BYTES_PER_IMAGE {
@@ -136,12 +83,9 @@ pub fn refuse_oversized(page: &RenderedPage) -> Result<u64, EmbedError> {
     Err(EmbedError::Document { code: format!("{code}-p{}", page.page_no) })
 }
 
-/// The packing rule, on its own so it can be tested without a renderer or a
-/// server: given each page's token cost in order, which pages travel together?
-///
-/// Greedy and order-preserving. A smarter bin-packer would fit marginally more
-/// pages per request, and would also reorder them — which costs the one thing
-/// this pipeline cannot spare, a stable `page_no` path from render to record.
+/// The packing rule, also used by `estimate`: given each page's token cost in
+/// order, which pages travel together? Greedy and order-preserving, so
+/// `page_no` stays stable from render to record.
 pub fn plan(costs: &[u64], max_inputs: usize, max_tokens: u64) -> Vec<Vec<usize>> {
     let max_inputs = max_inputs.max(1);
     let mut requests: Vec<Vec<usize>> = Vec::new();
@@ -165,25 +109,15 @@ pub fn plan(costs: &[u64], max_inputs: usize, max_tokens: u64) -> Vec<Vec<usize>
 
 // ── Running one document ─────────────────────────────────────────────────────
 
-/// What actually embeds a request. A trait rather than a concrete client so the
-/// packing and concurrency rules can be tested without a server — the same
-/// split `parse/mineru/batch.rs` draws with `BatchRun`.
+/// What embeds a request; a trait so packing and concurrency test without a
+/// server.
 pub trait RequestRun: Send + Sync {
     /// One vector per page, in the order the pages were given.
     fn run(&self, pages: &[RenderedPage]) -> Result<Vec<Vec<f32>>, EmbedError>;
 
-    /// The largest request this backend can currently get **accepted**, which
-    /// is not the same as the largest the API documents.
-    ///
-    /// This exists because of a livelock, confirmed live: a request of ~14,284
-    /// tokens is refused with 429 on a 10,000 TPM account, and no amount of
-    /// waiting changes that — an over-ceiling request is not slow, it is
-    /// *impossible*. Packing to the API's 320,000 and then pacing would send
-    /// the same doomed request once a minute forever.
-    ///
-    /// So the ceiling is asked for again on every page, and a run that starts
-    /// optimistic **shrinks its requests** the moment the first 429 teaches it
-    /// the account is 32x smaller than it assumed.
+    /// The largest request this backend can currently get accepted. A request
+    /// over the account's TPM is refused whatever the pace, so this is re-read
+    /// on every page and a run shrinks its requests once a 429 teaches the tier.
     fn max_tokens(&self) -> u64 {
         MAX_TOKENS_PER_REQUEST
     }
@@ -192,10 +126,8 @@ pub trait RequestRun: Send + Sync {
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
     pub max_inputs: usize,
-    /// The **API's** hard maximum, not the account's. The live ceiling comes
-    /// from `RequestRun::max_tokens` and is re-read on every page; the two are
-    /// combined with a `min`, so this is a floor under how large a request can
-    /// ever be asked to be rather than the number that governs packing.
+    /// The API's hard maximum; packing uses its `min` with
+    /// `RequestRun::max_tokens`.
     pub max_tokens: u64,
     pub in_flight: usize,
 }
@@ -205,10 +137,7 @@ impl Default for Limits {
         Self {
             max_inputs: MAX_INPUTS_PER_REQUEST,
             max_tokens: MAX_TOKENS_PER_REQUEST,
-            // Four, not eight. MinerU's eight batches were eight *documents*
-            // waiting on a server-side queue; these are four requests against a
-            // per-minute budget the gate is already pacing, and each one holds
-            // a request's worth of PNGs in memory until it returns.
+            // The gate already paces; each request holds its PNGs in memory.
             in_flight: 4,
         }
     }
@@ -247,9 +176,7 @@ impl DocumentRun {
         hold(&self.state).failure.clone()
     }
 
-    /// First failure wins, exactly as `CloudDocument::finish` keeps the first
-    /// answer: a worker that fails and then panics must not overwrite the real
-    /// reason.
+    /// First failure wins, so a later panic cannot overwrite the real reason.
     fn fail(&self, error: EmbedError) {
         let mut state = hold(&self.state);
         if state.failure.is_none() {
@@ -279,11 +206,8 @@ impl DocumentRun {
 /// Render `pdf`, pack it into requests, embed them with bounded concurrency,
 /// and hand back one `EmbedPage` per page — or fail.
 ///
-/// The thread story is the MinerU client's, for the same reason. `on_progress`
-/// is a plain `&dyn Fn`, neither `Send` nor `'static`, so it cannot be moved
-/// into a worker: workers record numbers behind the lock and *this* thread —
-/// which is rendering, and then parked waiting for the last requests — is the
-/// one that reports them.
+/// `on_progress` is neither `Send` nor `'static`, so workers record numbers
+/// behind the lock and this thread reports them.
 pub fn run_document(
     pdf: &Path,
     expected_pages: u32,
@@ -295,19 +219,14 @@ pub fn run_document(
     let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
     let mut batch: Vec<RenderedPage> = Vec::new();
     let mut spent: u64 = 0;
-    // The last number handed to `on_progress`, shared between the rendering
-    // pass and the drain below so the two never repeat or retreat.
+    // The last number reported, shared by both passes so neither repeats.
     let mut reported = u32::MAX;
-    // `render_pages` can only be stopped with a `RasterError`, and the reasons
-    // we stop are not raster problems. The real error is parked here and the
-    // sentinel is thrown away.
+    // `render_pages` stops only on a `RasterError`; the real reason is parked
+    // here and the sentinel discarded.
     let mut stop: Option<EmbedError> = None;
 
-    // The ceiling travels into the renderer rather than being checked after
-    // the fact: a page over it is rendered at a lower DPI instead of failing
-    // the document (`raster::dpi_for_page`). `refuse_oversized` below is still
-    // the guard — it is what catches a page the clamp could not save, and the
-    // byte and token ceilings it also checks are not things a DPI fixes.
+    // A page over the pixel ceiling renders at a lower DPI
+    // (`raster::dpi_for_page`); `refuse_oversized` catches the rest.
     let rendered = raster::render_pages(pdf, Some(MAX_PIXELS_PER_IMAGE), |page| {
         if let Some(error) = run.failure() {
             stop = Some(error);
@@ -320,17 +239,12 @@ pub fn run_document(
                 return Err(halt(page.page_no));
             }
         };
-        // Re-read every page rather than hoisted: the first 429 of a run can
-        // shrink this by 32x, and a request already packed to the old ceiling
-        // could never be accepted at any pace. See `RequestRun::max_tokens`.
+        // Re-read every page: see `RequestRun::max_tokens`.
         let ceiling = limits.max_tokens.min(runner.max_tokens());
         if !batch.is_empty() && (batch.len() >= limits.max_inputs || spent + cost > ceiling) {
             dispatch(&run, &runner, std::mem::take(&mut batch), &mut workers);
             spent = 0;
-            // Reported here too, not only in the drain below: rendering and
-            // embedding overlap, and on the free programme a document can take
-            // hours. A progress story that only starts once the last page is
-            // rendered is not a progress story.
+            // Reported while rendering too: rendering and embedding overlap.
             let done = hold(&run.state).done;
             if done != reported {
                 reported = done;
@@ -357,9 +271,8 @@ pub fn run_document(
         }),
     };
 
-    // Report while the last requests drain, then collect. This runs even when
-    // rendering failed: requests already in flight have been paid for, and
-    // their threads must be let finish rather than abandoned.
+    // Report while the last requests drain, then collect — even when rendering
+    // failed, since requests in flight are paid for and must finish.
     let mut state = hold(&run.state);
     loop {
         if state.done != reported {
@@ -390,19 +303,8 @@ pub fn run_document(
         return Err(error);
     }
 
-    // ── The boundary guard ───────────────────────────────────────────────────
-    //
-    // Same rule as the MinerU one, for a worse failure. A document that lost
-    // one page to a refused request would otherwise write a record that reads
-    // as finished: that page would never be searchable, nothing would retry it,
-    // and no error would exist anywhere to say so.
-    //
-    // The first check is the **page-count agreement** `raster::page_count`
-    // documents: pdfium counts one way and the `lopdf` behind the parse record
-    // counts another, and they part company on damaged xrefs, lying `/Count`s
-    // and incremental updates. `page_no` is the join key retrieval rests on, so
-    // a disagreement means the vectors would be filed under the wrong numbers —
-    // which is silent, permanent and worse than not embedding at all.
+    // The boundary guard: pdfium must agree with the parse record's page count
+    // (`page_no` is the join key), and every page must have embedded.
     if rendered_pages != expected_pages {
         return Err(EmbedError::Document { code: "page-count-mismatch".into() });
     }
@@ -412,12 +314,9 @@ pub fn run_document(
     Ok(pages)
 }
 
-/// Hand one request to a worker.
-///
-/// The permit is taken **here, on the calling thread**, before the spawn: that
-/// is the backpressure, and it is also what bounds memory — at most
-/// `in_flight` requests' worth of PNGs exist at once, rather than a 191-page
-/// deck's worth.
+/// Hand one request to a worker. The permit is taken on the calling thread
+/// before the spawn: that is the backpressure, and it bounds memory to
+/// `in_flight` requests' worth of PNGs.
 fn dispatch(
     run: &Arc<DocumentRun>,
     runner: &Arc<dyn RequestRun>,
@@ -437,7 +336,6 @@ fn dispatch(
         .spawn(move || {
             let numbers: Vec<u32> = pages.iter().map(|page| page.page_no).collect();
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| runner.run(&pages)));
-            // The PNGs are finished with the moment the request is.
             drop(pages);
             match result {
                 Ok(Ok(vectors)) if vectors.len() == numbers.len() => {
@@ -461,8 +359,7 @@ fn dispatch(
                     worker_run.fail(EmbedError::Document { code: "vector-count-mismatch".into() })
                 }
                 Ok(Err(error)) => worker_run.fail(error),
-                // A panic in the client would otherwise park the caller in the
-                // progress loop forever.
+                // Otherwise a panic would park the caller in the progress loop.
                 Err(_) => worker_run.fail(EmbedError::Io("the embedding worker panicked".into())),
             }
             worker_run.leave();
@@ -483,15 +380,8 @@ fn halt(page_no: u32) -> RasterError {
     RasterError::Page { page_no, message: "stopped by the embedder".into() }
 }
 
-/// Reconcile the renderer's vocabulary into the seam's.
-///
-/// The one interesting case is `Library`: a missing libpdfium condemns every
-/// file in the run, but `EmbedError` — which is `ParseError`'s vocabulary
-/// deliberately — has no variant that is both latching and fixable-by-the-user.
-/// So it is reported as `NotReady` *and* caught earlier, in
-/// `VoyageCloud::health`, which reports `ready: false` when the library will
-/// not bind. `preflight` then refuses the run once, before a single file,
-/// rather than failing two hundred of them with the same message.
+/// Reconcile the renderer's vocabulary into the seam's. A missing libpdfium
+/// is `NotReady`, and `VoyageCloud::health` catches it before the run starts.
 impl From<RasterError> for EmbedError {
     fn from(error: RasterError) -> Self {
         match error {
@@ -507,61 +397,28 @@ impl From<RasterError> for EmbedError {
     }
 }
 
-/// A counting semaphore. `std` has none, and this needs four lines — the same
-/// four `parse/mineru/batch.rs` writes.
-struct Permits {
-    free: Mutex<usize>,
-    wake: Condvar,
-}
-
-impl Permits {
-    fn new(count: usize) -> Self {
-        Self { free: Mutex::new(count), wake: Condvar::new() }
-    }
-
-    fn acquire(&self) {
-        let mut free = hold(&self.free);
-        while *free == 0 {
-            free = self.wake.wait(free).unwrap_or_else(std::sync::PoisonError::into_inner);
-        }
-        *free -= 1;
-    }
-
-    fn release(&self) {
-        *hold(&self.free) += 1;
-        self.wake.notify_one();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::embed::EMBED_DIM;
 
-    /// A landscape A4 slide at `RENDER_DPI`, which is the page this whole
-    /// token budget was measured against.
+    /// A landscape A4 slide at `RENDER_DPI`.
     const A4_LANDSCAPE: (u32, u32) = (2339, 1653);
 
     #[test]
     fn a_full_dpi_page_costs_what_was_measured() {
         let (width, height) = A4_LANDSCAPE;
         assert_eq!(u64::from(width) * u64::from(height), 3_866_367);
-        // Nearly half of those pixels are thrown away before billing: Voyage
-        // caps at 2M, measured live as `image_pixels: 4,000,000` for two of
-        // these pages. 2,000,000 / 560 = 3571.4, rounded up because the ledger
-        // reserves from this figure and an estimate that came in under what was
-        // billed would drift the whole allowance optimistic.
+        // Capped at 2M billed pixels, rounded up.
         assert_eq!(tokens_for(width, height), 3_572);
         assert_eq!(BILLED_PIXEL_CAP.div_ceil(PIXELS_PER_TOKEN), 3_572);
-        // Below the cap nothing is capped, so the low-DPI curve is unchanged.
         assert_eq!(tokens_for(842, 595), 895); // 72 dpi
         assert_eq!(tokens_for(1170, 827), 1_728); // 100 dpi
         assert_eq!(tokens_for(1754, 1240), 3_572); // 150 dpi is already at the cap
-        // Rounded up: a partial token is a token.
         assert_eq!(tokens_for(1, 1), 1);
         assert_eq!(tokens_for(560, 1), 1);
         assert_eq!(tokens_for(561, 1), 2);
-        // The cap is on billing, not on the page: the raster is untouched.
+        // The cap is on billing, not on the raster.
         let page = RenderedPage { page_no: 1, width, height, png: Vec::new() };
         assert_eq!(raw_pixels(&page), 3_866_367);
         assert_eq!(billed_pixels(&page), BILLED_PIXEL_CAP);
@@ -574,16 +431,13 @@ mod tests {
         assert_eq!(requests[0].len(), 89);
         assert!(89 * 3_572 <= MAX_TOKENS_PER_REQUEST as usize);
         assert!(90 * 3_572 > MAX_TOKENS_PER_REQUEST as usize);
-        // Every page travels exactly once, in order.
         let flat: Vec<usize> = requests.iter().flatten().copied().collect();
         assert_eq!(flat, (0..200).collect::<Vec<_>>());
     }
 
     #[test]
     fn the_batch_is_computed_from_real_pixels_never_a_page_count() {
-        // A deck that changes orientation halfway, which is ordinary: the
-        // second half is cheaper, so more of it fits. A fixed page count would
-        // be wrong in both directions.
+        // A deck whose second half is cheaper.
         let mut costs = vec![tokens_for(2339, 1653); 100];
         costs.extend(vec![tokens_for(827, 1170); 100]);
         let requests = plan(&costs, MAX_INPUTS_PER_REQUEST, MAX_TOKENS_PER_REQUEST);
@@ -596,15 +450,12 @@ mod tests {
                 <= MAX_TOKENS_PER_REQUEST),
             "a request went over the token ceiling: {requests:?}"
         );
-        // The expensive head fills at 89; the cheap tail packs more densely
-        // still. A fixed page count would be wrong in both directions.
         assert_eq!(requests[0].len(), 89);
         assert!(requests.last().unwrap().len() > 89, "{:?}", requests.last());
     }
 
     #[test]
     fn the_input_ceiling_binds_when_the_token_one_does_not() {
-        // Thumbnail-sized pages: 1000 of them cost less than one full slide.
         let costs = vec![1u64; 2_500];
         let requests = plan(&costs, MAX_INPUTS_PER_REQUEST, MAX_TOKENS_PER_REQUEST);
         assert_eq!(requests.len(), 3);
@@ -614,7 +465,6 @@ mod tests {
 
     #[test]
     fn one_page_larger_than_a_whole_request_still_travels_alone() {
-        // Not something to drop — dropping is what produces a short record.
         let costs = vec![5, MAX_TOKENS_PER_REQUEST + 1, 5];
         let requests = plan(&costs, MAX_INPUTS_PER_REQUEST, MAX_TOKENS_PER_REQUEST);
         assert_eq!(requests, vec![vec![0], vec![1], vec![2]]);
@@ -622,9 +472,7 @@ mod tests {
 
     #[test]
     fn a_free_tier_ceiling_shrinks_the_plan_instead_of_repeating_it() {
-        // The livelock, pinned. On a 10,000 TPM account a request built to the
-        // API's 320,000 ceiling is rejected with 429 *whatever the pace* — so
-        // the plan has to get smaller, not slower.
+        // Over the account's TPM the plan must get smaller, not slower.
         let costs = vec![tokens_for(A4_LANDSCAPE.0, A4_LANDSCAPE.1); 8];
         let free_ceiling = 10_000;
 
@@ -641,19 +489,14 @@ mod tests {
             shrunk.iter().all(|r| r.iter().map(|i| costs[*i]).sum::<u64>() <= free_ceiling),
             "{shrunk:?}"
         );
-        // Forward progress is the whole point: every page still travels.
         assert_eq!(shrunk.iter().flatten().count(), 8);
     }
 
     #[test]
     fn one_page_always_fits_inside_the_smallest_programme_voyage_runs() {
-        // The invariant the shrinking rests on. The billing cap puts a hard
-        // ceiling of 3,572 tokens on *any* page, and the slowest account Voyage
-        // runs is 10,000 TPM — so a single page can always be accepted, and
-        // shrinking a plan can never bottom out at a request that is still too
-        // big. Without the cap the worst page was 28,571 tokens and this was
-        // not true.
-        assert!(BILLED_PIXEL_CAP.div_ceil(PIXELS_PER_TOKEN) < 10_000);
+        // Shrinking always terminates: the billing cap keeps any page under
+        // the free tier's TPM.
+        assert!((BILLED_PIXEL_CAP.div_ceil(PIXELS_PER_TOKEN) as f64) < super::super::ledger::FREE_TPM);
     }
 
     #[test]
@@ -667,10 +510,9 @@ mod tests {
         let error = refuse_oversized(&page).unwrap_err();
         assert_eq!(error.kind(), "document");
         assert!(!error.latching(), "one huge page must not condemn the run");
-        // The page number is in the code, so a failure says which page.
         assert!(format!("{error:?}").contains("p7"), "{error:?}");
 
-        // A 20 MB PNG at a legal pixel count is refused on bytes.
+        // Refused on bytes at a legal pixel count.
         let heavy = RenderedPage {
             page_no: 1,
             width: 100,
@@ -686,8 +528,6 @@ mod tests {
 
     #[test]
     fn the_raster_vocabulary_reconciles_into_the_seams() {
-        // A missing library is a readiness problem, not this file's problem —
-        // and `health()` catches it before a run starts at all.
         let library = EmbedError::from(RasterError::Library("no dylib".into()));
         assert_eq!(library.kind(), "not_ready");
         assert!(library.retryable());
@@ -703,7 +543,6 @@ mod tests {
             assert!(!error.latching());
         }
 
-        // pdfium's own message never travels; only the page number does.
         let page = EmbedError::from(RasterError::Page {
             page_no: 12,
             message: "internal pdfium detail".into(),
@@ -743,8 +582,6 @@ mod tests {
 
     #[test]
     fn a_vector_of_the_wrong_width_is_caught_before_it_reaches_a_record() {
-        // `EmbedPage::new` is the gate; this pins that the worker path uses it
-        // rather than trusting the runner.
         assert!(EmbedPage::new(1, &vec![0.5; EMBED_DIM]).is_ok());
         assert!(EmbedPage::new(1, &vec![0.5; EMBED_DIM - 1]).is_err());
     }

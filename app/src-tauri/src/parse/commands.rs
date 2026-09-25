@@ -1,52 +1,27 @@
-//! Tauri commands for the parser settings — Settings → Library.
+//! Tauri commands for the parser settings — Settings → Library. The same
+//! shape as `embed/commands.rs`: labels and refusals come from Rust.
 //!
-//! Deliberately the same shape as `embed/commands.rs`, one field over: the
-//! same `EngineOption` row, the same rule that a label and a refusal both come
-//! from Rust so the page cannot explain a refusal in different words than Rust
-//! would use, the same tests at the bottom. Two settings sections that behaved
-//! differently would be worse than either behaviour alone.
+//! Unlike `embed_set_engine`, switching invalidates nothing: both engines
+//! write the same artifacts through the shared `render`.
 //!
-//! **The symmetry is the control, not the consequence.** What is not ported is
-//! the destruction. `embed_set_engine` throws the whole index away in the same
-//! call, because vectors from two models share a table, a width and a dot
-//! product and share no geometry at all — a search over the mixture returns a
-//! confident ranking of unrelated pages. Nothing of the sort is true here:
-//! markdown from a local MinerU and markdown from MinerU's cloud are the same
-//! artifact, written at the same `PARSER_VERSION` with the same `mode`, and
-//! `render` — the module that decides what the markdown says — is shared
-//! between them by construction. So switching the parser re-parses nothing,
-//! invalidates nothing and needs no confirmation dialog. If a future backend
-//! ever does change the artifacts, `PARSER_VERSION` is the thing that moves,
-//! and it moves for every backend at once.
-//!
-//! **Both engines are always `available`.** Availability here is not a
-//! reachability question, and making it one would be a quiet trap: a student
-//! has to be able to *select* Local and then go start their server, and a
-//! server that is merely stopped must not read as an engine that was never
-//! chosen. The three-state answer about what is actually listening lives in
-//! `LocalProbe`, which is a live status line beside the endpoint field — not a
-//! gate in front of the choice.
+//! **Both engines are always `available`**: a student must be able to select
+//! Local before starting their server. What is listening is `LocalProbe`'s
+//! job, a status line beside the endpoint field — not a gate on the choice.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
 use sqlx::Row;
-use tauri::AppHandle;
 
 use super::mineru::local::{self, LocalHealth};
 use super::{parse_config, Engine, LOCAL_BASE_URL, PARSER_VERSION};
 use crate::store::{db_path, pool};
 
-/// The `settings` row this module owns. Shared with `parse::parse_config`,
-/// which reads it; nothing else writes it.
+/// The `settings` row this module writes; `parse::parse_config` reads it.
 const SETTINGS_KEY: &str = "parse";
 
 // ── The view ─────────────────────────────────────────────────────────────────
 
 /// One selectable backend, with everything the row needs to draw itself.
-///
-/// The labels and the reason live in Rust rather than in the page so that the
-/// thing which refuses an engine and the thing which explains the refusal
-/// cannot drift apart.
 #[derive(Serialize)]
 pub struct EngineOption {
     /// The value `parse_set_engine` takes, and what lands in the settings row.
@@ -60,37 +35,25 @@ pub struct EngineOption {
 }
 
 /// Everything Settings → Library needs to draw the parser control.
-///
-/// No index statistics and no page count, unlike `EmbedSettings`: there is no
-/// number here that changing the engine would cost.
 #[derive(Serialize)]
 pub struct ParseSettings {
     /// The selected engine: `"cloud"` or `"local"`.
     pub engine: &'static str,
     /// The API root in force, default or overridden.
     pub base_url: String,
-    /// What `base_url` would be with no override — the endpoint field's
-    /// placeholder, so the address a user reads and the address a parse uses
-    /// are the same constant.
+    /// What `base_url` would be with no override — the field's placeholder.
     pub default_base_url: &'static str,
-    /// Is `base_url` an `engineUrl` override rather than the default? The
-    /// field needs to know whether it is showing a value or a suggestion.
+    /// Is `base_url` an `engineUrl` override rather than the default?
     pub overridden: bool,
-    /// The artifact version both backends write. Shown because a version
-    /// mismatch is one of the failures a student can be told about.
+    /// The artifact version both backends write.
     pub parser_version: u32,
-    /// Cloud: a token is in the keychain. Local: nothing to authenticate, so
-    /// this is true by construction.
+    /// Cloud: a token is in the keychain. Local: always true.
     pub credentials_ready: bool,
     pub engines: Vec<EngineOption>,
 }
 
-/// What is listening at a local address right now.
-///
-/// Three states, because "not reachable" would collapse two situations that
-/// call for different actions: a server that is not running (start it) and a
-/// MinerU that is running the V1 API (it has no `/file_parse` at all, so the
-/// fix is a different server, not a different port).
+/// What is listening at a local address right now. A V1 MinerU is its own
+/// state: the fix is a different server, not starting one.
 #[derive(Serialize)]
 pub struct LocalProbe {
     /// `"reachable"` | `"unreachable"` | `"version_mismatch"`.
@@ -148,14 +111,9 @@ pub async fn parse_settings() -> Result<ParseSettings, String> {
 
 // ── Changing it ──────────────────────────────────────────────────────────────
 
-/// Select a parse backend.
-///
-/// That is the whole operation: a row is written and the next parse uses the
-/// other backend. Nothing on disk is invalidated, because both backends write
-/// the same artifacts — see this module's header for why that is a fact about
-/// the design rather than a coincidence worth re-checking.
+/// Select a parse backend. Nothing on disk is invalidated (see module header).
 #[tauri::command]
-pub async fn parse_set_engine(app: AppHandle, engine: String) -> Result<ParseSettings, String> {
+pub async fn parse_set_engine(engine: String) -> Result<ParseSettings, String> {
     let chosen = match engine.trim() {
         "cloud" => Engine::Cloud,
         "local" => Engine::Local,
@@ -165,12 +123,10 @@ pub async fn parse_set_engine(app: AppHandle, engine: String) -> Result<ParseSet
         return Ok(view());
     }
 
-    let db = pool(&db_path(&app)?).await?;
+    let db = pool(&db_path()).await?;
     let result = edit_settings(&db, |object| {
         object.insert("engine".into(), Value::String(chosen.as_str().into()));
-        // An override points at one engine's API. Carried across a switch it
-        // would silently aim the new engine at the old one's address — the
-        // cloud root reached as if it were loopback, or the reverse.
+        // An override belongs to one engine's API.
         object.remove("engineUrl");
     })
     .await;
@@ -180,18 +136,13 @@ pub async fn parse_set_engine(app: AppHandle, engine: String) -> Result<ParseSet
     Ok(view())
 }
 
-/// Point the selected engine at a different address, or clear the override.
-///
-/// An empty or whitespace `url` **clears** it, so the field's "revert to
-/// default" gesture is emptying it rather than retyping the default — which
-/// would otherwise store a literal copy of a constant and pin it across a
-/// release that moved it.
+/// Point the selected engine at a different address. An empty `url` clears
+/// the override rather than storing a copy of the default.
 #[tauri::command]
-pub async fn parse_set_engine_url(app: AppHandle, url: String) -> Result<ParseSettings, String> {
+pub async fn parse_set_engine_url(url: String) -> Result<ParseSettings, String> {
     let override_url = url.trim().trim_end_matches('/').to_string();
     if !override_url.is_empty() {
-        // Checked here rather than at the first parse: a typo that is only
-        // discovered when a document fails looks like a broken parser.
+        // Checked now: a typo found at the first parse looks like a broken parser.
         let parsed = url::Url::parse(&override_url)
             .map_err(|_| "That is not an address — it needs to look like http://127.0.0.1:8000.")?;
         if !matches!(parsed.scheme(), "http" | "https")
@@ -202,7 +153,7 @@ pub async fn parse_set_engine_url(app: AppHandle, url: String) -> Result<ParseSe
         }
     }
 
-    let db = pool(&db_path(&app)?).await?;
+    let db = pool(&db_path()).await?;
     let result = edit_settings(&db, |object| {
         if override_url.is_empty() {
             object.remove("engineUrl");
@@ -217,11 +168,8 @@ pub async fn parse_set_engine_url(app: AppHandle, url: String) -> Result<ParseSe
     Ok(view())
 }
 
-/// Ask what is listening, at `url` or at whatever is configured.
-///
-/// The optional URL is the point: the endpoint field has to be testable
-/// *before* it is saved, or the only way to find out an address is wrong is to
-/// commit to it first.
+/// Ask what is listening, at `url` (so the field is testable before it is
+/// saved) or at whatever is configured.
 #[tauri::command]
 pub async fn parse_probe_local(url: Option<String>) -> Result<LocalProbe, String> {
     let base = match url.as_deref().map(str::trim).filter(|candidate| !candidate.is_empty()) {
@@ -229,8 +177,7 @@ pub async fn parse_probe_local(url: Option<String>) -> Result<LocalProbe, String
         None => configured_local_url(),
     };
 
-    // A blocking loopback request, off the runtime's workers: seconds here
-    // would be seconds no other command could run.
+    // Blocking, so off the runtime's workers.
     let address = base.clone();
     let state = tokio::task::spawn_blocking(move || local::probe(&address))
         .await
@@ -254,8 +201,6 @@ pub async fn parse_probe_local(url: Option<String>) -> Result<LocalProbe, String
             backend: None,
             parser_version: None,
         },
-        // Named rather than lumped in with "nothing there": this server is
-        // running and healthy, and still cannot parse for us.
         LocalHealth::WrongApi => LocalProbe {
             state: "version_mismatch",
             detail: Some(format!(
@@ -278,12 +223,8 @@ pub async fn parse_probe_local(url: Option<String>) -> Result<LocalProbe, String
     })
 }
 
-/// The address a local parse would use *now*.
-///
-/// An `engineUrl` override only ever belongs to the selected engine —
-/// `parse_set_engine` drops it on a change for exactly this reason — so on a
-/// cloud install `base_url` is MinerU's public root, and probing that as if it
-/// were loopback would report nonsense about a service nobody is running here.
+/// The address a local parse would use *now*. On a cloud install `base_url`
+/// is MinerU's public root, so the local default is probed instead.
 fn configured_local_url() -> String {
     let config = parse_config();
     match config.engine {
@@ -292,14 +233,8 @@ fn configured_local_url() -> String {
     }
 }
 
-/// Edit the `parse` row without disturbing the rest of it.
-///
-/// The row is a shared blob: this seam reads two keys out of it and still
-/// carries two dead ones from the Python sidecar (`memoryCapMb` and the legacy
-/// `backend`), left there deliberately rather than migrated out. Writing a
-/// fresh object would delete them, so the value is read, edited and written
-/// back — the same shape as `embed/commands.rs`'s `write_engine`, for the same
-/// reason.
+/// Edit the `parse` row without disturbing its other keys: read, edit, write
+/// back.
 async fn edit_settings(
     db: &sqlx::SqlitePool,
     edit: impl FnOnce(&mut Map<String, Value>),
@@ -337,8 +272,6 @@ mod tests {
 
     #[test]
     fn every_engine_in_the_seam_has_a_row() {
-        // A new arm of `Engine` that nobody added an option for would be a
-        // backend the settings page cannot select or explain.
         let options = engines();
         for engine in [Engine::Cloud, Engine::Local] {
             assert!(
@@ -361,18 +294,12 @@ mod tests {
         }
     }
 
-    /// Pinned because it looks like an oversight and is not. Selection is not
-    /// gated on reachability: the order of operations for a new local server
-    /// is choose it, then start it, and an engine greyed out until its server
-    /// answers cannot be chosen first. `parse_probe_local` is where "is it
-    /// running" is answered.
+    /// Not an oversight: see the module header.
     #[test]
     fn both_engines_can_be_selected_whatever_is_running() {
         assert!(engines().iter().all(|option| option.available));
     }
 
-    /// Every default has to be an address this client can actually reach, or
-    /// the first run of a fresh install fails on a value nobody typed.
     #[test]
     fn each_engine_defaults_to_a_usable_root() {
         for engine in [Engine::Cloud, Engine::Local] {
@@ -381,8 +308,7 @@ mod tests {
             assert!(matches!(parsed.scheme(), "http" | "https"), "{default}");
             assert!(parsed.host_str().is_some(), "{default}");
         }
-        // MinerU's own server binds this by default, and a default of ours it
-        // does not answer on is a setting every user has to change first.
+        // MinerU's own server binds this by default.
         assert_eq!(Engine::Local.default_base_url(), "http://127.0.0.1:8000");
     }
 }

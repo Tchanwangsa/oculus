@@ -1,69 +1,40 @@
-//! The reading copy: the lecture as it would read on the page, one sentence
-//! per line, each pinned to the second it was said.
+//! The reading copy: the lecture rewritten as text, one sentence per line,
+//! each pinned to the second it was said — spoken maths set as maths, ASR
+//! fixed from the slide.
 //!
-//! The transcript is speech — filler, restarts, and maths said out loud. The
-//! reading copy is the same content rewritten as text: spoken maths set as
-//! maths, ASR fixed from the slide, one sentence per thought. It shares
-//! chapters' cheap visual detector and splash-resistant frame grabs, and keeps
-//! a denser boundary set whose slide changes become paragraph breaks. The
-//! recording is split into roughly ten-minute windows so a long lecture never
-//! becomes one enormous agent turn. Each window is parsed, validated and
-//! written on its own; a failure therefore leaves the completed windows
-//! visible.
-//!
-//! This job replaced the lecture recap (`recap.rs`, third-person notes per
-//! slide); the windows, frames and commit shape are its, with the unit and
-//! the validator changed.
+//! Shares `chapters`' detector, frame grabs and reply parsing, with a denser
+//! boundary set whose slide changes become paragraph breaks. The recording is
+//! split into ~ten-minute windows, each parsed, validated and written on its
+//! own, so a failure leaves the completed windows visible. See
+//! `docs/chapters.md`.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// Paragraphs follow slide changes closely enough that looking away for
-/// half a minute normally moves to at most one new paragraph.
+/// Shortest segment (paragraph) the slide changes are thinned to.
 const MIN_SEGMENT_SECS: u32 = 25;
 
-/// A lecturer can speak over one unchanged slide for a long time. Past this
-/// length the longest transcript pause becomes an extra segment boundary.
+/// Past this length a segment is split at its longest transcript pause.
 const MAX_SEGMENT_SECS: u32 = 3 * 60;
 
 /// One agent turn should carry about this much lecture.
 const WINDOW_TARGET_SECS: u32 = 10 * 60;
 
-/// A nearby chapter boundary is a better window edge than an arbitrary slide
-/// change, but a far-away one should not make a tiny or enormous turn.
+/// How far from the target a chapter boundary may be and still become the
+/// window edge.
 const WINDOW_SNAP_SECS: u32 = 3 * 60;
 
-/// The coverage floor: the whole difference between a reading copy and a
-/// recap that drifted into summary. A line that covers more transcript than
-/// this is a summary, and the window is rejected so the model splits it.
-///
-/// Both constants are guesses from cue statistics (Echo360 cues run ~3 s;
-/// the prompt asks for two to six per line) and exist to be tuned after one
-/// real run.
+/// The coverage ceiling that separates a rewrite from a summary: a line
+/// covering more cues than this rejects the window so the model splits it.
 pub const MAX_CUES_PER_LINE: usize = 8;
-/// The summed cue duration one line may cover — speech only, so a pause
-/// between cues does not count against the line. See [`MAX_CUES_PER_LINE`].
+/// The summed cue duration (speech only, not pauses) one line may cover.
 pub const MAX_SPEECH_PER_LINE_SECS: f32 = 45.0;
 
-/// One WebVTT cue, and the parser for them, both `chapters`'.
-///
-/// They were here first, when the reading copy (then the recap) was the only
-/// job that needed the words as well as the timings. Chaptering needs them
-/// now too — the outline it hands its agent is the transcript with the slide
-/// changes merged in — so the parser sits beside `chapters::cue_gaps`, which
-/// reads the same file for the same two timestamp shapes. One parser, so a
-/// cue start in a reading window and a cue start in an outline are the same
-/// second.
 pub use crate::chapters::{parse_transcript, TranscriptCue};
 
-/// One stored line of the reading copy. Its end is the next line's start (or
-/// the lecture's duration), so storing an end would duplicate a fact just as
-/// it would for a chapter.
-///
-/// `start_seconds` is `floor(cue.start)` of the first transcript cue the line
-/// covers, so a line can be found from the playhead and the playhead from a
-/// line. `para` is derived here from the slide changes, never asked of the
-/// model — see [`mark_paragraphs`].
+/// One stored line of the reading copy; it ends where the next begins.
+/// `start_seconds` is `floor(cue.start)` of the first cue it covers; `para` is
+/// derived by [`mark_paragraphs`], never asked of the model.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ReadingLine {
     pub start_seconds: u32,
@@ -85,12 +56,9 @@ struct ReplyEnvelope {
     lines: Vec<ReplyLine>,
 }
 
-/// A job-time window. Windows are intentionally not persisted: they are only
-/// a way to keep each agent turn bounded.
-///
-/// `segment_starts` are the slide changes inside the window — what the prompt
-/// lists and what `para` is derived from. They are not where a line has to
-/// start: a line starts on a transcript cue.
+/// One agent turn's span of the lecture; not persisted. `segment_starts` are
+/// the slide changes inside it (paragraph breaks), not where lines start —
+/// lines start on transcript cues.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
     pub start_seconds: u32,
@@ -101,14 +69,10 @@ pub struct Window {
 
 // ── Transcript and segmentation ─────────────────────────────────────────────
 
-/// Dense, time-ordered slide-change seconds, always beginning at second 0.
-///
-/// Visual candidates use chapters' measured detector with a 25-second
-/// thinning radius. Short leading/trailing fragments are merged away, then a
-/// span over three minutes is recursively split at its longest usable
-/// transcript pause. When a malformed transcript offers no cue inside a long
-/// span, the midpoint is the only honest fallback that still enforces the
-/// ceiling.
+/// Dense, time-ordered slide-change seconds, always beginning at 0: chapters'
+/// detector thinned at [`MIN_SEGMENT_SECS`], short edge fragments merged away,
+/// then any span over [`MAX_SEGMENT_SECS`] split recursively at its longest
+/// transcript pause (or its midpoint, with no cue to split on).
 pub fn segment_starts(
     diffs: &[(u32, f32)],
     gaps: &[(u32, f32)],
@@ -188,9 +152,10 @@ fn previous_cue_end(cues: &[TranscriptCue], start: f32) -> f32 {
 }
 
 // ── Windows and prompt ──────────────────────────────────────────────────────
-/// Chunk segments into approximately ten-minute windows. A chapter boundary
-/// within three minutes of the target wins; it is mapped to the nearest
-/// segment start so every window opens on a slide change.
+
+/// Chunk segments into ~ten-minute windows. A chapter boundary within
+/// [`WINDOW_SNAP_SECS`] of the target wins, mapped to the nearest segment
+/// start so every window opens on a slide change.
 pub fn windows(
     starts: &[u32],
     duration_secs: u32,
@@ -250,16 +215,13 @@ fn nearest_later_start(starts: &[u32], first: usize, target: u32) -> usize {
     }
 }
 
-/// The integer second a line cites for a cue: the number printed in the
-/// transcript's first column, and the only form a `start` may take.
+/// The integer second a line cites for a cue, as printed in the transcript.
 fn cue_second(cue: &TranscriptCue) -> u32 {
     cue.start.max(0.0).floor() as u32
 }
 
-/// The cues that belong to a window, by their start. A cue belongs to exactly
-/// one window, so the transcript the prompt prints and the starts the
-/// validator allows are the same set, and neighbouring windows never both
-/// own the cue that straddles their edge.
+/// The cues that belong to a window, by their start — exactly one window per
+/// cue, so the prompt and the validator see the same set.
 fn window_cues<'a>(
     cues: &'a [TranscriptCue],
     window: &Window,
@@ -276,7 +238,6 @@ pub fn first_cue_start(cues: &[TranscriptCue], window: &Window) -> Option<u32> {
     window_cues(cues, window).next().map(cue_second)
 }
 
-/// Everything one window's prompt needs.
 pub struct Prompt<'a> {
     pub title: &'a str,
     pub lecture_dir: &'a str,
@@ -285,13 +246,9 @@ pub struct Prompt<'a> {
     pub cues: &'a [TranscriptCue],
 }
 
-/// Build one self-contained reading-copy turn: transcript inline, frames by
-/// path.
-///
-/// Every transcript line is printed as `second  timestamp  text`, the bare
-/// second first, because that number is what a line's `start` has to be
-/// *exactly*. A model asked to convert a clock to seconds will sometimes
-/// round, and a rounded second is not a cue start.
+/// One self-contained reading-copy turn: transcript inline, frames by path.
+/// The bare second is printed first because a line's `start` must be exactly
+/// it (see `chapters::outline`).
 pub fn prompt(job: &Prompt) -> String {
     let segments = job
         .window
@@ -390,21 +347,10 @@ fn transcript_span(cues: &[TranscriptCue], window: &Window) -> String {
 
 // ── Reply parsing and validation ─────────────────────────────────────────────
 
-/// Pull a line array out of a bare, fenced, prose-wrapped or enveloped reply.
-///
-/// Every line comes back with `para` false; [`mark_paragraphs`] sets it after
-/// the window has been validated.
+/// The line array out of the reply, every `para` false until
+/// [`mark_paragraphs`].
 pub fn parse_lines(reply: &str) -> Result<Vec<ReadingLine>, String> {
-    for candidate in json_candidates(reply) {
-        if let Some(lines) = decode_lines(&candidate) {
-            return Ok(lines);
-        }
-    }
-    Err(format!(
-        "no reading line list in the reply ({} chars): {}",
-        reply.chars().count(),
-        clip(reply.trim(), 200)
-    ))
+    crate::chapters::parse_reply(reply, "reading line list", decode_lines)
 }
 
 fn decode_lines(text: &str) -> Option<Vec<ReadingLine>> {
@@ -433,95 +379,10 @@ fn decode_lines(text: &str) -> Option<Vec<ReadingLine>> {
         .collect()
 }
 
-fn json_candidates(reply: &str) -> Vec<String> {
-    let mut out = vec![reply.trim().to_string()];
-    let mut rest = reply;
-    while let Some(open) = rest.find("```") {
-        let after = &rest[open + 3..];
-        let Some(newline) = after.find('\n') else { break };
-        let body = &after[newline + 1..];
-        match body.find("```") {
-            Some(close) => {
-                out.push(body[..close].trim().to_string());
-                rest = &body[close + 3..];
-            }
-            None => {
-                out.push(body.trim().to_string());
-                break;
-            }
-        }
-    }
-    for open in ['[', '{'] {
-        out.extend(balanced_runs(reply, open));
-    }
-    out
-}
-
-fn balanced_runs(text: &str, open: char) -> Vec<String> {
-    const LIMIT: usize = 8;
-    let close = if open == '[' { ']' } else { '}' };
-    let mut out = Vec::new();
-    let mut from = 0;
-    while out.len() < LIMIT {
-        let Some(offset) = text[from..].find(open) else { break };
-        let start = from + offset;
-        let mut depth = 0i32;
-        let mut in_string = false;
-        let mut escaped = false;
-        let mut end = None;
-        for (at, ch) in text[start..].char_indices() {
-            if in_string {
-                match ch {
-                    _ if escaped => escaped = false,
-                    '\\' => escaped = true,
-                    '"' => in_string = false,
-                    _ => {}
-                }
-                continue;
-            }
-            match ch {
-                '"' => in_string = true,
-                c if c == open => depth += 1,
-                c if c == close => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = Some(start + at + ch.len_utf8());
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        match end {
-            Some(end) => {
-                out.push(text[start..end].to_string());
-                from = end;
-            }
-            None => break,
-        }
-    }
-    out
-}
-
-fn clip(text: &str, chars: usize) -> String {
-    let head: String = text.chars().take(chars).collect();
-    if text.chars().count() > chars {
-        format!("{head}…")
-    } else {
-        head
-    }
-}
-
-/// Validate one window before any of its rows are written.
-///
-/// Five rules, every failure naming the line and its clock: a non-empty
-/// reply with non-empty text; starts strictly increasing; every start the
-/// integer second of a cue in this window; the first line on the window's
-/// first cue; and the coverage floor — the cues from a line's start up to
-/// the next line's start number at most [`MAX_CUES_PER_LINE`] and speak for
-/// at most [`MAX_SPEECH_PER_LINE_SECS`] between them. The last is what
-/// separates a reading copy from a summary: a model that folds a minute of
-/// speech into one sentence has stopped rewriting.
+/// Validate one window before any of its rows are written: non-empty text,
+/// strictly increasing starts, each start a cue second in this window, the
+/// first on the window's first cue, and the coverage ceiling. Every error
+/// names the line and its clock.
 pub fn validate(
     lines: &[ReadingLine],
     window: &Window,
@@ -580,10 +441,8 @@ pub fn validate(
     Ok(())
 }
 
-/// Set `para` on a validated, ordered window of lines: the first line, and
-/// the first line at or after each slide change. Derived here rather than
-/// asked of the model because the slide changes are already known to the
-/// second, and a model asked to mark them would mark some other set.
+/// Set `para` on a validated window: the first line, and the first line at or
+/// after each slide change.
 pub fn mark_paragraphs(lines: &mut [ReadingLine], slide_changes: &[u32]) {
     for line in lines.iter_mut() {
         line.para = false;
@@ -605,10 +464,7 @@ pub struct Run<'a> {
     pub lecture_id: &'a str,
     pub selection: &'a crate::harness::jobs::JobSelection,
     pub force: bool,
-    /// Read this stream instead of letting `chapters::detect` choose. The
-    /// reading copy carries it for the same reason chaptering does and with
-    /// the same meaning: the two jobs decode the same file and had the same
-    /// blind spot, so fixing one and leaving the other would only hide it.
+    /// Read this stream instead of letting `chapters::detect` choose.
     pub source: Option<crate::echo360::SourceNum>,
 }
 
@@ -623,19 +479,15 @@ pub enum Step<'a> {
 pub struct Outcome {
     pub title: String,
     pub duration_seconds: u32,
-    /// Which stream the segments were detected on.
     pub source: crate::echo360::SourceNum,
     pub segments: usize,
     pub windows: usize,
     pub lines: Vec<ReadingLine>,
 }
 
-/// Segment, grab, ask and write a lecture's reading copy.
-///
-/// Windows run strictly in sequence. A rejected or failed window is retried
-/// once with the validation error appended to the original prompt. Each valid
-/// window is committed before the next begins; after the second failure the
-/// status records the error and the new partial set stays visible.
+/// Segment, grab, ask and write a lecture's reading copy. Windows run in
+/// sequence; a rejected one is retried once with the error appended, and each
+/// valid one is committed before the next, so a failure leaves a partial set.
 pub fn run(
     rt: &tokio::runtime::Handle,
     pool: &sqlx::SqlitePool,
@@ -704,15 +556,10 @@ pub fn run(
 
     let on_event: Arc<dyn Fn(&HarnessEvent) + Send + Sync> = Arc::new(on_event);
     let outcome = (|| -> Result<Outcome, String> {
-        // `claim_reading` made this a new, empty set. From here on, each
-        // accepted window becomes visible immediately; if a later one fails,
-        // those rows deliberately remain as the partial result of this run.
         let gaps = crate::chapters::cue_gaps(&vtt);
         let dir = crate::echo360::lecture_dir(job.data_dir, id);
         let mut last = std::time::Instant::now();
-        // Which of the capture's streams actually holds the slides; see
-        // `chapters::detect`. The reading copy reads the raw diffs rather
-        // than the candidates because it thins them at its own radius.
+        // Raw diffs rather than candidates: this job thins at its own radius.
         let detected = crate::chapters::detect(
             &ffmpeg,
             &dir,
@@ -738,14 +585,8 @@ pub fn run(
         });
 
         let total = starts.len();
-        // A subfolder of chapters', the way the chat dock's `live/` is.
-        // `extract_frames` now deletes the grabs a run will not rewrite, and
-        // the two jobs are independently claimed — a reading copy can start
-        // while a chaptering turn is still open on the same lecture — so
-        // sharing one folder would let either job pull the other's frames
-        // out from under it. This job's boundaries are thinned at 25 s
-        // against chapters' 90 s, so they would mostly not survive each
-        // other's sweep.
+        // Its own subfolder: `extract_frames` sweeps grabs it will not
+        // rewrite, and this job can run alongside a chaptering one.
         crate::chapters::extract_frames(
             &ffmpeg,
             &detected.video,
@@ -767,9 +608,7 @@ pub fn run(
         let mut all_lines = Vec::new();
 
         for (index, window) in windows.iter().enumerate() {
-            // A window with no speech in it has no reading copy: there is
-            // nothing a line could start on, so asking would only spend two
-            // turns to be told so.
+            // No speech, nothing for a line to start on.
             if first_cue_start(&cues, window).is_none() {
                 continue;
             }
@@ -870,43 +709,11 @@ pub fn run(
 
 pub mod app {
     use super::*;
+    use crate::chapters::app::{check_start, reconcile_status, spawn_job, Progress, WindowProgress};
     use tauri::{AppHandle, Emitter};
 
     pub const LECTURE_READING_EVENT: &str = "lecture-reading";
     pub const LECTURE_READING_PROGRESS_EVENT: &str = "lecture-reading-progress";
-
-    #[derive(serde::Serialize, Clone, Copy)]
-    #[serde(rename_all = "camelCase")]
-    struct WindowProgress {
-        done: u32,
-        total: u32,
-    }
-
-    #[derive(serde::Serialize, Clone)]
-    #[serde(rename_all = "camelCase")]
-    struct Progress {
-        lecture_id: String,
-        phase: &'static str,
-        detail: Option<String>,
-        kind: Option<crate::harness::ToolKind>,
-        done: Option<u32>,
-        total: Option<u32>,
-        window: Option<WindowProgress>,
-    }
-
-    impl Progress {
-        fn at(lecture_id: &str, phase: &'static str) -> Self {
-            Self {
-                lecture_id: lecture_id.to_string(),
-                phase,
-                detail: None,
-                kind: None,
-                done: None,
-                total: None,
-                window: None,
-            }
-        }
-    }
 
     #[derive(serde::Serialize, Clone)]
     #[serde(rename_all = "camelCase")]
@@ -924,39 +731,17 @@ pub mod app {
         force: Option<bool>,
         source: Option<u8>,
     ) -> Result<(), String> {
-        if let Some(n) = source {
-            if n != 1 && n != 2 {
-                return Err(format!("{n} is not a source — a capture has 1 and sometimes 2"));
-            }
-        }
-        let pool = crate::store::open_pool().await?;
-        let running: Option<String> =
-            sqlx::query_scalar("SELECT reading_status FROM lectures WHERE id = ?1")
-                .bind(&lecture_id)
-                .fetch_optional(&pool)
-                .await
-                .map_err(|error| error.to_string())?
-                .flatten();
-        if running.as_deref() == Some("running") {
-            return Err("that lecture's reading copy is already being written".into());
-        }
-        drop(pool);
+        check_start(
+            &lecture_id,
+            source,
+            "reading_status",
+            "that lecture's reading copy is already being written",
+        )
+        .await?;
 
         let data_dir = crate::paths::data_dir();
         let force = force.unwrap_or(false);
-        std::thread::spawn(move || {
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(runtime) => runtime,
-                Err(error) => return eprintln!("[oculus] reading: {error}"),
-            };
-            let pool = match rt.block_on(crate::store::open_pool()) {
-                Ok(pool) => pool,
-                Err(error) => return eprintln!("[oculus] reading: {error}"),
-            };
-            let selection = rt.block_on(crate::harness::jobs::selection(
-                &pool,
-                crate::harness::jobs::Job::LectureReading,
-            ));
+        spawn_job("reading", crate::harness::jobs::Job::LectureReading, move |rt, pool, selection| {
             let window = Arc::new(Mutex::new(None::<WindowProgress>));
             let emit = {
                 let app = app.clone();
@@ -1023,7 +808,7 @@ pub mod app {
             };
             let outcome = run(
                 rt.handle(),
-                &pool,
+                pool,
                 &Run {
                     data_dir: &data_dir,
                     lecture_id: &lecture_id,
@@ -1056,17 +841,10 @@ pub mod app {
         Ok(())
     }
 
-    /// Clear a stale `running` status left by a killed app or agent turn.
-    pub fn reconcile(app: &AppHandle) {
-        let _ = app;
-        tauri::async_runtime::spawn(async {
-            if let Ok(pool) = crate::store::open_pool().await {
-                if let Ok(count) = crate::store::reconcile_reading_status(&pool).await {
-                    if count > 0 {
-                        eprintln!("[oculus] reading: cleared {count} interrupted run(s)");
-                    }
-                }
-            }
+    /// Startup: clear `running` left by a killed run.
+    pub fn reconcile(_app: &AppHandle) {
+        reconcile_status("reading", |pool| async move {
+            crate::store::reconcile_reading_status(&pool).await
         });
     }
 }

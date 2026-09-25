@@ -1,34 +1,20 @@
-//! Database writes for headless runs.
-//!
-//! In the app the frontend owns these tables: it listens for scrape events and
-//! upserts through tauri-plugin-sql. The CLI has no frontend, so it writes the
-//! same rows with the same SQL — same shape, same conflict handling — and the
-//! app picks the run up as if it had done the work itself.
-//!
-//! Schema ownership stays with the plugin's migrations. If the database does
-//! not exist yet, we do not invent one; the caller reports that and keeps
-//! scraping to disk.
+//! The database access every module shares. In the app the frontend writes most
+//! rows through tauri-plugin-sql; headless runs write the same rows with the
+//! same SQL here. Schema ownership stays with the migrations: a missing
+//! database is reported, never created.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
-use tauri::{AppHandle, Manager};
 
 use crate::sync::Course;
 
 // ── The connection pool ──────────────────────────────────────────────────────
-//
-// These three lived in `retrieval.rs` while retrieval was the only thing in
-// Rust that touched the database on its own. It is not any more — the parse
-// path writes page records too — so helpers every module needs do not belong
-// inside one of them. This is the DB-access module and the one they all
-// already depend on; the helpers belong here and every caller says `store::`.
 
-/// Our own pool over the file tauri-plugin-sql already manages. WAL means a
-/// second reader is harmless, and our writes are occasional (once per file
-/// parsed), so a busy timeout is enough to stay out of the plugin's way.
+/// Our own pool over the plugin's file. WAL makes a second reader harmless and
+/// our writes are rare, so a busy timeout keeps out of the plugin's way.
 pub async fn pool(path: &Path) -> Result<SqlitePool, String> {
     let opts = SqliteConnectOptions::new()
         .filename(path)
@@ -41,18 +27,14 @@ pub async fn pool(path: &Path) -> Result<SqlitePool, String> {
         .map_err(|e| format!("open {}: {e}", path.display()))
 }
 
-/// Where the app's database is, asked of Tauri rather than recomputed. The
-/// answer is the same one `paths::db_path(paths::data_dir())` gives; this is
-/// for the command layer, which already has a handle.
-pub fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(dir.join("oculus.db"))
+/// The shared database file.
+pub fn db_path() -> PathBuf {
+    crate::paths::db_path(&crate::paths::data_dir())
 }
 
-/// Open the shared database the same way the CLI does — no AppHandle, so this
-/// works headless.
+/// Open the shared database, reporting (never creating) a missing one.
 pub async fn open_pool() -> Result<SqlitePool, String> {
-    let path = crate::paths::db_path(&crate::paths::data_dir());
+    let path = db_path();
     if !path.exists() {
         return Err(format!("no database at {}", path.display()));
     }
@@ -61,32 +43,14 @@ pub async fn open_pool() -> Result<SqlitePool, String> {
 
 /// Read one `settings` row from a **synchronous** caller, from any context.
 ///
-/// Both seams need to know which backend is selected before they have an async
-/// frame to await in: the parse queue and the CLI are plain threads, and
-/// `parse_config` / `embed_config` are called from inside clients that are not
-/// async at all.
-///
-/// The obvious spelling for that — `tauri::async_runtime::block_on` — is a
-/// **trap**, and it cost a real bug. It is correct on a plain thread and on a
-/// `spawn_blocking` worker, and it *panics* on a runtime worker thread:
-/// "Cannot start a runtime from within a runtime". An `async` Tauri command
-/// runs on exactly such a thread, so `embed_settings` aborted mid-task, its
-/// promise never settled, and Settings → Library sat on its loading state
-/// forever — every field a dash, no error to show, because an aborted task
-/// rejects nothing. The indexing and search paths were fine the whole time,
-/// which is what made it look like a data problem instead of a crash.
-///
-/// So this never touches the caller's runtime. The read happens on a thread of
-/// its own with a current-thread runtime and the caller joins it: one `SELECT`
-/// a few times per run makes the spawn free, and **one code path** means the
-/// behaviour cannot depend on who is calling. Never reintroduce a `block_on`
-/// here, and never make its safety a fact about the call site.
-///
-/// `None` covers every uninteresting case — no database yet, no such row,
-/// a read that failed — because every caller's answer to all three is the same
-/// default.
+/// The seams read their backend setting from plain threads and non-async
+/// clients. Never use `tauri::async_runtime::block_on` here: it panics on a
+/// runtime worker thread, which is where an `async` Tauri command runs. So the
+/// read always happens on a thread of its own with a current-thread runtime —
+/// one code path, whoever calls. `None` covers no database, no row, or a
+/// failed read; every caller defaults the same way.
 pub fn setting_blocking(key: &str) -> Option<String> {
-    let database = crate::paths::db_path(&crate::paths::data_dir());
+    let database = db_path();
     if !database.is_file() {
         return None;
     }
@@ -165,9 +129,8 @@ pub async fn upsert_subjects(pool: &SqlitePool, courses: &[Course]) -> Result<()
 }
 
 pub async fn subjects(pool: &SqlitePool) -> Result<Vec<SubjectRow>, String> {
-    // Last-synced is derived, not stored: the finish time of the latest
-    // completed run whose subject_codes contain the subject. Mirrors
-    // getSubjects in app/src/lib/db.ts — keep the two in step.
+    // Derived, not stored: the latest completed run naming the subject. Mirrors
+    // `getSubjects` in app/src/lib/db.ts — keep the two in step.
     let rows = sqlx::query(
         "SELECT s.id, s.code, s.name, s.term_name, s.is_current, s.selected,
                 (SELECT MAX(r.finished_at)
@@ -208,8 +171,7 @@ pub async fn upsert_file(
     let filename = relative_path.rsplit('/').next().unwrap_or(relative_path).to_string();
     let file_type = filename.rsplit_once('.').map(|(_, e)| e.to_string()).unwrap_or_else(|| "md".into());
 
-    // `changed` is the write action from the engine ('new'/'updated' vs
-    // 'unchanged') — content_changed_at only moves when bytes actually did.
+    // `changed` is the engine's action; content_changed_at moves only on new bytes.
     let sql = if changed {
         r#"INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes, category, canvas_id, source_url, first_seen_at, content_changed_at)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))
@@ -265,21 +227,9 @@ pub async fn file_id(
 
 /// Write one file's page records.
 ///
-/// This used to happen on the *embed* path only (`retrieval::ingest`), which
-/// meant `pages.markdown` — the table `oculus grep` reads — was a side effect
-/// of building the vector index. With embeddings going away, finishing a parse
-/// has to write its own page records or the tool the user actually reaches for
-/// would quietly go blank.
-///
-/// The conflict clause is deliberately **not** a `COALESCE`: an empty incoming
-/// markdown must leave good text alone. A page that yields nothing (a slide
-/// that is one full-bleed image) normalises to `""` in `ParseOutput`, and a
-/// re-parse that produced fewer pages than the last one would otherwise wipe
-/// the text the last one found.
-///
-/// Nothing here touches `embedding` / `embed_model` / `embed_dim` /
-/// `embedded_at`. Those stay the embedder's until it stops writing them, and
-/// the columns stay in the schema either way.
+/// The conflict clause is a CASE, not a `COALESCE`: an empty incoming page (a
+/// full-bleed image, or a thinner re-parse) must leave good text alone. The
+/// embedding columns are the embedder's and are never touched here.
 pub async fn upsert_pages(
     pool: &SqlitePool,
     file_id: i64,
@@ -308,8 +258,7 @@ pub async fn upsert_pages(
     Ok(with_text)
 }
 
-/// How many page rows this file already has. Cheap enough to ask before
-/// deciding whether an already-parsed file needs its record folding in.
+/// How many page rows this file already has.
 pub async fn page_count(pool: &SqlitePool, file_id: i64) -> Result<i64, String> {
     sqlx::query_scalar("SELECT COUNT(*) FROM pages WHERE file_id = ?1")
         .bind(file_id)
@@ -341,23 +290,10 @@ pub async fn pdf_files(
         .collect())
 }
 
-/// Derive parse status from what the parser left on disk. Without the app's
-/// event listener running, this is how a CLI run's parse results reach the
-/// database.
-///
-/// `parse::parse_mode` answers a binary question now — `Some("quality")` or
-/// `None` — where it used to have a third value. `None` **clears** the row
-/// rather than skipping it, and that is the whole point of the sweep in the
-/// other direction: `files.parse_status` also holds the transient states the
-/// app writes from `parse-status` events (`queued`, `running`, `error`), and a
-/// run that is killed mid-parse leaves one of those behind with nothing left
-/// alive to finish it. The artifacts on disk are the only durable truth, so a
-/// row claiming anything the disk does not back is stale by definition. It is
-/// the same reconciliation `reconcile_chapter_status` performs.
-///
-/// Nothing in the live library actually changes value today: 166 rows say
-/// `quality` and have the record to prove it, 540 are already NULL, and the
-/// `fast` the old three-value reader could invent never made it to disk.
+/// Derive parse status from what the parser left on disk. `None` clears the
+/// row: `parse_status` also holds transient states (`queued`, `running`,
+/// `error`) that a killed run leaves behind, and the artifacts on disk are the
+/// only durable truth. Same reconciliation as `reconcile_chapter_status`.
 pub async fn reconcile_parse_status(pool: &SqlitePool, data_dir: &Path) -> Result<u64, String> {
     let rows = sqlx::query("SELECT relative_path FROM files")
         .fetch_all(pool)
@@ -398,11 +334,8 @@ pub async fn reconcile_parse_status(pool: &SqlitePool, data_dir: &Path) -> Resul
     Ok(updated)
 }
 
-/// Runs that were killed mid-job: `running` with no `chaptered_at`, and
-/// nothing left to finish them. Called at startup, the sibling of
-/// `reconcile_parse_status` above and of `harness::store::reconcile` — a
-/// status column that only a live process can clear needs a sweep behind it,
-/// or one crash leaves the button saying "chaptering" forever.
+/// Chaptering runs killed mid-job (`running`, no `chaptered_at`), cleared at
+/// startup: only a live process could clear the status otherwise.
 pub async fn reconcile_chapter_status(pool: &SqlitePool) -> Result<u64, String> {
     sqlx::query(
         "UPDATE lectures SET chapter_status = NULL, chapter_error = NULL
@@ -414,9 +347,7 @@ pub async fn reconcile_chapter_status(pool: &SqlitePool) -> Result<u64, String> 
     .map_err(|e| e.to_string())
 }
 
-/// Reading-copy runs that were killed mid-job. The windows already written remain
-/// visible, but `running` cannot survive the process that owned it or the
-/// player would wait forever for progress that can no longer arrive.
+/// Reading-copy runs killed mid-job; windows already written stay.
 pub async fn reconcile_reading_status(pool: &SqlitePool) -> Result<u64, String> {
     sqlx::query(
         "UPDATE lectures SET reading_status = NULL, reading_error = NULL
@@ -432,10 +363,8 @@ pub async fn reconcile_reading_status(pool: &SqlitePool) -> Result<u64, String> 
 
 /// Replace a subject's calendar rows with what Canvas just returned.
 ///
-/// Delete-then-insert, not upsert: a class moved or cancelled in Canvas has to
-/// vanish from the calendar, and an upsert over a growing set would leave the
-/// old occurrence sitting there forever. The fetch is always the complete set
-/// for the course, so the replacement is safe.
+/// Delete-then-insert, not upsert, so a moved or cancelled class disappears.
+/// The fetch is always the course's complete set.
 pub async fn replace_calendar_events(
     pool: &SqlitePool,
     subject_id: i64,
@@ -486,8 +415,7 @@ pub async fn replace_calendar_events(
 
 #[derive(Debug)]
 pub struct LectureRow {
-    /// Echo360's media id, and the name of the folder under `lectures/`. The
-    /// CLI's only handle on one lecture, so `list -l` has to print it.
+    /// Echo360's media id and the folder under `lectures/`; the CLI's handle.
     pub id: String,
     pub title: String,
     pub date: String,
@@ -527,8 +455,7 @@ pub async fn upsert_lectures(
     Ok(())
 }
 
-/// Record where a downloaded artifact landed, so the app can play it without
-/// re-deriving the path.
+/// Record where a downloaded artifact landed.
 pub async fn set_lecture_path(
     pool: &SqlitePool,
     id: &str,
@@ -553,12 +480,9 @@ pub async fn set_lecture_path(
 
 /// The chaptering job's own three columns on `lectures`, written together.
 ///
-/// A sibling of [`set_lecture_path`] rather than another arm of it: that
-/// function's allow-list takes a `&str` value and so cannot clear a column
-/// back to NULL, which is exactly what starting a run and succeeding at one
-/// both have to do. `status` NULL means "never chaptered"; only a terminal
-/// status stamps `chaptered_at`, and `error` is cleared by every write that
-/// does not carry one.
+/// Separate from [`set_lecture_path`] because these must clear to NULL.
+/// `status` NULL means never chaptered; only a terminal status stamps
+/// `chaptered_at`; `error` is cleared by any write that does not carry one.
 pub async fn set_chapter_status(
     pool: &SqlitePool,
     lecture_id: &str,
@@ -585,12 +509,9 @@ pub async fn set_chapter_status(
 
 /// Replace a lecture's chapters, and mark it chaptered.
 ///
-/// One transaction for the whole set, and the caller has already run
-/// `chapters::validate` over it — half a chapter list is worse than none,
-/// because a missing chapter is not a gap on the scrub bar but twenty extra
-/// minutes silently attributed to the chapter before it. The delete is in the
-/// same transaction as the inserts for the same reason: a regenerate that
-/// fails partway must leave the chapters that were already there.
+/// One transaction, over a set `chapters::validate` already passed: a missing
+/// chapter silently stretches the one before it, and a failed regenerate must
+/// leave the old set standing.
 pub async fn save_chapters(
     pool: &SqlitePool,
     lecture_id: &str,
@@ -654,11 +575,9 @@ pub async fn chapters(
 
 /// Atomically claim a reading-copy run and clear the previous derived set.
 ///
-/// The conditional update is the one shared gate for the app and CLI. Two
-/// callers may race to this transaction, but only the first can change a row
-/// that is not already `running`; the loser spends no model turn. Clearing the
-/// old lines is in the same transaction, so a failed delete cannot strand the
-/// lecture in `running`.
+/// The conditional update is the one gate the app and CLI share: only the
+/// first caller can claim a row not already `running`. Clearing old lines in
+/// the same transaction means a failed delete cannot strand it in `running`.
 pub async fn claim_reading(pool: &SqlitePool, lecture_id: &str) -> Result<bool, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     let claimed = sqlx::query(
@@ -687,9 +606,8 @@ pub async fn claim_reading(pool: &SqlitePool, lecture_id: &str) -> Result<bool, 
 
 /// The reading-copy job's status, terminal timestamp and failure message.
 ///
-/// `reading_written_at` records the most recent terminal transition, including an
-/// error after some windows were saved. Starting or reconciling a run clears
-/// it; every non-error transition clears the previous failure message.
+/// `reading_written_at` stamps every terminal transition, error included; a
+/// start or reconcile clears it.
 pub async fn set_reading_status(
     pool: &SqlitePool,
     lecture_id: &str,
@@ -716,10 +634,8 @@ pub async fn set_reading_status(
 
 /// Append one validated reading window atomically.
 ///
-/// Windows commit independently by design. `idx` continues from the rows
-/// already present, which keeps play order stable while allowing the panel to
-/// show completed windows during a long run. The caller marks the lecture
-/// `ready` only after every window has landed.
+/// Windows commit independently so the panel shows progress during a long
+/// run; `idx` continues from the rows present. The caller marks `ready` last.
 pub async fn save_reading_window(
     pool: &SqlitePool,
     lecture_id: &str,
@@ -753,8 +669,7 @@ pub async fn save_reading_window(
     Ok(())
 }
 
-/// A lecture's reading copy in play order, including complete windows from a
-/// run that is still in progress or ended with an error.
+/// A lecture's reading copy in play order, including windows from an unfinished run.
 pub async fn reading(
     pool: &SqlitePool,
     lecture_id: &str,
@@ -959,8 +874,7 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .expect("in-memory sqlite");
-        // The shape migration 12 created, embedding columns included: the
-        // parse path must leave them alone, not drop them.
+        // The shape migration 12 created, embedding columns included.
         sqlx::query(
             "CREATE TABLE pages (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -993,17 +907,13 @@ mod tests {
             .expect("first parse");
         assert_eq!(with_text, 2);
 
-        // Pretend the embedder has been over it. Re-parsing must not disturb
-        // the vector columns — they stay the embedder's until it stops
-        // writing them.
+        // Pretend the embedder has been over it; re-parsing must not disturb that.
         sqlx::query("UPDATE pages SET embedding = X'00', embed_model = 'qwen' WHERE page_no = 1")
             .execute(&pool)
             .await
             .expect("fake embedding");
 
-        // A second parse that came back thinner: page 2 now empty, page 1
-        // rewritten. The empty one must leave the good text standing — this is
-        // why the conflict clause is a CASE and not a COALESCE.
+        // A thinner second parse: the empty page 2 must leave the good text standing.
         upsert_pages(&pool, 7, &[page(1, "one, better"), page(2, "")])
             .await
             .expect("second parse");
@@ -1023,11 +933,7 @@ mod tests {
 
     #[tokio::test]
     async fn reconcile_follows_the_disk_in_both_directions() {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let data_dir = std::env::temp_dir().join(format!("oculus-reconcile-{stamp}"));
+        let data_dir = crate::test_support::Scratch::new("reconcile");
         let course = data_dir.join("courses/SUBJ/files");
         std::fs::create_dir_all(&course).expect("scratch library");
 
@@ -1083,7 +989,5 @@ mod tests {
         };
         assert_eq!(status("courses/SUBJ/files/done.pdf").await.as_deref(), Some("quality"));
         assert_eq!(status("courses/SUBJ/files/gone.pdf").await, None);
-
-        std::fs::remove_dir_all(&data_dir).ok();
     }
 }

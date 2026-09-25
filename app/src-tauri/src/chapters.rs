@@ -1,113 +1,64 @@
-//! Lecture chapters: where a recording changes topic.
+//! Lecture chapters: where a recording changes topic, and the agent job that
+//! names them.
 //!
-//! A two-hour Echo360 recording arrives as one unbroken timeline with a
-//! transcript beside it and no visible shape. This module finds the moments
-//! worth cutting at — the *candidates* — so that a later stage can name them.
-//! It decides nothing about titles, summaries or storage; it produces a list of
-//! seconds and how confident each one is.
-//!
-//! **The picture is the signal, not the words.** The stream this reads is 720p
-//! screen capture of a slide deck: no camera, no grain, no lighting drift. A
-//! held slide is *dead still* — frame-to-frame mean absolute difference sits at
-//! p50 ≈ 0.008 — and a slide change is a cliff (p99 ≈ 13, max ≈ 175). That
-//! bimodality is why one number and no tuning is enough: measured on a
-//! 42-minute lecture, a threshold of 2 and a threshold of 6 produce boundary
-//! sets whose first twelve entries are *identical*, and 19 vs 18 boundaries
-//! overall. Only at 12 does the detector start dropping real changes. The
-//! threshold barely matters, so there is no knob for it.
-//!
-//! **That holds for a slide capture and for nothing else.** An Echo360 capture
-//! publishes up to two streams, and the argument above is about the one
-//! pointed at the projector. A room camera never holds still: measured across
-//! five lectures it sits at p50 ≈ 1.4 with a maximum of 20, against the slide
-//! capture's p50 ≈ 0.01 and maxima past 175. No empty middle, so no threshold
-//! to put in it; no cliff, so nothing to find. A camera is outside this
-//! detector's design rather than a harder case for it, and [`detect`] answers
-//! that by choosing the right stream rather than by tuning.
-//!
-//! **Transcript pauses are a tiebreak, never a gate.** Only a quarter to a
-//! third of slide changes have a ≥2 s silence anywhere near them, so requiring
-//! one would throw away most of the real boundaries. A nearby pause adds a
-//! small amount to a candidate's score, which changes what survives thinning
-//! and nothing else.
-//!
-//! **Nothing is cached.** One `fps=1` decode pass over a 42-minute lecture
-//! costs ~4.9 s wall (it saturates every core; decode dominates, so the sample
-//! rate and the 160×90 frame size are effectively free), and a two-hour
-//! recording ~15 s. Re-detecting is cheaper than inventing a table to
-//! invalidate, so there is no candidates table and no persisted candidate set.
+//! Detection is visual: a slide capture is dead still between slides and a
+//! cliff at a change, so one fixed threshold separates them (a room camera has
+//! no such gap, which is why [`detect`] picks the stream rather than tuning).
+//! Transcript pauses only nudge a candidate's score. Nothing is cached —
+//! re-detecting is one fast decode. Measurements behind every constant here
+//! are in `docs/chapters.md`.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-/// 160×90, one byte per pixel — the frame geometry the ffmpeg command below
-/// asks for, and therefore exactly how many bytes one frame occupies on the
-/// pipe.
+/// 160×90 greyscale: the geometry ffmpeg is asked for, so one frame's size on
+/// the pipe.
 const FRAME_W: usize = 160;
 const FRAME_H: usize = 90;
 const FRAME_BYTES: usize = FRAME_W * FRAME_H;
 
 /// Mean absolute difference above which a frame pair counts as a change. Sits
-/// in the empty middle of a violently bimodal distribution; see the module
-/// note on why it is a constant and not a setting.
+/// in the empty middle of a bimodal distribution, so it is not a setting.
 const DIFF_THRESHOLD: f32 = 6.0;
 
-/// A dissolve, a build, or a scroll shows up as several consecutive loud
-/// frames. Loud frames this close together are one event, reported at its
-/// first frame — the moment the change *started* is the moment to cut at.
+/// Loud frames this close together (a dissolve, a build) are one event,
+/// reported at its first frame.
 const COLLAPSE_SECS: u32 = 3;
 
-/// A silence at least this long counts as the lecturer taking a breath between
-/// topics.
+/// A silence at least this long counts as a pause between topics.
 const PAUSE_SECS: f32 = 2.0;
 
 /// How far from a change-point a pause may sit and still be about it.
 const PAUSE_WINDOW: u32 = 8;
 
-/// Added to a candidate's score when a pause supports it. Deliberately small
-/// against a magnitude scale that runs to ~175: it reorders near-equals during
-/// thinning and can never promote a quiet frame into a boundary.
+/// Added to a candidate's score when a pause supports it. Small against the
+/// magnitude scale: it reorders near-equals during thinning, never more.
 const PAUSE_BONUS: f32 = 3.0;
 
-/// No two boundaries closer than this. A chapter shorter than a minute and a
-/// half is a slide, not a topic.
+/// No two boundaries closer than this: a shorter chapter is a slide, not a topic.
 const MIN_SPACING: u32 = 90;
 
 /// At most this many candidates in a whole recording means the stream is dead,
-/// not that the lecture was quiet.
-///
-/// Sits in an empty middle, exactly as [`DIFF_THRESHOLD`] does: the lecture
-/// whose projector capture failed gives *one* candidate across 44 minutes, and
-/// a healthy capture gives 16 to 22. Nothing has been observed in between, so
-/// this is a which-file decision rather than a knob — moving it anywhere in
-/// that gap changes no answer.
+/// not that the lecture was quiet. A failed capture gives ~1, a healthy one
+/// well over ten, so this is a which-file decision rather than a knob.
 const DEAD_SOURCE: usize = 2;
 
-/// Offsets past a boundary to consider when grabbing its frame, in the order
-/// they are preferred. A couple of seconds clears the cut itself; the later
-/// two step over a dropout; the boundary second is the last resort, because a
-/// grab landing exactly on a transition is the case this list exists for.
+/// Offsets past a boundary to probe when grabbing its frame, in preference
+/// order: clear the cut, step over a dropout, and the boundary itself last.
 const GRAB_OFFSETS: [u32; 4] = [2, 6, 12, 0];
 
-/// How wide a chaptering run's frames are. Fifty of them go to the agent in
-/// one prompt, and 768px lands around 30 KB while keeping a slide's title and
-/// formulas readable, which is all that stage has to decide.
+/// Width of a chaptering run's frames: small, since a run writes dozens, but
+/// slide titles and formulas stay readable.
 const GRAB_WIDTH: u32 = 768;
 
-/// How wide the dock's live grab is. One or two frames per message instead of
-/// fifty, and the question can be about a whiteboard rather than a slide —
-/// where 768px turns Dirac notation into grey marks and the 1280-wide room
-/// camera it came off does not. The cap is above every Echo360 stream
-/// measured here, so in practice it is the stream's own width; it is a cap
-/// rather than a width because past ~1.5K px a model downsamples anyway.
+/// Width cap for the dock's live grab: one or two frames per message, and the
+/// question may be about a whiteboard, so in practice the stream's own width.
 const LIVE_GRAB_WIDTH: u32 = 1536;
 
-/// How close to the most detailed frame in the probe set a frame has to be to
-/// be taken instead of it. Relative, not absolute: what counts as a detailed
-/// frame depends on the deck, and a title slide and a dense one differ by far
-/// less than either differs from a blank.
+/// How close to the most detailed probe a frame must be to be taken instead of
+/// it. Relative, because "detailed" depends on the deck.
 const GRAB_TOLERANCE: f32 = 0.95;
 
 /// One place the lecture plausibly changes topic.
@@ -115,8 +66,7 @@ const GRAB_TOLERANCE: f32 = 0.95;
 pub struct Candidate {
     /// Offset into the recording, in whole seconds.
     pub seconds: u32,
-    /// Visual magnitude plus the pause bonus. Comparable within one lecture;
-    /// not an absolute scale.
+    /// Visual magnitude plus the pause bonus; comparable within one lecture only.
     pub score: f32,
     /// The raw mean-absolute-difference that triggered it, before any bonus.
     pub diff: f32,
@@ -126,20 +76,11 @@ pub struct Candidate {
 
 // ── The decode pass ──────────────────────────────────────────────────────────
 
-/// Mean absolute difference between each sampled frame and the one before it.
+/// Mean absolute difference between each sampled frame (`fps=1`, so frame *n*
+/// is second *n*; the first entry is second 1) and the one before it. Frames
+/// are diffed as they arrive rather than held.
 ///
-/// One ffmpeg process, one second per sample, greyscale 160×90 raw frames on
-/// stdout. Frames are diffed **as they arrive** against a single retained
-/// previous frame: a two-hour lecture is 7200 frames ≈ 100 MB, which there is
-/// no reason to hold.
-///
-/// The returned second is the frame's own timestamp (`fps=1` places frame *n*
-/// at *n* seconds), so the first entry is at second 1.
-///
-/// `on_frame` sees that second as the frame is diffed. It is the only place in
-/// the whole job that can say how far along a decode is — the pass is fifteen
-/// seconds of nothing otherwise — so it fires per frame and the *caller* does
-/// the throttling; [`run`] emits four times a second, not four hundred.
+/// `on_frame` fires per frame; the caller throttles.
 pub fn sample_diffs(
     ffmpeg: &Path,
     video: &Path,
@@ -161,8 +102,7 @@ pub fn sample_diffs(
         .spawn()
         .map_err(|e| format!("could not run ffmpeg: {e}"))?;
 
-    // Drained on its own thread: ffmpeg blocks writing to a full stderr pipe,
-    // and a deadlock here would look exactly like a slow decode.
+    // Drained on its own thread: ffmpeg blocks on a full stderr pipe.
     let mut stderr = child.stderr.take().expect("piped stderr");
     let errors = std::thread::spawn(move || {
         let mut text = String::new();
@@ -207,8 +147,7 @@ pub fn sample_diffs(
 }
 
 /// Fill `frame` completely, or report that the stream ended. A trailing
-/// partial frame is ffmpeg being cut off mid-write; there is nothing to
-/// compare it against, so it is dropped.
+/// partial frame (ffmpeg cut off mid-write) is dropped.
 fn read_frame(source: &mut impl Read, frame: &mut [u8]) -> std::io::Result<bool> {
     let mut filled = 0;
     while filled < frame.len() {
@@ -231,13 +170,8 @@ fn mean_abs_diff(a: &[u8], b: &[u8]) -> f32 {
 
 // ── The transcript half ──────────────────────────────────────────────────────
 
-/// The silence before each cue, in seconds, paired with the second that cue
-/// starts at.
-///
-/// This is the timing half of the frontend's `parseVtt`
-/// (`app/src/lib/lectures.ts`) and handles the same two timestamp shapes
-/// (`HH:MM:SS.mmm` and `MM:SS.mmm`). Cue *text* plays no part in boundary
-/// detection, so none is parsed.
+/// The silence before each cue, paired with the second that cue starts at.
+/// The timing half of the frontend's `parseVtt` (`app/src/lib/lectures.ts`).
 pub fn cue_gaps(vtt: &str) -> Vec<(u32, f32)> {
     let normalised = vtt.replace("\r\n", "\n");
     let mut gaps: Vec<(u32, f32)> = Vec::new();
@@ -258,20 +192,14 @@ pub fn cue_gaps(vtt: &str) -> Vec<(u32, f32)> {
             continue;
         }
         gaps.push((start as u32, (start - previous_end).max(0.0)));
-        // A malformed end time must not drag the next gap out to the whole
-        // lecture; fall back to the cue's own start.
+        // A malformed end falls back to the cue's start, not 0.
         previous_end = if end >= start { end } else { start };
     }
     gaps
 }
 
-/// Seconds out of a WebVTT timestamp, `HH:MM:SS.mmm` or `MM:SS.mmm`.
-///
-/// `None` is a malformed stamp, and each reader decides what that is worth:
-/// [`cue_gaps`] keeps going with a sentinel it then filters on, and
-/// [`parse_transcript`] drops the block. One parser rather than two, because a
-/// transcript that reads one way for the detector and another way for the
-/// outline would put a chapter's start on a second the outline never printed.
+/// Seconds out of a WebVTT timestamp, `HH:MM:SS.mmm` or `MM:SS.mmm`. Shared by
+/// [`cue_gaps`] and [`parse_transcript`] so both read the same seconds.
 fn vtt_secs(stamp: &str) -> Option<f32> {
     let parts: Vec<&str> = stamp.trim().split(':').collect();
     let number = |s: &str| s.trim().parse::<f32>().ok();
@@ -290,14 +218,8 @@ pub struct TranscriptCue {
     pub text: String,
 }
 
-/// Parse WebVTT timing *and* text into plain cues.
-///
-/// [`cue_gaps`] above reads the same file for the same two timestamp shapes and
-/// throws the words away, because a pause bonus does not care what was said.
-/// This one keeps them: the words are what [`outline`] merges with the slide
-/// changes, and what the agent actually reads. Cue identifiers and VTT settings
-/// are ignored, simple tags are stripped, and a malformed block is skipped
-/// rather than poisoning the rest of the transcript.
+/// Parse WebVTT timing and text into plain cues. Identifiers and settings are
+/// ignored, tags stripped, and a malformed block skipped.
 pub fn parse_transcript(vtt: &str) -> Vec<TranscriptCue> {
     let normalised = vtt.replace("\r\n", "\n");
     normalised
@@ -345,16 +267,10 @@ fn plain_text(text: &str) -> String {
 
 // ── Scoring and thinning ─────────────────────────────────────────────────────
 
-/// Turn raw frame diffs and transcript gaps into a thinned, time-ordered set
-/// of boundary candidates.
-///
-/// Four steps, in order: keep the loud frames; collapse a run of them into the
-/// one that started it; score by magnitude with a small bonus for a nearby
-/// silence; then thin to [`MIN_SPACING`] by taking the strongest first and
-/// dropping everything in its shadow. Thinning greedily by strength rather than
-/// sweeping left to right is what keeps the *important* boundary when two land
-/// a minute apart — and it is what was measured, so the re-sort at the end is
-/// the only thing that puts the result back in play order.
+/// Raw frame diffs and transcript gaps to a thinned, time-ordered set of
+/// boundary candidates: keep loud frames, collapse runs onto their first
+/// second, score with a pause bonus, then thin to [`MIN_SPACING`] strongest
+/// first (so the important one of two close boundaries survives).
 pub fn candidates(
     diffs: &[(u32, f32)],
     gaps: &[(u32, f32)],
@@ -363,21 +279,15 @@ pub fn candidates(
     candidates_with_spacing(diffs, gaps, duration_secs, MIN_SPACING)
 }
 
-/// The shared detector with a caller-selected thinning radius.
-///
-/// Chapters use 90 seconds because they are topic spans; the reading copy
-/// uses a denser radius because its paragraphs follow visual changes. Keeping the radius at
-/// this boundary lets both jobs share the measured decode, collapse and score
-/// pipeline without pretending they want the same output density.
+/// [`candidates`] with a caller-chosen thinning radius; the reading copy
+/// thins more densely than chapters do.
 pub fn candidates_with_spacing(
     diffs: &[(u32, f32)],
     gaps: &[(u32, f32)],
     duration_secs: u32,
     min_spacing: u32,
 ) -> Vec<Candidate> {
-    // Loud frames, with a run collapsed onto its first second. The run keeps
-    // the largest magnitude it contained: a build-up that peaks two frames in
-    // is still as strong as its peak.
+    // A collapsed run keeps its peak magnitude.
     let mut collapsed: Vec<(u32, f32)> = Vec::new();
     for &(second, diff) in diffs {
         if diff < DIFF_THRESHOLD {
@@ -417,8 +327,6 @@ pub fn candidates_with_spacing(
         })
         .collect();
 
-    // Strongest first, then drop anything within the caller's radius of something
-    // already kept.
     scored.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -442,46 +350,22 @@ pub fn candidates_with_spacing(
 
 /// The stream a run read, and what came out of reading it.
 pub struct Detection {
-    /// Which of the capture's streams this is, for a caller that wants to say.
     pub source: crate::echo360::SourceNum,
-    /// The file the diffs came from — and therefore the file any frame grab
-    /// has to use, or the pictures would be of the stream nobody read.
+    /// The file the diffs came from, and so the one frame grabs must use.
     pub video: PathBuf,
-    /// The decode pass itself, for a caller that thins it its own way
-    /// (`reading` does).
+    /// The raw decode, for a caller that thins it its own way (`reading`).
     pub diffs: Vec<(u32, f32)>,
     /// [`candidates`] over those diffs, in play order.
     pub candidates: Vec<Candidate>,
 }
 
-/// Decode the lecture's slide capture — whichever of its streams that is.
+/// Decode the lecture's slide capture, whichever stream that is (it varies
+/// per lecture, so it is measured each time, never persisted).
 ///
-/// **Which source holds the slides is not consistent, even inside one
-/// subject.** Four MULT20015 lectures put them on source 1 and a fifth on
-/// source 2, because that week the projector capture failed and the only thing
-/// recording the screen was the second stream. So the answer is measured per
-/// lecture rather than remembered, and nothing is persisted: re-detecting is
-/// one decode and always reflects what is on disk, where a column would be a
-/// second place for the same fact to be wrong.
-///
-/// Source 1 is decoded first and kept unless it is *dead* — at most
-/// [`DEAD_SOURCE`] candidates in a whole recording. Only then is source 2
-/// decoded, so the normal case stays the single pass it has always been and
-/// the broken one costs about fifteen seconds more.
-///
-/// **Whichever gives more candidates is measurably the wrong question.** A room
-/// camera saturates the threshold — a quarter of every second clears it — and
-/// thinning then lays those down as a near-uniform grid, so on one measured
-/// lecture the camera beats the real slide deck 20 to 16 while carrying no
-/// topic boundaries at all. Only a dead source 1 is grounds to look at
-/// source 2.
-///
-/// `source` overrides all of it — `--source` on the CLI, and the app's picker
-/// — and when it is set nothing else is decoded.
-///
-/// `on_frame` is [`sample_diffs`]'s and fires for both passes, so a fallback
-/// restarts whatever progress the caller draws from it. That is what is
-/// actually happening.
+/// Source 1 is kept unless it is dead (at most [`DEAD_SOURCE`] candidates);
+/// only then is source 2 decoded. Never pick by candidate count: a room camera
+/// saturates the threshold and out-scores a real deck. `source` (`--source`,
+/// the app's picker) overrides all of it. `on_frame` fires for both passes.
 pub fn detect(
     ffmpeg: &Path,
     lecture_dir: &Path,
@@ -491,9 +375,8 @@ pub fn detect(
     source: Option<crate::echo360::SourceNum>,
     mut on_frame: impl FnMut(u32),
 ) -> Result<Detection, String> {
-    // The file on disk, not the `video2_path` column: they are the same path
-    // by construction, and a stream that was downloaded but never recorded is
-    // still one this can read.
+    // The file on disk, not the `video2_path` column: a stream downloaded but
+    // never recorded is still readable.
     let second = crate::echo360::source_path(lecture_dir, 2);
 
     let read = |path: PathBuf,
@@ -528,47 +411,13 @@ pub fn detect(
 
 // ── Frames for a later stage ─────────────────────────────────────────────────
 
-/// One legible JPEG per candidate, at `<out_dir>/<seconds>.jpg`.
+/// One probed JPEG per boundary at `<out_dir>/<second>.jpg` (see
+/// [`grab_frame`]); the name keeps the boundary second, not the probed offset.
+/// `on_grab` gets the running count.
 ///
-/// A seek-based single-frame grab is instant — ffmpeg jumps to the keyframe
-/// rather than decoding forward — so this stays a handful of processes per
-/// candidate rather than a second full pass. [`GRAB_WIDTH`] lands around 30 KB and
-/// keeps slide titles and formulas readable, which is what a model will need to
-/// name the chapter.
-///
-/// **The boundary second is the right timestamp and the wrong frame.** The
-/// loudest changes in a recording are the screen share stopping and starting,
-/// so a grab taken exactly at one catches the black — and a grab a fixed two
-/// seconds later can catch the room's "connect your laptop" splash instead.
-/// Either is a frame with no lecture content in it, which silently poisons
-/// whatever reads it. So each candidate is probed at [`GRAB_OFFSETS`] using the
-/// *same* seek the grab will use (input seeking lands on a keyframe, so a
-/// windowed decode would measure a different frame than it wrote), and the
-/// earliest frame within [`GRAB_TOLERANCE`] of the most detailed one wins.
-/// A blank loses on detail; so does a splash screen, without anything here
-/// having to know what one looks like. A recording that is blank across the
-/// whole probe set still gets a frame — there is nothing better to write, and
-/// a dropout that long is visible for what it is.
-///
-/// The file keeps the **boundary** second in its name, not the offset one:
-/// that is the timestamp every other part of this refers to.
-///
-/// `on_grab` fires with how many are written so far — five probes and a JPEG
-/// per boundary is ten seconds on a long lecture, and it is countable, so the
-/// panel says `12 / 50` rather than spinning.
-///
-/// **A JPEG from a previous run that this one will not overwrite is deleted.**
-/// Grabs are written by their second, so a re-run whose candidate set moved
-/// used to leave the old set's frames behind — and after [`detect`] that can
-/// mean frames off a stream this run never looked at. The lecture whose slide
-/// capture failed kept a grab of the room's Crestron splash in its folder for
-/// exactly that reason: the one candidate the black stream produced. Nothing
-/// reads a frame after the turn that asked for it, so the only thing an
-/// orphan can do is mislead whoever opens the folder next.
-///
-/// Only files are swept, and only `.jpg` directly in `out_dir` — the
-/// subfolders beside them belong to other jobs (`live/` is the chat dock's,
-/// `reading/` is the reading copy's) and each sweeps its own.
+/// JPEGs a previous run left that this one will not rewrite are deleted first,
+/// so the folder never holds frames from another candidate set or stream.
+/// Subfolders (`live/`, `reading/`) belong to other jobs and are left alone.
 pub fn extract_frames(
     ffmpeg: &Path,
     video: &Path,
@@ -588,12 +437,8 @@ pub fn extract_frames(
     Ok(written)
 }
 
-/// Delete the `.jpg` files in `out_dir` that this run is not about to rewrite.
-///
-/// Best effort on purpose: a frame that cannot be removed is clutter, and
-/// failing a ten-minute job over it would be the wrong trade. A name that is
-/// not a plain second was not written by [`extract_frames`], so it is left
-/// alone rather than guessed at.
+/// Delete the `<second>.jpg` files in `out_dir` not in `keep`. Best effort;
+/// any other name was not written here and is left alone.
 fn sweep_orphans(out_dir: &Path, keep: &[u32]) {
     let Ok(entries) = std::fs::read_dir(out_dir) else { return };
     for entry in entries.flatten() {
@@ -615,23 +460,14 @@ fn sweep_orphans(out_dir: &Path, keep: &[u32]) {
     }
 }
 
-/// One probed JPEG of `second`, written to `out`, at most `width` px wide.
+/// One JPEG of `second`, written to `out`, at most `width` px wide (never
+/// upscaled).
 ///
-/// Shared with the live grab the chat dock takes of the playhead's moment
-/// (`app::lecture_grab_frames`) rather than copied: the probing above is the
-/// defence against handing a model the room's AV splash screen or a black
-/// frame, and a grab the *student* asked about wants it for exactly the same
-/// reason. The offset it picks stays out of the filename — the second asked
-/// for is the one everything else refers to.
-///
-/// **The width is the callers' one difference, and it is not cosmetic.** A
-/// chaptering run writes fifty of these to title slides with, so
-/// [`GRAB_WIDTH`] keeps each one small; a dock message writes one or two and
-/// the question may be about a whiteboard, where [`LIVE_GRAB_WIDTH`] is the
-/// difference between the agent reading `|0> ⊗ |0>` off the board and seeing
-/// grey marks. Either way the filter only ever shrinks: `min(width, iw)`, so
-/// a 1280-wide room camera is passed through rather than blown up into a
-/// bigger file with no more detail in it.
+/// The boundary second itself is often black (screen share restarting) or a
+/// couple of seconds later the room's "connect your laptop" splash, so
+/// [`GRAB_OFFSETS`] are probed with the same seek the grab uses and the
+/// earliest within [`GRAB_TOLERANCE`] of the most detailed wins. Also used by
+/// the dock's live grab (`app::lecture_grab_frames`).
 pub fn grab_frame(
     ffmpeg: &Path,
     video: &Path,
@@ -640,8 +476,7 @@ pub fn grab_frame(
     out: &Path,
 ) -> Result<(), String> {
     let at = best_offset(ffmpeg, video, second);
-    // The comma is inside a filter *expression*, so it is escaped — an
-    // unescaped one would end the filter and start another.
+    // Escaped: an unescaped comma would end the filter.
     let scale = format!("scale=min({width}\\,iw):-2");
     let status = Command::new(ffmpeg)
         .args(["-v", "error", "-nostdin", "-y", "-ss", &at.to_string(), "-i"])
@@ -659,12 +494,8 @@ pub fn grab_frame(
     Ok(())
 }
 
-/// Which second to actually grab `boundary`'s frame from.
-///
-/// Probes cost ~40 ms each, so all of [`GRAB_OFFSETS`] are measured and the
-/// earliest one close enough to the best is taken — "earliest" so a sparse
-/// title slide is not passed over for a busier slide later in the lecture,
-/// which would name the chapter after the wrong thing.
+/// Which second to actually grab `boundary`'s frame from. Earliest-good rather
+/// than best, so a sparse title slide is not passed over for a busier one.
 fn best_offset(ffmpeg: &Path, video: &Path, boundary: u32) -> u32 {
     let probed: Vec<(u32, f32)> = GRAB_OFFSETS
         .iter()
@@ -676,9 +507,8 @@ fn best_offset(ffmpeg: &Path, video: &Path, boundary: u32) -> u32 {
     pick_offset(&probed).unwrap_or(boundary)
 }
 
-/// The choosing half of [`best_offset`], without an ffmpeg in it: the earliest
-/// probe within [`GRAB_TOLERANCE`] of the most detailed one. Probes are given
-/// in preference order, so "earliest" means first in the list, not lowest.
+/// The choosing half of [`best_offset`]: the first probe (in preference order)
+/// within [`GRAB_TOLERANCE`] of the most detailed one.
 fn pick_offset(probed: &[(u32, f32)]) -> Option<u32> {
     let best = probed
         .iter()
@@ -691,11 +521,8 @@ fn pick_offset(probed: &[(u32, f32)]) -> Option<u32> {
 }
 
 /// How much is going on in the frame at `second`: the standard deviation of
-/// its grey values, over the same 160×90 the detector samples at.
-///
-/// A blank frame scores ~0 and a slide scores in the high tens or hundreds,
-/// which is all this has to separate. `None` means ffmpeg produced no frame —
-/// past the end of the recording, normally.
+/// its grey values at 160×90. A blank scores ~0. `None` means no frame
+/// (normally past the end).
 fn frame_detail(ffmpeg: &Path, video: &Path, second: u32) -> Option<f32> {
     let out = Command::new(ffmpeg)
         .args(["-v", "error", "-nostdin", "-ss", &second.to_string(), "-i"])
@@ -736,21 +563,12 @@ fn spread(frame: &[u8]) -> f32 {
 
 // ── Naming them: the agent job ───────────────────────────────────────────────
 //
-// Candidates are seconds; chapters are seconds with a name on them. Naming is
-// a *coding agent's* job rather than an API call, and that choice is what
-// keeps the prompt below small: the agent is handed the candidate list, the
-// path to `transcript.vtt` and the path to `frames/`, and reads what it needs.
-// An API prompt would have to carry fifty frames to let a model look at five.
-//
-// The agent never touches the database. It replies with JSON, Rust parses it,
-// validates it against the candidate set, and writes the rows — chapters are
-// derived data like `pages`, not the student's own planning, so there is no
-// `oculus chapter add` and no write door for a model. See `projects.rs` for
-// the other shape, and why it is different.
+// A coding agent is handed paths (outline, frames) and reads what it needs.
+// It never touches the database: it replies with JSON, which Rust parses,
+// validates and writes — chapters are derived data, so there is no write door.
 
-/// One named span of a recording. It ends where the next one begins — and the
-/// last at the lecture's duration — so there is no end here to disagree with
-/// the next chapter's start.
+/// One named span of a recording. It ends where the next begins (the last at
+/// the lecture's duration), so no end is stored.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Chapter {
     pub start_seconds: u32,
@@ -758,10 +576,8 @@ pub struct Chapter {
     pub summary: String,
 }
 
-/// What the agent replies with, before any of it is believed. Field names are
-/// the prompt's contract; the aliases are there because a model asked for
-/// `start` sometimes writes `start_seconds` anyway, and refusing that would be
-/// a whole turn thrown away over a synonym.
+/// What the agent replies with, before validation. The aliases accept the
+/// synonyms models write despite the prompt.
 #[derive(serde::Deserialize)]
 struct ReplyChapter {
     #[serde(alias = "start_seconds", alias = "seconds", alias = "at")]
@@ -771,60 +587,35 @@ struct ReplyChapter {
     summary: String,
 }
 
-/// A reply that wrapped the array in an object, which both providers do
-/// perhaps one turn in five however plainly the format is asked for.
+/// A reply that wrapped the array in an object.
 #[derive(serde::Deserialize)]
 struct ReplyEnvelope {
     chapters: Vec<ReplyChapter>,
 }
 
-/// More than this and it is a slide list, not a shape. A ceiling rather than a
-/// target: most lectures are five to eight things.
+/// More than this and it is a slide list, not a shape.
 pub const MAX_CHAPTERS: usize = 12;
 
-/// The lecture a chaptering run is about. Everything the prompt needs and
-/// nothing it does not — the agent reads the rest off disk itself.
+/// What the chaptering prompt needs; the agent reads the rest off disk.
 pub struct Job<'a> {
     pub title: &'a str,
     pub duration_secs: u32,
-    /// Where the recording's folder sits *relative to the agent's working
-    /// directory*, which is always `agents/`. Paths it can paste into a
-    /// `Read`, not paths it has to rebuild.
+    /// Relative to the agent's working directory (`agents/`).
     pub lecture_dir: &'a str,
-    /// The subject's course folder, same relative shape. An Echo360 title is
-    /// a room booking ("MULT20015_2026_SM2 MO L105"), so without this the
-    /// agent goes looking for the deck itself — measured, and it costs
-    /// several turns of `find` before it gets there.
+    /// The subject's course folder, same relative shape. An Echo360 title is a
+    /// room booking, so this is how the agent finds the deck.
     pub course_dir: Option<&'a str>,
-    /// How many slide changes the detector found. The list itself is not in
-    /// the prompt — it is in the outline, in place — but the count is worth
-    /// saying, because it tells the agent roughly how dense the markers it is
-    /// about to grep for will be.
+    /// How many slide changes the outline marks.
     pub detected: usize,
-    /// Whether the outline has any transcript in it at all. Chaptering
-    /// tolerates a lecture that arrived without one: the pause bonus is lost,
-    /// no cue start is in the allowed set, and the prompt should not send the
-    /// agent looking for words that are not there.
+    /// Whether the outline has any transcript in it.
     pub has_transcript: bool,
 }
 
-/// The transcript and the detected slide changes as one document, in play
-/// order.
+/// The transcript and the detected slide changes merged into one document in
+/// play order, written to `<lecture dir>/outline.md` for the agent to read.
 ///
-/// Written to `<lecture dir>/outline.md` before the agent turn and named in the
-/// prompt in place of the raw VTT.
-///
-/// **A file, not prompt text.** A lecture is around 2500 cues, and handing over
-/// a path so the agent reads only the spans it wants is the whole reason this
-/// job drives a coding agent instead of calling a model API. What merging buys
-/// is not brevity but correlation: "the picture changed here" and "the subject
-/// turned here" arrive on adjacent lines instead of in two documents with
-/// timestamp arithmetic between them.
-///
-/// Every line is `second  timestamp  text`. Both are printed because both are
-/// load-bearing: the clock is what a person reads, and the bare second is what
-/// a chapter's `start` has to be exactly — a model asked to convert one to the
-/// other will sometimes round, and a rounded second is not in the allowed set.
+/// Every line is `second  timestamp  text`: the bare second is what a chapter's
+/// `start` must be exactly, because a model converting a clock will round.
 pub fn outline(title: &str, cues: &[TranscriptCue], changes: &[Candidate]) -> String {
     fn line(out: &mut String, second: u32, text: &str) {
         out.push_str(&format!("{second:>7}  {}  {text}\n", hms(second)));
@@ -849,29 +640,16 @@ pub fn outline(title: &str, cues: &[TranscriptCue], changes: &[Candidate]) -> St
         }
         line(&mut out, at, &cue.text);
     }
-    // Anything after the last spoken word — and, when there is no transcript
-    // at all, every marker there is.
+    // Markers after the last cue (or all of them, with no transcript).
     for change in marks {
         line(&mut out, change.seconds, &marker(change));
     }
     out
 }
 
-/// The prompt for one chaptering turn.
-///
-/// Deliberately short. It says what the lecture is, what the outline is, where
-/// the frames are, and what a good chapter looks like — then gets out of the
-/// way. Three things in it are lessons rather than decoration: the note that a
-/// slide change is *not* a chapter (candidate density varies threefold between
-/// lectures of the same length, so "one chapter per marker" gives a boundary
-/// every two minutes on a busy deck), the note about the room's AV splash
-/// screen (a dropout spanning the whole probe window survives frame selection,
-/// and a model that does not know what it is looking at will happily name a
-/// chapter after it), and the `grep` — named because the alternative is an
-/// agent reading 2500 lines to find twenty of them.
-///
-/// The candidate table this used to carry is gone: the markers are in the
-/// outline where they belong, next to the words they interrupt.
+/// The prompt for one chaptering turn. Three lines in it are load-bearing: a
+/// slide change is not a chapter, the AV splash screen is not a slide, and the
+/// `grep` that saves reading the whole outline.
 pub fn prompt(job: &Job) -> String {
     format!(
         "Chapter a university lecture recording: choose its real topic boundaries and name \
@@ -943,39 +721,38 @@ Reply with JSON and nothing else, in play order:\n\n\
     )
 }
 
-/// `HH:MM:SS`. The CLI has its own copy for its own output; this one is what
-/// every prompt about a recording uses — this module's and the lecture brief
-/// in `harness::instructions` — and it must agree with the frame filenames,
-/// which are plain seconds, so both are always printed.
-pub(crate) fn hms(secs: u32) -> String {
+/// `HH:MM:SS`, as every recording prompt prints it beside the bare second.
+pub fn hms(secs: u32) -> String {
     format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
 }
 
-/// The chapter array out of whatever the agent actually said.
-///
-/// Models wrap JSON in prose, in fences, or in an object, however plainly the
-/// format was asked for — the same tolerance `clean_title` in
-/// `harness/mod.rs` exists for, and for the same reason: the alternative is
-/// throwing away a good answer over its packaging. Four attempts, cheapest
-/// first: the whole reply, each fenced block, then the first balanced
-/// `[…]` or `{…}` found anywhere in the text.
-///
-/// This only reads the reply. Whether the chapters are *allowed* is
+/// The chapter array out of whatever the agent said. Whether it is allowed is
 /// [`validate`]'s question.
 pub fn parse_chapters(reply: &str) -> Result<Vec<Chapter>, String> {
+    parse_reply(reply, "chapter list", decode)
+}
+
+/// The first fragment of `reply` that `decode` accepts, trying the whole
+/// reply, each fenced block, then balanced `[…]`/`{…}` runs — models wrap JSON
+/// in prose, fences or objects however plainly asked. `what` names the
+/// expected shape in the error. Shared with `reading`.
+pub(crate) fn parse_reply<T>(
+    reply: &str,
+    what: &str,
+    decode: impl Fn(&str) -> Option<T>,
+) -> Result<T, String> {
     for candidate in json_candidates(reply) {
         if let Some(parsed) = decode(&candidate) {
             return Ok(parsed);
         }
     }
     Err(format!(
-        "no chapter list in the reply ({} chars): {}",
+        "no {what} in the reply ({} chars): {}",
         reply.chars().count(),
         clip(reply.trim(), 200)
     ))
 }
 
-/// Either shape, as a list of chapters, or `None` if this fragment is not one.
 fn decode(text: &str) -> Option<Vec<Chapter>> {
     let items: Vec<ReplyChapter> = serde_json::from_str(text)
         .or_else(|_| serde_json::from_str::<ReplyEnvelope>(text).map(|e| e.chapters))
@@ -987,8 +764,6 @@ fn decode(text: &str) -> Option<Vec<Chapter>> {
         items
             .into_iter()
             .map(|c| Chapter {
-                // A model that writes 742.0 means 742; one that writes a
-                // negative second is caught by `validate`, not here.
                 start_seconds: c.start.max(0.0).round() as u32,
                 title: c.title.trim().to_string(),
                 summary: c.summary.trim().to_string(),
@@ -997,12 +772,10 @@ fn decode(text: &str) -> Option<Vec<Chapter>> {
     )
 }
 
-/// Fragments of `reply` worth trying to parse, in order of how likely they are
-/// to be the answer.
+/// Fragments of `reply` worth trying to parse, most likely first.
 fn json_candidates(reply: &str) -> Vec<String> {
     let mut out = vec![reply.trim().to_string()];
-    // Fenced blocks, ```json or otherwise. The opening fence's info string is
-    // dropped with the rest of its line.
+    // Fenced blocks; the opening fence's info string is dropped with its line.
     let mut rest = reply;
     while let Some(open) = rest.find("```") {
         let after = &rest[open + 3..];
@@ -1021,19 +794,14 @@ fn json_candidates(reply: &str) -> Vec<String> {
             }
         }
     }
-    // Anything balanced, anywhere — the prose-wrapped case.
     for open in ['[', '{'] {
         out.extend(balanced_runs(reply, open));
     }
     out
 }
 
-/// At most [`BALANCED_RUNS`] balanced `open`…`close` spans of `text`, in order.
-///
-/// Several rather than the first because prose around the answer can contain a
-/// bracket of its own — a citation, an empty list, a worked example — and the
-/// real array would then never be tried. String literals and their escapes are
-/// respected, so a bracket inside a summary cannot end a scan early.
+/// Up to eight balanced `open`…`close` spans of `text`, in order — several,
+/// because prose can hold brackets of its own. String literals are respected.
 fn balanced_runs(text: &str, open: char) -> Vec<String> {
     const BALANCED_RUNS: usize = 8;
     let close = if open == '[' { ']' } else { '}' };
@@ -1074,7 +842,6 @@ fn balanced_runs(text: &str, open: char) -> Vec<String> {
                 out.push(text[start..e].to_string());
                 from = e;
             }
-            // Unbalanced from here on: nothing later can close either.
             None => break,
         }
     }
@@ -1090,22 +857,12 @@ fn clip(text: &str, chars: usize) -> String {
     }
 }
 
-/// Whether a parsed chapter set may be written at all.
+/// Whether a parsed chapter set may be written. One bad chapter rejects the
+/// whole set — dropping one would let its neighbour silently swallow its span.
 ///
-/// **One bad chapter rejects the whole set.** A chapter list is a shape rather
-/// than a pile of rows — drop the third of nine and the second chapter now
-/// silently swallows twenty minutes it was never named for — so a single
-/// failure means nothing is written, exactly as a rejected item rolls back a
-/// whole task breakdown in `projects::create_tasks`. The error names the
-/// chapter, because "not a candidate boundary" on its own is unfixable.
-///
-/// `boundaries` is every second the outline printed: second 0, the detected
-/// slide changes, and — when the lecture has a transcript — every cue start.
-/// **Wider than the candidate set, and still closed.** A lecture whose slide
-/// capture failed has one detected change and a perfectly good transcript, so
-/// a menu of one is the defect rather than the safeguard; but the agent still
-/// cannot invent a timestamp, because every second it may pick came off a
-/// file, so the all-or-nothing rollback below still means something.
+/// `boundaries` is every second the outline printed (0, the slide changes and
+/// every cue start): wide enough to chapter from speech alone, but closed, so
+/// the agent cannot invent a timestamp.
 pub fn validate(
     chapters: &[Chapter],
     boundaries: &[u32],
@@ -1162,88 +919,52 @@ pub fn validate(
 
 // ── Running the whole job ────────────────────────────────────────────────────
 //
-// Detection, frames, the agent turn, validation and the write, in one place so
-// that the CLI and the app run the *same* job rather than two that drift. The
-// callers differ only in where they get the selection from (a flag, or the
-// `lectureChapters` row of the model registry) and what they do while it runs
-// (print, or emit an event at the end).
+// One implementation for the CLI and the app; they differ only in where the
+// agent selection comes from and how progress is shown.
 
-/// One chaptering run.
 pub struct Run<'a> {
     pub data_dir: &'a Path,
-    /// A full lecture id. Prefix matching is the CLI's door, not this one's.
+    /// A full lecture id (prefix matching is the CLI's).
     pub lecture_id: &'a str,
-    /// Which agent, model and level to drive. Nothing is defaulted here: the
-    /// caller has already resolved it (`harness::jobs`).
+    /// Already resolved by the caller (`harness::jobs`).
     pub selection: &'a crate::harness::jobs::JobSelection,
-    /// Replace an existing chapter set instead of refusing to touch it.
+    /// Replace an existing chapter set instead of refusing.
     pub force: bool,
-    /// Read this stream instead of letting [`detect`] choose. `None` is the
-    /// normal case and the one the app takes unless the picker was used.
+    /// Read this stream instead of letting [`detect`] choose.
     pub source: Option<crate::echo360::SourceNum>,
 }
 
-/// Where a run has got to, for a caller that draws progress.
-///
-/// The job is one long bar of nothing otherwise: eight to eleven minutes with
-/// a single `ready` at the end of it. These are the moments the job genuinely
-/// changes what it is doing — everything *inside* the agent turn arrives on
-/// `on_event` instead, because the turn's own tool calls are the only honest
-/// account of those nine minutes.
-///
-/// Two of them are countable and one is not, which is the whole reason this is
-/// an enum rather than a percentage: a decode knows how many frames are left,
-/// an agent does not.
+/// The pipeline's own phases, for a caller that draws progress; what happens
+/// inside the agent turn arrives on `on_event` instead.
 pub enum Step<'a> {
-    /// The decode pass has reached `second` of a `duration`-second recording.
-    /// Fires often; [`run`] throttles it before the caller sees it.
+    /// Fires often; [`run`] throttles it.
     Decoding { second: u32, duration: u32 },
-    /// The candidate set exists — the lecture's title, its length, and how
-    /// many boundaries were found.
     Detected {
         title: &'a str,
         duration: u32,
         candidates: usize,
     },
-    /// `done` of `total` boundary frames are on disk.
     Grabbing { done: usize, total: usize },
-    /// The prompt is with the agent. From here until the reply, `on_event` is
-    /// the only thing that knows anything.
     Asking,
-    /// The reply parsed and validated; the rows are going in.
     Writing,
 }
 
-/// What a finished run has to say for itself.
 pub struct Outcome {
     pub title: String,
     pub duration_seconds: u32,
-    /// How many boundaries the detector offered, second 0 not counted.
+    /// Second 0 not counted.
     pub candidates: usize,
-    /// Which stream it read them off. Worth reporting rather than assuming:
-    /// a 2 here is the only visible sign that source 1 was dead.
+    /// A 2 here is the only visible sign that source 1 was dead.
     pub source: crate::echo360::SourceNum,
     pub chapters: Vec<Chapter>,
 }
 
-/// Detect, grab, ask, validate, write.
+/// Detect, grab, ask, validate, write. Blocking and minutes long, so callers
+/// run it off any thread that must stay responsive.
 ///
-/// Blocking from end to end and eight to eleven minutes long — the agent turn
-/// is nearly all of it — so both callers run it off the thread that has to
-/// stay responsive: the CLI is that thread, and the app spawns one.
-///
-/// `on_step` follows the pipeline through its phases ([`Step`]); `on_event`
-/// sees every harness event of the turn, which is how the CLI draws the
-/// agent's tool rows and how the app's panel says what the agent is reading.
-/// The split is deliberate: the phases are this function's own, the turn's
-/// detail belongs to the harness and neither caller should have to guess at
-/// one from the other.
-///
-/// The status column tracks the run from the moment the work starts: `running`
-/// until a terminal answer, then `error` with the message on it, or `ready`
-/// stamped by `store::save_chapters`. The guards above it — no video, chapters
-/// already there — fail before anything is claimed, so a refusal never leaves
-/// a status behind.
+/// `chapter_status` is `running` from the start of the work, then `error` with
+/// the message or `ready` (stamped by `store::save_chapters`). The guards
+/// before it fail without claiming, so a refusal leaves no status behind.
 pub fn run(
     rt: &tokio::runtime::Handle,
     pool: &sqlx::SqlitePool,
@@ -1290,23 +1011,11 @@ pub fn run(
     let ffmpeg = crate::echo360::find_ffmpeg(None)
         .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
 
-    // Claimed before the decode rather than before the turn: detection is
-    // fifteen seconds a student can see happening, and a button that only
-    // lights up once the agent starts reads as a button that did nothing.
+    // Claimed before the decode, so the UI shows the run immediately.
     rt.block_on(crate::store::set_chapter_status(pool, id, Some("running"), None))?;
 
     let outcome = (|| -> Result<Outcome, String> {
-        // Detection is seconds and nothing is cached, so this is the same pass
-        // `oculus lecture candidates` makes; see the module docs.
-        //
-        // One frame is one second of the recording, so the decode reports
-        // itself four times a second rather than per frame: a 107-minute
-        // lecture would otherwise send 6400 events through a Tauri channel to
-        // move a percentage that only has a hundred places to be.
-        // Read once, used three ways: the pauses that score a candidate, the
-        // words the outline is made of, and the cue starts the validator will
-        // accept. A missing or unreadable transcript costs all three and is
-        // not worth failing over — chaptering works off the picture alone.
+        // A missing transcript is not fatal: chaptering works off the picture.
         let vtt = transcript
             .as_deref()
             .and_then(|p| std::fs::read_to_string(p).ok());
@@ -1339,18 +1048,11 @@ pub fn run(
             candidates: found.len(),
         });
 
-        // Second 0 is never a detected candidate — the first change is
-        // typically twenty seconds in — but a lecture always starts somewhere,
-        // so the opening is prepended as an always-available boundary and
-        // accepted as one by the validator.
+        // Second 0 is never detected but is always a boundary.
         let mut frames_at: Vec<u32> = vec![0];
         frames_at.extend(found.iter().map(|c| c.seconds));
 
-        // What the agent may actually start a chapter at. Frames are grabbed
-        // at the slide changes only — a frame per cue would be two and a half
-        // thousand JPEGs of the same slide — but a *boundary* may also be a
-        // cue start, which is what lets a lecture with a dead slide capture be
-        // chaptered from what was said.
+        // Frames only at slide changes, but any cue start is a boundary too.
         let mut boundaries = frames_at.clone();
         boundaries.extend(cues.iter().map(|c| c.start.max(0.0) as u32));
         boundaries.sort_unstable();
@@ -1364,8 +1066,6 @@ pub fn run(
             on_step(Step::Grabbing { done, total })
         })?;
 
-        // An Echo360 title is a room booking rather than a topic, so the
-        // subject's own folder — where the deck is — is worth naming.
         let course_dir = code
             .as_deref()
             .map(|c| format!("../courses/{}", crate::paths::safe_dir(c)));
@@ -1373,8 +1073,6 @@ pub fn run(
         let text = prompt(&Job {
             title: &title,
             duration_secs: duration,
-            // Every agent turn runs from the library's `agents/` folder, so
-            // this is the path the agent can paste straight into a read.
             lecture_dir: &format!("../lectures/{id}"),
             course_dir: course_dir.as_deref(),
             detected: found.len(),
@@ -1418,9 +1116,6 @@ pub fn run(
     })();
 
     if let Err(e) = &outcome {
-        // The failure is kept on the row, not just reported: a player showing
-        // "chaptering failed" needs to say why and offer a retry, and a bare
-        // status cannot carry a message.
         rt.block_on(crate::store::set_chapter_status(pool, id, Some("error"), Some(e)))?;
     }
     outcome
@@ -1432,44 +1127,39 @@ pub mod app {
     use super::*;
     use tauri::{AppHandle, Emitter};
 
-    /// What the webview gets when a run ends, and the only chapter event there
-    /// is. Deliberately not `lectures-changed`: that one fires on every
-    /// progress save while a recording plays, and a result eight minutes in the
-    /// making would be indistinguishable from a scrub.
+    /// Emitted once when a run ends. Not `lectures-changed`, which fires on
+    /// every playback-progress save.
     pub const LECTURE_CHAPTERS_EVENT: &str = "lecture-chapters";
 
-    /// Where the run has got to, emitted throughout. Separate from
-    /// [`LECTURE_CHAPTERS_EVENT`] because the two have different lifetimes: a
-    /// finish is a fact the panel re-reads the database on, a step is a line it
-    /// paints and forgets.
+    /// Emitted throughout a run; display only, never persisted.
     pub const LECTURE_CHAPTER_PROGRESS_EVENT: &str = "lecture-chapter-progress";
 
-    /// One step of a run in flight.
-    ///
-    /// Everything here is display: nothing is persisted, and a panel that
-    /// missed the last one is only ever one event behind. That is why a run
-    /// already in flight when the app started shows no step until its next one
-    /// — there is no column to read it from, and inventing one would mean
-    /// writing to the row four times a second during the decode.
+    /// A reading-copy window count; chaptering never sets it.
+    #[derive(serde::Serialize, Clone, Copy)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct WindowProgress {
+        pub(crate) done: u32,
+        pub(crate) total: u32,
+    }
+
+    /// One step of a lecture job in flight, shared by chapters and `reading`.
     #[derive(serde::Serialize, Clone)]
     #[serde(rename_all = "camelCase")]
-    struct Progress {
-        lecture_id: String,
+    pub(crate) struct Progress {
+        pub(crate) lecture_id: String,
         /// `decoding` | `frames` | `agent` | `naming` | `writing`.
-        phase: &'static str,
-        /// The one line under the phase — a tool's own title while the agent
-        /// works, and nothing at all for a phase that speaks for itself.
-        detail: Option<String>,
-        /// What that tool was, so the panel can use the timeline's verbs
-        /// ("Reading", "Looking up") rather than a second vocabulary.
-        kind: Option<crate::harness::ToolKind>,
+        pub(crate) phase: &'static str,
+        /// A tool's own title while the agent works.
+        pub(crate) detail: Option<String>,
+        pub(crate) kind: Option<crate::harness::ToolKind>,
         /// Countable phases only; the agent turn has no denominator.
-        done: Option<u32>,
-        total: Option<u32>,
+        pub(crate) done: Option<u32>,
+        pub(crate) total: Option<u32>,
+        pub(crate) window: Option<WindowProgress>,
     }
 
     impl Progress {
-        fn at(lecture_id: &str, phase: &'static str) -> Progress {
+        pub(crate) fn at(lecture_id: &str, phase: &'static str) -> Progress {
             Progress {
                 lecture_id: lecture_id.to_string(),
                 phase,
@@ -1477,6 +1167,7 @@ pub mod app {
                 kind: None,
                 done: None,
                 total: None,
+                window: None,
             }
         }
     }
@@ -1485,25 +1176,84 @@ pub mod app {
     #[serde(rename_all = "camelCase")]
     struct Finished {
         lecture_id: String,
-        /// How *this* request ended, in the column's own vocabulary. They
-        /// agree except on a refusal — a lecture that already has chapters
-        /// reports `error` here and keeps its `ready` row, because nothing
-        /// was touched.
+        /// How this request ended. A refusal reports `error` while the row
+        /// keeps its `ready`.
         status: &'static str,
         chapters: usize,
         error: Option<String>,
     }
 
+    /// Refuse a `source` that is not 1 or 2, or a lecture whose
+    /// `status_column` says a run is already in flight.
+    pub(crate) async fn check_start(
+        lecture_id: &str,
+        source: Option<u8>,
+        status_column: &str,
+        busy: &str,
+    ) -> Result<(), String> {
+        if let Some(n) = source {
+            if n != 1 && n != 2 {
+                return Err(format!("{n} is not a source — a capture has 1 and sometimes 2"));
+            }
+        }
+        let pool = crate::store::open_pool().await?;
+        let running: Option<String> =
+            sqlx::query_scalar(&format!("SELECT {status_column} FROM lectures WHERE id = ?1"))
+                .bind(lecture_id)
+                .fetch_optional(&pool)
+                .await
+                .map_err(|e| e.to_string())?
+                .flatten();
+        if running.as_deref() == Some("running") {
+            return Err(busy.into());
+        }
+        Ok(())
+    }
+
+    /// Run `body` on a thread of its own with its own runtime, pool and the
+    /// agent selection configured for `job`. `tag` prefixes setup errors.
+    pub(crate) fn spawn_job(
+        tag: &'static str,
+        job: crate::harness::jobs::Job,
+        body: impl FnOnce(&tokio::runtime::Runtime, &sqlx::SqlitePool, crate::harness::jobs::JobSelection)
+            + Send
+            + 'static,
+    ) {
+        std::thread::spawn(move || {
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => return eprintln!("[oculus] {tag}: {e}"),
+            };
+            let pool = match rt.block_on(crate::store::open_pool()) {
+                Ok(p) => p,
+                Err(e) => return eprintln!("[oculus] {tag}: {e}"),
+            };
+            let selection = rt.block_on(crate::harness::jobs::selection(&pool, job));
+            body(&rt, &pool, selection);
+        });
+    }
+
+    /// Startup sweep: clear a `running` status a killed run left behind.
+    pub(crate) fn reconcile_status<F>(
+        tag: &'static str,
+        sweep: impl FnOnce(sqlx::SqlitePool) -> F + Send + 'static,
+    ) where
+        F: std::future::Future<Output = Result<u64, String>> + Send,
+    {
+        tauri::async_runtime::spawn(async move {
+            if let Ok(pool) = crate::store::open_pool().await {
+                if let Ok(n) = sweep(pool).await {
+                    if n > 0 {
+                        eprintln!("[oculus] {tag}: cleared {n} interrupted run(s)");
+                    }
+                }
+            }
+        });
+    }
+
     /// Chapter a lecture with the agent the `lectureChapters` job is
-    /// configured with.
-    ///
-    /// The job is eight to eleven minutes of ffmpeg and one very long agent
-    /// turn, so the command starts it on a thread of its own and returns as
-    /// soon as the run is claimed. Progress is the `chapter_status` column —
-    /// `running` from here, then `ready` or `error` — and the end is
-    /// [`LECTURE_CHAPTERS_EVENT`]. Nothing goes through the harness event
-    /// stream: a headless run reports on thread id 0, and the app started this
-    /// one, so it already knows whose it is.
+    /// configured with. Returns once the run is claimed; the end arrives as
+    /// [`LECTURE_CHAPTERS_EVENT`].
     #[tauri::command]
     pub async fn lecture_find_chapters(
         app: AppHandle,
@@ -1511,51 +1261,12 @@ pub mod app {
         force: Option<bool>,
         source: Option<u8>,
     ) -> Result<(), String> {
-        // `None` is the normal call and means let the detector choose; a value
-        // only ever comes from the source picker, which only offers the two.
-        if let Some(n) = source {
-            if n != 1 && n != 2 {
-                return Err(format!("{n} is not a source — a capture has 1 and sometimes 2"));
-            }
-        }
-        let pool = crate::store::open_pool().await?;
-        // The only check worth making the caller wait for: a second run over
-        // the same lecture would spend a second subscription turn and race the
-        // first one's write.
-        let running: Option<String> =
-            sqlx::query_scalar("SELECT chapter_status FROM lectures WHERE id = ?1")
-                .bind(&lecture_id)
-                .fetch_optional(&pool)
-                .await
-                .map_err(|e| e.to_string())?
-                .flatten();
-        if running.as_deref() == Some("running") {
-            return Err("that lecture is already being chaptered".into());
-        }
-        drop(pool);
+        check_start(&lecture_id, source, "chapter_status", "that lecture is already being chaptered")
+            .await?;
 
         let data_dir = crate::paths::data_dir();
         let force = force.unwrap_or(false);
-        std::thread::spawn(move || {
-            // Its own runtime, so the pool this run's queries use belongs to
-            // the thread that blocks on them — the shape the harness consumer
-            // thread has for the same reason.
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt,
-                Err(e) => return eprintln!("[oculus] chapters: {e}"),
-            };
-            let pool = match rt.block_on(crate::store::open_pool()) {
-                Ok(p) => p,
-                Err(e) => return eprintln!("[oculus] chapters: {e}"),
-            };
-            let selection = rt.block_on(crate::harness::jobs::selection(
-                &pool,
-                crate::harness::jobs::Job::LectureChapters,
-            ));
-            // One emitter for both halves of the report: the pipeline's own
-            // phases arrive as `Step`, the nine minutes inside the agent turn
-            // arrive as harness events, and the panel should not be able to
-            // tell which of the two it is drawing.
+        spawn_job("chapters", crate::harness::jobs::Job::LectureChapters, move |rt, pool, selection| {
             let emit = {
                 let app = app.clone();
                 move |p: Progress| {
@@ -1570,8 +1281,6 @@ pub mod app {
                     let p = match s {
                         Step::Decoding { second, duration } => Progress {
                             done: Some(second),
-                            // A lecture whose row has no duration still gets a
-                            // phase; it just cannot have a fraction.
                             total: (duration > 0).then_some(duration),
                             ..Progress::at(&id, "decoding")
                         },
@@ -1595,10 +1304,8 @@ pub mod app {
                 }
             };
 
-            // The reply *is* the chapter JSON, so the first delta of it is the
-            // agent having made up its mind — a real phase change, and the one
-            // that would otherwise leave the panel sitting on whichever file
-            // happened to be read last for a minute or more.
+            // The reply is the chapter JSON, so its first delta is the agent
+            // having decided: report that once as `naming`.
             let naming = std::sync::atomic::AtomicBool::new(false);
             let event = {
                 let id = lecture_id.clone();
@@ -1624,7 +1331,7 @@ pub mod app {
 
             let outcome = run(
                 rt.handle(),
-                &pool,
+                pool,
                 &Run {
                     data_dir: &data_dir,
                     lecture_id: &lecture_id,
@@ -1660,48 +1367,19 @@ pub mod app {
     /// One stream's frame of the moment a dock message carries.
     #[derive(serde::Serialize, Clone)]
     pub struct MomentFrame {
-        /// Which stream it came off, 1 and 2 as Echo360 numbers them — which
-        /// is all anyone can honestly say about which is which, and the same
-        /// thing the player's own picker says (`SourceControls.tsx`).
         pub source: crate::echo360::SourceNum,
         /// Relative to `agents/`, the thread's cwd.
         pub path: String,
     }
 
-    /// One JPEG **per downloaded stream** of the moment the playhead is at,
-    /// for a message sent from the lecture player's dock ([`docs/harness.md`]).
+    /// One JPEG per downloaded stream of the playhead's moment, for a message
+    /// sent from the lecture player's dock (`docs/harness.md`).
     ///
-    /// **Every source on disk is grabbed, not the one on screen.** Echo360
-    /// numbers the streams rather than naming them and neither is reliably the
-    /// one with the teaching on it: a theatre where the lecturer works at the
-    /// whiteboard leaves source 1 on the room's idle splash for the hour, and
-    /// the derivation the question is about exists only on source 2. The
-    /// student is asking about the *moment*, not about the pane they happen to
-    /// have in front, so the moment carries every view of it there is and the
-    /// agent reads whichever answers the question.
-    ///
-    /// **What comes back are paths the *agent* can read**, not ones the
-    /// webview can open: `../lectures/<id>/frames/live/<seconds>-source<n>.jpg`,
-    /// relative to `agents/`, which every thread runs from. The page never
-    /// opens the files — it puts the strings in the message, and the CLI opens
-    /// them.
-    ///
-    /// Frames live in their own `live/` subfolder so a message's grab can
-    /// never collide with a chaptering run's, which are named by boundary
-    /// second in the folder above. They are overwritten freely: the same
-    /// second asked for twice is the same frame.
-    ///
-    /// The probing is [`grab_frame`]'s, so a message sent while the screen
-    /// share is between slides still attaches something with lecture content
-    /// on it rather than a black frame. Four probes and a grab is ~200 ms, per
-    /// stream and one stream after another — the second one is the difference
-    /// between an answer and "the frame shows the room's idle screen", which
-    /// is worth 200 ms.
-    ///
-    /// **A stream that will not decode drops its own line and nothing else.**
-    /// Only a lecture with no frame at all is an error, for the reason the
-    /// whole moment is best-effort: losing the question over a picture would
-    /// be the wrong half to lose.
+    /// Every source is grabbed, not the one on screen: either stream may be the
+    /// one with the teaching on it. Returns paths the agent reads
+    /// (`../lectures/<id>/frames/live/<seconds>-source<n>.jpg`), in `live/` so
+    /// they never collide with a chaptering run's. A stream that fails to decode
+    /// is skipped; only no frame at all is an error.
     #[tauri::command]
     pub async fn lecture_grab_frames(
         lecture_id: String,
@@ -1717,10 +1395,7 @@ pub mod app {
         let (title, first, second) = row.ok_or_else(|| format!("no lecture {lecture_id}"))?;
 
         let dir = crate::echo360::lecture_dir(&crate::paths::data_dir(), &lecture_id);
-        // The column when there is one and the stream's own name on disk when
-        // there is not — `detect` reads source 2 that way too, and for the
-        // same reason: a stream that was downloaded but never recorded is
-        // still one ffmpeg can open.
+        // The column, else the stream's own path on disk (as `detect` does).
         let sources: Vec<(crate::echo360::SourceNum, PathBuf)> = [(1, first), (2, second)]
             .into_iter()
             .map(|(n, column)| {
@@ -1731,9 +1406,6 @@ pub mod app {
             })
             .filter(|(_, path)| path.exists())
             .collect();
-        // The same refusal `run` makes, for the same reason: there is no
-        // frame to take, and naming the download is more use than a missing
-        // file's path.
         if sources.is_empty() {
             return Err(format!(
                 "{title} is not downloaded — `oculus run -l --videos` fetches it"
@@ -1775,19 +1447,10 @@ pub mod app {
             .collect())
     }
 
-    /// Startup: a run killed mid-turn left `running` on the row with no
-    /// `chaptered_at`, and nothing is going to finish it — the same sweep
-    /// `harness::app::reconcile` makes over threads.
-    pub fn reconcile(app: &AppHandle) {
-        let _ = app;
-        tauri::async_runtime::spawn(async {
-            if let Ok(pool) = crate::store::open_pool().await {
-                if let Ok(n) = crate::store::reconcile_chapter_status(&pool).await {
-                    if n > 0 {
-                        eprintln!("[oculus] chapters: cleared {n} interrupted run(s)");
-                    }
-                }
-            }
+    /// Startup: clear `running` left by a killed run.
+    pub fn reconcile(_app: &AppHandle) {
+        reconcile_status("chapters", |pool| async move {
+            crate::store::reconcile_chapter_status(&pool).await
         });
     }
 }
@@ -1939,29 +1602,23 @@ mod tests {
 
     #[test]
     fn a_frame_grab_steps_over_a_blank_and_over_a_splash_screen() {
-        // Measured on the reference lecture at its 1386 s boundary: the cut
-        // itself is black, +2 and +6 are the room's AV splash (the same static
-        // image every time, hence the identical value), and the slide is back
-        // by +12. Probes arrive in GRAB_OFFSETS order: 2, 6, 12, 0.
+        // The cut is black, +2 and +6 are the AV splash, the slide is back by
+        // +12. Probes arrive in GRAB_OFFSETS order: 2, 6, 12, 0.
         let probed = [(1388, 81.4), (1392, 81.4), (1398, 102.2), (1386, 0.0)];
         assert_eq!(pick_offset(&probed), Some(1398));
 
-        // At 1724 s the boundary frame is a perfectly good slide and +2 is the
-        // splash; the first frame within tolerance of the best wins.
+        // +2 is the splash; the first frame within tolerance of the best wins.
         let probed = [(1726, 81.4), (1730, 102.5), (1736, 102.5), (1724, 102.6)];
         assert_eq!(pick_offset(&probed), Some(1730));
     }
 
     #[test]
     fn a_run_sweeps_the_grabs_it_will_not_rewrite() {
-        let dir = std::env::temp_dir().join(format!("oculus-sweep-{}", std::process::id()));
-        std::fs::remove_dir_all(&dir).ok();
+        let dir = crate::test_support::Scratch::new("sweep");
         std::fs::create_dir_all(dir.join("live")).unwrap();
         for name in ["50.jpg", "313.jpg", "1767.jpg", "notes.txt", "keyframe.jpg"] {
             std::fs::write(dir.join(name), b"x").unwrap();
         }
-        // The chat dock's own grabs are a folder, not a file, and are not this
-        // run's business.
         std::fs::write(dir.join("live").join("900.jpg"), b"x").unwrap();
 
         sweep_orphans(&dir, &[313, 1767, 2550]);
@@ -1972,31 +1629,23 @@ mod tests {
         assert!(left("notes.txt"), "only JPEGs are swept");
         assert!(left("keyframe.jpg"), "a name that is not a second was not written here");
         assert!(left("live/900.jpg"), "another job's subfolder is untouched");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn a_frame_grab_prefers_the_earliest_good_frame() {
-        // The ordinary case: nothing wrong anywhere in the probe set, so the
-        // grab happens a couple of seconds past the cut and goes no further.
         let probed = [(114, 102.9), (118, 102.9), (124, 102.9), (112, 102.9)];
         assert_eq!(pick_offset(&probed), Some(114));
 
-        // A sparse title slide must not be passed over for a denser slide
-        // twelve seconds into the chapter — that would name it after the
-        // wrong thing. Within tolerance is good enough.
+        // A sparse title slide is not passed over for a denser later one.
         let probed = [(22, 98.0), (26, 99.0), (32, 101.0), (20, 98.5)];
         assert_eq!(pick_offset(&probed), Some(22));
     }
 
     #[test]
     fn a_frame_grab_with_nothing_to_go_on_still_picks_something() {
-        // Every probe blank — a long dropout. There is nothing better to
-        // write, so the first offset wins rather than the caller getting
-        // nothing.
+        // Every probe blank: the first offset still wins.
         let probed = [(1388, 0.0), (1392, 0.0), (1398, 0.0), (1386, 0.0)];
         assert_eq!(pick_offset(&probed), Some(1388));
-        // Past the end of the recording, ffmpeg returns no frames at all.
         assert_eq!(pick_offset(&[]), None);
     }
 
@@ -2105,9 +1754,6 @@ mod tests {
 
     #[test]
     fn a_transcript_cue_start_is_a_boundary_too() {
-        // The widened set: the slide changes, plus wherever anybody spoke.
-        // This is what lets a lecture whose slide capture was black still be
-        // chaptered — the words are intact even when the picture is not.
         let mut bounds = BOUNDS.to_vec();
         bounds.push(701);
         let set = vec![chapter(0, "Opening"), chapter(701, "Middle"), chapter(2000, "End")];
@@ -2119,8 +1765,7 @@ mod tests {
         let set = vec![chapter(0, "Opening"), chapter(1200, "Middle"), chapter(700, "End")];
         let error = validate(&set, &BOUNDS, 2400).unwrap_err();
         assert!(error.starts_with("chapter 3 (\"End\"): starts at 700, which is not after"), "{error}");
-        // A repeat is not contiguous either — two chapters starting at the same
-        // second means one of them is zero seconds long.
+        // A repeat would make a zero-length chapter.
         let set = vec![chapter(0, "Opening"), chapter(700, "A"), chapter(700, "B")];
         assert!(validate(&set, &BOUNDS, 2400).is_err());
     }
@@ -2241,8 +1886,7 @@ mod tests {
                 // MM:SS.mmm, and a real pause before it.
                 (66, 3.0),
                 (70, 0.5),
-                // HH:MM:SS.mmm past the hour — and a silence is just a big
-                // gap, however big.
+                // HH:MM:SS.mmm past the hour.
                 (3675, 3603.0),
             ]
         );
@@ -2251,8 +1895,6 @@ mod tests {
     #[test]
     fn cue_gaps_ignores_headers_notes_and_blank_blocks() {
         let vtt = include_str!("../fixtures/chapters/sample.vtt");
-        // WEBVTT, the NOTE block and the numbered cue identifiers all carry no
-        // " --> ", so none of them becomes a gap.
         assert_eq!(cue_gaps(vtt).len(), 5);
         assert!(cue_gaps("WEBVTT\n\nnot a cue at all\n").is_empty());
     }
@@ -2260,8 +1902,7 @@ mod tests {
     #[test]
     fn cue_gaps_survives_crlf_and_a_bad_end_time() {
         let vtt = "WEBVTT\r\n\r\n00:00.000 --> broken\r\nhello\r\n\r\n00:10.000 --> 00:12.000\r\nworld\r\n";
-        // The broken end falls back to its own start, so the next gap is 10 s
-        // rather than the whole file.
+        // The broken end falls back to its own start.
         assert_eq!(cue_gaps(vtt), vec![(0, 0.0), (10, 10.0)]);
     }
 }

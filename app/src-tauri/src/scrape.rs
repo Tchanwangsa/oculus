@@ -1,13 +1,10 @@
-//! The app's entry point into the scrape engine.
-//!
-//! The engine runs on a plain thread and reports through [`AppReporter`], which
-//! forwards to the same Tauri events the frontend already listens for. Nothing
-//! about the UI contract changed when the scraper moved out of the WebView.
+//! The app's entry point into the scrape engine: it runs on a plain thread and
+//! reports through [`AppReporter`] as Tauri events.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::sync::{Engine, FileEvent, FileStart, Progress, Reporter, Subject, SyncOptions};
 
@@ -44,14 +41,12 @@ pub async fn scrape_content(
         return Err("No subjects selected.".to_string());
     }
 
-    // Holding an actual session is what matters — the flag file only records
-    // that a login once happened, not that we still have the cookie.
-    if !crate::auth::has_session(&app) {
+    if crate::files::proxy_cookie(&app).is_empty() {
         app.emit("canvas-auth-expired", "not-authenticated").ok();
         return Err("Not authenticated. Connect to Canvas first.".to_string());
     }
 
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = crate::paths::data_dir();
     let targets: Vec<Subject> = subjects
         .into_iter()
         .map(|s| Subject { id: s.id, code: s.code })
@@ -62,8 +57,7 @@ pub async fn scrape_content(
 
     eprintln!("[oculus] scrape: {} subject(s)", targets.len());
 
-    // Off the command thread: a sync runs for minutes and the frontend expects
-    // this call to return immediately, then follow the events.
+    // Returns immediately; the frontend follows the events.
     std::thread::spawn(move || {
         let reporter = AppReporter {
             app: app.clone(),
@@ -118,33 +112,23 @@ impl Reporter for AppReporter {
     }
 }
 
-/// Resume the parse pipeline for one already-downloaded PDF. `parse_mode`
-/// reads the `.pages.json` record, so a file that already parsed is skipped
-/// and one that never did is submitted — this costs nothing on a file that is
-/// already done. Fire-and-forget: progress arrives as the same `parse-status`
-/// events a sync produces.
+/// Parse one already-downloaded PDF (a no-op if already parsed).
+/// Fire-and-forget: progress arrives as `parse-status` events.
 #[tauri::command]
 pub fn parse_file(
-    app: AppHandle,
     subject_id: i64,
     subject_code: String,
     relative_path: String,
 ) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    // For Office files the parseable artifact is the derived sibling PDF, and
-    // that (not the original, which legacy syncs discarded) must be on disk.
+    let data_dir = crate::paths::data_dir();
+    // For Office files this is the derived sibling PDF.
     let pdf_rel = crate::paths::doc_pdf_rel(&relative_path)
         .ok_or_else(|| format!("{relative_path}: not a parseable file"))?;
     if !data_dir.join(&pdf_rel).is_file() {
         return Err(format!("not on disk: {pdf_rel}"));
     }
-    // `subject_code` is still in the command's signature because the frontend
-    // sends it; nothing downstream needs it now that the parse is in-process
-    // and no longer addressed by course folder.
+    // Unused, but the frontend sends it.
     let _ = subject_code;
-    // Off the command thread: `parse_pdf` blocks for the whole cloud round
-    // trip, and this call has always returned immediately with the caller
-    // following `parse-status` events.
     std::thread::spawn(move || {
         match crate::sync::parse_pdf(&data_dir, &relative_path, subject_id) {
             Ok(summary) => eprintln!("[oculus] parse_file {relative_path}: {summary}"),
@@ -162,10 +146,10 @@ pub fn rescrape_file(
     subject_code: String,
     canvas_id: i64,
 ) -> Result<String, String> {
-    if !crate::auth::has_session(&app) {
+    if crate::files::proxy_cookie(&app).is_empty() {
         return Err("Not authenticated — connect to Canvas first.".to_string());
     }
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = crate::paths::data_dir();
     let engine = Engine::new(
         &data_dir,
         Box::new(AppReporter {

@@ -1,49 +1,25 @@
 //! Headless University of Melbourne SSO sign-in.
 //!
-//! Canvas authenticates through Okta at `sso.unimelb.edu.au` (an Okta
-//! **Identity Engine** org — the security-method chooser and the numbered push
-//! challenge are OIE-only UI). OIE's sign-in widget is a thin client over a
-//! JSON state machine at `/idp/idx/*`, so the whole flow can run in Rust with
-//! no browser: introspect the login page's state token, answer each
-//! *remediation* it offers, and finish by replaying the SAML app URL to get a
-//! `SAMLResponse` we POST to Canvas.
+//! Canvas authenticates through Okta Identity Engine at `sso.unimelb.edu.au`,
+//! whose widget is a thin client over a JSON state machine at `/idp/idx/*`. So
+//! the flow runs in Rust with no webview (see CLAUDE.md on hidden WebViews):
+//! introspect the login page's state token, answer each *remediation*, then
+//! replay the SAML app URL and POST the `SAMLResponse` to Canvas.
 //!
-//! Why not drive the login WebView instead? Same reason the scraper lives in
-//! Rust: an off-screen WKWebView gets suspended by macOS (see `canvas.rs`), and
-//! a *visible* one defeats the point of automating the sign-in.
+//! Only password and TOTP (Google Authenticator) are answerable; push needs a
+//! human. The TOTP seed is shown once, at enrolment, so using this means
+//! re-enrolling the factor and copying its setup key.
 //!
-//! ## What this can and cannot do
-//!
-//! It answers **password** and **TOTP** (Google Authenticator) factors. It
-//! cannot answer Okta Verify push — that needs a human tapping a number on a
-//! phone, which is the entire point of push. So the account must have a TOTP
-//! factor enrolled and this module must hold that factor's shared secret.
-//!
-//! **A TOTP secret cannot be recovered by watching codes.** A code is
-//! `HMAC-SHA1(secret, unix_time / 30)` truncated to 6 digits — a one-way
-//! function of a 160-bit seed. Observing a million codes reveals nothing about
-//! the next one. The seed is shown exactly once, at enrolment, as the QR code
-//! and the "setup key" beside it. Getting it means *re-enrolling* the factor
-//! and copying that key; there is no other path.
-//!
-//! ## Security shape
-//!
-//! Password and TOTP seed both live in the macOS keychain on one machine, so
-//! for anything running as this user the second factor is no longer a second
-//! factor. That is the deliberate trade: it is the same posture as a password
-//! manager that stores TOTP next to the password. It does not weaken the
-//! account against anyone who is not already on this Mac as this user.
+//! Password and seed share the macOS keychain, so to anything running as this
+//! user the second factor is not a second factor — the same deliberate trade
+//! as a password manager holding TOTP.
 
 use std::collections::BTreeMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // ── SHA-1 / HMAC / TOTP ──────────────────────────────────────────────────────
 //
-// Hand-rolled because the sandbox this was written in could not fetch crates,
-// and because RFC 6238 is 40 lines over a primitive that has not changed since
-// 1995. Correctness is pinned by the RFC's own test vectors in `mod tests` —
-// if those pass, this is right. SHA-1 is broken for *collisions*; HMAC-SHA1 is
-// not, and is what every authenticator app implements.
+// Pinned by the RFC 4226/6238 test vectors in `mod tests`. SHA-1 is broken for
+// collisions; HMAC-SHA1 is not, and is what authenticator apps implement.
 
 fn sha1(msg: &[u8]) -> [u8; 20] {
     let mut h: [u32; 5] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476, 0xC3D2_E1F0];
@@ -115,8 +91,7 @@ fn hmac_sha1(key: &[u8], msg: &[u8]) -> [u8; 20] {
     sha1(&outer)
 }
 
-/// RFC 4648 base32, which is how every authenticator app writes a seed.
-/// Tolerates the spaces and lowercase Okta's setup key is shown with.
+/// RFC 4648 base32. Tolerates the spaces and lowercase Okta shows the key in.
 pub fn base32_decode(s: &str) -> Result<Vec<u8>, String> {
     let mut bits: u32 = 0;
     let mut nbits: u32 = 0;
@@ -160,23 +135,12 @@ pub fn totp_at(secret: &[u8], unix_seconds: u64, step: u64, digits: u32) -> Stri
 /// The code an authenticator app would be showing right now.
 pub fn totp_now(secret_b32: &str) -> Result<String, String> {
     let secret = base32_decode(secret_b32)?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_secs();
-    Ok(totp_at(&secret, now, 30, 6))
+    Ok(totp_at(&secret, crate::clock::now_secs(), 30, 6))
 }
 
-/// Seconds until the current code rolls over. Sign-in waits for a fresh code
-/// when this is small: Okta rejects a reused code, and burning our one attempt
-/// on a code with 2 seconds left is how an automated retry loop locks an
-/// account out.
+/// Seconds until the current code rolls over.
 pub fn totp_seconds_remaining() -> u64 {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    30 - (now % 30)
+    30 - (crate::clock::now_secs() % 30)
 }
 
 // ── Stored credentials ───────────────────────────────────────────────────────
@@ -202,8 +166,8 @@ fn erase(account: &str) -> Result<(), String> {
     }
 }
 
-/// What a headless sign-in needs. Never logged, never written outside the
-/// keychain, never sent anywhere but `sso.unimelb.edu.au`.
+/// Never logged, never written outside the keychain, never sent anywhere but
+/// `sso.unimelb.edu.au`.
 pub struct Credentials {
     pub username: String,
     pub password: String,
@@ -220,8 +184,8 @@ impl Credentials {
     }
 }
 
-/// Whether each piece is on file, for the settings UI. Values never leave the
-/// keychain — the UI only needs to know what is missing.
+/// Which pieces are on file, for the settings UI; values never leave the
+/// keychain.
 #[derive(serde::Serialize)]
 pub struct CredentialStatus {
     pub username: Option<String>,
@@ -237,9 +201,8 @@ pub fn credential_status() -> CredentialStatus {
     }
 }
 
-/// Save credentials, validating the TOTP seed before it is stored — a seed
-/// that cannot be decoded would otherwise fail much later, mid sign-in, as an
-/// indistinguishable "wrong code".
+/// Validates the TOTP seed first: an undecodable one would otherwise surface
+/// mid sign-in as an indistinguishable "wrong code".
 pub fn store_credentials(username: &str, password: &str, totp_secret: &str) -> Result<(), String> {
     let username = username.trim();
     let secret = totp_secret.trim().replace(' ', "");
@@ -266,10 +229,8 @@ pub fn clear_credentials() -> Result<(), String> {
     Ok(())
 }
 
-/// Drop only the password, keeping username and seed. This is the response to
-/// `LoginError::BadPassword`: the user changed their UniMelb password, so the
-/// stored one is worthless, but re-scanning the authenticator would be a
-/// pointless extra chore.
+/// Drop only the password, keeping username and seed — the response to
+/// `LoginError::BadPassword`.
 pub fn clear_password() -> Result<(), String> {
     erase("password")
 }
@@ -278,18 +239,14 @@ pub fn clear_password() -> Result<(), String> {
 
 const SSO_HOST: &str = "sso.unimelb.edu.au";
 const IDX_MEDIA: &str = "application/ion+json; okta-version=1.0.0";
-/// Hygiene, not a known requirement: the flow was made to work without this,
-/// but a default `ureq/2.x` is exactly the sort of thing an IdP starts
-/// treating differently, and every leg here is impersonating a browser anyway.
+/// Hygiene, not a known requirement: every leg here impersonates a browser.
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
-/// Every remediation step is one round trip; a real sign-in takes four or
-/// five. This only has to stop a policy we did not anticipate from looping.
+/// Stops a policy we did not anticipate from looping.
 const MAX_STEPS: usize = 12;
 
-/// Cookies kept per host. Okta's `sid` must never be sent to Canvas and the
-/// Canvas session must never be sent to Okta — the same per-host discipline
-/// `ed.rs` needs for edstem.
+/// Cookies kept per host: Okta's `sid` must never reach Canvas, nor Canvas's
+/// session Okta.
 #[derive(Default)]
 struct Jar(BTreeMap<String, BTreeMap<String, String>>);
 
@@ -326,24 +283,20 @@ impl Jar {
     }
 }
 
-/// Why an automated sign-in stopped. The variants exist so callers can do the
-/// right thing rather than show one opaque failure: a bad password must clear
-/// the stored one, a missing factor must tell the user what to enrol, and a
-/// flat network must not throw away a session that is probably still fine.
+/// Why an automated sign-in stopped. Callers act on the variant: a bad
+/// password clears the stored one, a network failure keeps the session.
 #[derive(Debug)]
 pub enum LoginError {
     /// No credentials on file — automated sign-in was never set up.
     NotConfigured,
     BadPassword(String),
     BadTotp(String),
-    /// Okta offered only factors we cannot answer. Carries the labels it did
-    /// offer, which is exactly what the user needs to see.
+    /// Okta offered only factors we cannot answer; carries their labels.
     UnsupportedFactor(Vec<String>),
     Locked(String),
     Network(String),
-    /// The state machine went somewhere this code does not model. Carries the
-    /// remediation names so a first run diagnoses itself instead of needing a
-    /// packet capture.
+    /// The state machine went somewhere this code does not model; carries the
+    /// remediation names.
     Unexpected(String),
 }
 
@@ -423,9 +376,7 @@ fn walk(jar: &mut Jar, start: &str, max: usize) -> Result<(url::Url, String), Lo
     Err(LoginError::Unexpected("redirect loop during sign-in".into()))
 }
 
-/// Start the SAML flow and pull the Okta widget's state token out of the
-/// login page. The token is the handle to the IDX state machine; everything
-/// after this is JSON.
+/// Start the SAML flow and pull the IDX state token out of the login page.
 fn bootstrap(jar: &mut Jar) -> Result<(String, String), LoginError> {
     let start = format!("{}/login/saml", crate::paths::CANVAS_BASE);
     let (landed, body) = walk(jar, &start, 10)?;
@@ -447,12 +398,9 @@ fn extract_state_token(html: &str) -> Option<String> {
     state_token_candidates(html).into_iter().next()
 }
 
-/// Every `stateToken`-shaped value on the page.
-///
-/// The hosted page mentions `stateToken` several times — in inline script
-/// logic as well as in the widget config — so taking the *first* mention
-/// yields a fragment Okta rejects as an expired session. Each candidate is
-/// therefore required to be a quoted value of plausible shape.
+/// Every `stateToken`-shaped value on the page. Inline script mentions the
+/// name before the config assigns it, so each candidate must be a quoted
+/// value of plausible shape, not just the first mention.
 fn state_token_candidates(html: &str) -> Vec<String> {
     const KEY: &str = "stateToken";
     let mut out: Vec<String> = Vec::new();
@@ -500,9 +448,8 @@ fn looks_like_state_token(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '~'))
 }
 
-/// One IDX call. Okta answers 400/401 with a body that explains itself, so a
-/// non-2xx status is parsed rather than thrown — the message is the whole
-/// point.
+/// One IDX call. A non-2xx body is parsed, not thrown: Okta explains its
+/// 400/401s there.
 fn idx(jar: &mut Jar, url: &str, body: serde_json::Value) -> Result<serde_json::Value, LoginError> {
     let resp = agent()
         .post(url)
@@ -579,11 +526,9 @@ enum Factor {
     Totp,
 }
 
-/// Build the `authenticator` payload that selects `want`.
-///
-/// TOTP is matched by label first: Okta Verify also advertises `methodType:
-/// otp`, and answering *it* with a Google Authenticator seed produces a
-/// baffling "invalid code" rather than a useful error.
+/// Build the `authenticator` payload that selects `want`. TOTP is matched by
+/// label first: Okta Verify also advertises `methodType: otp`, with a
+/// different seed.
 fn select_payload(rem: &serde_json::Value, want: Factor) -> Option<serde_json::Value> {
     let options = authenticator_options(rem);
     let pick = |pred: &dyn Fn(&str, &str) -> bool| -> Option<serde_json::Value> {
@@ -622,11 +567,8 @@ fn summarise(state: &serde_json::Value) -> String {
 }
 
 /// Which factor the pending challenge is for, or `None` when it is one we
-/// cannot answer and the caller should switch via the chooser.
-///
-/// Okta names the authenticator under `currentAuthenticator`; when it says
-/// nothing we fall back on flow position, which is what this used to do
-/// unconditionally.
+/// cannot answer and the caller should switch via the chooser. Falls back on
+/// flow position when Okta names no `currentAuthenticator`.
 fn challenged_factor(state: &serde_json::Value, password_done: bool) -> Option<Factor> {
     let current = ["currentAuthenticator", "currentAuthenticatorEnrollment"]
         .iter()
@@ -645,8 +587,7 @@ fn challenged_factor(state: &serde_json::Value, password_done: bool) -> Option<F
         .unwrap_or_default();
 
     if key == "okta_password" || methods.contains(&"password") {
-        // Being asked for the password again after it was accepted is Okta
-        // moving on, not an instruction to resend it.
+        // Re-offered after it was accepted: Okta is moving on.
         return (!password_done).then_some(Factor::Password);
     }
     if key == "google_otp" {
@@ -689,14 +630,9 @@ fn check_messages(state: &serde_json::Value, answering: Option<Factor>) -> Resul
 
 // ── The flow ─────────────────────────────────────────────────────────────────
 
-/// Sign in headlessly and persist the resulting Canvas session cookie.
-/// Returns the cookie header on success.
-///
-/// The loop is written against IDX *remediations* rather than a fixed script,
-/// because the order Okta asks for factors in is a policy setting that can
-/// change without notice. Anything it offers that we cannot answer comes back
-/// as [`LoginError::UnsupportedFactor`] naming the options, so a failure is
-/// self-diagnosing.
+/// Sign in headlessly and persist the resulting Canvas session cookie,
+/// returning the cookie header. Driven by whichever remediations Okta offers,
+/// since factor order is a policy setting.
 pub fn sign_in(data_dir: &std::path::Path) -> Result<String, LoginError> {
     let creds = Credentials::load().ok_or(LoginError::NotConfigured)?;
     let mut jar = Jar::default();
@@ -704,10 +640,8 @@ pub fn sign_in(data_dir: &std::path::Path) -> Result<String, LoginError> {
     let (state_token, saml_url) = bootstrap(&mut jar)?;
     let idx_base = format!("https://{SSO_HOST}/idp/idx");
 
-    // Introspect is the one call that names the token `stateToken`; every
-    // later call echoes back the `stateHandle` the response carries. Some
-    // configurations accept only the latter here, so a field-name mismatch
-    // falls back instead of failing the whole sign-in.
+    // Introspect takes `stateToken`, but some configurations accept only
+    // `stateHandle` here, so retry with that.
     let introspect = format!("{idx_base}/introspect");
     let mut state = idx(
         &mut jar,
@@ -766,11 +700,9 @@ pub fn sign_in(data_dir: &std::path::Path) -> Result<String, LoginError> {
             }
         }
 
-        // Answer the factor Okta is actually challenging, BEFORE considering
-        // the chooser. OIE offers `select-authenticator-authenticate`
-        // alongside every challenge as the "verify with something else"
-        // escape hatch, so treating that as the next step re-picks the same
-        // authenticator forever without ever answering it.
+        // Answer the challenge BEFORE considering the chooser: OIE offers
+        // `select-authenticator-authenticate` alongside every challenge, and
+        // taking it re-picks the same authenticator forever.
         if let Some(rem) = remediation(&state, "challenge-authenticator") {
             if let Some(kind) = challenged_factor(&state, password_done) {
             let passcode = match kind {
@@ -802,8 +734,7 @@ pub fn sign_in(data_dir: &std::path::Path) -> Result<String, LoginError> {
         // Pick the next factor: password first, then TOTP.
         if let Some(rem) = remediation(&state, "select-authenticator-authenticate") {
             let want = if password_done { Factor::Totp } else { Factor::Password };
-            // Selecting the same factor twice means the answer never landed;
-            // stop rather than spin out the step budget.
+            // Selecting the same factor twice means the answer never landed.
             if switched_to == Some(want) {
                 return Err(LoginError::Unexpected(format!(
                     "Okta re-offered the factor chooser after {want:?} was already selected"
@@ -850,9 +781,8 @@ pub fn sign_in(data_dir: &std::path::Path) -> Result<String, LoginError> {
 
     let cookie = complete_saml(&mut jar, &saml_url)?;
 
-    // Prove the cookie authenticates before persisting it. Writing first and
-    // discovering the 401 later overwrites a session that may still have been
-    // good, and reports a success that is not one.
+    // Prove the cookie authenticates before overwriting one that may still
+    // be good.
     let name = verify(&cookie)?;
 
     let path = crate::paths::cookie_path(data_dir);
@@ -882,16 +812,15 @@ fn verify(cookie: &str) -> Result<String, LoginError> {
                 .to_string())
         }
         Ok(r) | Err(ureq::Error::Status(_, r)) => Err(LoginError::Unexpected(format!(
-            "the SAML round trip finished but Canvas rejected the session (HTTP {}) —              the assertion was not accepted",
+            "the SAML round trip finished but Canvas rejected the session (HTTP {}) — the assertion was not accepted",
             r.status()
         ))),
         Err(e) => Err(LoginError::Network(e.to_string())),
     }
 }
 
-/// A TOTP code is single-use and Okta rejects a replay, so spending one that
-/// is about to expire wastes an attempt — and repeated attempts are what trip
-/// the lockout policy. Wait out the tail of the window instead.
+/// Okta rejects a replayed code and repeated failures trip the lockout, so
+/// never spend one that is about to expire.
 fn wait_for_fresh_code() {
     let left = totp_seconds_remaining();
     if left < 3 {
@@ -899,9 +828,8 @@ fn wait_for_fresh_code() {
     }
 }
 
-/// With an Okta session in hand, replay the SAML app URL: Okta now answers
-/// with the auto-submit assertion form, which we POST to Canvas to trade for
-/// a `canvas_session` cookie.
+/// With an Okta session, replay the SAML app URL and POST the auto-submit
+/// assertion form to Canvas for a `canvas_session` cookie.
 fn complete_saml(jar: &mut Jar, saml_url: &str) -> Result<String, LoginError> {
     let canvas_host = url::Url::parse(crate::paths::CANVAS_BASE)
         .ok()
@@ -948,10 +876,8 @@ fn complete_saml(jar: &mut Jar, saml_url: &str) -> Result<String, LoginError> {
             continue;
         }
 
-        // Only once the assertion has actually been posted. Canvas hands out
-        // an anonymous `canvas_session` to the very first visitor — which the
-        // SAML start collected before any of this — so checking for the
-        // cookie alone reports success while authenticating nothing.
+        // Only after the assertion is posted: Canvas hands an anonymous
+        // `canvas_session` to every first visitor.
         if posted_assertion && jar.has(&canvas_host, "canvas_session") {
             return Ok(jar.header(&canvas_host));
         }
@@ -983,8 +909,7 @@ fn complete_saml(jar: &mut Jar, saml_url: &str) -> Result<String, LoginError> {
     ))
 }
 
-/// The auto-submit form carrying the assertion. Matched by the presence of a
-/// `SAMLResponse` field, since Okta's pages carry unrelated forms too.
+/// The form carrying a `SAMLResponse` field; Okta's pages carry others too.
 fn parse_saml_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
     let doc = scraper::Html::parse_document(html);
     let form_sel = scraper::Selector::parse("form").ok()?;
@@ -1004,32 +929,11 @@ fn parse_saml_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
     None
 }
 
-/// Keep-alive's entry point: confirm the saved session, and quietly rebuild it
-/// if it has lapsed. `Ok(false)` means the existing session was already fine.
-///
-/// A network failure is deliberately *not* an attempt to sign in again — an
-/// offline laptop is not an expired session, the same distinction
-/// `AuthProbe::Unreachable` exists to draw.
-pub fn ensure_session(data_dir: &std::path::Path) -> Result<bool, LoginError> {
-    let canvas = crate::canvas::Canvas::open(data_dir);
-    if canvas.has_session() {
-        match canvas.get("/api/v1/users/self") {
-            Ok(r) if r.ok() => return Ok(false),
-            Ok(r) if r.status == 401 => {}
-            Ok(r) => {
-                return Err(LoginError::Network(format!("Canvas returned HTTP {}", r.status)))
-            }
-            Err(e) => return Err(LoginError::Network(e)),
-        }
-    }
-    sign_in(data_dir).map(|_| true)
-}
-
 // ── Diagnosis ────────────────────────────────────────────────────────────────
 
-/// What the sign-in page actually looks like from here, for when the flow
-/// fails against the live Okta policy. Reports shapes and lengths, never
-/// values: a state token is a live credential for the duration of a login.
+/// What the sign-in page looks like from here, for when the flow fails.
+/// Reports shapes and lengths, never values: a state token is a live
+/// credential.
 pub fn diagnose() -> String {
     let mut out = String::new();
     let mut jar = Jar::default();
@@ -1100,11 +1004,6 @@ pub fn diagnose() -> String {
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
-fn data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    use tauri::Manager;
-    app.path().app_data_dir().map_err(|e| e.to_string())
-}
-
 #[tauri::command]
 pub fn okta_credential_status() -> CredentialStatus {
     credential_status()
@@ -1126,40 +1025,30 @@ pub fn okta_clear_credentials() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn okta_sign_in(app: tauri::AppHandle) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let dir = data_dir(&app)?;
-        run_sign_in(&app, &dir)
-    })
+    tauri::async_runtime::spawn_blocking(move || run_sign_in(&app, &crate::paths::data_dir()))
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// Sign in, then bring the rest of the app's auth state with it: the flag file
-/// `get_auth_status` reads and the event the UI listens on, so an automated
-/// sign-in is indistinguishable from the interactive one downstream.
+/// Sign in, then set the auth flag, state and event exactly as the
+/// interactive sign-in does.
 fn run_sign_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, String> {
     use tauri::{Emitter, Manager};
 
     match sign_in(dir) {
         Ok(_) => {
-            let flag = crate::auth::auth_flag_path(app);
-            if let Some(parent) = flag.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            std::fs::write(&flag, b"1").ok();
+            crate::paths::mark_authenticated(dir);
             if let Some(state) = app.try_state::<crate::auth::AuthState>() {
                 *state.0.lock().unwrap() = true;
             }
-            // Proof the headless path works on this account — the only
-            // condition under which a LaunchAgent that re-authenticates is
-            // worth installing. Push/WebAuthn orgs never reach here.
-            crate::keepalive::ensure_installed(app);
+            // The headless path works on this account, so a re-authenticating
+            // LaunchAgent is worth installing.
+            crate::keepalive::ensure_installed();
             app.emit("canvas-auth-success", "ok").ok();
             crate::canvas::Canvas::open(dir).whoami()
         }
         Err(e @ LoginError::BadPassword(_)) => {
-            // Drop the stored password rather than let the keep-alive replay a
-            // wrong one every six hours until Okta locks the account.
+            // Otherwise the keep-alive replays it until Okta locks the account.
             clear_password().ok();
             Err(e.to_string())
         }
@@ -1168,16 +1057,12 @@ fn run_sign_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, 
 }
 
 /// Called when a probe finds the session dead: rebuild it silently if
-/// automated sign-in is set up. `false` means the caller should fall back to
-/// asking the user, exactly as before.
+/// automated sign-in is set up. `false` means ask the user.
 pub fn try_auto_recover(app: &tauri::AppHandle) -> bool {
     if Credentials::load().is_none() {
         return false;
     }
-    let Ok(dir) = data_dir(app) else {
-        return false;
-    };
-    match run_sign_in(app, &dir) {
+    match run_sign_in(app, &crate::paths::data_dir()) {
         Ok(name) => {
             eprintln!("[oculus] session rebuilt without a browser ({name})");
             true
@@ -1246,9 +1131,7 @@ mod tests {
         assert_eq!(extract_state_token(&html).unwrap(), REAL_TOKEN);
     }
 
-    /// The bug this replaced: Okta's page names `stateToken` in inline script
-    /// logic before the config assigns it, so taking the first mention got a
-    /// fragment and introspect answered "The session has expired".
+    /// Inline script names `stateToken` before the config assigns it.
     #[test]
     fn skips_mentions_that_are_not_the_value() {
         let html = format!(
@@ -1301,8 +1184,7 @@ mod tests {
 
         assert_eq!(select_payload(&rem, Factor::Password).unwrap()["id"], "aut_pw");
 
-        // Google Authenticator must win over Okta Verify's TOTP, which
-        // advertises the same methodType but has a different seed.
+        // Google Authenticator wins over Okta Verify's TOTP (different seed).
         let totp = select_payload(&rem, Factor::Totp).unwrap();
         assert_eq!(totp["id"], "aut_ga");
         assert_eq!(totp["methodType"], "otp");
@@ -1330,9 +1212,7 @@ mod tests {
         })
     }
 
-    /// The loop bug this guards: OIE offers the factor chooser alongside every
-    /// challenge, so the challenge must be answered on what Okta says it is
-    /// challenging, not on where we think we are in the flow.
+    /// Answered on what Okta says it is challenging, not on flow position.
     #[test]
     fn answers_the_factor_okta_says_it_is_challenging() {
         let pw = challenge_state("okta_password", &["password"]);

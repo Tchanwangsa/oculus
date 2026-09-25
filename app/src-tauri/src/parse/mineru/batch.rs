@@ -1,34 +1,23 @@
 //! The submission queue: which documents travel in one `POST` together.
 //!
-//! Batching is not an optimisation here, it is how the API is shaped. One
-//! submit carries up to fifty tasks and returns one batch id, and the poll
-//! endpoint is per batch — so fifty files sent one at a time cost fifty
-//! submits and fifty poll loops, against a per-minute budget of fifty
-//! requests. Sending them together costs one of each.
-//!
-//! Against that, a parse queue hands files over one at a time, and a user
-//! watching one PDF should not wait for the next nineteen to arrive. The
-//! compromise is the Python's and it is unchanged: a short window — **five
-//! seconds or twenty files, whichever comes first** — and at most **eight
-//! batches in flight**. The window opens when the dispatcher wakes and finds
-//! work, not when a file is enqueued, so a lone file at 3am waits five seconds
-//! and goes.
+//! The API is batch-shaped: one submit and one poll loop per batch, against a
+//! per-minute submit budget. A window of `WINDOW` or `MAX_FILES`, whichever
+//! comes first, with at most `IN_FLIGHT` batches running. The window opens
+//! when the dispatcher finds work, so a lone file waits one window and goes.
 
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::parse::{ParseError, Progress};
+use crate::ratelimit::{hold, Permits};
 
 use super::client::{CloudDocument, DocumentOutput};
-use super::ledger::hold;
 
 pub const WINDOW: Duration = Duration::from_secs(5);
 pub const MAX_FILES: usize = 20;
 pub const IN_FLIGHT: usize = 8;
 
-/// What actually parses a batch. A trait rather than a concrete client so the
-/// queue has no opinion about the protocol — and so the batching rules can be
-/// tested without a server.
+/// What parses a batch; a trait so the batching rules test without a server.
 pub trait BatchRun: Send + Sync {
     fn run(&self, documents: &[Arc<CloudDocument>]) -> Vec<Result<DocumentOutput, ParseError>>;
 }
@@ -69,10 +58,8 @@ impl Batcher {
         }
     }
 
-    /// Queue one document and block until its batch has an answer for it.
-    ///
-    /// `key` is the client's identity: only jobs that would produce the same
-    /// `POST` — same token, same API root — may share a batch.
+    /// Queue one document and block until its batch answers. Only jobs with
+    /// the same `key` (`MinerUCloud::batch_key`) share a batch.
     pub fn submit(
         self: &Arc<Self>,
         key: u64,
@@ -86,8 +73,7 @@ impl Batcher {
             if !queue.dispatching {
                 queue.dispatching = true;
                 let batcher = self.clone();
-                // Started on first use rather than at boot: an app that never
-                // parses anything should not carry a parked thread.
+                // Started on first use, not at boot.
                 if let Err(error) = std::thread::Builder::new()
                     .name("mineru-cloud-batcher".into())
                     .spawn(move || batcher.dispatch())
@@ -105,8 +91,7 @@ impl Batcher {
     fn dispatch(self: Arc<Self>) {
         loop {
             let batch = self.next_batch();
-            // Blocks the dispatcher once eight batches are running, which is
-            // the backpressure: work keeps queueing, nothing else is sent.
+            // Backpressure: work keeps queueing, nothing else is sent.
             self.permits.acquire();
             let batcher = self.clone();
             if std::thread::Builder::new()
@@ -158,12 +143,8 @@ impl Batcher {
     }
 }
 
-/// Run one batch and hand every document its answer.
-///
-/// A panic in the client would otherwise park every caller in `wait` forever,
-/// so it is caught and turned into a failure for the documents that do not
-/// have one yet. `CloudDocument::finish` keeps the first answer, so a document
-/// the client already failed properly keeps its real reason.
+/// Run one batch and hand every document its answer. A panic is caught, or
+/// every caller would park in `wait` forever; `finish` keeps the first answer.
 fn run(batch: Vec<Queued>) {
     let Some(runner) = batch.first().map(|job| job.runner.clone()) else {
         return;
@@ -190,31 +171,6 @@ fn run(batch: Vec<Queued>) {
                 document.finish(Err(ParseError::Io("the MinerU batch worker panicked".into())));
             }
         }
-    }
-}
-
-/// A counting semaphore. `std` has none, and this needs four lines.
-struct Permits {
-    free: Mutex<usize>,
-    wake: Condvar,
-}
-
-impl Permits {
-    fn new(count: usize) -> Self {
-        Self { free: Mutex::new(count), wake: Condvar::new() }
-    }
-
-    fn acquire(&self) {
-        let mut free = hold(&self.free);
-        while *free == 0 {
-            free = self.wake.wait(free).unwrap_or_else(std::sync::PoisonError::into_inner);
-        }
-        *free -= 1;
-    }
-
-    fn release(&self) {
-        *hold(&self.free) += 1;
-        self.wake.notify_one();
     }
 }
 
@@ -303,10 +259,7 @@ mod tests {
     #[test]
     fn a_full_batch_closes_the_window_early() {
         let recorder = Recorder::new(Duration::ZERO);
-        // A ten-second window nothing ever waits out: four jobs at two per
-        // batch have to close on the count, not the clock. (A fifth job would
-        // correctly sit out the whole window on its own — the window is the
-        // other half of the rule, not a bug.)
+        // A ten-second window nothing waits out: batches close on the count.
         let batcher = Arc::new(Batcher::new(Duration::from_secs(10), 2, 8));
         let started = Instant::now();
         for handle in submit_all(&batcher, recorder.clone(), 1, 4) {
