@@ -25,17 +25,11 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 
-/**
- * Office formats the scraper stores as themselves plus a derived sibling PDF
- * ("deck.pptx" → "deck.pptx.pdf"). Mirrors OFFICE_EXTS in paths.rs.
- */
+/** Office formats stored with a derived sibling PDF ("deck.pptx" →
+ *  "deck.pptx.pdf"). Mirrors OFFICE_EXTS in paths.rs. */
 export const OFFICE_EXTS = ["pptx", "docx", "xlsx", "ppt", "doc", "xls"];
 
-/**
- * The same set as a SQL list, for the queries that select the files the
- * PDF pipeline owns (`lower(file_type) IN …`). Built from OFFICE_EXTS so a new
- * format reaches the parse sweep and the embed queue by being added once.
- */
+/** PDF plus OFFICE_EXTS as a SQL list, for `lower(file_type) IN …`. */
 export const PDF_BACKED_SQL_LIST = `('pdf', ${OFFICE_EXTS.map((e) => `'${e}'`).join(", ")})`;
 
 function ext(filename: string): string {
@@ -47,11 +41,8 @@ export function isOfficeFile(filename: string): boolean {
   return OFFICE_EXTS.includes(ext(filename));
 }
 
-/**
- * The PDF that viewing/parsing/embedding operate on: the file itself for real
- * PDFs, the derived sibling for Office documents, null for everything else.
- * Mirrors `doc_pdf_rel` in paths.rs.
- */
+/** The PDF that viewing/parsing/embedding use: the file itself, the derived
+ *  sibling for Office documents, else null. Mirrors `doc_pdf_rel` in paths.rs. */
 export function docPdfRelPath(file: { filename: string; relative_path: string }): string | null {
   const e = ext(file.filename);
   if (e === "pdf") return file.relative_path;
@@ -64,12 +55,8 @@ export function isPdfBacked(filename: string): boolean {
   return ext(filename) === "pdf" || isOfficeFile(filename);
 }
 
-/**
- * The parser's markdown output for a PDF-backed file. Artifacts are keyed on
- * the parsed PDF's stem, which for both plain PDFs ("a.pdf" → "a.md") and
- * Office docs ("deck.pptx" via "deck.pptx.pdf" → "deck.pptx.md") is the
- * library path with any trailing ".pdf" gone.
- */
+/** The parser's markdown for a PDF-backed file: "a.pdf" → "a.md",
+ *  "deck.pptx" → "deck.pptx.md". */
 export function parsedMdRelPath(file: { filename: string; relative_path: string }): string | null {
   const e = ext(file.filename);
   if (e === "pdf") return file.relative_path.replace(/\.pdf$/i, ".md");
@@ -77,13 +64,8 @@ export function parsedMdRelPath(file: { filename: string; relative_path: string 
   return null;
 }
 
-/**
- * The icon a file wears in a list that mixes categories, matching the glyph its
- * own subject tab uses — a page is a `FileText`, an announcement a `Megaphone`,
- * a downloaded artefact whatever its extension says. Only downloads carry a
- * meaningful extension, which is why `fileIconFor` is the fallback and not the
- * rule.
- */
+/** A file's icon in a mixed-category list, matching its subject tab's glyph;
+ *  only downloads fall through to `fileIconFor`. */
 export function categoryIconFor(file: {
   category: string | null;
   filename: string;
@@ -147,15 +129,9 @@ export function fileIconFor(filename: string): Icon {
 }
 
 /**
- * The file a parsed-markdown path belongs to — the inverse of
- * [`parsedMdRelPath`]. An agent reads the markdown, so the markdown is the
- * path it cites back, but `X.md` is a parser artefact with no row of its own:
- * the file the library knows is the PDF it was parsed from ("a.md" → "a.pdf")
- * or, for an Office document, the document itself ("deck.pptx.md" →
- * "deck.pptx").
- *
- * Only asked after a direct lookup has missed, so markdown that *is* a file in
- * its own right — a page, an announcement, an Ed thread — never reaches here.
+ * The inverse of `parsedMdRelPath`, for an agent citing parser markdown that
+ * has no row of its own: "a.md" → "a.pdf", "deck.pptx.md" → "deck.pptx". Only
+ * called after a direct lookup misses.
  */
 export function parsedMdSource(path: string): string | null {
   if (!/\.md$/i.test(path)) return null;

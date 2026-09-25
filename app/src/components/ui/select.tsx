@@ -53,9 +53,7 @@ function SelectTrigger({
 function SelectContent({
   className,
   children,
-  // "item-aligned" positions the popup over its trigger by scrolling the
-  // viewport by hand; popper anchors it beside the trigger and flips near a
-  // window edge, which is the behaviour every other popup here has.
+  // Popper, not "item-aligned", so it anchors and flips like every other popup.
   position = "popper",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {

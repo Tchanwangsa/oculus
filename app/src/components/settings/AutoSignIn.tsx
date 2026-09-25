@@ -17,12 +17,8 @@ type CredentialStatus = {
 };
 
 /**
- * Stores the credentials that let Oculus answer the Okta sign-in itself.
- *
- * The setup key is the part people get stuck on: a TOTP code is a one-way
- * function of a seed, so it cannot be recovered from codes the app is already
- * showing. The only source is the enrolment screen, which is why the hint
- * points there rather than explaining the maths.
+ * Stores the credentials that let Oculus answer the Okta sign-in itself. The
+ * TOTP setup key can't be derived from codes, only from the enrolment screen.
  */
 export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
   const [status, setStatus] = useState<CredentialStatus | null>(null);
@@ -57,7 +53,7 @@ export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
         password,
         totpSecret: secret,
       });
-      // Prove it works now rather than at 3am when a sync needs it.
+      // Prove it works now rather than when a sync needs it.
       await invoke<string>("okta_sign_in");
       setPassword("");
       setSecret("");

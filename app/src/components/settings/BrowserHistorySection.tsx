@@ -24,16 +24,9 @@ import { faviconForHost } from "@/hooks/useBrowserTabs";
 import { useBrowserStore } from "@/stores/browserStore";
 
 /**
- * Where the in-app browser has been, grouped by the day it was last there.
- *
- * It lives in Settings rather than as a page of its own because that is what
- * it is for: this is where you come to *forget* something, not to navigate.
- * Anything you actually want to reach again is a keystroke away in the address
- * bar, which ranks the same table (`app/src/lib/browserHistory.ts`).
- *
- * One row per URL, so a page you open every morning appears once, under today
- * — the table has no per-visit log to draw a fuller timeline from, and adding
- * one would mean keeping a record nothing else asks for.
+ * In-app browser history, grouped by the day each URL was last visited — here
+ * to forget entries; the address bar ranks the same table
+ * (`app/src/lib/browserHistory.ts`). One row per URL: there is no visit log.
  */
 export function BrowserHistorySection() {
   const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
@@ -108,8 +101,6 @@ export function BrowserHistorySection() {
         </Button>
       </div>
 
-      {/* A list this long scrolls inside its own box rather than growing the
-          settings page — the sections under it stay reachable. */}
       <div className="mt-3 max-h-[420px] overflow-y-auto">
         {entries === null ? (
           <p className="py-2 text-xs text-muted-foreground">Loading…</p>

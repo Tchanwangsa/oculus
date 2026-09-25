@@ -14,32 +14,21 @@ import {
 import type { ImportedFile } from "@/lib/uploads";
 
 /**
- * The student's own notes: markdown they write in the app, per subject.
- *
- * A document is the same shape as an upload with the bytes coming from a
- * textarea instead of Finder. Rust keeps it at `courses/<code>/documents/
- * <title>.md`, the row is `category = 'document'`, and from there it is an
- * ordinary library file — ⌘K finds it, the side panel renders it, the chat
- * agent reads it under `courses/`. **The title is the filename** without its
- * `.md`; there is no separate title column to drift from the name on disk.
- *
- * What this module adds over `uploads.ts` is a write path and a reconcile: a
- * note is edited in place rather than copied in once, and the folder is plain
- * markdown on disk that a text editor, or an agent handed the folder, can
- * change behind the app's back.
+ * The student's own markdown notes, per subject, at
+ * `courses/<code>/documents/<title>.md` with `category = 'document'` — an
+ * ordinary library file otherwise. **The title is the filename**; there is no
+ * title column. The folder can change behind the app's back, hence
+ * {@link reconcileDocuments}.
  */
 
-/** Fired after a document is created, renamed, deleted or found on disk, so
- *  open lists refresh — `useSubjectFiles` listens for it directly. Not fired
- *  on a save: the row's size and stamps change, but nothing a list is looking
- *  at, and a note autosaves every pause. */
+/** Fired when a document is created, renamed, deleted or found on disk — not
+ *  on save, which changes nothing a list shows. */
 export const DOCUMENTS_CHANGED_EVENT = "oculus:documents-changed";
 
 const announce = () =>
   window.dispatchEvent(new CustomEvent(DOCUMENTS_CHANGED_EVENT));
 
-/** A row for a file Rust just reported, read back so the caller has the full
- *  `DbFile` a route or an editor wants. */
+/** Upsert the row for a file Rust just reported and read it back. */
 async function rowFor(
   subjectId: number,
   file: ImportedFile,
@@ -57,11 +46,7 @@ async function rowFor(
   return row;
 }
 
-/**
- * A new, empty document. A taken title steps aside on disk (`notes.md` →
- * `notes-2.md`) rather than overwriting, the same rule an upload follows, and
- * the row is written before anything can point at it.
- */
+/** A new, empty document; a taken title steps aside (`notes-2.md`). */
 export async function createDocument(
   subject: { id: number; code: string },
   title = "Untitled",
@@ -75,9 +60,8 @@ export async function createDocument(
   return row;
 }
 
-/** Write the document's text and bring the row up to date with it. The row
- *  is touched as *seen*: this is the student's own edit, not a change for the
- *  unseen dot to flag. */
+/** Write the text and touch the row as *seen* — the student's own edit is not
+ *  news for the unseen dot. */
 export async function saveDocument(file: DbFile, content: string): Promise<void> {
   const bytes = await invoke<number>("write_document", {
     relativePath: file.relative_path,
@@ -86,12 +70,8 @@ export async function saveDocument(file: DbFile, content: string): Promise<void>
   await touchFileRow(file.id, bytes, true);
 }
 
-/**
- * Rename a document, which is to say move its file. Returns the path it now
- * has — the one it had when the name was unchanged, or when the new name was
- * taken and Rust stepped it aside to something close. The row keeps its id,
- * so a page holding it can follow the move without losing its place.
- */
+/** Rename (move) a document, returning its path now — which may be a stepped-
+ *  aside name if the title was taken. The row keeps its id. */
 export async function renameDocument(file: DbFile, title: string): Promise<string> {
   const moved = await invoke<ImportedFile>("rename_document", {
     relativePath: file.relative_path,
@@ -105,20 +85,10 @@ export async function renameDocument(file: DbFile, title: string): Promise<strin
 }
 
 /**
- * Write a pasted picture beside the note and answer the path to link it by —
- * `assets/<stamp>.png`, relative to the note itself.
- *
- * Beside the note rather than in `agents/attachments/`, where a composer's
- * picture goes (`app/src/lib/attachments.ts`), because a note is a library
- * file: a relative link resolves for the preview, for the file viewer and for
- * anything else handed the folder, and a picture under `agents/` would
- * resolve for none of them. Rust names the file and sniffs the bytes, so
- * nothing of the clipboard's reaches the filesystem
- * (`app/src-tauri/src/files.rs`).
- *
- * The write happens on arrival, not on a later save: there is no send to
- * defer to here, and a link cannot point at a file that will be written
- * afterwards.
+ * Write a pasted picture beside the note, returning `assets/<stamp>.png`
+ * relative to it. Beside the note, not in `agents/attachments/`, so the
+ * relative link resolves for anything handed the folder. Written on arrival,
+ * since a link cannot point at a file not yet written.
  */
 export async function attachDocumentImage(file: DbFile, picture: Blob): Promise<string> {
   return invoke<string>("attach_document_image", {
@@ -127,8 +97,7 @@ export async function attachDocumentImage(file: DbFile, picture: Blob): Promise<
   });
 }
 
-/** The same for a picture dropped from Finder, which arrives as a path: the
- *  bytes are read in Rust and never cross the IPC. */
+/** The same for a dropped path; the bytes are read in Rust. */
 export async function attachDocumentFile(file: DbFile, path: string): Promise<string> {
   return invoke<string>("attach_document_file", {
     relativePath: file.relative_path,
@@ -136,8 +105,7 @@ export async function attachDocumentFile(file: DbFile, path: string): Promise<st
   });
 }
 
-/** Delete a document: the file, then its row. There is no trash — the note is
- *  gone — which is why the page asks first. */
+/** Delete the file, then its row. No trash, so the page confirms first. */
 export async function deleteDocument(file: DbFile): Promise<void> {
   await invoke("delete_document", { relativePath: file.relative_path });
   await deleteFileRow(file.id);
@@ -145,15 +113,10 @@ export async function deleteDocument(file: DbFile): Promise<void> {
 }
 
 /**
- * Bring the subject's `document` rows into line with its `documents/` folder.
- *
- * The folder is not this module's alone: the student can write a note into it
- * from any text editor, or drag one out in Finder. Neither touches the
- * database, so the list would not show the first and would keep showing the
- * second. A file with no row gets one; a row with no file loses it; a file
- * whose size no longer matches its row was rewritten by someone else, and its
- * row is touched *unseen* so the recency dot says so. Returns whether
- * anything changed, and has already announced it if so.
+ * Sync the subject's `document` rows with its `documents/` folder, which other
+ * editors can change: new files get rows, missing files lose them, and a size
+ * change is touched *unseen*. Returns whether anything changed (already
+ * announced).
  */
 export async function reconcileDocuments(
   subject: { id: number; code: string },

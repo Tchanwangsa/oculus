@@ -13,15 +13,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { getRecents, relativeTime, type RecentEntry } from "@/lib/recents";
-import { dateFromSlug, humanizeSlug } from "@/lib/format";
+import { dateFromSlug, fmtShortDate, humanizeSlug } from "@/lib/format";
 import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { lecturePagePath } from "@/lib/lectures";
 import { getLectures, type DbFile, type Lecture } from "@/lib/db";
-
-function fmtDay(d: Date): string {
-  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-}
 
 /**
  * Subject home: where you left off, then what's new. Counts and per-tab stats
@@ -92,7 +88,7 @@ export default function SubjectOverviewPage() {
                   {nextLecture.title}
                 </p>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  {fmtDay(new Date(nextLecture.date))}
+                  {fmtShortDate(new Date(nextLecture.date))}
                   {nextLecture.progress_seconds > 5 ? " · in progress" : ""}
                 </p>
               </div>
@@ -124,7 +120,7 @@ export default function SubjectOverviewPage() {
                     key={f.id}
                     file={f}
                     label={humanizeSlug(f.filename)}
-                    meta={posted ? fmtDay(posted) : undefined}
+                    meta={posted ? fmtShortDate(posted) : undefined}
                   />
                 );
               })}
@@ -161,11 +157,8 @@ function EmptyState() {
   );
 }
 
-/**
- * Horizontal card row driven by the flanking arrow buttons (no visible
- * scrollbar). Arrows only render on their side while there is somewhere left
- * to go.
- */
+/** Card row scrolled by flanking arrows, each shown only while there is more
+ *  that way. */
 function RecentsCarousel({
   recents, files, subjectId,
 }: {

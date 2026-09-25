@@ -1,12 +1,7 @@
 import { create } from "zustand";
 
-/**
- * Whether the ⌘K palette is up.
- *
- * A store rather than local state in `AppLayout` because the two things that
- * open it are far apart: the menu event the palette listens for itself, and the
- * sidebar's Search row. Nothing else needs to know it exists.
- */
+/** Whether the ⌘K palette is up — a store because the sidebar's Search row
+ *  opens it too. */
 interface PaletteState {
   open: boolean;
   setOpen: (open: boolean) => void;

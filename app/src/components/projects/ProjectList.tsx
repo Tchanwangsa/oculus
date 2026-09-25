@@ -10,12 +10,11 @@ import { InlineAdd } from "./InlineAdd";
 import { ProjectMenu } from "./ProjectMenu";
 import { AgentMark, DueChip, ProjectProgress } from "./TaskMarks";
 import { projectHref } from "./projectHref";
+import { ListCard } from "@/components/ui/PageParts";
 
 const COLLAPSED_KEY = "oculus-projects-groups-collapsed";
 
-/** Which groups are folded, by key. The *collapsed* ones are stored, so a
- *  subject that gets its first project arrives open without being listed
- *  anywhere first — `ThreadList`'s rule. */
+/** Stores the *collapsed* groups, so a new group arrives open. */
 function loadCollapsed(): Set<string> {
   try {
     const raw: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]");
@@ -25,35 +24,17 @@ function loadCollapsed(): Set<string> {
   }
 }
 
-/**
- * What a row's overflow menu does, bound to the row it was opened on.
- *
- * One object rather than four props at every hop, because it is threaded three
- * levels down — row, box, list — and none of the levels in between has an
- * opinion about any of them. It is **optional** the whole way: a list that
- * passes nothing draws no menu, which is a truer answer than a list that has
- * to invent four handlers to say it has no actions to offer.
- *
- * Every callback takes the project, so a page can act on a row without the row
- * closing over which page it is in.
- */
+/** A row's overflow-menu actions; omit to draw no menu. */
 export interface ProjectRowActions {
-  /** The new name, trimmed and known to differ — {@link ProjectMenu} swallows
-   *  the no-op. */
+  /** Trimmed and changed — {@link ProjectMenu} drops no-ops. */
   onRename: (project: DbProject, name: string) => void;
   onArchive: (project: DbProject) => void;
   onUnarchive: (project: DbProject) => void;
   onDelete: (project: DbProject) => void;
 }
 
-/**
- * Projects under the subject they are scoped to, in the order the list came
- * back in, with the subject-less ones under "Personal".
- *
- * A subject that has since been deleted falls back into Personal rather than
- * vanishing with its heading, which is what `ThreadList.group` does with a
- * thread whose subject is gone.
- */
+/** Groups by subject; subject-less or deleted-subject projects go under
+ *  "Personal". */
 function group(
   projects: DbProject[],
   subjects: Subject[],
@@ -87,19 +68,9 @@ function group(
   return out;
 }
 
-/**
- * One project as a row: what it is called, what it is about, how far along it
- * is, when it is due.
- *
- * The link covers the row's *contents* and the menu sits beside it as a
- * sibling, not inside it. An anchor wrapping the whole row is the simpler
- * markup and was the earlier shape, but a button nested in a link navigates
- * when you click it — and there is no cancelling that from the button, since
- * the anchor is the thing the browser acts on. So the hover surface moved up
- * to the wrapper, which is what keeps the row lighting as one row while the
- * pointer is on the menu.
- */
-export function ProjectRow({
+/** The menu is a sibling of the link, not inside it: a button nested in an
+ *  anchor navigates on click. */
+function ProjectRow({
   project,
   counts,
   actions,
@@ -108,10 +79,7 @@ export function ProjectRow({
   project: DbProject;
   counts: ProjectTaskCounts | undefined;
   actions?: ProjectRowActions;
-  /** Drawn as something you have put away: the name steps back and the
-   *  progress meter gives up its bar. An archived project is a record, not
-   *  work in flight, and a half-filled bar on one reads as a project that
-   *  stalled. */
+  /** Archived styling: muted name, count instead of a progress bar. */
   quiet?: boolean;
 }) {
   return (
@@ -158,11 +126,8 @@ export function ProjectRow({
             onArchive={() => actions.onArchive(project)}
             onUnarchive={() => actions.onUnarchive(project)}
             onDelete={() => actions.onDelete(project)}
-            /* Faded rather than `hidden`, for two reasons: a display-none
-               button cannot be tabbed to, and a button that only exists on
-               hover would re-lay the row out as the pointer crosses it. It
-               stays up while its own popover is open, or the menu would be
-               anchored to something invisible. */
+            /* Faded, not `hidden`, so it stays tabbable and anchors its
+               open popover. */
             className="opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
           />
         </span>
@@ -171,8 +136,6 @@ export function ProjectRow({
   );
 }
 
-/** The bordered column a group's rows sit in — shared so the index and the
- *  subject tab draw the same list. */
 function RowBox({
   projects,
   counts,
@@ -185,21 +148,17 @@ function RowBox({
 }: {
   projects: DbProject[];
   counts: Map<number, ProjectTaskCounts>;
-  /** Omitted where the box is not somewhere new work starts — the archived
-   *  list is a record, and a composer in it would create an active project
-   *  under an "Archived" heading. */
+  /** Omitted for the archived list. */
   onCreate?: (name: string) => void;
   addLabel?: string;
   emptyCopy: string;
   actions?: ProjectRowActions;
   quiet?: boolean;
-  /** Open the composer as a focused field rather than a button — what the
-   *  group heading's `+` does from outside the box. The `key` below remounts
-   *  it so arming works a second time. */
+  /** Open the composer focused; the `key` below remounts it so it re-arms. */
   armed?: boolean;
 }) {
   return (
-    <div className="divide-y divide-border-subtle overflow-hidden rounded-lg border border-border">
+    <ListCard>
       {projects.length === 0 && (
         <p className="px-3 py-5 text-center text-xs text-muted-foreground">{emptyCopy}</p>
       )}
@@ -223,11 +182,10 @@ function RowBox({
           />
         </div>
       )}
-    </div>
+    </ListCard>
   );
 }
 
-/** Every project, grouped by subject — the index. */
 export function ProjectGroups({
   projects,
   counts,
@@ -236,8 +194,6 @@ export function ProjectGroups({
   actions,
 }: {
   projects: DbProject[];
-  /** Finished/total per project id, from the store — one grouped read for the
-   *  whole list rather than a query per row. */
   counts: Map<number, ProjectTaskCounts>;
   subjects: Subject[];
   /** `null` is the Personal group. */
@@ -245,7 +201,6 @@ export function ProjectGroups({
   actions?: ProjectRowActions;
 }) {
   const [folded, setFolded] = useState<Set<string>>(loadCollapsed);
-  /** The group whose composer the heading's `+` has just opened. */
   const [arming, setArming] = useState<string | null>(null);
   const groups = useMemo(() => group(projects, subjects), [projects, subjects]);
 
@@ -262,9 +217,7 @@ export function ProjectGroups({
       return next;
     });
 
-  // The Personal group is always offered, even empty: it is where a project
-  // that belongs to no subject goes, and it cannot be discovered if it only
-  // appears once one exists.
+  // Personal is always shown, even empty, so it can be discovered.
   const shown = groups.some((g) => g.key === "personal")
     ? groups
     : [
@@ -294,8 +247,7 @@ export function ProjectGroups({
                 className="flex min-w-0 items-center gap-1.5 text-left transition-colors hover:opacity-70"
               >
                 {subject && <SubjectIcon code={subject.code} size={12} />}
-                {/* Not an <h2>: a heading element cannot live inside a button,
-                    so it borrows the base heading rule's face instead. */}
+                {/* Not an <h2>: headings can't nest in a button. */}
                 <span className="truncate font-display text-[13px] font-semibold tracking-tight text-foreground">
                   {g.label}
                 </span>
@@ -315,8 +267,6 @@ export function ProjectGroups({
                 type="button"
                 aria-label={`New project in ${g.label}`}
                 title={`New project in ${g.label}`}
-                /* A project started from a folded group would be started out
-                   of sight, so the group opens with the composer. */
                 onClick={() => {
                   setOpen(g.key, true);
                   setArming(g.key);
@@ -349,28 +299,11 @@ export function ProjectGroups({
   );
 }
 
-/**
- * Whether the archived section is open, stored the *other* way round from
- * {@link COLLAPSED_KEY}.
- *
- * That key stores which groups are folded so that anything new — a subject's
- * first project — arrives open without having to be listed somewhere first.
- * Here the wanted default is the opposite: archived is closed until you go
- * looking, so what is worth storing is the one state that differs from the
- * default. Absent means shut, which is what a first run should be.
- */
+/** Stores *open* (the inverse of {@link COLLAPSED_KEY}): archived defaults
+ *  shut. */
 const ARCHIVED_OPEN_KEY = "oculus-projects-archived-open";
 
-/**
- * The projects you have put away, under everything else.
- *
- * Drawn by its caller only when it has rows, on the index's own rule that a
- * heading appears once there is something under it — an always-present
- * "Archived (0)" would be the one empty heading on a page arranged to have
- * none. Personal is the deliberate exception there, because it is the only way
- * to discover where a subject-less project goes; archived has a way in already,
- * which is having archived something.
- */
+/** The caller renders this only when there are archived projects. */
 export function ArchivedProjects({
   projects,
   counts,
@@ -423,7 +356,6 @@ export function ArchivedProjects({
   );
 }
 
-/** One subject's projects, ungrouped — the per-subject tab. */
 export function ProjectFlatList({
   projects,
   counts,

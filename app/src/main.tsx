@@ -5,11 +5,8 @@ import "./lib/tauriEvents";
 import "./index.css";
 import App from "./App";
 
-// A render crash unmounts the tree and leaves a blank window with nothing to
-// read — there is no devtools console in a release webview and no Vite overlay
-// for a runtime throw. So paint whatever threw, on top, to be read off the
-// screen. Escape dismisses it, and a second error replaces the box rather than
-// stacking another one: the point is to read the first thing that broke.
+// A release webview has no console, so paint uncaught errors over the window.
+// Escape dismisses; a later error replaces the box rather than stacking.
 const OVERLAY_ATTR = "data-debug-overlay";
 
 function paint(label: string, err: unknown) {
@@ -27,16 +24,10 @@ function paint(label: string, err: unknown) {
   document.body.appendChild(box);
 }
 
-// "ResizeObserver loop completed with undelivered notifications" is the
-// browser reporting its own frame budget, not a fault: a callback resized
-// something the observer watches, so delivery continues next frame. It arrives
-// as a window `error` event with a null `error` — indistinguishable from a
-// crash to the listener below, and a window resize fires every observer in
-// every open tab at once, so it blacked out a working app. Ignore it by name.
-// The second is pdf.js's global `selectionchange` handler walking backwards
-// with no null guard, out of a text layer it detached itself — unguarded
-// upstream too, and it fires for any selection in the app while a PDF is open.
-// A bare identifier only, so our own `p.node.previousSibling` still surfaces.
+// Not faults: the ResizeObserver loop notice is the browser deferring delivery
+// a frame, and the `previousSibling` one is pdf.js's unguarded global
+// `selectionchange` handler. A bare identifier only, so our own
+// `p.node.previousSibling` still surfaces.
 const BENIGN = /^ResizeObserver loop|evaluating '\w+\.previousSibling'/;
 
 window.addEventListener("error", (ev) => {

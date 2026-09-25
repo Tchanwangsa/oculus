@@ -1,41 +1,23 @@
 @import "tailwindcss";
 
-/* Inter Variable covers 100–900 continuously, so `font-medium` (500) and
-   `font-semibold` (600) resolve to real weights rather than snapping to a
-   neighbouring cut. One file, every weight. */
 @import "@fontsource-variable/inter";
 
-/* The italic cut has to be imported separately — Fontsource's default entry is
-   the upright only. Without it WebKit fakes italics by shearing the roman
-   glyphs, which slants far harder than a real italic and mangles the letters
-   that actually change shape (a, e, f), so a quoted paragraph turns into a
-   wall of leaning text. Manrope has no italic upstream, so headings still
-   synthesise — they're short and rarely italic. */
+/* Fontsource's default entry is upright only; without the italic cut WebKit
+   synthesises italics by shearing the roman. */
 @import "@fontsource-variable/inter/wght-italic.css";
 
-/* Manrope carries the headings. Its wider, rounder forms and near-geometric
-   caps give a title its own voice next to Inter's UI text — the two read as
-   display vs. interface rather than as two competing sans faces. Variable, so
-   600/700 are real weights. */
+/* Headings. */
 @import "@fontsource-variable/manrope";
 
-/* Enter/exit keyframes (animate-in, fade-in-0, zoom-in-95, slide-in-from-*)
-   that the shadcn primitives drive off Radix `data-[state]` attributes. */
+/* Enter/exit keyframes the shadcn primitives use. */
 @import "tw-animate-css";
 
-/* Theme is toggled by a `.dark` class on <html> (see lib/theme.ts), not by the
-   OS preference — so `dark:` has to follow the class, which is not Tailwind
-   v4's default. Without this, every `dark:` utility silently tracks the OS
-   instead of the app's own theme setting. */
+/* `dark:` follows the `.dark` class (lib/theme.ts), not the OS preference. */
 @custom-variant dark (&:is(.dark *));
 
 /* ─── Tailwind v4 custom theme ─────────────────────────────────── */
 @theme {
-  /* ── Neutral ramp ───────────────────────────────────────────────
-     Dead-neutral greys (equal R/G/B), not Tailwind's blue-tinted slate and
-     not a warm cream. Neutral is what lets the indigo accent sit on the page
-     without clashing: any hue in the greys reads as a second, competing
-     colour next to it. */
+  /* ── Neutral ramp: equal R/G/B, so no hue competes with the indigo ── */
   --color-ink-50:  #ffffff;
   --color-ink-100: #f9f9f9;
   --color-ink-200: #f4f4f4;
@@ -47,9 +29,7 @@
   --color-ink-800: #2b2b2b;
   --color-ink-900: #0d0d0d;
 
-  /* Brand — muted indigo. It is both the button fill (`primary`) and the
-     accent (`brand`): one colour doing both jobs is what keeps the app
-     recognisable rather than generic greyscale. */
+  /* Brand — muted indigo, behind both `primary` and `brand`. */
   --color-indigo-300: #a5aded;
   --color-indigo-400: #8b93e8;
   --color-indigo-500: #6e79d6;
@@ -61,13 +41,10 @@
   --color-background:        #f9f9f9;
   --color-foreground:        #0d0d0d;
 
-  /* `card` is the floating content pane, one step *lighter* than the ground —
-     the shell recedes, the document comes forward. */
+  /* The floating content pane, one step lighter than the ground. */
   --color-card:              #ffffff;
   --color-card-foreground:   #0d0d0d;
 
-  /* shadcn floats popovers/dropdowns/selects on `popover`, one step above the
-     page rather than flush with it — same value as a card here. */
   --color-popover:           #ffffff;
   --color-popover-foreground:#0d0d0d;
 
@@ -78,8 +55,6 @@
   --color-border:            #e5e5e5;
   --color-border-subtle:     #efefef;
 
-  /* `input` (field borders) and `ring` (focus) are shadcn's names for what this
-     palette already had — kept as aliases so stock components need no edits. */
   --color-input:             #dedede;
   --color-ring:              #5e6ad2;
 
@@ -92,9 +67,8 @@
   --color-primary-active:    #414a9b;
   --color-primary-foreground:#ffffff;
 
-  /* `brand` is the same indigo used as an *accent* rather than a fill: links,
-     selection, in-flight progress, new-item chips. Split from `primary` so
-     those can be tuned (or muted) without restyling every button. */
+  /* The indigo as an accent, not a fill (links, selection, progress) — see
+     CLAUDE.md "UI conventions". */
   --color-brand:             #5e6ad2;
   --color-brand-hover:       #505bbd;
   --color-brand-muted:       #eef0fb;
@@ -103,10 +77,7 @@
   --color-secondary:         #ececec;
   --color-secondary-foreground: #0d0d0d;
 
-  /* NB: in shadcn's vocabulary `accent` is the quiet hover/highlight surface
-     (menu items, ghost buttons) — NOT the brand colour. That is `primary` /
-     `brand`. Pointing `accent` at the indigo would make every hovered menu
-     row a solid slab. */
+  /* shadcn's `accent` is the quiet hover surface, NOT the brand colour. */
   --color-accent:            #ececec;
   --color-accent-foreground: #0d0d0d;
 
@@ -116,18 +87,14 @@
   --color-success:           #16a34a;
   --color-warning:           #b45309;
 
-  /* The sidebar shares the ground colour — it is not a panel with its own
-     fill. Separation comes from the content card's border, not a rule. */
+  /* The sidebar shares the ground; the content card's border separates. */
   --color-sidebar:           #f9f9f9;
   --color-sidebar-border:    #e5e5e5;
   --color-sidebar-item-hover:#ececec;
   --color-sidebar-item-active:#e3e3e3;
 
-  /* Chart categorical palette. Validated (CVD separation, lightness band,
-     chroma, normal-vision floor) against the card surface in both modes —
-     the slot ORDER is part of the safety guarantee, don't reshuffle. Sub-3:1
-     contrast slots are legal because every mark ships a visible text label.
-     `chart-other` is the de-emphasis gray for folded tails, never a series. */
+  /* Chart palette, validated for colour-vision separation on `card` — the slot
+     ORDER is part of that, don't reshuffle. `chart-other` is never a series. */
   --color-chart-1: #5e6ad2;
   --color-chart-2: #1baf7a;
   --color-chart-3: #eda100;
@@ -137,14 +104,10 @@
 
   /* ── Typography ─────────────────────────────────────────────── */
   --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
-  /* Headings and hero copy. Applied to h1–h4 in @layer base, so most headings
-     pick it up without touching the markup; `font-display` is the utility for
-     titles that aren't heading elements. */
   --font-display: "Manrope Variable", "Manrope", "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
 
-  /* Display sizes for hero copy. Manrope runs a touch wide, so display sizes
-     carry more negative tracking than the UI scale. */
+  /* Manrope runs wide, so display sizes carry negative tracking. */
   --text-display: 2.125rem;
   --text-display--line-height: 1.15;
   --text-display--letter-spacing: -0.028em;
@@ -152,9 +115,7 @@
   --text-display-sm--line-height: 1.25;
   --text-display-sm--letter-spacing: -0.022em;
 
-  /* ── Radius ──────────────────────────────────────────────────
-     Rounder than before across the board; buttons and chips go fully round
-     (`rounded-full`) rather than taking a step on this scale. */
+  /* ── Radius (buttons and chips are `rounded-full`, not on this scale) ── */
   --radius-xs:  4px;
   --radius-sm:  6px;
   --radius-md:  8px;
@@ -163,8 +124,7 @@
   --radius-2xl: 22px;
   --radius-3xl: 28px;
 
-  /* ── Shadows ─────────────────────────────────────────────────
-     Cast in warm black so a raised surface doesn't turn the paper grey. */
+  /* ── Shadows ───────────────────────────────────────────────── */
   --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.04);
   --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.04);
@@ -235,8 +195,7 @@
   --color-sidebar-item-hover:#262626;
   --color-sidebar-item-active:#2f2f2f;
 
-  /* Chart palette, re-stepped for the dark card surface (not a lightness
-     flip) and validated as its own set. */
+  /* Re-stepped and validated for the dark card, not a lightness flip. */
   --color-chart-1: #7b85e0;
   --color-chart-2: #199e70;
   --color-chart-3: #c98500;
@@ -252,32 +211,10 @@
 }
 
 /* ─── Diagram palette ───────────────────────────────────────────── */
-/* What a ```mermaid fence is painted with (`components/markdown/Mermaid.tsx`).
- *
- * It is a layer of aliases rather than a direct read of the tokens above, and
- * that is load-bearing twice over.
- *
- * Mermaid is a library that draws an SVG from colour *values* — it runs each
- * one through its own colour maths to derive the dozen shades it actually
- * paints with — so the component has to resolve these with `getComputedStyle`
- * rather than name them in a class. **And Tailwind v4 only emits a theme
- * variable that something references**: measured, `--color-surface`,
- * `--color-ink-500` and the whole `--color-chart-*` family come back as empty
- * strings unless a utility somewhere in the app happens to use them, and an
- * empty string reaches mermaid as "Unsupported color format" and no diagram.
- * They survive today only because `ThreadMap` and `EmbeddingSection` each
- * happen to name one. The `var()` references below are what actually pin
- * them, so deleting a class in an unrelated file can no longer blank a
- * diagram.
- *
- * Declared on `:root`, which is also where `.dark` lands, so each alias
- * resolves against whichever palette won — one block covers both themes.
- *
- * Neutral by design: the app has one colour and it is spent on controls, so a
- * diagram that reached for the indigo would read as a second accent competing
- * with the button beside it. The series slots are the exception — a pie needs
- * to tell its slices apart — and they are the validated chart palette in its
- * validated order. */
+/* Colour values `Mermaid.tsx` reads with `getComputedStyle`. Tailwind v4 only
+ * emits a theme variable something references — an unreferenced one reads as
+ * "" and mermaid draws nothing — so these `var()`s are what pin them. Neutral:
+ * the indigo is for controls; only the series slots take colour. */
 :root {
   --diagram-node: var(--color-surface);
   --diagram-node-alt: var(--color-surface-raised);
@@ -296,21 +233,8 @@
 }
 
 /* ─── Base resets ───────────────────────────────────────────────── */
-/* All of it inside @layer base, without exception. Unlayered CSS outranks
-   every layer, so a reset written out here is not a default at all — it is an
-   `!important` with no keyword, beating every Tailwind utility regardless of
-   specificity. This section has been bitten twice. The `*` border-colour
-   below silently beat every `border-<colour>` utility in the app — an active
-   tab's `border-primary` underline, a destructive button's
-   `border-destructive/30` — and painted them all plain grey. The
-   `body`/`span` selection pair beat every `select-none` and `select-text`
-   utility that landed on a `p`, `span`, `li`, `td`, `th`, `input` or
-   `textarea`, which is how the project board's drag lost its
-   `[&_*]:select-none` (`hooks/useCardDrag.ts`). In the layer each of these is
-   still the default for anything that names nothing, and utilities win again.
-
-   The blocks further down the file that are deliberately unlayered are
-   overrides, not defaults, and say so at each one. */
+/* Every reset stays inside @layer base, or it outranks all utilities — see
+   CLAUDE.md "UI conventions". Unlayered blocks below are overrides. */
 @layer base {
   *,
   *::before,
@@ -334,9 +258,6 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    /* Inter Variable carries an optical-size axis; letting it track the
-       rendered size is what keeps hero type from looking like inflated UI
-       text. */
     font-optical-sizing: auto;
     user-select: none;
   }
@@ -346,13 +267,10 @@
     display: flex;
   }
 
-  /* Allow text selection inside content areas */
   p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
     user-select: text;
   }
 
-  /* Selection is brand-tinted, not the ink fill — a solid black highlight over
-     body copy is unreadable and reads as a rendering fault. */
   ::selection {
     background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
     color: inherit;
@@ -360,10 +278,8 @@
 }
 
 @layer base {
-  /* Scrollbar styling. Giving `::-webkit-scrollbar` an explicit width makes
-     the bar a classic one that takes a 6px gutter out of its scroller's
-     width; tables with a header outside the scroller re-create that gutter
-     by hand, and page scrollers reserve it up front with `page-scroll`. */
+  /* An explicit width makes this a classic bar that takes a 6px gutter;
+     `page-scroll` and headed tables reserve it by hand. */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -372,8 +288,7 @@
   ::-webkit-scrollbar-corner {
     background: transparent;
   }
-  /* The track stops short of both ends so the thumb never runs into the
-     content card's rounded corners, which clip it into a stub. */
+  /* Inset so the card's rounded corners don't clip the thumb. */
   ::-webkit-scrollbar-track:vertical {
     margin-block: 10px;
   }
@@ -388,50 +303,31 @@
     background: var(--color-muted-foreground);
   }
 
-  /* Headings are Manrope, and display type: negative tracking at every size,
-     so an <h1> never reads as body copy scaled up. Anything that is visually
-     a title but not a heading element takes the `font-display` utility. */
   h1, h2, h3, h4 {
     font-family: var(--font-display);
     font-weight: 600;
     letter-spacing: -0.02em;
   }
 
-  /* Focus ring — brand, not ink, so it reads as a state rather than a fill.
-     Inside @layer base so `focus:outline-none` utilities can override it on
-     inputs whose container already shows a focus affordance. */
+  /* Layered so `focus:outline-none` can override it. */
   :focus-visible {
     outline: 2px solid var(--color-brand);
     outline-offset: 2px;
   }
 }
 
-/* The default scroller for a full-page view inside the content card. The
-   gutter is reserved on both edges whether or not the page overflows, so a
-   section expanding into scrollable territory doesn't jog the whole page
-   sideways by the width of the bar — and the content stays centred in the
-   card, which a single-edge gutter would throw off by half a bar. */
+/* Full-page scroller. `overflow-y: scroll` reserves the gutter because
+   `scrollbar-gutter` is a no-op in WebKit; the left padding mirrors the 6px
+   bar so content stays centred. */
 @utility page-scroll {
   height: 100%;
-  overflow-y: auto;
-  scrollbar-gutter: stable both-edges;
+  overflow-y: scroll;
+  padding-left: 6px;
 }
 
-/* Markdown scaled to a panel: a chat reply.
- *
- * `MD_COMPONENTS` is sized for a document — the file viewer reads a whole
- * lecture page through it — and those sizes are baked into the components as
- * utilities. A reply in the timeline is a different register, so it goes
- * through `CompactMd`, which wraps it in `.md-compact`, and this block pulls
- * the type down there and nowhere else. (The player's Read tab is not here:
- * its lines sit inside buttons and take `InlineMd`, which sizes itself at the
- * call site.)
- *
- * Deliberately *unlayered*, and the one place in this file that should be:
- * layer order beats specificity, so the same rules inside `@layer base` would
- * lose to the very utilities they exist to override. Every base reset still
- * belongs in the layer — this is the inverse case, an override, not a
- * default. */
+/* `CompactMd`: markdown scaled down to a panel. Deliberately unlayered — it
+ * overrides the size utilities baked into `MD_COMPONENTS`, and inside a layer
+ * it would lose to them. */
 .md-compact {
   font-size: 13px;
 }
@@ -455,15 +351,10 @@
 .md-compact th {
   font-size: 11px;
 }
-/* An inline picture (`MdImage`) is capped by the column it is in everywhere
-   else, which in 360px of dock is already small — but a portrait screenshot
-   is capped by its *height*, and 20rem of it above a question bubble whose own
-   picture stops at 16rem reads as two different sizes for the same file. One
-   number for both. */
+/* Matches the question bubble's image cap. */
 .md-compact img {
   max-height: 16rem;
 }
-/* First and last blocks sit flush: the row around them owns the gap. */
 .md-compact > :first-child {
   margin-block-start: 0;
 }
@@ -471,14 +362,8 @@
   margin-block-end: 0;
 }
 
-/* KaTeX in a reply. Its own stylesheet is written for a document — 1.21em and
- * a centred display block that is allowed to be as wide as the formula is —
- * and the dock is 360px of it. The size comes down to something that sits in
- * 13px text, and a display formula gets its own scroller: without one a long
- * derivation widens the whole panel, since `.katex-display` has no width to
- * shrink to. Unlayered for the same reason the block above is, and one step
- * more specific than `.katex`, so it wins wherever KaTeX's sheet lands in the
- * cascade. */
+/* KaTeX sized for 13px text; a display formula scrolls rather than widening
+ * the panel. One step more specific than KaTeX's own sheet. */
 .md-compact .katex {
   font-size: 1.05em;
 }
@@ -486,115 +371,34 @@
   margin-block: 0.7rem;
   overflow-x: auto;
   overflow-y: hidden;
-  /* The scroller clips the descenders of a fraction otherwise. */
+  /* Room for a fraction's descenders inside the scroller. */
   padding-block: 2px;
 }
 
-/* A rendered ```mermaid fence (`components/markdown/Mermaid.tsx`): the
- * `<figure>` that owns the hover control, and the scroller inside it that
- * holds the picture.
- *
- * **The label size is what is bounded, not the box.** Mermaid's own sizing is
- * `width: 100%` under an inline `max-width` of the diagram's natural width,
- * which fits the picture to whatever it is dropped into — so the *column*
- * decides how big the type is. Measured in the 760px chat page: the twelve-node
- * `graph TD` (natural 360 × 791) renders at scale 1.0 with 13px labels, while a
- * five-column `graph LR` (natural 1525 × 181) is fitted to scale 0.50 and its
- * labels land at 6.5px. One reply, two diagrams, one at body-text size and one
- * an unreadable smear.
- *
- * There was a floor before this and it was in the wrong unit: a flat 520px,
- * which in a 760px column never fires at all, and which for a wide diagram
- * would have meant scale 0.34 — worse than the bug. A floor has to be
- * *proportional* to the diagram to say anything about its type.
- *
- * So the whole policy is one sentence and one `clamp()`: *a diagram is drawn as
- * large as it can be without passing the column, the size it was drawn at, or a
- * target height — and never so small that a label drops under 11px.* The two
- * bounds are computed in `Mermaid.tsx`, which is the only place that knows both
- * numbers (`LABEL_PX`, `MIN_LABEL_PX`, `TARGET_HEIGHT_PX`):
- *
- *   - `--diagram-max` — the widest it should be drawn. Natural width for a
- *     diagram that already fits the height target, walked down the band for one
- *     that does not, which is how a tall diagram lands at 11px and a short one
- *     at 13px with neither being a special case.
- *   - `--diagram-min` — the width at which labels hit 11px. Past it the diagram
- *     stops shrinking and **overflows** instead, on either axis.
- *
- * Between the two, `100%` wins and the picture fits its column. Both fall back
- * to leaving `width: 100%` alone, so a diagram whose natural size could not be
- * read behaves the way it did before any of this.
- *
- * Unlayered like the two blocks above, and for the same reason. */
+/* A rendered ```mermaid fence: the `<figure>` and its scroller. The label size
+ * is bounded, not the box — `--diagram-min`/`--diagram-max` come from
+ * `Mermaid.tsx`, and past the minimum the diagram overflows. Unlayered. */
 .diagram-figure {
   margin-block: 0.75rem;
-  /* A dragged diagram must not also select the text of the reply around it —
-     WebKit starts a selection from the first pointermove otherwise, and the
-     whole message ends up highlighted behind the pan. */
+  /* A pan must not select the reply's text around it. */
   user-select: none;
 }
 .diagram {
   overflow: auto;
-  /* The scroller would otherwise clip the hairline border of an edge node. */
+  /* Keeps an edge node's hairline border inside the scroller. */
   padding-block: 1px;
-  /* Flex, and only so the centring below can be an auto margin.
-   *
-   * A diagram is a figure, and a figure centres — which is also what makes a
-   * narrow `graph TD` stop reading as a column of boxes shoved against the
-   * left margin of a 760px reply. `justify-content: center` is the obvious way
-   * to say it and is the one thing that must not be used here: centred content
-   * that outgrows its scroller overflows equally in both directions, and the
-   * overflow before the start edge cannot be scrolled to, so the left end of a
-   * wide diagram becomes unreachable. An auto margin on a *flex item* is
-   * defined to absorb only positive free space — an overflowing item ignores
-   * it and overflows in the end direction — so the same one rule centres a
-   * small diagram and pins a wide one. `AppLayout` and the lightbox learned
-   * this the hard way; this is the third place it applies.
-   *
-   * `flex-start` because a diagram taller than the cap must begin at the top:
-   * the default `stretch` would also hand the SVG a cross size it never asked
-   * for. */
+  /* Flex only so the svg can centre with an auto margin: `justify-content:
+   * center` would overflow both ways and make a wide diagram's left end
+   * unreachable by scrolling. */
   display: flex;
   align-items: flex-start;
-  /* Tall is allowed; endless is not.
-   *
-   * Mermaid draws a `graph TD` at whatever height its ranks need and caps
-   * nothing — measured, the twelve-node flowchart comes out 791px tall, which
-   * at this app's page zoom is very nearly the whole window. Scaling it down
-   * to fit is the wrong fix for the reason the whole block above exists: the
-   * scale needed is ~0.55 and a 13px label lands at 7px. So the picture keeps
-   * the size it was drawn at, the box is capped, and the rest is a scroll or
-   * the expand control.
-   *
-   * 80vh was tried and is a takeover rather than a figure — at this app's page
-   * zoom it is the whole pane. The `rem` half of the `min()` is what stops a
-   * tall window handing a diagram 700px just because it can; between the two,
-   * most diagrams now come in under the cap on their own, because
-   * `FLOWCHART_LAYOUT` took ~16% off the height before this rule ever sees
-   * it. */
+  /* Cap the box, not the picture: shrinking a tall diagram to fit would
+   * push its labels under the readable minimum. */
   max-height: min(60vh, 30rem);
 
-  /* Where the picture runs out, it fades out.
-   *
-   * A capped, scrolling box guillotines a diagram mid-node and the cut reads as
-   * the end of it, so each edge with something behind it gets softened. Four
-   * edges, driven by `--fade-*` written straight onto this element from
-   * `Mermaid.tsx` on every scroll — 1 where there is more to see, 0 where there
-   * is not — so an edge with nothing behind it stays a hard edge.
-   *
-   * A mask rather than a gradient overlay, and that is the whole reason this is
-   * pleasant: a mask fades to *transparent*, so it needs no opinion about what
-   * colour is behind the diagram. An overlay would have to name one, and this
-   * component renders on `card` in a reply, on `background` in the lecture
-   * dock, and on either in both themes — four colours to keep in sync with a
-   * palette, for an effect that wants none of them.
-   *
-   * The two gradients are composed with `intersect` so the horizontal and
-   * vertical fades both apply; `mask-composite` and `calc(var())` inside a
-   * gradient stop are both confirmed in the app's own WKWebView, not merely in
-   * a Chromium tab. The stops sit 1px *outside* the box on purpose: at exactly
-   * 0 and 100% the unfaded case still antialiases its last pixel, which takes
-   * the hairline border off an edge node. */
+  /* Fade each edge with more behind it (`--fade-*`, 0/1, set by `Mermaid.tsx`
+   * on scroll). A mask, not an overlay, so it needs no background colour. The
+   * stops sit 1px outside the box so an unfaded edge keeps its hairline. */
   --diagram-fade: 24px;
   mask-image:
     linear-gradient(
@@ -613,72 +417,33 @@
     );
   mask-composite: intersect;
 }
-/* Some diagram types still draw their labels as real HTML inside a
-   `<foreignObject>`, and that HTML lands inside `.md-compact`, where the
-   `margin-block` on `p` would walk a caption out of the box drawn around it.
-   Flowcharts no longer do — `Mermaid.tsx` asks for SVG `<text>` labels at the
-   top level of the config, where the key is actually read — but the others
-   have no such switch, so the guard stays. Mermaid's own `p { margin: 0 }`
-   also happens to win (it is scoped by the SVG's id, and an id beats a class),
-   which is their stylesheet defending our layout by accident; this is the rule
-   that means it. Same specificity as `.md-compact`'s and later in the file,
-   which is what decides it. Sizes are left alone: `font-size: inherit` on a
-   caption inherits from the label mermaid already sized. */
+/* Non-flowchart diagrams draw HTML labels in a `<foreignObject>`, where
+   `.md-compact`'s margins would push a caption out of its box. Wins by coming
+   later at equal specificity. */
 .diagram :is(p, ul, ol, li, blockquote) {
   margin: 0;
 }
 .diagram > svg {
-  /* The clamp the whole block above is about. `clamp()` is
-     `max(min, min(100%, max))`, which reads exactly as the policy: fit the
-     column, never past the size it should be drawn at, never below the width
-     where its labels stop being readable. */
   width: clamp(var(--diagram-min, 0px), 100%, var(--diagram-max, 100%));
-  /* Centred when it fits, pinned to the start when it does not — see the
-     `display: flex` note above for why this cannot be `justify-content`. */
   margin-inline: auto;
-  /* A flex item's default `flex-shrink: 1` would take the clamp's floor
-     straight back out and squeeze the picture to the column anyway, which is
-     the bug this rule exists to fix. Measured once already in the lightbox,
-     where the zoom climbed while the picture did not move. */
+  /* `flex-shrink: 1` would undo the clamp's floor. */
   flex: none;
 }
 
-/* Markdown with its blocks flattened — `InlineMd`, which renders a chapter
- * summary inside the button that seeks to it. The wrapper has to sit in the
- * text it is part of, so it inherits rather than setting a size, and KaTeX
- * comes down to the surrounding 11px the same way it does above. Unlayered
- * for the same reason that block is. */
+/* `InlineMd`: markdown flattened into surrounding text. Unlayered. */
 .md-inline .katex {
   font-size: 1.05em;
 }
-/* No `overflow-x` guard on an inline formula, which is the obvious thing to
- * reach for and wrong: an inline-block with a clipped overflow takes its
- * baseline from its bottom margin edge, so every `$n_0$` in a sentence sits a
- * subscript's depth above the line it is in. A summary's formulas are short,
- * and the wrapper below lets a long one break out rather than widening the
- * panel around it. */
+/* No `overflow-x` on an inline formula: a clipped inline-block takes its
+ * baseline from its bottom edge and lifts off the line. Wrap instead. */
 .md-inline {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-/* pdf.js's viewer stylesheet, brought back inside this app's world — the page
- * surface for `components/files/PDFViewer.tsx`.
- *
- * `pdf_viewer.css` is third-party and imported unlayered, so it outranks every
- * `@layer` in this file: the trap recorded at the top of the file, met from the
- * other side. These rules are unlayered for the same reason the blocks above
- * are, and each is one step more specific than the pdf.js rule it answers,
- * because at equal specificity the winner would come down to whichever
- * stylesheet Vite happened to emit last.
- *
- * **`pdf_viewer.css` declares `color-scheme: light dark` on `:root`** — a
- * whole-app statement smuggled in by one view's stylesheet. Dark mode here is
- * the `.dark` class and nothing else (`lib/theme.ts`), so on a Mac set to dark
- * that line would turn the native scrollbars, the form controls and the canvas
- * default dark underneath a light app. Pinning the scheme to the class is both
- * the fix and the thing that should have been declared all along. `html:root`
- * is one element more specific than `:root`, which is what decides it. */
+/* Overrides for pdf.js's unlayered `pdf_viewer.css` (`PDFViewer.tsx`), each one
+ * step more specific than the rule it answers. That sheet sets `color-scheme:
+ * light dark` on `:root`; pin it to the `.dark` class instead. */
 html:root {
   color-scheme: light;
 }
@@ -686,17 +451,10 @@ html:root.dark {
   color-scheme: dark;
 }
 
-/* The ground the pages sit on. pdf.js draws no ground of its own — the grey
- * one belongs to its toolbar chrome, which this app does not ship. */
 .pdf-surface .pdfViewer {
   padding-block: 16px;
 }
-/* The page. The viewer is constructed with `removePageBorders`, which drops
- * pdf.js's 9px transparent frame and the shadow image hung on it — drawn for
- * that grey ground, and wrong on this one — so the page takes the same
- * hairline-and-soft-shadow treatment as every other card in the app. The
- * shadow is `shadow-sm`'s, written out because there is no utility to reach
- * for on an element pdf.js creates. */
+/* `removePageBorders` drops pdf.js's frame; the page takes a card's shadow. */
 .pdf-surface .pdfViewer.removePageBorders .page {
   margin: 0 auto 16px;
   border-radius: 4px;

@@ -2,22 +2,10 @@ import { getDb } from "@/lib/db";
 import { hostOf, isWebUrl } from "@/lib/browser";
 
 /**
- * Where the in-app browser has been, and what the sites it visited look like.
- *
- * **One row per URL, not one per visit** (migration 36). The address bar's
- * question is "which page do you mean", which `visits` and `last_visit`
- * answer between them; a log of every load would grow forever to answer a
- * question nothing asks, and the history view groups by day from `last_visit`
- * either way — so a page you opened again today moves to today rather than
- * appearing under both. If something later wants per-visit data (time spent
- * per site, say), it belongs in a `browser_visit` table beside this one rather
- * than in a reshaping of it.
- *
- * Rust is the one that sees page loads (`app/src-tauri/src/browser.rs`), but
- * the writing happens here, from the snapshot the frontend already mirrors:
- * the tables belong to the frontend the way every other table does, and the
- * ranking below is then a query the address bar runs while you type, with no
- * IPC in the way.
+ * The in-app browser's history and site icons. **One row per URL, not per
+ * visit**: `visits` and `last_visit` are all the address bar and the by-day
+ * view need. Written here from the snapshot the frontend mirrors of
+ * `app/src-tauri/src/browser.rs`, so ranking runs with no IPC.
  */
 
 export interface HistoryEntry {
@@ -36,45 +24,26 @@ export interface HistoryDay {
   entries: HistoryEntry[];
 }
 
-/** `%` and `_` mean something in LIKE; a pasted URL is full of neither, but a
- *  typed `_` is common enough in a slug to be worth not treating as "any
- *  character". Paired with an `ESCAPE` clause at every call site. */
+/** Escapes LIKE wildcards; pair with an `ESCAPE '\\'` clause. */
 function likeSafe(text: string): string {
   return text.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 // ── What is safe to remember ─────────────────────────────────────────────
-//
-// A history table is a table we intend to *show* — in a dropdown, in Settings,
-// and to whoever is looking at the screen. So the rule is not "record the URL"
-// but "record the URL with nothing in it that should not be read aloud".
-//
-// Echo360 is the case that forces it: its playback URLs are signed, and a
-// lecture watched in a browser tab would otherwise put a live credential in
-// the suggestion list. A table that has already swallowed tokens cannot be
-// un-swallowed without a migration, so the filtering happens before the first
-// write and never after.
+// History is shown on screen, so credentials (e.g. Echo360's signed playback
+// URLs) are stripped before the first write.
 
 /** Query parameters that carry a credential, whatever the site calls it. */
 const SECRET_PARAMS =
   /^(x-amz-.*|access[_-]?token|id[_-]?token|refresh[_-]?token|oauth[_-]?token|token|auth|authorization|api[_-]?key|apikey|key|secret|signature|sig|hmac|policy|credential|expires|session|sessionid|sid|jwt|password|passwd|pwd|code|state|ticket|saml.*|sso.*)$/i;
 
-/** A value with no structure and a lot of it — an unnamed signature. Sixty
- *  characters is well past anything a person types into a query and well short
- *  of nothing: a real search of sixty unbroken characters is not a thing, and a
- *  base64 or hex blob almost always is. */
+/** A long unbroken value — an unnamed signature or token blob. */
 const OPAQUE_VALUE = /^[A-Za-z0-9._~-]{60,}$/;
 
-/**
- * The URL as it should be remembered, or `null` for one that should not be.
- *
- * Drops the fragment always — it never helps a match and doubles the rows —
- * and drops the **whole** query as soon as any part of it looks like a
- * credential. Whole, not the offending parameter: a signed URL missing one of
- * its parameters is neither safe to keep nor useful to return to, and half a
- * credential is still a credential.
- */
-export function historyUrl(raw: string): string | null {
+/** The URL as it should be remembered, or `null`. Drops the fragment, and
+ *  the **whole** query if any part looks like a credential — a signed URL
+ *  missing one parameter is neither safe nor useful. */
+function historyUrl(raw: string): string | null {
   if (!isWebUrl(raw)) return null;
   let url: URL;
   try {
@@ -92,13 +61,8 @@ export function historyUrl(raw: string): string | null {
   return url.toString();
 }
 
-/**
- * Records that `url` was opened, or that it was opened again.
- *
- * The title usually lands after the URL does — WebKit reports it when the
- * document has parsed its `<head>` — so an empty one never overwrites a title
- * already recorded for that URL.
- */
+/** Records a visit. The title usually arrives later, so an empty one never
+ *  overwrites a recorded title. */
 export async function recordVisit(raw: string, title: string): Promise<void> {
   const url = historyUrl(raw);
   if (!url) return;
@@ -116,8 +80,7 @@ export async function recordVisit(raw: string, title: string): Promise<void> {
   );
 }
 
-/** The title arriving for a page already recorded. Not a visit: a document
- *  that renames itself as it loads must not count twice. */
+/** A late title for a recorded page — not a visit, so it does not count. */
 export async function recordTitle(raw: string, title: string): Promise<void> {
   const url = historyUrl(raw);
   if (!title || !url) return;
@@ -130,13 +93,8 @@ export async function recordTitle(raw: string, title: string): Promise<void> {
 
 // ── Finding a row again ──────────────────────────────────────────────────
 
-/** The ⌘K palette's matching rule, which this reuses rather than inventing a
- *  second one: every word you typed has to appear somewhere in the row, in any
- *  order, with `-` and `_` read as spaces. "canvas quiz" then finds
- *  `canvas…/quizzes/…` without your having to remember which way round it was.
- *
- *  Each word becomes its own LIKE, so the shape of the statement follows the
- *  query — hence the built SQL and the counted binds. */
+/** The ⌘K palette's rule: every typed word appears somewhere in url or
+ *  title, any order, `-`/`_` read as spaces. One LIKE per word. */
 function wordFilter(text: string): { sql: string; binds: string[] } {
   const words = text.split(/\s+/).filter(Boolean);
   const binds: string[] = [];
@@ -151,22 +109,16 @@ function wordFilter(text: string): { sql: string; binds: string[] } {
   return { sql: clauses.join(" AND "), binds };
 }
 
-/** How fast a visit stops counting. A week to halve it: often enough that
- *  yesterday's rabbit hole has faded out of the list by the weekend, slow
- *  enough that the page you open every Monday survives to the next one. */
+/** A visit's weight halves every week. */
 const HALF_LIFE_DAYS = 7;
 
-/** `sqliteUtcToMs` lives in `format.ts`, which is a UI module; this is the one
- *  place here that needs it, and three lines beats making the data layer
- *  depend on the formatting layer. */
+/** `sqliteUtcToMs`, copied to keep the data layer off `format.ts`. */
 function sqliteMs(s: string): number | undefined {
   const ms = Date.parse(s.includes("T") ? s : `${s.replace(" ", "T")}Z`);
   return Number.isNaN(ms) ? undefined : ms;
 }
 
-/** Frecency — how often, decayed by how long ago — with one thumb on the
- *  scale for a host you are typing the start of. Someone who types "can" means
- *  `canvas…`, however many pages of it they have never been back to. */
+/** Frecency, boosted for a host that starts with what is typed. */
 function score(entry: HistoryEntry, prefix: string, nowMs: number): number {
   const visited = sqliteMs(entry.last_visit) ?? nowMs;
   const ageDays = Math.max(0, (nowMs - visited) / 86_400_000);
@@ -176,15 +128,8 @@ function score(entry: HistoryEntry, prefix: string, nowMs: number): number {
   return frecency * (onPrefix ? 4 : 1);
 }
 
-/**
- * What the address bar offers for what has been typed so far.
- *
- * Two steps on purpose: SQL narrows to the rows that match at all, ordered by
- * recency so the shortlist is the *relevant* few hundred rather than an
- * arbitrary few hundred, and the ranking then runs here over that shortlist.
- * Frecency wants an exponential, SQLite has no `exp()`, and a decay curve
- * approximated in SQL is harder to read than the thing it approximates.
- */
+/** Address-bar suggestions. SQL shortlists the most recent matches and the
+ *  ranking runs here, since SQLite has no `exp()` for the decay. */
 export async function suggestHistory(
   query: string,
   limit = 6,
@@ -214,9 +159,7 @@ export async function suggestHistory(
     .map(({ entry }) => entry);
 }
 
-/** Everything visited, newest first — the history view's list. `query`
- *  filters it; the cap is there so a long history cannot make the settings
- *  page pause on open. */
+/** The history view's list, newest first, optionally filtered. */
 export async function listHistory(
   query = "",
   limit = 500,
@@ -232,19 +175,14 @@ export async function listHistory(
   }
   const { sql, binds } = wordFilter(text);
   if (!sql) return [];
-  // The limit is interpolated rather than bound: the binds are numbered from
-  // the word clauses, and one more placeholder after a variable number of them
-  // is a counting bug waiting to happen. It is a number this module chose.
+  // Interpolated, not bound: the binds are numbered by the word clauses.
   return db.select<HistoryEntry[]>(
     `${rows} WHERE ${sql} ORDER BY last_visit DESC LIMIT ${Math.trunc(limit)}`,
     binds,
   );
 }
 
-/** Groups a list by the **local** day it was last visited.
- *
- *  Local, not the stored UTC: `datetime('now')` writes UTC, and grouping on
- *  that string would file a Melbourne afternoon under tomorrow. */
+/** Groups by the **local** day of `last_visit` (stored as UTC). */
 export function groupByDay(
   entries: HistoryEntry[],
   toMs: (utc: string) => number | undefined,
@@ -269,9 +207,7 @@ export async function forgetUrl(url: string): Promise<void> {
   await db.execute(`DELETE FROM browser_history WHERE url = $1`, [url]);
 }
 
-/** Everything gone. The icons stay: they are a cache keyed by host, not a
- *  record of where you have been, and throwing them away only means fetching
- *  them again the next time you open one of those sites. */
+/** Clears history. Icons stay: they are a per-host cache, not a record. */
 export async function clearHistory(): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM browser_history`);
@@ -279,8 +215,7 @@ export async function clearHistory(): Promise<void> {
 
 // ── Site icons ───────────────────────────────────────────────────────────
 
-/** Every icon found so far, host → `data:` URL. Read once on startup so the
- *  tab strip has icons before any page has loaded. */
+/** host → `data:` URL, read at startup so the strip has icons early. */
 export async function loadFavicons(): Promise<Record<string, string>> {
   const db = await getDb();
   const rows = await db.select<{ host: string; icon: string }[]>(

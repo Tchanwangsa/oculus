@@ -33,49 +33,31 @@ import { fmtLectureDate, lecturePagePath } from "@/lib/lectures";
 import { filePagePath, fileTitle, openFileSmart } from "@/lib/openFile";
 
 /**
- * One search, two fields.
+ * The one search behind ⌘K (`CommandPalette.tsx`) and the new-tab page's field
+ * (`NewTabPage.tsx`); a new kind of thing to find is a change here only.
  *
- * ⌘K (`app/src/components/palette/CommandPalette.tsx`) and the new-tab page's
- * own field (`app/src/pages/NewTabPage.tsx`) ask the same question, so they
- * ask it through here rather than each growing their own idea of what the
- * library contains. Adding a kind of thing to find is a change in this file
- * and nowhere else.
+ * Searches titles (subjects, files, lectures, projects, tasks) and parsed text
+ * via `pages_fts` — not page-image embeddings, which cost a cloud round trip
+ * per query (`docs/retrieval.md`). A URL is offered as a page; anything else
+ * falls through to a web search.
  *
- * What it searches: **titles** — of subjects, files, lectures, projects and
- * tasks — and the **text inside parsed documents**, through the `pages_fts`
- * index (`searchPageText`). Not the page-image embeddings: those are a cloud
- * round trip per query (`docs/retrieval.md`) and belong to a question you ask
- * Chat, not to a field you are still typing in.
- *
- * And what is not in the library at all: a URL is offered as a page to open,
- * and anything else falls through to a web search, so a field you type into
- * always has somewhere to send you.
- *
- * This file builds *data*. Icons are named, not rendered, and where a row goes
- * is a `target` rather than a closure — the surface supplies the navigation,
- * because the palette navigates the shell and the new-tab field navigates the
- * pane it is drawn in. {@link openSearchItem} is the one place that dispatch
- * lives.
+ * Builds data only: icons are named and a row's destination is a `target`, so
+ * each surface supplies its own navigation via {@link openSearchItem}.
  */
 
-/** Which glyph a row wears. A descriptor, not an element: a subject's icon is
- *  a component with a prop, so the two cannot be one type. */
+/** A descriptor, not an element: a subject's icon is a component with a prop. */
 export type IconSpec =
   | { kind: "glyph"; icon: PhosphorIcon }
   | { kind: "subject"; code: string };
 
-/** Where a row leads. */
-export type SearchTarget =
-  /** A route, opened in the surface's own way. */
+type SearchTarget =
   | { kind: "route"; path: string }
-  /** A binary the app cannot render — a .zip, a .mp3 — which leaves for the
-   *  system viewer the way any file row in the app does. */
+  /** A binary the app cannot render (.zip, .mp3): opens in the system viewer. */
   | { kind: "file"; file: LibraryFileHit }
-  /** A web page: the in-app browser, never Safari. */
+  /** Opens in the in-app browser. */
   | { kind: "url"; url: string };
 
-/** A run of snippet text, and whether it is one of the words that matched. */
-export interface SnippetPart {
+interface SnippetPart {
   text: string;
   hit: boolean;
 }
@@ -86,7 +68,7 @@ export interface SearchItem {
   label: string;
   /** Right-aligned: the subject a document belongs to, a project's subject. */
   meta?: string;
-  /** The matched prose, for a hit found inside a document. */
+  /** Matched prose, for a hit inside a document. */
   snippet?: SnippetPart[];
   target: SearchTarget;
 }
@@ -96,7 +78,6 @@ export interface SearchSection {
   items: SearchItem[];
 }
 
-/** The places search can send you that aren't a document. */
 const PLACES: { label: string; path: string; icon: PhosphorIcon }[] = [
   { label: "Chat", path: "/chat", icon: Chat },
   { label: "Calendar", path: "/calendar", icon: CalendarBlank },
@@ -110,9 +91,7 @@ const PLACES: { label: string; path: string; icon: PhosphorIcon }[] = [
   { label: "Settings · Library", path: "/settings/library", icon: GearSix },
 ];
 
-/** How many of each kind a typed query gets back. Files lead because they are
- *  what a coursework library is mostly made of; the rest are a handful each,
- *  so no one kind can push the others off the list. */
+/** Per-kind caps for a typed query, so no one kind pushes the others off. */
 const LIMITS = {
   file: 6,
   page: 4,
@@ -122,14 +101,9 @@ const LIMITS = {
   task: 3,
 } as const;
 
-/** With nothing typed the list is a landing, not a dump — five of each. */
 const IDLE_LIMIT = 5;
 
-/**
- * Every typed word must appear somewhere, in any order — the same rule the SQL
- * side applies, so what the in-memory lists (subjects, places) do and what the
- * database does stay one behaviour.
- */
+/** Every typed word, in any order — the same rule the SQL side applies. */
 function matchesAll(haystack: string, query: string): boolean {
   const hay = haystack.toLowerCase();
   return query
@@ -139,8 +113,7 @@ function matchesAll(haystack: string, query: string): boolean {
     .every((w) => hay.includes(w));
 }
 
-/** Everything a subject answers to: its display name and its code, with and
- *  without the term suffix. */
+/** Display name, plus the code with and without the term suffix. */
 function subjectHaystack(s: Subject): string {
   return `${displayName(s.name, s.code)} ${s.code} ${displayCode(s.code)}`;
 }
@@ -149,18 +122,8 @@ function glyph(icon: PhosphorIcon): IconSpec {
   return { kind: "glyph", icon };
 }
 
-/**
- * Markdown, made readable in one line.
- *
- * A snippet is cut out of a parsed page, so it arrives wearing whatever
- * syntax it was sitting in — a heading's `##`, a table row's pipes, emphasis
- * asterisks, an image's `![...](...)`. None of that means anything in a
- * single line of prose under a search result, and all of it costs the few
- * characters there is room for.
- *
- * The fences `snippet()` put around the matched words are control characters
- * (see `SNIP_OPEN`) precisely so that this can run without touching them.
- */
+/** Strips markdown syntax from a one-line snippet. The match fences are
+ *  control characters (`SNIP_OPEN`), so this leaves them alone. */
 function tidyMarkdown(raw: string): string {
   return raw
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // images say nothing here
@@ -171,11 +134,8 @@ function tidyMarkdown(raw: string): string {
     .trim();
 }
 
-/** The snippet as runs of plain and matched text. */
-export function snippetParts(raw: string): SnippetPart[] {
+function snippetParts(raw: string): SnippetPart[] {
   const parts: SnippetPart[] = [];
-  // Split on the open fence, then each piece on the close: what lies between
-  // them is a hit, what follows is ordinary text.
   for (const [i, chunk] of tidyMarkdown(raw).split(SNIP_OPEN).entries()) {
     if (i === 0) {
       if (chunk) parts.push({ text: chunk, hit: false });
@@ -195,7 +155,6 @@ function fileItem(f: LibraryFileHit): SearchItem {
     icon: glyph(categoryIconFor(f)),
     label: fileTitle(f),
     meta: displayCode(f.subject_code),
-    // A binary we cannot render — a .zip, a .mp3 — has no page to go to.
     target:
       f.category === "file" && !isPdfBacked(f.filename)
         ? { kind: "file", file: f }
@@ -219,8 +178,7 @@ function lectureItem(l: LibraryLectureHit): SearchItem {
     key: `lecture:${l.id}`,
     icon: glyph(VideoCamera),
     label: l.title,
-    // Echo360 titles a capture by its room and timetable slot, so a subject's
-    // lectures all read alike — the date is the half that tells them apart.
+    // Echo360 titles captures by room and slot; the date tells them apart.
     meta: `${displayCode(l.subject_code)} · ${fmtLectureDate(l.date)}`,
     target: { kind: "route", path: lecturePagePath(l) },
   };
@@ -236,22 +194,13 @@ function subjectItem(s: Subject): SearchItem {
   };
 }
 
-/**
- * The one thing outside the library every field like this has to answer for:
- * what you typed is a web address, or it is something to look up.
- *
- * `normalizeAddress` is the address bar's own rule, so the search field and
- * the browser's address bar cannot disagree about what counts as a URL or
- * which engine a query goes to (`app/src/lib/browser.ts`).
- */
+/** A URL to open, or a web search — by the address bar's own rule
+ *  (`normalizeAddress`), so the two cannot disagree. */
 function webItems(query: string): SearchItem[] {
   const q = query.trim();
   if (!q) return [];
   const address = normalizeAddress(q);
-  // A URL is the answer, not a guess at one: offered as the page it is.
-  // Asked of `addressKind` rather than by looking for `?q=` in the result —
-  // which engine a query goes to is a setting now, so the shape of a search
-  // URL is not something this side may assume.
+  // Ask `addressKind`, not the result's shape: the search engine is a setting.
   if (addressKind(q) === "url" && hostOf(address)) {
     return [
       {
@@ -275,25 +224,16 @@ function webItems(query: string): SearchItem[] {
 }
 
 export interface SearchOptions {
-  /** Every subject, for title matching. */
   subjects: Subject[];
-  /** This term's, which is what an empty query offers instead. */
+  /** This term's subjects, offered for an empty query. */
   current: Subject[];
-  /** Leave the web row out — a surface that has its own address bar, say.
-   *  Default false: a field that finds nothing should still go somewhere. */
+  /** Leave out the web row (e.g. a surface with its own address bar). */
   noWeb?: boolean;
 }
 
 /**
- * The library, and the web, as one ranked list of sections.
- *
- * Two orders, because the useful first row differs. Idle, it is the file you
- * were last in; searching, it is whatever best matches what you typed, and a
- * subject beats a document that merely mentions its code. Prose found *inside*
- * a document comes after the titles: a title match is a thing you were looking
- * for, a text match is a thing you may have been.
- *
- * Empty sections are dropped, never drawn as an empty state.
+ * One ranked list of non-empty sections. Idle leads with recent files; a query
+ * leads with subjects, and in-document text hits come after title matches.
  */
 export async function runSearch(
   query: string,
@@ -310,8 +250,6 @@ export async function runSearch(
     ].filter((s) => s.items.length > 0);
   }
 
-  // One round trip each, in parallel: they are independent reads of the same
-  // SQLite and the slowest of them is what the field waits for, not the sum.
   const [files, pages, lectures, projects, tasks] = await Promise.all([
     searchLibraryFiles(query, LIMITS.file),
     searchPageText(query, LIMITS.page),
@@ -320,8 +258,7 @@ export async function runSearch(
     searchTasks(query, LIMITS.task),
   ]);
 
-  // A file that already matched by title says nothing new as a text hit; the
-  // snippet is worth showing only for a document the title search missed.
+  // A text hit is shown only for a file the title search missed.
   const byTitle = new Set(files.map((f) => f.id));
 
   const sections: SearchSection[] = [
@@ -349,10 +286,6 @@ export async function runSearch(
           key: `task:${t.id}`,
           icon: glyph(CheckSquare),
           label: t.title,
-          // A task title alone names a dozen pieces of work across a
-          // semester; the project it is in is what tells them apart — and
-          // "Unfiled" is what a task with no project is called everywhere
-          // else in the app, rather than a blank where a project should be.
           meta: t.project_name ?? "Unfiled",
           target: {
             kind: "route" as const,
@@ -384,27 +317,20 @@ function placeItem(p: (typeof PLACES)[number]): SearchItem {
   };
 }
 
-/** How a surface acts on a picked row. Injected rather than assumed: the
- *  palette navigates the shell from outside every router, and the new-tab
- *  field navigates the pane it is drawn in. */
+/** Injected per surface: the palette navigates the shell from outside every
+ *  router, the new-tab field the pane it is drawn in. */
 export interface OpenSearchOptions {
   /** ⌘-click / ⌘↵ — somewhere new, rather than here. */
   newTab: boolean;
-  /** Go to a route in this surface's current context. */
   navigate: (path: string) => void;
-  /** The same route, in a tab of its own. */
   addTab: (path: string) => void;
-  /** Open a web page. */
   openUrl: (url: string) => void;
 }
 
-/** Acting on a row, in one place, so two fields cannot disagree about what
- *  picking the same result does. */
 export function openSearchItem(item: SearchItem, o: OpenSearchOptions): void {
   switch (item.target.kind) {
     case "file":
-      // Out to the system viewer: there is no route to take a .mp3 to, and
-      // ⌘ changes nothing about where it opens.
+      // System viewer; ⌘ changes nothing.
       openFileSmart(item.target.file);
       return;
     case "url":

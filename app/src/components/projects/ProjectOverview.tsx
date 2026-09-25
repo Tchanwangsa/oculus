@@ -13,41 +13,19 @@ import { DueChip, ProgressMeter, TaskGlyph } from "./TaskMarks";
 import { taskHref } from "./taskHref";
 import { boardProgress, columnOf, type TaskNode } from "./taskTree";
 
-/**
- * What a project *is*, before what is left to do about it: a description, the
- * handful of facts worth pinning to it, and the work that is next.
- *
- * Short on purpose. Everything here could be a board column or a table cell
- * instead, and the reason it is not is that this is the page you open when you
- * have forgotten what the project was for — a fourth view of the same task
- * rows would answer a question the Tasks tab already answers.
- */
+/** A project's description, properties and next few dated tasks. */
 
 // ── Shared furniture ─────────────────────────────────────────────────────────
 
-/**
- * The page's headings, which are `Section`'s own
- * (`app/src/components/home/Section.tsx`) down to the class list.
- *
- * Upcoming tasks below literally *is* a `Section`, so About and Properties —
- * which are not row lists and so have no box to put themselves in — borrow its
- * label rather than inventing a second heading weight for the same column.
- */
+/** Matches `Section`'s heading, for the parts that aren't row lists. */
 function Heading({ children }: { children: ReactNode }) {
   return (
     <h2 className="mb-2 px-0.5 text-[13px] font-semibold text-foreground">{children}</h2>
   );
 }
 
-/**
- * Notion's property grammar, the same row `app/src/pages/TaskPage.tsx` draws
- * one level down: the label is furniture on the left, the value is the control
- * on the right.
- *
- * `items-start` rather than that page's `items-center`, because two of these
- * values are as tall as their contents — a tag list wraps, and a resolved
- * event is two lines.
- */
+/** `TaskPage`'s property row, but `items-start`: tags wrap and an event is
+ *  two lines. */
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-h-8 items-start gap-3">
@@ -66,8 +44,6 @@ export function ProjectOverview({
 }: {
   project: DbProject;
   nodes: TaskNode[];
-  /** Every write on this page, funnelled back to the one caller that holds the
-   *  store — the same shape `ProjectBoard` has with `onMove`. */
   onPatch: (patch: UpdateProjectInput) => void;
 }) {
   const progress = useMemo(() => boardProgress(nodes), [nodes]);
@@ -84,9 +60,7 @@ export function ProjectOverview({
           <Heading>Properties</Heading>
           <div className="flex flex-col gap-0.5">
             <Row label="Subject">
-              {/* Read-only: moving a project between subjects re-scopes every
-                  task's place on the calendar, and there is nowhere on a page
-                  this quiet to say so. */}
+              {/* Read-only: re-scoping moves every task on the calendar. */}
               <span className="flex min-w-0 items-center gap-1.5 text-xs text-foreground">
                 {project.subject_code ? (
                   <>
@@ -131,9 +105,7 @@ export function ProjectOverview({
 
             <Row label="Progress">
               {progress.total === 0 ? (
-                // A bar at zero is what a stalled project looks like, and one
-                // you have not broken down yet is not stalled — the same call
-                // `ProjectProgress` makes on a list row.
+                // No zero bar — it reads as stalled (as `ProjectProgress`).
                 <span className="text-[11px] text-muted-foreground/60">Nothing planned yet</span>
               ) : (
                 <ProgressMeter done={progress.done} total={progress.total} />
@@ -148,18 +120,8 @@ export function ProjectOverview({
   );
 }
 
-/**
- * The description.
- *
- * Plain text, deliberately — the same call `TaskPage`'s body makes: a brief is
- * a paragraph saying what the assignment actually asks for, and wiring the
- * markdown renderer in would mean a read mode and an edit mode for something
- * you write three lines into. `whitespace-pre-wrap` is the whole renderer.
- *
- * The draft follows the row only when the row changes: every write in the app
- * fires `PROJECTS_UPDATED_EVENT`, and a draft that re-synced on each one would
- * overwrite what is being typed.
- */
+/** Plain text, like `TaskPage`'s body. The draft re-syncs only when the
+ *  brief itself changes, not on every `PROJECTS_UPDATED_EVENT`. */
 function Brief({
   project,
   onSave,
@@ -183,8 +145,7 @@ function Brief({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={save}
       onKeyDown={(e) => {
-        // ⌘↵ saves without leaving the field — the composer's gesture, and the
-        // only way to save a brief you are not finished with.
+        // ⌘↵ saves without blurring.
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           save();
@@ -202,27 +163,16 @@ function Brief({
 
 // ── Upcoming tasks ───────────────────────────────────────────────────────────
 
-/** Five. This is the "what is next" glance, not a second table — past five
- *  rows you are reading the board, and the Tasks tab is one click away. */
 const MAX_UPCOMING = 5;
 
 interface Upcoming {
   task: DbProjectTask;
-  /** The parent's title on a subtask. A bare "Draft the intro" on its own is
-   *  not something you can act on, and the board always draws a subtask under
-   *  the card it belongs to — here there is no card to sit under. */
+  /** Set on a subtask, for context. */
   parentTitle: string | null;
   due: number;
 }
 
-/**
- * The project's own unfinished, dated work, soonest first — **subtasks
- * included**, because they are work, and a breakdown whose parents alone were
- * listed would skip exactly the rows that carry the real dates.
- *
- * Overdue sorts to the top for free: it is the same ascending order, and
- * `DueChip` already reddens anything behind us.
- */
+/** Unfinished, dated tasks and subtasks, soonest (so overdue) first. */
 function upcomingTasks(nodes: TaskNode[]): Upcoming[] {
   const out: Upcoming[] = [];
   const take = (task: DbProjectTask, parentTitle: string | null) => {
@@ -238,14 +188,7 @@ function upcomingTasks(nodes: TaskNode[]): Upcoming[] {
   return out.sort((a, b) => a.due - b.due).slice(0, MAX_UPCOMING);
 }
 
-/**
- * Two empty states, not one.
- *
- * A project you have not broken down yet and a project whose tasks carry no
- * dates are different problems with different next moves, and one shared
- * "nothing here" sentence would name neither. Neither draws the bordered box:
- * an empty list with a border around it reads as a list that failed to load.
- */
+/** Two empty states (no tasks / no dates), neither in a bordered box. */
 function UpcomingTasks({ project, nodes }: { project: DbProject; nodes: TaskNode[] }) {
   const rows = useMemo(() => upcomingTasks(nodes), [nodes]);
   const anyTasks = nodes.length > 0;
@@ -267,8 +210,6 @@ function UpcomingTasks({ project, nodes }: { project: DbProject; nodes: TaskNode
     <Section title="Upcoming tasks">
       {rows.map(({ task, parentTitle }) => (
         <Link key={task.id} to={taskHref(project.id, task)} className={ROW}>
-          {/* The kind of the column it sits in, not the column's name, which is
-              the user's to change — the rule `moveTask` decides "done" by. */}
           <TaskGlyph kind={columnOf(project, task.column_id)?.kind ?? null} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[12px] text-foreground">{task.title}</span>

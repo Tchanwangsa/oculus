@@ -30,11 +30,7 @@ interface SubjectPickerProps {
   canRefetch: boolean;
 }
 
-/**
- * The Sync page's subject selector: a compact trigger in the header row that
- * opens the current / past subject checklist in a popover. What's checked
- * here is what "Sync now" pulls.
- */
+/** The Sync page's subject checklist popover; what's checked is what syncs. */
 export function SubjectPicker({
   subjects,
   selectedIds,

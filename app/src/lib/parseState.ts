@@ -1,30 +1,15 @@
 import type { ParseFailure, ParseLatch } from "@/stores/parseStore";
 
 /**
- * What a file's markdown situation *is*, in one vocabulary.
- *
- * MinerU cloud is the only parser and there is no fallback beneath it, so a
- * failure is permanent until something changes: the file simply has no
- * markdown, and with it no search, no `@`-mention and no Markdown view. That
- * used to be invisible — a file row said `"failed"` or nothing at all, and the
- * viewer just didn't draw its toggle — which read as "this file is fine".
- *
- * Three questions decide which state a file is in, and they are the three the
- * `parse-status` error carries (`app/src/stores/parseStore.ts`):
- *
- * - is it moving (queued / running) or done (`quality`)?
- * - did *this file* fail, and **could a retry ever work** (`retryable`)?
- * - is the cause **the whole library's** (`latching`) — no token, a rejected
- *   token, a spent quota — rather than this file's?
- *
- * The last one is the distinction the UI must never fudge: "this file is
- * broken" and "parsing is down for everything" call for different words and
- * different fixes. `retryable` and `latching` are both **optional** — a
- * failure inherited from a previous session is only the word `error` in the
- * DB, with no column for the discriminants — so unknown is its own case and is
- * never coerced into either extreme.
+ * A file's markdown situation in one vocabulary. Nothing catches a failed
+ * parse (CLAUDE.md), so a file without markdown must say so, from the three
+ * things the `parse-status` error carries (`parseStore`): moving or done;
+ * whether a retry could work (`retryable`); and whether the cause is the whole
+ * library's (`latching`), which the UI must never blur with "this file is
+ * broken". Both flags are optional (a previous session's failure is just
+ * `error` in the DB), so unknown is its own case.
  */
-export type ParseStateKind =
+type ParseStateKind =
   | "parsed"
   | "running"
   | "queued"
@@ -37,50 +22,37 @@ export interface ParseState {
   kind: ParseStateKind;
   /** The one word a file row shows. */
   label: string;
-  /** The heading of the explanation, where there is room for one. */
   title: string;
-  /** The explanation — the backend's own sentence whenever it gave one. */
+  /** The backend's own sentence whenever it gave one. */
   detail: string;
-  /** How loud the row's word is allowed to be. Only a genuine failure is
-   *  `bad`; "not parsed yet" is not a failure and colouring it red is a lie. */
+  /** Only a genuine failure is `bad`; "not parsed yet" is not one. */
   tone: "quiet" | "progress" | "good" | "bad" | "hold";
-  /** True when Settings → Library is where this gets fixed (a missing or
-   *  rejected token). A spent quota heals on its own and gets no button. */
+  /** Settings → Library can fix it (a missing or rejected token). */
   fixInSettings: boolean;
 }
 
-/** The background sweep's promise, and only said when it can keep it: under a
- *  latch `useQualitySweep` stands down entirely, and a file whose failure said
- *  a retry cannot work is never re-kicked. */
+/** Only shown where `useQualitySweep` will actually retry: not under a latch,
+ *  not for a non-retryable failure. */
 export const PARSE_SWEEP_NOTE = "Oculus retries outstanding files in the background.";
 
 /**
- * Is this latching cause a token the student can fix in Settings → Library?
- *
- * The other latching causes are not: a spent quota heals on a clock, and a
- * backend/app version mismatch is an update, not a setting — pointing either
- * at Settings would send someone to a page that cannot help. `kind` is
- * preferred but optional, so the backend's own sentence is the fallback: both
- * credential messages name the token, and no other one does.
+ * Is this latching cause a token fixable in Settings → Library? (A spent quota
+ * or a version mismatch is not.) Falls back to the message when `kind` is
+ * absent: only the credential messages name the token.
  */
 export function tokenish(kind: string | undefined, message: string): boolean {
   if (kind) return /credential|token/i.test(kind);
   return /token/i.test(message);
 }
 
-/**
- * Derive the state of one PDF-backed file.
- *
- * `status` is the live/DB word, `failure` what this file last failed with (if
- * this session saw it fail), `latch` the app-wide condition in force.
- */
+/** `status` is the live/DB word; `failure` is set only if this session saw
+ *  the file fail; `latch` is the app-wide condition in force. */
 export function parseStateOf(
   status: string | undefined,
   failure: ParseFailure | undefined,
   latch: ParseLatch | null,
 ): ParseState {
-  // Done and moving both beat any stale failure — the store already clears a
-  // file's failure the moment it moves again, so these can never disagree.
+  // Done and moving beat any failure; the store clears it when a file moves.
   if (status === "quality") {
     return {
       kind: "parsed",
@@ -128,8 +100,7 @@ export function parseStateOf(
         kind: "permanent",
         label: "can't parse",
         title: "This PDF cannot be parsed",
-        // No sweep line: a file whose failure said a retry cannot work is
-        // never re-kicked, and promising one would be a lie.
+        // No PARSE_SWEEP_NOTE: the sweep never re-kicks this file.
         detail: `${failure.message} It will not be tried again.`,
         tone: "bad",
         fixInSettings: false,
@@ -145,9 +116,7 @@ export function parseStateOf(
     };
   }
 
-  // `error` with no discriminants: this session never saw the failure, so all
-  // the DB kept is the word. Unknown retryability is still swept (that is the
-  // recovery path's whole point), so the promise holds.
+  // `error` from a previous session: unknown retryability is still swept.
   if (status === "error") {
     return {
       kind: "failed",
@@ -161,8 +130,7 @@ export function parseStateOf(
     };
   }
 
-  // Nothing wrong with this file — the library's parser is down, which is why
-  // it has no markdown and why nothing is coming for it.
+  // Nothing wrong with this file; parsing is down for the whole library.
   if (latch) {
     return {
       kind: "blocked",

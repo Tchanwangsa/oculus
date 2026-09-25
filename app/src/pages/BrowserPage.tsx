@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { listen } from "@tauri-apps/api/event";
 import {
   ArrowClockwise,
   ArrowSquareOut,
@@ -24,38 +23,20 @@ import {
 } from "@/lib/browser";
 import { suggestHistory, type HistoryEntry } from "@/lib/browserHistory";
 import { faviconFor } from "@/hooks/useBrowserTabs";
+import { useTauriEvent } from "@/hooks/useEvents";
 import { useBrowserStore } from "@/stores/browserStore";
 import { useActivePaneId } from "@/stores/tabStore";
 import { useTabActive, useTabId } from "@/components/tabs/TabContext";
 
 /**
- * The `/browse/:id` route: a toolbar across the top of the content card and,
- * under it, an empty slot that the tab's native page WebView sits in. The page
- * is not in the DOM — Rust parks a WKWebView over the slot
- * (`app/src-tauri/src/browser.rs`) — so this component's job is to say where
- * the slot is, and to step the page aside when the app has to draw over it.
+ * The `/browse/:id` route: a toolbar over an empty slot that Rust parks the
+ * tab's native WKWebView over (`app/src-tauri/src/browser.rs`).
  *
- * Everything shown here comes from Rust's snapshot; the local state is the
- * address bar's draft while it is being typed in, the suggestions under it,
- * and the find bar.
- *
- * **Three things in this file hide the page, and they are one rule.** A native
- * view cannot interleave with the DOM, so anything the app draws over the slot
- * would render *beneath* the page: a portalled popover (`coveredBy`), the
- * address bar's own suggestion list, and the tab going to the background. They
- * are folded into a single `hidden` below rather than three competing calls,
- * because Rust does what it is told page by page and two effects disagreeing
- * about one page is how a page ends up parked over the app.
- *
- * The suggestion list is the only one of the three that is a *choice*, and it
- * is the only one with a **still** behind it. Taking the page away to make
- * room for a dropdown blanked the card, which is not what an omnibox does — so
- * focusing the address bar asks Rust for a PNG of the page as it stands
- * (`browser_snapshot`), the slot paints that image, and the popover is drawn
- * over the image in the ordinary way, with its shadow and its hover states.
- * What you were reading stays on screen, frozen, for the second you spend
- * typing. If no still arrives the list opens anyway and the page still goes:
- * that is the old behaviour, kept as the floor rather than as the plan.
+ * A native view cannot sit under the DOM, so anything drawn over the slot must
+ * hide the page: a portalled popover, the suggestion list, the tab going to the
+ * background. They fold into one `hidden` — two effects disagreeing about one
+ * page leave it parked over the app. The suggestion list is drawn over a PNG
+ * still of the page (`browser_snapshot`) so the card does not blank.
  */
 
 function appZoom(): number {
@@ -65,9 +46,8 @@ function appZoom(): number {
   return Number.isFinite(z) && z > 0 ? z : 1;
 }
 
-/** The slot's place in the window as insets, in logical points: CSS pixels
- *  times the page zoom. The card's inner corner radius rides along so the
- *  page can round its bottom corners to match. */
+/** The slot as window insets in logical points (CSS px × page zoom), plus the
+ *  card's inner radius for the page's bottom corners. */
 function measure(slot: HTMLElement): Viewport {
   const z = appZoom();
   const r = slot.getBoundingClientRect();
@@ -100,9 +80,8 @@ function overlaps(a: DOMRect, b: DOMRect): boolean {
   );
 }
 
-/** Whether anything portalled out of the app tree — a popover, tooltip,
- *  menu, dialog — currently lands over the slot. A portal's own wrapper is
- *  an unstyled div, so its children are what get measured. */
+/** Whether a portal (popover, menu, dialog…) lands over the slot. A portal's
+ *  wrapper is an unstyled div, so its children are measured too. */
 function coveredBy(slot: HTMLElement): boolean {
   const page = slot.getBoundingClientRect();
   for (const portal of document.body.children) {
@@ -114,15 +93,11 @@ function coveredBy(slot: HTMLElement): boolean {
   return false;
 }
 
-/** What the address bar offers: the thing you typed, then places you have
- *  been. The typed row is always first and always selected to begin with, so
- *  Enter means what it has always meant and the list only ever adds. */
+/** The typed row (always first, selected by default), then history matches. */
 interface Suggestion {
   key: string;
   url: string;
-  /** The line in bold-ish: a page's title, or the address itself. */
   label: string;
-  /** The quiet line under it. */
   detail: string;
   kind: "typed" | "search" | "history";
 }
@@ -131,10 +106,8 @@ export default function BrowserPage() {
   const params = useParams();
   const id = Number(params.id);
   const active = useTabActive();
-  // ⌘F belongs to one page, and a split tab has two of them in front at once.
-  // `active` is true for both halves — it means "this tab is the tab in
-  // front" — so the find bar asks the narrower question the shell already
-  // answers for navigation: which half am I working in.
+  // `active` is true for both halves of a split; menu shortcuts go only to
+  // the focused half.
   const paneId = useTabId();
   const focusedPaneId = useActivePaneId();
   const focused = active && paneId === focusedPaneId;
@@ -144,14 +117,10 @@ export default function BrowserPage() {
   const addressRef = useRef<HTMLInputElement>(null);
   const findRef = useRef<HTMLInputElement>(null);
   const [address, setAddress] = useState(tab?.url ?? "");
-  // State, not a ref: whether the field is being typed in decides whether the
-  // suggestion list is up, and the list is rendered.
   const [editing, setEditing] = useState(false);
   const [covered, setCovered] = useState(false);
-  // The still of the page the suggestion list is drawn over: a blob URL once
-  // Rust has answered, `null` when it cannot, `undefined` while the answer is
-  // outstanding — which is also "the list is not allowed up yet", so that
-  // typing never shows a dropdown over a card with nothing behind it.
+  // Blob URL once Rust answers, `null` if it cannot, `undefined` while
+  // pending — which also holds the list closed.
   const [still, setStill] = useState<string | null | undefined>(undefined);
   const [standing, setStanding] = useState(false);
   const stillSeq = useRef(0);
@@ -162,9 +131,7 @@ export default function BrowserPage() {
     { open: false, query: "", found: true },
   );
 
-  // Typing something other than where you already are is what opens the list;
-  // focusing the field is not, or ⌘L would blank the page you are reading
-  // before you have asked for anything.
+  // Typing opens the list, focusing does not — or ⌘L would hide the page.
   const draft = address.trim();
   const suggesting = editing && draft !== "" && draft !== tab?.url;
 
@@ -199,15 +166,11 @@ export default function BrowserPage() {
     return [typed, ...rest];
   }, [suggesting, draft, matches]);
 
-  // The list waits on the snapshot, not the other way round: opening it first
-  // would hide the page for the 30ms the still takes, which is the flash this
-  // whole mechanism exists to remove. `null` — no still to be had — counts as
-  // settled, and the page simply goes, as it always used to.
+  // The list waits on the still so the page is never hidden with nothing
+  // behind the list; `null` counts as settled.
   const listOpen = suggesting && suggestions.length > 0 && still !== undefined;
 
-  // ── The page's slot ────────────────────────────────────────────────────
-  //
-  // One rule, three reasons. See the note at the top of the file.
+  // One rule, three reasons — see the file header.
   const hidden = !active || covered || listOpen;
 
   useEffect(() => {
@@ -217,9 +180,7 @@ export default function BrowserPage() {
       browser.hideTab(id).catch(() => {});
       return;
     }
-    // The still is dropped when Rust says the live page is up again, not when
-    // the list closes: between those two is a frame with neither, and that
-    // frame is a flash of empty card.
+    // Drop the still only once the live page is back, else one blank frame.
     browser
       .place(id, measure(slot))
       .catch(() => {})
@@ -229,14 +190,11 @@ export default function BrowserPage() {
       });
   }, [id, hidden]);
 
-  // Leaving the slot takes the page with it — on unmount for an app tab, and
-  // on an id change, which is the same slot handed to another tab. Keyed on
-  // the id it put there, so it is the outgoing page that goes down.
+  // On unmount or id change, hide the outgoing page.
   useEffect(() => () => void browser.hideTab(id).catch(() => {}), [id]);
 
-  // The slot moves when the sidebar toggles or the zoom changes (page zoom
-  // reflows the viewport, so this fires for it too); the window's own
-  // resizes Rust follows without us.
+  // Sidebar toggles and page zoom move the slot; Rust follows window resizes
+  // itself.
   useEffect(() => {
     const slot = slotRef.current;
     if (!slot) return;
@@ -247,10 +205,8 @@ export default function BrowserPage() {
     return () => observer.disconnect();
   }, [id]);
 
-  // Watch for portals landing over the slot. Measured a frame after the
-  // mutation, once the popper has positioned itself. Only portals: this
-  // component's own overlays are inside `#root` and are accounted for above,
-  // so opening the suggestion list cannot feed back into this.
+  // Measured a frame after the mutation, once the popper has positioned.
+  // Only portals count, so the suggestion list cannot feed back into this.
   useEffect(() => {
     const slot = slotRef.current;
     if (!slot) return;
@@ -274,18 +230,12 @@ export default function BrowserPage() {
     };
   }, [id]);
 
-  // The address bar shows the tab's URL unless it is being typed in.
   useEffect(() => {
     if (!editing) setAddress(tab?.url ?? "");
   }, [editing, tab?.url, id]);
 
-  // ── The still ─────────────────────────────────────────────────────────
-  //
-  // Taken when the field is focused rather than when the list opens: a
-  // snapshot is a round trip through WebKit, and focus is the keystroke
-  // before the one that needs it. Sequenced like the autocomplete below,
-  // because a snapshot that lands after you have already left is a picture of
-  // a page you are no longer looking at.
+  // Taken on focus, a keystroke ahead of the list; sequenced so a late
+  // snapshot of a page you have left is dropped.
   const captureStill = useCallback(() => {
     if (!Number.isInteger(id)) return;
     const seq = ++stillSeq.current;
@@ -301,28 +251,20 @@ export default function BrowserPage() {
       });
   }, [id]);
 
-  // A blob URL is a live allocation — a window-sized 2x PNG of it — so the
-  // state that holds one owns it: whenever `still` moves on, the URL it held
-  // goes back to the browser.
+  // Revoke each blob URL once `still` moves on.
   useEffect(() => {
     if (typeof still !== "string") return;
     return () => URL.revokeObjectURL(still);
   }, [still]);
 
-  // `listOpen` puts the still in the slot during the *render* that opens the
-  // list, before the effect above tells Rust to take the page down — the image
-  // is under the page until then, so it costs nothing to have it early and it
-  // means there is never a frame with neither. This flag is only what keeps it
-  // there afterwards, until the live page is back.
+  // `listOpen` already shows the still in the render that opens the list;
+  // `standing` keeps it up after the list closes, until the live page is back.
   useEffect(() => {
     if (listOpen && typeof still === "string") setStanding(true);
   }, [listOpen, still]);
 
-  // ── Autocomplete ──────────────────────────────────────────────────────
-  //
-  // A local SQLite query per keystroke, which is cheap enough not to debounce;
-  // what it does need is an ordering guard, since two queries in flight can
-  // land out of order and leave the list showing answers to an older prefix.
+  // Autocomplete: a local query per keystroke, undebounced, with an ordering
+  // guard against out-of-order answers.
   const query = useRef(0);
   useEffect(() => {
     if (!suggesting) {
@@ -337,17 +279,13 @@ export default function BrowserPage() {
       .catch(() => {});
   }, [suggesting, draft]);
 
-  // The typed row is first, so a fresh keystroke always re-selects it: what
-  // you are typing must never be overtaken by a suggestion that happened to
-  // stay in the list.
+  // A fresh keystroke re-selects the typed row.
   useEffect(() => setPicked(0), [draft]);
 
   const goTo = useCallback(
     (url: string) => {
       if (!tab || !url) return;
-      // Blur *first*: the blur handler puts the field back to the tab's
-      // current URL, and doing it the other way round would land that stale
-      // value on top of the address we are on our way to.
+      // Blur first: the blur handler resets the field to the old URL.
       addressRef.current?.blur();
       setEditing(false);
       setAddress(url);
@@ -372,8 +310,7 @@ export default function BrowserPage() {
       return;
     }
     if (!listOpen) return;
-    // Tab fills the field with the highlighted row without going there — the
-    // way an address bar lets you take a completion and then edit it.
+    // Tab takes the highlighted completion into the field without going.
     if (e.key === "Tab") {
       e.preventDefault();
       const suggestion = suggestions[picked];
@@ -389,14 +326,9 @@ export default function BrowserPage() {
     }
   };
 
-  // ── Find in page ──────────────────────────────────────────────────────
-  //
-  // WebKit's own find, driven from Rust (`browser.rs`). Two things follow from
-  // that API: there is no match *count*, only whether anything matched, so the
-  // bar says "No results" and never "3 of 12"; and each search starts from the
-  // current selection, so an edit to the query clears the selection first and
-  // searches again from the top — which is what makes typing feel incremental
-  // rather than walking forward a match per keystroke.
+  // Find in page: WebKit's find via Rust. It reports only matched/not (no
+  // count), and searches from the current selection — so a query edit clears
+  // the selection first to search again from the top.
   const runFind = useCallback(
     (text: string, backwards: boolean, fromTop: boolean) => {
       if (!tab) return;
@@ -412,68 +344,37 @@ export default function BrowserPage() {
     [tab],
   );
 
-  useEffect(() => {
-    const unlisten = listen<FindResult>("browser-find", (e) => {
-      if (e.payload.id !== id) return;
-      setFind((f) =>
-        e.payload.query === f.query ? { ...f, found: e.payload.found } : f,
-      );
-    });
-    return () => void unlisten.then((off) => off()).catch(() => {});
-  }, [id]);
+  useTauriEvent<FindResult>("browser-find", (e) => {
+    if (e.payload.id !== id) return;
+    setFind((f) =>
+      e.payload.query === f.query ? { ...f, found: e.payload.found } : f,
+    );
+  });
 
   const closeFind = useCallback(() => {
     setFind({ open: false, query: "", found: true });
     if (tab) browser.findClear(tab.id).catch(() => {});
   }, [tab]);
 
-  // ⌘F, ⌘G and ⇧⌘G arrive as menu events, not key presses: the page is a
-  // native WebView that takes every ⌘-key, so a `keydown` here would only ever
-  // work from outside the page it is meant to search
-  // (`app/src-tauri/src/menu.rs`).
-  const findActions = useRef({ open: () => {}, step: (_: boolean) => {} });
-  findActions.current = {
-    open: () => {
-      setFind((f) => ({ ...f, open: true }));
-      // After the bar has mounted, and selecting so ⌘F twice replaces rather
-      // than appends.
-      requestAnimationFrame(() => findRef.current?.select());
-    },
-    step: (backwards: boolean) => {
-      if (!find.open) {
-        findActions.current.open();
-        return;
-      }
-      if (find.query) runFind(find.query, backwards, false);
-    },
+  // ⌘F / ⌘G / ⇧⌘G are menu events (see ⌘L below).
+  const openFind = () => {
+    setFind((f) => ({ ...f, open: true }));
+    // After mount; select so a second ⌘F replaces the query.
+    requestAnimationFrame(() => findRef.current?.select());
   };
+  const stepFind = (backwards: boolean) => {
+    if (!find.open) openFind();
+    else if (find.query) runFind(find.query, backwards, false);
+  };
+  useTauriEvent("menu-find", () => focused && openFind());
+  useTauriEvent("menu-find-next", () => focused && stepFind(false));
+  useTauriEvent("menu-find-prev", () => focused && stepFind(true));
 
-  useEffect(() => {
-    if (!focused) return;
-    const pending = [
-      listen("menu-find", () => findActions.current.open()),
-      listen("menu-find-next", () => findActions.current.step(false)),
-      listen("menu-find-prev", () => findActions.current.step(true)),
-    ];
-    return () => {
-      for (const p of pending) p.then((off) => off()).catch(() => {});
-    };
-  }, [focused]);
-
-  // ⌘L. **Every browser shortcut here is a menu item**, none of them a
-  // `keydown` listener: `browser_place` calls `set_focus()` on the page, so
-  // while you are browsing the app's own webview receives no key events at all
-  // — and macOS gives the menu bar first refusal on ⌘-keys even when it does.
-  // A listener in this file worked only in the sliver where the app happened
-  // to have focus, which is exactly not when you reach for ⌘R.
-  // ⌘R, ⌘[ and ⌘] are routed by the shell and the strip, which own what they
-  // mean on a page that is not a browser tab; ⌘L means nothing there at all,
-  // so it ends here.
-  useEffect(() => {
-    if (!focused) return;
-    const unlisten = listen("menu-address", () => addressRef.current?.focus());
-    return () => void unlisten.then((off) => off()).catch(() => {});
-  }, [focused]);
+  // ⌘L. Every browser shortcut is a menu item, never a `keydown`:
+  // `browser_place` focuses the page, so the app's webview gets no key events
+  // while browsing (`app/src-tauri/src/menu.rs`). ⌘R/⌘[/⌘] are routed by the
+  // shell and tab strip.
+  useTauriEvent("menu-address", () => focused && addressRef.current?.focus());
 
   const barButton =
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent transition-colors";
@@ -482,7 +383,6 @@ export default function BrowserPage() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* The hairline under the toolbar is where the page begins. */}
       <div className="relative shrink-0 border-b border-border">
         <div className="flex h-10 items-center gap-1 px-2">
           <button
@@ -533,10 +433,7 @@ export default function BrowserPage() {
             className="h-7 min-w-0 flex-1 rounded-full bg-secondary px-3.5 text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground focus:bg-card focus:ring-2 focus:ring-brand/40 disabled:opacity-50"
             placeholder="Search or enter address"
           />
-          {/* Only when it is not 100%: a zoom control that is always there is
-              a permanent reminder of a setting almost nobody changes, and
-              ⌘= / ⌘− / View → Zoom are how it is changed anyway. Clicking it
-              puts the page back to actual size. */}
+          {/* Shown only off 100%; resets to actual size. */}
           {Math.abs(zoom - 1) > 0.001 && (
             <button
               onClick={() => tab && browser.setZoom(tab.id, 1)}
@@ -548,7 +445,7 @@ export default function BrowserPage() {
             </button>
           )}
           <button
-            onClick={() => findActions.current.open()}
+            onClick={openFind}
             disabled={!tab}
             aria-label="Find in page"
             className={cn(barButton, "ml-1")}
@@ -565,9 +462,8 @@ export default function BrowserPage() {
           </button>
         </div>
 
-        {/* The find bar is a second row of the toolbar rather than a strip
-            floating over the page: over the page it would be under it, since
-            the page is a native view this DOM cannot draw on top of. */}
+        {/* A toolbar row, not a floating strip: the DOM cannot draw over the
+            native page. */}
         {find.open && (
           <div className="flex h-9 items-center gap-1 border-t border-border-subtle px-2">
             <MagnifyingGlass size={13} className="mx-1.5 shrink-0 text-muted-foreground" />
@@ -594,8 +490,6 @@ export default function BrowserPage() {
               placeholder="Find in page"
               className="h-7 min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground"
             />
-            {/* No "3 of 12": WebKit's find API answers whether it matched and
-                nothing more (see `find_string` in browser.rs). */}
             {find.query && !find.found && (
               <span className="mr-1 shrink-0 text-[11.5px] text-muted-foreground">
                 No results
@@ -623,11 +517,8 @@ export default function BrowserPage() {
           </div>
         )}
 
-        {/* The omnibox dropdown, over the page — over the page's *still*,
-            strictly, since the DOM cannot draw on a native view (see the note
-            at the top of the file). `onMouseDown` rather than `onClick`: the
-            field's blur would close this list out from under the pointer
-            before a click could land. */}
+        {/* Drawn over the still. `onMouseDown`, not `onClick`: the field's
+            blur would close the list before a click landed. */}
         {listOpen && (
           <div className="absolute inset-x-2 top-full z-20 mt-1 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-lg">
             {suggestions.map((s, i) => {
@@ -674,9 +565,7 @@ export default function BrowserPage() {
         )}
       </div>
 
-      {/* The page's slot. Nothing renders here — the native view covers it —
-          except the still that stands in for the page while the suggestion
-          list is over it. */}
+      {/* The native view covers this slot; only the still renders here. */}
       <div ref={slotRef} className="relative min-h-0 flex-1">
         {(listOpen || standing) && typeof still === "string" && (
           <img

@@ -9,26 +9,18 @@ import { AttachmentStrip } from "@/components/harness/AttachmentStrip";
 import { useAttachments } from "@/hooks/useAttachments";
 import { imageFiles, withAttachments } from "@/lib/attachments";
 import type { Provider } from "@/lib/harness";
-import { fmtTime } from "@/lib/lectures";
+import { fmtClockSecs } from "@/lib/lectures";
 import { cn } from "@/lib/utils";
 
-/** The empty box is one line tall; both halves of the autosize measure against
- *  this, so it has to stay the textarea's own line-height. */
+/** The empty box's height; must stay the textarea's own line-height. */
 const LINE_H = 16;
 
-/** About six lines. The dock is short as well as narrow — a box that grew to
- *  ten would be most of the panel. */
+/** About six lines: the dock is short as well as narrow. */
 const MAX_H = 96;
 
 /**
- * The moment's timestamp, ticking itself.
- *
- * It reads the playhead out of a **ref** and re-renders only itself, once a
- * second. The player re-renders four times a second on `timeupdate` and
- * `TranscriptPanel` is memoised against exactly that — a `currentTime` prop
- * anywhere in the dock's props bag would throw the memo away on every one of
- * those frames and put the virtualised transcript back in the path of a
- * decoding video. Same shape as `Running`'s elapsed clock in `ChaptersPanel`.
+ * The moment's timestamp. Reads the playhead from a ref and re-renders only
+ * itself, once a second, so no `currentTime` prop breaks `TranscriptPanel`'s memo.
  */
 function MomentChip({
   atRef,
@@ -61,7 +53,7 @@ function MomentChip({
           )}
         >
           <Icon size={12} className="shrink-0" />
-          {fmtTime(at)}
+          {fmtClockSecs(at)}
         </button>
       </TooltipTrigger>
       <TooltipContent>
@@ -74,30 +66,14 @@ function MomentChip({
 }
 
 /**
- * The dock's composer.
+ * The dock's composer — a sibling of `components/harness/Composer.tsx`, not a
+ * variant: the lecture fixes the subject and the agent already has the
+ * recording folder (`docs/harness.md`), so there is no scope picker or `@` menu,
+ * and it adds the moment instead. Attachments are shared outright
+ * (`useAttachments`, `AttachmentStrip`).
  *
- * **A sibling of `app/src/components/harness/Composer.tsx`, not a variant of
- * it.** The two boxes answer different questions. That one opens a
- * conversation and so carries the choices that are made once — the subject
- * scope above the box, the `@` menu that turns a filename into a library path
- * — and it has the room for them. This one is 300px wide beside a playing
- * video, and both of those are already answered: the lecture fixes the
- * subject, and the agent has been handed the recording folder in its
- * instructions (`docs/harness.md`), so a file is typed as a path. What it adds
- * instead is the moment, which the page composer has no playhead to build.
- * Threading a `compact` flag and four "not here" props through one component
- * would have made the shared one harder to read than both of them are apart.
- *
- * **Sibling, not lesser.** Everything a picture does in the page composer it
- * does here: paste a screenshot, drag one in from Finder, see it as a chip,
- * open it, take it off, send it. That half is `useAttachments` and
- * `AttachmentStrip`, shared outright — a drop that worked in one box and did
- * nothing in the other read as the app being broken rather than as two boxes
- * with different jobs, which is exactly what it was.
- *
- * Enter sends, Shift+Enter breaks a line — bb's keys, and the same ones next
- * door. While a turn runs the box still takes a message: Rust queues it, so
- * stop and send sit side by side exactly as they do on the page.
+ * Enter sends, Shift+Enter breaks a line. While a turn runs a send is queued by
+ * Rust, so stop and send sit side by side.
  */
 export function LectureChatComposer({
   providers,
@@ -128,8 +104,8 @@ export function LectureChatComposer({
   /** Whether the next message carries the moment. */
   moment: boolean;
   onMoment: (on: boolean) => void;
-  /** Words stop dropped out of the queue, handed back to be typed over. The
-   *  counter is what is watched: the same text twice is still two restores. */
+  /** Words a stop handed back. Watched by `n`: the same text twice is still
+   *  two restores. */
   restore?: { text: string; n: number } | null;
   onProvider: (p: Provider) => void;
   onModel: (m: string | null) => void;
@@ -139,12 +115,10 @@ export function LectureChatComposer({
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
-  /** The box and its strip of attachments: what a drag is aimed at, which is
-   *  the surface rather than the field's text. */
+  /** The drop target: the box and its attachment strip. */
   const wrapRef = useRef<HTMLDivElement>(null);
-  /** Pictures pasted or dropped in, written only on send. The refusal names a
-   *  typed path rather than `@`, because this box has no mention menu — the
-   *  agent already holds the recording folder (`docs/harness.md`). */
+  /** Pictures pasted or dropped in, written on send. No `@` menu here, so the
+   *  refusal says to type a path. */
   const att = useAttachments(wrapRef, {
     notAPicture: "Only images can be attached — type a path for a course file.",
   });
@@ -159,9 +133,8 @@ export function LectureChatComposer({
     ref.current?.focus();
   }, [restore]);
 
-  // The box grows to its content. A layout effect rather than the change
-  // handler: at the moment a handler runs the textarea still holds the old
-  // string, and measuring it then sizes the box to the wrong text.
+  // Autosize in a layout effect: in the change handler the textarea still holds
+  // the old string.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -169,10 +142,8 @@ export function LectureChatComposer({
     el.style.height = `${Math.min(el.scrollHeight, MAX_H)}px`;
   }, [text]);
 
-  // Pictures are written first and the message is only assembled once they are
-  // on disk: a path in a message that points at nothing is worse than a send
-  // that did not happen, so a refusal keeps the box exactly as it was and says
-  // why.
+  // Pictures are written before the message is assembled; if that fails the
+  // box is kept as it was.
   const send = async () => {
     const t = text.trim();
     if ((!t && !att.items.length) || att.writing) return;
@@ -181,8 +152,7 @@ export function LectureChatComposer({
     if (!paths) return;
 
     setText("");
-    // Whether this goes out now or waits behind the running turn is Rust's
-    // call, not this box's: it owns the queue and the order.
+    // Rust decides whether this sends now or queues.
     onSend(withAttachments(t, paths));
   };
 
@@ -193,26 +163,20 @@ export function LectureChatComposer({
       <div
         className={cn(
           "flex flex-col gap-2 rounded-lg border border-border bg-card px-2 py-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
-          // A drag over the box says so on the box itself, in the same
-          // vocabulary focus uses — the page composer's announcement, because
-          // it is the same gesture.
+          // Drag-over styling in focus's vocabulary, like the page composer.
           att.dropping && "border-brand ring-[3px] ring-brand/25",
         )}
       >
         <AttachmentStrip items={att.items} onDetach={att.detach} compact />
-        {/* `overflow-x-hidden`: same one-line box as the main composer, and the
-          same reason — with macOS showing scrollbars rather than overlaying
-          them, WebKit paints a horizontal bar across a 16px-tall field that
-          has nothing to scroll sideways. */}
+        {/* `overflow-x-hidden`: with classic scrollbars WebKit paints a
+            horizontal bar across a one-line field. */}
         <Textarea
           ref={ref}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
-            // A screenshot is a file on the clipboard, and on some sources it
-            // comes with a text flavour of its own — the picture wins, and the
-            // typed text is left as it was. Plain text falls through to the
-            // textarea's own paste, which keeps the browser's undo.
+            // A picture on the clipboard wins over its text flavour; plain text
+            // falls through to the native paste (keeps undo).
             const pictures = imageFiles(e.clipboardData.files);
             if (!pictures.length) return;
             e.preventDefault();

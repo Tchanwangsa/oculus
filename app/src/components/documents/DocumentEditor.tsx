@@ -6,8 +6,6 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { CircleNotch } from "@phosphor-icons/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -31,12 +29,12 @@ import { applyEdit, enterEdit, imageEdit, tabEdit, type TextEdit } from "@/lib/m
 import { fileTitle, openFileSmart } from "@/lib/openFile";
 import { cn } from "@/lib/utils";
 import type { DbFile } from "@/lib/db";
+import { readCourseFile } from "@/lib/courseFiles";
+import { LoadingFill } from "@/components/ui/PageParts";
 
 export type EditorMode = "write" | "preview";
 
-/** What the header's status word says. `idle` is blank: nothing has been
- *  typed since the note was opened, or since it was last saved and then
- *  touched again — a word for every keystroke would be noise. */
+/** The header's status word; `idle` is blank. */
 export type SaveStatus =
   | { state: "idle" }
   | { state: "saving" }
@@ -54,11 +52,7 @@ const SAVE_DELAY_MS = 600;
 /** A freshly created note, still wearing the name Rust gave it. */
 const UNTITLED = /^Untitled(?:-\d+)?$/;
 
-/**
- * The editor's header controls — the Write / Preview pills and the save
- * word — drawn by the page that hosts the editor, in *its* header, so the
- * document below stays chrome-free.
- */
+/** Write/Preview pills and the save word, drawn in the host page's header. */
 export function DocumentControls({
   mode,
   onMode,
@@ -90,18 +84,15 @@ export function DocumentControls({
 }
 
 /**
- * Turn a `TextEdit` into an insertion the browser makes itself, so ⌘Z takes
- * it back like any other typing. The `input` event it raises is what updates
- * React's copy; only when the command is refused is the value swapped in by
- * hand, with the caret placed once that render has landed.
+ * Apply a `TextEdit` via `execCommand` so ⌘Z undoes it like typing; its
+ * `input` event updates React. If refused, `fallback` swaps the value in.
  */
 function applyTextEdit(
   ta: HTMLTextAreaElement,
   edit: TextEdit,
   fallback: (value: string) => void,
 ) {
-  // A collapsed range and nothing to insert is a no-op — and `delete` on a
-  // collapsed selection would eat the character before it.
+  // Nothing to do — and `delete` on a collapsed selection would eat a char.
   if (edit.start === edit.end && edit.text === "") return;
   ta.setSelectionRange(edit.start, edit.end);
   const done = edit.text
@@ -116,18 +107,10 @@ function applyTextEdit(
 }
 
 /**
- * A markdown note, edited in place. No toolbar: the page is the document,
- * with a title above the text and the mode and save state in the host's
- * header (`DocumentControls`).
- *
- * A picture can be pasted or dropped into it, and unlike a composer's it is
- * written the moment it arrives — see `embed` below.
- *
- * The draft lives in a ref as well as in state, and every write reads the
- * ref: a save that starts on a timer, a blur, ⌘S or the unmount always takes
- * the latest text, never the one a stale closure saw. Writes are serialised —
- * one in flight, looping until the draft it wrote is the draft there is — so
- * two saves can never race each other onto disk out of order.
+ * A markdown note, edited in place; controls live in the host's header.
+ * The draft lives in a ref so every save (timer, blur, ⌘S, unmount) takes the
+ * latest text, and writes are serialised — one in flight, looping until the
+ * draft on disk is current — so saves never land out of order.
  */
 export function DocumentEditor({
   file,
@@ -147,9 +130,8 @@ export function DocumentEditor({
   const [text, setText] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [title, setTitle] = useState(() => fileTitle(file));
-  /** Why a picture could not be taken in — a refusal from Rust, or a drop of
-   *  something that is not one. Its own line rather than the header's save
-   *  word, which the next keystroke would overwrite. */
+  /** Picture-attach failures; separate from the save word, which the next
+   *  keystroke would overwrite. */
   const [attachError, setAttachError] = useState<string | null>(null);
 
   const draft = useRef("");
@@ -158,14 +140,11 @@ export function DocumentEditor({
   const inFlight = useRef<Promise<void> | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
-  /** The whole page: the drop target, so a picture can be let go anywhere
-   *  over the note rather than on the text's own box, which is only as tall
-   *  as what has been written. */
+  /** The whole page is the drop target, not just the text box. */
   const pageRef = useRef<HTMLDivElement>(null);
 
-  // Updated after each commit rather than during render, so the cleanup that
-  // runs when this editor moves to another file still sees the file it was
-  // editing — React runs the old effect's cleanup before the new effects.
+  // Updated after commit, not during render, so the cleanup on a file switch
+  // (which React runs before new effects) still sees the old file.
   const fileRef = useRef(file);
   useEffect(() => {
     fileRef.current = file;
@@ -173,8 +152,7 @@ export function DocumentEditor({
   const statusRef = useRef(onStatus);
   statusRef.current = onStatus;
 
-  /** Write the draft if it differs from what is on disk; resolves once it
-   *  does not. Safe to call from anywhere, any number of times. */
+  /** Write the draft if it differs from disk. Idempotent. */
   const flush = useCallback((): Promise<void> => {
     if (timer.current != null) {
       window.clearTimeout(timer.current);
@@ -191,8 +169,7 @@ export function DocumentEditor({
           saved.current = content;
           statusRef.current({ state: "saved" });
         } catch (e) {
-          // Not retried here: the next keystroke schedules another attempt,
-          // and the word in the header says what happened until then.
+          // Not retried: the next keystroke schedules another attempt.
           statusRef.current({ state: "error", message: String(e) });
           break;
         }
@@ -211,8 +188,7 @@ export function DocumentEditor({
     }, SAVE_DELAY_MS);
   }, [flush]);
 
-  // Load the text, keyed on the row and not its path: a rename moves the
-  // file under the editor and must not reload (and so discard) the draft.
+  // Keyed on the row, not its path: a rename must not reload the draft.
   useEffect(() => {
     let live = true;
     draft.current = "";
@@ -220,7 +196,7 @@ export function DocumentEditor({
     setText(null);
     setLoadError(null);
     statusRef.current({ state: "idle" });
-    invoke<string>("read_course_file", { relativePath: file.relative_path })
+    readCourseFile(file.relative_path)
       .then((t) => {
         if (!live) return;
         draft.current = t;
@@ -234,9 +210,7 @@ export function DocumentEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.id]);
 
-  // Leaving — another file, another route, the tab closing — writes whatever
-  // has not been written. A save already in flight is looping on the draft
-  // and will take it; only a quiet editor needs the push.
+  // On leave, write anything unsaved; an in-flight save already loops on it.
   useEffect(() => {
     return () => {
       if (timer.current != null) window.clearTimeout(timer.current);
@@ -247,8 +221,7 @@ export function DocumentEditor({
     };
   }, [file.id]);
 
-  // The row's name follows a rename a beat later; take it unless the student
-  // is mid-edit in the field.
+  // Follow a rename unless the title field is being edited.
   useEffect(() => {
     if (document.activeElement !== titleRef.current) setTitle(fileTitle(file));
   }, [file.filename, file.category]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -261,8 +234,7 @@ export function DocumentEditor({
     titleRef.current?.select();
   }, [loaded]);
 
-  // Preview is a look at the draft, but it is also a pause — and a natural
-  // moment to write. Coming back lands in the text.
+  // Entering preview saves; leaving it focuses the text.
   const prevMode = useRef(mode);
   useEffect(() => {
     if (mode === "preview") void flush();
@@ -270,8 +242,7 @@ export function DocumentEditor({
     prevMode.current = mode;
   }, [mode, flush]);
 
-  // ⌘S and ⌘⇧P, for the tab being looked at. Document-level, because in
-  // preview nothing in the editor holds focus.
+  // ⌘S / ⌘⇧P on the document, since in preview nothing here holds focus.
   useEffect(() => {
     if (!tabActive) return;
     const onKey = (e: KeyboardEvent) => {
@@ -299,8 +270,7 @@ export function DocumentEditor({
     try {
       await flush();
       const path = await renameDocument(fileRef.current, next);
-      // The row reloads through the event a moment later; until it does, a
-      // save must not land on the old path.
+      // Until the row reloads, saves must go to the new path.
       fileRef.current = {
         ...fileRef.current,
         relative_path: path,
@@ -343,18 +313,9 @@ export function DocumentEditor({
   };
 
   /**
-   * A picture, written beside the note the moment it arrives and linked at
-   * the caret.
-   *
-   * A composer writes nothing until send, because the message may never be
-   * sent. A note has no send: the picture has to be *in* the text while it is
-   * still being written around, so there is no later moment to defer the
-   * write to. The cost is a file left in `assets/` when its tag is deleted
-   * again, and that is the accepted trade — an image pointing at nothing
-   * would be the alternative.
-   *
-   * The insertion goes through `applyTextEdit` like Tab and Enter do, so ⌘Z
-   * takes the picture back out the way it takes back typing.
+   * Write a picture beside the note immediately and link it at the caret.
+   * A note has no send to defer to, so a deleted tag leaves a file in
+   * `assets/` — accepted over a dangling image. Undoable via `applyTextEdit`.
    */
   const embed = useCallback(
     async (write: (note: DbFile) => Promise<string>, name: string) => {
@@ -362,12 +323,9 @@ export function DocumentEditor({
         const path = await write(fileRef.current);
         const ta = bodyRef.current;
         if (!ta) return;
-        // `[`, `]` and `(` would close the alt text or the link early. The
-        // path never needs escaping: Rust names the file itself, from a stamp
-        // and the extension it sniffed.
+        // Strip chars that would end the alt text early; Rust names the path.
         const alt = name.replace(/[[\]()]/g, "").trim() || "image";
-        // A drop may land with the focus anywhere; the caret the edit splices
-        // at is this field's, so it has to be this field that has it.
+        // A drop may leave focus elsewhere; the edit splices at this caret.
         ta.focus();
         const edit = imageEdit(
           ta.value,
@@ -388,10 +346,7 @@ export function DocumentEditor({
     [schedule],
   );
 
-  /** Pasted pictures, which arrive as `File`s the clipboard owns. One at a
-   *  time, so two screenshots land in the order they were pasted. A paste
-   *  carrying a picture *and* a text flavour of it — most web pages — is the
-   *  picture, and the composer reads one the same way. */
+  /** Pasted pictures, one at a time to keep order. Picture beats a text flavour. */
   const onBodyPaste = (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
     const pictures = imageFiles(e.clipboardData?.files);
     if (!pictures.length) return;
@@ -403,9 +358,7 @@ export function DocumentEditor({
     })();
   };
 
-  /** …and dropped ones, which arrive as paths (`useFileDrop`). A drop of
-   *  something else says so rather than being ignored: silence reads as a
-   *  broken drop target, and a dropped PDF is a reasonable thing to try. */
+  /** Dropped paths. A non-image drop says so rather than silently failing. */
   const attachPaths = (paths: string[]) => {
     if (!paths.length) return;
     if (mode !== "write") {
@@ -442,10 +395,7 @@ export function DocumentEditor({
   }
   if (text === null) {
     return (
-      <div className="h-full flex items-center justify-center gap-2 text-muted-foreground">
-        <CircleNotch size={16} className="animate-spin" />
-        <span className="text-sm">Loading…</span>
-      </div>
+      <LoadingFill />
     );
   }
 
@@ -501,9 +451,7 @@ export function DocumentEditor({
         </div>
       </div>
 
-      {/* The affordance is an overlay over the whole note, because that is
-          what accepts the drop — a zone around the text alone would be a lie
-          about where a picture can be let go. */}
+      {/* Overlay over the whole note, since that is the drop target. */}
       <div
         aria-hidden
         className={cn(

@@ -5,31 +5,10 @@ import { chatHref, harnessSend, type Provider } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/harnessStore";
 
 /**
- * The box you came to Home for: the Chat page's composer, with the thread id
- * pinned at `null`.
- *
- * Home never continues a conversation — the one you were in is a row in
- * Continue below, and picking up where you left off is a click on that. So
- * every send here opens a **new** thread and then leaves for `/chat`, which is
- * why nothing on this page is `providerLocked` or `subjectLocked`: those two
- * exist to stop an *open* thread changing the agent or the scope it was bound
- * with, and there is no open thread here. `running`, `usage` and the rest are
- * the empty-thread values for the same reason.
- *
- * No suggestion chips and no hero line above it. ChatPage's empty state has
- * both and earns them — it is a page with nothing else on it — where here the
- * date heading is already the page's title and the four sections below are
- * already four things to do.
- *
- * The subject list the scope picker offers is loaded by `HomePage`, not here:
- * Continue's thread rows resolve their subject codes off the same slice, and a
- * load that lives in one of two readers is a load the other one silently
- * depends on being mounted first.
- *
- * `useNavigate`, not `navigateActive`: every tab builds its own memory router
- * (`app/src/components/tabs/TabPane.tsx`), so a page inside one navigates with
- * the plain hook. `navigateActive` is the shell's, for the sidebar and the
- * palette that live outside all of them.
+ * The Chat composer with the thread pinned at `null`: every send opens a new
+ * thread and leaves for `/chat`, so nothing here is provider- or
+ * subject-locked. Subjects are loaded by `HomePage` (Continue reads them too).
+ * `useNavigate`, not `navigateActive`: each tab has its own memory router.
  */
 export function HomeComposer() {
   const store = useHarnessStore;
@@ -50,17 +29,12 @@ export function HomeComposer() {
           reasoningEffort: s.reasoning,
           subjectId: s.subjectId,
         });
-        // The rows went in under the new id while we waited; list it, and
-        // only then leave — arriving before the thread is listed would land
-        // on a route naming a thread the page does not know yet. The id rides
-        // in the route (`chatHref`), so the conversation opens in this tab and
-        // no other.
+        // List the thread before leaving: a route naming an unlisted thread
+        // opens on nothing. The id rides in the route, so only this tab opens it.
         await s.loadThreads();
         navigate(chatHref(newId));
       } catch (e) {
-        // The failure also arrives as an error row through the event path, so
-        // there is nothing to say here beyond re-reading the list: the thread
-        // may well have been created before the send failed.
+        // The failure also arrives as an error row; the thread may exist.
         console.error("harness send failed", e);
         await store.getState().loadThreads();
       }
@@ -94,8 +68,7 @@ export function HomeComposer() {
       onModel={onModel}
       onReasoning={onReasoning}
       onSend={send}
-      // Nothing can be in flight from here — the send leaves the page — so
-      // stop has nothing to stop.
+      // The send leaves the page, so nothing is ever in flight here.
       onStop={noop}
       autoFocus
     />

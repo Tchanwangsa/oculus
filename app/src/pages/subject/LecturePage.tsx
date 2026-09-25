@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, useParams, useSearchParams } from "react-router-dom";
-import { CircleNotch } from "@phosphor-icons/react";
 import { getLectures, type Lecture } from "@/lib/db";
 import { LecturePlayer } from "@/components/lectures/LecturePlayer";
+import { LoadingFill } from "@/components/ui/PageParts";
 import { LECTURES_TAB, SubjectCrumbs } from "@/components/subjects/SubjectCrumbs";
 import { recordRecent } from "@/lib/recents";
 
 /**
- * A lecture as its own page — what the peek's expand button opens in a new
- * tab. Standalone: no subject shell above it, so the player has the height,
- * and one breadcrumb row says which subject this recording belongs to and
- * leads back to its Lectures list. Fullscreen takes the player `fixed
- * inset-0`, which covers the row rather than fighting it.
+ * A lecture as its own page (the peek's expand target). Standalone, so the
+ * player has the height; one breadcrumb row leads back to the subject.
  */
 export default function SubjectLecturePage() {
   const { subjectId } = useParams();
@@ -33,7 +30,6 @@ export default function SubjectLecturePage() {
     refresh();
   }, [refresh]);
 
-  // Feeds the "Recently visited" row on the subject home.
   useEffect(() => {
     if (lecture) {
       recordRecent(lecture.subject_id, {
@@ -47,14 +43,7 @@ export default function SubjectLecturePage() {
   if (!Number.isFinite(id) || !lectureId) return <Navigate to="/subjects" replace />;
 
   if (!lecture) {
-    if (!loaded) {
-      return (
-        <div className="h-full flex items-center justify-center gap-2 text-muted-foreground">
-          <CircleNotch size={16} className="animate-spin" />
-          <span className="text-sm">Loading…</span>
-        </div>
-      );
-    }
+    if (!loaded) return <LoadingFill />;
     // Loaded but gone — a stale tab after a re-sync.
     return <Navigate to={`/subjects/${id}/lectures`} replace />;
   }

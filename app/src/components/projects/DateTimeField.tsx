@@ -5,40 +5,15 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { sqliteUtcToMs } from "@/lib/format";
 
-/**
- * A date and a time, picked rather than typed.
- *
- * This was an `<input type="datetime-local">`, which is the obvious answer and
- * the wrong one on macOS: WebKit renders it as a row of separate editable
- * segments, greys the ones it considers unfilled, and lights each under the
- * pointer on its own — so a single field reads as five controls at three
- * different weights, and its popup calendar is the OS's, in the OS's calendar
- * system, ignoring every token in `index.css`. (The screenshot that prompted
- * this had it rendering a Buddhist-era year.) It also could not be committed
- * on change, because a half-typed segment reports the whole field as empty.
- *
- * So the field is a button showing what is set, and the editing happens in a
- * popover we own: shadcn's `Calendar` for the date and one `type="time"` input
- * for the clock, which is the one native control here with nothing to mis-render
- * — it is two segments, and they are never empty because picking a date always
- * sets a time.
- */
-
-/** What a date with no time yet gets. A deadline lands at the end of its day
- *  and a start at the beginning of the working one — picking "the 20th" for a
- *  due date means the 20th, not one minute past midnight on it. */
+/** What a date with no time yet gets: a deadline lands at the end of its day,
+ *  a start at the beginning of the working one. */
 const DEFAULT_TIME: Record<"start" | "end", { h: number; m: number }> = {
   start: { h: 9, m: 0 },
   end: { h: 23, m: 59 },
 };
 
-/**
- * "15 Sep, 11:59 pm", with the year only once it is not this one.
- *
- * `fmtClock` is the app's version of this and is deliberately not used: it
- * never prints a year, which is right for a timeline entry and wrong for a due
- * date, where next February and last February are the whole question.
- */
+/** "15 Sep, 11:59 pm", with the year when it is not this one (which
+ *  `fmtClock` never prints). */
 function label(d: Date): string {
   const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
   if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
@@ -46,13 +21,13 @@ function label(d: Date): string {
   return `${d.toLocaleDateString([], opts)}, ${time}`;
 }
 
-/** `HH:mm` for the time input, which wants 24-hour regardless of how it
- *  chooses to display it. */
+/** `HH:mm`: the time input's value is 24-hour whatever it displays. */
 function clockValue(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Picked in a popover — see CLAUDE.md (no native date inputs). */
 export function DateTimeField({
   value,
   onCommit,
@@ -62,10 +37,7 @@ export function DateTimeField({
 }: {
   /** As stored: SQLite's naive UTC, or an ISO instant. `null` is unset. */
   value: string | null;
-  /** A full ISO 8601 instant, or `null` when cleared. `check_iso8601` in
-   *  `app/src-tauri/src/projects.rs` is the contract, and takes this shape —
-   *  so a date set here and one passed to `oculus task update --due` store
-   *  identically. */
+  /** A full ISO 8601 instant (`check_iso8601`'s contract), `null` when cleared. */
   onCommit: (iso: string | null) => void;
   defaultTime?: "start" | "end";
   placeholder?: string;
@@ -76,20 +48,10 @@ export function DateTimeField({
   const ms = sqliteUtcToMs(value);
   const current = ms == null ? null : new Date(ms);
 
-  /**
-   * Write a local wall-clock date back out as an instant.
-   *
-   * The whole conversion lives here, in one direction, which is the point of
-   * the rewrite: a `Date` built from local parts *is* the instant the user
-   * meant, and `toISOString` is the only place a zone is applied. The old
-   * field had to go both ways through a `YYYY-MM-DDTHH:mm` string, where
-   * `toISOString().slice(0, 16)` is the tempting and wrong way back — it
-   * renders UTC, so an 11pm Melbourne deadline read into the field as midday
-   * and saving it moved the date.
-   */
+  // A `Date` built from local parts is the instant meant; `toISOString` is the
+  // only place a zone is applied. Never round-trip via `toISOString().slice()`.
   const commit = (d: Date) => onCommit(d.toISOString());
 
-  /** A day from the calendar, keeping whatever clock is already set. */
   const pickDay = (day: Date | undefined) => {
     if (!day) return;
     const time = current ?? null;
@@ -99,9 +61,7 @@ export function DateTimeField({
     commit(next);
   };
 
-  /** A clock from the time input, keeping whatever day is already set. An
-   *  emptied time input keeps the date rather than clearing the field — Clear
-   *  is the control that means "no date", and it is right there. */
+  // An emptied time input keeps the date; Clear is what means "no date".
   const pickTime = (raw: string) => {
     const [h, m] = raw.split(":").map(Number);
     if (!Number.isFinite(h) || !Number.isFinite(m)) return;
@@ -116,8 +76,6 @@ export function DateTimeField({
         <button
           type="button"
           className={cn(
-            // One control, one hover state — which is the other half of what
-            // was wrong with the native field.
             "inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-xs transition-colors",
             "hover:border-border-subtle hover:bg-surface",
             open && "border-border-subtle bg-surface",
@@ -134,8 +92,6 @@ export function DateTimeField({
         <Calendar
           mode="single"
           selected={current ?? undefined}
-          // Opens on the month you are editing rather than on today, which is
-          // the difference between confirming a date and hunting for it.
           defaultMonth={current ?? undefined}
           onSelect={pickDay}
           autoFocus

@@ -4,29 +4,10 @@ import { useEffect, useRef } from "react";
 const STICK_PX = 80;
 
 /**
- * Follow the stream, but only from the bottom.
- *
- * A `scrollTo` on every delta forced a layout of the whole thread per token
- * *and* yanked the view back down whenever the reader scrolled up mid-turn;
- * growth is watched instead, and the scroll only happens while the bottom is
- * where they already are.
- *
- * Shared because the Chat page and the lecture player's dock draw the same
- * timeline (`docs/harness.md`), and two copies of this would be two answers to
- * "did the reader scroll away" — the one thing the timeline gets wrong most
- * visibly.
- *
- * Both boxes are watched, because the bottom moves for two reasons. The
- * content grows — a token lands — and the scroller itself shrinks, which is
- * what a composer does to the box above it as it wraps onto another line.
- * Only the first changes `scrollHeight`, so watching the content alone left
- * every ⇧⏎ pushing the last rows behind the composer with the scroll position
- * untouched and the view no longer at the end.
- *
- * `threadId` is what resets the pin: a thread you have just opened starts at
- * its end, whatever the last one was scrolled to. `live` re-hangs the observer
- * when the scroller itself is swapped out — an empty thread draws a different
- * box from a thread with rows in it.
+ * Follow a growing timeline, but only while the reader is at the bottom.
+ * Watches both boxes: content grows, and the scroller shrinks as the composer
+ * wraps. `threadId` resets the pin; `live` re-hangs the observer when the
+ * scroller element is swapped.
  */
 export function useStickToBottom(threadId: number | null, live: boolean) {
   const outer = useRef<HTMLDivElement>(null);

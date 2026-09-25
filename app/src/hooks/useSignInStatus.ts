@@ -8,23 +8,10 @@ import {
 } from "@/lib/harness";
 
 /**
- * Whether each CLI is signed in — one answer, shared by the three places that
- * ask: Settings → AI, the composer's warning line, and the sign-in dialog's
- * end state.
- *
- * Shaped after `app/src/hooks/useBridgeHealth.ts` deliberately, because it is
- * the same kind of value: one fact per provider that arrives once, is read
- * wherever a turn might be sent, and is edited by nobody. So it is a
- * module-level cache and a single in-flight promise rather than a store —
- * three surfaces mounting at once make one round of probes, not three.
- *
- * **One difference matters.** Rust caches health (`discover.rs` memoises the
- * lookup and the `--version` behind it); it caches *nothing* here, because
- * answering means spawning the CLI and asking it. So this cache is the only
- * one there is, which cuts both ways: a probe is expensive enough to be worth
- * holding, and a sign-in run that just succeeded has to drop it or every
- * surface goes on saying "signed out". `recheck` is that drop, and
- * `useSignIn`'s `onFinished` is its caller.
+ * Whether each CLI is signed in, shared by Settings → AI, the composer and the
+ * sign-in dialog. A module-level cache with one in-flight promise, like
+ * `useBridgeHealth`. Rust caches nothing (each check spawns the CLI), so a
+ * finished sign-in must call `recheck` or every surface keeps saying "out".
  */
 export type SignInState = "unknown" | "in" | "out";
 
@@ -37,10 +24,8 @@ function read(recheck: boolean): Promise<SignInStatus[]> {
     if (cached) return Promise.resolve(cached);
     if (inFlight) return inFlight;
   }
-  // A probe that could not run is not evidence that the student is signed
-  // out — the same rule health follows. A rejected invoke drops that provider
-  // from the answer entirely, which reads as `unknown` everywhere, rather
-  // than flashing the one state that puts a Sign in button on screen.
+  // A check that could not run is not evidence of "signed out": drop that
+  // provider so it reads as `unknown`, not as a Sign in button.
   const p = Promise.all(
     PROVIDERS.map((p) => harnessSignInStatus(p.id).catch(() => null)),
   )
@@ -55,15 +40,9 @@ function read(recheck: boolean): Promise<SignInStatus[]> {
   return p;
 }
 
-/**
- * A provider's state, given whatever has landed so far.
- *
- * Three states for the same reason `providerHealth` has three: until the probe
- * returns, a provider is neither signed in nor signed out, and every surface
- * draws `unknown` as *nothing at all*. An `error` row is `unknown` too — the
- * probe failing says nothing about the credential — and so is opencode's
- * `signedIn: null`, which is the deliberate "not answerable from here".
- */
+/** `unknown` (drawn as nothing) until the check lands, and for an error row or
+ *  opencode's `signedIn: null`, neither of which says anything about the
+ *  credential. */
 export function signInState(rows: SignInStatus[] | null, provider: Provider): SignInState {
   if (!rows) return "unknown";
   const row = rows.find((s) => s.provider === provider);
@@ -77,10 +56,9 @@ export function signInAccount(rows: SignInStatus[] | null, provider: Provider): 
 }
 
 export function useSignInStatus(): {
-  /** Null until the first round of probes lands. */
+  /** Null until the first round of checks lands. */
   statuses: SignInStatus[] | null;
-  /** Drop the cache and ask every CLI again. Settings' *Recheck*, and the end
-   *  of a sign-in run. */
+  /** Drop the cache and ask every CLI again. */
   recheck: () => void;
   checking: boolean;
 } {

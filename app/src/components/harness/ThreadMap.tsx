@@ -2,22 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The thread as a rail of ticks in the left gutter — one per question asked,
- * in order. It answers "how far in am I, and what came before", which a long
- * thread otherwise only tells you by scrolling: the replies are long and the
- * questions are the only landmarks in them. Clicking a tick jumps to that
- * question; hovering names it.
- *
- * **The ticks are one block, evenly spaced — not a scale.** Placing them
- * proportionally to where their message sits in the scroll spread them over
- * the whole viewport, so a thread read as two far-apart clusters of dashes
- * rather than as one index of the conversation. Even spacing gives up "how far
- * apart" — which the scrollbar already says — and keeps the count and the
- * position, which is what the rail is for.
- *
- * It reads geometry, never the stream. Where each question actually starts is
- * kept in a ref for the jump and the active tick, so a turn that grows the
- * thread twenty times a second re-renders nothing here.
+ * A rail of ticks in the left gutter, one per question; click jumps, hover names.
+ * Ticks are evenly spaced, not proportional to scroll position (the scrollbar
+ * already says that). Positions live in refs, so streaming re-renders nothing.
  */
 
 export type ThreadMarker = { id: number; text: string };
@@ -26,10 +13,9 @@ const PAD = 20;
 /** Distance between two ticks, and the shrunken floor for a very long thread. */
 const PITCH = 9;
 const MIN_PITCH = 4;
-/** The timeline's own width — the rail needs a gutter outside it. */
+/** The timeline column's width; the rail needs a gutter outside it. */
 const COLUMN = 760;
-/** Where a question that is not itself on screen counts as the one you are
- *  reading: far enough down that its reply, not its own bubble, fills the view. */
+/** With no question on screen, the one above this viewport fraction is active. */
 const ACTIVE_LINE = 0.35;
 
 export function ThreadMap({
@@ -42,12 +28,9 @@ export function ThreadMap({
   markers: ThreadMarker[];
 }) {
   const [box, setBox] = useState({ height: 0, room: false });
-  // Which questions are on screen, as a range — they are in order, so what is
-  // in frame is always contiguous.
+  // On-screen questions are contiguous, so a range.
   const [active, setActive] = useState({ from: 0, to: 0 });
   const [hover, setHover] = useState<number | null>(null);
-  // Where each question starts in the scroller. Out of state on purpose:
-  // clicking reads it, drawing does not.
   const tops = useRef<number[]>([]);
   const bottoms = useRef<number[]>([]);
   const frame = useRef(0);
@@ -68,8 +51,6 @@ export function ThreadMap({
     tops.current = t;
     bottoms.current = b;
     const height = Math.max(0, el.clientHeight - PAD * 2);
-    // The rail lives in the gutter beside the column; a window too narrow to
-    // have one would put ticks on top of the text.
     const room = (el.clientWidth - COLUMN) / 2 >= 44;
     setBox((prev) => (prev.height === height && prev.room === room ? prev : { height, room }));
   }, [scrollRef, contentRef, markers]);
@@ -79,10 +60,7 @@ export function ThreadMap({
     const content = contentRef.current;
     if (!el || !content) return;
     measure();
-    // Every question on screen is lit, not just one: a viewport holding three
-    // of them and marking one says the other two are somewhere else. When none
-    // is on screen — a long reply filling the view — the question that reply
-    // answers is lit instead, so the rail always says where you are.
+    // Light every on-screen question; if none, the one whose reply fills the view.
     const onScroll = () => {
       const top = el.scrollTop;
       const bottom = top + el.clientHeight;
@@ -104,9 +82,7 @@ export function ThreadMap({
     };
     onScroll();
     el.addEventListener("scroll", onScroll, { passive: true });
-    // The thread grows as the turn streams and as detail cards open; both move
-    // every question under them. Coalesced into a frame, and cheap: the ticks
-    // themselves do not depend on what it finds.
+    // Streaming and opening cards move questions; re-measure once per frame.
     const schedule = () => {
       if (frame.current) return;
       frame.current = requestAnimationFrame(() => {
@@ -126,7 +102,6 @@ export function ThreadMap({
     };
   }, [scrollRef, contentRef, measure]);
 
-  // One question is no map.
   if (!box.room || markers.length < 2) return null;
 
   const pitch = Math.max(MIN_PITCH, Math.min(PITCH, box.height / (markers.length - 1)));

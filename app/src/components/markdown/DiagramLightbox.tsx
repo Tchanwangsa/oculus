@@ -3,17 +3,8 @@ import { Lightbox, type LightboxSize } from "@/components/ui/Lightbox";
 export type DiagramSize = LightboxSize;
 
 /**
- * A diagram, opened out: the whole window, zoomable and pannable.
- *
- * The inline figure in a reply is a picture sized to the column it is in
- * (`Mermaid.tsx`), which is right for reading past and wrong for reading
- * *into* — a twenty-node flowchart in a 360px dock is a shape, not a diagram.
- * This is where it becomes one.
- *
- * The viewer itself is `components/ui/Lightbox.tsx`, shared with the pictures
- * a question attaches. What is left here is the two things that are true of a
- * diagram and of nothing else: the SVG goes in as markup, and its labels are
- * text the reader should be able to select through a pan.
+ * A mermaid diagram full-window in `ui/Lightbox.tsx`: SVG as markup, with
+ * selectable label text.
  */
 export function DiagramLightbox({
   svg,
@@ -21,8 +12,7 @@ export function DiagramLightbox({
   open,
   onOpenChange,
 }: {
-  /** The rendered SVG, already re-scoped by the caller so its ids cannot
-   *  collide with the copy still on screen in the reply. */
+  /** Ids already re-scoped so they don't collide with the inline copy. */
   svg: string;
   size: DiagramSize;
   open: boolean;
@@ -34,22 +24,13 @@ export function DiagramLightbox({
       open={open}
       onOpenChange={onOpenChange}
       title="Diagram"
-      // The affordance has to match what the pointer will actually do: an
-      // I-beam and a real selection over label text, the grab hand everywhere
-      // else. SVG `<text>` is not selectable here by default at all — `body`
-      // in `index.css` turns selection off app-wide — so saying so is what
-      // makes "select when hovering over text" true.
+      // `body` disables selection app-wide; labels opt back in.
       scrollerClassName="[&_svg_text]:cursor-text [&_svg_text]:select-text [&_svg_foreignObject]:cursor-text [&_svg_foreignObject]:select-text"
-      // Mermaid draws labels as SVG `<text>`/`<tspan>` where it can
-      // (`htmlLabels: false` in `Mermaid.tsx`) and as HTML inside a
-      // `<foreignObject>` for the diagram types with no such switch, so both
-      // shapes are named.
+      // Labels are SVG text, or HTML in a `<foreignObject>` for diagram types
+      // without `htmlLabels: false`.
       selectableSelector="text, tspan, foreignObject"
     >
-      {/* The `!` on `max-w-none` is not tidying: mermaid writes its natural
-          width as an **inline** `max-width`, and an inline style outranks any
-          class, so without the bang the picture stops growing at natural size
-          however far it is zoomed. */}
+      {/* `!` beats mermaid's inline `max-width`, which would cap the zoom. */}
       <div
         className="h-full w-full [&>svg]:h-full [&>svg]:w-full [&>svg]:max-w-none!"
         dangerouslySetInnerHTML={{ __html: svg }}

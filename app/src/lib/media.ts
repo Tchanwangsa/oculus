@@ -8,13 +8,9 @@ interface MediaServerInfo {
 let infoPromise: Promise<MediaServerInfo> | null = null;
 
 /**
- * URL for streaming a local media file through the Rust media HTTP server.
- *
- * WebKit's media pipeline refuses `<video>`/`<audio>` sources on custom URL
- * schemes — `convertFileSrc` URLs fetch fine but fail instantly with
- * MEDIA_ERR_SRC_NOT_SUPPORTED when given to a media element (macOS 26).
- * Real localhost HTTP is the only thing it accepts for local files; the
- * server lives in `app/src-tauri/src/media.rs`.
+ * URL for a local media file via the localhost server in `media.rs`. WebKit
+ * (macOS 26) rejects media on custom schemes like `convertFileSrc`'s with
+ * MEDIA_ERR_SRC_NOT_SUPPORTED.
  */
 export async function mediaSrc(absolutePath: string): Promise<string> {
   infoPromise ??= invoke<MediaServerInfo>("media_server_info");

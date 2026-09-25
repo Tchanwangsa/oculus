@@ -1,33 +1,21 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
 /**
- * Pictures on their way into a message.
- *
- * A CLI agent reads files, so an image has to be one before it can be talked
- * about: pasting or dropping one writes it into the library's
- * `agents/attachments/` and puts the path it comes back as into the message,
- * exactly as the `@` menu puts a course file's path there
- * (`app/src-tauri/src/harness/attach.rs`, `docs/harness.md`).
- *
- * Nothing is written while it is only *pending*. The composer holds the
- * clipboard's `File` or the dropped path and draws it from memory; the write
- * happens on send, so a picture pasted and then thought better of leaves
- * nothing behind on disk to sweep up.
+ * A picture on its way into a message. A CLI agent reads files, so on send it
+ * is written to `agents/attachments/` and its path goes into the message (see
+ * `docs/harness.md`). Until then it lives only in memory, so a discarded paste
+ * leaves nothing on disk.
  */
 export interface PendingAttachment {
   id: string;
-  /** For the alt text and the tooltip — never for the filename on disk,
-   *  which Rust names itself. */
+  /** Alt text and tooltip only; Rust names the file on disk. */
   name: string;
-  /** What the strip draws: a blob URL for pasted bytes, an asset URL for a
-   *  file that is already on disk. */
+  /** A blob URL for pasted bytes, an asset URL for a file on disk. */
   preview: string;
   source: { kind: "bytes"; file: File } | { kind: "path"; path: string };
 }
 
-/** Extensions a dropped file is worth offering to the agent. The bytes are
- *  sniffed in Rust regardless — this only keeps a dropped folder of PDFs from
- *  becoming eight refusals. */
+/** Pre-filters dropped paths; Rust still sniffs the bytes. */
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|heic|heif|avif)$/i;
 
 let seq = 0;
@@ -39,7 +27,7 @@ export function imageFiles(list: FileList | null | undefined): File[] {
   return Array.from(list).filter((f) => f.type.startsWith("image/"));
 }
 
-/** …and the same filter for a native drop, which hands over paths. */
+/** The same filter for a native drop, which hands over paths. */
 export function imagePaths(paths: string[]): string[] {
   return paths.filter((p) => IMAGE_EXT.test(p));
 }
@@ -62,15 +50,12 @@ export function pendingFromPath(path: string): PendingAttachment {
   };
 }
 
-/** Frees a blob URL. An asset URL has nothing to free. */
 export function releaseAttachment(a: PendingAttachment): void {
   if (a.source.kind === "bytes") URL.revokeObjectURL(a.preview);
 }
 
-/** A `File` as base64, the form the IPC takes it in — a byte array would
- *  cross as a JSON list of numbers, some seven characters per byte. Exported
- *  because a note's pictures cross the same way to a different command
- *  (`app/src/lib/documents.ts`). */
+/** A `File` as base64 for IPC — a byte array would cross as a JSON list of
+ *  numbers. */
 export function base64(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -83,11 +68,8 @@ export function base64(file: Blob): Promise<string> {
   });
 }
 
-/**
- * Write one pending picture into the library, answering with the path the
- * agent opens it by — `./attachments/<name>`, relative to `agents/`, which is
- * every thread's working directory.
- */
+/** Write one pending picture, returning `./attachments/<name>` — relative to
+ *  `agents/`, every thread's working directory. */
 export async function writeAttachment(a: PendingAttachment): Promise<string> {
   if (a.source.kind === "path") {
     return invoke<string>("harness_attach_file", { path: a.source.path });
@@ -95,15 +77,8 @@ export async function writeAttachment(a: PendingAttachment): Promise<string> {
   return invoke<string>("harness_attach_image", { data: await base64(a.source.file) });
 }
 
-/**
- * The same path as the webview sees it: `agents/attachments/<name>`, under the
- * data directory.
- *
- * Both spellings are accepted because both are written — the composer sends
- * the agent-relative one, and an agent quoting a picture back may write either
- * — and neither is a *library* path in the `courses/` sense, which is why this
- * is a matcher of its own rather than a case inside `libraryPath`.
- */
+/** An attachment path in either spelling agents write (agent- or
+ *  data-dir-relative); not a `courses/` path, so not part of `libraryPath`. */
 const ATTACHMENT_PATH = /^(?:\.\/)?(?:\.\.\/)?(?:agents\/)?attachments\/([A-Za-z0-9._-]+)$/;
 
 /** The data-directory-relative path a fenced attachment stands for, or null. */
@@ -112,23 +87,14 @@ export function attachmentPath(raw: string): string | null {
   return m ? `agents/attachments/${m[1]}` : null;
 }
 
-/** What an `<img>` in a bubble loads. Empty until the data directory has
- *  been asked for, which is one IPC call for the whole app
- *  (`app/src/hooks/useDataDir.ts`). */
+/** What an `<img>` in a bubble loads; empty until `useDataDir` resolves. */
 export function attachmentSrc(dataDir: string, path: string): string {
   if (!dataDir) return "";
   return convertFileSrc(`${dataDir}/${path}`.replace(/\/{2,}/g, "/"));
 }
 
-/**
- * The message a composer actually sends: what was typed, then the written
- * pictures' paths on their own line under it.
- *
- * Fenced the way a mention is, so the bubble draws them and the agent reads
- * them with the one matcher both already use (`splitLibraryPaths`). It lives
- * here rather than in either composer because a picture has to mean the same
- * thing in every box that takes one.
- */
+/** The text, then the pictures' paths on their own line, backtick-fenced like
+ *  a mention so `splitLibraryPaths` finds them. */
 export function withAttachments(text: string, paths: string[]): string {
   return [text, paths.map((p) => `\`${p}\``).join(" ")].filter(Boolean).join("\n\n");
 }

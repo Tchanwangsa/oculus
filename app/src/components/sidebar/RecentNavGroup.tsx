@@ -8,17 +8,11 @@ import { useActivePath } from "@/stores/tabStore";
 import { tabInfo } from "@/components/tabs/tabInfo";
 
 const OPEN_KEY = "oculus-recent-nav-open";
-/** The sidebar is a short column shared with the subjects — five is as much
- *  of the trail as earns its place. */
 const SHOWN = 5;
 
 /**
- * The Recent group: the last few pages you settled on, named exactly as their
- * tabs are (`tabInfo`). Clicking one goes there in the current tab; ⌘-click
- * opens it in a new one, as the tab strip's own affordances do.
- *
- * Rows do not move while you work — the ordering rules live in
- * `recentTabsStore`.
+ * The last few pages, named as their tabs are (`tabInfo`). Click navigates the
+ * current tab, ⌘-click opens a new one. Ordering rules: `recentTabsStore`.
  */
 export default function RecentNavGroup() {
   const recents = useRecentTabsStore((s) => s.recents);
@@ -34,15 +28,13 @@ export default function RecentNavGroup() {
     localStorage.setItem(OPEN_KEY, String(open));
   }, [open]);
 
-  // Nothing visited yet is nothing to say: the group appears with the trail.
   if (recents.length === 0) return null;
 
   const shown = recents.slice(0, SHOWN);
 
   return (
     <div>
-      {/* Same section header as Subjects, minus the link: Recent is a list,
-          not a place you can go. */}
+      {/* Like Subjects' header, minus the link: Recent is not a place. */}
       <div className="group/row flex items-center justify-between pl-2 pr-1 mb-0.5">
         <button
           type="button"
@@ -85,11 +77,8 @@ export default function RecentNavGroup() {
                   onClick={() => navigateActive(entry.path)}
                   className={cn(
                     "flex w-full items-center gap-2.5 rounded-md pl-2 pr-7 py-1.5 text-[12.5px] transition-colors",
-                    // Matched on the entry's identity, not its path: one
-                    // row stands for a whole subject, so it lights from any
-                    // of its tabs — while two files of that subject, which
-                    // differ only in `?path=`, stay two rows and light one at
-                    // a time.
+                    // By entry identity, not path: a subject row lights from
+                    // any of its tabs; two files (`?path=`) stay distinct.
                     entry.key === hereKey
                       ? "bg-sidebar-item-active text-foreground font-medium"
                       : "text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground",
@@ -98,8 +87,7 @@ export default function RecentNavGroup() {
                   <span className="shrink-0">{icon}</span>
                   <span className="truncate flex-1 text-left">{title}</span>
                 </button>
-                {/* Drops the entry, the way a tab's × drops the tab. Absolute
-                    so appearing on hover can't re-lay out the row. */}
+                {/* Absolute, so appearing on hover can't re-lay out the row. */}
                 <button
                   type="button"
                   onClick={() => forget(entry.key)}

@@ -4,13 +4,9 @@ import type { IconSpec, SearchItem, SearchSection } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
 /**
- * The result list, drawn the same way wherever search is offered: ⌘K
- * (`app/src/components/palette/CommandPalette.tsx`) and the new-tab page's own
- * field (`app/src/pages/NewTabPage.tsx`).
- *
- * The rows are the two surfaces' one shared piece of appearance; what the rows
- * *are* is `app/src/lib/search.ts`, and what picking one does is that file's
- * `openSearchItem`. Nothing here reads the library or navigates.
+ * The result list for ⌘K (`app/src/components/palette/CommandPalette.tsx`) and
+ * the new-tab page (`app/src/pages/NewTabPage.tsx`). Items and picking live in
+ * `app/src/lib/search.ts`; nothing here reads the library or navigates.
  */
 
 function Glyph({ spec }: { spec: IconSpec }) {
@@ -20,12 +16,8 @@ function Glyph({ spec }: { spec: IconSpec }) {
 }
 
 /**
- * Keyboard selection over a list that is rebuilt on every keystroke.
- *
- * The index is clamped rather than stored valid: results landing after a
- * keystroke can shorten the list under the highlight, and a new list is a new
- * first row — clamping alone would leave the highlight on whatever happened to
- * land at the old offset.
+ * Keyboard selection over a list rebuilt every keystroke: clamped, and reset
+ * to the first row when the list changes.
  */
 export function useSearchSelection(
   sections: SearchSection[],
@@ -72,8 +64,7 @@ export function SearchList({
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
-  /** Where each section starts in the flattened list, so a row knows its own
-   *  keyboard index without the render walking a counter. */
+  /** Section start offsets, so a row knows its keyboard index. */
   const offsets = useMemo(() => {
     let n = 0;
     return sections.map((s) => {
@@ -83,9 +74,7 @@ export function SearchList({
     });
   }, [sections]);
 
-  // Follow the highlight with the scroll, addressed through the DOM rather
-  // than a ref per row: the rows are rebuilt on every keystroke and a map of
-  // refs would be a second thing to keep in step.
+  // Scroll the highlight into view via the DOM; rows rebuild every keystroke.
   useEffect(() => {
     listRef.current
       ?.querySelector(`[data-index="${selected}"]`)
@@ -103,7 +92,6 @@ export function SearchList({
       ) : (
         sections.map((section, si) => (
           <div key={section.heading} className="pb-1 last:pb-0">
-            {/* No icon: section headers are labels, not rows. */}
             <div className="px-4 pb-0.5 pt-1.5 text-[11px] font-medium tracking-wide text-muted-foreground">
               {section.heading}
             </div>
@@ -114,9 +102,8 @@ export function SearchList({
                   key={item.key}
                   type="button"
                   data-index={i}
-                  // `mousemove`, not `mouseenter`: arrowing through a list
-                  // that scrolls under a resting pointer would otherwise hand
-                  // the selection straight back to the mouse.
+                  // `mousemove`, not `mouseenter`: arrowing scrolls rows under a
+                  // resting pointer, which would steal the selection back.
                   onMouseMove={() => onHover(i)}
                   onClick={(e) => onPick(item, e.metaKey || e.ctrlKey)}
                   className={cn(
@@ -129,18 +116,13 @@ export function SearchList({
                   <Glyph spec={item.icon} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{item.label}</span>
-                    {/* The line of prose that matched, for a hit found inside
-                        a document. One line, clipped: it is evidence that this
-                        is the right file, not a reading of it. */}
+                    {/* The matching line inside a document, clipped to one line. */}
                     {item.snippet && (
                       <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
                         {item.snippet.map((part, pi) => (
                           <span
                             key={pi}
-                            // `brand`, the accent token — a marked word is a
-                            // selection, not a fill. No background: a row of
-                            // highlighter blocks in a list this quiet reads as
-                            // damage.
+                            // `brand`, text only — highlighter blocks read as damage.
                             className={part.hit ? "text-brand" : undefined}
                           >
                             {part.text}

@@ -1,36 +1,19 @@
 /**
- * opencode's provider credentials, frontend side.
- *
- * Claude Code and Codex are signed in with their own CLIs and carry the
- * student's subscription; opencode reaches every provider at once and reaches
- * exactly the ones `opencode auth` holds a credential for. Until this existed
- * the only way to put one there was a terminal, so the model picker showed two
- * providers out of two hundred and eighteen with nothing on screen saying why.
- *
- * Everything here goes through the app's own `opencode serve`
- * (`app/src-tauri/src/harness/opencode.rs`), which is the supported door to
- * that store — and, for the browser flows, the process that owns the loopback
- * listener the redirect comes back to. Nothing writes `auth.json` directly and
- * nothing here mirrors a credential into the app: a key is a function argument
- * on its way to one request and is not in this module a moment longer.
- *
- * The forms are **declared by opencode**, not written here. A method is a spec
- * — a kind, a label, and a list of prompts with optional conditions — so one
- * generic dialog (`app/src/components/settings/OpencodeConnectDialog.tsx`)
- * covers `openai`'s three ways in, `github-copilot`'s enterprise branch and
- * the two hundred providers that just take a key, including ones opencode adds
- * after this was written.
+ * opencode's provider credentials, frontend side. Everything goes through the
+ * app's own `opencode serve` (`app/src-tauri/src/harness/opencode.rs`); nothing
+ * writes `auth.json` or keeps a key. The forms are specs declared by opencode,
+ * drawn by one generic `OpencodeConnectDialog`.
  */
 import { invoke } from "@tauri-apps/api/core";
 
 /** Shows a field only when another answer matches. */
-export interface AuthWhen {
+interface AuthWhen {
   key: string;
   op: "eq" | "neq";
   value: string;
 }
 
-export interface AuthOption {
+interface AuthOption {
   label: string;
   value: string;
   hint: string | null;
@@ -47,22 +30,18 @@ export interface AuthPrompt {
 }
 
 export interface AuthMethod {
-  /** Position in opencode's own array for this provider, and the only name
-   *  the OAuth endpoints have for a method. Passed back verbatim. */
+  /** Position in opencode's array — the only name its OAuth endpoints take. */
   index: number;
   kind: "oauth" | "api";
   label: string;
-  /** The *extra* fields. An `api` method always needs a key on top of these;
-   *  `openai`'s "Manually enter API Key" declares no prompts at all. */
+  /** Extra fields; an `api` method always needs a key on top of these. */
   prompts: AuthPrompt[];
 }
 
 export interface OpencodeProvider {
   id: string;
   name: string;
-  /** `custom` is opencode's built-in catalogue; `config` means the provider is
-   *  declared in an `opencode.json` rather than signed in to, so there is no
-   *  credential to remove. */
+  /** `config`: declared in an `opencode.json`, so no credential to remove. */
   source: string;
   env: string[];
   modelCount: number;
@@ -73,38 +52,27 @@ export interface OpencodeProvider {
 
 export interface OpencodeProviderList {
   providers: OpencodeProvider[];
-  /** A refresh was skipped because an opencode turn was running. The write
-   *  itself went through; the server has simply not re-read its store yet. */
+  /** A refresh was skipped because a turn was running; the write went through. */
   stale: boolean;
 }
 
 export interface Authorization {
   url: string;
-  /** `auto` — opencode finishes the flow itself, on a loopback listener or a
-   *  device poll, and the app watches for the credential to appear. `code` —
-   *  the student pastes something back. */
+  /** `auto`: opencode finishes the flow itself. `code`: the student pastes one. */
   method: "auto" | "code";
   instructions: string;
 }
 
 export type Answers = Record<string, string>;
 
-/**
- * The list, and optionally a re-read first.
- *
- * `refresh` is not free and is not cosmetic: measured against opencode 1.18.2,
- * a credential written through `PUT /auth` does not change what `GET /provider`
- * reports for the life of the instance, so every read after a write asks for
- * one. It is also what this section must **not** do on mount — the call starts
- * `opencode serve` if it is down, and a settings page being opened is not a
- * reason to spawn a CLI.
- */
+/** `refresh` is needed after a write: in opencode 1.18.2 `PUT /auth` does not
+ *  change `GET /provider` for the instance's life. Never call on mount — it
+ *  starts `opencode serve`. */
 export function opencodeProviders(refresh: boolean): Promise<OpencodeProviderList> {
   return invoke<OpencodeProviderList>("harness_opencode_providers", { refresh });
 }
 
-/** The key goes straight to opencode's store. It is never returned, never
- *  stored by the app, and redacted out of any error on the way back. */
+/** The key goes straight to opencode's store; redacted from any error. */
 export function opencodeSetKey(
   provider: string,
   method: number,
@@ -143,15 +111,8 @@ export function opencodeOauthFinish(
   });
 }
 
-/**
- * Which of a method's fields are on screen, given what has been answered.
- *
- * The same rule runs again in Rust before anything is sent — an abandoned
- * answer must not travel — so this copy is the *drawing* half only: it decides
- * what the dialog shows and what counts as filled in. An unanswered dependency
- * reads as the empty string, which is why `github-copilot`'s enterprise URL is
- * absent until the select says so.
- */
+/** Which fields are on screen. Drawing only — Rust re-applies the rule so an
+ *  abandoned answer is never sent. */
 export function visiblePrompts(method: AuthMethod, answers: Answers): AuthPrompt[] {
   return method.prompts.filter((p) => {
     if (!p.when) return true;
@@ -162,16 +123,12 @@ export function visiblePrompts(method: AuthMethod, answers: Answers): AuthPrompt
   });
 }
 
-/** Whether the form can be submitted: every visible field answered, plus the
- *  key an `api` method always needs on top of its prompts. */
 export function formComplete(method: AuthMethod, answers: Answers, key: string): boolean {
   if (method.kind === "api" && !key.trim()) return false;
   return visiblePrompts(method, answers).every((p) => (answers[p.key] ?? "").trim().length > 0);
 }
 
-/** A select's first option, so a branch is never drawn with nothing chosen —
- *  opencode's own prompts assume the obvious default (`github.com`) rather
- *  than declaring one. */
+/** Preselect each select's first option; opencode declares no defaults. */
 export function initialAnswers(method: AuthMethod): Answers {
   const out: Answers = {};
   for (const p of method.prompts) {
@@ -180,14 +137,7 @@ export function initialAnswers(method: AuthMethod): Answers {
   return out;
 }
 
-/**
- * The list this session has already read, so reopening Settings draws it
- * without another invoke.
- *
- * `useBridgeHealth`'s shape and its reason: the first read is the one that may
- * start a CLI, and it happens on a click. After that the server is up and the
- * answer is worth keeping for as long as the window lives.
- */
+/** The session's last read, so reopening Settings starts no CLI. */
 let cached: OpencodeProviderList | null = null;
 
 export function cachedProviders(): OpencodeProviderList | null {

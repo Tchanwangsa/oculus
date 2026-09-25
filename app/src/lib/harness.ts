@@ -1,11 +1,7 @@
 /**
- * The CLI-agent harness, frontend side: types that mirror the Rust
- * `harness` module, the reads over its tables, and the commands.
- *
- * Rust writes every row (`app/src-tauri/src/harness/store.rs`) as the
- * provider's events arrive, and forwards the same events on `harness-event`;
- * this module reads the rows back and `stores/harnessStore.ts` folds the live
- * events into what is on screen. Nothing here talks to a provider.
+ * The CLI-agent harness, frontend side: types mirroring the Rust `harness`
+ * module, reads over its tables, and its commands. Rust writes every row;
+ * `stores/harnessStore.ts` folds the live events. See docs/harness.md.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getDb, getSetting } from "@/lib/db";
@@ -13,15 +9,9 @@ import { filterOffered, loadCatalogue } from "@/lib/opencodeCatalogue";
 
 export type Provider = "claude" | "codex" | "opencode" | "antigravity";
 
-/** The reasoning levels a turn may ask for, **weakest first** — the key order
- *  here is the canonical one, and `sortReasoning` below is the only thing that
- *  decides how a level row reads. Every provider declares its levels per
- *  model — Claude's Haiku takes none of the five `claude --effort` accepts,
- *  and Codex's lists differ model to model — which is why the picker reads the
- *  level list off the *model*, not the provider. `null`
- *  is the absence of a level — the flag is left off and the agent's own
- *  default applies. Labels are bb's. */
-export const REASONING_LABELS: Record<string, string> = {
+/** Reasoning levels, **weakest first**: the key order is the canonical one
+ *  `sortReasoning` uses. Levels are per model, not per provider. */
+const REASONING_LABELS: Record<string, string> = {
   none: "None",
   minimal: "Minimal",
   low: "Low",
@@ -36,26 +26,11 @@ export function reasoningLabel(level: string): string {
   return REASONING_LABELS[level] ?? level;
 }
 
-/** Weakest to strongest, from the key order of `REASONING_LABELS` so there is
- *  one table rather than two that can drift. */
 const REASONING_ORDER = Object.keys(REASONING_LABELS);
 
-/**
- * A model's levels in the one order a person expects to read them.
- *
- * **No provider hands them over sorted, and one of them hands them over
- * alphabetically.** opencode's catalogue spells `variants` as an object keyed
- * by level id, and a JSON map has no order worth keeping, so the levels
- * arrived as High · Low · Max — which reads like a ranking and is not one.
- * Sorting here rather than at each source covers all four catalogues,
- * including a Codex that adds a level to an existing model tomorrow.
- *
- * A level this build has no name for keeps its place at the end, in the order
- * the provider gave it: an unknown id is already shown verbatim by
- * `reasoningLabel`, and guessing where it ranks would be worse than tacking
- * it on.
- */
-export function sortReasoning(levels: string[]): string[] {
+/** Weakest to strongest; no provider sends them sorted (opencode's arrive
+ *  alphabetically). Unknown levels keep their order at the end. */
+function sortReasoning(levels: string[]): string[] {
   const rank = (l: string) => {
     const i = REASONING_ORDER.indexOf(l);
     return i === -1 ? REASONING_ORDER.length : i;
@@ -63,32 +38,23 @@ export function sortReasoning(levels: string[]): string[] {
   return [...levels].sort((a, b) => rank(a) - rank(b));
 }
 
-/** One row of the model picker: the id the CLI is given, the name a person
- *  reads, and which reasoning levels that model accepts. */
 export interface HarnessModel {
-  /** Passed verbatim to `claude --model` or Codex's `model` field. */
+  /** Passed verbatim to the CLI. */
   id: string;
-  /** The model's own name — never a bare alias. The vendor mark beside it
-   *  already says whose it is, so the brand prefix is dropped, the way bb
-   *  drops it (`stripModelBrandPrefix`). */
+  /** The model's own name, never a bare alias, without a brand prefix. */
   label: string;
   description: string;
   reasoningEfforts: string[];
   defaultReasoningEffort: string | null;
-  /** Where the composer starts before anyone has picked. Not a "default
-   *  model" the user can select — every turn names its model outright. */
+  /** Where the composer starts; every turn still names its model. */
   isDefault?: boolean;
-  /** What the provider says this model can do, for opencode's rows only —
-   *  Claude's and Codex's lists carry none of these, and absent reads as
-   *  capable. `unusableReason` in `@/lib/opencodeCatalogue` is the rule. */
+  /** opencode rows only; absent reads as capable. See `unusableReason`. */
   toolCall?: boolean;
   textInput?: boolean;
   textOutput?: boolean;
 }
 
-/** The model and level a fresh composer opens on. Nothing is ever sent
- *  without both, so this is a starting selection rather than a fallback the
- *  agent resolves for itself. */
+/** The model and level a fresh composer opens on. */
 export function defaultSelection(models: HarnessModel[]): {
   model: string | null;
   reasoning: string | null;
@@ -98,76 +64,27 @@ export function defaultSelection(models: HarnessModel[]): {
   return { model: m.id, reasoning: m.defaultReasoningEffort ?? m.reasoningEfforts[0] ?? null };
 }
 
-/** One CLI agent the harness can drive: its id, the name a person reads, and
- *  where its catalogue comes from. */
 export interface ProviderInfo {
   id: Provider;
   label: string;
-  /** The models this provider has without being asked. Every agent today is
-   *  `null` — each CLI reports its own catalogue, and Claude Code's used to be
-   *  compiled in only until its `initialize` answer turned out to carry one —
-   *  so `fetchModels` below is how every list arrives. The field stays because
-   *  it is the question everything that used to test `provider === "claude"`
-   *  — the composer's opening selection, what a provider switch clears — was
-   *  really asking. */
+  /** A compiled-in catalogue; null when the CLI reports its own. */
   staticModels: HarnessModel[] | null;
-  /** Ask the CLI for its catalogue. Present exactly when `staticModels` is
-   *  null, and already adapted to the picker's shape, so a call site never
-   *  names a provider to know which command to invoke
-   *  (`useProviderModels` in `app/src/hooks/useProviderModels.ts`). */
+  /** Present exactly when `staticModels` is null; already in picker shape. */
   fetchModels?: () => Promise<HarnessModel[]>;
-  /** How this CLI's own sign-in ends — the one thing `SignInDialog` branches
-   *  on, and a property of the provider rather than a test on its id.
-   *
-   *  `"code"` is Claude: `claude auth login` prints the authorize URL and then
-   *  *blocks reading a pasted authorization code off stdin*, so the dialog has
-   *  to offer a field. `"callback"` is Codex: `codex login` runs a loopback
-   *  server on :1455 and finishes by itself when the browser comes back, so
-   *  there is nothing to type and the dialog only waits.
-   *
-   *  `null` is opencode, and it is a decision rather than a gap. opencode's
-   *  credentials are per *provider*, not per CLI, and Settings → AI already
-   *  owns that whole surface — the catalogue, the form specs, the OAuth flows
-   *  (`OpencodeProvidersSection.tsx`). A second path to the same store would
-   *  be a second answer to "am I signed in", so `harness_sign_in_start`
-   *  rejects opencode and `harness_sign_in_status` answers `signedIn: null`. */
+  /** How the CLI's sign-in ends: `"code"` blocks on a pasted code (Claude),
+   *  `"callback"` finishes via a loopback server (Codex). `null`: nothing to
+   *  drive here — opencode signs in per provider in Settings → AI. */
   signIn: "code" | "callback" | null;
-  /** What a picker should say when this provider's list comes back empty and
-   *  its CLI *is* installed — the one case "No models available" is a dead end
-   *  rather than a fact, because there is something the student can do about
-   *  it.
-   *
-   *  opencode's list is filtered by the catalogue below, so an installed,
-   *  connected opencode with nothing probed yet legitimately has zero rows,
-   *  and the sentence has to point at where the probing happens. Claude and
-   *  Codex leave this unset: an empty catalogue from either of them is an
-   *  answer their CLI gave, not a step that was skipped.
-   *
-   *  It is a field here rather than an `id === "opencode"` in the picker for
-   *  the same reason `staticModels`, `signIn` and `health` are: this file is
-   *  the one place a provider is declared, and the picker stays provider-blind
-   *  so a fourth agent costs it nothing. */
+  /** What the picker says when an installed CLI's list is empty because of a
+   *  step the student can take. */
   emptyNote?: string;
-  /** Whether this CLI can take a question back out of its own context — the
-   *  capability behind Rewind, Edit and Retry, all three of which truncate the
-   *  thread and would otherwise leave the agent remembering what the screen
-   *  no longer shows. Claude and Codex rewind over their control channel and
-   *  opencode reverts its session; Antigravity cannot (measured on `agy`
-   *  1.2.9: `/rewind` answers "not available in print mode", and nothing in
-   *  its stream-json protocol drops a message), so its timeline offers none of
-   *  the three rather than one that always drifts. */
+  /** Whether the CLI can drop a question from its own context — gates Rewind,
+   *  Edit and Retry. `agy` 1.2.9 cannot in print mode. */
   rewind: boolean;
 }
 
-/**
- * Every provider, in the order the picker lists them. **The one place a
- * provider is declared**: the marks (`ProviderMark.tsx`), the picker's rows,
- * the job registry's read in `db.ts` and the composer's selection all come off
- * this list rather than off a hardcoded pair, so adding a fourth agent is an
- * entry here plus its mark.
- *
- * opencode brands itself lowercase, so the label is not title-cased.
- */
+/** Every provider, in picker order — the one place a provider is declared;
+ *  call sites read these fields rather than testing ids. */
 export const PROVIDERS: ProviderInfo[] = [
   {
     id: "claude",
@@ -189,12 +106,8 @@ export const PROVIDERS: ProviderInfo[] = [
     id: "opencode",
     label: "opencode",
     staticModels: null,
-    // opencode is the one provider whose catalogue is bigger than its truth:
-    // 218 providers' worth of rows, some of which answer 400 or 401 when
-    // asked (`app/src/lib/opencodeCatalogue.ts`). The filter lives inside the
-    // entry so `useProviderModels` and `ModelPicker` still name no provider —
-    // "fetch the list" and "fetch the list that works" are the same job from
-    // where they stand.
+    // opencode's catalogue lists models that do not work; filtered here so
+    // callers stay provider-blind (see `filterOffered`).
     fetchModels: async () => {
       const models = opencodeAsModels(await harnessOpencodeModels());
       return filterOffered(models, await loadCatalogue());
@@ -207,17 +120,9 @@ export const PROVIDERS: ProviderInfo[] = [
     id: "antigravity",
     label: "Antigravity",
     staticModels: null,
-    // `agy models` prints what the account can actually use, and costs
-    // nothing to ask — it is a listing subcommand, not a turn. No filter in
-    // front of it: unlike opencode's 218 providers, this catalogue is one
-    // account's own entitlements, so a row in it is a row that works.
+    // `agy models` lists the account's own entitlements, so no filter.
     fetchModels: () => harnessAntigravityModels().then(antigravityAsModels),
-    // Not "no sign-in" so much as "no sign-in to drive". `agy` has no login
-    // subcommand: signing in is the interactive CLI — `agy` with no
-    // arguments, in a terminal — and nothing headless starts it (`agy models`
-    // signed out only says "Please sign in", which is how Rust answers
-    // `harness_sign_in_status` for it). So there is nothing for
-    // `SignInDialog` to wait on or type into.
+    // `agy` has no login subcommand; signing in is its interactive CLI.
     signIn: null,
     emptyNote:
       "Run agy in a terminal and finish its Google sign-in, then its models appear here.",
@@ -234,19 +139,10 @@ export function providerLabel(provider: Provider): string {
 }
 
 /**
- * The route for a Chat tab showing one conversation — or, with no id, the
- * empty composer that starts a new one.
- *
- * **Which thread a tab shows lives in its route, and only there.** Every tab
- * has its own router (`app/src/components/tabs/TabPane.tsx`), so an id in the
- * path is an id per tab: two tabs hold two conversations, a restored tab comes
- * back on the one it was left on, and the back arrow walks between threads.
- * It used to be one `activeId` in the store, which every Chat tab read — so
- * opening a thread in one tab opened it in all of them.
- *
- * `n` is the name, for the tab strip's sake: `tabInfo` titles a tab from its
- * path alone and has no thread list to look one up in, which is the trade
- * `projectHref` makes with the same letter.
+ * The route for a Chat tab showing one conversation, or with no id the empty
+ * composer. The thread lives only in the route: every tab has its own router
+ * (`TabPane`), so two tabs hold two conversations and back walks between them.
+ * `n` is the name, because `tabInfo` titles a tab from its path alone.
  */
 export function chatHref(threadId?: number | null, title?: string | null): string {
   if (threadId == null) return "/chat";
@@ -261,25 +157,16 @@ export function chatThreadId(search: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-/** Which sign-in shape this agent has, or null for one that has none here.
- *  Read off `PROVIDERS` rather than tested on an id, so a fourth agent costs
- *  the dialog nothing. */
 export function signInFlow(provider: Provider): "code" | "callback" | null {
   return providerInfo(provider)?.signIn ?? null;
 }
 
-/** Narrow a string that came out of the database — or out of an older build —
- *  to a provider. Driven off `PROVIDERS` so it can never go stale against the
- *  union: a stored row naming a provider this build has is kept, and one
- *  naming a provider it does not is dropped. */
+/** Narrow a stored string to a provider this build has. */
 export function isProvider(value: unknown): value is Provider {
   return typeof value === "string" && PROVIDERS.some((p) => p.id === value);
 }
 
-/** The selection a fresh composer opens on for one provider. A provider whose
- *  catalogue is fetched has nothing to open on until its CLI answers — the
- *  picker fills it in the moment the list lands — so the answer there is an
- *  empty selection rather than a guess. */
+/** Empty for a fetched catalogue; the picker fills it when the list lands. */
 export function defaultSelectionFor(provider: Provider): {
   model: string | null;
   reasoning: string | null;
@@ -292,19 +179,10 @@ export type ToolKind =
   | "read" | "edit" | "write" | "bash" | "search" | "oculus_cli"
   | "task" | "web" | "plan" | "other";
 
-/**
- * "Ran", "Read", "Edited" — past tense once done, present while running.
- *
- * Here rather than in the timeline's row because the chapter panel says the
- * same thing about the same events while a lecture is being chaptered
- * (docs/chapters.md), and two tables would drift into two vocabularies for one
- * `ToolKind`.
- */
+/** "Ran", "Read", "Edited" — past tense once done. Shared with the chapter
+ *  panel so both speak one vocabulary. */
 export function toolVerb(kind: ToolKind, done: boolean, name?: string | null): string {
-  // The one kind two tools share: a search and a fetch are both `web`, and
-  // "Fetched" over a list of queries reads as the wrong thing having happened.
-  // The provider's own tool name is the only thing that tells them apart, and
-  // every row carries it (`name` in `ToolMeta`).
+  // Search and fetch are both `web`; only the tool name tells them apart.
   if (kind === "web" && name && /search/i.test(name)) return done ? "Searched" : "Searching";
   switch (kind) {
     case "read": return done ? "Read" : "Reading";
@@ -327,13 +205,9 @@ export interface RateWindow {
 }
 
 /** `HarnessEvent` in `app/src-tauri/src/harness/event.rs`, serde-tagged on `type`. */
-export type HarnessEvent =
+type HarnessEvent =
   | { type: "session_started"; provider_session_id: string; model: string | null; cwd: string }
-  /** `at` is the playhead's second for a message sent from the lecture dock.
-   *  It rides the event rather than only the row Rust wrote, because the
-   *  bubble is drawn from the live event first — without it a message showed
-   *  its moment only after a reload. Rust skips the field when there is no
-   *  moment, so it is optional on the way in too. */
+  /** `at`: playhead second for a message sent from the lecture dock. */
   | { type: "user_message"; text: string; at?: number | null }
   | { type: "turn_started" }
   | { type: "assistant_delta"; text: string }
@@ -346,27 +220,16 @@ export type HarnessEvent =
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number | null; context_window: number | null; cost_usd: number | null }
   | { type: "rate_limits"; windows: RateWindow[] }
   | { type: "thread_titled"; title: string }
-  /** A message waiting behind the running turn. Also how an edit to one
-   *  arrives: the same `id`, new text. */
+  /** Queued behind the running turn; an edit re-sends the same `id`. */
   | { type: "queued"; id: string; text: string }
-  /** One left the queue — cancelled, cleared by stop, or going out now, in
-   *  which case its `user_message` follows. */
   | { type: "unqueued"; id: string }
-  /** The provider's handle for the turn that just went out, kept on the
-   *  question's row so a later rewind can name it. Nothing on screen changes;
-   *  Rust writes it and the webview ignores it. */
+  /** The provider's handle for a later rewind; the webview ignores it. */
   | { type: "turn_anchor"; anchor: string }
-  /** Rows from `from_item_id` on are gone: a question was edited or taken
-   *  back. `context` is whether the agent was rewound with them; false means
-   *  it still holds the original, and the timeline says so. */
+  /** Rows from `from_item_id` on are gone; `context` is whether the agent
+   *  was rewound too. */
   | { type: "rewound"; from_item_id: number; context: boolean }
-  /** The agent was stopped at a permission it lacks — Antigravity only, whose
-   *  print mode refuses what its rules do not allow and ends the turn there,
-   *  so this arrives with the turn already over. `action` is `agy`'s word for
-   *  the permission (`command`, `write_file`, `read_file`, `read_url`),
-   *  `target` what was refused (the command line, the path), and `rule` a
-   *  rule that would allow it, for `harnessAntigravityAllow`. Rust writes it
-   *  as a `permission` row with the same four fields in `meta`. */
+  /** Antigravity only: a refusal that already ended the turn. `rule` would
+   *  allow it, for `harnessAntigravityAllow`. */
   | {
       type: "permission_needed";
       tool: string;
@@ -375,19 +238,14 @@ export type HarnessEvent =
       rule: string | null;
     }
   | { type: "turn_finished"; status: "completed" | "interrupted" | "failed" }
-  /** `auth` names the provider when the message is that CLI saying it has no
-   *  usable credentials — an expired OAuth session, a login never done. It is
-   *  the difference between a crash and a state the student can fix, so the
-   *  timeline draws a sign-in card rather than a red row for it. Rust writes
-   *  the same fact to the row's `meta` (`{"auth":"claude"}`), which is what
-   *  `parseErrorMeta` reads after a reload. */
+  /** `auth` names the provider when the CLI has no usable credentials; the
+   *  timeline draws a sign-in card instead of an error. */
   | { type: "error"; message: string; auth: Provider | null }
   | { type: "exited"; code: number | null };
 
 export interface HarnessEnvelope {
   threadId: number;
-  /** The thread's provider — or, for an account-scoped event with no thread
-   *  behind it (rate limits, which arrive on `threadId` 0), whose account. */
+  /** For account-scoped events on `threadId` 0 (rate limits), whose account. */
   provider: Provider;
   itemId: number | null;
   event: HarnessEvent;
@@ -406,17 +264,12 @@ export interface HarnessThread {
   provider: Provider;
   provider_session_id: string | null;
   model: string | null;
-  /** The subject the thread is scoped to; null is the general thread. Fixed
-   *  when the thread is created — both CLIs bind the appended instructions at
-   *  session start, so it cannot change under a live session. */
+  /** Null is the general thread. Fixed at creation: CLIs bind instructions
+   *  at session start. */
   subject_id: number | null;
-  /** The recording this conversation is about, for a thread opened in the
-   *  lecture player's dock; null for every other thread. Fixed at creation
-   *  like the subject beside it — and it is what *sets* that subject, which
-   *  Rust reads off the lecture's own row rather than from the payload. */
+  /** Set for a lecture-dock thread; it also decides `subject_id`. */
   lecture_id: string | null;
-  /** The model's own name for the thread once it has been asked for; until
-   *  then, the first line of the first message. */
+  /** The model's title once asked for; until then the first message's line. */
   title: string | null;
   status: "idle" | "running" | "error";
   /** JSON `ThreadUsage`, or null. */
@@ -425,31 +278,23 @@ export interface HarnessThread {
   updated_at: string;
 }
 
-/** `interrupted` is the one row with nothing in it: a mark left where a turn
- *  was stopped, so the answer above it reads as cut short rather than given
- *  up on. */
-export type ItemKind =
+/** `interrupted` is an empty marker where a turn was stopped. */
+type ItemKind =
   | "user"
   | "assistant"
   | "thinking"
   | "tool"
   | "error"
   | "interrupted"
-  /** An Antigravity refusal: `content` is the refused target, `meta` is
-   *  `{tool, action, target, rule}` — see `permission_needed`. */
+  /** `meta` is `PermissionMeta`. */
   | "permission";
 
-/** A message typed while a turn was running. It is not in the conversation
- *  yet — Rust holds it in memory and writes no row until it goes out — which
- *  is why it can still be edited or dropped. */
+/** Held in Rust's memory, not the database, until it goes out. */
 export interface QueuedMessage {
   id: string;
   text: string;
 }
 
-/** What an `error` row's `meta` can carry. Only the one field, and only on
- *  the rows that have it: an error that is not a credentials failure has no
- *  `meta` at all. */
 export interface ErrorMeta {
   auth?: Provider;
 }
@@ -482,7 +327,7 @@ export interface BridgeHealth {
   overrideEnv: string;
 }
 
-export interface CodexModel {
+interface CodexModel {
   id: string;
   displayName: string;
   description: string;
@@ -491,14 +336,9 @@ export interface CodexModel {
   isDefault: boolean;
 }
 
-/**
- * One row of Claude Code's own `/model` catalogue, as the CLI's `initialize`
- * answer reports it (`list_models` in `app/src-tauri/src/harness/claude.rs`).
- * `value` is what `/model` would pass on — an alias such as `sonnet` or
- * `opus[1m]`, or a full name — and `resolvedModel` is the model it stands for
- * today.
- */
-export interface ClaudeModel {
+/** One row of Claude Code's `/model` catalogue (`list_models` in
+ *  `app/src-tauri/src/harness/claude.rs`). `value` may be an alias. */
+interface ClaudeModel {
   value: string;
   resolvedModel: string;
   displayName: string;
@@ -507,25 +347,13 @@ export interface ClaudeModel {
   supportedEffortLevels?: string[];
 }
 
-/** "Opus 5.5 with 1M context · Best for…" → "Opus 5.5": the model's own name
- *  and version, which is what a row reads as. */
+/** "Opus 5.5 with 1M context · Best for…" → "Opus 5.5". */
 const CLAUDE_NAME = /^([A-Za-z]+)\s+(\d+(?:\.\d+)*)/;
 
-/**
- * Claude Code's catalogue in `HarnessModel`'s shape.
- *
- * **The id is a real model name, never a moving alias.** A thread or a job
- * stores its model, and `sonnet` stored today would silently be a different
- * model after the next release. So an alias row is stored as the name it
- * resolves to, and a row whose `value` is already a full name keeps it —
- * including its `[1m]`, which `resolvedModel` drops. Two aliases for one model
- * (`default` and `opus[1m]`) collapse into the first row, and the row that came
- * from `default` is where a fresh composer opens.
- *
- * The CLI reports no default level; its own `/model` picker starts on medium,
- * so this does too wherever the model takes one.
- */
-export function claudeAsModels(models: ClaudeModel[]): HarnessModel[] {
+/** The id is a real model name, never a moving alias — a stored `sonnet`
+ *  would change model under a saved thread. A full-name `value` is kept for
+ *  its `[1m]`, which `resolvedModel` drops. Defaults to medium like `/model`. */
+function claudeAsModels(models: ClaudeModel[]): HarnessModel[] {
   const out: HarnessModel[] = [];
   const seen = new Set<string>();
   for (const m of models) {
@@ -548,9 +376,7 @@ export function claudeAsModels(models: ClaudeModel[]): HarnessModel[] {
   return out;
 }
 
-/** Codex reports its own catalogue over `model/list`; this is the same
- *  `HarnessModel` shape, so the picker renders both without a special case. */
-export function codexAsModels(models: CodexModel[]): HarnessModel[] {
+function codexAsModels(models: CodexModel[]): HarnessModel[] {
   return models.map((m) => ({
     id: m.id,
     label: m.displayName,
@@ -561,44 +387,28 @@ export function codexAsModels(models: CodexModel[]): HarnessModel[] {
   }));
 }
 
-/**
- * One row of `opencode models`. The id is that CLI's own spelling,
- * `providerID/id` (`anthropic/claude-sonnet-4-5`) — free-form, and passed back
- * to the CLI untouched, so nothing here parses or prettifies it.
- *
- * opencode calls a model's reasoning levels its **variants**; they are the
- * same thing `claude --effort` and Codex's `reasoningEfforts` name, so the
- * adapter below maps them onto the one field the picker reads. Everything but
- * the id and the name is optional on the way in, the way `getJobModels` is
- * tolerant of a stored row: a bridge that reports no variants for a model
- * costs that model its level row, not the list its rows.
- */
-/** One model out of `agy models`. Antigravity bakes the reasoning level into
- *  most of its slugs (`gemini-3.8-flash-high`); the bridge splits the suffix
- *  off and groups the rows, so `id` is the base (`gemini-3.8-flash`), the
- *  suffixes arrive as `reasoningEfforts`, and Rust rebuilds the full slug at
- *  spawn. A slug with no level suffix is a model with none. */
-export interface AntigravityModel {
+/** One model out of `agy models`. The bridge splits the level suffix off each
+ *  slug (`gemini-3.8-flash-high`), so `id` is the base and Rust rebuilds the
+ *  full slug at spawn. */
+interface AntigravityModel {
   id: string;
   displayName: string;
   reasoningEfforts: string[];
   defaultReasoningEffort: string | null;
 }
 
-export function antigravityAsModels(models: AntigravityModel[]): HarnessModel[] {
+function antigravityAsModels(models: AntigravityModel[]): HarnessModel[] {
   return models.map((m) => ({
     id: m.id,
     label: m.displayName || m.id,
-    // `agy models` prints a slug and, sometimes, prose beside it. The prose
-    // is not a description of the model so much as a note about the row, and
-    // the bridge does not carry it across — an empty string is what every
-    // other provider's description field degrades to anyway.
     description: "",
     reasoningEfforts: sortReasoning(m.reasoningEfforts),
     defaultReasoningEffort: m.defaultReasoningEffort,
   }));
 }
 
+/** One row of `opencode models`. `id` is `providerID/id`, passed back to the
+ *  CLI untouched; `variants` are its reasoning levels. */
 export interface OpencodeModel {
   id: string;
   displayName: string;
@@ -606,15 +416,11 @@ export interface OpencodeModel {
   variants?: string[];
   defaultVariant?: string | null;
   isDefault?: boolean;
-  /** `ModelInfo` in `app/src-tauri/src/harness/opencode.rs` always sends
-   *  these three; optional here so an older payload still parses. */
   toolCall?: boolean;
   textInput?: boolean;
   textOutput?: boolean;
 }
 
-/** `opencode models` in the `HarnessModel` shape, so the picker renders all
- *  four catalogues without a special case. */
 export function opencodeAsModels(models: OpencodeModel[]): HarnessModel[] {
   return models.map((m) => {
     const variants = sortReasoning(m.variants ?? []);
@@ -641,10 +447,8 @@ export function parseUsage(t: HarnessThread | null): ThreadUsage | null {
   }
 }
 
-/** Parsed `meta` per row object. A tool's output can be hundreds of
- *  kilobytes and every render of its row asks for it again; the row object is
- *  replaced whenever the row changes (the store never mutates one in place),
- *  so keying the cache on it is both cheap and self-invalidating. */
+/** Parsed tool `meta` per row object — outputs can be large, and the store
+ *  replaces a row object on change, so the cache self-invalidates. */
 const TOOL_META = new WeakMap<HarnessItem, ToolMeta>();
 
 export function parseToolMeta(item: HarnessItem): ToolMeta {
@@ -661,17 +465,8 @@ export function parseToolMeta(item: HarnessItem): ToolMeta {
   return meta;
 }
 
-/**
- * The playhead second a question was asked at, or null for a question asked
- * anywhere but the lecture dock.
- *
- * It is in the user row's `meta` (`{"at": 220}`) rather than in its content,
- * because the moment rides the prompt and never becomes the message — a
- * timeline that read the attachment back as the question would be a timeline
- * of something nobody asked. No cache: `parseToolMeta`'s exists because a
- * single tool row can carry 300KB of output, where this is one number on a
- * memoised row.
- */
+/** The playhead second a lecture-dock question was asked at, from the user
+ *  row's `meta` (`{"at": 220}`); null elsewhere. */
 export function messageAt(item: HarnessItem): number | null {
   if (!item.meta) return null;
   try {
@@ -682,20 +477,8 @@ export function messageAt(item: HarnessItem): number | null {
   }
 }
 
-/**
- * Which agent an error row is about, when the error was that agent saying it
- * has no credentials — and null for every other error.
- *
- * Rust puts it on the row (`{"auth":"claude"}`) as well as on the event, so a
- * reloaded page draws the same card rather than a thread whose one actionable
- * row quietly became a red line again. `isProvider` narrows it, so a row
- * naming an agent this build does not have reads as an ordinary error instead
- * of an unreachable button.
- *
- * No cache, on `messageAt`'s precedent rather than `parseToolMeta`'s: that one
- * exists because a single tool row can carry 300KB of output, where this is
- * one short field on a memoised row.
- */
+/** The agent a credentials-failure error row is about (`{"auth":"claude"}`);
+ *  an unknown provider reads as an ordinary error. */
 export function parseErrorMeta(item: HarnessItem): ErrorMeta {
   if (!item.meta) return {};
   try {
@@ -706,10 +489,8 @@ export function parseErrorMeta(item: HarnessItem): ErrorMeta {
   }
 }
 
-/** A `permission` row's `meta`: what Antigravity was refused and the rule
- *  that would allow it. Every field is optional because the row came out of
- *  the database — a row that does not parse draws as a refusal with nothing
- *  to approve, never as a button that sends a malformed rule. */
+/** A `permission` row's `meta`. A row that does not parse draws as a refusal
+ *  with nothing to approve, never a malformed rule. */
 export interface PermissionMeta {
   tool?: string;
   action?: string;
@@ -733,10 +514,8 @@ export function parsePermissionMeta(item: HarnessItem): PermissionMeta {
   }
 }
 
-/** An `agy` rule taken apart: which permission, and what it names — the
- *  command's first word, a folder, or a host. `null` for anything outside the
- *  four shapes Rust accepts (`is_valid_rule` in
- *  `app/src-tauri/src/harness/antigravity_rules.rs`). */
+/** An `agy` rule taken apart; null outside the shapes `is_valid_rule` in
+ *  `app/src-tauri/src/harness/antigravity_rules.rs` accepts. */
 export function splitRule(
   rule: string,
 ): { action: "command" | "read_file" | "write_file" | "read_url"; value: string } | null {
@@ -755,10 +534,8 @@ export async function getHarnessThreads(limit = 100): Promise<HarnessThread[]> {
   );
 }
 
-/** One lecture's threads, newest first — the dock's history list. A separate
- *  query rather than a filter over `getHarnessThreads`, which caps at the
- *  most recent hundred threads across the whole library and would drop a
- *  lecture's older conversations out of its own list. */
+/** One lecture's threads — its own query, since `getHarnessThreads` caps
+ *  library-wide and would drop a lecture's older ones. */
 export async function getLectureThreads(lectureId: string, limit = 100): Promise<HarnessThread[]> {
   const db = await getDb();
   return db.select<HarnessThread[]>(
@@ -791,21 +568,13 @@ export async function getHarnessRateLimits(provider: Provider): Promise<RateWind
 export interface SendOptions {
   model?: string | null;
   reasoningEffort?: string | null;
-  /** Only read when the send creates the thread; an open thread keeps its
-   *  own scope. */
+  /** Only read when the send creates the thread. */
   subjectId?: number | null;
-  /** The lecture a dock thread is about. Only read when the send creates the
-   *  thread, and it decides the thread's subject — Rust takes that from the
-   *  lecture's row, so `subjectId` is not consulted alongside it. */
+  /** Only read on creation; overrides `subjectId`. */
   lectureId?: string | null;
-  /** The moment, built by the player at send time: the timestamp, the last
-   *  minute of transcript, the chapter, and a frame path per downloaded
-   *  stream from `lectureGrabFrames`. It is appended to the prompt the CLI receives, after
-   *  the student's text — it never becomes the message's content, so the
-   *  timeline still shows only what was typed. */
+  /** The lecture moment, appended to the prompt but never to the message. */
   context?: string | null;
-  /** The playhead's second when the message was sent. Lands on the user
-   *  row's `meta` as `{ at }`, which is what lets the bubble say "at 3:40". */
+  /** Playhead second; stored on the user row's `meta` as `{ at }`. */
   at?: number | null;
 }
 
@@ -818,17 +587,8 @@ export function harnessSend(
   return invoke<number>("harness_send", { threadId, provider, text, options });
 }
 
-/**
- * Ask the same question differently. The thread is rewound to that question —
- * it and everything after it stop being rows — and the new text goes as the
- * next turn.
- *
- * The agent is rewound too, over its own control channel, so its context
- * matches what is on screen. The exception is a question asked before the
- * anchor was recorded, or one whose session the CLI has since dropped: the
- * rows still go, and the `rewound` event's `context: false` is what draws the
- * note saying the agent kept the original.
- */
+/** Rewind to a question and send new text in its place. See docs/harness.md
+ *  "Going back" for when the agent's own context cannot follow. */
 export function harnessEditResend(
   threadId: number,
   itemId: number,
@@ -838,20 +598,11 @@ export function harnessEditResend(
   return invoke("harness_edit_resend", { threadId, itemId, text, options });
 }
 
-/**
- * Take the thread back to just before a question: it and everything after it
- * stop being rows, and the question comes back as text for the composer.
- * Claude Code's rewind without the branching — there is one thread, so going
- * back means the rest is gone. The agent is rewound too, on the same terms as
- * `harnessEditResend`; not sending is the whole difference between them.
- */
+/** `harnessEditResend` without the send: resolves to the question's text. */
 export function harnessRewind(threadId: number, itemId: number): Promise<string> {
   return invoke<string>("harness_rewind", { threadId, itemId });
 }
 
-/** What is still waiting behind this thread's turn. The queue lives in Rust's
- *  memory rather than the database — a message that was never sent is not
- *  history — so a reloaded page asks for it. */
 export function harnessQueued(threadId: number): Promise<QueuedMessage[]> {
   return invoke<QueuedMessage[]>("harness_queued", { threadId });
 }
@@ -864,9 +615,7 @@ export function harnessEditQueued(threadId: number, queueId: string, text: strin
   return invoke("harness_edit_queued", { threadId, queueId, text });
 }
 
-/** Stop the running turn and drop whatever was waiting behind it. The dropped
- *  messages come back so the composer can hand them to the student rather
- *  than swallow what they typed. */
+/** Stop the turn and clear the queue; resolves to the dropped messages. */
 export function harnessInterrupt(threadId: number): Promise<string[]> {
   return invoke<string[]>("harness_interrupt", { threadId });
 }
@@ -875,59 +624,33 @@ export function harnessDeleteThread(threadId: number): Promise<void> {
   return invoke("harness_delete_thread", { threadId });
 }
 
-/**
- * Where each CLI is, or why it is not. Read through
- * `app/src/hooks/useBridgeHealth.ts` rather than called directly — every model
- * picker in the app asks this question and there is one answer per session.
- *
- * `recheck` drops Rust's cached lookups first, which can cost a login shell
- * per provider; it belongs to Settings' *Recheck* button and nothing else.
- */
+/** Read through `useBridgeHealth`. `recheck` drops Rust's cached lookups
+ *  (a login shell per provider) — Settings' Recheck button only. */
 export function harnessHealth(recheck = false): Promise<BridgeHealth[]> {
   return invoke<BridgeHealth[]>("harness_health", { recheck });
 }
 
-/** Ask the provider for its plan windows now, rather than waiting for a turn
- *  to report them. The answer comes back as a `rate_limits` event like any
- *  other, so nothing here reads a return value. Codex answers; Claude has no
- *  such request and ignores it. */
+/** The answer arrives as a `rate_limits` event. Claude ignores it. */
 export function harnessRefreshRateLimits(provider: Provider): Promise<void> {
   return invoke<void>("harness_refresh_rate_limits", { provider });
 }
 
-/**
- * Whether the CLI thinks it is signed in, and as whom.
- *
- * Three fields rather than one boolean because they are three different
- * answers. `signedIn: null` is "not answerable from here" — opencode, whose
- * store is per provider and whose surface is Settings → AI — and is not the
- * same as signed out. `error` is the probe itself failing (no binary, a spawn
- * that would not start), which is not evidence either way.
- *
- * Read through `app/src/hooks/useSignInStatus.ts` rather than called directly:
- * Rust spawns the CLI per ask and caches nothing, so the frontend cache is the
- * only one there is.
- */
+/** Read through `useSignInStatus` (Rust caches nothing). `signedIn: null` is
+ *  "not answerable here" (opencode); `error` is the check itself failing. */
 export interface SignInStatus {
   provider: Provider;
   signedIn: boolean | null;
-  /** Which account the CLI is on — an email where it names one, else the
-   *  door it went through ("Claude subscription", "ChatGPT"). */
+  /** An email, else the route ("Claude subscription", "ChatGPT"). */
   account: string | null;
   error: string | null;
 }
 
-/** One line of a running sign-in, or the last event of the run. Same shape as
- *  the install stream next door, plus the authorize URL. */
 export const SIGNIN_EVENT = "harness-signin";
 
 export interface SignInLine {
   provider: Provider;
   line: string | null;
-  /** Emitted once, on the first line that carries one. Rust opens it in the
-   *  system browser itself; it rides the event anyway so the dialog can show
-   *  it with a Copy, because an `open` that silently failed must not be a
-   *  dead end. */
+  /** Rust opens it too; shown with Copy in case that `open` failed. */
   url: string | null;
   done: boolean;
   ok: boolean | null;
@@ -938,15 +661,11 @@ export function harnessSignInStatus(provider: Provider): Promise<SignInStatus> {
   return invoke<SignInStatus>("harness_sign_in_status", { provider });
 }
 
-/** Run the CLI's own login. Output arrives on `SIGNIN_EVENT` until a line
- *  carries `done`; nothing is returned here because the run outlives the call.
- *  Rejects for opencode — see `ProviderInfo.signIn`. */
+/** Output streams on `SIGNIN_EVENT` until `done`. Rejects for opencode. */
 export function harnessSignInStart(provider: Provider): Promise<void> {
   return invoke("harness_sign_in_start", { provider });
 }
 
-/** The authorization code the student pasted back. Only Claude's flow asks
- *  for one: `claude auth login` blocks on stdin until it arrives. */
 export function harnessSignInCode(provider: Provider, code: string): Promise<void> {
   return invoke("harness_sign_in_code", { provider, code });
 }
@@ -955,33 +674,29 @@ export function harnessSignInCancel(provider: Provider): Promise<void> {
   return invoke("harness_sign_in_cancel", { provider });
 }
 
-export function harnessAntigravityModels(): Promise<AntigravityModel[]> {
+function harnessAntigravityModels(): Promise<AntigravityModel[]> {
   return invoke<AntigravityModel[]>("harness_antigravity_models");
 }
 
-/** Allow what an Antigravity thread was stopped at. Stores the rule with the
- *  student's other approvals and drops the thread's `agy` process, which never
- *  re-reads its rules — so the follow-up message, which is the caller's to
- *  send, resumes the conversation under them. Resolves to every approval. */
+/** Store the rule and drop the thread's `agy` process (it never re-reads its
+ *  rules); the caller's follow-up resumes under them. Resolves to all rules. */
 export function harnessAntigravityAllow(threadId: number, rule: string): Promise<string[]> {
   return invoke<string[]>("harness_antigravity_allow", { threadId, rule });
 }
 
-/** The student's Antigravity approvals, in `agy`'s rule syntax. */
 export function harnessAntigravityRules(): Promise<string[]> {
   return invoke<string[]>("harness_antigravity_rules");
 }
 
-/** Take an approval back; resolves to the ones left. */
 export function harnessAntigravityRevoke(rule: string): Promise<string[]> {
   return invoke<string[]>("harness_antigravity_revoke", { rule });
 }
 
-export function harnessClaudeModels(): Promise<ClaudeModel[]> {
+function harnessClaudeModels(): Promise<ClaudeModel[]> {
   return invoke<ClaudeModel[]>("harness_claude_models");
 }
 
-export function harnessCodexModels(): Promise<CodexModel[]> {
+function harnessCodexModels(): Promise<CodexModel[]> {
   return invoke<CodexModel[]>("harness_codex_models");
 }
 

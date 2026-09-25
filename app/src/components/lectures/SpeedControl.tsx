@@ -12,7 +12,7 @@ import {
 } from "@/stores/playerPrefsStore";
 
 /** `1×`, `1.75×` — trailing zeros trimmed so a badge never reads `1.50×`. */
-export const fmtSpeed = (s: number) => `${Number(s.toFixed(2))}×`;
+const fmtSpeed = (s: number) => `${Number(s.toFixed(2))}×`;
 
 function StepButton({
   label,
@@ -43,12 +43,8 @@ function StepButton({
 }
 
 /**
- * Playback speed, YouTube's shape: a continuous 0.05 slider between −/+ nudges,
- * with the common speeds as presets underneath.
- *
- * The trigger is an icon plus a **fixed-width** badge. It used to be the number
- * alone in a hug-width pill, which changed width on every step — and since it
- * sits in a row of controls, every neighbour shifted with it.
+ * Playback speed: a 0.05-step slider between −/+ nudges, with presets below.
+ * The trigger's badge is fixed-width so stepping never shifts its neighbours.
  */
 export function SpeedControl({
   speed,
@@ -88,13 +84,10 @@ export function SpeedControl({
         side="top"
         align="end"
         className={cn(
-          // Dark glass, not the app's `popover` white: this panel floats over
-          // the frame like the bar that opened it, so it takes the bar's fixed
-          // white-on-frame palette and lets the slide read through it.
+          // Dark glass: it floats over the frame like the bar that opened it.
           "w-60 p-2.5 border-white/15 bg-black/55 text-white shadow-black/50",
           "backdrop-blur-xl backdrop-saturate-150",
-          // The shared Slider styles its own track for a themed surface; on
-          // glass that near-white grey is a bright bar. Match the scrub bar's.
+          // The Slider's themed track is a bright bar on glass; match the scrub bar.
           "[&_[data-slot=slider-track]]:bg-white/25",
         )}
       >
@@ -134,8 +127,7 @@ export function SpeedControl({
           </StepButton>
         </div>
 
-        {/* A grid, not a wrapping flex row: equal columns keep the presets on
-            one line whatever they read, and none of them can drop below. */}
+        {/* A grid, so the presets never wrap. */}
         <div className="mt-2 grid grid-cols-6 gap-1">
           {SPEED_PRESETS.map((s) => (
             <button

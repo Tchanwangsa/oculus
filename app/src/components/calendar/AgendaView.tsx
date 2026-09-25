@@ -1,12 +1,10 @@
 import { useNow } from "@/hooks/useNow";
-import { sameDay, startOfDay, type CalEvent } from "@/lib/calendar";
+import type { CalEvent } from "@/lib/calendar";
+import { sameDay, startOfDay } from "@/lib/format";
 import { EventRow } from "./EventRow";
+import { ListCard } from "@/components/ui/PageParts";
 
-/**
- * Everything ahead, in order, grouped by day — the view that answers "what's
- * next" without counting grid squares. Past events are left out: the month and
- * week views are where you go looking backwards.
- */
+/** Everything ahead, grouped by day. Past events are left to month and week. */
 export function AgendaView({
   events,
   colors,
@@ -46,7 +44,7 @@ export function AgendaView({
               })}
               {sameDay(day, now) && " · Today"}
             </h2>
-            <div className="overflow-hidden rounded-lg border border-border divide-y divide-border-subtle">
+            <ListCard>
               {items.map((e) => (
                 <EventRow
                   key={e.id}
@@ -55,7 +53,7 @@ export function AgendaView({
                   now={now}
                 />
               ))}
-            </div>
+            </ListCard>
           </section>
         ))}
       </div>

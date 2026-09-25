@@ -9,7 +9,7 @@ const HOT = 90;
 const WARM = 75;
 
 /** Tokens as the model counts them: `106k`, `1M`, `1.5M`. */
-export function fmtTokens(n: number) {
+function fmtTokens(n: number) {
   if (n >= 1_000_000) {
     const m = n / 1_000_000;
     return `${Number.isInteger(m) ? m : Number(m.toFixed(1))}M`;
@@ -17,12 +17,8 @@ export function fmtTokens(n: number) {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 }
 
-/**
- * "Resets in 3 hr 48 min" while the window is close enough to plan around,
- * "Resets Tue 9:00 pm" once it is a day or more out — a weekly window's
- * "in 4 days 3 hr" is a number nobody converts back into a day.
- */
-export function fmtResets(unixSeconds: number | null): string | null {
+/** "Resets in 3 hr 48 min" under a day out, else "Resets Tue 9:00 pm". */
+function fmtResets(unixSeconds: number | null): string | null {
   if (!unixSeconds) return null;
   const ms = unixSeconds * 1000;
   const left = ms - Date.now();
@@ -44,8 +40,7 @@ function tint(percent: number) {
   return "bg-brand";
 }
 
-/** A 16px donut. Radix's `Progress` is a bar; this is the same number as a
- *  ring, small enough to sit in the control row without a label. */
+/** A 16px donut for the control row. */
 function Ring({ percent }: { percent: number }) {
   const r = 6.5;
   const circumference = 2 * Math.PI * r;
@@ -74,7 +69,6 @@ function Ring({ percent }: { percent: number }) {
   );
 }
 
-/** One labelled bar: the name, what it resets, the percentage, then the fill. */
 function Meter({
   label,
   note,
@@ -108,18 +102,9 @@ function Meter({
 }
 
 /**
- * Everything the old footer line said, folded into one wheel beside the send
- * button: the ring is this thread's context, and the popover opens the bars —
- * context, then the account's rate-limit windows with when each one resets.
- *
- * The ring is context and only context. It is the number that moves every
- * turn, it is thread-local like the composer it sits in, and it answers the
- * one question asked from here ("is it time for a new thread?"). A ring that
- * silently switched to whichever number was worst would be unreadable at
- * 16px. The plan windows are a click away, where they can carry their labels.
- *
- * Spend is gone on purpose: these are subscription CLIs, so the dollars the
- * provider reports are a notional price for tokens nobody is billed for.
+ * The ring is this thread's context usage only (never the worst of several
+ * numbers); the popover adds the account's rate-limit windows. No spend shown:
+ * subscription CLIs report a notional price nobody is billed.
  */
 export function UsageMeter({
   usage,
@@ -132,7 +117,6 @@ export function UsageMeter({
   const limit = usage?.contextWindow ?? null;
   const contextPercent = used && limit ? (used / limit) * 100 : 0;
 
-  // Nothing to say until the first turn reports something.
   if (used == null && rateLimits.length === 0) return null;
 
   const summary = [

@@ -16,94 +16,50 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 
 /**
- * Something flat, opened out: the whole window, zoomable and pannable.
+ * A full-window, zoomable, pannable viewer for something drawn small — a
+ * mermaid figure (`DiagramLightbox`) or an attached picture (`ImageLightbox`).
  *
- * Two things in the app are drawn small and meant to be read large — a
- * mermaid figure sized to the column it sits in (`DiagramLightbox`), and a
- * picture attached to a question, which the thread draws as a card a few
- * centimetres wide (`ImageLightbox`). Both want the same viewer, so there is
- * one: the caller hands over the content and its natural size, and everything
- * below — the fit, the zoom, the pan, the toolbar — is shared.
- *
- * **Panning is the container's own scroll; only the scale is a transform.**
- * The picture sits in an `overflow-scroll` box, which is what `PDFViewer` does
- * and for the same payoff: two-finger panning, momentum, scrollbars and
- * keyboard scrolling all arrive for free and behave the way every other
- * scroller in the app does. What the zoom changes is a `scale()` on an
- * SVG host of fixed size, inside a layout box that carries `natural × zoom`
- * so the scroll extent still tells the truth.
- *
- * That split is not the CSS-`zoom` mistake the app made once before
- * (`AppLayout`, root `CLAUDE.md`). Inside a CSS-`zoom`ed subtree WebKit
- * reports pointer coordinates in visual pixels and element rects in layout
- * pixels, so the two disagree; under a `transform` both are visual, so the
- * anchor maths below — pointer position against `getBoundingClientRect` — is
- * measuring one space. Measured, scaling the transform rather than resizing
- * the `<svg>` is about 3× cheaper per frame (0.3ms against 1.0ms for this
- * app's flowcharts), because the SVG's own layout never re-runs.
+ * Panning is the container's own scroll (free momentum, scrollbars, keys);
+ * only the scale is a `transform`, on a host of fixed natural size inside a
+ * layout box sized `natural × zoom`. A transform, not CSS `zoom` (see
+ * CLAUDE.md): under a transform pointer coords and rects share one space, so
+ * the anchor maths below holds, and the content never re-lays out.
  */
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 8;
 const STEP = 1.25;
 
-/** How far out the picture is allowed to start. A small diagram is blown up
- *  to fill the window — that is what opening it was for — but only so far
- *  before the strokes stop looking drawn and start looking zoomed. */
+/** Cap on the initial fit, so a small diagram fills the window without
+ *  looking blown up. */
 const MAX_FIT = 2.5;
 
-/** Breathing room around the picture at fit, in px, and it is not square.
- *  Sideways it is `p-9` twice over. Downwards the toolbar floats *over* the
- *  picture, so a symmetric gutter fitted the diagram's last node neatly behind
- *  it — the bottom has to clear `bottom-6` plus the control's own height. */
+/** Gutter at fit, in px: `p-9` each side; the bottom also clears the
+ *  floating toolbar (`pb-20`). */
 const GUTTER_X = 72;
 const GUTTER_Y = 36 + 80;
 
 /**
- * Time constant of the zoom smoother, in ms.
- *
- * **This is what makes the zoom smooth, and it is deliberately render-side.**
- * Measured, the work of a zoom frame is about 0.3ms and not one frame is
- * dropped at 120Hz — so a juddering zoom was never the drawing being slow, it
- * was the *number* moving in steps: a mouse notch is one ±120 lurch, a
- * `gesturechange` delivers a quantised `scale`, and a button is a single 1.25×
- * jump. Chasing each input source into behaving was tried once and did not
- * hold. So the inputs only ever move a **target**, and what is painted eases
- * towards it every frame, which is smooth whatever arrived and however often.
- *
- * 45ms settles inside ~130ms: fast enough that a pinch still feels attached to
- * the fingers, slow enough that one wheel notch reads as a movement rather
- * than a cut.
+ * Time constant of the zoom smoother, in ms. Inputs arrive in steps (a wheel
+ * notch, a quantised pinch `scale`, a button's 1.25×), so they only move a
+ * target and the painted zoom eases towards it every frame.
  */
 const SMOOTH_MS = 45;
 
-/**
- * Zoom per pixel of ⌘-scroll, as an exponent.
- *
- * Multiplicative, because zoom is — `1 - deltaY / 100` hits zero at a deltaY
- * of 100 and goes negative past it. The constant is small on purpose: one
- * notch of a real mouse wheel on macOS is ±120, and an earlier 0.01 here
- * turned that single notch into a 1.65× jump, which is most of the "glitchy"
- * in a mouse zoom. At 0.0022 a notch is ~1.3×, and a trackpad's fractional
- * deltas land where they should — a whole ⌘-scroll gesture sums to about 2×.
- */
+/** Zoom per pixel of ⌘-scroll, as an exponent (zoom is multiplicative). A
+ *  macOS wheel notch is ±120px, so this makes one notch ~1.3×. */
 const WHEEL_GAIN = 0.0022;
 
-/** Ceiling on what one wheel event may do, so a violent flick of trackpad
- *  momentum cannot cross the zoom range in a frame. */
+/** Per-event cap, so trackpad momentum can't cross the range in a frame. */
 const WHEEL_MAX_STEP = 1.3;
 
-/** A pinch that ends off-window, or with the dialog closing under it, can
- *  leave `gestureend` undelivered — and a latched flag would mute the wheel
- *  path for the rest of the session. This is how long after the last gesture
- *  event the pinch is assumed over. */
+/** `gestureend` can go undelivered (pinch ends off-window), so the pinch is
+ *  assumed over this long after its last event. */
 const GESTURE_IDLE_MS = 400;
 
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
-/** The content's own, unscaled size. Everything the viewer computes is in
- *  these coordinates, so it has to be the real thing — an `<svg>`'s drawn
- *  size, an image's `naturalWidth`/`naturalHeight`. */
+/** The content's natural, unscaled size — all viewer maths is in it. */
 export type LightboxSize = { width: number; height: number };
 
 export function Lightbox({
@@ -118,26 +74,19 @@ export function Lightbox({
   size: LightboxSize;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Named for the screen reader only — the window *is* the picture, and a
-   *  visible title would be a strip taken off it. */
+  /** Screen-reader only. */
   title: string;
-  /** Drawn at `size` and scaled by a transform, so it lays out once on open
-   *  and a zoom is only a paint. */
+  /** Drawn at `size`, scaled by a transform. */
   children: React.ReactNode;
-  /** Affordances the content needs from the scroller — the diagram hands
-   *  its label text back its I-beam and its selection this way. */
+  /** E.g. the diagram restores its labels' I-beam and selection here. */
   scrollerClassName?: string;
-  /** Anything matching this under the pointer keeps the press instead of
-   *  starting a pan, so text can be selected. */
+  /** A press on a match selects text instead of starting a pan. */
   selectableSelector?: string;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogCanvas
-        // Radix moves focus to the first focusable thing on open, which is the
-        // toolbar's first button — that would put a focus ring on a control
-        // nobody pressed. The canvas takes it instead, which is also what
-        // makes the arrow keys work without a click first.
+        // Focus the canvas, not the toolbar's first button, so keys work at once.
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           (e.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-canvas]")?.focus();
@@ -160,15 +109,11 @@ export function Lightbox({
   );
 }
 
-/** Which end of the range the zoom is sitting on, so the toolbar can grey the
- *  button that would do nothing. A three-way state rather than the zoom
- *  itself: it changes a handful of times in a session, where the zoom changes
- *  every frame, and this is the only thing a zoom renders React for. */
+/** Which clamp the zoom is at, for greying a button — the only React state a
+ *  zoom touches. */
 type Limit = "none" | "min" | "max";
 
-/** Split out so every ref and every piece of view state is born with the
- *  dialog and dies with it — an opened picture always starts at fit, never at
- *  wherever the last one was left. */
+/** Mounted per open, so every view starts at fit. */
 function Viewer({
   size,
   onClose,
@@ -183,23 +128,15 @@ function Viewer({
   selectableSelector?: string;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
-  /** The layout box. Carries `natural × zoom` so the scroller has something
-   *  the right size to scroll, and the gutter outside that via `box-content`. */
+  /** The layout box, sized `natural × zoom` so the scroll extent is right. */
   const box = useRef<HTMLDivElement>(null);
-  /** The content's host, always at natural size and scaled by a transform. */
   const host = useRef<HTMLDivElement>(null);
-  /** The percentage in the toolbar, written straight to the text node — see
-   *  `SMOOTH_MS` on why a zoom renders nothing. It starts empty and is filled
-   *  by the first `paint`, which runs in a layout effect, so it is never seen
-   *  blank. */
+  /** The toolbar percentage, written directly by `paint`. */
   const readout = useRef<HTMLSpanElement>(null);
 
-  // ── The zoom, which lives in refs ─────────────────────────────────────────
-  // Three numbers, and the distinction between them is the whole design.
-  // `target` is where the input asked to go, `current` is what the smoother
-  // has eased to, and `painted` is what the DOM has actually been told — the
-  // scale `scrollLeft` and every rect below are expressed in. Only refs,
-  // because they move faster than React renders and the last write must win.
+  // Zoom lives in refs (it moves faster than React renders): `target` is what
+  // input asked for, `current` what the smoother has eased to, `painted` what
+  // the DOM shows — the scale every rect below is measured in.
   const target = useRef(1);
   const current = useRef(1);
   const painted = useRef<number | null>(null);
@@ -207,10 +144,8 @@ function Viewer({
 
   const [limit, setLimit] = useState<Limit>("none");
 
-  // Where to hold the picture still while the zoom moves: a point in the
-  // diagram's own coordinates, and where on screen it should stay. Scale-free
-  // by construction, so the smoother can re-apply the same anchor on every
-  // frame of an eased zoom rather than predicting one offset up front.
+  // The point (content coords) to hold still at screen position (px, py);
+  // scale-free, so it is re-applied every frame of the ease.
   const anchor = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
 
   const raf = useRef<number | null>(null);
@@ -224,12 +159,8 @@ function Viewer({
     return clampZoom(Math.min(wide, tall, MAX_FIT));
   }, [size.width, size.height]);
 
-  /** Put a scale on screen, and spend the anchor against it.
-   *
-   *  Every write to the DOM in this component goes through here, and none of
-   *  it goes through React: the `<svg>` is committed once, and the three
-   *  properties a zoom touches are set by hand. A re-render in the middle of a
-   *  pinch would otherwise have to be told to leave them alone. */
+  /** Put a scale on screen and apply the anchor. The only DOM writer for a
+   *  zoom; React never owns these properties. */
   const paint = useCallback(
     (z: number) => {
       const el = scroller.current;
@@ -243,17 +174,9 @@ function Viewer({
 
       const a = anchor.current;
       if (a) {
-        // A correction, not a computed offset. `m-auto` centres a picture
-        // smaller than the window and collapses once it is larger, and the
-        // gutter sits outside the size the zoom computes, so an offset
-        // derived from `scrollLeft` alone would fold both in and point
-        // somewhere else the moment either changed — which is exactly when a
-        // pinch carries the picture past the window's size. Measuring where
-        // the anchored point *landed* is right whatever those did, and one
-        // pass is enough because moving the scroll moves the picture by
-        // exactly the amount taken out. Re-measured every frame of the ease,
-        // so a scroll the browser clamped at the bounds simply corrects
-        // itself on the next one.
+        // Measure where the anchor landed and correct by the difference —
+        // robust to `m-auto` collapsing and the gutter, which a computed
+        // offset would get wrong as the picture crosses the window's size.
         const rect = picture.getBoundingClientRect();
         el.scrollLeft += rect.left + a.x * z - a.px;
         el.scrollTop += rect.top + a.y * z - a.py;
@@ -272,9 +195,7 @@ function Viewer({
     stamp.current = null;
   }, []);
 
-  /** Ease what is painted towards `target`, one frame at a time, until it
-   *  arrives. Time-based rather than a fixed fraction per frame so the feel is
-   *  the same on a 60Hz display as on this machine's 120Hz one. */
+  /** Ease towards `target` per frame; time-based so 60Hz and 120Hz match. */
   const run = useCallback(() => {
     if (raf.current != null) return;
     const tick = (ts: number) => {
@@ -283,8 +204,7 @@ function Viewer({
       stamp.current = ts;
       const to = target.current;
       let z = current.current + (to - current.current) * (1 - Math.exp(-dt / SMOOTH_MS));
-      // Land exactly, rather than approaching forever a tenth of a per cent
-      // at a time with a repaint for each.
+      // Snap when close rather than approaching forever.
       if (Math.abs(to - z) < to * 0.0015) z = to;
       current.current = z;
       paint(z);
@@ -299,20 +219,13 @@ function Viewer({
 
   useEffect(() => stop, [stop]);
 
-  /** Ask for a zoom, holding `(clientX, clientY)` over the same part of the
-   *  diagram. Called with the window's centre when the zoom came from a button
-   *  or a key, which is what "no cursor to anchor to" should mean.
-   *
-   *  Every zoom in the file goes through here, and every one of them composes
-   *  on `target` rather than on what is painted — that is what lets a burst of
-   *  wheel events, or four impatient clicks on +, add up instead of each
-   *  overwriting the last. */
+  /** Zoom holding `(clientX, clientY)` still (window centre if omitted).
+   *  Callers compose on `target`, not the painted zoom, so bursts add up. */
   const requestZoom = useCallback(
     (next: number, clientX?: number, clientY?: number) => {
       const el = scroller.current;
       const picture = host.current;
-      // `painted`, not `current`: what is measured below belongs to the scale
-      // on screen, and the smoother may already be a frame ahead of it.
+      // `painted`, not `current`: the rects below are in the on-screen scale.
       const now = painted.current;
       if (!el || !picture || now == null) return;
       const wanted = clampZoom(next);
@@ -322,10 +235,8 @@ function Viewer({
       const py = clientY ?? view.top + view.height / 2;
       const rect = picture.getBoundingClientRect();
       anchor.current = {
-        // In the diagram's own coordinates, so it survives the scale change.
         x: (px - rect.left) / now,
         y: (py - rect.top) / now,
-        // The screen position being held, which the correction measures against.
         px,
         py,
       };
@@ -350,23 +261,15 @@ function Viewer({
     }
   }, [fitZoom, paint, stop]);
 
-  // First paint: measure the window and fit to it. Layout, not effect — the
-  // browser must never get a frame at a guessed scale.
+  // Fit before first paint, and only on open — `reset` is also the Fit button.
   useLayoutEffect(() => {
     reset();
-    // Only ever on open. `reset` is also the Fit button, and re-running this
-    // because one of its deps was rebuilt would yank a zoomed-in reader back
-    // to the corner.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Zoom gestures ─────────────────────────────────────────────────────────
-  // One pinch arrives twice over, and that duplication is a bug, not a
-  // convenience: WKWebView synthesizes `ctrlKey` wheel events for the same
-  // fingers that it reports through its own `gesture*` events, so answering
-  // both applies the pinch twice. `gestureActive` picks one — while the
-  // fingers are down the gesture owns the zoom, and the wheel path is left to
-  // ⌘-scroll and to a real mouse. Plain scrolling is untouched: it is the pan.
+  // Zoom gestures. WKWebView reports a pinch both as `gesture*` events and as
+  // synthesized `ctrlKey` wheels; while `gestureActive`, the wheel path is
+  // ignored so the pinch isn't applied twice. Plain scrolling is the pan.
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -374,7 +277,6 @@ function Viewer({
     let gestureActive = false;
     let idle: number | null = null;
 
-    // See GESTURE_IDLE_MS: the flag has to be able to clear itself.
     const keepAlive = () => {
       if (idle != null) clearTimeout(idle);
       idle = window.setTimeout(() => {
@@ -387,7 +289,7 @@ function Viewer({
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       if (gestureActive) return;
-      // `deltaMode === 1` counts lines rather than pixels, hence the 16px line.
+      // `deltaMode === 1` is lines, not pixels.
       const dy = e.deltaY * (e.deltaMode === 1 ? 16 : 1);
       const stepBy = Math.min(
         WHEEL_MAX_STEP,
@@ -405,8 +307,7 @@ function Viewer({
       e.preventDefault();
       const g = e as unknown as { scale: number; clientX: number; clientY: number };
       keepAlive();
-      // `scale` is the magnification of the whole gesture so far, not a delta,
-      // so this multiplies the zoom the pinch *started* from.
+      // `scale` is cumulative for the gesture, not a delta.
       if (g.scale) requestZoom(pinchBase * g.scale, g.clientX, g.clientY);
     };
     const onGestureEnd = (e: Event) => {
@@ -429,8 +330,7 @@ function Viewer({
     };
   }, [requestZoom]);
 
-  // The window changing size under an open diagram moves what "fit" means.
-  // Only the fit is re-measured — the picture is left where the reader put it.
+  // A window resize re-measures fit but leaves the view where it is.
   useEffect(() => {
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -441,35 +341,20 @@ function Viewer({
     return () => ro.disconnect();
   }, [fitZoom]);
 
-  // ── Drag to pan ───────────────────────────────────────────────────────────
-  // Pointer events, not HTML5 drag: a `dragstart` that sets no data is
-  // cancelled outright by WebKit (root `CLAUDE.md`), and there is nothing
-  // being dragged *to* here anyway — the gesture moves a viewport.
+  // Drag to pan, on pointer events (see CLAUDE.md: HTML5 drag).
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    // Let a click on the toolbar, or a right-click, be what it is.
     if (e.button !== 0) return;
     const el = scroller.current;
     if (!el) return;
-    // Text is the one thing that should answer to a press by selecting
-    // rather than panning, and only the caller knows which of its own nodes
-    // are text. The browser's own selection is better than any we would
-    // write, so the press is simply left alone over them.
     if (selectableSelector && (e.target as Element).closest?.(selectableSelector)) return;
-    // WebKit starts a selection-drag from the first `pointermove` otherwise,
-    // and the pan would drag a highlight across the content behind it. It
-    // also cancels an `<img>`'s own native drag, which would otherwise fight
-    // the pan for the same gesture.
-    // Cancelling the pointerdown also cancels the focus it would have moved,
-    // so the canvas takes focus by hand — the arrow keys and `+`/`-`/`0` are
-    // its, and it is what `onOpenAutoFocus` hands the dialog to on open.
+    // Stops a selection-drag and an `<img>`'s native drag; it also cancels
+    // the focus move, so focus the canvas by hand.
     e.preventDefault();
     el.focus();
-    // A pan is a deliberate scroll, so an eased zoom still in flight must
-    // stop correcting one: it would drag the picture back out from under the
-    // hand every frame.
+    // An in-flight ease must stop re-anchoring against the pan.
     anchor.current = null;
     drag.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
     setDragging(true);
@@ -489,9 +374,7 @@ function Viewer({
     if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
   };
 
-  // ── Keys ──────────────────────────────────────────────────────────────────
-  // Escape is Radix's. The rest is what a picture viewer is expected to
-  // answer to; arrows fall through to the scroller's own handling.
+  // Escape is Radix's; arrows fall through to the scroller.
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "+" || e.key === "=") {
       e.preventDefault();
@@ -505,9 +388,7 @@ function Viewer({
     }
   };
 
-  // A double-click toggles between the whole picture and one detail of it,
-  // which is the one thing a two-state gesture is good for. 100% is the
-  // diagram at the size mermaid drew it — the size it is in a wide reply.
+  // Double-click toggles fit ↔ 100% at the pointer.
   const onDoubleClick = (e: React.MouseEvent) => {
     if (Math.abs(target.current - fit.current) < 0.01) requestZoom(1, e.clientX, e.clientY);
     else reset();
@@ -526,71 +407,33 @@ function Viewer({
         onPointerCancel={endDrag}
         onDoubleClick={onDoubleClick}
         className={cn(
-          // `overflow-scroll`, not `auto`. Under `auto` the scrollbars appear
-          // and vanish as the picture crosses the window's size — and with
-          // classic scrollbars on (`index.css`) that takes 15px out of
-          // `clientWidth` mid-zoom, which re-centres `m-auto` and moves the
-          // fit under the reader's fingers at exactly the moment they are
-          // zooming through it. Reserved gutters cost two strips and make the
-          // geometry constant. `scrollbar-gutter` would be the tidy way to say
-          // this and is a no-op in WebKit.
+          // `overflow-scroll`, not `auto`: scrollbars appearing mid-zoom would
+          // change `clientWidth` and re-centre under the pinch
+          // (`scrollbar-gutter` is a no-op in WebKit — see CLAUDE.md).
           "flex flex-1 overflow-scroll outline-none",
           scrollerClassName,
           dragging
-            ? // A pan must not paint a selection behind itself. The `!` is not
-              // shouting: what it has to beat is whatever `scrollerClassName`
-              // handed the content — the diagram's label rules land in the
-              // same layer and are two elements more specific (`.x svg text`
-              // against this rule's `.x *`), so at equal weight the label
-              // would keep its I-beam and its selection right through the pan.
-              // An important declaration is what settles it. (It is not the
-              // cascade-layer trap recorded in `index.css`: the base resets
-              // live inside `@layer base`, so a plain `select-none` beats
-              // `span { user-select: text }` fine.) `*` because the rule has
-              // to reach every shape a caller's content can take.
+            ? // `!` to beat the more specific rules `scrollerClassName` gives
+              // the content (the diagram's `svg text`).
               "cursor-grabbing [&_*]:cursor-grabbing! [&_*]:select-none!"
             : "cursor-grab",
         )}
       >
         <div
           ref={box}
-          // No `style` prop, deliberately: the size is written by `paint` and
-          // React must have no opinion it could restore mid-pinch.
-          //
-          // `m-auto` is the centring, and it has to be an auto *margin* rather
-          // than `justify-content: center` on the scroller: centred content
-          // that outgrows its scroller overflows equally in both directions,
-          // and the overflow before the start edge cannot be scrolled to — the
-          // top-left corner of a zoomed-in diagram is simply unreachable. An
-          // auto margin collapses to 0 once the free space goes negative, so
-          // the same rule centres a small diagram and pins a large one.
-          //
-          // `shrink-0` is not tidying. This is a flex item, and a flex item's
-          // default `flex-shrink: 1` squeezes it back to the container's width
-          // — measured, the zoom climbed to 165% while the picture did not
-          // move a pixel, because every extra pixel of width was being taken
-          // straight back out.
-          //
-          // `box-content` puts the gutter outside the size the zoom computed,
-          // so 100% means 100%. The deeper `pb` is the toolbar's room — see
-          // `GUTTER_Y`.
+          // No `style` prop: `paint` owns the size. `m-auto`, not
+          // `justify-center`, so an oversized picture's start edge stays
+          // scrollable. `shrink-0` or flex squeezes it back to the container.
+          // `box-content` keeps the gutter outside the zoomed size.
           className="m-auto box-content shrink-0 p-9 pb-20"
         >
           <div
             ref={host}
-            // Always the content's natural size, and scaled by a transform on
-            // top — so it lays out once, on open, and a zoom is a paint.
-            // `transform-origin` at the corner is what keeps the host's
-            // visual box flush with the layout box `paint` sized for it.
+            // Natural size, scaled from the corner to sit flush in `box`.
             style={{
               width: size.width,
               height: size.height,
               transformOrigin: "0 0",
-              // Ask for the content to be its own compositing layer. The
-              // transform then changes without the whole canvas being
-              // re-rastered from scratch each frame, and WebKit still
-              // re-rasters at the settled scale, so a vector does not end up
-              // soft and a photograph does not end up blocky.
               willChange: "transform",
             }}
           >
@@ -611,15 +454,8 @@ function Viewer({
   );
 }
 
-/** The controls, floating over the picture rather than in a bar above it —
- *  the window is the picture, and a bar would take a strip of it for a row
- *  that is empty most of the time. Same grammar as `PDFViewer`'s zoom cluster:
- *  ghost icon buttons around a percentage that resets when pressed, in
- *  `tabular-nums` so it does not jitter as the digits change.
- *
- *  The percentage arrives as a ref rather than a prop: it changes on every
- *  frame of a zoom, and a component that re-rendered for it would be the only
- *  React work in the gesture. */
+/** Floating controls, same grammar as `PDFViewer`'s zoom cluster. The
+ *  percentage is a ref so a zoom frame renders no React. */
 function Toolbar({
   readout,
   limit,
@@ -647,11 +483,8 @@ function Toolbar({
           className="w-12 cursor-pointer text-center tabular-nums transition-colors hover:text-foreground"
           aria-label="Fit to window"
         >
-          {/* No child in the JSX, deliberately. `paint` owns this text node,
-              and a literal here would be restored the moment React re-rendered
-              the toolbar for a `limit` change — which happens exactly when the
-              zoom hits a clamp and stops painting, leaving "100%" frozen over
-              a diagram at 800%. */}
+          {/* Empty on purpose: `paint` owns the text; a JSX child would be
+              restored stale on the next `limit` re-render. */}
           <span ref={readout} />
         </button>
         <Action label="Zoom in" onClick={onIn} disabled={limit === "max"}>
@@ -692,16 +525,8 @@ function Action({
   );
 }
 
-/**
- * A picture, opened out.
- *
- * The natural size is measured here rather than passed in, because what a
- * caller has is a thumbnail and a src — the thread's attachment card, the
- * composer's chip. `Image` resolves out of the same cache the thumbnail has
- * already filled, so the measure costs a microtask and nothing is seen
- * waiting; the viewer is mounted only once there is an answer, because a fit
- * computed against 0×0 would open the picture pinned at a clamp.
- */
+/** A picture, opened out. Measures its natural size first (from cache) and
+ *  mounts the viewer only then — a fit against 0×0 would open at a clamp. */
 export function ImageLightbox({
   src,
   alt,
@@ -735,8 +560,6 @@ export function ImageLightbox({
 
   return (
     <Lightbox size={size} open={open} onOpenChange={onOpenChange} title={alt || "Picture"}>
-      {/* `draggable` off because an `<img>` is natively draggable in WebKit
-          and that drag would fight the pan for the same gesture. */}
       <img src={src} alt={alt ?? ""} draggable={false} className="h-full w-full" />
     </Lightbox>
   );

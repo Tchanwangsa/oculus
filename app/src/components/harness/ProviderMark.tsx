@@ -1,15 +1,10 @@
 import type { ComponentType, SVGProps } from "react";
 import type { Provider } from "@/lib/harness";
 
-/**
- * Vendor marks for the CLI agents the harness drives. All of them are
- * `currentColor` monochrome — the same treatment bb gives them under its
- * per-provider `icons` folders — so they sit in the quiet palette like any
- * other icon and never fight the indigo accent. The caller sizes them with a
- * `size-` utility.
- */
+/** Vendor marks for the CLI agents, all `currentColor` monochrome so they sit
+ *  in the neutral palette. Sized by the caller's `size-` utility. */
 
-export function ClaudeCodeMark(props: SVGProps<SVGSVGElement>) {
+function ClaudeCodeMark(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -23,7 +18,7 @@ export function ClaudeCodeMark(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-export function CodexMark(props: SVGProps<SVGSVGElement>) {
+function CodexMark(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -37,26 +32,10 @@ export function CodexMark(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-/**
- * opencode's own mark, which is the only two-tone one of the three: a heavy
- * rectangular frame with a block filling the lower two-thirds of its opening —
- * a cursor sitting in a terminal.
- *
- * **Both halves are `currentColor`; the inner block is the same ink at a
- * fraction of its alpha.** The vendor ships a light and a dark file, and the
- * difference between them is only that each is composed against its own
- * background: measured off the two, the inner block is the outer colour at
- * α≈0.21 over the page in both. Carrying two SVGs to say that would also cost
- * the thing every mark here has — one colour, inherited — so the ratio is
- * expressed as an opacity and the theme takes care of itself. It is set a
- * little heavier than measured because these are drawn at 14px in ink that is
- * already `muted-foreground` at 60–70% opacity, where a true 21% block
- * disappears into the surface.
- *
- * Its viewBox is 4:5 where the other two are square, so it letterboxes inside
- * the caller's `size-` box rather than being stretched to match them.
- */
-export function OpencodeMark(props: SVGProps<SVGSVGElement>) {
+/** Two-tone: the vendor's light/dark files differ only in the inner block's
+ *  alpha, so one `currentColor` SVG with a `fillOpacity` covers both themes
+ *  (set heavier than the vendor's, to survive small muted rendering). */
+function OpencodeMark(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -71,19 +50,7 @@ export function OpencodeMark(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-/**
- * Antigravity's mark: the vendor's own arch, a single swept "A" whose legs
- * flare out and curl up at the feet.
- *
- * One `currentColor` path like Claude's and Codex's rather than opencode's
- * two-tone treatment, because the vendor's mark is a single weight with no
- * second value in it to express. The vendor file is filled white; that is
- * swapped for `currentColor` so the theme colours it like the others.
- *
- * Its viewBox is 23:21 rather than square, so like opencode's it letterboxes
- * inside the caller's `size-` box.
- */
-export function AntigravityMark(props: SVGProps<SVGSVGElement>) {
+function AntigravityMark(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -97,14 +64,7 @@ export function AntigravityMark(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-/**
- * Every provider's mark, exhaustively.
- *
- * A `Record<Provider, …>` rather than a ternary on purpose: a ternary answered
- * "not Claude" with the Codex mark, so a third agent would have drawn itself
- * as Codex with nothing to catch it. Adding a provider to the union is a
- * compile error here until its mark exists.
- */
+/** A `Record`, so a new provider is a compile error here until it has a mark. */
 const MARKS: Record<Provider, ComponentType<SVGProps<SVGSVGElement>>> = {
   claude: ClaudeCodeMark,
   codex: CodexMark,
@@ -112,8 +72,6 @@ const MARKS: Record<Provider, ComponentType<SVGProps<SVGSVGElement>>> = {
   antigravity: AntigravityMark,
 };
 
-/** The mark for a provider — the tab strip, the trigger and the model rows
- *  all use it, so a thread's agent is readable at a glance. */
 export function ProviderMark({ provider, className }: { provider: Provider; className?: string }) {
   const Mark = MARKS[provider];
   return <Mark className={className} />;

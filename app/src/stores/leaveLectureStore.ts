@@ -1,15 +1,7 @@
 import { create } from "zustand";
 import { isLecturePlaying, playingLecture } from "@/lib/lecturePlayback";
 
-/**
- * The "leave your lecture?" prompt, as a store rather than local state,
- * because the two things that can strand a playing lecture are in different
- * corners of the tree: the player itself (a navigation out of its tab, caught
- * by the router blocker) and the tab strip (closing its tab). Both ask through
- * here and one dialog in `AppLayout` answers.
- */
 interface Pending {
-  /** What the lecture is called, so the dialog can name it. */
   title: string;
   leave: () => void;
   stay: () => void;
@@ -21,6 +13,8 @@ interface LeaveLectureState {
   cancel: () => void;
 }
 
+/** The "leave your lecture?" prompt: the player and the tab strip both ask
+ *  here, and one dialog in `AppLayout` answers. */
 export const useLeaveLecture = create<LeaveLectureState>((set, get) => ({
   pending: null,
   confirm: () => {
@@ -35,11 +29,8 @@ export const useLeaveLecture = create<LeaveLectureState>((set, get) => ({
   },
 }));
 
-/**
- * Run `leave` — after asking, if a lecture is playing and would be left behind.
- * `stay` is the undo for whatever the caller had to start before asking (the
- * router's blocker, most of all, which has to be released either way).
- */
+/** Run `leave`, asking first if a lecture is playing. `stay` undoes whatever
+ *  the caller started before asking (e.g. releasing a router blocker). */
 export function confirmLeavingLecture(leave: () => void, stay = () => {}) {
   const lecture = playingLecture();
   if (!isLecturePlaying() || !lecture) {

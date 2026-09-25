@@ -1,19 +1,9 @@
 import { cn } from "@/lib/utils";
 
 /**
- * A quiet tab strip, a step below `ViewTabs` in every dimension it can be:
- * smaller, no underline, and the active one marked by a fill rather than a
- * colour.
- *
- * It exists because two identical underline strips stacked read as two levels
- * of the same rank and fight each other for the indigo rule. So where a page
- * already has a `ViewTabs` above it and needs a *subordinate* set of
- * views — Board / Table / Timeline under a project's Tasks tab, Board / Table
- * under the universal Tasks page's scope — this is the second strip.
- *
- * Pills, per the root `CLAUDE.md`: `rounded-full`, and the fill is `secondary`
- * rather than `primary`, which is reserved for the thing a page is actually
- * doing.
+ * A quieter tab strip for views subordinate to a `ViewTabs` above them (e.g.
+ * Board / Table under Tasks): smaller pills, the active one a `secondary` fill,
+ * so two stacked strips don't read as the same rank.
  */
 export function PillTabs<T extends string>({
   tabs,

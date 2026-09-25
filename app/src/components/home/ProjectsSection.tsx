@@ -12,27 +12,15 @@ import {
 import { ROW, Section } from "./Section";
 import { useHomeSection } from "./useHomeSection";
 
-/**
- * Every project write fires this — a click on a board, and equally the chat
- * agent's own `oculus project` / `oculus task` run, which reaches the same
- * event through `useBackendEvents`. One door for both.
- *
- * Module-level so the reference is stable — see `useHomeSection`.
- */
+/** Fired by every project write, UI or CLI (via `useBackendEvents`).
+ *  Module-level for a stable reference — see `useHomeSection`. */
 const EVENTS = [PROJECTS_UPDATED_EVENT];
 
-/** Four. The projects index is the list; this is the handful you are actually
- *  in, and a fifth row pushes Continue below the fold on a laptop. */
 const MAX_ROWS = 4;
 
 /**
- * The active projects, in the board's own order, with how far along each one
- * is.
- *
- * Counts come from one `getTaskCounts` over every id rather than a query per
- * row — the same reason the index and the subject tabs batch it. Archived
- * projects never appear: `getProjects` defaults to active, and a project you
- * have put away is not one to be reminded of on the first screen.
+ * Active projects in board order with progress; counts batched in one
+ * `getTaskCounts`. Archived projects never appear.
  */
 export function ProjectsSection() {
   const [projects, setProjects] = useState<DbProject[]>([]);
@@ -60,8 +48,7 @@ export function ProjectsSection() {
       {projects.map((p) => {
         const c = counts.get(p.id);
         return (
-          // `projectHref`, not a bare path: the tab strip titles a project tab
-          // out of the `?n=` query and has no project list to look one up in.
+          // `projectHref`: the tab strip titles a project tab from `?n=`.
           <Link key={p.id} to={projectHref(p)} className={ROW}>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[12px] text-foreground">{p.name}</span>

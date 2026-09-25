@@ -49,36 +49,25 @@ interface LocalProbe {
 }
 
 /**
- * Which MinerU reads the library's PDFs.
- *
- * The engine list, the labels and the reason an engine is unavailable all come
- * from Rust, so the page cannot offer something the backend would refuse, or
- * explain a refusal in different words.
- *
- * Unlike the embedding engine, switching this one costs nothing: markdown from
- * either backend is markdown, nothing already parsed is re-parsed and no index
- * is thrown away. So the control is a plain `onValueChange` with no
- * confirmation in front of it — a dialog raised over a change that destroys
- * nothing is how people learn to click through the one that matters.
+ * Which MinerU reads the library's PDFs. Engine list and unavailable reasons
+ * come from Rust. Switching destroys nothing (nothing is re-parsed), so unlike
+ * the embedding engine there is no confirmation. No fallback between engines —
+ * see CLAUDE.md: nothing catches a failed parse.
  */
 export function ParserSection() {
   const [settings, setSettings] = useState<ParseSettings | null>(null);
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // `null` is "not answered yet", and it is a state the UI must keep separate
-  // from `false`. These two used to load in one `Promise.all`, so a failure in
-  // *either* left this at its initial `false` — and the page then told someone
-  // with a perfectly good token, in red, that they had none and nothing could
-  // be parsed. A check that did not happen is not a negative answer.
+  // `null` is "not answered yet" and must stay distinct from `false`: a check
+  // that failed is not a missing token.
   const [hasToken, setHasToken] = useState<boolean | null>(null);
   const [tokenCheckError, setTokenCheckError] = useState<string | null>(null);
   const [token, setToken] = useState("");
   const [tokenNote, setTokenNote] = useState<{ kind: "error" | "warn"; text: string } | null>(null);
   const [checkingToken, setCheckingToken] = useState(false);
 
-  // The endpoint as typed, which is not the endpoint in force: an empty field
-  // means "no override", and `default_base_url` is what it then stands for.
+  // The endpoint as typed; empty means "no override" (`default_base_url`).
   const [urlDraft, setUrlDraft] = useState("");
   const [urlNote, setUrlNote] = useState<string | null>(null);
   const [savingUrl, setSavingUrl] = useState(false);
@@ -87,25 +76,18 @@ export function ParserSection() {
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
 
-  // The only live signal about the token now. The sidecar used to latch a
-  // rejection in its own process and report it in the health this page polled;
-  // the in-process client keeps no such state (see the note in
-  // `app/src-tauri/src/mineru.rs`), so what is left is the app-wide latch the
-  // parse events raise. That makes the "Expired" state session-scoped rather
-  // than sticky — which is the honest scope, because the very next parse reads
-  // the keychain afresh and a stale flag would outlive the problem.
+  // The only live signal about the token: the app-wide latch parse events
+  // raise. "Expired" is session-scoped because each parse re-reads the keychain.
   const latch = useParseStore((state) => state.latch);
   const clearLatch = useParseStore((state) => state.clearLatch);
 
-  // Rust owns which endpoint is in force, so the field is re-seeded from every
-  // answer it gives rather than kept as a second opinion.
+  // Rust owns the endpoint in force, so re-seed the field from every answer.
   const applySettings = useCallback((next: ParseSettings) => {
     setSettings(next);
     setUrlDraft(next.overridden ? next.base_url : "");
   }, []);
 
-  // Two independent questions, loaded independently. Neither can answer for
-  // the other, and neither failing may be reported as the other's answer.
+  // Loaded independently so one failing is never read as the other's answer.
   useEffect(() => {
     let cancelled = false;
 
@@ -121,9 +103,7 @@ export function ParserSection() {
         setError("Could not read the parser settings.");
       });
 
-    // Asked whichever engine is selected: the answer decides what the cloud
-    // row says the moment someone switches back to it, and a token check is
-    // cheap next to a flash of "Checking…" over a row that was already known.
+    // Asked whichever engine is selected, so switching to cloud shows no flash.
     invoke<boolean>("mineru_has_api_key")
       .then((present) => {
         if (cancelled) return;
@@ -133,8 +113,6 @@ export function ParserSection() {
       .catch((cause) => {
         console.error("MinerU token check failed", cause);
         if (cancelled) return;
-        // Shown, not swallowed. The console is not somewhere a student looks,
-        // and this is the whole reason the page was lying.
         setHasToken(null);
         setTokenCheckError(String(cause));
       });
@@ -165,9 +143,7 @@ export function ParserSection() {
     }
   }, []);
 
-  // On mount when local is already selected, and again on every switch to it.
-  // Switching away drops the verdict rather than leaving a stale one to be
-  // read as the cloud's.
+  // Probe whenever local is selected; switching away drops the verdict.
   useEffect(() => {
     if (settings?.engine !== "local") {
       setProbe(null);
@@ -194,8 +170,7 @@ export function ParserSection() {
     }
   };
 
-  // An empty field clears the override, which is why this is never guarded on
-  // a non-empty value the way the token is.
+  // Not guarded on non-empty: an empty field clears the override.
   const saveUrl = async () => {
     setUrlNote(null);
     setSavingUrl(true);
@@ -210,8 +185,7 @@ export function ParserSection() {
     }
   };
 
-  // Rust checks the token against MinerU before it reaches the keychain, so a
-  // typo or an expired token is reported here rather than at the next parse.
+  // Rust checks the token against MinerU before storing it in the keychain.
   const saveToken = async () => {
     if (!token.trim()) return;
     setCheckingToken(true);
@@ -220,9 +194,7 @@ export function ParserSection() {
       const verdict = await invoke<string>("mineru_set_api_key", { key: token.trim() });
       setToken("");
       setHasToken(true);
-      // A token MinerU just accepted is the thing the latch was waiting on, so
-      // lift it here rather than leaving the library "on hold" until some file
-      // happens to parse. The sweep picks the outstanding files back up.
+      // An accepted token lifts the latch; the sweep resumes outstanding files.
       clearLatch();
       setTokenNote(
         verdict === "unverified"
@@ -291,17 +263,13 @@ export function ParserSection() {
           </Select>
         </div>
 
-        {/* A disabled option with no reason beside it reads as a bug. Rust
-            decides both the list and the refusal, so the sentence is its. */}
         {unavailable.map((engine) => (
           <p key={engine.id} className="text-[11px] leading-relaxed text-muted-foreground">
             {engine.label}: {engine.unavailable_reason}
           </p>
         ))}
 
-        {/* The token belongs to the cloud engine and only to it. A local server
-            needs no credential, and a key field standing under a backend that
-            cannot use it is the kind of thing people paste secrets into. */}
+        {/* Cloud only: a local server needs no credential. */}
         {isCloud ? (
           <div className="py-2">
             <div className="flex items-center justify-between gap-4">
@@ -439,8 +407,6 @@ export function ParserSection() {
           />
         ) : null}
 
-        {/* Where the PDFs actually go, which is the whole difference between
-            the two engines and is never left to be inferred from the label. */}
         {isCloud ? (
           <p className="pt-1 text-[11px] leading-relaxed text-muted-foreground">
             Lecture PDFs are uploaded to MinerU and its PRC-hosted OSS storage. Results may be
@@ -465,20 +431,9 @@ export function ParserSection() {
 }
 
 /**
- * Whether the local server is answering, in one line.
- *
- * Four states, not two. "Reachable" and "unreachable" are the obvious pair;
- * a version mismatch is a *third* problem with a different fix — the server
- * answered, it just speaks an API this build cannot use — and flattening it
- * into "not ok" sends someone to check a port that is fine. The fourth is a
- * probe that has not answered yet, which must never be drawn as a failure: no
- * answer is not a negative answer.
- *
- * **The sentence itself is Rust's, not this file's.** `detail` already says
- * what is wrong and what to do, and it distinguishes cases this side cannot
- * see — a server that answered but is still loading its models reads as
- * `unreachable` here, and a second sentence written from the state alone
- * would tell someone nothing answered while Rust told them something did.
+ * Whether the local server is answering, in one line. The failure sentence is
+ * Rust's `detail`, which distinguishes cases the state alone cannot (e.g. a
+ * server still loading models reads as `unreachable`).
  */
 function ProbeLine({
   probe,

@@ -50,59 +50,26 @@ import { PillTabs } from "@/components/ui/PillTabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { OpencodeConnectDialog } from "./OpencodeConnectDialog";
 
-/** How many search results a query shows before it is asking the wrong
- *  question. It was eight when the results shared a column with the connected
- *  list and had two rows of room; now that a query gives the whole body over
- *  to its matches it can be a list worth scrolling, and the cap is only there
- *  so that a one-letter query is not all 218 rows. */
+/** Cap on provider search results, so a one-letter query isn't every row. */
 const RESULTS = 30;
 
 type View = { kind: "providers" } | { kind: "models"; providerId: string };
 
 /**
- * Everything about opencode's providers, in one dialog: what is connected,
- * what each provider's models have been measured to do, and which of them the
- * composer is allowed to offer.
+ * opencode's providers in one dialog: connect, disconnect or hide, and tick
+ * which models the composer offers. Two views in local state (`providers` →
+ * `models:<id>`); the connect flow is its own dialog on top.
  *
- * It replaced a version of all this inlined into Settings → AI, which was the
- * wrong shape twice over. A 218-row search box and a connected list are not a
- * settings *row*; and the thing that actually had to be built — per-model
- * ticks over a provider that can contribute three hundred of them — has no
- * chance of fitting on a page beside four other sections.
- *
- * **Three views, one dialog.** `providers` → `models:<id>` → back, held in
- * local state rather than as three `<Dialog>`s, because they are one task: a
- * student who connects OpenRouter is going to check it and then untick two
- * hundred rows, and a stack of dialogs would make each step feel like leaving
- * the last one. The connect flow is the exception and genuinely is a second
- * dialog — it is a form with its own browser round trip
- * (`OpencodeConnectDialog.tsx`), and it is rendered over this one unchanged.
- *
- * **The dialog's first read is what starts opencode.** Listing providers means
- * asking the app's `opencode serve`, and a settings page being *opened* is not
- * a reason to spawn a CLI — so the section above draws a button, and mounting
- * this component is the click. After that the answer is cached for the
- * window's life in `opencodeAuth.ts`.
- *
- * **Connected leads, because it is the only thing there is to remove**, and
- * removal has two shapes that are not the same fact. A provider with a
- * credential is disconnected. A provider whose `source` is `config` is
- * connected because the student's own `opencode.json` declares it: there is no
- * credential to delete, and Oculus must never edit that file — so the honest
- * action is to hide it from Oculus, which is a fact about this app and nothing
- * else. That is `hiddenProviders` in `app/src/lib/opencodeCatalogue.ts`.
- *
- * **What the model list is, and what it is not.** The rows come from
- * `harnessOpencodeModels()` — opencode's whole catalogue — and never from
- * `PROVIDERS`' opencode `fetchModels`, which is already filtered by the very
- * store this dialog edits. Reading through that filter would mean a model
- * could only be unhidden if it were not hidden.
+ * Mounting is what starts `opencode serve` — Settings only draws a button.
+ * A `config`-sourced provider comes from the user's own `opencode.json`, which
+ * Oculus never edits, so it can only be hidden (`hiddenProviders`).
+ * Model rows come from `harnessOpencodeModels()` (the unfiltered catalogue),
+ * never the already-filtered picker list, or a hidden model could never be
+ * unhidden.
  */
 export function OpencodeCatalogDialog({ onClose }: { onClose: () => void }) {
   const [view, setView] = useState<View>({ kind: "providers" });
   const [list, setList] = useState<OpencodeProviderList | null>(cachedProviders);
-  // True on the first render already when there is nothing cached, so the
-  // view never flashes its failure state in the beat before the effect runs.
   const [loading, setLoading] = useState(() => !cachedProviders());
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -124,22 +91,12 @@ export function OpencodeCatalogDialog({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
-  // Mounting is the click that was allowed to start opencode. A list this
-  // window already read is reused rather than re-asked — nothing about the
-  // credential store changes while nobody is editing it.
   useEffect(() => {
     if (!cachedProviders()) void loadList(false);
   }, [loadList]);
 
-  /**
-   * opencode's whole catalogue, held for the life of the dialog.
-   *
-   * Every model of every provider arrives in one call, so the second provider
-   * a student opens costs nothing. The ref beside the state is what a click
-   * handler reads: `Check` has to hand the sweep a list of ids *now*, and a
-   * `useState` value captured in a closure would be the one from the render
-   * that drew the button.
-   */
+  /** opencode's whole catalogue (every provider, one call), held for the
+   *  dialog's life; the ref dedupes loads without a stale closure. */
   const modelsRef = useRef<HarnessModel[] | null>(null);
   const inFlight = useRef<Promise<HarnessModel[]> | null>(null);
   const [models, setModels] = useState<HarnessModel[] | null>(null);
@@ -164,9 +121,7 @@ export function OpencodeCatalogDialog({ onClose }: { onClose: () => void }) {
     return p;
   }, []);
 
-  // Read on open rather than on the first click into a provider, because the
-  // self-check below needs model ids to ask for. It is one `GET /provider`
-  // against the server this dialog has already started.
+  // Read on open: the provider rows' offered counts need it.
   useEffect(() => {
     void loadModels(false);
   }, [loadModels]);
@@ -182,9 +137,7 @@ export function OpencodeCatalogDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       setList(rememberProviders(await opencodeDisconnect(provider.id)));
-      // The credential is gone, so the 401s it produced are no longer facts
-      // about anything. Reconnecting later starts from an empty catalogue
-      // rather than inheriting a menu an old key emptied.
+      // Reconnecting later starts from a clean catalogue entry.
       if (catalogue) await save(forgetProvider(catalogue, provider.id));
     } catch (e) {
       setError(String(e));
@@ -205,9 +158,7 @@ export function OpencodeCatalogDialog({ onClose }: { onClose: () => void }) {
   const providers = list?.providers ?? [];
   const hiddenIds = catalogue?.hiddenProviders ?? [];
 
-  // A hidden provider is listed once, under *Hidden* — it is still connected
-  // as far as opencode is concerned, and drawing it in both groups would make
-  // "hide" look like it had not worked.
+  // A hidden provider is listed only under *Hidden*.
   const connected = useMemo(
     () => providers.filter((p) => p.connected && !hiddenIds.includes(p.id)),
     [providers, hiddenIds],
@@ -216,9 +167,7 @@ export function OpencodeCatalogDialog({ onClose }: { onClose: () => void }) {
     () => providers.filter((p) => hiddenIds.includes(p.id)),
     [providers, hiddenIds],
   );
-  /** The ten or so that declare a named way in — an OAuth flow, or a key plus
-   *  the fields that key needs. Everything else is an unadorned API key and is
-   *  found by name. */
+  /** Providers with an OAuth flow; the rest are plain API keys, found by search. */
   const featured = useMemo(
     () => providers.filter((p) => !p.connected && p.methods.some((m) => m.kind === "oauth")),
     [providers],
@@ -322,9 +271,6 @@ export function OpencodeCatalogDialog({ onClose }: { onClose: () => void }) {
         </DialogContent>
       </Dialog>
 
-      {/* Over the top of this one, and unchanged: the connect flow is a form
-          with its own browser round trip, and it is the one step here that is
-          genuinely a separate task. */}
       {connecting && (
         <OpencodeConnectDialog
           provider={connecting}
@@ -334,10 +280,8 @@ export function OpencodeCatalogDialog({ onClose }: { onClose: () => void }) {
             setList(rememberProviders(next));
             setConnecting(null);
             setQuery("");
-            // The model catalogue this dialog is holding predates the
-            // provider, so its models are not in it. Re-read, and land on its
-            // model list: everything opencode lists is offered already, so
-            // there is nothing to wait for and nothing to spend.
+            // The held catalogue predates this provider: re-read it and land
+            // on its model list.
             setModelQuery("");
             setView({ kind: "models", providerId: id });
             void loadModels(true);
@@ -351,23 +295,9 @@ export function OpencodeCatalogDialog({ onClose }: { onClose: () => void }) {
 // ── the provider list ──────────────────────────────────────────────────────
 
 /**
- * What is connected, what is hidden, and the way in to the other 213 — in one
- * column with **one scroll region**, under a search field that is the only
- * pinned thing.
- *
- * The obvious layout is the wrong one and was built first: connected list,
- * hidden list, then a search with its results under it, all sharing a single
- * scroll. Every group competes with every other for the same column, and the
- * one that loses is always the results — a student with five providers signed
- * in was left about two rows of room to scroll two hundred in, and pinning the
- * top half only moved the squeeze.
- *
- * **The query is the mode.** Empty, the body is the student's own providers,
- * and the whole dialog is theirs to scroll. Typing gives the body over to the
- * matches, because looking for one of 218 providers is a find rather than a
- * browse, and nothing about the connected list helps with it. So the two
- * things never share a column at all, the search stays reachable from anywhere
- * in either, and neither can starve the other of height.
+ * Connected, hidden and addable providers under a pinned search, in one scroll
+ * region. The query is the mode: empty shows the groups, typing replaces the
+ * whole body with matches, so neither starves the other of height.
  */
 function ProvidersView({
   loading,
@@ -400,8 +330,7 @@ function ProvidersView({
   matched: number;
   query: string;
   onQuery: (q: string) => void;
-  /** Every model opencode lists, or null before the read lands. Only the
-   *  counts need it, which is why a row draws without waiting for it. */
+  /** Every model opencode lists, or null before the read lands (counts only). */
   models: HarnessModel[] | null;
   removing: string | null;
   onModels: (providerId: string) => void;
@@ -410,9 +339,7 @@ function ProvidersView({
   onConnect: (p: OpencodeProvider) => void;
 }) {
   if (list === null) {
-    // A read that failed leaves nothing to draw, and a spinner over it would
-    // claim work that is not happening — the message below this view says what
-    // went wrong, so this offers the one thing that can change it.
+    // On failure the error shows below; offer a retry, not a spinner.
     return (
       <div className="flex min-h-0 flex-1 items-center gap-2 text-xs text-muted-foreground">
         {loading ? (
@@ -568,19 +495,9 @@ function ProvidersView({
   );
 }
 
-/**
- * What a provider row lets you do, in one place so that a search result and a
- * row under *Connected* cannot offer different things about the same provider
- * — typing "zen" used to produce a *Connect* button for a provider that was
- * already signed in.
- *
- * **Disconnect is an icon.** Three words of chrome on every row — *Models*,
- * *Check*, *Disconnect* — made the provider's own name the least emphatic
- * thing in it. *Models* keeps its label because it is the way further in and
- * the one a student is looking for; the other is the kind of thing an icon and
- * a tooltip carry. *Check* is gone altogether: it sent a billed request to
- * every model the provider has.
- */
+/** A provider row's actions, shared by search results and the groups so both
+ *  offer the same thing. No per-model check — see CLAUDE.md: no billed calls
+ *  from Settings. */
 function ProviderActions({
   provider,
   removing,
@@ -611,9 +528,7 @@ function ProviderActions({
         <CaretRight size={12} />
       </Button>
       {provider.source === "config" ? (
-        // Declared in the student's own opencode.json, so there is no
-        // credential to delete and Oculus will not touch that file. Hiding is
-        // the only removal that is true.
+        // From the user's opencode.json: no credential to delete, so hide.
         <IconAction label="Hide from Oculus" onClick={() => onHide(provider.id, true)}>
           <EyeSlash size={12} />
         </IconAction>
@@ -634,8 +549,7 @@ function ProviderActions({
   );
 }
 
-/** A ghost icon button whose tooltip is its accessible name, so the two cannot
- *  drift apart. */
+/** A ghost icon button whose tooltip is its accessible name. */
 function IconAction({
   label,
   disabled,
@@ -676,24 +590,15 @@ function ProviderRow({
   provider: OpencodeProvider;
   catalogue: OpencodeCatalogue | null;
   models: HarnessModel[] | null;
-  /** Greys the name. Set under *Hidden*, where the row is a record of
-   *  something switched off rather than something in use. */
+  /** Greys the name (the *Hidden* group). */
   muted?: boolean;
-  /** Set for a row in the *Hidden* group, where a count of offered models
-   *  would be a number the picker ignores. */
+  /** Replaces the offered count in the *Hidden* group. */
   hiddenNote?: string;
   children: React.ReactNode;
 }) {
-  // How many of this provider's models the composer will show: all of them,
-  // less the ones that cannot run here and the ones unticked. A provider in
-  // the add list is not signed in, so that number is a question about nothing
-  // — its size is what a student is weighing there. Before the model list
-  // lands there is nothing to subtract, so the row says the size and catches
-  // up rather than drawing a count it would have to correct.
+  // Offered count for a connected provider; plain size until models load.
   const mine = models?.filter((m) => providerOf(m.id) === provider.id) ?? null;
-  // `filterOffered` rather than a local test: it is the one place the
-  // capability half and the catalogue half of the gate are applied together,
-  // so this line and the composer's menu cannot come to different numbers.
+  // `filterOffered`, the composer's own gate, so the counts agree.
   const offered = mine && catalogue ? filterOffered(mine, catalogue).length : null;
   const size = `${provider.modelCount} ${provider.modelCount === 1 ? "model" : "models"}`;
   const line = hiddenNote
@@ -753,10 +658,8 @@ function ModelsView({
 }) {
   const entry = catalogue?.providers[providerId];
 
-  // *Selected* narrows the list to what is ticked — but to what was ticked
-  // when it was chosen, not live. A live filter would pull a row out from
-  // under the click that unticked it, and a mis-click would leave nothing to
-  // click back on. Choosing *Selected* again re-reads the ticks.
+  // *Selected* snapshots the ticks when chosen, not live, so unticking a row
+  // doesn't pull it out from under the click.
   const [picked, setPicked] = useState<Set<string> | null>(null);
   const scope = picked ? "selected" : "all";
   const onScope = (next: "all" | "selected") =>
@@ -771,10 +674,7 @@ function ModelsView({
     );
   const filtered = picked ? searched.filter((m) => picked.has(m.id)) : searched;
 
-  // A blocked row — Zen, or missing a capability the agent needs — stays in
-  // the list so the student can read why, but it is not offered and not
-  // tickable. Counting it as offered would be the same wrong promise the
-  // disabled checkbox refuses to make.
+  // Blocked rows stay listed with their reason but are never counted offered.
   const blocked = models.filter((m) => blockedBecause(m) !== null).length;
   const usable = models.filter((m) => blockedBecause(m) === null);
   const hidden = usable.filter((m) => entry?.models[m.id]?.hidden === true).length;
@@ -784,8 +684,7 @@ function ModelsView({
       ? `${offered} of ${models.length} offered · ${blocked} cannot run here`
       : `${offered} of ${models.length} offered`;
 
-  // Bulk ticks act on what the search has narrowed to, and only on rows there
-  // is something to change about.
+  // Bulk ticks act on the filtered rows only.
   const tickable = filtered.filter((m) => blockedBecause(m) === null);
   const showable = tickable.filter((m) => entry?.models[m.id]?.hidden === true).map((m) => m.id);
   const hideable = tickable.filter((m) => entry?.models[m.id]?.hidden !== true);
@@ -901,22 +800,12 @@ function ModelRow({
 }) {
   const hidden = stored?.hidden === true;
 
-  // **A model that cannot work here cannot be ticked.** The tick is a promise
-  // that the composer will offer this model, and the gate will not offer one
-  // whose gateway always refuses (Zen) or that cannot call a tool — so an
-  // enabled checkbox here would be a control that appears to work and changes
-  // nothing. Both are known without asking anybody, which is the whole bar a
-  // rule has to clear to live here; everything else shows up in the timeline.
+  // A model the gate never offers can't be ticked.
   const why = blockedBecause(model);
   const blocked = why !== null;
 
-  // The **row** is the control, not the box inside it. A provider like
-  // OpenRouter is three hundred of these, and a 16px target beside a 13px name
-  // is the wrong thing to have to hit three hundred times. A `<label>` around
-  // it would be the usual trick and is not safe here: shadcn's Checkbox is a
-  // Radix `button` rather than an `input`, so it reaches the control only
-  // through label activation, and a row that toggles twice is worse than one
-  // that toggles from further away.
+  // The whole row is the checkbox. Not a `<label>`: Radix's Checkbox is a
+  // `button`, and label activation would toggle it twice.
   return (
     <div
       role="checkbox"
@@ -940,8 +829,6 @@ function ModelRow({
       />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] text-foreground">{model.label}</div>
-        {/* An id is an id: shown verbatim, never humanized, and never in a
-            monospace face — this app keeps that for code. */}
         <div className="mt-0.5 truncate text-xs text-muted-foreground">{model.id}</div>
         {why && <div className="mt-0.5 text-xs text-muted-foreground">{why}</div>}
       </div>
@@ -949,15 +836,7 @@ function ModelRow({
   );
 }
 
-/**
- * A list with nothing in it, and the way out of it.
- *
- * An empty list here is most of the dialog's height, and the only exit from a
- * provider that turned out to have no models was a 24px caret in the corner of
- * the header — a long way from where the eye is, which is the middle of the
- * empty space. So the action that ends the dead end goes there: *back* when
- * there was never anything to show, *clear* when a query is what emptied it.
- */
+/** An empty list with its way out (back, or clear the query) centred in it. */
 function Empty({ message, children }: { message: string; children: React.ReactNode }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 py-10 text-center">
@@ -973,10 +852,8 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 
 // ── catalogue arithmetic ───────────────────────────────────────────────────
 
-/** Why this row cannot reach the composer, or null. The two free refusals in
- *  one sentence each, so the list and its counts cannot disagree about which
- *  rows are on offer. Zen leads because it is the stronger fact: those models
- *  claim every capability and still refuse everything. */
+/** Why this model is never offered, or null (see `lib/opencodeCatalogue.ts`).
+ *  Zen first: those models claim every capability and still refuse. */
 function blockedBecause(model: HarnessModel): string | null {
   if (isZen(model.id)) {
     return "opencode’s free tier only runs inside opencode itself, so Chat cannot use it.";
@@ -985,21 +862,8 @@ function blockedBecause(model: HarnessModel): string | null {
   return reason === null ? null : `This model ${reason}.`;
 }
 
-/** How many of a provider's models the student has unticked. The catalogue
- *  stores nothing else now, so *offered* is the provider's model count less
- *  this — computed by the caller, which is the only place that knows how many
- *  models opencode lists. Exported for the section's summary line. */
-export function countHidden(c: OpencodeCatalogue | null, providerId: string): number {
-  const models = c?.providers[providerId]?.models ?? {};
-  return Object.values(models).filter((m) => m.hidden === true).length;
-}
-
-/** Set or clear `hidden` on a provider's models.
- *
- * Unlike the version this replaced it **creates** an entry for a model that
- * has none, because an absent entry now means offered: there is nothing else
- * in a row to preserve, and a provider the student has never touched has no
- * entries at all to edit. */
+/** Set or clear `hidden` on a provider's models. An absent entry means
+ *  offered, so showing deletes the entry rather than writing `false`. */
 function withHidden(
   c: OpencodeCatalogue,
   providerId: string,
@@ -1009,9 +873,6 @@ function withHidden(
   const entry = c.providers[providerId] ?? { models: {} };
   const models = { ...entry.models };
   for (const id of modelIds) {
-    // Showing a model *removes* its row rather than writing `hidden: false`:
-    // absent is what `parse` keeps and what `isOffered` reads as offered, so a
-    // catalogue never accumulates entries that say nothing.
     if (hidden) models[id] = { hidden: true };
     else delete models[id];
   }

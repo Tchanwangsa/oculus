@@ -3,12 +3,7 @@ import { ArrowLeft, ArrowRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
-/**
- * The footer of a full-bleed table: page controls on the left, the row total
- * on the right, sitting on a top hairline. It is a footer, not a floating
- * control — it spans the table's full width and stays put while the body
- * scrolls under it.
- */
+/** A full-bleed table's footer: page controls left, row total right. */
 export function TablePagination({
   page,
   pageCount,
@@ -26,8 +21,7 @@ export function TablePagination({
   unit: string;
   className?: string;
 }) {
-  // The box is free text while it is being typed in; it only commits on Enter
-  // or blur, so a half-typed "1" of "12" never jumps the table to page 1.
+  // Commits on Enter or blur, so a half-typed "1" of "12" doesn't jump pages.
   const [draft, setDraft] = useState(String(page));
   useEffect(() => setDraft(String(page)), [page]);
 

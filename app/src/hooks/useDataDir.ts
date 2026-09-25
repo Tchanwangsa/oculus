@@ -1,15 +1,8 @@
 import { useState, useEffect } from "react";
 import { appDataDir } from "@tauri-apps/api/path";
 
-/**
- * Where the library lives, for the handful of places that build an asset URL.
- *
- * Asked for **once per app**, not once per caller: the answer cannot change
- * while the app is running, and a thread of a hundred bubbles — each of which
- * may hold a picture — would otherwise be a hundred IPC calls for the same
- * string. The first caller starts the request; every later one gets it
- * synchronously.
- */
+// The data dir, for building asset URLs. Asked once per app, not per caller:
+// a long chat thread would otherwise make one IPC call per bubble.
 let cached = "";
 let inflight: Promise<string> | null = null;
 

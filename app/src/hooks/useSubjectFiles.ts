@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { getFilesForSubject, type DbFile } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/openFile";
 import { DOCUMENTS_CHANGED_EVENT } from "@/lib/documents";
+import { useWindowEvent } from "@/hooks/useEvents";
 
 export function useSubjectFiles(subjectId: number | null) {
   const [files, setFiles] = useState<DbFile[]>([]);
@@ -26,19 +27,9 @@ export function useSubjectFiles(subjectId: number | null) {
 
   const reload = useCallback(() => setRefresh((r) => r + 1), []);
 
-  // Opening a file stamps last_accessed_at; refetch so its "new" dot clears
-  // and the accessed time updates in place. A document being created, renamed
-  // or deleted is a change to the same table, and every list of a subject's
-  // files — including the full page holding the file that just moved — has to
-  // see it, so it is answered here rather than page by page.
-  useEffect(() => {
-    window.addEventListener(FILE_ACCESSED_EVENT, reload);
-    window.addEventListener(DOCUMENTS_CHANGED_EVENT, reload);
-    return () => {
-      window.removeEventListener(FILE_ACCESSED_EVENT, reload);
-      window.removeEventListener(DOCUMENTS_CHANGED_EVENT, reload);
-    };
-  }, [reload]);
+  // Both events change `files` rows (an open stamps last_accessed_at), so every
+  // list of a subject's files refetches here rather than page by page.
+  useWindowEvent([FILE_ACCESSED_EVENT, DOCUMENTS_CHANGED_EVENT], reload);
 
   const byCategory = useMemo(
     () => ({

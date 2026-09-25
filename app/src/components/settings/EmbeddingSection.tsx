@@ -31,13 +31,8 @@ interface EngineOption {
 }
 
 /**
- * Mirrors `VoyageUsage` in `app/src-tauri/src/embed/commands.rs`.
- *
- * **These are Oculus's numbers, not Voyage's.** Voyage publishes no usage
- * endpoint, so everything here is `voyage-usage.json` — what this app reserved
- * before each request, topped up against what each response said it was
- * billed. The page says so where it shows them, because a figure that looks
- * like an account balance and is really a local tally would be read as one.
+ * Mirrors `VoyageUsage` in `app/src-tauri/src/embed/commands.rs`. Oculus's own
+ * tally (`voyage-usage.json`), not Voyage's — Voyage has no usage endpoint.
  */
 interface VoyageUsage {
   /** `"free"`, `"paid"` or `"unknown"` — see `plan_source` before believing it. */
@@ -109,10 +104,7 @@ interface EmbedSettings {
   usage: VoyageUsage | null;
 }
 
-// ── Numbers, in the units a sentence can carry ───────────────────────────────
-
-/** 5,180,000,000 → "5.2B". Pixels and tokens run to ten digits and a settings
- *  row is not where anyone counts them. */
+/** 5,180,000,000 → "5.2B". */
 function si(value: number): string {
   if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
   if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
@@ -120,9 +112,7 @@ function si(value: number): string {
   return value.toLocaleString();
 }
 
-/** A duration for a sentence, not a stopwatch: this is a prediction about a run
- *  that may take most of a day, and "17h 43m" claims a precision the estimate
- *  does not have. */
+/** A rough duration for a sentence — the estimate has no minute precision. */
 function roughly(seconds: number): string {
   if (seconds < 90) return "under a minute";
   const minutes = seconds / 60;
@@ -135,22 +125,10 @@ function roughly(seconds: number): string {
 /**
  * The embedding backend, the account behind it, and the index it owns.
  *
- * One model is selected and search runs against that one — no fallback
- * between engines, no fusing two spaces at query time. Which is why the
- * control is not a plain `onValueChange`: changing it throws every stored
- * vector away, so the change is announced first (`ReindexConfirmDialog`) and
- * only then handed to Rust, which clears the index and writes the setting in
- * one call.
- *
- * The engine list, the labels and the reason an engine is unavailable all come
- * from Rust, so the page cannot offer something the backend would refuse, or
- * explain a refusal in different words.
- *
- * **The stats are a short list on purpose.** This section used to spell the
- * stale-vector story out in a row *and* a paragraph, on a page where the one
- * thing a student actually has to decide is whether to press Index. What is
- * left answers that: what is in the index, what is not, what the account is,
- * and — in `RunEstimate` — what pressing it will cost in hours and in dollars.
+ * Search runs against one model only, so switching engines discards every
+ * stored vector: it is confirmed first (`ReindexConfirmDialog`), then Rust
+ * clears the index and writes the setting in one call. The engine list and
+ * unavailable reasons come from Rust so the page cannot offer what it refuses.
  */
 export function EmbeddingSection() {
   const [settings, setSettings] = useState<EmbedSettings | null>(null);
@@ -162,30 +140,19 @@ export function EmbeddingSection() {
   const [keyNote, setKeyNote] = useState<{ kind: "error" | "warn"; text: string } | null>(null);
   const [checkingKey, setCheckingKey] = useState(false);
 
-  // How many files a run would actually touch. Not derivable from the counts
-  // above — `pages_stale` counts pages from any model, and a file can be
-  // partly embedded — so it is the same query the run itself walks.
+  // Files a run would touch — the same query the run walks, since the index
+  // counts above can't give it (stale pages, partly-embedded files).
   const [outstanding, setOutstanding] = useState<number | null>(null);
 
-  // Kept apart from `settings` because it is *slow*: Rust opens every
-  // outstanding PDF to measure its pages. The rest of the section draws while
-  // this is still running, and `null` renders as "Measuring…" rather than as
-  // an empty banner.
+  // Separate from `settings` because it is slow (Rust opens every outstanding PDF).
   const [estimate, setEstimate] = useState<EmbedEstimate | null>(null);
   const [estimating, setEstimating] = useState(false);
 
   const run = useIndexStore();
 
-  // **One sweep at a time, and never two at once.** `embed_estimate` opens
-  // every outstanding PDF, and pdfium is a single session process-wide
-  // (`raster.rs`), so a second concurrent call does not run twice as fast — it
-  // queues behind the first for several seconds. React's StrictMode fires the
-  // mount effect twice in dev, which is how this page came to ask for two
-  // library-wide sweeps every time it opened.
-  //
-  // A request that arrives while one is running is *remembered*, not dropped:
-  // changing the spend limit re-measures, and silently keeping the old answer
-  // would leave the banner quoting a cut-off that is no longer the setting.
+  // One sweep at a time: pdfium is a single process-wide session (`raster.rs`),
+  // so concurrent calls just queue. A request during a sweep is remembered and
+  // re-run after, so a changed spend limit is never quoted with a stale cut-off.
   const sweeping = useRef(false);
   const resweep = useRef(false);
   const loadEstimate = useCallback(() => {
@@ -247,10 +214,8 @@ export function EmbeddingSection() {
     };
   }, [loadEstimate]);
 
-  // A finished run moves every number on this page, so re-read them rather
-  // than leaving counts that were true before it started. The estimate
-  // especially: a run is the only thing that teaches the ledger what tier this
-  // account is on, so the hours quoted here are often wrong until one has run.
+  // A finished run moves every number here — including the detected tier the
+  // estimate's hours depend on — so re-read them.
   useEffect(() => {
     if (!run.running && (run.result || run.error)) reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -273,9 +238,7 @@ export function EmbeddingSection() {
     }
   };
 
-  // An empty index has nothing to lose, so the dialog would be ceremony — and
-  // a confirmation raised over nothing is how people learn to click through
-  // the one that matters.
+  // An empty index has nothing to lose, so it skips the confirmation.
   const choose = (engine: string) => {
     if (!settings || engine === settings.engine) return;
     const { pages_embedded, files_embedded, model } = settings.index;
@@ -292,9 +255,7 @@ export function EmbeddingSection() {
     });
   };
 
-  // The guard moves where the run stops, so the estimate is re-measured with
-  // it — that is the only way the banner's "would stop after N pages" can be
-  // true of the setting that is actually in force.
+  // The guard moves where the run stops, so re-measure the estimate.
   const setBudget = async (percent: number) => {
     try {
       setSettings(await invoke<EmbedSettings>("embed_set_budget", { percent }));
@@ -305,8 +266,7 @@ export function EmbeddingSection() {
     }
   };
 
-  // Rust checks the key against Voyage before it reaches the keychain, so a
-  // typo is named here rather than at the next page indexed.
+  // Rust checks the key against Voyage before storing it in the keychain.
   const saveKey = async () => {
     if (!key.trim()) return;
     setCheckingKey(true);
@@ -315,9 +275,7 @@ export function EmbeddingSection() {
       const verdict = await invoke<string>("voyage_set_api_key", { key: key.trim() });
       setKey("");
       setSettings((prev) => (prev ? { ...prev, credentials_ready: true } : prev));
-      // The third pipeline stage and auto-embed both hang off this: a key is
-      // what makes the app willing to queue work at all. Re-asked rather than
-      // assumed, because the *engine* has a say too.
+      // Re-asked rather than assumed: the engine also decides readiness.
       void embedReady().then((ready) => useIndexStore.getState().setReady(ready));
       setKeyNote(
         verdict === "unverified"
@@ -337,7 +295,6 @@ export function EmbeddingSection() {
       await invoke("voyage_delete_api_key");
       setKey("");
       setSettings((prev) => (prev ? { ...prev, credentials_ready: false } : prev));
-      // And off again — nothing queues itself against a backend with no key.
       useIndexStore.getState().setReady(false);
     } catch (cause) {
       console.error("Voyage key removal failed", cause);
@@ -385,13 +342,6 @@ export function EmbeddingSection() {
             </SelectContent>
           </Select>
         </div>
-
-        {/* The unavailable engines used to explain themselves in a paragraph
-            here as well as in the menu. The menu already says "Unavailable" on
-            the row nobody can pick, and Rust still refuses the engine in the
-            same words if a stale UI asks for it — so the paragraph was a
-            sentence about a control that is not in use, on a page whose job is
-            the one that is. `unavailable_reason` is still the source of both. */}
 
         {settings && !settings.credentials_ready && settings.engine === "cloud" ? (
           <p className="text-[11px] leading-relaxed text-warning">
@@ -458,10 +408,8 @@ export function EmbeddingSection() {
           label="Files indexed"
           value={settings ? settings.index.files_embedded.toLocaleString() : "—"}
         />
-        {/* `index.model` is the space this build *writes*, not the space the
-            stored vectors are in — `stats` reads it off the seam's constants so
-            it can answer before a key exists. Labelling it "Vector space" said
-            the library held Voyage vectors while every one of them was Qwen. */}
+        {/* `index.model` is the space this build writes, not necessarily the
+            space the stored vectors are in. */}
         <StatRow
           label="Search space"
           value={
@@ -470,11 +418,8 @@ export function EmbeddingSection() {
               : "—"
           }
         />
-        {/* The one row about what is *missing*, and it replaced two that were
-            about stale vectors. It counts files rather than pages because a
-            file is what the run walks and what a failure is scoped to — and it
-            follows the current space, so vectors from a retired model read as
-            not indexed, which is exactly what they are. */}
+        {/* Files, not pages: a file is what the run walks. Vectors from another
+            model count as not indexed. */}
         <StatRow
           label="Not indexed"
           value={
@@ -495,9 +440,6 @@ export function EmbeddingSection() {
           />
         ) : null}
 
-        {/* The run. Until this existed the index could only be built from a
-            terminal, which meant a library could sit permanently unsearchable
-            with nothing in the app admitting it or offering a fix. */}
         <IndexRunRow
           outstanding={outstanding}
           ready={Boolean(settings?.credentials_ready)}
@@ -527,13 +469,8 @@ export function EmbeddingSection() {
 const VOYAGE_DASHBOARD = "https://dashboard.voyageai.com/";
 
 /**
- * What programme this account is on.
- *
- * Allowed to say it does not know, because Voyage has no endpoint that
- * answers: the per-minute limits are *detected* from 429 bodies during a run
- * (`embed/voyage/ledger.rs`), so an install that has never indexed anything has
- * never had the chance to find out, and "Free" printed over that opening guess
- * would be a claim about somebody's billing that nothing checked.
+ * What plan this account is on. May be "unknown": limits are only detected
+ * from 429 bodies during a run (`embed/voyage/ledger.rs`).
  */
 function PlanRow({ usage }: { usage: VoyageUsage }) {
   const perMinute = `${si(usage.tpm)} tokens/min`;
@@ -557,19 +494,9 @@ function PlanRow({ usage }: { usage: VoyageUsage }) {
 }
 
 /**
- * The free pixel grant as a meter, with the spend guard drawn on it.
- *
- * Three facts in one object, which is why they stopped being three rows and a
- * paragraph: what has been spent, what this run would add, and where indexing
- * stops. The guard is a number you set against a number you cannot see, so
- * showing it as a line across the same track is the whole point — "100%" means
- * nothing until it is the mark the fill is heading for.
- *
- * Every figure is **Oculus's own count**: Voyage publishes no usage endpoint,
- * so this is `voyage-usage.json`, what the client reserved before each request
- * and topped up from what each response said it was billed. That caveat is a
- * tooltip rather than a sentence, because it qualifies the number without ever
- * being the thing you came to read.
+ * The free pixel grant as a meter: what has been spent, what this run would
+ * add, and the spend guard as a mark on the same track. Figures are Oculus's
+ * own count (see `VoyageUsage`).
  */
 function AllowanceMeter({
   usage,
@@ -607,16 +534,12 @@ function AllowanceMeter({
         </p>
       </div>
 
-      {/* Same meter grammar as Settings → Storage: a stacked fill on a track,
-          with the limit as a `destructive` hairline across it. */}
       <div className="relative mt-2 h-2.5 overflow-hidden rounded-full bg-surface">
         <div className="absolute inset-0 flex">
           <div
             className="h-full bg-chart-1"
             style={{ width: `${Math.min(spent, 100)}%`, minWidth: usage.pixels > 0 ? 3 : 0 }}
           />
-          {/* This run, ahead of what is already spent — the reason the guard is
-              worth setting before pressing Index rather than after. */}
           {projected > 0 ? (
             <div className="h-full bg-chart-1/35" style={{ width: `${projected}%`, minWidth: 3 }} />
           ) : null}
@@ -651,8 +574,6 @@ function AllowanceMeter({
                 Stop at {option}%
               </SelectItem>
             ))}
-            {/* Past the grant is a price, not a wall. Somebody who means to pay
-                for it turns the guard off and the app stops having an opinion. */}
             <SelectItem value="0" className="text-xs">
               No limit
             </SelectItem>
@@ -663,8 +584,7 @@ function AllowanceMeter({
   );
 }
 
-/** Fixed per file type, the way Settings → Storage fixes them per entity:
- *  colour follows the kind, never its current rank. */
+/** Colour follows the file kind, never its current rank. */
 const KIND_COLOR: Record<string, string> = {
   pdf: "bg-chart-1",
   docx: "bg-chart-2",
@@ -674,24 +594,10 @@ const KIND_COLOR: Record<string, string> = {
 };
 
 /**
- * What pressing Index will actually cost, in hours and in dollars.
- *
- * Every number is measured rather than phrased: Rust reads each outstanding
- * PDF's page boxes, bills them the way Voyage does (pixels, capped at 2,000,000
- * an image) and packs them with the same batcher the run uses. See
- * `app/src-tauri/src/embed/estimate.rs`.
- *
- * **The headline is the saving, not the total**, and the reason is the one
- * genuinely counter-intuitive fact about this API: the 150B free pixels are
- * granted to *every* account, so a payment method does not make a coursework
- * library cheaper — it is already free — it makes it two hundred times faster.
- * "About 18 hours" is a number to sigh at; "save about 18 hours, at no extra
- * cost" is a number to act on, and it is the same measurement.
- *
- * An earlier draft said all of that in five paragraphs, including a sentence
- * about page orientation and one about the billing cap. They were true and
- * nobody would read them. What is left is a headline, a comparison, a
- * breakdown and a price.
+ * What pressing Index will cost, in time and dollars — measured by Rust
+ * (`app/src-tauri/src/embed/estimate.rs`). The free pixel grant applies to
+ * every account, so a payment method buys speed, not price: when tier 1 is
+ * faster the headline is the time saved.
  */
 function RunEstimate({
   estimate,
@@ -709,8 +615,7 @@ function RunEstimate({
   }
   if (!estimate || estimate.files === 0 || estimate.pages === 0) return null;
 
-  // Only when tier 1 is a real, measured improvement — never over an `assumed`
-  // tier, which would be pitching an upgrade off a guess.
+  // Never pitch an upgrade off an `assumed` tier.
   const upgrade =
     estimate.tier_free &&
     estimate.tier_source !== "assumed" &&
@@ -748,8 +653,6 @@ function RunEstimate({
           </div>
         ) : null}
 
-        {/* The breakdown, in Storage's grammar: one stacked bar, then a row per
-            kind. It replaced a sentence that counted page orientations. */}
         <div className="w-full">
           <div className="flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-surface">
             {kinds.map((bucket) => (
@@ -787,9 +690,6 @@ function RunEstimate({
           {((estimate.pixels / Math.max(1, usage?.free_pixels ?? 150e9)) * 100).toFixed(1)}%)
         </p>
 
-        {/* Only when the guard would actually bite — the meter above already
-            says what it does, and repeating that over a run it would not touch
-            is the kind of line people stop reading the banner over. */}
         {cut != null ? (
           <p className="font-medium">
             Stops after {cut.toLocaleString()} of {estimate.pages.toLocaleString()} pages at
@@ -809,15 +709,9 @@ function RunEstimate({
 }
 
 /**
- * What the run has finished, as a fraction of what it holds — files, plus the
- * part of the current document that is done.
- *
- * The page term is what makes it move. Files alone step once an hour on a
- * 200-page deck at the free programme's ~2.8 pages a minute, and a bar that
- * has not moved in an hour is indistinguishable from a hang. The queue can
- * also *grow* mid-run (a sync finishing a parse appends a file), so this is
- * deliberately a fraction of the total as it stands now rather than a promise
- * about the end.
+ * Files done plus the fraction of the current document, over the queue as it
+ * stands now (it can grow mid-run). The page term keeps a slow run visibly
+ * moving.
  */
 function runPercent(progress: IndexProgress): number {
   if (progress.total <= 0) return 0;
@@ -826,8 +720,7 @@ function runPercent(progress: IndexProgress): number {
   return Math.min(((progress.done + inside) / progress.total) * 100, 100);
 }
 
-/** The same in words. Pages only once the document has reported some — a
- *  denominator of zero would read as a finished file. */
+/** The same in words; pages only once the document has reported some. */
 function runLabel(progress: IndexProgress): string {
   const files = `${progress.done} of ${progress.total}`;
   if (progress.totalPages > 0) {
@@ -837,15 +730,8 @@ function runLabel(progress: IndexProgress): string {
 }
 
 /**
- * Start, watch and stop an index run.
- *
- * It names the file it is on, not just a percentage, because on a Voyage
- * account with no payment method this is ~2.8 pages a minute — a run that can
- * take most of a day, where a bar that has not moved in ten minutes is
- * indistinguishable from a hang and a filename that changed is proof of life.
- *
- * No toast and no bottom bar, per the house rules: the page that owns the
- * index shows the detail, and the sidebar carries it once you navigate away.
+ * Start, watch and stop an index run. Names the current file so a slow run
+ * shows it is alive (see CLAUDE.md: a parse or an embed blocks for minutes).
  */
 function IndexRunRow({
   outstanding,
@@ -879,8 +765,7 @@ function IndexRunRow({
         </div>
         {run.running ? (
           <Button variant="outline" size="xs" disabled={run.stopping} onClick={() => run.stop()}>
-            {/* Stopping lands on a file boundary, so the button says so
-                rather than pretending the click was instant. */}
+            {/* Stopping lands on a file boundary. */}
             {run.stopping ? "Stopping…" : "Stop"}
           </Button>
         ) : (
@@ -894,10 +779,6 @@ function IndexRunRow({
         )}
       </div>
 
-      {/* One bar for the whole run, and the page inside the current document is
-          part of its fraction rather than a second bar: a 200-page deck on the
-          free programme is an hour in which a file-counting bar does not move
-          at all, which is the complaint this exists to answer. */}
       {run.running && run.progress ? (
         <Progress value={runPercent(run.progress)} className="mt-2 h-1" />
       ) : null}
@@ -919,9 +800,7 @@ function IndexRunRow({
         </p>
       ) : null}
 
-      {/* Named, not counted: a run that failed on three files should say which,
-          because the reasons differ per file and one of them may be the whole
-          account's. */}
+      {/* Named, not counted: reasons differ per file. */}
       {run.result?.errors.length ? (
         <ul className="mt-1 space-y-0.5">
           {run.result.errors.slice(0, 5).map((message) => (

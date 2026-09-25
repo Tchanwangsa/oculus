@@ -35,32 +35,12 @@ import {
 } from "@/components/ui/select";
 
 /**
- * One dialog for every way into every opencode provider.
- *
- * It draws nothing it decided for itself. A method arrives from opencode as a
- * **form spec** — a kind, a label, and prompts that are text fields or selects,
- * some of them conditional — so this renders the spec and hands the answers
- * back by key. That is why `openai`'s three ways in, `github-copilot`'s
- * enterprise branch and the two hundred providers that simply take a key all
- * come out of the same component, and why a provider opencode adds next month
- * needs no change here.
- *
- * Three steps, and a provider with one obvious way in skips the first:
- *
- * 1. **Which way in**, when the provider declares more than one.
- * 2. **The form** — the method's prompts, plus the key field an `api` method
- *    always needs on top of them.
- * 3. **The browser**, for an `oauth` method. `auto` means opencode finishes the
- *    flow itself — the redirect lands on a loopback listener inside the app's
- *    own server, or a device code it polls for — so the app opens the URL and
- *    then watches for the credential to appear. `code` means the student pastes
- *    something back, and the field for it is the same generic row as any other.
- *
- * The link opens in the **system browser**: a student is far more likely to be
- * signed in to GitHub or OpenAI there than in this app's in-app one.
- *
- * Progress and failure stay in here. The app has no toasts, and a sign-in that
- * reported itself somewhere else would be a sign-in you had to go looking for.
+ * One dialog for every way into every opencode provider. Each method arrives
+ * from opencode as a form spec (text/select prompts, some conditional), which
+ * this renders generically. Steps: pick a method (skipped when there is one),
+ * fill its form (+ a key for `api`), then for `oauth` open the system browser —
+ * `auto` means opencode finishes the flow itself and the app watches for the
+ * credential; `code` means the user pastes a code back.
  */
 export function OpencodeConnectDialog({
   provider,
@@ -84,8 +64,7 @@ export function OpencodeConnectDialog({
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** Set once the `auto` watch gives up, so the dialog stops claiming to be
-   *  working while nothing is happening. */
+  /** Set once the `auto` watch gives up. */
   const [gaveUp, setGaveUp] = useState(false);
 
   const pick = (method: AuthMethod) => {
@@ -130,27 +109,11 @@ export function OpencodeConnectDialog({
     }
   };
 
-  /**
-   * The `auto` watch.
-   *
-   * opencode writes the credential itself — the redirect lands on its loopback
-   * listener, or it polls a device code — and it announces nothing: there is no
-   * auth event on the SSE stream the bridge is already connected to (checked
-   * against the whole event union, and watched live through one), and
-   * `connected` on a running instance does not change until the instance
-   * re-reads its store. So the only honest signal is a refreshed read on a
-   * timer, and it stops itself rather than polling behind a dialog nobody is
-   * watching any more.
-   *
-   * The refresh behind each read disposes the instance, which was measured not
-   * to disturb a flow in progress: the loopback listener opened before a
-   * dispose is still bound after it, the event stream keeps heart-beating, and
-   * sessions stay readable. It is a slow poll for that reason and not only for
-   * the cost.
-   */
+  // The `auto` watch: opencode emits no auth event on SSE and `connected` only
+  // changes after the instance re-reads its store, so poll a refreshed read
+  // (which disposes the instance — safe mid-flow) until a deadline.
   const watching = auth?.method === "auto" && !gaveUp;
-  // The callback is read through a ref so the timer is not restarted every
-  // time the section above re-renders and hands down a new closure.
+  // Via a ref so a parent re-render doesn't restart the timer.
   const latestDone = useRef(onDone);
   latestDone.current = onDone;
 
@@ -168,8 +131,7 @@ export function OpencodeConnectDialog({
           return;
         }
       } catch {
-        // A read that failed mid-flow is not evidence either way; the next
-        // tick asks again and the deadline is what ends it.
+        // Not evidence either way; the deadline ends it.
       }
       if (!live) return;
       if (Date.now() < until) timer = window.setTimeout(() => void tick(), 3_000);
@@ -254,8 +216,7 @@ export function OpencodeConnectDialog({
               </div>
             ))}
 
-            {/* An `api` method always needs a key on top of its prompts —
-                `openai`'s "Manually enter API Key" declares none at all. */}
+            {/* An `api` method always needs a key, even if it declares no prompt. */}
             {chosen.kind === "api" && (
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs text-muted-foreground" htmlFor="oc-key">

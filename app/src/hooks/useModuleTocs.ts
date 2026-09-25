@@ -1,17 +1,14 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { parseModuleToc, type ModuleToc } from "@/lib/moduleToc";
 import type { DbFile } from "@/lib/db";
+import { readCourseFile } from "@/lib/courseFiles";
 
 export interface LoadedModule extends ModuleToc {
   /** `modules/03-week-1.md` — hrefs inside resolve against this. */
   relPath: string;
 }
 
-/**
- * Loads and parses every module TOC for a subject. `null` while loading.
- * Interim: goes away once modules/module_items get their own tables.
- */
+/** Loads and parses every module TOC for a subject. `null` while loading. */
 export function useModuleTocs(
   moduleFiles: DbFile[],
   filesLoading: boolean,
@@ -26,9 +23,7 @@ export function useModuleTocs(
     let cancelled = false;
     Promise.all(
       moduleFiles.map(async (f) => {
-        const md = await invoke<string>("read_course_file", {
-          relativePath: f.relative_path,
-        }).catch(() => "");
+        const md = await readCourseFile(f.relative_path).catch(() => "");
         return { ...parseModuleToc(md), relPath: f.relative_path };
       }),
     ).then((loaded) => {

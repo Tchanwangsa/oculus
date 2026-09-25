@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { fmtTime } from "@/lib/lectures";
+import { fmtClockSecs } from "@/lib/lectures";
 
 /** Thumbnail width; the height follows the recording's own aspect ratio. */
 const THUMB_W = 168;
 
 interface ScrubPreviewProps {
-  /** Same URL the player streams. `null` before the video is downloaded — the
-   *  time readout still appears, there is just no frame to show. */
+  /** Same URL the player streams; `null` before download (time readout only). */
   src: string | null;
   /** Time under the pointer, seconds. */
   time: number;
@@ -21,19 +20,12 @@ interface ScrubPreviewProps {
 }
 
 /**
- * The frame under the pointer while hovering or dragging the scrub bar, the
- * way YouTube previews a seek before you commit to it.
+ * The frame under the pointer while hovering or dragging the scrub bar: a
+ * second muted `<video>` on the same localhost source, not a sprite sheet.
  *
- * It is a second `<video>` on the same localhost source rather than a
- * pre-rendered sprite sheet: the file is already on disk and the media server
- * serves ranges, so seeking a muted decoder is cheaper than generating and
- * storing a storyboard for every recording at download time.
- *
- * Seeks are gated one at a time. A pointer sweep across the bar fires a move
- * event per frame, and assigning `currentTime` mid-seek makes WebKit drop the
- * earlier target — so a move while a seek is in flight only parks its time in
- * `pendingRef`, and `seeked` starts the next one. The preview lands on the
- * last position the pointer visited instead of a random one along the way.
+ * Seeks run one at a time — assigning `currentTime` mid-seek makes WebKit drop
+ * the earlier target — so a move during a seek parks its time in `pendingRef`
+ * and `seeked` starts the next. The preview lands where the pointer stopped.
  */
 export function ScrubPreview({
   src,
@@ -59,8 +51,7 @@ export function ScrubPreview({
     pendingRef.current = null;
     if (Math.abs(v.currentTime - t) < 0.05) return;
     seekingRef.current = true;
-    // fastSeek lands on the nearest keyframe instead of decoding forward to an
-    // exact frame — for a thumbnail that is the right trade.
+    // fastSeek lands on the nearest keyframe: good enough for a thumbnail.
     if (typeof v.fastSeek === "function") v.fastSeek(t);
     else v.currentTime = t;
   }, []);
@@ -119,7 +110,7 @@ export function ScrubPreview({
         </div>
       )}
       <span className="rounded-full bg-black/75 px-1.5 py-px text-[11px] tabular-nums text-white">
-        {fmtTime(Math.floor(time), forceHours)}
+        {fmtClockSecs(Math.floor(time), forceHours)}
       </span>
     </div>
   );

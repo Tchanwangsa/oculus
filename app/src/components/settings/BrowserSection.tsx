@@ -13,8 +13,7 @@ import {
   type OpenLinksIn,
 } from "@/stores/browserPrefsStore";
 
-/** One label/control line. `StatRow` next door is for read-only numbers; this
- *  is its writable twin, with room for a sentence under the label. */
+/** A label/control line — the writable twin of `StatRow`. */
 function SettingRow({
   label,
   hint,
@@ -38,23 +37,14 @@ function SettingRow({
 }
 
 /**
- * The two things about the in-app browser that are a preference.
- *
- * Neither costs anything to change and neither can fail, so both are plain
- * `onValueChange` with nothing in front of them — the house rule is that a
- * dialog raised over a change that destroys nothing is how people learn to
- * click through the one that matters.
- *
- * The engine is one list shared with the new-tab page's browser door and with
- * ⌘K's "search the web" row, so all three go to the same place
- * (`app/src/lib/browser.ts`).
+ * In-app browser preferences. The search engine list is shared with the
+ * new-tab page and ⌘K's web search (`app/src/lib/browser.ts`).
  */
 export function BrowserSection() {
   const { engine, openLinksIn, loaded, load, setEngine, setOpenLinksIn } =
     useBrowserPrefsStore();
 
-  // Normally loaded once at startup by `useBrowserTabs`; asked again here so
-  // the page is right even if it is the first thing rendered after a reload.
+  // Also loaded by `useBrowserTabs` at startup; re-read in case this renders first.
   useEffect(() => {
     if (!loaded) void load().catch(() => {});
   }, [loaded, load]);

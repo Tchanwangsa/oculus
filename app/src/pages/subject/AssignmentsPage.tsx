@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { ArrowSquareOut, PencilLine, Rocket } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,6 +9,8 @@ import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { humanizeSlug } from "@/lib/format";
 import type { DbFile } from "@/lib/db";
+import { readCourseFile } from "@/lib/courseFiles";
+import { ListCard } from "@/components/ui/PageParts";
 
 interface TaskDoc {
   file: DbFile;
@@ -73,9 +74,7 @@ function useTaskDocs(files: DbFile[], loading: boolean): TaskDoc[] | null {
     let cancelled = false;
     Promise.all(
       files.map(async (file): Promise<TaskDoc> => {
-        const md = await invoke<string>("read_course_file", {
-          relativePath: file.relative_path,
-        }).catch(() => "");
+        const md = await readCourseFile(file.relative_path).catch(() => "");
         return {
           file,
           title: /^# (.+)$/m.exec(md)?.[1] ?? humanizeSlug(file.filename),
@@ -108,9 +107,8 @@ function fmtDue(d: Date): string {
 }
 
 /**
- * Quizzes and assignments, from the documents the scraper writes to
- * `assignments/` and `quizzes/` — due soonest first, rows open in the peek.
- * Libraries synced before those existed fall back to the module-TOC listing,
+ * Quizzes and assignments from `assignments/` and `quizzes/`, due soonest
+ * first. With no such documents yet, falls back to the module-TOC listing,
  * whose rows can only link out to Canvas.
  */
 export default function SubjectAssignmentsPage() {
@@ -167,11 +165,11 @@ export default function SubjectAssignmentsPage() {
               <h2 className="mb-2 px-0.5 text-[13px] font-semibold text-foreground">
                 {GROUP_LABELS[group]}
               </h2>
-              <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">
+              <ListCard>
                 {tasks.map((t) => (
                   <TaskRow key={t.file.id} task={t} muted={group === "closed" || group === "done"} />
                 ))}
-              </div>
+              </ListCard>
             </section>
           );
         })}
@@ -256,7 +254,7 @@ function TocFallback() {
   return (
     <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-5">
-        <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">
+        <ListCard>
           {tasks.map((t, i) => {
             const Icon = t.kind === "quiz" ? Rocket : PencilLine;
             const inner = (
@@ -296,7 +294,7 @@ function TocFallback() {
               </div>
             );
           })}
-        </div>
+        </ListCard>
       </div>
     </div>
   );

@@ -10,15 +10,12 @@ const TABS = [
   { to: "appearance", label: "Appearance" },
 ] as const;
 
-/**
- * Everything under /settings. Same shell as SubjectLayout — page title over an
- * underline tab strip, sharing one centered column with the tab content.
- */
+/** Everything under /settings: SubjectLayout's shell, a title over an
+ *  underline tab strip in the same centered column as the content. */
 export default function SettingsLayout() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="shrink-0 border-b border-border-subtle">
-        {/* Same centered column as the tab content below it. */}
         <div className="mx-auto max-w-5xl px-6">
           <div className="pt-5 pb-3">
             <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-none">
@@ -33,8 +30,7 @@ export default function SettingsLayout() {
                 to={tab.to}
                 className={({ isActive }) =>
                   cn(
-                    // -1px bottom margin so the active underline sits on the
-                    // header's border rather than above it.
+                    // -mb-px puts the active underline on the header's border.
                     "-mb-px border-b-2 px-2 pb-2 pt-1 text-[12px] font-medium transition-colors",
                     isActive
                       ? "border-primary text-foreground"
@@ -49,7 +45,8 @@ export default function SettingsLayout() {
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+      {/* `scroll`, not `auto` + `scrollbar-gutter`, which reserves nothing in WebKit. */}
+      <div className="flex-1 min-h-0 overflow-y-scroll">
         <div className="mx-auto max-w-5xl px-6 py-6">
           <Outlet />
         </div>

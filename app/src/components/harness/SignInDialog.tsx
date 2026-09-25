@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import {
   CaretRight,
   CheckCircle,
@@ -18,6 +17,7 @@ import {
   type Provider,
   type SignInLine,
 } from "@/lib/harness";
+import { useTauriEvent } from "@/hooks/useEvents";
 import { signInAccount, useSignInStatus } from "@/hooks/useSignInStatus";
 import { navigateActive } from "@/lib/tabRouters";
 import { copyText, cn } from "@/lib/utils";
@@ -42,22 +42,9 @@ export interface SignInRun {
 }
 
 /**
- * The run itself, held by whatever **opened** the dialog rather than by the
- * dialog — the shape `useAgentInstall` settled on next door, for the same
- * reason and one more.
- *
- * The same one: a student who closes the dialog mid-flow has not cancelled
- * anything. The browser is still open on the agent's sign-in page, the child
- * is still waiting, and if the stream lived in the dialog, closing it would
- * strand both — and, worse, skip the recheck that turns "signed out" back into
- * an account name. Held a level up, the dialog is a view of this and reopening
- * it resumes the same run.
- *
- * The one more: the dialog is opened from three places — a timeline row, the
- * composer's warning line, Settings → AI — and a run started from one of them
- * has to finish for all three. `onFinished` is `useSignInStatus`'s `recheck`,
- * and it runs however the flow ended, because a failure is a state worth
- * re-reading too.
+ * The sign-in run, held by the dialog's opener (as `useAgentInstall` does), so
+ * closing the dialog mid-flow neither strands the CLI nor skips the recheck.
+ * `onFinished` (`useSignInStatus`'s `recheck`) runs however the flow ended.
  */
 export function useSignIn(onFinished: () => void): {
   run: SignInRun | null;
@@ -68,47 +55,30 @@ export function useSignIn(onFinished: () => void): {
 } {
   const [run, setRun] = useState<SignInRun | null>(null);
 
-  const finished = useRef(onFinished);
-  finished.current = onFinished;
-
-  /** Whose run is live, for the two commands that act on it. A ref rather
-   *  than a read inside `setRun`: a state updater has to stay pure, and under
-   *  StrictMode's double invocation an invoke fired from one would go out
-   *  twice — which for `harness_sign_in_code` means posting the same
-   *  single-use code to the CLI a second time. */
+  /** Whose run is live. A ref, not read inside `setRun`: StrictMode runs
+   *  updaters twice, which would post a single-use code twice. */
   const active = useRef<Provider | null>(null);
 
-  // One listener for the life of the host, not one per run: attached on the
-  // click it would miss the first lines — and on Claude the URL is on one of
-  // them — since `listen` resolves a tick after the child is already talking.
-  useEffect(() => {
-    const un = listen<SignInLine>(SIGNIN_EVENT, (e) => {
-      const ev = e.payload;
-      setRun((prev) => {
-        if (!prev || prev.provider !== ev.provider) return prev;
-        let next = prev;
-        // The URL arrives once, on the first line that carries one, so it is
-        // kept on the run rather than hunted back out of the log.
-        if (ev.url && !next.url) next = { ...next, url: ev.url };
-        if (ev.line !== null) next = { ...next, lines: [...next.lines, ev.line] };
-        if (ev.done) {
-          next = { ...next, result: { ok: ev.ok ?? false, status: ev.status ?? "finished" } };
-        }
-        return next;
-      });
-      // Only the host that started this run rechecks. All three mount their
-      // own `useSignIn` and every listener hears every line, so an unguarded
-      // call here would fire `recheck` once per host — two extra rounds of
-      // CLI spawns for one sign-in.
-      if (ev.done && active.current === ev.provider) {
-        active.current = null;
-        finished.current();
+  // One listener for the host's life: `listen` attached per click resolves too
+  // late and misses the first lines, where Claude prints its URL.
+  useTauriEvent<SignInLine>(SIGNIN_EVENT, (e) => {
+    const ev = e.payload;
+    setRun((prev) => {
+      if (!prev || prev.provider !== ev.provider) return prev;
+      let next = prev;
+      if (ev.url && !next.url) next = { ...next, url: ev.url };
+      if (ev.line !== null) next = { ...next, lines: [...next.lines, ev.line] };
+      if (ev.done) {
+        next = { ...next, result: { ok: ev.ok ?? false, status: ev.status ?? "finished" } };
       }
+      return next;
     });
-    return () => {
-      void un.then((f) => f());
-    };
-  }, []);
+    // Every mounted host hears every line; only the one that started it rechecks.
+    if (ev.done && active.current === ev.provider) {
+      active.current = null;
+      onFinished();
+    }
+  });
 
   const start = useCallback((provider: Provider) => {
     active.current = provider;
@@ -142,37 +112,12 @@ export function useSignIn(onFinished: () => void): {
 }
 
 /**
- * Signing a CLI agent back in, from wherever the app noticed it was signed
- * out: the timeline row a failed turn left behind, the composer's line above
- * the box, or the agent's row in Settings → AI.
- *
- * What it does *not* do is hold a credential. Rust spawns the CLI's own login
- * subcommand and the browser flow writes to that CLI's own store — the same
- * store the student's terminal reads — so Oculus never sees the token. That is
- * the first sentence of the dialog, because it is the question a student has
- * when an app offers to sign them in to something.
- *
- * Three arms, and they are the providers' own flows rather than a shape
- * imposed here (`ProviderInfo.signIn` in `app/src/lib/harness.ts` carries
- * which is which):
- *
- * - **Claude** prints the authorize URL and then blocks reading a pasted
- *   authorization code off stdin, so there is a field and a Submit under the
- *   link. The student authorizes in the browser, copies what the callback page
- *   shows, and pastes it back.
- * - **Codex** starts a loopback server on :1455 and finishes by itself the
- *   moment the browser callback lands, so there is nothing to type and the
- *   dialog only says it is waiting.
- * - **opencode** is not signed in at all here, deliberately. Its credentials
- *   are per *provider*, not per CLI, and the whole surface for them — the
- *   catalogue, the form specs, the OAuth flows — already exists in
- *   Settings → AI (`OpencodeProvidersSection.tsx`). A second path to the same
- *   store would be a second answer to "am I signed in", so this arm is one
- *   sentence and a way there.
- *
- * The URL is shown with Copy even though Rust opens it in the system browser
- * itself: an `open` that silently failed would otherwise be a dead end with a
- * spinner on it. Body font, not monospace — a URL is not code.
+ * Signs a CLI agent in via its own login subcommand, which writes the CLI's own
+ * store — Oculus never sees the token. The flow is the provider's
+ * (`ProviderInfo.signIn` in `app/src/lib/harness.ts`): `code` (Claude: paste the
+ * callback code to stdin), `callback` (Codex: loopback server, nothing to type),
+ * or null (opencode: per-provider credentials live in Settings → AI).
+ * The URL gets a Copy button in case Rust's browser `open` silently failed.
  */
 export function SignInDialog({
   provider,
@@ -198,8 +143,7 @@ export function SignInDialog({
   const [copied, setCopied] = useState(false);
   const [showLog, setShowLog] = useState(false);
 
-  // A run that finished while the dialog was closed still has its lines; a
-  // fresh open of a different provider's dialog must not inherit the field.
+  // A different provider's dialog must not inherit the typed code.
   useEffect(() => setCode(""), [provider]);
 
   const live = !!run && !run.result;
@@ -207,8 +151,6 @@ export function SignInDialog({
 
   const copy = async () => {
     if (!url) return;
-    // The tick is the whole answer: no toasts here, and a Copy that does
-    // nothing visible is indistinguishable from one that failed.
     if (await copyText(url)) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
@@ -279,10 +221,7 @@ export function SignInDialog({
               </div>
             )}
 
-            {/* Claude's flow is only half done when the browser is open: the
-                CLI is sitting on stdin waiting for the code the callback page
-                shows. Offered once the URL is out, because before that there
-                is nothing to have copied. */}
+            {/* The CLI waits on stdin for the code the callback page shows. */}
             {flow === "code" && live && url && (
               <div className="flex items-center gap-2">
                 <Input
@@ -304,8 +243,6 @@ export function SignInDialog({
               </div>
             )}
 
-            {/* Codex finishes itself — the browser comes back to its loopback
-                server on :1455 — so there is nothing to type here. */}
             {flow === "callback" && live && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <CircleNotch size={12} className="animate-spin" />
@@ -350,9 +287,6 @@ export function SignInDialog({
 
         {run?.error && <p className="text-xs text-destructive">{run.error}</p>}
 
-        {/* The CLI's own output. Collapsed by default, like the install
-            dialog's log: it is what to read when the flow went wrong, and
-            noise when it did not. */}
         {!!run?.lines.length && (
           <div>
             <button
@@ -389,10 +323,6 @@ export function SignInDialog({
               <Button variant="outline" size="sm" onClick={onClose}>
                 Close
               </Button>
-              {/* The start button shares the footer row rather than sitting
-                  above it: before a run there is nothing else in the body, and
-                  a lone button on its own line above Close read as two
-                  separate decisions. */}
               {!run?.result && (
                 <Button size="sm" onClick={onStart}>
                   {run ? "Try again" : "Sign in"}

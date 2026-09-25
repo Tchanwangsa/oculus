@@ -10,11 +10,8 @@ const OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "System", icon: Desktop },
 ];
 
-/**
- * The theme switch. `applyTheme` is the only writer of both the `.dark` class
- * and the stored preference, so this holds no state beyond what it renders —
- * a remount reads the same answer back out of localStorage.
- */
+/** The theme switch. `applyTheme` is the only writer of the `.dark` class and
+ *  the stored preference, so this holds no state of its own. */
 export function AppearanceSection() {
   const [theme, setTheme] = useState<Theme>(getStoredTheme);
 

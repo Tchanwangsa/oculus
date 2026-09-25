@@ -6,28 +6,12 @@ import {
 } from "@/lib/db";
 
 /**
- * The app's `<video>` elements, owned here rather than by the player
- * component.
+ * The app's `<video>` elements and progress writes, owned here rather than by
+ * the player so a route change (tab switch, expanding the peek) hands them to
+ * the next host without interrupting playback.
  *
- * A tab switch is a route change, and a route change unmounts the page —
- * which used to take the video element, and the lecture, with it. The elements
- * living out here instead means switching tabs (or expanding the peek into its
- * own tab, which is the same unmount) hands them from one host to the next
- * without interrupting playback: the lecture keeps going in the background and
- * picks up on screen exactly where it is when you come back.
- *
- * These are DOM nodes in the *visible* webview, not a hidden WebView — the
- * suspension problem that keeps scraping in Rust does not apply to them.
- *
- * There is one element **per source**, because an Echo360 capture is two
- * streams of the same hour (`docs/sync.md`) and the player can show both at
- * once. They are two files, so they are two elements and two decoders; what
- * makes them one lecture is the sync below. Exactly one is the **leader**: it
- * carries the audio, it is the clock every readout counts against, and it is
- * what writes progress. The others follow it, muted.
- *
- * Progress is written from here too, for the same reason as the elements:
- * the position has to keep being saved while no player is mounted to save it.
+ * One element per Echo360 source (`docs/sync.md`). Exactly one is the
+ * **leader** — audio, clock, progress writes; the others follow it, muted.
  */
 
 /** Fired after a progress write so a mounted list can refresh its rows. */
@@ -39,44 +23,28 @@ const SAVE_EVERY_MS = 5000;
 /** How often a follower is nudged back onto the leader's clock. */
 const SYNC_EVERY_MS = 1000;
 
-/**
- * Drift a follower is left alone at. A seek is a re-buffer, so correcting a
- * few frames of slip would stutter the picture to fix something nobody can
- * see; a third of a second is past the point where two views of one room stop
- * looking simultaneous.
- */
+/** Drift (seconds) a follower is left alone at — correcting less would
+ *  stutter the picture for no visible gain. */
 const MAX_DRIFT = 0.35;
 
-/**
- * Drift worth a *seek*. Between this and `MAX_DRIFT` the follower is walked
- * back onto the clock with a trim to its playback rate instead.
- *
- * A seek flushes the decoder, and a follower that cannot quite hold real time
- * — which is what coming back to a backgrounded tab leaves you with — earns
- * one every tick. On a slide that is invisible; on the room camera it is a
- * picture that stutters once a second and never settles. Riding the rate
- * closes the same gap without ever dropping a frame.
- */
+/** Drift worth a seek. Between this and `MAX_DRIFT` the follower's rate is
+ *  trimmed instead, since a seek flushes the decoder and stutters. */
 const SEEK_DRIFT = 1.5;
 
-/** How hard a trimmed follower chases the leader: 8% off its rate, so a
- *  half-second gap closes over a few seconds, invisibly. */
+/** Fraction a trimmed follower's rate is nudged by. */
 const RATE_TRIM = 0.08;
 
-/** Ending within this of the finish counts as watched. */
+/** Seconds from the end that count as watched. */
 const COMPLETE_WITHIN = 30;
 
 /** Which player has the elements: the lecture page, or the peek beside a page. */
 export type PlaybackHost = "page" | "panel";
 
-/** The player claiming the elements — the tab it is mounted in, and which of
- *  the two it is. */
 export interface PlaybackOwner {
   tab: number;
   host: PlaybackHost;
 }
 
-/** One frame of a lecture on screen: which stream, from where, in what box. */
 export interface SourcePlan {
   source: SourceNum;
   /** Media-server URL for that source's file. */
@@ -92,55 +60,26 @@ let leaderSource: SourceNum | null = null;
 let parkedHost: HTMLDivElement | null = null;
 let saveTicker: ReturnType<typeof setInterval> | null = null;
 let syncTicker: ReturnType<typeof setInterval> | null = null;
-/** The lecture the elements are loaded with, for the writes below. */
 let current: Lecture | null = null;
 /** Last second written, so a paused element doesn't rewrite the same row. */
 let lastWritten = -1;
-/**
- * The player the elements belong to: the tab it was mounted in, and which of
- * the two players it is. Playback belongs to that tab — switching to another
- * one leaves it alone, while closing it or navigating it elsewhere is leaving
- * the lecture, and asks first.
- *
- * The host is part of the answer because the two are stranded by different
- * moves. A page player *is* the route, so anything that navigates its tab —
- * a breadcrumb, a history arrow — takes the lecture off screen with it. A
- * peek is furniture beside the route and survives a move within the same tab,
- * so only what actually shuts it strands a lecture: the shell's navigation
- * (which closes the panel on its way out) or closing the tab.
- */
+/** The player playback belongs to (see `ownsPlayback`). */
 let ownerTab: number | null = null;
 let ownerHost: PlaybackHost = "page";
 /**
- * Which mounted player the elements belong to, as a counter bumped on every
- * claim.
- *
- * Two players can be mounted over the same lecture at once — the side panel is
- * shell furniture and every tab's pane stays mounted behind the one in front —
- * and handing a lecture from one to the other is a normal move: expanding the
- * panel into its own tab mounts the page's player before the panel's is taken
- * down. Without a token the one leaving parks the elements a beat *after* the
- * new one adopted them, which leaves the picture off screen and playing: black
- * frame, audio carrying on, controls counting up. A player parks only what is
- * still its own.
+ * Bumped on every claim. Two players can be mounted at once and the new one
+ * adopts the elements before the old one unmounts; the token stops the old
+ * one parking them after the handover.
  */
 let claim = 0;
 
-/**
- * Where an element sits while it is not in a player. Off screen rather than
- * `display: none`: a hidden subtree is where a browser feels entitled to stop
- * a media element, and this host exists precisely so it doesn't stop.
- */
+/** Off screen rather than `display: none`, where a browser may stop media. */
 function parked(): HTMLDivElement {
   if (!parkedHost) {
     const host = document.createElement("div");
     host.setAttribute("aria-hidden", "true");
-    // Off screen at a *real size*, not collapsed to a pixel. The elements are
-    // `w-full h-full`, so a 1×1 host is a 1×1 picture, and WebKit sizes the
-    // decode path to the picture it is asked for — park a playing lecture in
-    // one and it comes back to the player as mush until the decoder catches
-    // up. 480×270 costs nothing here (nothing off screen is painted) and
-    // keeps the presentation size roughly what it was.
+    // A real size, not 1×1: WebKit sizes the decode path to the picture, so a
+    // tiny host brings the video back blurry until the decoder catches up.
     host.style.cssText =
       "position:fixed;left:-10000px;top:0;width:480px;height:270px;overflow:hidden;pointer-events:none";
     document.body.appendChild(host);
@@ -149,14 +88,11 @@ function parked(): HTMLDivElement {
   return parkedHost;
 }
 
-/** The element carrying the audio and the clock. */
-export function leaderVideo(): HTMLVideoElement | null {
+function leaderVideo(): HTMLVideoElement | null {
   return leaderSource != null ? (els.get(leaderSource) ?? null) : null;
 }
 
-/** The element for one source, if it has ever been on screen. The player uses
- *  it to read the picture's own dimensions, which is what locks the PIP box's
- *  aspect ratio to the recording rather than to an assumed 16:9. */
+/** The element for one source, if it has ever been on screen. */
 export function videoForSource(source: SourceNum): HTMLVideoElement | null {
   return els.get(source) ?? null;
 }
@@ -176,10 +112,8 @@ function videoFor(source: SourceNum): HTMLVideoElement {
 
 // ── Leader ───────────────────────────────────────────────────────────────────
 
-// Playing writes every few seconds; the moments that end a stretch of playback
-// write immediately, because they are exactly when the position stops changing
-// on its own. Each of them also re-aligns the followers, since a pause or a
-// seek is the one thing they cannot infer from their own clock.
+// Pause/end/seek write immediately and re-align followers, which cannot infer
+// them from their own clock.
 const onLeaderPlay = () => {
   startTickers();
   syncFollowers();
@@ -209,9 +143,7 @@ function setLeader(next: SourceNum | null) {
   const previous = leaderVideo();
   if (previous) {
     for (const [type, fn] of LEADER_EVENTS) previous.removeEventListener(type, fn);
-    // Demoted, not stopped: it may still be on screen as a follower, and a
-    // follower is silent. `syncFollowers` would do this on its next tick, but
-    // a beat of two audio tracks is audible.
+    // Now, not on the next sync tick: two audio tracks for a beat is audible.
     previous.muted = true;
   }
   leaderSource = next;
@@ -222,7 +154,6 @@ function setLeader(next: SourceNum | null) {
 
 function startTickers() {
   saveTicker ??= setInterval(() => void saveLectureProgress(), SAVE_EVERY_MS);
-  // Only worth a timer when something is actually following.
   if (!syncTicker && onScreen.size > 1) {
     syncTicker = setInterval(syncFollowers, SYNC_EVERY_MS);
   }
@@ -237,11 +168,8 @@ function stopTickers() {
 
 // ── Follower sync ────────────────────────────────────────────────────────────
 
-/**
- * Put every follower back where the leader is. Both files are the same
- * recording trimmed the same way (`echo360::TRIM_SECS`), so "in sync" is
- * simply the same `currentTime` — there is no offset to carry.
- */
+/** Both files are trimmed alike (`echo360::TRIM_SECS`), so in sync means the
+ *  same `currentTime` — no offset. */
 function syncFollowers() {
   const lead = leaderVideo();
   if (!lead) return;
@@ -262,17 +190,11 @@ function syncFollowers() {
   }
 }
 
-/**
- * Put one follower back on the leader's clock: a seek only when it is a long
- * way out or the leader is not moving, and otherwise a trim to its rate that
- * closes the gap without a re-buffer.
- */
 function alignFollower(f: HTMLVideoElement, lead: HTMLVideoElement) {
   const rate = lead.playbackRate;
   const behind = lead.currentTime - f.currentTime;
   const off = Math.abs(behind);
 
-  // Paused, there is no rate to ride: land on the frame, exactly.
   if (lead.paused || off > SEEK_DRIFT) {
     if (off > MAX_DRIFT) f.currentTime = lead.currentTime;
     if (f.playbackRate !== rate) f.playbackRate = rate;
@@ -283,7 +205,6 @@ function alignFollower(f: HTMLVideoElement, lead: HTMLVideoElement) {
     if (f.playbackRate !== trimmed) f.playbackRate = trimmed;
     return;
   }
-  // Back together — hand the leader's rate back before it overshoots.
   if (f.playbackRate !== rate) f.playbackRate = rate;
 }
 
@@ -315,24 +236,10 @@ function release(source: SourceNum) {
 // ── The one call the player makes ────────────────────────────────────────────
 
 /**
- * Point the elements at `lecture` and lay them out to match `plan`, whose
- * **first entry is the leader** — the frame whose audio you hear.
- *
- * This is a reconcile, not a series of commands: the player in front re-states
- * what it wants on screen whenever anything changes (a different lecture, a
- * layout, a swapped source, its pane coming forward) and everything else
- * follows. Only a player on screen calls this — `owner` says which tab it is
- * mounted in and which of the two players it is, which is what makes
- * `ownerTab` mean something. Which means the two awkward moments are handled
- * in one place:
- *
- *   * **a source joins** — it loads and `syncFollowers` walks it onto the
- *     leader's clock within a tick;
- *   * **the leader changes** — switching the single view from screen to camera
- *     is a different file with a different decoder, so the position and the
- *     playing/paused state are carried across by hand.
- *
- * Returns the leader element, which is what the player wires its own UI to.
+ * Reconcile the elements to `lecture` laid out as `plan`, whose **first entry
+ * is the leader**. Called by the on-screen player whenever what it wants
+ * changes. A changed leader is a different decoder, so position and play state
+ * are carried across by hand. Returns the leader element.
  */
 export function syncLectureSources(
   lecture: Lecture,
@@ -344,14 +251,11 @@ export function syncLectureSources(
   claim++;
 
   const lectureChanged = current?.id !== lecture.id;
-  // A different lecture takes the elements over, so the old one's position
-  // goes down before the sources change under it.
   if (lectureChanged && current) void saveLectureProgress();
   current = lecture;
   if (lectureChanged) lastWritten = -1;
 
-  // Where playback is *now*, to hand to whatever takes over. Null when there
-  // is nothing to carry — a fresh lecture starts from its saved progress.
+  // Null for a fresh lecture, which starts from its saved progress.
   const outgoing = lectureChanged ? null : leaderVideo();
   const at = outgoing ? outgoing.currentTime : null;
   const wasPlaying = !!outgoing && !outgoing.paused && !outgoing.ended;
@@ -367,10 +271,6 @@ export function syncLectureSources(
     if (fresh) {
       v.dataset.lectureId = lecture.id;
       v.src = p.src;
-      // Either carry the live position over, or restore the saved one. The
-      // player used to do the latter on `loadedmetadata`, which fought this:
-      // a source switch mid-lecture would land on the last *written* second
-      // rather than the one you were watching.
       joinAt(v, at ?? lecture.progress_seconds, wasPlaying && p.source === plan[0].source);
     }
     if (v.parentElement !== p.host) p.host.appendChild(v);
@@ -379,9 +279,7 @@ export function syncLectureSources(
 
   setLeader(plan[0]?.source ?? null);
   const lead = leaderVideo();
-  // A leader that was *already* loaded and is taking over from another source
-  // still has to be moved to where that one was. A fresh one was handed the
-  // position above, on the load it is waiting for.
+  // An already-loaded leader taking over still needs moving; a fresh one got `at` above.
   if (lead && !leaderIsFresh && at != null && Math.abs(lead.currentTime - at) > MAX_DRIFT) {
     joinAt(lead, at, wasPlaying);
   }
@@ -390,43 +288,32 @@ export function syncLectureSources(
   return lead;
 }
 
-/** The claim the last `syncLectureSources` handed out. A player keeps its own
- *  and gives it back when it parks, so a stale one parks nothing. */
+/** The current claim, for a player to pass back to `parkLectureVideos`. */
 export function playbackClaim(): number {
   return claim;
 }
 
-/** Is a lecture actually running right now (as opposed to loaded and paused)? */
 export function isLecturePlaying(): boolean {
   const v = leaderVideo();
   return !!v && !v.paused && !v.ended;
 }
 
-/** The lecture playing now, for a dialog that has to name it. */
 export function playingLecture(): Lecture | null {
   return isLecturePlaying() ? current : null;
 }
 
 /**
- * Whether this tab is the one playback belongs to — and, when `host` is given,
- * whether it is that player holding it.
- *
- * Ask without a host for the moves that strand a lecture whichever player has
- * it: closing the tab, or the shell navigating out of it. Ask with `"page"`
- * for the moves that only strand the page's copy, which is every navigation
- * *within* a tab — a peek rides those out.
+ * Whether playback belongs to this tab (and, given `host`, to that player).
+ * Omit the host for closing the tab; pass `"page"` for navigation within it,
+ * which a peek survives.
  */
 export function ownsPlayback(tabId: number, host?: PlaybackHost): boolean {
   return ownerTab === tabId && (host == null || ownerHost === host);
 }
 
 /**
- * Hand every element back to the off-screen host — still playing, if it was.
- *
- * `forClaim` is a player parking its own: give it the claim the matching
- * `syncLectureSources` returned and the call is a no-op once someone else has
- * taken the elements over. Omitted, it parks whatever is out there, which is
- * what closing a lecture wants.
+ * Park every element off screen, still playing if it was. With `forClaim`, a
+ * no-op once another player has claimed them.
  */
 export function parkLectureVideos(forClaim?: number) {
   if (forClaim != null && forClaim !== claim) return;
@@ -435,10 +322,7 @@ export function parkLectureVideos(forClaim?: number) {
   for (const v of els.values()) parked().appendChild(v);
 }
 
-/**
- * Stop for good — the lecture was closed, not navigated away from. Leaving a
- * lecture's tab is a "keep it going"; closing it is not.
- */
+/** Stop for good: the lecture was closed, not navigated away from. */
 export function stopLecturePlayback() {
   if (!els.size) return;
   for (const v of els.values()) v.pause();
@@ -449,8 +333,7 @@ export function stopLecturePlayback() {
   ownerHost = "page";
 }
 
-/** Write where the loaded lecture is now. Safe to call at any time. */
-export async function saveLectureProgress(): Promise<void> {
+async function saveLectureProgress(): Promise<void> {
   const v = leaderVideo();
   const lecture = current;
   if (!v || !lecture) return;
@@ -459,8 +342,7 @@ export async function saveLectureProgress(): Promise<void> {
   lastWritten = seconds;
   try {
     await updateLectureProgress(lecture.id, seconds);
-    // The file's length beats the catalogue's — Echo360's lesson duration runs
-    // a few seconds short of the recording it serves.
+    // The file's length beats Echo360's catalogue duration, which runs short.
     const total =
       Number.isFinite(v.duration) && v.duration > 0
         ? v.duration
@@ -478,15 +360,12 @@ export async function saveLectureProgress(): Promise<void> {
   }
 }
 
-// A hidden page is a throttled page: WebKit keeps the audio running but stops
-// handing the pictures frames, so the two elements come back apart by however
-// long you were away. That is far past `SEEK_DRIFT`, and one alignment on the
-// way in is the cheap version of the tick discovering it a second later.
+// WebKit stops feeding a hidden page's video frames, so followers come back
+// out of sync; realign on return.
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   if (leaderVideo()) syncFollowers();
 });
 
-// Quitting mid-lecture should still land where you were. Best effort: the
-// write is async and the webview is going away, but it usually beats it.
+// Best effort: the write is async and the webview is going away.
 window.addEventListener("pagehide", () => void saveLectureProgress());

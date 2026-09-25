@@ -39,13 +39,8 @@ const TABS = [
 ] as const;
 
 /**
- * Everything under /subjects/:subjectId. Resolves the id once here so the child
- * pages never load or pick a subject themselves — they read it off the outlet
- * context via `useSubject()`.
- *
- * The header is the subject's identity (large title) plus the tab strip; each
- * tab then owns the entire remaining height, which is what the Files and
- * Lectures three-pane views need.
+ * Everything under /subjects/:subjectId. Resolves the subject once; child pages
+ * read it via `useSubject()`. Each tab owns the full remaining height.
  */
 export default function SubjectLayout() {
   const { subjectId } = useParams();
@@ -144,10 +139,8 @@ export default function SubjectLayout() {
         </div>
       </header>
 
-      {/* Keyed on the subject so switching subjects remounts the tab instead of
-          carrying the previous subject's open file / playing lecture across.
-          Deliberately NOT position:relative — peeks rendered inside must anchor
-          to AppLayout's main so they overlay the whole page. */}
+      {/* Keyed so switching subjects remounts the tab. Not `relative`: peeks
+          inside must anchor to AppLayout's main to cover the whole page. */}
       <div key={subject.id} className="flex-1 min-h-0 overflow-hidden">
         <Outlet context={subject satisfies Subject} />
       </div>
@@ -156,17 +149,9 @@ export default function SubjectLayout() {
 }
 
 /**
- * The tab row, as a strip that scrolls sideways rather than one that gets cut
- * off. Nine tabs already crowd the centred column, and the card is narrower
- * still whenever the side panel is docked open — so the row is a scroller with
- * its bar hidden and a fade over each live edge, which is the affordance the
- * sidebar's own scroller uses.
- *
- * `-mb-px` sits on the scroller rather than on each tab: `overflow-x` makes
- * this a scroll container, and a scroll container clips on *both* axes, so a
- * negative bottom margin inside it would take the active underline with it.
- * On the container itself the margin is outside the clip, and the underline
- * still lands on the header's border instead of above it.
+ * The tab row, scrolling sideways with a hidden bar and edge fades when it
+ * does not fit. `-mb-px` is on the scroller, not each tab: a scroll container
+ * clips both axes, so a margin inside it would clip the active underline.
  */
 function TabStrip({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLElement>(null);
@@ -188,8 +173,6 @@ function TabStrip({ children }: { children: React.ReactNode }) {
     if (!el) return;
     measure();
     el.addEventListener("scroll", measure, { passive: true });
-    // The strip's own width is what changes — the side panel opening, the
-    // sidebar folding — so watch the scroller rather than its contents.
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => {
@@ -198,8 +181,7 @@ function TabStrip({ children }: { children: React.ReactNode }) {
     };
   }, [measure]);
 
-  // A tab reached from anywhere but the strip — ⌘K, a card on the overview,
-  // a restored tab — may be sitting off the end; the strip follows it.
+  // Keep the active tab in view when reached from elsewhere (⌘K, restore).
   useEffect(() => {
     ref.current
       ?.querySelector('[aria-current="page"]')
@@ -207,16 +189,13 @@ function TabStrip({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   return (
-    /* `flex` rather than a plain block: it stops the scroller's -1px bottom
-       margin collapsing out through the wrapper, so the underline's overlap
-       with the header border is the same 1px it always was. */
+    /* `flex` stops the scroller's -1px margin collapsing through the wrapper. */
     <div className="relative flex">
       <nav
         ref={ref}
         className={cn(
           "-mb-px flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden",
-          // The bar would take a 6px gutter out of a 30px-tall row and jog
-          // every tab upward; the fades carry the affordance instead.
+          // A bar would jog every tab up; the fades carry the affordance.
           "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         )}
       >
@@ -228,9 +207,8 @@ function TabStrip({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Fade over one end of the strip, shown only while there is more that way.
- *  A plain gradient over the card's ground, for the reason `ScrollFade` in the
- *  sidebar is one: a backdrop layer here would cost a compositing layer. */
+/** Fade over one end of the strip while there is more that way. A plain
+ *  gradient, not a backdrop layer, to avoid a compositing layer. */
 function StripFade({ side, show }: { side: "left" | "right"; show: boolean }) {
   return (
     <div

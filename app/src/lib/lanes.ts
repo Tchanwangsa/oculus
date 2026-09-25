@@ -1,17 +1,4 @@
-/**
- * Laying overlapping things out side by side, for any view that draws a set of
- * spans in one track.
- *
- * Lifted out of `app/src/components/calendar/WeekView.tsx`, which was the only
- * caller until the project timeline needed the same packing. Generic over the
- * item rather than tied to `CalEvent`, because the two callers measure a span
- * differently — a class has a start and a duration in minutes, a task bar has
- * a left and a width in pixels — and the packing itself never needs to know
- * which. The numbers only have to share a unit with each other.
- */
-
-/** A span on whatever axis the caller is packing: milliseconds, pixels, either.
- *  `end` is exclusive in the sense that touching spans do not overlap. */
+/** A span in any one unit (ms, px). Touching spans do not overlap. */
 export interface LaneSpan {
   start: number;
   end: number;
@@ -21,8 +8,7 @@ export interface Lane<T> {
   item: T;
   /** 0-based lane within the item's cluster. */
   lane: number;
-  /** How many lanes that cluster needed — the denominator the item's width is
-   *  drawn against. */
+  /** Lanes in that cluster — the denominator for the item's width. */
   of: number;
 }
 

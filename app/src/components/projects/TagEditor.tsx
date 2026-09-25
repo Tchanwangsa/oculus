@@ -4,30 +4,20 @@ import { cn } from "@/lib/utils";
 import { allTags, normaliseTags } from "@/lib/projects";
 
 /**
- * A project's own labels, as pills you can add to and take away from.
- *
- * The whole set is written at once — `updateProject` replaces `tags` and has
- * no add/remove patch — so this component hands back the list it is showing
- * rather than a delta, and never needs to know what it is merging into.
- *
- * Nothing here trims, deduplicates or caps: {@link normaliseTags} does all
- * three on the way into the column, and a second copy of those rules is a
- * second place for `Draft` and `draft` to start disagreeing. It *is* called
- * here, on the one thing the column cannot decide for us — whether what has
- * just been typed is a tag this project already carries.
+ * A project's tags as removable pills. Hands back the whole set
+ * (`updateProject` replaces `tags`); {@link normaliseTags} owns trimming,
+ * dedup and caps on the way into the column.
  */
 export function TagEditor({
   tags,
   onChange,
 }: {
   tags: string[];
-  /** The replacement set, in display order. */
   onChange: (tags: string[]) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState("");
-  /** Every tag used anywhere, for the suggestions. `null` until the field has
-   *  been opened at least once — see the effect below. */
+  /** Every tag used anywhere; `null` until the field first opens. */
   const [vocab, setVocab] = useState<string[] | null>(null);
   const ref = useRef<HTMLInputElement>(null);
 
@@ -35,11 +25,7 @@ export function TagEditor({
     if (adding) ref.current?.focus();
   }, [adding]);
 
-  // Read when the field opens, not per keystroke: `allTags` scans every
-  // project's `tags` column, and filtering the result is a substring test over
-  // a handful of strings. Re-read on each opening rather than once for the
-  // life of the component, so a tag invented on another project since the page
-  // was mounted is offered here too.
+  // Re-read on each opening so tags added elsewhere since mount are offered.
   useEffect(() => {
     if (!adding) return;
     let cancelled = false;
@@ -55,8 +41,6 @@ export function TagEditor({
   }, [adding]);
 
   const add = (raw: string) => {
-    // `normaliseTags` for the trim and the whitespace collapse, so "  final
-    // draft " and "final  draft" are the same typed tag here and in the column.
     const [tag] = normaliseTags([raw]);
     setText("");
     if (!tag) return;
@@ -100,14 +84,11 @@ export function TagEditor({
             placeholder="Tag"
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              // Enter adds and leaves the field open for the next one, the way
-              // `InlineAdd` does — tags arrive in twos and threes.
+              // Enter and comma both add and keep the field open.
               if (e.key === "Enter") {
                 e.preventDefault();
                 add(text);
               }
-              // A comma is what people type *between* tags, so it means the
-              // same thing as Enter rather than ending up inside a label.
               if (e.key === ",") {
                 e.preventDefault();
                 add(text);
@@ -117,10 +98,8 @@ export function TagEditor({
                 setAdding(false);
               }
             }}
-            // Blur closes without committing, which is where this parts company
-            // with `InlineAdd`: the suggestions below are clicked, and a blur
-            // that committed the half-typed text would add both it and the
-            // suggestion that was clicked.
+            // Blur must not commit: a clicked suggestion blurs the input first,
+            // and would add the half-typed text too.
             onBlur={() => {
               setText("");
               setAdding(false);
@@ -149,9 +128,8 @@ export function TagEditor({
             <button
               key={tag}
               type="button"
-              // The input's blur fires before a click lands, and closing the
-              // field unmounts this row mid-gesture — so the press is taken on
-              // mousedown and the focus is never given up in the first place.
+              // On mousedown with preventDefault: the input's blur would
+              // unmount this row before a click landed.
               onMouseDown={(e) => {
                 e.preventDefault();
                 add(tag);
@@ -167,6 +145,4 @@ export function TagEditor({
   );
 }
 
-/** Six. The suggestions sit inside a property row, and a list long enough to
- *  need scrolling is a list you would have been faster typing. */
 const MAX_SUGGESTIONS = 6;

@@ -11,13 +11,8 @@ import {
 import type { DlProgress } from "@/lib/lectures";
 
 /**
- * Lecture download state, global on purpose: a download keeps running in Rust
- * after the player peek closes, so the "is this downloading?" answer cannot
- * live in any one component. Rows and players all read from here.
- *
- * Keyed by media id *and* source: a lecture's screen and camera streams are
- * separate downloads that can run at the same time, and a single key would
- * have the second one overwriting the first one's bar.
+ * Global because a download outlives the player that started it. Keyed by
+ * media id *and* source: the two streams download independently.
  */
 export const dlKey = (id: string, source: SourceNum = 1) => `${id}:${source}`;
 
@@ -103,11 +98,8 @@ export function isDownloading(
 }
 
 /**
- * Ask Rust to stop an in-flight download. The flag is checked between 64 KB
- * chunks, so the bar keeps ticking for a moment; `downloadLecture` then throws
- * `cancelled`, which its caller swallows rather than reporting as a failure.
- *
- * Returns false when nothing was running — the download beat the click.
+ * Ask Rust to stop an in-flight download; `downloadLecture` then throws
+ * `cancelled` (see `wasCancelled`). False when nothing was running.
  */
 export async function cancelLectureDownload(
   id: string,
@@ -122,9 +114,8 @@ export function wasCancelled(e: unknown): boolean {
 }
 
 /**
- * Delete a lecture's downloaded video and forget its path. Both streams by
- * default; the transcript, chapters and recap notes are deliberately kept.
- * Resolves to the bytes freed.
+ * Delete a lecture's downloaded video (both streams when `source` is null) and
+ * forget its path; the transcript and chapters are kept. Resolves to bytes freed.
  */
 export async function deleteLectureVideo(
   id: string,

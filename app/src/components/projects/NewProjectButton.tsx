@@ -18,25 +18,16 @@ import { displayCode, displayName } from "@/lib/format";
 import type { Subject } from "@/lib/db";
 
 /**
- * Start a project in any group, from one control.
- *
- * The index only draws a group once it has something in it — that is what
- * keeps a term's worth of empty subject headings off the page — so the inline
- * composer on a group can only ever add to a subject that already has
- * projects. This is the other door: the group is part of what you are filling
- * in rather than something you have to find a heading for first, which is what
- * makes a subject's *first* project reachable at all.
- *
- * The picker is a plain list rather than a `Select`: a select inside a popover
- * is a portal inside a portal, and the rows here want a subject's icon and its
- * full name beside the code anyway.
+ * Start a project in any group — the only way to a subject's first project,
+ * since the index draws a group only once it has one. A plain list, not a
+ * `Select` (a portal inside the popover).
  */
 export function NewProjectButton({
   subjects,
   onCreate,
 }: {
   subjects: Subject[];
-  /** `null` is the Personal group — the same contract `ProjectGroups` has. */
+  /** `null` is the Personal group. */
   onCreate: (subjectId: number | null, name: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -44,12 +35,7 @@ export function NewProjectButton({
   const [subjectId, setSubjectId] = useState<number | null>(null);
   const [pastOpen, setPastOpen] = useState(false);
 
-  // A project is nearly always for something you are enrolled in now, so the
-  // list is Personal and this term's subjects — and past terms, kept only so
-  // an old one stays reachable, fold away behind their own heading rather than
-  // padding the list you actually pick from. The chat scope picker goes
-  // further and drops them entirely; here they stay reachable, because a
-  // project *can* outlive the term it was set in.
+  // Personal and this term's subjects; past terms fold away but stay reachable.
   const { listed, past } = useMemo(() => {
     const row = (s: Subject) => ({
       id: s.id as number | null,
@@ -71,9 +57,7 @@ export function NewProjectButton({
     };
   }, [subjects]);
 
-  // A selection inside the fold can never be hidden by it — otherwise creating
-  // a project for a past subject and opening the picker again shows Personal
-  // unticked and no tick anywhere.
+  // The fold never hides the current selection.
   const pastSelected = past.some((g) => g.id === subjectId);
 
   const commit = () => {
@@ -89,8 +73,7 @@ export function NewProjectButton({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        // A half-typed name is not worth keeping; the group is, so a second
-        // project for the same subject is one field away.
+        // Keep the group across openings, not the half-typed name.
         if (!next) setName("");
       }}
     >
@@ -126,11 +109,6 @@ export function NewProjectButton({
             />
           ))}
 
-          {/* The Sync page's picker says "Past subjects (n)" behind the same
-              caret, so this reads as the same idea rather than a second one.
-              It does not repeat that picker's per-term headings: there you are
-              auditing several terms at once, here you are choosing one
-              destination out of a short list in a narrow popover. */}
           {past.length > 0 && (
             <Collapsible
               open={pastOpen || pastSelected}
@@ -174,8 +152,6 @@ export function NewProjectButton({
   );
 }
 
-/** One destination: the Personal board, or a subject. Extracted only so the
- *  open list and the folded one cannot drift apart. */
 function GroupRow({
   group,
   selected,

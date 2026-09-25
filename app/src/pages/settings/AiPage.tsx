@@ -30,43 +30,19 @@ import {
 import { Section } from "./section";
 
 /**
- * The CLI agents behind Chat: where each binary was found and which version,
- * or why it was not.
+ * The CLI agents behind Chat: where each binary is, its version, and whether
+ * it is signed in. Health (`useBridgeHealth`) and sign-in (`useSignInStatus`)
+ * are separate shared reads; *Recheck* is the only caller that drops Rust's
+ * cached answers for both.
  *
- * This is no longer the only reader — every model picker asks the same
- * question now, and a provider with no binary reads as *not installed* there
- * rather than offering a catalogue nothing can run — so the answer comes from
- * the shared `useBridgeHealth`. This page keeps the one thing that is its
- * alone: *Recheck* is the only caller that passes `recheck`, which is what
- * drops Rust's cached lookups and pays for a fresh probe after an install.
- *
- * It is also the only place that can *do* something about a missing one. A
- * row with no path carries *Install*, which opens the commands this machine
- * can run and runs the one that is picked
- * (`app/src/components/settings/InstallAgentDialog.tsx`). The run is held
- * here rather than in that dialog so closing it mid-install strands neither
- * the output nor the recheck the finish fires — and `recheck` is exactly the
- * hand-off, since a CLI installed a second ago stays missing until Rust's
- * cached failure is dropped.
- *
- * A row whose CLI *is* here answers the second question too — whether it is
- * signed in, and as whom. Being installed and being usable are different
- * facts, and until this stage the second one only surfaced as a red row in the
- * timeline after a turn had already failed. Sign-in status is its own shared
- * read (`app/src/hooks/useSignInStatus.ts`) rather than a field on health,
- * because Rust answers it by spawning the CLI and asking, where health is a
- * cached lookup — so *Recheck* drops both caches and asks both questions.
- *
- * opencode's row says nothing here, and that is the contract rather than an
- * omission: its credentials are per provider, so `harness_sign_in_status`
- * answers `signedIn: null` and the providers strip below is the answer.
+ * A missing CLI offers *Install* (`InstallAgentDialog`). The run is held here,
+ * not in the dialog, so closing it mid-install keeps the output and the
+ * recheck its finish fires. opencode's sign-in is per provider, so its row
+ * shows none (`signedIn: null`); the providers section below is the answer.
  */
 function CliAgentsSection() {
   const { health, recheck, checking } = useBridgeHealth();
   const { statuses, recheck: recheckSignIn, checking: checkingSignIn } = useSignInStatus();
-  /** One button, both questions — a row that said "installed" and went on
-   *  saying "signed out" a minute after signing in would be the row that
-   *  lies. */
   const recheckAll = useCallback(() => {
     recheck();
     recheckSignIn();
@@ -74,8 +50,7 @@ function CliAgentsSection() {
 
   const install = useAgentInstall(recheck);
   const signIn = useSignIn(recheckSignIn);
-  /** Which row's dialog is open. Separate from the run above: the run
-   *  outlives the dialog, and the dialog can be opened on a row with no run. */
+  /** Which row's dialog is open; the run outlives the dialog. */
   const [openFor, setOpenFor] = useState<{ provider: Provider; label: string } | null>(null);
   const [signInFor, setSignInFor] = useState<Provider | null>(null);
 
@@ -86,9 +61,7 @@ function CliAgentsSection() {
     >
       <div className="divide-y divide-border-subtle">
         {(health ?? []).map((h) => {
-          // `unknown` — the probe has not landed, or this is opencode — draws
-          // nothing at all, the same three-state discipline the model picker
-          // uses for health.
+          // `unknown` (not probed yet, or opencode) draws nothing.
           const state = h.path ? signInState(statuses, h.provider) : "unknown";
           const account = signInAccount(statuses, h.provider);
           return (
@@ -170,9 +143,8 @@ function CliAgentsSection() {
           run={install.run?.provider === openFor.provider ? install.run : null}
           onStart={(route) => install.start(openFor.provider, route)}
           onClose={() => {
-            // A finished run is cleared with the dialog, so reopening the row
-            // offers the commands again rather than a log of what already
-            // happened. One still running is kept, and reopening resumes it.
+            // A finished run is cleared with the dialog; a running one resumes
+            // on reopen.
             if (install.run?.result) install.clear();
             setOpenFor(null);
           }}
@@ -186,8 +158,7 @@ function CliAgentsSection() {
           onCode={(code) => signIn.submitCode(code)}
           onCancel={() => signIn.cancel()}
           onClose={() => {
-            // Same rule as the install above: a finished run is cleared with
-            // the dialog, one still in flight is kept and resumes on reopen.
+            // Same rule as the install above.
             if (signIn.run?.result) signIn.clear();
             setSignInFor(null);
           }}
@@ -198,19 +169,13 @@ function CliAgentsSection() {
 }
 
 /**
- * Which agent runs each model-backed job that is not a chat turn, on what
- * model, at what reasoning level.
- *
- * The same `ModelPicker` the composer uses, for the same reason: what the row
- * shows is what the CLI is told, and no "default" hides behind it. The jobs
- * themselves run in Rust and read this straight back out of `settings`
- * (`harness::jobs`), so a change here is live on the next run — there is no
- * second copy of the selection anywhere.
+ * Agent, model and reasoning level for each non-chat job, in the composer's
+ * `ModelPicker` (no hidden "default"). Rust reads this straight from
+ * `settings` (`harness::jobs`), so a change is live on the next run.
  */
 function JobModelsSection() {
   const [jobs, setJobs] = useState<JobModels | null>(null);
-  /** What is already in the database, so the save effect below can tell an
-   *  edit from the load that started it. */
+  /** What is in the database, so the save effect can tell an edit from the load. */
   const saved = useRef<string | null>(null);
 
   useEffect(() => {
@@ -222,21 +187,16 @@ function JobModelsSection() {
       });
   }, []);
 
-  // An agent whose catalogue comes from its CLI is asked only when a job is
-  // actually set to it — a row has to show its model's name rather than its
-  // id — and not merely because this page was opened. Switching a row is what
-  // asks, since `needed` changes with it.
+  // Only the agents a job is set to are asked for their catalogue.
   const needed = useMemo(() => (jobs ? JOBS.map((j) => jobs[j.id].provider) : []), [jobs]);
   const { providers, modelsFor } = useProviderModels(needed);
 
   const edit = (id: JobId, patch: Partial<JobSelection>) =>
     setJobs((prev) => (prev ? { ...prev, [id]: { ...prev[id], ...patch } } : prev));
 
-  /** Settings save as you go, like the rest of this page. One writer rather
-   *  than one per control: a model change and the level change that follows it
-   *  are two edits a beat apart, and two overlapping writes of the whole
-   *  object can land in either order. A row with no model yet — Codex picked,
-   *  its list still arriving — is a moment, not a configuration, so it waits. */
+  /** Save as you go, through one writer so a model change and the level
+   *  change right after it can't land out of order. A row with no model yet
+   *  (its list still arriving) waits. */
   useEffect(() => {
     if (!jobs || saved.current === null) return;
     if (JOBS.some((j) => !jobs[j.id].model)) return;
@@ -246,9 +206,7 @@ function JobModelsSection() {
     void setJobModels(jobs);
   }, [jobs]);
 
-  /** A row sits without a model only while a provider's list is still coming
-   *  — every catalogue is fetched from its CLI — so it is filled the moment
-   *  one exists, exactly as the composer fills an empty selection. */
+  /** Fill a model-less row once its provider's list arrives. */
   useEffect(() => {
     if (!jobs) return;
     for (const job of JOBS) {
@@ -259,9 +217,7 @@ function JobModelsSection() {
     }
   }, [jobs, modelsFor]);
 
-  /** Switching agent takes the model and the level with it: a Claude model id
-   *  means nothing to Codex. A list already fetched makes the new selection
-   *  immediate; one still coming arrives with its list, above. */
+  /** Switching agent resets model and level: a Claude id means nothing to Codex. */
   const switchProvider = (id: JobId, provider: Provider) => {
     const pick = defaultSelection(modelsFor(provider));
     edit(id, { provider, model: pick.model ?? "", reasoningEffort: pick.reasoning });
@@ -302,8 +258,7 @@ function JobModelsSection() {
   );
 }
 
-/** An approval in the words the chat's allow button used, not `agy`'s
- *  syntax. */
+/** An approval in the chat allow button's words, not `agy`'s syntax. */
 function ruleWords(rule: string): string {
   const r = splitRule(rule);
   if (!r) return rule;
@@ -320,15 +275,10 @@ function ruleWords(rule: string): string {
 }
 
 /**
- * What the student has let Antigravity do, from the allow button on a
- * refusal in chat (`app/src/components/harness/PermissionCard.tsx`), and the
- * way to take one back.
- *
- * Absent until there is something to list: most students never run
- * Antigravity, and a section that only ever said "none" would be furniture.
- * Once it has shown, it stays for the visit, so removing the last approval
- * does not pull the page up under the pointer. Loading it is a settings-row
- * read in Rust; nothing is spawned.
+ * What the student has let Antigravity do (from `PermissionCard`'s allow
+ * button), with a way to revoke. Hidden until there is something to list;
+ * once shown it stays for the visit so removing the last one doesn't jump the
+ * page.
  */
 function AntigravityApprovalsSection() {
   const [rules, setRules] = useState<string[] | null>(null);

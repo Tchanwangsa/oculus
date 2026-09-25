@@ -15,11 +15,8 @@ const PAST_KEY = "oculus-subjects-nav-past-shown";
 /** How many more past subjects each "More" click reveals. */
 const PAST_STEP = 5;
 
-/* How far the past list is unfolded lives outside the component so that
-   remounting the sidebar — collapsing it with ⌘\ — doesn't lose it. Writes go
-   through here synchronously rather than from an effect, which could be torn
-   down before it ever ran. Collapsing the Subjects group itself is different:
-   that folds the past subjects away deliberately and resets this to 0. */
+/* Outside the component so collapsing the sidebar (a remount) keeps it; written
+   synchronously, not from an effect that could be torn down first. */
 let pastShownCache = ((): number => {
   const n = Number(localStorage.getItem(PAST_KEY));
   return Number.isFinite(n) && n > 0 ? n : 0;
@@ -30,20 +27,15 @@ function storePastShown(n: number) {
   localStorage.setItem(PAST_KEY, String(n));
 }
 
-/**
- * The Subjects group: a header row that navigates to the subject index, plus a
- * caret that expands the list of subjects in place.
- */
+/** Header navigates to the subject index; the caret expands the list in place. */
 export default function SubjectsNavGroup() {
   const { current, past, loading } = useSubjects();
   const [open, setOpen] = useState(
     () => localStorage.getItem(OPEN_KEY) !== "false",
   );
-  // Past subjects unfold a page at a time rather than all at once.
   const [pastShown, setPastShown] = useState(() => pastShownCache);
 
-  // Active only on the subject index itself — inside an individual subject the
-  // subject's own row carries the highlight instead.
+  // Only on the index itself; inside a subject its own row lights instead.
   const inSection = useActivePath().split("?")[0] === "/subjects";
 
   useEffect(() => {
@@ -52,9 +44,7 @@ export default function SubjectsNavGroup() {
 
   return (
     <div>
-      {/* Notion-style section header: a small muted label, no icon. The label
-          navigates to the subject index; the caret (revealed on hover, where
-          the count sits) collapses the list. */}
+      {/* Label navigates; the hover caret (over the count) collapses. */}
       <div className="group/row flex items-center justify-between pl-2 pr-1 mb-0.5">
         <button
           type="button"
@@ -74,8 +64,7 @@ export default function SubjectsNavGroup() {
           onClick={() => {
             const next = !open;
             setOpen(next);
-            // Collapsing the group is a fresh start: the past subjects fold
-            // back away, so re-expanding comes back to just the current ones.
+            // Collapsing folds the past subjects away again.
             if (!next) {
               storePastShown(0);
               setPastShown(0);
@@ -121,9 +110,7 @@ export default function SubjectsNavGroup() {
               {past.slice(0, pastShown).map((s) => (
                 <SubjectNavRow key={s.id} subject={s} dimmed />
               ))}
-              {/* Notion-style "More" row: sits under the last subject and reads
-                  as one of them, so past subjects unfold in place — a few at a
-                  time, collapsing back once they are all out. */}
+              {/* "More" reads as a row, unfolding past subjects a few at a time. */}
               <button
                 type="button"
                 onClick={() => {
@@ -159,10 +146,7 @@ function SubjectNavRow({
   const bySubject = useNewFilesStore((s) => s.bySubject);
   const newCount = newCountForSubject(bySubject, subject.id);
   const to = `/subjects/${subject.id}`;
-  // An exact match, which is `NavLink`'s `end`: the subject itself, not
-  // everything under it. Without it a lecture or a file open in this subject —
-  // a page of its own, with its own tab — lit the subject row as though you
-  // were sitting in the subject.
+  // Exact match (`NavLink`'s `end`), so a lecture or file tab doesn't light it.
   const isActive = useActivePath().split("?")[0] === to;
 
   return (

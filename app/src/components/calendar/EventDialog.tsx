@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { DateTimeField } from "@/components/projects/DateTimeField";
 import { createLocalEvent, getSubjects, updateLocalEvent } from "@/lib/db";
-import { displayCode } from "@/lib/format";
+import { displayCode, sameDay } from "@/lib/format";
 import {
   CALENDAR_UPDATED_EVENT,
   NO_SUBJECT,
@@ -30,11 +30,8 @@ import {
 import { useEventEditor } from "@/stores/eventEditorStore";
 
 /**
- * The three layers a row the user writes can join, in the order they are
- * offered. A note is first because it is what most new rows are: a reminder
- * with no Canvas counterpart at all. `class` is the only one with a span —
- * a note and a due date are instants, which is why the end field appears and
- * disappears with this control rather than sitting there greyed.
+ * Layers a user-written row can join. Only `class` has a span, so the end
+ * field appears with it rather than sitting greyed.
  */
 const KINDS: { id: string; label: string; hint: string }[] = [
   { id: "note", label: "Note", hint: "A reminder pinned to a time." },
@@ -42,40 +39,25 @@ const KINDS: { id: string; label: string; hint: string }[] = [
   { id: "due", label: "Due", hint: "A cutoff, drawn like a Canvas deadline." },
 ];
 
-/** What the subject Select calls "no subject". Radix needs a non-empty string
- *  value, and `null` is not one. */
+/** "No subject" in the Select — Radix needs a non-empty string value. */
 const PERSONAL = "personal";
 
 const HOUR_MS = 60 * 60 * 1000;
 
-/**
- * When a new event starts.
- *
- * On today, the next whole hour — you are almost always adding something ahead
- * of now, and 9am on a day that is half over is a date you would have to fix.
- * On any other day, 9am: the start of the teaching day, and the same default
- * `DateTimeField` uses for a start.
- */
+/** A new event's start: the next whole hour on today, else 9am. */
 function defaultStart(day: Date | null): Date {
   const now = new Date();
   const base = day ?? now;
   const out = new Date(base);
-  const sameDay =
-    base.getFullYear() === now.getFullYear() &&
-    base.getMonth() === now.getMonth() &&
-    base.getDate() === now.getDate();
-  if (sameDay) out.setHours(now.getHours() + 1, 0, 0, 0);
+  if (sameDay(base, now)) out.setHours(now.getHours() + 1, 0, 0, 0);
   else out.setHours(9, 0, 0, 0);
   return out;
 }
 
 /**
- * Write a row into `local_events` — the one calendar layer Oculus owns.
- *
- * It is a dialog rather than an inline row because an event is six fields, two
- * of which are dates; and it is mounted in `AppLayout` because the Edit that
- * opens it lives on `EventPopover`, which is rendered by all three calendar
- * views and by Home's Today list. See `app/src/stores/eventEditorStore.ts`.
+ * Create/edit a row in `local_events`, the one calendar layer Oculus owns.
+ * Mounted in `AppLayout` because its Edit trigger (`EventPopover`) appears in
+ * every calendar view and on Home — see `app/src/stores/eventEditorStore.ts`.
  */
 export function EventDialog() {
   const open = useEventEditor((s) => s.open);
@@ -94,11 +76,8 @@ export function EventDialog() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Seeded when the dialog opens, not on every render: the store hands over a
-  // `CalEvent` to edit or a day to start on, and everything typed after that
-  // belongs to the form. The subject list is read here too rather than on
-  // mount — the dialog is mounted in `AppLayout` for the whole session, and a
-  // query at startup for a form nobody has opened is a query for nothing.
+  // Seeded on open, not every render, so typing belongs to the form. Subjects
+  // load here too — the dialog is mounted all session.
   useEffect(() => {
     if (!open) return;
     void getSubjects()
@@ -130,12 +109,10 @@ export function EventDialog() {
     }
   }, [open, editing, day]);
 
-  // Only a class occupies time; a note and a due date are instants, and an
-  // all-day row of any kind has no clock to end on either.
+  // Only a class occupies time; instants and all-day rows have no end.
   const hasEnd = kind === "class" && !allDay;
 
-  /** Switching to Class with no end yet gets an hour, which is what a class
-   *  almost always is — rather than an empty field the user has to discover. */
+  /** Switching to Class with no end yet defaults to an hour. */
   const pickKind = (next: string) => {
     setKind(next);
     if (next === "class" && !endAt && startAt) {
@@ -245,8 +222,7 @@ export function EventDialog() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={PERSONAL}>{NO_SUBJECT_LABEL}</SelectItem>
-                {/* Current subjects first, which is the order `getSubjects`
-                    already returns. */}
+                {/* Already current-first from `getSubjects`. */}
                 {subjects.map((o) => (
                   <SelectItem key={o.id} value={String(o.id)}>
                     {o.label}
@@ -301,9 +277,7 @@ export function EventDialog() {
   );
 }
 
-/** One labelled row of the form. A plain `<span>` rather than `Label`: the
- *  controls here are a toggle group, a Radix select and two popover buttons,
- *  none of which a `for=` would reach. */
+/** One labelled row. A `<span>`, not `Label`: none of these controls take `for=`. */
 function Field({
   label,
   align = "center",
