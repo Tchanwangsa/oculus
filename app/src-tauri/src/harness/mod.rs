@@ -1,31 +1,21 @@
-//! CLI agents as the app's chat: Claude Code and Codex, driven as
-//! subprocesses the user has already signed in to.
+//! CLI agents as the app's chat: Claude Code, Codex, opencode and
+//! Antigravity (`agy`), driven as subprocesses the user has signed in to.
 //!
-//! This is the bb shape (get-bb/bb) with its plugin system taken out: one
-//! bridge per provider that owns a process and folds its dialect into one
-//! event stream ([`event::HarnessEvent`]), a manager that persists that
-//! stream and forwards it to the webview, and a timeline that only ever
-//! sees the normalized events. No API keys are involved — the CLIs carry
-//! their own subscriptions, which is the whole reason for driving them
-//! rather than the APIs (`docs/harness.md`).
+//! One bridge per provider folds its dialect into one event stream
+//! ([`event::HarnessEvent`]); the [`Harness`] owns the live sessions, and
+//! [`app`] persists the stream and forwards it to the webview.
 //!
-//! Every thread runs from the library's `agents/` folder, not the library
-//! root. That one choice is the containment model: Claude's `acceptEdits`
-//! only auto-approves edits inside the cwd and, with prompts routed to
-//! `none`, refuses the rest; Codex's `workspace-write` sandbox makes the
-//! cwd its only writable root at the OS level. Both were measured refusing
-//! a write to `../courses/` and accepting one to `memories/`. The rest of
-//! the library is readable through `..`, and the appended instructions
-//! (`templates/HARNESS.template.md`) say where everything is.
+//! Every thread runs from the library's `agents/` folder — that is the
+//! containment model; see `docs/harness.md` for what each bridge adds.
 //!
-//! Every raw line a provider emits is also appended to
-//! `agents/threads/<id>.ndjson`. It costs nothing, it is how a translation
-//! bug gets diagnosed without re-running an agent, and the recordings under
-//! `fixtures/harness/` that the bridge tests replay came from exactly this.
+//! Every raw line a provider emits is appended to
+//! `agents/threads/<id>.ndjson`; the replay fixtures under
+//! `fixtures/harness/` came from there.
 
 pub mod antigravity;
 pub mod antigravity_rules;
 pub mod attach;
+mod child;
 pub mod claude;
 pub mod codex;
 pub mod discover;
@@ -33,6 +23,7 @@ pub mod event;
 pub mod install;
 pub mod jobs;
 pub mod opencode;
+mod protected;
 pub mod signin;
 pub mod store;
 
@@ -44,6 +35,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use antigravity::{AntigravitySession, AntigravitySpawn};
+use child::ThreadSpawn;
 use claude::{ClaudeSession, ClaudeSpawn};
 use codex::{CodexServer, CodexSpawn, CodexThreadOpts, ModelInfo};
 pub use event::{HarnessEvent, Provider, ToolKind};
@@ -55,25 +47,15 @@ pub type Sink = Arc<dyn Fn(HarnessEvent) + Send + Sync>;
 
 const INSTRUCTIONS_TEMPLATE: &str = include_str!("../../templates/HARNESS.template.md");
 
-/// The thread's working directory: the library's `agents/` folder. See the
-/// module docs for why this and not the root.
+/// The thread's working directory: the library's `agents/` folder.
 pub fn thread_cwd(data_dir: &Path) -> PathBuf {
     crate::agents::agents_dir(data_dir)
 }
 
 /// The instructions appended to the provider's own system prompt, with the
-/// library's real paths in them.
-///
-/// `scope` is the thread's subject folder, when it has one. It does not
-/// narrow what the agent may reach — every thread reads the whole library and
-/// writes only to `agents/` — it says which subject the questions are about,
-/// so "what's due this week" has an answer. A general thread passes None and
-/// gets the library-wide instructions unchanged.
-///
-/// `lecture` is the recording a dock conversation is about, and it is
-/// appended after the subject section rather than instead of it: a lecture
-/// thread is still scoped to that lecture's course, and the agent still reads
-/// the whole library.
+/// library's real paths in them. `scope` (the subject folder) and `lecture`
+/// only say what the questions are about — they never narrow what the agent
+/// may reach — and are appended to the library-wide brief, not substituted.
 pub fn instructions(
     data_dir: &Path,
     scope: Option<&str>,
@@ -104,16 +86,9 @@ pub fn instructions(
     format!("{base}{}", thread_sections(scope, lecture))
 }
 
-/// The part of the brief that is about *this thread* — the subject it was
-/// scoped to, the lecture it was opened over — and not about the library.
-///
-/// Split out of [`instructions`] because opencode cannot take the two
-/// together. Claude appends a whole system prompt per process and Codex
-/// takes `developerInstructions` per thread, so for both this is simply the
-/// tail of the one string. opencode has no append at all: an agent's
-/// `prompt` *replaces* its system prompt and lives in one config document
-/// shared by every thread, so its bridge puts the library-wide half in that
-/// document and sends this half ahead of the session's first message.
+/// The part of the brief about *this thread* (subject, lecture). Split out
+/// for the bridges with no per-thread system prompt — opencode and
+/// Antigravity — which send it ahead of the session's first message.
 pub fn thread_sections(scope: Option<&str>, lecture: Option<&LectureBrief>) -> String {
     let mut out = String::new();
     if let Some(code) = scope {
@@ -135,27 +110,11 @@ pub fn thread_sections(scope: Option<&str>, lecture: Option<&LectureBrief>) -> S
 }
 
 /// What the agent is told about the recording the student is watching.
-///
-/// Paths are given the way every other path in this brief is — relative to
-/// `agents/`, which every thread runs from — so the agent can paste one
-/// straight into a read rather than reconstructing the library root.
-///
-/// The chapter list is **inlined** while the transcript is only named. The
-/// chapters are a dozen short lines and asking for them would cost a tool
-/// call the student waits through; the transcript is twenty thousand words
-/// and the agent should open the part it needs, which is the same call
-/// `chapters::prompt` makes about the same two files.
-///
-/// The rest of it is there because of what a real thread spent its turn
-/// doing (`agents/threads/26.ndjson`): four reads scrolling around a VTT
-/// whose every other line is a `NOTE CONF` the agent had no way to know was
-/// noise, two `oculus files` calls to discover which PDF the slide deck was,
-/// and two refusals from guessing that `grep` and `read` take a subject
-/// positionally the way `files` does. None of that is the model being slow —
-/// it is this brief naming a course folder and leaving the rest to be
-/// rediscovered every time. So: the recording's date, since the title is the
-/// timetable's and says nothing about which week; the shape of the VTT; and
-/// the two commands written out with their real flags.
+/// Paths are relative to `agents/`, like the rest of the brief. Chapters are
+/// inlined (short; fetching them costs a tool call); the transcript is only
+/// named. The date, the VTT's shape and the deck-finding commands with their
+/// real flags are spelled out because an agent otherwise spends its turn
+/// rediscovering them.
 fn lecture_section(lec: &LectureBrief, scope: Option<&str>) -> String {
     let dir = format!("../lectures/{}", lec.id);
     let mut s = format!(
@@ -244,75 +203,52 @@ impl RawLog {
     }
 }
 
-/// What a send asks for beyond the text. Persisted on the thread once
-/// chosen; a later send with a different model changes the thread's model
-/// from then on (Claude honours it on the next process, Codex per turn).
+/// What a send asks for beyond the text. The model is persisted on the
+/// thread; a later send with a different one changes it from then on.
 #[derive(Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SendOptions {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
-    /// The subject the thread is scoped to, from the composer's picker. Only
-    /// read when the send creates the thread — afterwards the thread's own
-    /// row is the authority, because both CLIs bind the appended instructions
-    /// at session start and a re-scope would not reach a live session.
+    /// Read only when the send creates the thread; afterwards the row is the
+    /// authority, since the brief is bound at session start.
     pub subject_id: Option<i64>,
-    /// That subject's folder name, resolved from the thread row before the
-    /// send reaches a bridge. Not part of the webview's payload: it is looked
-    /// up here so the instructions can name a folder that exists.
+    /// That subject's folder name, resolved from the thread row.
     #[serde(skip)]
     pub scope: Option<String>,
-    /// The recording a dock conversation is about. Read only when the send
-    /// creates the thread, like `subject_id` — and unlike it, it also
-    /// *decides* the subject, which Rust reads off the lecture's own row
-    /// (`store::create_thread`).
+    /// The recording a dock conversation is about. Read only on creation,
+    /// and it also decides the subject (`store::create_thread`).
     pub lecture_id: Option<String>,
-    /// That lecture, resolved from the thread row for the same reason
-    /// `scope` is: the instructions name a folder and a chapter list, and
-    /// both come from the database rather than from the webview.
+    /// That lecture, resolved from the thread row.
     #[serde(skip)]
     pub lecture: Option<LectureBrief>,
-    /// The moment, built by the player at send time: the timestamp, the last
-    /// minute of transcript, the chapter, the frame path. Appended to the
-    /// prompt the CLI receives, **after** the student's text — it is context
-    /// for the question, not the question. It never becomes the row's
-    /// content: the timeline shows what was typed.
+    /// The player's moment (timestamp, transcript tail, frames). Appended to
+    /// the prompt after the student's text; never part of the row.
     pub context: Option<String>,
-    /// The playhead's second when the message was sent. Goes on the user
-    /// row's `meta` so the bubble can say "at 3:40"; see
-    /// [`HarnessEvent::UserMessage`].
+    /// The playhead's second at send; see [`HarnessEvent::UserMessage`].
     pub at: Option<i64>,
-    /// Antigravity only: the rules the student approved, read from the
-    /// database before a send so the spawn can write them into `agy`'s
-    /// settings (`antigravity_rules::install`). `None` from a caller with no
-    /// database to read, which keeps the last ones written.
+    /// Antigravity only: the student's approved rules, for the spawn to write
+    /// (`antigravity_rules::install`). `None` keeps the last ones written.
     #[serde(skip)]
     pub antigravity_rules: Option<Vec<String>>,
 }
 
-/// What a lecture thread's appended instructions say about the recording.
-/// Assembled from the thread's row and `store::chapters` before the send
-/// reaches a bridge.
+/// What a lecture thread's brief says about the recording, assembled from
+/// the thread's row and `store::chapters`.
 #[derive(Clone)]
 pub struct LectureBrief {
     pub id: String,
     pub title: String,
-    /// `YYYY-MM-DD`, from the row. See [`store::LectureRef::date`]: the title
-    /// is the timetable's, so the date is what tells the agent which week —
-    /// and therefore which slide deck — it is being asked about.
+    /// `YYYY-MM-DD`: the title is the timetable's, so the date is what says
+    /// which week (and slide deck) this is.
     pub date: String,
     pub has_transcript: bool,
-    /// Inlined rather than left for the agent to fetch: a chapter list is a
-    /// dozen short lines, and a turn spent reading it back is a turn the
-    /// student waits through.
     pub chapters: Vec<crate::chapters::Chapter>,
 }
 
-/// Every reasoning level either CLI accepts, mirrored by `REASONING_LABELS`
-/// in `app/src/lib/harness.ts`. Codex declares a subset per model and Claude
-/// takes the five `--effort` names; the union is checked here so an unknown
-/// string is rejected before it reaches an argv or a Codex config, where it
-/// would fail the whole turn with a much worse message.
+/// Every reasoning level any CLI accepts, mirrored by `REASONING_LABELS` in
+/// `app/src/lib/harness.ts`. Checked up front so an unknown string never
+/// reaches an argv or a Codex config.
 const REASONING_EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 fn validate_effort(value: Option<String>) -> Result<Option<String>, String> {
@@ -340,18 +276,10 @@ fn next_queue_id() -> String {
 
 /// Which threads have a turn open, and what is waiting behind each.
 ///
-/// Both CLIs accept a second message mid-turn and neither does anything good
-/// with it. Measured against both, and the recordings are the fixtures the
-/// bridge tests replay: `claude` queues it itself and starts a second turn
-/// the instant the first closes — so the composer flickers idle between them
-/// and stop has nothing to stop — while `codex` answers a second `turn/start`
-/// with the *running* turn's id and folds the message into it, so the
-/// question lands in the timeline above the answer to the previous one, and
-/// sometimes is never answered visibly at all.
-///
-/// So the waiting happens here: one turn per thread, everything else pending,
-/// and a pending message is not part of the conversation — no row is written
-/// for it until it goes out, which is why it can still be edited or dropped.
+/// The CLIs mishandle a message sent mid-turn (`claude` silently chains a
+/// second turn; `codex` folds it into the running one), so one turn per
+/// thread runs and the rest wait here. A pending message has no row until it
+/// goes out, which is why it can still be edited or dropped.
 #[derive(Default)]
 pub struct Queue {
     threads: HashMap<i64, ThreadQueue>,
@@ -359,10 +287,8 @@ pub struct Queue {
 
 #[derive(Default)]
 struct ThreadQueue {
-    /// A turn of ours is open on this thread. Released by the
-    /// `TurnFinished` that closes it — both bridges promise exactly one per
-    /// message they accept, which is what `expecting` (Claude) and the turn
-    /// id taken from `turn/start` (Codex) are for.
+    /// A turn of ours is open. Released by its `TurnFinished` — every bridge
+    /// emits exactly one per message it accepts.
     busy: bool,
     pending: VecDeque<(QueuedMessage, SendOptions)>,
 }
@@ -406,9 +332,8 @@ impl Queue {
         }
     }
 
-    /// Everything still waiting, dropped — what stop does. They are handed
-    /// back rather than discarded so the composer can return them to the
-    /// student, who typed them and never saw them sent.
+    /// Everything still waiting, dropped — what stop does. Handed back so
+    /// the composer can return them to the student.
     pub fn clear(&mut self, thread_id: i64) -> Vec<QueuedMessage> {
         match self.threads.get_mut(&thread_id) {
             Some(q) => q.pending.drain(..).map(|(m, _)| m).collect(),
@@ -454,13 +379,8 @@ impl Queue {
 
 // ── Naming a thread ──────────────────────────────────────────────────────────
 
-// Naming is a one-line job on a clipped exchange, so it runs on something
-// cheap rather than on whatever the thread itself is using — but *which*
-// cheap thing is a configured job now (`jobs::Job::ThreadNaming`), not a
-// constant here. See `jobs.rs`.
-
-/// Long enough for a cold `claude` start on a slow disk, short enough that a
-/// wedged CLI does not leave a thread thinking it is being named.
+/// Long enough for a cold CLI start, short enough that a wedged one does not
+/// leave a thread forever "being named".
 const NAMING_TIMEOUT_SECS: u64 = 90;
 
 const NAMING_INSTRUCTIONS: &str =
@@ -491,12 +411,9 @@ fn naming_prompt(first_message: &str, reply: &str) -> String {
     )
 }
 
-/// What survives from a naming reply, if anything.
-///
-/// A model asked for a name alone still sometimes wraps it in quotes, labels
-/// it, or writes a sentence. The first non-empty line is taken, the wrapping
-/// is stripped, and anything that reads like prose rather than a name — too
-/// long — is refused so the first-line title stays instead.
+/// What survives from a naming reply: the first non-empty line, stripped of
+/// labels and quoting. Anything long enough to be prose is refused, so the
+/// first-line title stays instead.
 fn clean_title(raw: &str) -> Option<String> {
     let line = raw.lines().find(|l| !l.trim().is_empty())?.trim();
     let line = line
@@ -514,91 +431,103 @@ fn clean_title(raw: &str) -> Option<String> {
     Some(line.to_string())
 }
 
-/// A running provider process bound to one thread.
-enum Live {
-    Claude {
-        session: Arc<ClaudeSession>,
-        /// What `--effort` this process was spawned with. Claude fixes it for
-        /// the life of the process, so changing the level has to respawn.
-        effort: Option<String>,
-    },
-    Codex {
-        server: Arc<CodexServer>,
-        thread_id: String,
-        opts: CodexThreadOpts,
-    },
-    Opencode {
-        server: Arc<OpencodeServer>,
-        session: String,
-        /// What variant this session was created with. opencode binds it at
-        /// session creation, like the other two bind their level, so asking
-        /// for a different one means a new session.
-        variant: Option<String>,
-    },
-    Antigravity {
-        session: Arc<AntigravitySession>,
-        /// `--effort` is a process flag here as it is for Claude, so a level
-        /// changed mid-thread costs a respawn.
-        effort: Option<String>,
-    },
+/// One provider session: a process per thread (Claude, Antigravity) or a
+/// thread/session id on a shared server (Codex, opencode). Cheap to clone,
+/// so it can be lifted out of the live map and talked to without the lock.
+#[derive(Clone)]
+enum Handle {
+    Claude(Arc<ClaudeSession>),
+    Codex(Arc<CodexServer>, String, Arc<CodexThreadOpts>),
+    Opencode(Arc<OpencodeServer>, String),
+    Antigravity(Arc<AntigravitySession>),
+}
+
+impl Handle {
+    fn provider(&self) -> Provider {
+        match self {
+            Handle::Claude(_) => Provider::Claude,
+            Handle::Codex(..) => Provider::Codex,
+            Handle::Opencode(..) => Provider::Opencode,
+            Handle::Antigravity(_) => Provider::Antigravity,
+        }
+    }
+
+    fn is_alive(&self) -> bool {
+        match self {
+            Handle::Claude(s) => s.is_alive(),
+            Handle::Codex(server, tid, _) => server.is_alive() && server.has_thread(tid),
+            Handle::Opencode(server, ses) => server.is_alive() && server.has_session(ses),
+            Handle::Antigravity(s) => s.is_alive(),
+        }
+    }
+
+    fn send(&self, text: &str) -> Result<(), String> {
+        match self {
+            Handle::Claude(s) => s.send(text),
+            Handle::Codex(server, tid, opts) => server.start_turn(tid, text, opts),
+            Handle::Opencode(server, ses) => server.prompt(ses, text),
+            Handle::Antigravity(s) => s.send(text),
+        }
+    }
+
+    /// Antigravity refuses: its protocol has no way back to an earlier message.
+    fn rewind(&self, anchor: &str) -> Result<(), String> {
+        match self {
+            Handle::Claude(s) => s.rewind(anchor),
+            Handle::Codex(server, tid, _) => server.revert(tid, anchor),
+            Handle::Opencode(server, ses) => server.revert(ses, anchor),
+            Handle::Antigravity(s) => s.rewind(anchor),
+        }
+    }
+
+    fn interrupt(&self) -> Result<(), String> {
+        match self {
+            Handle::Claude(s) => s.interrupt(),
+            Handle::Codex(server, tid, _) => server.interrupt(tid),
+            Handle::Opencode(server, ses) => server.interrupt(ses),
+            Handle::Antigravity(s) => s.interrupt(),
+        }
+    }
+
+    /// End this session; a shared server stays up. With `delete`, an opencode
+    /// session is removed from the server rather than detached.
+    fn close(&self, delete: bool) {
+        match self {
+            Handle::Claude(s) => s.kill(),
+            Handle::Codex(server, tid, _) => server.detach(tid),
+            Handle::Opencode(server, ses) if delete => server.delete_session(ses),
+            Handle::Opencode(server, ses) => server.detach(ses),
+            Handle::Antigravity(s) => s.kill(),
+        }
+    }
+}
+
+/// A thread's live session and the reasoning level it was started under.
+/// Every CLI binds the level at session start, so a different one respawns.
+struct Live {
+    handle: Handle,
+    effort: Option<String>,
 }
 
 impl Live {
     fn is_alive(&self) -> bool {
-        match self {
-            Live::Claude { session, .. } => session.is_alive(),
-            Live::Codex { server, thread_id, .. } => server.is_alive() && server.has_thread(thread_id),
-            Live::Opencode { server, session, .. } => server.is_alive() && server.has_session(session),
-            Live::Antigravity { session, .. } => session.is_alive(),
-        }
-    }
-
-    /// The reasoning level this session is already running under.
-    fn effort(&self) -> Option<&str> {
-        match self {
-            Live::Claude { effort, .. } => effort.as_deref(),
-            Live::Codex { opts, .. } => opts.reasoning_effort.as_deref(),
-            Live::Opencode { variant, .. } => variant.as_deref(),
-            Live::Antigravity { effort, .. } => effort.as_deref(),
-        }
+        self.handle.is_alive()
     }
 }
 
-/// A session lifted out of the map so it can be talked to without holding it.
-enum Rewindable {
-    Claude(Arc<ClaudeSession>),
-    Codex(Arc<CodexServer>, String),
-    Opencode(Arc<OpencodeServer>, String),
-    /// Refuses. Antigravity's protocol has no way back to an earlier message,
-    /// and the session says so rather than answering `Ok(())` to a caller that
-    /// is about to delete rows on the strength of it.
-    Antigravity(Arc<AntigravitySession>),
-}
-
-/// The set of live sessions plus the shared Codex server. One per app.
+/// The live sessions plus the shared Codex and opencode servers. One per app.
 pub struct Harness {
     data_dir: PathBuf,
     live: Mutex<HashMap<i64, Live>>,
     codex: Mutex<Option<Arc<CodexServer>>>,
-    /// The shared opencode server, the same shape as the Codex one: one
-    /// process for the app, one session per thread inside it.
     opencode: Mutex<Option<Arc<OpencodeServer>>>,
-    /// Codex events that belong to the account rather than to any one
-    /// thread — the rate-limit windows, which the shared server reports with
-    /// no `threadId` on them. Claude needs no equivalent: its processes are
-    /// one per thread, so its windows already arrive on a thread's stream.
-    /// Set by the app; `None` headless, where nothing is listening.
+    /// Codex events with no thread — the account's rate-limit windows.
+    /// `None` headless, where nothing is listening.
     codex_account_sink: Mutex<Option<Sink>>,
-    /// Where opencode's session-less events go — thirty of its eighty-eight
-    /// types name no session, and `session.error`'s own id is optional. Same
-    /// role as the Codex account sink above, and the same thread id 0.
+    /// opencode events that name no session; same role, same thread id 0.
     opencode_default_sink: Mutex<Option<Sink>>,
-    /// Claude Code's last catalogue, and which binary gave it. Every composer
-    /// that opens asks for the list and each ask would otherwise be a CLI
-    /// start of its own; the binary's resolved path and mtime are the key
-    /// because the list only moves when the CLI does — `claude update`
-    /// re-points the launcher at a new version directory. A sign-in drops it,
-    /// since the account decides what the CLI offers.
+    /// Claude Code's last catalogue, keyed by the binary's resolved path and
+    /// mtime (the list only moves when the CLI does). A sign-in drops it.
     claude_models: Mutex<Option<ClaudeCatalogue>>,
 }
 
@@ -621,10 +550,7 @@ impl Harness {
         }
     }
 
-    /// Where Codex's account-scoped events go, set once at startup. It is on
-    /// the harness rather than on a session because the fact it carries — how
-    /// much of the plan is spent — outlives every thread that reports it, and
-    /// the server that reports it is shared by all of them.
+    /// Where Codex's account-scoped events go, set once at startup.
     pub fn set_codex_account_sink(&self, sink: Sink) {
         *self.codex_account_sink.lock().unwrap() = Some(sink);
     }
@@ -648,9 +574,8 @@ impl Harness {
             account_sink: self.codex_account_sink.lock().unwrap().clone(),
         })?;
         *slot = Some(server.clone());
-        // Seed the meter off the pull, so the windows are current from the
-        // moment the server is up rather than from the first turn. Off the
-        // caller's thread: this runs inside the first send.
+        // Seed the rate-limit meter now rather than at the first turn, off
+        // the caller's thread (this runs inside the first send).
         {
             let s = server.clone();
             std::thread::spawn(move || {
@@ -662,10 +587,8 @@ impl Harness {
         Ok(server)
     }
 
-    /// Re-read the windows on a server that is already up — what the Chat
-    /// page asks for when it opens. It never starts the server to answer:
-    /// a page visit is not a reason to spawn a CLI, and a server that has
-    /// just started has already seeded itself above.
+    /// Re-read the windows on a server that is already up. Never starts one:
+    /// a page visit is not a reason to spawn a CLI.
     pub fn refresh_codex_rate_limits(&self) {
         let server = {
             let slot = self.codex.lock().unwrap();
@@ -682,21 +605,15 @@ impl Harness {
         self.codex_server()?.list_models()
     }
 
-    /// Antigravity's catalogue. No server and no session behind it — `agy
-    /// models` is a listing subcommand, so this is one short-lived process
-    /// and nothing is spent.
+    /// Antigravity's catalogue: one short-lived `agy models`, nothing spent.
     pub fn antigravity_models(&self) -> Result<Vec<antigravity::ModelInfo>, String> {
         let bin = discover::binary(Provider::Antigravity)?;
         antigravity::list_models(&bin, &discover::child_env())
     }
 
-    /// Claude Code's catalogue. There is no shared server to ask, so this is
-    /// a short-lived CLI of its own (`claude::list_models`), run from the
-    /// threads' folder with the bridge's binary and environment so the list
-    /// is the one a thread will be offered — once per binary, then from
-    /// `claude_models` above. The lock is held across the probe so two
-    /// composers opening together start one CLI, not two. Only an answer is
-    /// kept; a failure is asked again next time.
+    /// Claude Code's catalogue, from a short-lived CLI run the way a thread's
+    /// is (`claude::list_models`), cached per binary. The lock is held across
+    /// the probe so concurrent callers start one CLI; failures are not cached.
     pub fn claude_models(&self) -> Result<Vec<claude::ModelInfo>, String> {
         let bin = discover::binary(Provider::Claude)?;
         let resolved = std::fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
@@ -718,13 +635,9 @@ impl Harness {
         *self.claude_models.lock().unwrap() = None;
     }
 
-    /// The shared opencode server, started on first use.
-    ///
-    /// The config it runs under is rendered first, every time. That document
-    /// is both the containment ruleset and the only way to give opencode a
-    /// system prompt (`opencode::write_config`), and it has the library's
-    /// real paths and the course folders on disk in it — so a stale one is a
-    /// stale brief *and* a stale deny list.
+    /// The shared opencode server, started on first use. Its config (brief
+    /// and containment ruleset, `opencode::write_config`) is re-rendered
+    /// before every start so neither is stale.
     fn opencode_server(&self) -> Result<Arc<OpencodeServer>, String> {
         let mut slot = self.opencode.lock().unwrap();
         if let Some(s) = slot.as_ref().filter(|s| s.is_alive()) {
@@ -755,30 +668,14 @@ impl Harness {
 
     // ── opencode credentials ─────────────────────────────────────────────
     //
-    // Claude Code and Codex carry the student's own subscription and are
-    // signed in with their own CLIs; opencode carries whatever
-    // `opencode auth` holds, and until this existed the only way to put
-    // something there was a terminal. Every call below goes through the
-    // server's own auth endpoints (`opencode.rs`), so the credential lands
-    // in opencode's store and is the same one the student's terminal
-    // opencode uses. Nothing is mirrored into `settings`, the keychain or a
-    // thread log.
-    //
-    // This does **not** soften [`discover::child_env`]'s strip of
-    // `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`. That strip exists so the
-    // catalogue is what `opencode auth` holds rather than whatever is in a
-    // shell; writing through `PUT /auth` *is* that store, so the rule stands
-    // exactly as it did.
-    //
-    // All of them start the server if it is down — they are the answer to a
-    // button the student pressed, not to a page being opened, which is the
-    // same line `harness_opencode_models` sits on and the opposite of the
-    // rate-limit read.
+    // Through the server's own auth endpoints, so the credential lands in
+    // opencode's store and nowhere else. Each starts the server if it is
+    // down: they answer a button press, never a page opening.
 
     pub fn opencode_providers(&self, refresh: bool) -> Result<ProviderList, String> {
         let server = self.opencode_server()?;
-        // A refusal is a running turn: the list is then what the instance
-        // last read, which may predate a credential written since.
+        // Refused during a running turn: the list may then predate a
+        // credential written since.
         let stale = refresh && !server.refresh();
         Ok(ProviderList {
             providers: server.list_providers()?,
@@ -786,8 +683,7 @@ impl Harness {
         })
     }
 
-    /// The key travels as an argument and a request body and is gone when
-    /// this returns.
+    /// The key is never stored or logged here.
     pub fn opencode_set_api_key(
         &self,
         provider: &str,
@@ -814,16 +710,7 @@ impl Harness {
     ) -> Result<(), String> {
         let mut live = self.live.lock().unwrap();
         self.ensure(&mut live, thread_id, provider, resume, opts, sink)?;
-        match live.get(&thread_id).ok_or("no session")? {
-            Live::Claude { session, .. } => session.send(text),
-            Live::Codex {
-                server,
-                thread_id: tid,
-                opts,
-            } => server.start_turn(tid, text, opts),
-            Live::Opencode { server, session, .. } => server.prompt(session, text),
-            Live::Antigravity { session, .. } => session.send(text),
-        }
+        live.get(&thread_id).ok_or("no session")?.handle.send(text)
     }
 
     pub fn opencode_disconnect(&self, provider: &str) -> Result<ProviderList, String> {
@@ -854,13 +741,9 @@ impl Harness {
     }
 
     /// Take a question and everything after it out of the provider's own
-    /// session, so the agent's context matches the thread the student is
-    /// reading. `anchor` is the provider's handle for that question, kept on
-    /// its row when the turn went out.
-    ///
-    /// A thread whose process has gone is resumed for this, without a turn:
-    /// both bridges take the instruction on their control channel, which is
-    /// live as soon as the session is, so nothing is spent on the model.
+    /// session, so the agent's context matches the timeline. `anchor` is the
+    /// provider's handle for that question, kept on its row. A thread whose
+    /// process has gone is resumed for this without starting a turn.
     pub fn rewind(
         &self,
         thread_id: i64,
@@ -870,44 +753,23 @@ impl Harness {
         anchor: &str,
         sink: Sink,
     ) -> Result<(), String> {
-        // The handle is taken out from under the lock and the rewind done
-        // outside it: a rewind waits on the CLI's answer, and holding the map
-        // for that would stall every *other* thread's next message behind it.
+        // Rewound outside the lock: it waits on the CLI, and holding the map
+        // would stall every other thread's next message.
         let handle = {
             let mut live = self.live.lock().unwrap();
-            // Any live session will do. `ensure` would respawn one running
-            // under a different reasoning level, which matters for a turn and
-            // not at all for an instruction on the control channel.
+            // Any live session will do — the reasoning level is irrelevant to
+            // a control-channel instruction, so no `ensure` respawn.
             if !live.get(&thread_id).is_some_and(|l| l.is_alive()) {
                 self.ensure(&mut live, thread_id, provider, resume, opts, sink)?;
             }
-            match live.get(&thread_id).ok_or("no session")? {
-                Live::Claude { session, .. } => Rewindable::Claude(session.clone()),
-                Live::Codex {
-                    server,
-                    thread_id: tid,
-                    ..
-                } => Rewindable::Codex(server.clone(), tid.clone()),
-                Live::Opencode { server, session, .. } => {
-                    Rewindable::Opencode(server.clone(), session.clone())
-                }
-                Live::Antigravity { session, .. } => Rewindable::Antigravity(session.clone()),
-            }
+            live.get(&thread_id).ok_or("no session")?.handle.clone()
         };
-        match handle {
-            Rewindable::Claude(s) => s.rewind(anchor),
-            Rewindable::Codex(server, tid) => server.revert(&tid, anchor),
-            Rewindable::Opencode(server, ses) => server.revert(&ses, anchor),
-            Rewindable::Antigravity(s) => s.rewind(anchor),
-        }
+        handle.rewind(anchor)
     }
 
     /// Make sure this thread has a session that can be talked to, spawning or
-    /// resuming one when it has none.
-    ///
-    /// A live session is reused only if it is running under the level asked
-    /// for; both CLIs bind the reasoning level at session start, so a
-    /// different one means a new process (Claude) or a new thread (Codex).
+    /// resuming one when it has none. A live session is reused only if it
+    /// runs under the reasoning level asked for.
     fn ensure(
         &self,
         live: &mut HashMap<i64, Live>,
@@ -919,7 +781,7 @@ impl Harness {
     ) -> Result<(), String> {
         if live
             .get(&thread_id)
-            .is_some_and(|l| l.is_alive() && l.effort() == opts.reasoning_effort.as_deref())
+            .is_some_and(|l| l.is_alive() && l.effort == opts.reasoning_effort)
         {
             return Ok(());
         }
@@ -929,45 +791,39 @@ impl Harness {
         std::fs::create_dir_all(&cwd)
             .map_err(|e| format!("cannot create {}: {e}", cwd.display()))?;
         let raw_log = RawLog::open(&self.data_dir, thread_id);
-        let session = match provider {
-            Provider::Claude => {
-                let s = ClaudeSession::spawn(
-                    ClaudeSpawn {
-                        bin: discover::binary(provider)?,
-                        cwd,
-                        library: self.data_dir.clone(),
-                        oculus: discover::oculus_cli(),
-                        resume: resume.map(String::from),
-                        model: opts.model.clone(),
-                        effort: opts.reasoning_effort.clone(),
-                        permission_mode: "acceptEdits".into(),
-                        system_append: instructions(
-                            &self.data_dir,
-                            opts.scope.as_deref(),
-                            opts.lecture.as_ref(),
-                        ),
-                        env: discover::child_env(),
-                        raw_log,
-                    },
-                    sink,
-                )?;
-                Live::Claude {
-                    session: s,
-                    effort: opts.reasoning_effort.clone(),
-                }
-            }
+        let base = |cwd: PathBuf| -> Result<ThreadSpawn, String> {
+            Ok(ThreadSpawn {
+                bin: discover::binary(provider)?,
+                cwd,
+                library: self.data_dir.clone(),
+                resume: resume.map(String::from),
+                model: opts.model.clone(),
+                effort: opts.reasoning_effort.clone(),
+                env: discover::child_env(),
+                raw_log,
+            })
+        };
+        let handle = match provider {
+            Provider::Claude => Handle::Claude(ClaudeSession::spawn(
+                ClaudeSpawn {
+                    base: base(cwd)?,
+                    oculus: discover::oculus_cli(),
+                    permission_mode: "acceptEdits".into(),
+                    system_append: instructions(
+                        &self.data_dir,
+                        opts.scope.as_deref(),
+                        opts.lecture.as_ref(),
+                    ),
+                },
+                sink,
+            )?),
             Provider::Codex => {
                 let server = self.codex_server()?;
                 let topts = CodexThreadOpts {
                     cwd,
-                    // Existing files only: Codex stats every writable root
-                    // and refuses to run a command whose root it cannot
-                    // inspect ("failed to inspect Seatbelt writable root"),
-                    // so a missing WAL sidecar would cost the whole turn
-                    // rather than one write. It is missing only when nothing
-                    // holds the database open — and then the CLI would need a
-                    // grant on the folder to create it, which this
-                    // deliberately does not give.
+                    // Existing files only: Codex fails the whole turn on a
+                    // writable root it cannot stat ("failed to inspect
+                    // Seatbelt writable root"), e.g. an absent WAL sidecar.
                     writable_files: crate::paths::db_write_paths(&self.data_dir)
                         .into_iter()
                         .filter(|p| p.exists())
@@ -987,25 +843,14 @@ impl Harness {
                     }
                     None => server.start_thread(&topts, sink)?,
                 };
-                Live::Codex {
-                    server,
-                    thread_id: tid,
-                    opts: topts,
-                }
+                Handle::Codex(server, tid, Arc::new(topts))
             }
             Provider::Opencode => {
                 let server = self.opencode_server()?;
                 let sopts = OpencodeSessionOpts {
                     model: opts.model.clone(),
-                    // Only ever set when the picker offered a level, which
-                    // means the model declared one. Nothing is invented: in
-                    // 1.18.2 no model declares any, so this is None and the
-                    // session takes the model's own default.
+                    // Set only when the model declared levels.
                     variant: opts.reasoning_effort.clone(),
-                    // The library-wide brief is the agent's prompt in the
-                    // config; this is the rest of it, and it rides the
-                    // session's first message because there is nowhere else
-                    // to put it.
                     brief: thread_sections(opts.scope.as_deref(), opts.lecture.as_ref()),
                     agent: opencode::AGENT,
                 };
@@ -1016,58 +861,33 @@ impl Harness {
                     }
                     None => server.start_session(&sopts, sink)?,
                 };
-                Live::Opencode {
-                    server,
-                    session: ses,
-                    variant: opts.reasoning_effort.clone(),
-                }
+                Handle::Opencode(server, ses)
             }
-            Provider::Antigravity => {
-                let s = AntigravitySession::spawn(
-                    AntigravitySpawn {
-                        bin: discover::binary(provider)?,
-                        cwd,
-                        library: self.data_dir.clone(),
-                        resume: resume.map(String::from),
-                        model: opts.model.clone(),
-                        effort: opts.reasoning_effort.clone(),
-                        // Only the per-thread half. The library-wide brief is
-                        // already `agents/AGENTS.md`, which `agy` reads for
-                        // itself from the directory it is spawned in — the
-                        // same free ride Codex gets, and the reason there is
-                        // no `--append-system-prompt` to miss.
-                        brief: thread_sections(opts.scope.as_deref(), opts.lecture.as_ref()),
-                        env: discover::child_env(),
-                        raw_log,
-                        approved: opts.antigravity_rules.clone(),
-                    },
-                    sink,
-                )?;
-                Live::Antigravity {
-                    session: s,
-                    effort: opts.reasoning_effort.clone(),
-                }
-            }
+            Provider::Antigravity => Handle::Antigravity(AntigravitySession::spawn(
+                AntigravitySpawn {
+                    base: base(cwd)?,
+                    // `agy` reads the library-wide brief (`agents/AGENTS.md`)
+                    // itself; only the per-thread half is sent.
+                    brief: thread_sections(opts.scope.as_deref(), opts.lecture.as_ref()),
+                    approved: opts.antigravity_rules.clone(),
+                },
+                sink,
+            )?),
         };
-        live.insert(thread_id, session);
+        live.insert(
+            thread_id,
+            Live {
+                handle,
+                effort: opts.reasoning_effort.clone(),
+            },
+        );
         Ok(())
     }
 
-    /// Ask the provider to name a thread from its first exchange.
-    ///
-    /// Neither CLI names a conversation on its own: Claude's stream-json has
-    /// no title event, and `app-server` sends none either — so a name that
-    /// the model wrote has to be asked for, and it costs one turn. It is
-    /// asked once, after the first exchange (`store::claim_naming`), on the
-    /// agent, model and level the `threadNaming` job is configured with
-    /// (`jobs.rs`) — not on the thread's own. Naming is a job like the
-    /// chaptering one, and a student who has picked a namer in Settings has
-    /// said which CLI should pay for it.
-    ///
-    /// It runs outside the thread: its own short-lived Claude process, or a
-    /// throwaway thread on the shared Codex server. Sending it down the
-    /// thread's own session would put a question the student never asked into
-    /// the timeline, and would spend the thread's context on it.
+    /// Ask the provider to name a thread from its first exchange, on the
+    /// agent and model the `threadNaming` job is configured with (`jobs.rs`).
+    /// It runs in a throwaway session of its own, so the question never
+    /// reaches the thread's timeline or context.
     pub fn name_thread(
         &self,
         sel: &jobs::JobSelection,
@@ -1081,64 +901,47 @@ impl Harness {
             let _ = tx.send(ev);
         });
         let cwd = thread_cwd(&self.data_dir);
+        let base = |cwd: PathBuf| -> Result<ThreadSpawn, String> {
+            Ok(ThreadSpawn {
+                bin: discover::binary(provider)?,
+                cwd,
+                library: self.data_dir.clone(),
+                resume: None,
+                model: Some(sel.model.clone()),
+                effort: sel.reasoning_effort.clone(),
+                env: discover::child_env(),
+                raw_log: None,
+            })
+        };
 
-        // Held so the session outlives the collect loop, and dropped after it.
-        let claude;
-        let codex;
-        let oc;
-        let agy;
-        match provider {
-            Provider::Claude => {
-                let s = ClaudeSession::spawn(
-                    ClaudeSpawn {
-                        bin: discover::binary(provider)?,
-                        cwd,
-                        library: self.data_dir.clone(),
-                        oculus: discover::oculus_cli(),
-                        resume: None,
-                        model: Some(sel.model.clone()),
-                        effort: sel.reasoning_effort.clone(),
-                        // Nothing here needs a tool, and `default` auto-allows
-                        // none — with prompts routed to `none` a stray call is
-                        // refused rather than hanging the turn.
-                        permission_mode: "default".into(),
-                        system_append: String::new(),
-                        env: discover::child_env(),
-                        raw_log: None,
-                    },
-                    sink,
-                )?;
-                s.send(&prompt)?;
-                claude = Some(s);
-                codex = None;
-                oc = None;
-                agy = None;
-            }
+        let handle = match provider {
+            Provider::Claude => Handle::Claude(ClaudeSession::spawn(
+                ClaudeSpawn {
+                    base: base(cwd)?,
+                    oculus: discover::oculus_cli(),
+                    // `default` auto-allows no tool; with prompts routed to
+                    // `none` a stray call is refused rather than hanging.
+                    permission_mode: "default".into(),
+                    system_append: String::new(),
+                },
+                sink,
+            )?),
             Provider::Codex => {
                 let server = self.codex_server()?;
                 let opts = CodexThreadOpts {
                     cwd,
-                    // The namer writes nothing: it is one question with no
-                    // tool worth reaching for, so it gets no hole in the
-                    // sandbox either.
                     writable_files: Vec::new(),
                     model: Some(sel.model.clone()),
                     reasoning_effort: sel.reasoning_effort.clone(),
                     instructions: NAMING_INSTRUCTIONS.into(),
                 };
                 let tid = server.start_thread(&opts, sink)?;
-                server.start_turn(&tid, &prompt, &opts)?;
-                claude = None;
-                codex = Some((server, tid));
-                oc = None;
-                agy = None;
+                Handle::Codex(server, tid, Arc::new(opts))
             }
             Provider::Opencode => {
                 let server = self.opencode_server()?;
-                // A throwaway session on the shared server, exactly as for
-                // Codex — and on the hidden `oculus-namer` agent, because
-                // opencode has no per-session instructions and the naming
-                // brief cannot ride the `oculus` agent's own prompt.
+                // opencode has no per-session instructions, so the naming
+                // brief is the hidden `oculus-namer` agent's prompt.
                 let sopts = OpencodeSessionOpts {
                     model: Some(sel.model.clone()),
                     variant: sel.reasoning_effort.clone(),
@@ -1146,77 +949,30 @@ impl Harness {
                     agent: opencode::NAMING_AGENT,
                 };
                 let ses = server.start_session(&sopts, sink)?;
-                server.prompt(&ses, &prompt)?;
-                claude = None;
-                codex = None;
-                oc = Some((server, ses));
-                agy = None;
+                Handle::Opencode(server, ses)
             }
-            Provider::Antigravity => {
-                // A throwaway process, the way Claude's namer is one. It gets
-                // no brief and asks for no tool: naming a thread is a single
-                // question about text that is already in the prompt.
-                let s = AntigravitySession::spawn(
-                    AntigravitySpawn {
-                        bin: discover::binary(provider)?,
-                        cwd,
-                        library: self.data_dir.clone(),
-                        resume: None,
-                        model: Some(sel.model.clone()),
-                        effort: sel.reasoning_effort.clone(),
-                        brief: String::new(),
-                        env: discover::child_env(),
-                        raw_log: None,
-                        // No database here: the same approvals the last
-                        // thread's spawn wrote, so the global file is left as
-                        // it stands rather than rewritten without them.
-                        approved: None,
-                    },
-                    sink,
-                )?;
-                s.send(&prompt)?;
-                claude = None;
-                codex = None;
-                oc = None;
-                agy = Some(s);
-            }
-        }
+            Provider::Antigravity => Handle::Antigravity(AntigravitySession::spawn(
+                AntigravitySpawn {
+                    base: base(cwd)?,
+                    brief: String::new(),
+                    // No database here: keep the approvals last written.
+                    approved: None,
+                },
+                sink,
+            )?),
+        };
+        handle.send(&prompt)?;
 
         let mut text = String::new();
-        let mut failed: Option<String> = None;
-        loop {
-            match rx.recv_timeout(std::time::Duration::from_secs(NAMING_TIMEOUT_SECS)) {
-                Ok(HarnessEvent::AssistantMessage { text: t }) => text.push_str(&t),
-                Ok(HarnessEvent::Error { message, .. }) => failed = Some(message),
-                Ok(HarnessEvent::TurnFinished { .. }) => break,
-                Ok(HarnessEvent::Exited { code }) => {
-                    failed.get_or_insert(format!(
-                        "provider exited (code {code:?}) before naming the thread"
-                    ));
-                    break;
-                }
-                Ok(_) => {}
-                Err(_) => {
-                    failed.get_or_insert_with(|| "timed out naming the thread".into());
-                    break;
-                }
+        let timeout = Some(std::time::Duration::from_secs(NAMING_TIMEOUT_SECS));
+        let failed = drain_turn(&rx, timeout, "naming the thread", |ev| {
+            if let HarnessEvent::AssistantMessage { text: t } = ev {
+                text.push_str(t);
             }
-        }
-        if let Some(s) = claude {
-            s.kill();
-        }
-        if let Some(s) = agy {
-            s.kill();
-        }
-        if let Some((server, tid)) = codex {
-            server.detach(&tid);
-        }
-        // Deleted rather than detached: a naming session is a question the
-        // student never asked, and leaving it on the server would put it in
-        // their own `opencode` session list for ever.
-        if let Some((server, ses)) = oc {
-            server.delete_session(&ses);
-        }
+        });
+        // Deleted rather than detached: a naming session left on the opencode
+        // server would sit in the student's own session list.
+        handle.close(true);
         match (clean_title(&text), failed) {
             (Some(t), _) => Ok(t),
             (None, Some(e)) => Err(e),
@@ -1227,10 +983,7 @@ impl Harness {
     pub fn interrupt(&self, thread_id: i64) -> Result<(), String> {
         let live = self.live.lock().unwrap();
         match live.get(&thread_id) {
-            Some(Live::Claude { session, .. }) => session.interrupt(),
-            Some(Live::Codex { server, thread_id, .. }) => server.interrupt(thread_id),
-            Some(Live::Opencode { server, session, .. }) => server.interrupt(session),
-            Some(Live::Antigravity { session, .. }) => session.interrupt(),
+            Some(l) => l.handle.interrupt(),
             None => Ok(()),
         }
     }
@@ -1239,12 +992,7 @@ impl Harness {
     /// resumes it by session id.
     pub fn close(&self, thread_id: i64) {
         if let Some(l) = self.live.lock().unwrap().remove(&thread_id) {
-            match l {
-                Live::Claude { session, .. } => session.kill(),
-                Live::Codex { server, thread_id, .. } => server.detach(&thread_id),
-                Live::Opencode { server, session, .. } => server.detach(&session),
-                Live::Antigravity { session, .. } => session.kill(),
-            }
+            l.handle.close(false);
         }
     }
 
@@ -1254,22 +1002,9 @@ impl Harness {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, l)| match l {
-                Live::Claude { .. } => provider == Provider::Claude,
-                Live::Codex { .. } => provider == Provider::Codex,
-                Live::Opencode { .. } => provider == Provider::Opencode,
-                Live::Antigravity { .. } => provider == Provider::Antigravity,
-            })
+            .filter(|(_, l)| l.handle.provider() == provider)
             .map(|(id, _)| *id)
             .collect()
-    }
-
-    pub fn is_live(&self, thread_id: i64) -> bool {
-        self.live
-            .lock()
-            .unwrap()
-            .get(&thread_id)
-            .map_or(false, |l| l.is_alive())
     }
 
     /// Everything, on quit.
@@ -1305,25 +1040,49 @@ pub fn run_once(
     });
     // Thread id 0 in the log dir: a headless run is not a thread.
     harness.send(0, provider, None, opts, prompt, sink)?;
-
-    let mut failed: Option<String> = None;
-    for ev in rx {
-        on_event(&ev);
-        match &ev {
-            HarnessEvent::Error { message, .. } => failed = Some(message.clone()),
-            HarnessEvent::TurnFinished { .. } => break,
-            HarnessEvent::Exited { code } => {
-                failed.get_or_insert(format!("provider exited (code {code:?}) before finishing"));
-                break;
-            }
-            _ => {}
-        }
-    }
+    let failed = drain_turn(&rx, None, "finishing", &on_event);
     harness.shutdown();
     match failed {
         Some(e) => Err(e),
         None => Ok(()),
     }
+}
+
+/// Wait out one turn on `rx`, handing every event to `on_event`, and answer
+/// its failure if it had one. With a `timeout`, that long a silence fails it.
+fn drain_turn(
+    rx: &mpsc::Receiver<HarnessEvent>,
+    timeout: Option<std::time::Duration>,
+    doing: &str,
+    mut on_event: impl FnMut(&HarnessEvent),
+) -> Option<String> {
+    let mut failed: Option<String> = None;
+    loop {
+        let ev = match timeout {
+            Some(t) => match rx.recv_timeout(t) {
+                Ok(ev) => ev,
+                Err(_) => {
+                    failed.get_or_insert_with(|| format!("timed out {doing}"));
+                    break;
+                }
+            },
+            None => match rx.recv() {
+                Ok(ev) => ev,
+                Err(_) => break,
+            },
+        };
+        on_event(&ev);
+        match ev {
+            HarnessEvent::Error { message, .. } => failed = Some(message),
+            HarnessEvent::TurnFinished { .. } => break,
+            HarnessEvent::Exited { code } => {
+                failed.get_or_insert(format!("provider exited (code {code:?}) before {doing}"));
+                break;
+            }
+            _ => {}
+        }
+    }
+    failed
 }
 
 // ── Tauri ────────────────────────────────────────────────────────────────────
@@ -1333,10 +1092,9 @@ pub mod app {
     use sqlx::SqlitePool;
     use tauri::{AppHandle, Emitter, Manager, State};
 
-    /// What the webview gets on `harness-event`: the thread and the event,
-    /// plus the row id when the event became a row. The provider is on it
-    /// too, because an account-scoped event (rate limits) has no thread to
-    /// read it off — it arrives with `threadId` 0.
+    /// What the webview gets on `harness-event`, plus the row id when the
+    /// event became a row. Account-scoped events arrive with `threadId` 0,
+    /// hence the provider.
     #[derive(Serialize, Clone)]
     #[serde(rename_all = "camelCase")]
     struct Envelope {
@@ -1364,6 +1122,13 @@ pub mod app {
         })
     }
 
+    /// Run blocking work off the async runtime; a failed join is an error.
+    async fn blocking<T: Send + 'static>(
+        f: impl FnOnce() -> Result<T, String> + Send + 'static,
+    ) -> Result<T, String> {
+        tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string())?
+    }
+
     /// One consumer thread folds every event, from every thread, in order:
     /// a row is written before the webview hears about it, and a tool's
     /// finish can never overtake its start.
@@ -1372,16 +1137,13 @@ pub mod app {
         let handle = app.clone();
         let harness = Arc::new(Harness::new(crate::paths::data_dir()));
         let queue: Arc<Mutex<Queue>> = Arc::new(Mutex::new(Queue::default()));
-        // Codex's rate-limit windows come off the shared server with no thread
-        // attached; thread id 0 is the same id its raw log uses.
+        // Thread-less events go out as thread 0, the id their raw logs use.
         {
             let bus = tx.clone();
             harness.set_codex_account_sink(Arc::new(move |ev| {
                 let _ = bus.send((0, Provider::Codex, ev));
             }));
         }
-        // opencode's session-less events, on the same thread id 0 its raw log
-        // uses.
         {
             let bus = tx.clone();
             harness.set_opencode_default_sink(Arc::new(move |ev| {
@@ -1409,18 +1171,14 @@ pub mod app {
                     if let Err(e) = rt.block_on(store::save_rate_limits(p, provider, &ev)) {
                         eprintln!("[oculus] harness rate limits: {e}");
                     }
-                    // A finished first exchange is when a thread can be named.
-                    // The claim is atomic, so this asks at most once; the turn
-                    // itself takes seconds and cannot run on this loop, which
-                    // every other thread's events are waiting behind.
+                    // A finished first exchange is when a thread is named. The
+                    // claim is atomic (asks at most once); the naming turn runs
+                    // off this loop, which every thread's events wait behind.
                     if thread_id > 0
                         && matches!(&ev, HarnessEvent::TurnFinished { status } if status == "completed")
                     {
                         match rt.block_on(store::claim_naming(p, thread_id)) {
                             Ok(Some(seed)) => {
-                                // Read here rather than in the naming thread:
-                                // the pool is already open on this loop, and
-                                // the read is one indexed row.
                                 let sel = rt.block_on(jobs::selection(p, jobs::Job::ThreadNaming));
                                 let (namer, bus) = (namer.clone(), bus.clone());
                                 std::thread::spawn(move || {
@@ -1442,10 +1200,8 @@ pub mod app {
                         }
                     }
                 }
-                // A closed turn is when the next message waiting on this
-                // thread may go. It cannot go from here — every other
-                // thread's events queue behind this loop, and a send starts
-                // a process — so the dispatch is spawned and this moves on.
+                // A closed turn releases the next queued message; its send is
+                // spawned, since a send may start a process.
                 if thread_id > 0 && matches!(&ev, HarnessEvent::TurnFinished { .. }) {
                     let next = queued.lock().unwrap().next(thread_id);
                     if let Some((msg, opts)) = next {
@@ -1486,14 +1242,8 @@ pub mod app {
         }
     }
 
-    /// Everything a send does once the thread exists and the queue has said
-    /// it may go: resolve what the *row* says rather than what the payload
-    /// asked for, write the question through the event path like any other
-    /// row, and hand the text to the bridge.
-    ///
-    /// A failure here closes the turn it never opened — the error becomes a
-    /// row and a `TurnFinished` releases the thread — so a send that cannot
-    /// start does not leave whatever was queued behind it stranded.
+    /// A send the queue has let go. A failure still closes the turn (an error
+    /// row, then `TurnFinished`), so nothing queued behind it is stranded.
     async fn dispatch(
         harness: Arc<Harness>,
         bus: Bus,
@@ -1515,18 +1265,9 @@ pub mod app {
         }
     }
 
-    /// The lecture section of a thread's instructions, assembled off its row.
-    ///
-    /// Read on every send rather than carried on the thread, for the same
-    /// reason the subject's folder name is joined rather than stored: the
-    /// chapters can land eight minutes after the conversation started, and a
-    /// brief built once at creation would never grow them. A lecture with no
-    /// chapters simply has none in the brief.
-    ///
-    /// It has to be resolved before *any* session is spawned, including the
-    /// one a rewind brings back up — both CLIs bind the appended instructions
-    /// at session start, so a session opened without it would keep answering
-    /// without it for the rest of the thread.
+    /// The lecture section of a thread's brief, read off its row on every
+    /// send (chapters can land after the conversation started). Needed
+    /// before *any* spawn, a rewind's included: the brief binds at start.
     async fn lecture_brief(pool: &SqlitePool, row: &store::ThreadRow) -> Option<LectureBrief> {
         let l = row.lecture.as_ref()?;
         Some(LectureBrief {
@@ -1558,21 +1299,15 @@ pub mod app {
         }
         if opts.model.is_some() && opts.model != row.model {
             store::set_model(&pool, thread_id, opts.model.as_deref()).await?;
-            // A different model means a different process for the two CLIs
-            // that fix `--model` at spawn — Claude, and Antigravity, whose
-            // live `agy` keeps the model it started with. Safe here and not
-            // at the moment the student picked it: the thread is between
-            // turns, so nothing is killed mid-answer.
+            // Claude and agy fix `--model` at spawn. The thread is between
+            // turns here, so nothing is killed mid-answer.
             if matches!(provider, Provider::Claude | Provider::Antigravity) {
                 harness.close(thread_id);
             }
         }
-        // The row, not the payload, decides all three: an open thread keeps
-        // the model it was last set to, the subject it was created with, and
-        // the lecture it was opened over.
+        // The row, not the payload, decides model, subject and lecture.
         let lecture = lecture_brief(&pool, &row).await;
-        // Read on every send, though only a spawn uses them: which send will
-        // spawn is `ensure`'s call, and it is one indexed row.
+        // Only a spawn uses these, but whether this send spawns is `ensure`'s call.
         let antigravity_rules = match provider {
             Provider::Antigravity => Some(antigravity_rules::stored(&pool).await?),
             _ => None,
@@ -1585,10 +1320,8 @@ pub mod app {
             ..opts
         };
         let resume = row.provider_session_id;
-        // The row is what the student typed. The moment they sent it at is a
-        // fact about the message and rides on the event; the moment's own
-        // text rides the prompt below and is never a row, or the timeline
-        // would read back a transcript excerpt as the question.
+        // The row is what the student typed; the moment's text rides only
+        // the prompt, or the timeline would show a transcript excerpt.
         sink(HarnessEvent::UserMessage {
             text: text.to_string(),
             at: opts.at,
@@ -1599,23 +1332,12 @@ pub mod app {
         };
 
         let (h, sink) = (harness.clone(), sink.clone());
-        tokio::task::spawn_blocking(move || {
-            h.send(thread_id, provider, resume.as_deref(), &opts, &text, sink)
-        })
-        .await
-        .map_err(|e| e.to_string())?
+        blocking(move || h.send(thread_id, provider, resume.as_deref(), &opts, &text, sink)).await
     }
 
-    /// Where each CLI is, and whether it is there at all.
-    ///
-    /// `recheck` is the difference between Settings' *Recheck* button and
-    /// everything else. Only that button drops the cached lookups
-    /// (`discover::forget`), because a full recheck can end in a login shell's
-    /// `command -v` per provider — a few hundred milliseconds each, and this
-    /// is now read by every model picker in the app rather than by one
-    /// settings page. Without `recheck` the answer comes off
-    /// `discover::health`'s cache, so opening a composer costs nothing after
-    /// the first read of the session.
+    /// Where each CLI is, and whether it is there at all. Only `recheck`
+    /// (Settings' *Recheck*) drops `discover`'s caches — a full recheck can
+    /// cost a login shell per provider, and every model picker reads this.
     #[tauri::command]
     pub async fn harness_health(recheck: bool) -> Vec<discover::BridgeHealth> {
         tokio::task::spawn_blocking(move || {
@@ -1631,62 +1353,40 @@ pub mod app {
         .unwrap_or_default()
     }
 
-    /// The four ways this machine could install one of the CLIs, and which of
-    /// them it can actually run. Detection asks a login shell, so it is
-    /// blocking and cached (`discover::tool`); *Recheck* drops that cache
-    /// alongside everything else.
+    /// The ways this machine could install one of the CLIs, and which it can
+    /// run. Detection is blocking and cached (`discover::tool`).
     #[tauri::command]
     pub async fn harness_install_offer(provider: Provider) -> install::InstallOffer {
         tokio::task::spawn_blocking(move || install::offer(provider, install::detect()))
             .await
-            // A join that failed is not evidence that the machine is bare, but
-            // it is the only safe thing to draw: commands to copy, no buttons.
+            // The only safe reading of a failed join: commands to copy, no buttons.
             .unwrap_or_else(|_| install::offer(provider, install::Managers::default()))
     }
 
-    /// Run one of them. The webview names a provider and a manager and never
-    /// the command — `install.rs` owns the string, and that is the whole
-    /// reason this takes an enum rather than the text the dialog is showing.
-    ///
-    /// Output streams on `install::INSTALL_EVENT` the way every other job's
-    /// progress reaches the webview, and the run's last event is the one with
-    /// `done` on it: that is where Settings rechecks, because
-    /// `discover::binary` caches its failures and a freshly installed CLI
-    /// stays missing until both caches are dropped.
+    /// Run one route. The webview names a provider and a manager, never the
+    /// command. Output streams on `install::INSTALL_EVENT`; Settings rechecks
+    /// on the `done` event.
     #[tauri::command]
     pub async fn harness_install_run(
         app: AppHandle,
         provider: Provider,
         manager: install::Manager,
     ) -> Result<(), String> {
-        tokio::task::spawn_blocking(move || {
+        blocking(move || {
             let emitter = app.clone();
             install::start(provider, manager, move |line| {
                 emitter.emit(install::INSTALL_EVENT, line).ok();
             })
         })
         .await
-        .map_err(|e| e.to_string())?
     }
 
-    /// Whether a provider has credentials, asked of the provider.
-    ///
-    /// Read in two places and cached in neither: the Settings → AI row, and
-    /// the sign-in card the timeline draws over an auth error. Both are places
-    /// a student is looking *because* something is wrong, so a cached "signed
-    /// out" that outlived the sign-in that fixed it would be the one answer
-    /// that must not be stale — which is why this differs from
-    /// `harness_health` and spawns the CLI every time. `discover::forget` has
-    /// nothing of this to drop.
-    ///
-    /// opencode answers `signedIn: null`: its credentials are per provider and
-    /// live behind `harness_opencode_providers`, not behind a login command.
+    /// Whether a provider has credentials, asked of the CLI every time (see
+    /// `signin.rs` for why this is never cached).
     #[tauri::command]
     pub async fn harness_sign_in_status(provider: Provider) -> signin::SignInStatus {
         tokio::task::spawn_blocking(move || signin::status(provider))
             .await
-            // A join that failed is not evidence about the account either way,
-            // and "cannot say" is exactly what `signed_in: None` means.
             .unwrap_or_else(|e| signin::SignInStatus {
                 provider,
                 signed_in: None,
@@ -1695,20 +1395,13 @@ pub mod app {
             })
     }
 
-    /// Run the provider's own login flow, and open the page it points at.
-    ///
-    /// Output streams on `signin::SIGNIN_EVENT` the way an install's streams
-    /// on `install::INSTALL_EVENT`. The one addition is the URL: the first
-    /// line that carries one opens it **in the system browser**
-    /// (`tauri_plugin_opener`), because the student is almost certainly
-    /// already signed in to claude.com or chatgpt.com there, while this app's
-    /// own in-app browser (`browser.rs`) has a cookie jar seeded for Canvas
-    /// and nothing else. The URL rides the event as well as being opened, so
-    /// the dialog can show it with a Copy button — an `open` that silently did
-    /// nothing must not be a dead end.
+    /// Run the provider's own login flow. Output streams on
+    /// `signin::SIGNIN_EVENT`; the first URL opens in the *system* browser,
+    /// where the student is already signed in, and rides the event too so
+    /// the dialog can offer it to copy.
     #[tauri::command]
     pub async fn harness_sign_in_start(app: AppHandle, provider: Provider) -> Result<(), String> {
-        tokio::task::spawn_blocking(move || {
+        blocking(move || {
             let emitter = app.clone();
             signin::start(provider, move |line| {
                 if let Some(url) = line.url.as_deref() {
@@ -1718,11 +1411,9 @@ pub mod app {
             })
         })
         .await
-        .map_err(|e| e.to_string())?
     }
 
-    /// The code Claude's flow ends on, pasted back from the browser. Codex
-    /// finishes on its own loopback callback and never reaches this.
+    /// The code Claude's flow ends on, pasted back from the browser.
     #[tauri::command]
     pub async fn harness_sign_in_code(
         state: State<'_, HarnessState>,
@@ -1730,7 +1421,7 @@ pub mod app {
         code: String,
     ) -> Result<(), String> {
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || {
+        blocking(move || {
             let signed_in = signin::submit_code(provider, &code);
             if provider == Provider::Claude {
                 h.forget_claude_models();
@@ -1738,22 +1429,16 @@ pub mod app {
             signed_in
         })
         .await
-        .map_err(|e| e.to_string())?
     }
 
-    /// The student closed the dialog. Nothing else ends a login — an OAuth
-    /// page can sit open for as long as a person takes, so there is no
-    /// deadline above this to expire.
+    /// The student closed the dialog — the only thing that ends a login.
     #[tauri::command]
     pub async fn harness_sign_in_cancel(provider: Provider) -> Result<(), String> {
-        tokio::task::spawn_blocking(move || signin::cancel(provider))
-            .await
-            .map_err(|e| e.to_string())?
+        blocking(move || signin::cancel(provider)).await
     }
 
-    /// The Chat page, on open and on a provider switch. Codex answers a read
-    /// for its plan windows; Claude has no such request over `stream-json`,
-    /// so its windows keep arriving with a turn and this is a no-op for it.
+    /// Only Codex can be asked for its plan windows; the other providers'
+    /// arrive with a turn.
     #[tauri::command]
     pub async fn harness_refresh_rate_limits(
         state: State<'_, HarnessState>,
@@ -1763,9 +1448,11 @@ pub mod app {
             return Ok(());
         }
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || h.refresh_codex_rate_limits())
-            .await
-            .map_err(|e| e.to_string())
+        blocking(move || {
+            h.refresh_codex_rate_limits();
+            Ok(())
+        })
+        .await
     }
 
     #[tauri::command]
@@ -1773,9 +1460,7 @@ pub mod app {
         state: State<'_, HarnessState>,
     ) -> Result<Vec<ModelInfo>, String> {
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || h.codex_models())
-            .await
-            .map_err(|e| e.to_string())?
+        blocking(move || h.codex_models()).await
     }
 
     #[tauri::command]
@@ -1783,23 +1468,13 @@ pub mod app {
         state: State<'_, HarnessState>,
     ) -> Result<Vec<antigravity::ModelInfo>, String> {
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || h.antigravity_models())
-            .await
-            .map_err(|e| e.to_string())?
+        blocking(move || h.antigravity_models()).await
     }
 
-    /// Allow what an Antigravity thread was just stopped at.
-    ///
-    /// `rule` is the one a `permission_needed` event suggested, or the
-    /// student's edit of it, in `agy`'s syntax. It is stored with the other
-    /// approvals and the thread's process is dropped, because a live `agy`
-    /// never re-reads its rules (measured): the next message resumes the
-    /// conversation with `--conversation` and the rules rewritten. Nothing is
-    /// sent from here — the follow-up is the webview's to send.
-    ///
-    /// Refused while a turn is running, since dropping the process would end
-    /// it; and refused for a rule one of Oculus's own denies covers, since
-    /// deny beats allow and the approval would silently do nothing.
+    /// Allow what an Antigravity thread was just stopped at. `rule` is in
+    /// `agy`'s syntax. It is stored and the thread's process dropped (a live
+    /// `agy` never re-reads its rules); the webview sends the follow-up.
+    /// Refused mid-turn, and for a rule one of Oculus's own denies covers.
     #[tauri::command]
     pub async fn harness_antigravity_allow(
         state: State<'_, HarnessState>,
@@ -1840,9 +1515,8 @@ pub mod app {
         antigravity_rules::stored(&pool).await
     }
 
-    /// Take an approval back. The settings file is rewritten now rather than
-    /// at the next spawn — it is the student's own file, and their own `agy`
-    /// in a terminal reads it too — and every idle Antigravity thread's
+    /// Take an approval back. The settings file is rewritten now (the
+    /// student's own `agy` reads it too), and every idle Antigravity thread's
     /// process is dropped so none keeps running under the rule.
     #[tauri::command]
     pub async fn harness_antigravity_revoke(
@@ -1854,11 +1528,8 @@ pub mod app {
         rules.retain(|r| r != rule.trim());
         antigravity_rules::save(&pool, &rules).await?;
         let written = rules.clone();
-        tokio::task::spawn_blocking(move || {
-            antigravity_rules::install(&crate::paths::data_dir(), Some(written))
-        })
-        .await
-        .map_err(|e| e.to_string())??;
+        blocking(move || antigravity_rules::install(&crate::paths::data_dir(), Some(written)))
+            .await?;
         for id in state.harness.live_threads(Provider::Antigravity) {
             if !state.queue.lock().unwrap().is_busy(id) {
                 state.harness.close(id);
@@ -1867,43 +1538,29 @@ pub mod app {
         Ok(rules)
     }
 
-    /// Claude Code's catalogue, for the same picker — read off the CLI's
-    /// `initialize` answer, which starts no turn and bills nothing.
+    /// Claude Code's catalogue, off the CLI's `initialize` answer — no turn,
+    /// nothing billed.
     #[tauri::command]
     pub async fn harness_claude_models(
         state: State<'_, HarnessState>,
     ) -> Result<Vec<claude::ModelInfo>, String> {
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || h.claude_models())
-            .await
-            .map_err(|e| e.to_string())?
+        blocking(move || h.claude_models()).await
     }
 
-    /// opencode's catalogue, for the same picker. It starts the server if it
-    /// is not up — unlike the rate-limit read, this one is the answer to a
-    /// question the picker asked and there is no cached list behind it.
+    /// opencode's catalogue. Starts the server if it is not up.
     #[tauri::command]
     pub async fn harness_opencode_models(
         state: State<'_, HarnessState>,
     ) -> Result<Vec<opencode::ModelInfo>, String> {
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || h.opencode_models())
-            .await
-            .map_err(|e| e.to_string())?
+        blocking(move || h.opencode_models()).await
     }
 
     // ── opencode credentials ─────────────────────────────────────────────
     //
-    // Settings → AI's provider list and the dialog behind it. Each of these
-    // starts the server if it is down, so none of them is called on a page
-    // opening: the section draws a button first and the student's click is
-    // what spawns opencode. `harness_health` already says whether the binary
-    // exists at all, and it costs nothing, so the section can degrade to
-    // "not installed" without any of this running.
-    //
-    // A credential never comes back out. `opencode_set_api_key` takes the
-    // key and answers with the provider list; there is no read side, because
-    // the app has no reason to know a key it has already handed over.
+    // Each starts the server if it is down, so none is called on a page
+    // opening. A credential never comes back out: there is no read side.
 
     #[tauri::command]
     pub async fn harness_opencode_providers(
@@ -1911,9 +1568,7 @@ pub mod app {
         refresh: bool,
     ) -> Result<opencode::ProviderList, String> {
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || h.opencode_providers(refresh))
-            .await
-            .map_err(|e| e.to_string())?
+        blocking(move || h.opencode_providers(refresh)).await
     }
 
     #[tauri::command]
@@ -1926,11 +1581,7 @@ pub mod app {
     ) -> Result<opencode::ProviderList, String> {
         let h = state.harness.clone();
         let answers = answers.unwrap_or_default();
-        tokio::task::spawn_blocking(move || {
-            h.opencode_set_api_key(&provider, method, &key, &answers)
-        })
-        .await
-        .map_err(|e| e.to_string())?
+        blocking(move || h.opencode_set_api_key(&provider, method, &key, &answers)).await
     }
 
     #[tauri::command]
@@ -1939,16 +1590,11 @@ pub mod app {
         provider: String,
     ) -> Result<opencode::ProviderList, String> {
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || h.opencode_disconnect(&provider))
-            .await
-            .map_err(|e| e.to_string())?
+        blocking(move || h.opencode_disconnect(&provider)).await
     }
 
-    /// Start a browser flow and hand back the URL to open, whether the
-    /// server finishes it by itself (`auto`) and what to tell the student.
-    /// The webview opens the URL in the *system* browser — they are far more
-    /// likely to be signed in to GitHub or OpenAI there than in the app's
-    /// in-app one.
+    /// Start a browser flow: the URL to open (in the system browser), whether
+    /// the server finishes it by itself (`auto`), and what to tell the student.
     #[tauri::command]
     pub async fn harness_opencode_oauth_start(
         state: State<'_, HarnessState>,
@@ -1958,14 +1604,11 @@ pub mod app {
     ) -> Result<opencode::Authorization, String> {
         let h = state.harness.clone();
         let answers = answers.unwrap_or_default();
-        tokio::task::spawn_blocking(move || h.opencode_oauth_authorize(&provider, method, &answers))
-            .await
-            .map_err(|e| e.to_string())?
+        blocking(move || h.opencode_oauth_authorize(&provider, method, &answers)).await
     }
 
-    /// Finish a `code` flow. An `auto` one never calls this — its credential
-    /// is written by the server's own listener, and the dialog finds out by
-    /// polling `harness_opencode_providers` with `refresh`.
+    /// Finish a `code` flow. An `auto` one never calls this; the dialog polls
+    /// `harness_opencode_providers` with `refresh` instead.
     #[tauri::command]
     pub async fn harness_opencode_oauth_finish(
         state: State<'_, HarnessState>,
@@ -1974,21 +1617,12 @@ pub mod app {
         code: Option<String>,
     ) -> Result<opencode::ProviderList, String> {
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || {
-            h.opencode_oauth_callback(&provider, method, code.as_deref())
-        })
-        .await
-        .map_err(|e| e.to_string())?
+        blocking(move || h.opencode_oauth_callback(&provider, method, code.as_deref())).await
     }
 
     /// Send a message; creates the thread when `thread_id` is null. Returns
-    /// the thread id.
-    ///
-    /// A message sent while the thread is working does not reach the CLI: it
-    /// waits in the [`Queue`], and the `queued` event is all the webview
-    /// gets until the running turn ends and it goes out for real. The user's
-    /// row is written by the event path like every other row, so the
-    /// timeline sees the question in order with the answer it gets.
+    /// the thread id. A message sent mid-turn waits in the [`Queue`] and the
+    /// webview gets only a `queued` event until it goes out.
     #[tauri::command]
     pub async fn harness_send(
         state: State<'_, HarnessState>,
@@ -2044,18 +1678,10 @@ pub mod app {
         Ok(id)
     }
 
-    /// Ask a question again, differently: the thread is rewound to that
-    /// question — it and everything after it stop being rows, and the agent
-    /// is told to forget them too — and the new text is sent as the next
-    /// turn.
-    ///
-    /// The agent's half is [`Harness::rewind`], and it is done first: if the
-    /// provider will not rewind, its context and the timeline would disagree,
-    /// and the timeline is the thing the student is about to reason from. It
-    /// is not fatal, though — a question asked before the anchor was recorded
-    /// has nothing to name, and a session the CLI has since dropped cannot be
-    /// resumed — so the rewind falls back to our rows alone and says so on
-    /// the event, which is what the timeline's note is drawn from.
+    /// Ask a question again, differently: rewind the thread to that question
+    /// (rows and, where it can, the agent's context) and send the new text.
+    /// A provider that cannot rewind is not fatal — the rows still go, and
+    /// the `Rewound` event says the agent kept the original.
     #[tauri::command]
     pub async fn harness_edit_resend(
         state: State<'_, HarnessState>,
@@ -2068,11 +1694,8 @@ pub mod app {
         opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
         let pool = crate::store::open_pool().await?;
         let row = store::thread(&pool, thread_id).await?;
-        // The id comes from the webview and everything from it on is about to
-        // be deleted, so it is checked against the row it names.
+        // Checked against the row: everything from it on is about to go.
         let question = store::user_item(&pool, thread_id, item_id).await?;
-        // Rewinding under a running turn would delete rows it is still
-        // writing, and the CLI would answer the old question anyway.
         if !state.queue.lock().unwrap().try_claim(thread_id) {
             return Err("stop the current turn before editing a question".into());
         }
@@ -2098,16 +1721,9 @@ pub mod app {
         .await
     }
 
-    /// Ask the provider to forget this question and everything after it.
-    /// Answers whether it did.
-    ///
-    /// A thread with no anchor on the row is one whose question predates the
-    /// column (migration 28) or whose turn never started; there is nothing to
-    /// name, and no amount of retrying will produce one. A provider that
-    /// refuses, or a session that can no longer be resumed, lands the same
-    /// way: the rows still go, and the `false` travels to the timeline so the
-    /// student is told the agent kept the original rather than finding out
-    /// from an answer that refers to it.
+    /// Ask the provider to forget this question and everything after it, and
+    /// answer whether it did. No anchor, a refusal or an unresumable session
+    /// all answer `false`, which the timeline shows as a note.
     async fn rewind_provider(
         state: &State<'_, HarnessState>,
         pool: &SqlitePool,
@@ -2124,33 +1740,20 @@ pub mod app {
         };
         let (h, provider) = (state.harness.clone(), row.provider);
         let sink = state.sink(thread_id, provider);
-        // A rewind will resume a thread whose process has gone, and that
-        // spawn binds the instructions for every turn after it — so the
-        // lecture brief is resolved here too, not only on a send.
+        // A rewind may respawn the session, which binds the brief.
         let opts = SendOptions {
             model: opts.model.clone().or_else(|| row.model.clone()),
             scope: row.subject_code.clone(),
             lecture: lecture_brief(pool, row).await,
             ..opts.clone()
         };
-        tokio::task::spawn_blocking(move || {
-            h.rewind(thread_id, provider, Some(&resume), &opts, &anchor, sink)
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r)
-        .is_ok()
+        blocking(move || h.rewind(thread_id, provider, Some(&resume), &opts, &anchor, sink))
+            .await
+            .is_ok()
     }
 
-    /// Take the thread back to just before a question: it and everything
-    /// after it stop being rows, and the question comes back as text for the
-    /// composer to hold. Claude Code's rewind, without the branching — there
-    /// is one thread, and going back means the rest is gone.
-    ///
-    /// Nothing is sent. That is the whole difference from
-    /// [`harness_edit_resend`]: rewinding is for picking the conversation up
-    /// again yourself, which is why the words are handed back rather than
-    /// put straight to the agent. The agent forgets either way.
+    /// Take the thread back to just before a question and hand the question
+    /// back for the composer. Unlike [`harness_edit_resend`], nothing is sent.
     #[tauri::command]
     pub async fn harness_rewind(
         state: State<'_, HarnessState>,
@@ -2176,9 +1779,8 @@ pub mod app {
         Ok(question.text)
     }
 
-    /// What is still waiting behind this thread's turn. The queue is in
-    /// memory — a message that was never sent is not history — so this is
-    /// how a reloaded page finds out it is there.
+    /// What is still waiting behind this thread's turn (the queue is only in
+    /// memory), for a reloaded page.
     #[tauri::command]
     pub async fn harness_queued(
         state: State<'_, HarnessState>,
@@ -2202,9 +1804,8 @@ pub mod app {
         Ok(())
     }
 
-    /// Rewrite one that has not gone out yet. It arrives back as a `queued`
-    /// event under the same id, which is how the webview knows to replace it
-    /// rather than add another.
+    /// Rewrite one that has not gone out yet; it comes back as a `queued`
+    /// event under the same id, so the webview replaces it.
     #[tauri::command]
     pub async fn harness_edit_queued(
         state: State<'_, HarnessState>,
@@ -2228,10 +1829,8 @@ pub mod app {
         Ok(())
     }
 
-    /// Stop the running turn, and drop whatever was waiting behind it —
-    /// stop means nothing more goes out, not "one more first". The dropped
-    /// messages are handed back so the composer can return them to the
-    /// student, who typed them and never saw them sent.
+    /// Stop the running turn and drop whatever was waiting behind it,
+    /// handing the dropped texts back to the composer.
     #[tauri::command]
     pub async fn harness_interrupt(
         state: State<'_, HarnessState>,
@@ -2247,9 +1846,7 @@ pub mod app {
             }
         }
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || h.interrupt(thread_id))
-            .await
-            .map_err(|e| e.to_string())??;
+        blocking(move || h.interrupt(thread_id)).await?;
         Ok(cleared.into_iter().map(|m| m.text).collect())
     }
 
@@ -2264,12 +1861,8 @@ pub mod app {
         store::delete_thread(&pool, thread_id).await
     }
 
-    /// Startup: collect the opencode servers a previous run was signalled
-    /// out of. `tauri dev` terminates the app to relaunch it, and a
-    /// force-quit or a crash does the same in production — neither runs
-    /// [`Harness::shutdown`] or any `Drop`, so the server is left listening
-    /// with launchd for a parent and nothing else will ever take it. See
-    /// [`opencode::sweep`] for what makes one safe to kill.
+    /// Startup: kill opencode servers a previous run was terminated out of
+    /// (no `shutdown` or `Drop` ran). See [`opencode::sweep`].
     pub fn sweep_strays() {
         let killed = opencode::sweep();
         if !killed.is_empty() {
@@ -2305,9 +1898,6 @@ pub mod app {
 mod tests {
     use super::*;
 
-    /// A model asked for a name alone mostly gives one, and sometimes dresses
-    /// it up. What it dresses it in is stripped; a whole sentence is refused,
-    /// because the first-line title it would replace is better than prose.
     #[test]
     fn a_name_is_taken_out_of_whatever_the_model_wrapped_it_in() {
         assert_eq!(
@@ -2335,10 +1925,6 @@ mod tests {
         );
     }
 
-    /// One turn per thread, and the rest in the order they were typed. The
-    /// queue is the whole of what makes a message sent mid-turn behave: both
-    /// CLIs would take it immediately, and both would ruin the thread doing
-    /// it (`Queue`'s own docs).
     #[test]
     fn a_thread_runs_one_turn_and_the_rest_wait_in_order() {
         let mut q = Queue::default();
@@ -2367,8 +1953,6 @@ mod tests {
         let _ = b;
     }
 
-    /// Stop means nothing more goes out — and hands back what was waiting,
-    /// because the student typed those words and never saw them sent.
     #[test]
     fn stopping_clears_the_queue_and_returns_what_it_held() {
         let mut q = Queue::default();
@@ -2386,20 +1970,16 @@ mod tests {
             vec!["one".to_string(), "three".to_string()]
         );
         assert!(q.list(7).is_empty());
-        // The turn itself is still running: only its `TurnFinished` releases
-        // the thread, and it finds nothing waiting.
+        // Only the running turn's `TurnFinished` releases the thread.
         assert!(!q.try_claim(7));
         assert!(q.next(7).is_none());
         assert!(q.try_claim(7));
     }
 
-    /// The scope is appended, not substituted: a scoped thread gets the whole
-    /// library brief *and* the subject it is about, because it still reads
-    /// across `courses/` and still writes only to `agents/`.
+    /// The scope is appended to the library brief, not substituted.
     #[test]
     fn a_scoped_thread_keeps_the_library_brief_and_names_its_folder() {
-        let root = std::env::temp_dir().join("oculus-harness-scope");
-        let _ = std::fs::remove_dir_all(&root);
+        let root = crate::test_support::Scratch::new("harness-scope");
         std::fs::create_dir_all(root.join("courses/COMP30026_2026_SM2")).unwrap();
 
         let general = instructions(&root, None, None);
@@ -2411,10 +1991,8 @@ mod tests {
             !general.contains("This conversation"),
             "no scope section on a general thread"
         );
-        // The memory contract rides every brief, scoped or not, and it is two
-        // halves: the index is opened at the top, and a fact is written the
-        // moment it is true. Trimming either one is what made memory
-        // something that happened in the threads that happened to think of it.
+        // The memory contract rides every brief, both halves: read the index
+        // first, write a fact the moment it is true.
         assert!(
             general.contains("oculus memory list"),
             "the index is read with the command"
@@ -2438,29 +2016,20 @@ mod tests {
             "the scope is appended to the same brief"
         );
         assert!(scoped.contains("`../courses/COMP30026_2026_SM2/`"));
-        // The bucket is reached by flag rather than by path, which is what
-        // stopped a subject fact from being filed across subjects — and what
-        // keeps the unwritable path (the course folder's own
-        // `agents/memories/`, which every sandbox here refuses) out of the
-        // brief entirely.
+        // The subject bucket is named by flag, never by the course folder's
+        // own `agents/memories/` path, which every sandbox refuses.
         assert!(scoped.contains("oculus memory list -s COMP30026_2026_SM2"));
         assert!(
             !scoped.contains("../courses/COMP30026_2026_SM2/agents/memories"),
             "the unwritable path is not offered as a place to write"
         );
-        let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The lecture is a third layer on the same brief, not a replacement for
-    /// either of the two under it: a thread opened in the player's dock still
-    /// reads the whole library and is still about that lecture's subject. It
-    /// names the recording folder as the agent would have to type it — from
-    /// `agents/` — and carries the chapters inline, so the first question
-    /// does not cost a turn spent reading them back.
+    /// The lecture is a third layer on the same brief, with paths as typed
+    /// from `agents/` and the chapters inline.
     #[test]
     fn a_lecture_thread_keeps_both_briefs_and_names_the_recording() {
-        let root = std::env::temp_dir().join("oculus-harness-lecture");
-        let _ = std::fs::remove_dir_all(&root);
+        let root = crate::test_support::Scratch::new("harness-lecture");
         std::fs::create_dir_all(root.join("courses/COMP30026_2026_SM2")).unwrap();
 
         let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None);
@@ -2491,8 +2060,6 @@ mod tests {
             "chapters are inline"
         );
         assert!(full.contains("the moment it was sent at"));
-        // The date is the only thing here that says which week's deck goes
-        // with the recording — the title is the timetable's.
         assert!(full.contains("2026-09-08"), "the recording's date is named");
         assert!(
             full.contains("oculus files COMP30026_2026_SM2 --type pdf"),
@@ -2508,12 +2075,9 @@ mod tests {
                 ..lecture
             }),
         );
-        // The library brief names `lectures/<id>/transcript.vtt` as a shape,
-        // so what must be absent is this lecture's own path.
         assert!(
             !no_transcript.contains("`../lectures/abc-123/transcript.vtt`"),
             "a transcript that is not on disk is not named"
         );
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

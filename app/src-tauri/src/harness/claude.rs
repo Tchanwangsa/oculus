@@ -1,122 +1,58 @@
 //! The Claude Code bridge: one long-lived `claude -p` process per thread.
 //!
-//! The CLI is run in its stream-json mode — user turns go in as one JSON line
-//! each on stdin, and everything it does comes back as JSON lines on stdout:
-//! Anthropic's own stream events for live text, a full `assistant` message per
-//! block, a `user` message per tool result, and a `result` line closing each
-//! turn. The process stays up between turns, which is what makes the second
-//! message cheap; a thread whose process has gone is resumed by session id
-//! with `--resume`, which the CLI persists itself under `~/.claude`.
+//! Stream-json both ways: a user turn is one JSON line on stdin; stdout
+//! carries stream events for live text, an `assistant` message per block, a
+//! `user` message per tool result, and a `result` closing each turn. The
+//! process stays up between turns; a thread whose process has gone resumes
+//! with `--resume <session id>`.
 //!
-//! Permission prompts have nowhere to go from here yet, so they are
-//! configured to auto-deny (`--permission-prompts none`) rather than block:
-//! under `-p` a prompt with no answerer would hang the turn forever. So what
-//! the agent may do has to be settled up front, and it is settled three ways
-//! at once (`settings_json`), each measured against the library:
-//!
-//! - `--add-dir <library>` opens the whole library to reads. Without it the
-//!   CLI scopes *listing* to the cwd, and `ls ../courses` is refused.
-//! - Claude's own sandbox (`sandbox.enabled`) runs every Bash command inside
-//!   a seatbelt profile whose only writable root is the cwd, and auto-allows
-//!   Bash while it does. That is what turns `echo x > ../courses/f` into
-//!   "operation not permitted" instead of a file, and what lets a piped
-//!   `oculus files | head` run without an approval it could never get.
-//!   That auto-allow is the analyser's judgement of each command's *shape*,
-//!   though, and it does not stretch to a plan: a multi-line `--brief`, a loop
-//!   over subjects or a compound line falls through to a prompt nobody can
-//!   answer, and the denial sticks for the rest of the session. So
-//!   `Bash(oculus:*)` is allowed by name as well — the one binary a thread is
-//!   meant to write the board through, cleared however the command is shaped.
-//!   The one exception is the database, which is writable *as three files*
-//!   (`oculus.db` and its WAL sidecars) because `oculus project` / `oculus
-//!   task` are how a plan becomes the board's rows, and SQLite answers a
-//!   sandbox that will not let it touch `oculus.db-wal` with "attempt to
-//!   write a readonly database" — which is what every `oculus task add` from
-//!   a thread used to do. An `Edit` deny on `oculus.db*` cannot be the thing
-//!   that keeps the file tools off it: the CLI merges `Edit(...)` deny rules
-//!   into the sandbox's own `denyWrite`, so that rule denied the database at
-//!   the OS level too and cancelled the three paths it had just been given —
-//!   deny beats allow, so the sandbox half of this fix could never land while
-//!   the deny stood. `sqlite3` is denied by name instead: the CLI is the only
-//!   door, because it is the only thing that knows what a valid row is.
-//! - Deny rules on `Edit` for every sibling of `agents/`, because `--add-dir`
-//!   would otherwise put the courses inside `acceptEdits`' reach. Deny beats
-//!   allow in the CLI's rule order, so the siblings are named rather than
-//!   the root denied and `agents/` re-allowed. Three paths *inside*
-//!   `agents/` are denied too — `skills/` and the `.claude/skills` and
-//!   `.agents/skills` links the scanning CLIs find them through
-//!   (`crate::agents`) — since all are generated and a thread could otherwise
-//!   edit the procedures it runs under.
-//!
-//! Auto-memory is switched off in the same settings: the library has its own
-//! memory layer under `agents/`, and asked to write there the CLI reached for
-//! `~/.claude/projects/…/memory/` instead.
+//! `--permission-prompts none` auto-denies, because under `-p` an unanswered
+//! prompt hangs the turn — so containment is settled up front in
+//! `settings_json`. See docs/harness.md.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
 
+use super::child::{self, str_of, ChildProc, ThreadSpawn};
 use super::event::{cap_output, classify, HarnessEvent, Provider, RateWindow};
-use super::{RawLog, Sink};
+use super::protected::{LIBRARY_DIRS, ROOT_FILE_GLOBS, WORKSPACE_DIRS};
+use super::Sink;
 
 pub struct ClaudeSpawn {
-    pub bin: PathBuf,
-    /// The library's `agents/` folder — the only writable root.
-    pub cwd: PathBuf,
-    /// The library root, opened for reads with `--add-dir`.
-    pub library: PathBuf,
-    /// Where the `oculus` binary actually is, so the permission rule can name
-    /// the absolute path as well as the bare command. `None` only when
-    /// discovery found nothing, in which case the name is all there is.
+    pub base: ThreadSpawn,
+    /// The discovered `oculus` binary, allowed by absolute path as well as name.
     pub oculus: Option<PathBuf>,
-    /// Resume this session rather than starting one.
-    pub resume: Option<String>,
-    pub model: Option<String>,
-    /// `--effort`: one of `low`, `medium`, `high`, `xhigh`, `max`. Left off
-    /// when None, which leaves the model's own default in charge. Unlike
-    /// Codex, which takes an effort per turn, this is fixed for the process,
-    /// so a level chosen mid-thread applies from the next resume.
-    pub effort: Option<String>,
     /// `default`, `acceptEdits`, `plan`, `bypassPermissions`.
     pub permission_mode: String,
     /// Appended to the CLI's own system prompt.
     pub system_append: String,
-    pub env: Vec<(String, String)>,
-    pub raw_log: Option<RawLog>,
 }
 
 pub struct ClaudeSession {
-    child: Mutex<Child>,
-    stdin: Mutex<ChildStdin>,
-    alive: Arc<AtomicBool>,
+    proc: ChildProc,
     request_ids: AtomicU64,
-    /// Set between asking the CLI to stop and the `result` that answers.
-    /// The translator reads it, because an interrupted turn is not something
-    /// the `result` line says plainly — see the `result` arm below.
+    /// Set between asking the CLI to stop and the `result` that answers; the
+    /// `result` line does not say plainly that it was interrupted.
     interrupting: Arc<AtomicBool>,
-    /// Control requests waiting on their `control_response`, by request id.
-    /// `interrupt` does not wait — it is answered by the `result` that
-    /// follows — but a rewind has to know whether it actually happened
-    /// before the rows are deleted on the strength of it.
+    /// Control requests (only `rewind`) waiting on their `control_response`.
     pending: Mutex<HashMap<String, mpsc::Sender<Value>>>,
-    /// Set between a message going in and the `result` that closes its turn.
-    /// A process that dies in that window has to close the turn anyway:
-    /// upstream a thread is only released for its next message by a
-    /// `TurnFinished` (`Queue` in the manager), and the window is a real one
-    /// — a model name the CLI rejects kills it before the first stream
-    /// event, which is the point at which `turn_open` would otherwise notice.
+    /// Set between a message going in and the `result` that closes its turn,
+    /// so a process that dies before its first stream event (a rejected model
+    /// name) still emits the `TurnFinished` the manager's queue waits on.
     expecting: Arc<AtomicBool>,
 }
 
 impl ClaudeSession {
     pub fn spawn(cfg: ClaudeSpawn, sink: Sink) -> Result<Arc<Self>, String> {
-        let mut cmd = Command::new(&cfg.bin);
+        let base = cfg.base;
+        let mut cmd = Command::new(&base.bin);
         cmd.arg("-p")
             .args(["--input-format", "stream-json"])
             .args(["--output-format", "stream-json"])
@@ -124,137 +60,71 @@ impl ClaudeSession {
             .arg("--include-partial-messages")
             .args(["--permission-mode", &cfg.permission_mode])
             .args(["--permission-prompts", "none"]);
-        if let Some(m) = &cfg.model {
+        if let Some(m) = &base.model {
             cmd.args(["--model", m]);
         }
-        if let Some(e) = &cfg.effort {
+        if let Some(e) = &base.effort {
             cmd.args(["--effort", e]);
         }
-        if let Some(id) = &cfg.resume {
+        if let Some(id) = &base.resume {
             cmd.args(["--resume", id]);
         }
         if !cfg.system_append.trim().is_empty() {
             cmd.args(["--append-system-prompt", &cfg.system_append]);
         }
-        cmd.args(["--add-dir", &cfg.library.display().to_string()]);
-        cmd.args(["--settings", &settings_json(&cfg.library, &cfg.cwd, cfg.oculus.as_deref())]);
-        cmd.current_dir(&cfg.cwd)
+        cmd.args(["--add-dir", &base.library.display().to_string()]);
+        cmd.args(["--settings", &settings_json(&base.library, &base.cwd, cfg.oculus.as_deref())]);
+        cmd.current_dir(&base.cwd)
             .env_clear()
-            .envs(cfg.env.iter().map(|(k, v)| (k, v)))
-            // bb sets this too: the CLI gates some behaviour on how it was
-            // entered, and "cli" is the interactive-install path.
-            .env("CLAUDE_CODE_ENTRYPOINT", "cli")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .envs(base.env.iter().map(|(k, v)| (k, v)))
+            // The CLI gates some behaviour on its entrypoint.
+            .env("CLAUDE_CODE_ENTRYPOINT", "cli");
+        let (proc, stdout) = ChildProc::spawn("claude", &mut cmd, true)?;
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("cannot start {}: {e}", cfg.bin.display()))?;
-        let stdin = child.stdin.take().ok_or("no stdin on claude child")?;
-        let stdout = child.stdout.take().ok_or("no stdout on claude child")?;
-        let stderr = child.stderr.take().ok_or("no stderr on claude child")?;
-
-        let alive = Arc::new(AtomicBool::new(true));
         let interrupting = Arc::new(AtomicBool::new(false));
         let expecting = Arc::new(AtomicBool::new(false));
         let session = Arc::new(ClaudeSession {
-            child: Mutex::new(child),
-            stdin: Mutex::new(stdin),
-            alive: alive.clone(),
+            proc,
             request_ids: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             interrupting: interrupting.clone(),
             expecting: expecting.clone(),
         });
 
-        // stderr is the CLI's own log. Keep a tail so a process that dies
-        // before saying anything on stdout can still explain itself.
-        let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        {
-            let tail = stderr_tail.clone();
-            std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    let mut t = tail.lock().unwrap();
-                    if t.len() >= 20 {
-                        t.remove(0);
-                    }
-                    t.push(line);
-                }
-            });
-        }
-
         let reader_session = session.clone();
-        let raw_log = cfg.raw_log;
+        let raw_log = base.raw_log;
         std::thread::spawn(move || {
             let mut state = Translator {
                 interrupting,
                 expecting: expecting.clone(),
                 ..Default::default()
             };
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(log) = &raw_log {
-                    log.write(&line);
-                }
-                let Ok(v) = serde_json::from_str::<Value>(&line) else {
-                    continue;
-                };
+            child::read_json_lines(stdout, raw_log.as_ref(), |v| {
                 if v.get("type").and_then(|t| t.as_str()) == Some("control_response") {
                     reader_session.settle(&v);
-                    continue;
+                    return;
                 }
                 for ev in state.translate(&v) {
                     sink(ev);
                 }
-            }
-            // EOF: the process is gone or going. Reap it for the code.
-            alive.store(false, Ordering::SeqCst);
-            let code = reader_session
-                .child
-                .lock()
-                .unwrap()
-                .wait()
-                .ok()
-                .and_then(|s| s.code());
-            if expecting.swap(false, Ordering::SeqCst) || !state.turn_open_closed_cleanly() {
-                let tail = stderr_tail.lock().unwrap().join("\n");
-                let msg = if tail.trim().is_empty() {
-                    format!("claude exited (code {code:?}) mid-turn")
-                } else {
-                    format!("claude exited (code {code:?}) mid-turn:\n{tail}")
-                };
-                sink(HarnessEvent::error_for(Provider::Claude, msg));
-                sink(HarnessEvent::TurnFinished {
-                    status: "failed".into(),
-                });
-            }
-            sink(HarnessEvent::Exited { code });
+            });
+            reader_session.proc.finish(&sink, Provider::Claude, || {
+                expecting.swap(false, Ordering::SeqCst) || state.turn_open
+            });
         });
 
         Ok(session)
     }
 
     pub fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::SeqCst)
+        self.proc.is_alive()
     }
 
-    fn write_line(&self, v: &Value) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().unwrap();
-        let line = serde_json::to_string(v).map_err(|e| e.to_string())?;
-        stdin
-            .write_all(line.as_bytes())
-            .and_then(|_| stdin.write_all(b"\n"))
-            .and_then(|_| stdin.flush())
-            .map_err(|e| format!("claude stdin: {e}"))
-    }
-
-    /// One user turn. The CLI takes the next line as soon as the previous
-    /// turn's `result` is out — and takes one mid-turn too, queueing it
-    /// itself and running it the instant the current turn ends, which is why
-    /// the manager holds messages back rather than letting them through.
+    /// One user turn. A line sent mid-turn is queued by the CLI itself, which
+    /// is why the manager holds messages back until `TurnFinished`.
     pub fn send(&self, text: &str) -> Result<(), String> {
         self.expecting.store(true, Ordering::SeqCst);
-        self.write_line(&serde_json::json!({
+        self.proc.write_line(&serde_json::json!({
             "type": "user",
             "message": { "role": "user", "content": text },
             "parent_tool_use_id": null,
@@ -262,23 +132,20 @@ impl ClaudeSession {
         }))
     }
 
-    /// Stop the current turn without ending the session. The CLI answers
-    /// with a `control_response`, emits the half-written assistant message as
-    /// an ordinary `assistant` line, and closes the turn with a `result` that
-    /// calls itself an error. The flag is how the translator tells that one
-    /// apart from a real failure.
+    /// Stop the current turn without ending the session. The CLI emits the
+    /// partial answer as an ordinary `assistant` line, then a `result` that
+    /// calls itself an error — the flag tells that apart from a real failure.
     pub fn interrupt(&self) -> Result<(), String> {
         self.interrupting.store(true, Ordering::SeqCst);
         let id = self.request_ids.fetch_add(1, Ordering::SeqCst);
-        self.write_line(&serde_json::json!({
+        self.proc.write_line(&serde_json::json!({
             "type": "control_request",
             "request_id": format!("oculus-{id}"),
             "request": { "subtype": "interrupt" },
         }))
     }
 
-    /// Hand a `control_response` to whoever is waiting on it. A response
-    /// nobody asked about — the one an `interrupt` gets — is dropped.
+    /// Hand a `control_response` to its waiter; unawaited ones are dropped.
     fn settle(&self, v: &Value) {
         let Some(id) = v.pointer("/response/request_id").and_then(|s| s.as_str()) else {
             return;
@@ -288,29 +155,21 @@ impl ClaudeSession {
         }
     }
 
-    /// Drop a question and everything after it from the CLI's *own* session,
-    /// so the agent's context matches the thread the student is reading.
-    ///
-    /// `target_message_uuid` is the CLI's id for the user message, which it
-    /// never puts on stdout — it is read out of the session transcript when
-    /// the turn ends ([`anchor_for`]) and kept on the row.
-    ///
-    /// This waits for the `control_response`, unlike every other line written
-    /// here: the rows are deleted on the strength of the answer, so a rewind
-    /// that quietly did nothing would put the thread and the agent back out
-    /// of step in the one place the student is guaranteed to notice.
+    /// Drop a question and everything after it from the CLI's own session.
+    /// `target_message_uuid` never appears on stdout; it comes from the
+    /// transcript ([`anchor_for`]). Waits for the answer, because the rows are
+    /// deleted on the strength of it.
     pub fn rewind(&self, target_message_uuid: &str) -> Result<(), String> {
         let id = format!("oculus-{}", self.request_ids.fetch_add(1, Ordering::SeqCst));
         let (tx, rx) = mpsc::channel();
         self.pending.lock().unwrap().insert(id.clone(), tx);
-        let sent = self.write_line(&serde_json::json!({
+        let sent = self.proc.write_line(&serde_json::json!({
             "type": "control_request",
             "request_id": id,
             "request": {
                 "subtype": "rewind_conversation",
                 "target_message_uuid": target_message_uuid,
-                // The manager only rewinds a thread that is between turns, so
-                // there is nothing running to cut short.
+                // The manager only rewinds between turns.
                 "interrupt_if_running": false,
             },
         }));
@@ -318,9 +177,7 @@ impl ClaudeSession {
             rx.recv_timeout(Duration::from_secs(30))
                 .map_err(|_| "claude did not answer the rewind".to_string())
         });
-        // A write that failed and a wait that timed out both leave the id in
-        // the map, where it would hold a sender for a response that is never
-        // coming.
+        // A failed write or a timeout would otherwise leave the id behind.
         self.pending.lock().unwrap().remove(&id);
         let v = answer?;
         if v.pointer("/response/subtype").and_then(|s| s.as_str()) != Some("success") {
@@ -337,31 +194,16 @@ impl ClaudeSession {
     }
 
     pub fn kill(&self) {
-        let mut child = self.child.lock().unwrap();
-        let _ = child.kill();
-        let _ = child.wait();
-        self.alive.store(false, Ordering::SeqCst);
+        self.proc.kill();
     }
 }
 
-impl Drop for ClaudeSession {
-    fn drop(&mut self) {
-        if let Ok(mut c) = self.child.lock() {
-            let _ = c.kill();
-        }
-    }
-}
-
-/// One row of the CLI's own `/model` catalogue, as `initialize` reports it.
-/// Raw on purpose: which of `value` and `resolvedModel` becomes the id the
-/// picker stores, and how a row is labelled, is the frontend's adapter
-/// (`claudeAsModels` in `app/src/lib/harness.ts`), next to Codex's and
-/// opencode's.
+/// One row of the CLI's `/model` catalogue, as `initialize` reports it. Raw
+/// on purpose: `claudeAsModels` in `app/src/lib/harness.ts` adapts it.
 #[derive(serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
-    /// What `/model` would pass on: an alias (`sonnet`, `opus[1m]`,
-    /// `default`) or a full name (`claude-fable-5-1[1m]`).
+    /// An alias (`sonnet`, `opus[1m]`, `default`) or a full name.
     pub value: String,
     /// The concrete model the alias stands for today.
     pub resolved_model: String,
@@ -371,32 +213,21 @@ pub struct ModelInfo {
     pub supported_effort_levels: Vec<String>,
 }
 
-/// How long the model probe may take. It answers in well under a second; this
-/// is for a CLI that is wedged on something — a login prompt, an update — not
-/// for a slow one.
+/// For a CLI wedged on a login prompt or an update, not a slow one.
 const MODELS_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Ask the installed CLI which models it offers, without starting a turn.
-///
-/// The catalogue rides the answer to the SDK's `initialize` control request —
-/// the handshake the Agent SDK opens every session with — so one line in and
-/// one `control_response` out is the whole exchange, and no API call is made.
-/// It is a throwaway process rather than a question put to a live session
-/// because a session only exists per thread, and the picker needs the list
-/// before there is one. The flags keep that process inert: no hooks, no MCP
-/// servers, nothing written to `~/.claude`. `cwd` is the threads' own folder,
-/// so the catalogue is the one a thread will actually be offered.
-///
-/// The child is killed rather than left to exit: in stream-json mode it sits
-/// waiting for a user message that is never coming.
+/// Ask the installed CLI which models it offers, without starting a turn or
+/// making an API call: the catalogue rides the answer to the stream-json
+/// `initialize` control request. A throwaway, inert process (no hooks, no
+/// MCP, no session persisted), killed afterwards since it waits for input.
 pub fn list_models(
     bin: &Path,
     cwd: &Path,
     env: &[(String, String)],
 ) -> Result<Vec<ModelInfo>, String> {
     const REQUEST_ID: &str = "oculus-models";
-    let mut child = Command::new(bin)
-        .arg("-p")
+    let mut cmd = Command::new(bin);
+    cmd.arg("-p")
         .args(["--input-format", "stream-json"])
         .args(["--output-format", "stream-json"])
         .arg("--verbose")
@@ -406,33 +237,10 @@ pub fn list_models(
         .current_dir(cwd)
         .env_clear()
         .envs(env.iter().map(|(k, v)| (k, v)))
-        // As the bridge does, so the catalogue is the one a thread gets.
-        .env("CLAUDE_CODE_ENTRYPOINT", "cli")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("cannot start {}: {e}", bin.display()))?;
-
-    // Held until the child is killed: closing stdin is end-of-input, and a
-    // CLI that sees it first may leave without answering.
-    let mut stdin = child.stdin.take().ok_or("no stdin on claude child")?;
-    let stdout = child.stdout.take().ok_or("no stdout on claude child")?;
-    let stderr = child.stderr.take().ok_or("no stderr on claude child")?;
-
-    let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    {
-        let tail = stderr_tail.clone();
-        std::thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                let mut t = tail.lock().unwrap();
-                if t.len() >= 20 {
-                    t.remove(0);
-                }
-                t.push(line);
-            }
-        });
-    }
+        .env("CLAUDE_CODE_ENTRYPOINT", "cli");
+    // stdin stays open until the kill: an early EOF may make the CLI leave
+    // unanswered.
+    let (proc, stdout) = ChildProc::spawn("claude", &mut cmd, true)?;
 
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -445,19 +253,14 @@ pub fn list_models(
                 return;
             }
         }
-        // EOF with no answer: the process is gone.
         let _ = tx.send(None);
     });
 
-    let request = serde_json::json!({
+    let written = proc.write_line(&serde_json::json!({
         "type": "control_request",
         "request_id": REQUEST_ID,
         "request": { "subtype": "initialize" },
-    });
-    let written = stdin
-        .write_all(format!("{request}\n").as_bytes())
-        .and_then(|_| stdin.flush())
-        .map_err(|e| format!("claude stdin: {e}"));
+    }));
     let answer = written.and_then(|()| {
         rx.recv_timeout(MODELS_TIMEOUT).map_err(|_| {
             format!(
@@ -467,26 +270,15 @@ pub fn list_models(
         })
     });
 
-    let _ = child.kill();
-    let code = child.wait().ok().and_then(|s| s.code());
-    drop(stdin);
+    let code = proc.kill();
     match answer? {
         Some(result) => result,
-        None => {
-            let tail = stderr_tail.lock().unwrap().join("\n");
-            Err(if tail.trim().is_empty() {
-                format!("claude exited (code {code:?}) before listing its models")
-            } else {
-                format!("claude exited (code {code:?}) before listing its models:\n{tail}")
-            })
-        }
+        None => Err(proc.with_tail(format!("claude exited (code {code:?}) before listing its models"))),
     }
 }
 
-/// The catalogue out of one stdout line, or None when the line is not the
-/// answer to `request_id`. Tolerant per row: a field a future CLI drops reads
-/// as empty, and a row with neither name is skipped rather than failing the
-/// list — the adapter decides what an empty field costs.
+/// The catalogue out of one stdout line, or None when it is not the answer to
+/// `request_id`. A missing field reads as empty; a row with no name is skipped.
 fn models_from_response(v: &Value, request_id: &str) -> Option<Result<Vec<ModelInfo>, String>> {
     if v.get("type").and_then(|t| t.as_str()) != Some("control_response")
         || v.pointer("/response/request_id").and_then(|s| s.as_str()) != Some(request_id)
@@ -520,86 +312,33 @@ fn models_from_response(v: &Value, request_id: &str) -> Option<Result<Vec<ModelI
         .collect()))
 }
 
-/// The inline `--settings` document: see the module docs for what each part
-/// buys. `//` prefixes an absolute path in the CLI's rule syntax. The root's
-/// files are named by suffix rather than with a bare `*`: measured, `*.log`
-/// at the root leaves `agents/memories/x.log` alone, but a bare `*` denied
-/// every write under `agents/` too.
-fn settings_json(
-    library: &std::path::Path,
-    cwd: &std::path::Path,
-    oculus: Option<&std::path::Path>,
-) -> String {
+/// The inline `--settings` document; docs/harness.md explains each part.
+/// `//` prefixes an absolute path in the CLI's rule syntax. Root files are
+/// denied by suffix, because a bare `*` also denied everything under `agents/`.
+fn settings_json(library: &Path, cwd: &Path, oculus: Option<&Path>) -> String {
     let root = library.display().to_string();
     let abs = root.trim_start_matches('/');
-    let mut deny: Vec<String> = [
-        "courses/**",
-        "lectures/**",
-        "canvas-session/**",
-        // `oculus.db*` is deliberately NOT denied here. The CLI merges
-        // `Edit(...)` deny rules into the sandbox's own `denyWrite` — "Merged
-        // with paths from Edit(...) deny permission rules", its settings
-        // schema — so denying the database to the file tools denied it at the
-        // OS level as well, cancelling the three `allowWrite` paths below and
-        // handing every `oculus task add` from a thread SQLite's "attempt to
-        // write a readonly database". The two halves of the fix were fighting
-        // each other. `Bash(sqlite3:*)` below is what still guards the row
-        // format: the CLI stays the only door.
-        "*.cookie",
-        "*.token",
-        "*.json",
-        "*.log",
-        // The paths inside the writable root that are not the agent's work
-        // but the app's: the generated skills, and both directories a
-        // scanning CLI discovers them through. `agents/` is the one place a
-        // thread may write, so without these the agent can rewrite the
-        // procedures it is about to follow — and the next `oculus docs` would
-        // silently put them back, which is a confusing way to lose an
-        // afternoon. `.agents/` is denied here as well as in Codex's own
-        // sandbox: a thread's rules are about what *this* thread may touch,
-        // not about which CLI is running it.
-        "agents/skills/**",
-        "agents/.claude/**",
-        "agents/.agents/**",
-    ]
+    // Never `oculus.db*`: the CLI merges `Edit(...)` denies into the
+    // sandbox's `denyWrite`, which would cancel `allowWrite` below.
+    let mut deny: Vec<String> = LIBRARY_DIRS
         .iter()
+        .map(|d| format!("{d}/**"))
+        .chain(ROOT_FILE_GLOBS.iter().map(|g| g.to_string()))
+        .chain(WORKSPACE_DIRS.iter().map(|d| format!("agents/{d}/**")))
         .map(|p| format!("Edit(//{abs}/{p})"))
         .collect();
-    // The database is writable at the OS level (see `allowWrite` below), so
-    // the one command that could go around the CLI with it is named here.
-    // `oculus task` knows that a column id must exist and that a breakdown is
-    // one transaction; a hand-written `UPDATE` knows neither, and a mangled
-    // board is the one thing in the library that no re-sync repairs.
+    // The database is OS-writable, so the CLI must stay the only door to it.
     deny.push("Bash(sqlite3:*)".to_string());
 
-    // `autoAllowBashIfSandboxed` clears a Bash call only when the CLI's own
-    // analyser can statically vouch for the command, and a plan is the thing it
-    // cannot vouch for: a `--brief` with newlines in it, a loop over subjects, a
-    // compound line. Those fall through to an approval prompt that
-    // `--permission-prompts none` then denies — and the denial is *sticky*, so
-    // one long brief costs the thread every write it had left. Measured: of 39
-    // `oculus` calls in one thread 36 cleared the analyser, and the 3 that did
-    // not included the `project create` the whole turn was for. So the board's
-    // own door is allowed by name rather than by the shape of each command,
-    // which is what opencode's ruleset already does (`oculus`, `oculus *`) and
-    // what Codex gets for free from `approvalPolicy: never`. This is a prompt
-    // rule, not a sandbox one: the seatbelt below still bounds what the command
-    // may touch, and deny still beats allow, so `sqlite3` stays shut.
+    // `autoAllowBashIfSandboxed` misses commands its analyser cannot vouch
+    // for (multi-line, loops), and the resulting denial sticks for the session.
     let mut allow = vec!["Bash(oculus:*)".to_string()];
-    // And by absolute path, when discovery knows it. The match is on the
-    // command *name*, so `/…/target/release/oculus project create` is not
-    // `oculus` and falls straight through this rule — into an approval prompt
-    // that `--permission-prompts none` denies without a word and that sticks
-    // for the rest of the session. A thread reaches for the full path more
-    // often than it looks: any note or transcript that once learned it while
-    // the bare name was broken keeps using it long after the name is fixed.
+    // The rule matches the command name, so the full path needs its own.
     if let Some(cli) = oculus {
         allow.push(format!("Bash({}:*)", cli.display()));
     }
 
-    // The cwd — `agents/` — plus the database's three files. Nothing else in
-    // the library is writable from a thread; see `paths::db_write_paths` for
-    // why it is the files and not the folder they are in.
+    // `agents/` plus the database's three files (`paths::db_write_paths`).
     let write: Vec<String> = std::iter::once(cwd.display().to_string())
         .chain(
             crate::paths::db_write_paths(library)
@@ -624,43 +363,26 @@ fn settings_json(
 
 // ── Translation ──────────────────────────────────────────────────────────────
 
-/// Per-process translation state. Small on purpose: the stream is almost
-/// stateless, and what state there is exists to dedupe — a tool_use block
+/// Per-process translation state. `started_tools` dedupes: a tool_use block
 /// can appear in more than one `assistant` line of the same message.
 #[derive(Default)]
 struct Translator {
     started_tools: std::collections::HashSet<String>,
     /// Between the first stream event of a turn and its `result`.
     turn_open: bool,
-    /// Whether anything was ever received: an EOF before the first line is
-    /// a spawn failure, not a mid-turn death.
     saw_result: bool,
-    /// What the last request occupied — `result.usage` sums every request in
-    /// the turn, which is spend, not context.
+    /// What the last request occupied; `result.usage` sums the turn (spend).
     last_context_tokens: Option<u64>,
-    /// Shared with the session: whether the turn being closed was stopped on
-    /// purpose.
     interrupting: Arc<AtomicBool>,
-    /// Shared with the session: a turn is owed a `result`. Cleared here, on
-    /// the `result` itself.
     expecting: Arc<AtomicBool>,
-    /// From the `init` line: what this session's transcript is called and
-    /// which working directory files it under. Together they are the only
-    /// way to the uuid a rewind needs, since the uuid of the question never
-    /// comes back on stdout.
+    /// From the `init` line; together they locate the transcript.
     session_id: String,
     cwd: String,
-    /// The first `assistant` line of the open turn. Its ancestry in the
-    /// transcript names the question that started the turn — see
-    /// [`anchor_for`].
+    /// The open turn's first `assistant` uuid — see [`anchor_for`].
     turn_first_assistant: Option<String>,
 }
 
 impl Translator {
-    fn turn_open_closed_cleanly(&self) -> bool {
-        !self.turn_open
-    }
-
     fn open_turn(&mut self, out: &mut Vec<HarnessEvent>) {
         if !self.turn_open {
             self.turn_open = true;
@@ -689,8 +411,7 @@ impl Translator {
                 match et {
                     "message_start" => self.open_turn(&mut out),
                     "content_block_start" => {
-                        // A start can carry a prefix of text; the deltas that
-                        // follow do not repeat it.
+                        // A start can carry text the deltas do not repeat.
                         if let Some(cb) = ev.get("content_block") {
                             match cb.get("type").and_then(|t| t.as_str()) {
                                 Some("text") => {
@@ -728,9 +449,7 @@ impl Translator {
                                         out.push(HarnessEvent::ThinkingDelta { text: t });
                                     }
                                 }
-                                // Tool inputs are never streamed to the
-                                // timeline: the complete call arrives on the
-                                // `assistant` line right after.
+                                // Tool inputs arrive whole on the `assistant` line.
                                 _ => {}
                             }
                         }
@@ -796,8 +515,7 @@ impl Translator {
                 }
             }
             "user" => {
-                // Only tool results come back this way; the user's own text
-                // is what we sent.
+                // Only tool results; the user's own text is what we sent.
                 let Some(content) = v.pointer("/message/content").and_then(|c| c.as_array()) else {
                     return out;
                 };
@@ -820,16 +538,9 @@ impl Translator {
                 self.saw_result = true;
                 let is_error = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false);
                 let subtype = v.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
-                // A stopped turn does not say so. Recorded (the fixture this
-                // line's test replays): `is_error: true`, `subtype:
-                // "error_during_execution"`, `stop_reason: null`, and an
-                // `errors` array holding the CLI's own diagnostic —
-                // `[ede_diagnostic] result_type=user …`, which is the string
-                // that was reaching the timeline as a red row every time the
-                // student pressed stop. `terminal_reason: "aborted_streaming"`
-                // is the only field that names it, so that and the flag we
-                // set when we asked are what decide; the rest is a fallback
-                // for a CLI that words it differently.
+                // A stopped turn reports `is_error: true` with an
+                // `[ede_diagnostic]` in `errors`; only `terminal_reason:
+                // "aborted_streaming"` (or our flag) names it. The rest is fallback.
                 let interrupted = self.interrupting.swap(false, Ordering::SeqCst)
                     || v.get("terminal_reason")
                         .and_then(|t| t.as_str())
@@ -839,9 +550,7 @@ impl Translator {
                         Some("interrupted") | Some("interrupt")
                     )
                     || subtype.contains("interrupt");
-                // An interrupted result reports zeros for everything —
-                // `duration_api_ms: 0`, no tokens, no cost. Folding that in
-                // would blank the thread's usage for a turn that did happen.
+                // An interrupted result reports zero usage; don't fold it in.
                 if let Some(u) = v.get("usage").filter(|_| !interrupted) {
                     let n = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
                     let input = n("input_tokens");
@@ -880,10 +589,8 @@ impl Translator {
                 } else {
                     "completed"
                 };
-                // The question's uuid is readable now that the turn's rows
-                // are on disk, and this is the last moment it can be had:
-                // the transcript is walked back from this turn's first
-                // answer, and the next turn would move that landmark.
+                // The turn's rows are on disk now, and the next turn would
+                // move the landmark `anchor_for` walks back from.
                 let first = self.turn_first_assistant.take();
                 if let Some(path) = transcript_path(&self.cwd, &self.session_id) {
                     if let Some(anchor) = anchor_for(&path, first.as_deref()) {
@@ -923,16 +630,10 @@ impl Translator {
     }
 }
 
-/// Where the CLI keeps a session's transcript.
-///
-/// It is not announced: `memory_paths` on the `init` line would give the
-/// folder away, but it is null whenever auto-memory is off, which is how this
-/// bridge runs it (`settings_json`). So the path is rebuilt the way the CLI
-/// builds it — every character of the working directory that is not a letter
-/// or a digit becomes `-`, measured against real folders rather than assumed.
-/// A slug that does not resolve falls back to finding the file by name, since
-/// the session id is unique across projects and the rule is the CLI's to
-/// change.
+/// Where the CLI keeps a session's transcript: `projects/<cwd slug>/<id>.jsonl`,
+/// the slug being the cwd with every non-alphanumeric char turned to `-`
+/// (the CLI does not announce it with auto-memory off). Falls back to a
+/// search by file name, since session ids are unique.
 fn transcript_path(cwd: &str, session_id: &str) -> Option<PathBuf> {
     if cwd.is_empty() || session_id.is_empty() {
         return None;
@@ -956,17 +657,10 @@ fn transcript_path(cwd: &str, session_id: &str) -> Option<PathBuf> {
     })
 }
 
-/// The uuid of the question a turn answered, read out of the transcript.
-///
-/// The transcript is a tree, not a list: every row names its `parentUuid`,
-/// and a turn's rows hang off the question that started it. So the walk goes
-/// up from the turn's first answer until it reaches a `user` row — skipping
-/// the attachments the CLI threads in between, and skipping `user` rows that
-/// are tool results rather than anything a student typed.
-///
-/// With no answer to start from — an interrupted turn can produce none — the
-/// newest question in the file is taken instead. That is this turn's: the
-/// manager runs one at a time, and the file has just been written.
+/// The uuid of the question a turn answered. The transcript is a tree by
+/// `parentUuid`, so walk up from the turn's first answer to a `user` row that
+/// is not a tool result, skipping attachments. With no answer (an interrupted
+/// turn) take the newest question, which is this turn's.
 fn anchor_for(path: &Path, first_assistant: Option<&str>) -> Option<String> {
     struct Row {
         parent: Option<String>,
@@ -999,7 +693,7 @@ fn anchor_for(path: &Path, first_assistant: Option<&str>) -> Option<String> {
         return newest_question;
     };
     let mut at = start.to_string();
-    // Bounded by the file: a malformed parent chain must not loop forever.
+    // Bounded: a malformed parent chain must not loop forever.
     for _ in 0..by_uuid.len() {
         let row = by_uuid.get(&at)?;
         if row.question {
@@ -1008,10 +702,6 @@ fn anchor_for(path: &Path, first_assistant: Option<&str>) -> Option<String> {
         at = row.parent.clone()?;
     }
     None
-}
-
-fn str_of(v: &Value, key: &str) -> String {
-    v.get(key).and_then(|s| s.as_str()).unwrap_or("").to_string()
 }
 
 /// A tool result's text: the structured `tool_use_result` (stdout + stderr
@@ -1050,14 +740,6 @@ mod tests {
     use super::*;
     use crate::harness::event::ToolKind;
 
-    /// The containment, as the CLI will read it — the counterpart of
-    /// opencode's `the_rendered_config_denies_the_right_things`.
-    ///
-    /// Two halves that have to agree: the seatbelt may write the thread's cwd
-    /// and the database's three files and nothing else, and the file tools are
-    /// denied every sibling of `agents/` *including* the database, so the only
-    /// way a row reaches the board is the `oculus` CLI. `sqlite3` is named
-    /// because the sandbox can no longer stop it.
     #[test]
     fn the_settings_document_opens_the_database_and_nothing_else() {
         let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
@@ -1088,8 +770,6 @@ mod tests {
             .collect();
         for rule in [
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/courses/**)",
-            // Inside the writable root, and the reason they have to be named:
-            // everything else in `agents/` is the agent's to write.
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/agents/skills/**)",
             "Edit(//Users/x/Library/Application Support/com.tchan.oculus/agents/.claude/**)",
             "Bash(sqlite3:*)",
@@ -1097,19 +777,12 @@ mod tests {
             assert!(deny.contains(&rule), "missing {rule} in {deny:?}");
         }
 
-        // And the database must NOT be denied, however tempting it looks
-        // beside the others: an `Edit(...)` deny is merged into the sandbox's
-        // `denyWrite`, so this one rule cancels the `allowWrite` paths above
-        // and every board write from a thread fails as readonly.
+        // An `Edit(...)` deny merges into `denyWrite` and cancels `allowWrite`.
         assert!(
             !deny.iter().any(|r| r.contains("oculus.db")),
             "oculus.db must stay out of deny — it cancels allowWrite: {deny:?}"
         );
 
-        // The CLI is allowed by name, because the sandbox's own auto-allow only
-        // clears commands its analyser can vouch for and a breakdown is not one
-        // of those. `sqlite3` must not have followed it in: deny beats allow,
-        // but only while the two lists stay this far apart.
         let allow: Vec<&str> = v
             .pointer("/permissions/allow")
             .and_then(|a| a.as_array())
@@ -1123,9 +796,6 @@ mod tests {
             "the board's door, and nothing else, is allowed by name"
         );
 
-        // Given the binary's location, the same door is allowed by path too:
-        // a thread that calls the CLI by its full path matches no name rule
-        // and is denied silently.
         let v2: serde_json::Value = serde_json::from_str(&settings_json(
             library,
             &cwd,
@@ -1142,12 +812,8 @@ mod tests {
         assert_eq!(allow2, ["Bash(oculus:*)", "Bash(/opt/oculus/bin/oculus:*)"]);
     }
 
-    /// Replays a recorded `claude -p` session and checks the folded shape.
-    /// The fixture is the real output of `claude 2.1.267` asked to `ls` the
-    /// library and describe it, captured with the flags `spawn` uses.
-    /// A transcript in the shape the CLI writes one: a question, the
-    /// attachments it threads in after it, the answer, then a tool result
-    /// that is also a `user` row and must not be mistaken for a question.
+    /// A question, its attachments, the answer, then a tool result that is
+    /// also a `user` row and must not be mistaken for a question.
     fn transcript(dir: &Path) -> PathBuf {
         let rows = [
             r#"{"type":"user","uuid":"q1","parentUuid":null,"message":{"role":"user","content":"first"}}"#,
@@ -1164,50 +830,35 @@ mod tests {
         path
     }
 
-    /// The question a turn answered is found by walking the transcript's
-    /// parent chain up from the turn's first answer — past the attachments
-    /// the CLI inserts, and never stopping on a tool result.
     #[test]
     fn the_anchor_is_the_question_the_answer_hangs_off() {
-        let dir = std::env::temp_dir().join(format!("oculus-anchor-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_support::Scratch::new("anchor");
         let path = transcript(&dir);
 
         assert_eq!(anchor_for(&path, Some("a2")).as_deref(), Some("q2"));
         assert_eq!(anchor_for(&path, Some("a1")).as_deref(), Some("q1"));
-        // A later answer in the same turn walks back through the tool result
-        // to the same question, not to the tool row.
         assert_eq!(anchor_for(&path, Some("a3")).as_deref(), Some("q2"));
-        // An interrupted turn can produce no answer at all; the newest
-        // question in the file is this turn's.
         assert_eq!(anchor_for(&path, None).as_deref(), Some("q2"));
-        // An answer the file has never heard of anchors nothing rather than
-        // guessing.
         assert_eq!(anchor_for(&path, Some("nope")), None);
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// The transcript is filed under the working directory with every
-    /// character that is not a letter or a digit replaced — measured against
-    /// the CLI's own folders, including the double dash a dotfile produces.
+    /// A dotfile in the cwd produces a double dash.
     #[test]
     fn the_transcript_slug_flattens_everything_but_letters_and_digits() {
-        let dir = std::env::temp_dir().join(format!("oculus-slug-{}", std::process::id()));
+        let dir = crate::test_support::Scratch::new("slug");
         let projects = dir.join("projects").join("-tmp-a-b--claude-c-d");
         std::fs::create_dir_all(&projects).unwrap();
         std::fs::write(projects.join("sess.jsonl"), "").unwrap();
-        std::env::set_var("CLAUDE_CONFIG_DIR", &dir);
+        std::env::set_var("CLAUDE_CONFIG_DIR", &*dir);
 
         let found = transcript_path("/tmp/a b/.claude/c_d", "sess");
         assert_eq!(found.as_deref(), Some(projects.join("sess.jsonl").as_path()));
-        // A session that is nowhere under `projects` is not invented.
         assert_eq!(transcript_path("/tmp/a b/.claude/c_d", "gone"), None);
 
         std::env::remove_var("CLAUDE_CONFIG_DIR");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// Recorded from `claude 2.1.267` asked to `ls` the library.
     #[test]
     fn folds_a_recorded_session() {
         let raw = include_str!("../../fixtures/harness/claude-ls.ndjson");
@@ -1254,12 +905,7 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::RateLimits { windows } if windows.len() == 2)));
     }
 
-    /// A turn stopped mid-answer. The recording is a real one: the CLI sends
-    /// the half-written text as an ordinary `assistant` line, then closes the
-    /// turn with a `result` that calls itself an error and carries its own
-    /// diagnostic — `[ede_diagnostic] result_type=user …`. That string was
-    /// reaching the timeline as a red row every time stop was pressed, and
-    /// the zeroed usage on the same line was blanking the thread's numbers.
+    /// Recorded: the stop's `result` calls itself an error, with zeroed usage.
     #[test]
     fn a_stopped_turn_is_not_an_error() {
         let raw = include_str!("../../fixtures/harness/claude-interrupt.ndjson");
@@ -1278,8 +924,6 @@ mod tests {
             !events.iter().any(|e| matches!(e, HarnessEvent::Usage { .. })),
             "an interrupted result reports zeros; folding them in blanks the meter"
         );
-        // What the agent had already said is a row like any other, so it
-        // survives the turn ending and the reload after it.
         let deltas: String = events
             .iter()
             .filter_map(|e| match e {
@@ -1295,9 +939,8 @@ mod tests {
         assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted"));
     }
 
-    /// The `initialize` answer from CLI 2.1.281, cut down to its models (the
-    /// real line also carries the commands, agents and account). Haiku is the
-    /// row that declares no effort levels at all, and must still arrive.
+    /// `initialize` from CLI 2.1.281, cut to its models. Haiku declares no
+    /// effort levels and must still arrive.
     #[test]
     fn the_initialize_answer_lists_the_models() {
         let line = r#"{"type":"control_response","response":{"subtype":"success","request_id":"oculus-models","response":{"models":[
@@ -1325,8 +968,7 @@ mod tests {
         assert!(models_from_response(&refused, "oculus-models").unwrap().is_err());
     }
 
-    /// The probe against the installed CLI. Ignored because it needs one:
-    /// `cargo test --lib list_models_from_the_real_cli -- --ignored`.
+    /// Needs an installed CLI: `cargo test --lib list_models_from_the_real_cli -- --ignored`.
     #[test]
     #[ignore]
     fn list_models_from_the_real_cli() {

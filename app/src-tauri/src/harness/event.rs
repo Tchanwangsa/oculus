@@ -1,16 +1,8 @@
 //! The one event stream every bridge produces.
 //!
-//! Claude Code and Codex speak different dialects — Anthropic stream events
-//! wrapped in `stream-json` lines on one side, JSON-RPC notifications on the
-//! other — and nothing downstream of the bridge should know which. The
-//! bridges fold both into this enum; the manager persists it, the frontend
-//! renders it, and the CLI prints it. Adding a provider means writing one
-//! translator to here, not touching the timeline.
-//!
-//! Shapes are kept deliberately flat. bb's delta grammar carries keys,
-//! channels and presentation hints so its UI can stay provider-agnostic;
-//! this app has one timeline and one style, so the same information is a
-//! handful of variants with named fields.
+//! Each bridge folds its CLI's dialect into this enum; the manager persists
+//! it, the frontend renders it and the CLI prints it. A new provider is one
+//! translator to here, not a timeline change.
 
 use serde::{Deserialize, Serialize};
 
@@ -49,22 +41,16 @@ impl Provider {
         match self {
             Provider::Claude => "Claude Code",
             Provider::Codex => "Codex",
-            // Lowercase is the project's own branding, and the frontend's
-            // `PROVIDERS` entry spells it the same way.
+            // Lowercase is the project's own branding.
             Provider::Opencode => "opencode",
-            // The product is "Antigravity"; the binary is `agy`. A student
-            // reads the former and types the latter, so the label is the
-            // product and `discover::binary_name` is the only place the
-            // three letters appear.
+            // The product name; the binary `agy` lives in `discover::binary_name`.
             Provider::Antigravity => "Antigravity",
         }
     }
 }
 
-/// What a tool call *is*, independent of what the provider calls it. The
-/// timeline picks an icon and a verb from this; the raw tool name rides
-/// along in [`HarnessEvent::ToolStarted::name`] for anything it does not
-/// cover.
+/// What a tool call *is*, independent of the provider's name for it, which
+/// rides along in [`HarnessEvent::ToolStarted::name`].
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKind {
@@ -74,8 +60,7 @@ pub enum ToolKind {
     Bash,
     /// Grep, Glob, file search.
     Search,
-    /// A shell command that runs the `oculus` binary — the library's own
-    /// door, worth naming so the row can say "Searched the library".
+    /// A shell command that runs the `oculus` binary.
     OculusCli,
     /// A subagent / delegation.
     Task,
@@ -99,21 +84,14 @@ pub struct RateWindow {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HarnessEvent {
-    /// The provider has a session for this thread. Arrives once per process
-    /// start — a resumed thread announces the same id again.
+    /// Once per process start; a resumed thread announces the same id again.
     SessionStarted {
         provider_session_id: String,
         model: Option<String>,
         cwd: String,
     },
-    /// The user's message, echoed once it is on its way to the provider —
-    /// so the timeline has one shape for both sides of the conversation.
-    ///
-    /// `text` is what the student typed. A message sent from the lecture
-    /// player's dock can also carry the moment it was sent at — `at`, the
-    /// playhead's second — which becomes the row's `meta` and the "at 3:40"
-    /// on the bubble. It is skipped when absent so the recorded fixtures the
-    /// bridge tests replay, and the frontend's own type, stay as they were.
+    /// The user's message, echoed once sent. `at` is the lecture playhead's
+    /// second for a message from the player dock; omitted when absent.
     UserMessage {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -121,13 +99,11 @@ pub enum HarnessEvent {
     },
     /// The provider began working on the last user message.
     TurnStarted,
-    /// Live assistant text; the frontend appends. Superseded by the
-    /// [`Self::AssistantMessage`] that follows it.
+    /// Live assistant text, superseded by the [`Self::AssistantMessage`] that follows.
     AssistantDelta { text: String },
     /// Live reasoning text.
     ThinkingDelta { text: String },
-    /// A finished block of assistant text. This is what gets persisted;
-    /// deltas are only ever display.
+    /// A finished block of assistant text: persisted, where deltas are display only.
     AssistantMessage { text: String },
     /// A finished block of reasoning text. Persisted, collapsed by default.
     Thinking { text: String },
@@ -139,7 +115,6 @@ pub enum HarnessEvent {
         name: String,
         /// One line for the row: the command, the path, the query.
         title: String,
-        /// The full input, for the expanded row.
         input: serde_json::Value,
     },
     /// Streamed tool output (command stdout so far).
@@ -149,14 +124,8 @@ pub enum HarnessEvent {
         ok: bool,
         /// Output or error text, capped by the bridge.
         output: String,
-        /// A row title the provider only knew once the call was over, which
-        /// replaces the one [`Self::ToolStarted`] opened with.
-        ///
-        /// Codex's web search is why it exists: its `item/started` carries an
-        /// empty `query` and the real queries arrive with the results, so a
-        /// search row could otherwise never say what was searched for — the
-        /// one thing Claude's `WebSearch` row says from its first event.
-        /// `None` everywhere else, and `None` leaves the row's title alone.
+        /// A title known only once the call is over (Codex's web search sends
+        /// its query with the results); replaces `ToolStarted`'s. `None` keeps it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
@@ -169,52 +138,31 @@ pub enum HarnessEvent {
         cost_usd: Option<f64>,
     },
     RateLimits { windows: Vec<RateWindow> },
-    /// The thread has a name. Neither CLI names a conversation over its own
-    /// protocol, so this is the answer to a naming turn asked of the thread's
-    /// provider once its first exchange is done
-    /// ([`super::Harness::name_thread`]). It rides the same stream as
-    /// everything else so the row is written before the webview hears it.
+    /// The answer to the naming turn ([`super::Harness::name_thread`]).
     ThreadTitled { title: String },
-    /// A message typed while a turn was running. It is not in the
-    /// conversation yet and no row is written for it: it is waiting its turn
-    /// (`Queue` in [`super`]), and the webview draws it as pending.
+    /// A message typed mid-turn, waiting in `Queue`; no row is written for it.
     Queued { id: String, text: String },
-    /// A queued message has left the queue — cancelled, cleared by an
-    /// interrupt, or about to go out, in which case its
-    /// [`Self::UserMessage`] follows immediately.
+    /// Left the queue: cancelled, cleared, or sent (its `UserMessage` follows).
     Unqueued { id: String },
-    /// The provider's own handle for the turn that just went out — Claude's
-    /// uuid for the user message, Codex's turn id. It is kept on the user's
-    /// row because it is the thing a later rewind has to name
-    /// (`rewind_conversation`, `thread/revert`), and neither CLI will hand it
-    /// out again afterwards.
+    /// The provider's handle for the turn just sent (Claude's message uuid,
+    /// Codex's turn id), kept on the user row: a rewind names it, no CLI re-issues it.
     TurnAnchor { anchor: String },
-    /// Rows from `from_item_id` on are gone: a question was edited and the
-    /// thread rewound to it.
+    /// Rows from `from_item_id` on are gone: an edited question rewound the thread.
     Rewound {
         from_item_id: i64,
-        /// Whether the provider's own session was rewound too. False only for
-        /// a question asked before the anchor was recorded, or one whose
-        /// session has since been deleted — there the agent keeps the
-        /// original in its context and the timeline says so.
+        /// Whether the provider's session rewound too (false: no anchor, or session gone).
         context: bool,
     },
-    /// The agent was stopped at a permission it lacks. Only Antigravity
-    /// raises it: in print mode `agy` refuses any step its rules do not
-    /// allow, and the turn ends there — so by the time this arrives the turn
-    /// is already over, and what it carries is what to allow before the next
-    /// message (`harness_antigravity_allow`). Persisted as a `permission` row.
+    /// Antigravity refused a step its rules don't allow; the turn is already
+    /// over. Carries what to allow before the next message; persisted as a row.
     PermissionNeeded {
         /// The provider's tool (`run_command`, `write_to_file`).
         tool: String,
-        /// The permission it needed, in the provider's own word: `command`,
-        /// `write_file`, `read_file`, `read_url`.
+        /// In the provider's word: `command`, `write_file`, `read_file`, `read_url`.
         action: String,
         /// What it was refused on: the command line, or the path.
         target: Option<String>,
-        /// A rule that would let it, in the provider's rule syntax
-        /// (`command(python3)`, `write_file(/abs/dir)`), when one can be
-        /// read off the refusal.
+        /// A rule that would allow it (`command(python3)`), when readable off the refusal.
         rule: Option<String>,
     },
     /// The provider stopped working on the user's message.
@@ -224,21 +172,15 @@ pub enum HarnessEvent {
     },
     Error {
         message: String,
-        /// Set when the message is the provider saying it has no usable
-        /// credentials. The timeline draws such a row as a sign-in card
-        /// rather than red text, so this is the difference between an error
-        /// a student can act on and one they can only read.
+        /// Set when the provider has no usable credentials; drawn as a sign-in card.
         auth: Option<Provider>,
     },
-    /// The provider process is gone. The thread stays; the next message
-    /// resumes it.
+    /// The process is gone; the thread stays and the next message resumes it.
     Exited { code: Option<i32> },
 }
 
 impl HarnessEvent {
-    /// An error with no provider behind it — the manager failing to start a
-    /// bridge, a job that never reached a CLI. `auth` is `None` because there
-    /// is nothing for a student to sign in to.
+    /// An error with no provider behind it, so no sign-in to offer.
     pub fn error(message: impl Into<String>) -> Self {
         HarnessEvent::Error {
             message: message.into(),
@@ -246,15 +188,8 @@ impl HarnessEvent {
         }
     }
 
-    /// An error the named provider reported, classified: if it reads as a
-    /// credentials failure, the row says which agent to sign in to.
-    ///
-    /// The classification lives in [`signin::is_auth_failure`](super::signin::is_auth_failure)
-    /// rather than here, because it is the same judgement the sign-in dialog
-    /// makes and there should only be one copy of it. It is deliberately
-    /// narrow: a row that offers a sign-in over an unrelated failure sends a
-    /// student to re-authenticate and leaves them with the same error and one
-    /// less reason to trust the card.
+    /// A provider's error, with `auth` set when the (deliberately narrow)
+    /// [`signin::is_auth_failure`](super::signin::is_auth_failure) reads it as a credentials failure.
     pub fn error_for(provider: Provider, message: impl Into<String>) -> Self {
         let message = message.into();
         let auth = super::signin::is_auth_failure(provider, &message).then_some(provider);
@@ -262,31 +197,13 @@ impl HarnessEvent {
     }
 }
 
-/// Classify a tool by its raw name and input. Provider-specific names are
-/// mapped here so all three bridges share one table.
-///
-/// The three CLIs spell their tools differently and, worse, spell their
-/// *arguments* differently. Claude sends `Read { file_path }`; opencode's
-/// runner sends `read { path }` — measured off the wire, not off its
-/// `/experimental/tool` registry, which still advertises `filePath`. So the
-/// lowercase names below have their own arms wherever the accessor differs,
-/// and only join a Claude arm where the key is genuinely the same
-/// (`command`, `pattern`, `url`). A fall-through would have titled every
-/// opencode file row with an empty string, which looks like a missing title
-/// rather than a wrong lookup.
+/// Classify a tool by raw name and input: one table for every bridge. Each CLI
+/// spells argument keys differently (Claude `file_path`, opencode `path` despite
+/// its registry saying `filePath`), so names share an arm only where the key does.
 pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
     let s = |k: &str| input.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    // Antigravity is the fourth spelling of the same handful of tools, and the
-    // only one that **PascalCases its parameters**: `run_command` takes
-    // `CommandLine` and `view_file` takes `AbsolutePath` — both read off the
-    // wire from `agy` 1.2.9, not from a schema. A lowercase fall-through would
-    // have titled every one of its rows with an empty string, which is exactly
-    // the failure opencode's `path`-vs-`file_path` arms are already here for.
-    //
-    // The two above are measured. The rest of the keys in each list are the
-    // same convention applied to the tool names in `agy`'s own `init.tools`,
-    // and are there so a row is titled rather than blank if the guess is
-    // right; narrow each list as a recording confirms it.
+    // Antigravity PascalCases its parameters (`CommandLine`, `AbsolutePath` on
+    // agy 1.2.9); the other keys in each list follow that convention unconfirmed.
     let any = |ks: &[&str]| {
         ks.iter()
             .find_map(|k| input.get(*k).and_then(|v| v.as_str()))
@@ -295,8 +212,7 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
     };
     let base = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
     match name {
-        // Antigravity's own names, off the `tools` array its `init` event
-        // prints. `CommandLine` and `AbsolutePath` are measured; see above.
+        // Antigravity's names, from its `init` event's `tools`.
         "run_command" => {
             let cmd = any(&["CommandLine", "Command"]);
             let kind = if is_oculus_cli(&cmd) { ToolKind::OculusCli } else { ToolKind::Bash };
@@ -316,8 +232,7 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
         "invoke_subagent" | "define_subagent" | "browser_subagent" => {
             (ToolKind::Task, any(&["Name", "Prompt", "TypeName"]))
         }
-        // The agent asking the student something. There is nowhere for it to
-        // be answered from a timeline, so it is a row like any other.
+        // The agent asking the student something; a timeline can't answer it.
         "ask_question" | "ask_permission" | "ask_custom_permission" => {
             (ToolKind::Other, any(&["Question", "Prompt"]))
         }
@@ -343,9 +258,7 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
         "edit" => (ToolKind::Edit, base(&s("path"))),
         "write" => (ToolKind::Write, base(&s("path"))),
         "list" => (ToolKind::Search, base(&s("path"))),
-        // One tool for a whole multi-file patch; the row is titled with the
-        // first file the patch names, which is the one an `*** Update File:`
-        // header carries.
+        // A multi-file patch is titled by the first file it names.
         "apply_patch" => (ToolKind::Edit, base(&patch_target(&s("patchText")))),
         "skill" => (ToolKind::Other, s("name")),
         "question" => (ToolKind::Other, String::new()),
@@ -363,8 +276,7 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
         "Skill" => (ToolKind::Other, s("skill")),
         _ => {
             if let Some(rest) = name.strip_prefix("mcp__") {
-                // `mcp__server__tool` — title by the tool, the server rides
-                // along in the raw name.
+                // `mcp__server__tool`: title by the tool.
                 let tool = rest.splitn(2, "__").nth(1).unwrap_or(rest);
                 return (ToolKind::Other, tool.to_string());
             }
@@ -373,10 +285,7 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
     }
 }
 
-/// The first file an `apply_patch` envelope names. The patch text is a
-/// sequence of `*** Add File: p` / `*** Update File: p` / `*** Delete File: p`
-/// headers; anything else has no path in it and titles the row with nothing,
-/// which is what an unparseable patch deserves.
+/// The first path an `apply_patch` envelope's `*** … File:` headers name, or "".
 fn patch_target(patch: &str) -> String {
     for line in patch.lines() {
         let line = line.trim();
@@ -397,9 +306,7 @@ fn is_oculus_cli(cmd: &str) -> bool {
         .any(|w| w == "oculus" || w.ends_with("/oculus"))
 }
 
-/// Tool output is a row in a timeline, not a transcript; past this it is
-/// truncated with a marker. Bash output of 200 KB would otherwise be a
-/// 200 KB row in `harness_items` and a 200 KB Tauri event.
+/// Tool output past this is truncated with a marker: it is a timeline row and a Tauri event.
 pub const MAX_TOOL_OUTPUT: usize = 16 * 1024;
 
 pub fn cap_output(s: &str) -> String {
@@ -428,9 +335,6 @@ mod tests {
         assert_eq!(k, ToolKind::Bash);
     }
 
-    /// opencode's runner spells its tools in lowercase and its file argument
-    /// `path`. Letting those fall through to Claude's arms would have read
-    /// `file_path` off every one of them and titled the row with nothing.
     #[test]
     fn opencode_tool_names_are_titled_off_their_own_arguments() {
         use serde_json::json;
@@ -440,7 +344,6 @@ mod tests {
         assert_eq!(classify("glob", &json!({"pattern": "**/*.md"})), (ToolKind::Search, "**/*.md".into()));
         assert_eq!(classify("todowrite", &json!({"todos": []})), (ToolKind::Plan, String::new()));
         assert_eq!(classify("skill", &json!({"name": "customize-opencode"})), (ToolKind::Other, "customize-opencode".into()));
-        // Bash is the one place the two CLIs agree on the argument name.
         assert_eq!(
             classify("bash", &json!({"command": "oculus files COMP30026"})),
             (ToolKind::OculusCli, "oculus files COMP30026".into())
@@ -449,7 +352,6 @@ mod tests {
             classify("apply_patch", &json!({"patchText": "*** Begin Patch\n*** Update File: memories/x.md\n@@\n-a\n+b\n*** End Patch"})),
             (ToolKind::Edit, "x.md".into())
         );
-        // Claude's own spelling is untouched by any of it.
         assert_eq!(classify("Read", &json!({"file_path": "/a/b.md"})), (ToolKind::Read, "b.md".into()));
     }
 

@@ -1,85 +1,20 @@
 //! Signing in to a CLI agent, from the error row that says you are not.
 //!
-//! `install.rs` is the way through when the CLI is *missing*. This is the way
-//! through when it is there and its credentials are not: an expired OAuth
-//! session, a `claude auth logout` a student ran last month, a machine that
-//! has never been signed in at all. Until this existed the whole answer was a
-//! red row reading *"Failed to authenticate: OAuth session expired and could
-//! not be refreshed"* — true, unactionable, and identical in shape to a row
-//! about a syntax error in a file. A student's next move was to find a
-//! terminal, remember which of three CLIs this thread was on, and guess the
-//! subcommand.
+//! [`is_auth_failure`] classifies a provider's error text; its lists stay
+//! tight because a false "sign in again" is worse than a miss. [`start`] /
+//! [`submit_code`] / [`cancel`] drive the CLI's own login flow as a
+//! subprocess (the discovered binary with [`discover::child_env`], never a
+//! shell), streamed like `install.rs`; nothing here holds a token. There is
+//! no deadline — [`cancel`] ends a flow.
 //!
-//! The module does two separable things, and they are worth keeping apart:
-//!
-//! - [`is_auth_failure`] **reads** a provider's own error text and says
-//!   whether it is that provider saying it has no usable credentials. That is
-//!   a classification over strings nobody controls, so the lists below are
-//!   kept tight on purpose. A false positive is worse than a miss: it tells a
-//!   student to re-authenticate over a failure that had nothing to do with
-//!   their account, and the sign-in they then do will not fix it.
-//! - [`start`] / [`submit_code`] / [`cancel`] **drive** the CLI's own login
-//!   flow, which is the only login flow there is. Nothing here implements
-//!   OAuth, holds a token, or writes a credential file. Each CLI owns its
-//!   store and this module owns a subprocess.
-//!
-//! **The two flows are genuinely different shapes**, measured on this machine
-//! rather than assumed:
-//!
-//! - `claude auth login` prints an authorize URL and then **blocks reading a
-//!   pasted code from stdin**. Its last prompt — `Paste code here if prompted
-//!   >` — carries no trailing newline, so a `lines()` loop never emits it
-//!   until the child exits. That is expected and nothing here waits for it:
-//!   the dialog's paste field is offered as soon as the URL arrives, and
-//!   [`submit_code`] writes the answer to the child's stdin.
-//! - `codex login` starts its **own loopback listener** on port 1455, prints
-//!   the authorize URL, and finishes by itself when the browser redirect comes
-//!   back. It never reads stdin. [`submit_code`] exists for one of the two
-//!   providers and is simply never called for the other.
-//!
-//! **opencode is deliberately not here.** Its credentials are per *provider*,
-//! not per CLI — one store holding an Anthropic key, a GitHub Copilot OAuth
-//! token, and two hundred more — and this repo already has the whole surface
-//! for it (`harness_opencode_providers`, `harness_opencode_set_key`, the
-//! `harness_opencode_oauth_*` pair, and `OpencodeConnectDialog.tsx`), going
-//! through `opencode serve`'s own HTTP API rather than a terminal. Driving
-//! `opencode auth login` as a subprocess would be a second, worse door to the
-//! same store: it is a TUI with arrow-key menus, and it could only write what
-//! the existing path already writes. So [`status`] answers `signed_in: None`
-//! for it — *not answerable from here*, which is a different fact from "no" —
-//! and [`start`] returns an error naming the dialog that is the real answer.
-//!
-//! **Nothing here is cached, and that is the difference from
-//! [`discover::health`](super::discover::health).** Health is asked by every
-//! model picker in the app, three spawns a menu, so it is cached for the life
-//! of the process and dropped only by Settings' *Recheck*. Sign-in state is
-//! asked in two places — a settings row and an error row a student is looking
-//! at *because something just failed* — and a cached "signed out" that
-//! outlived the sign-in that fixed it would be the one wrong answer that
-//! matters here. So [`status`] spawns the CLI every time it is asked, and
-//! `discover::forget()` has nothing of this module's to forget. The binary
-//! lookup underneath it is still cached; where the CLI *is* does not change
-//! when its credentials do.
-//!
-//! The streaming shape is `install.rs`'s, for the same reasons: one event per
-//! line on one `app.emit` channel, stdout and stderr drained by a thread each
-//! into one channel (read one after the other, a child that fills the unread
-//! pipe deadlocks), and a final `done` event that is always last. Two things
-//! differ. The child is the **discovered binary run directly**, never
-//! `$SHELL -lc` — there is no user-supplied string anywhere near a shell here,
-//! and no profile PATH to need. And it gets [`discover::child_env`], whose
-//! strip of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` is exactly as load-bearing
-//! for a login as it is for a turn: a sign-in that landed on a stray key in
-//! the shell would defeat the point of signing in.
-//!
-//! **No deadline is imposed from above.** An OAuth page can sit open for as
-//! long as a person takes to find their password, switch accounts, or answer a
-//! second factor on a phone in another room. A timeout here could only abandon
-//! a flow that was still going; [`cancel`] is what ends one, and a student
-//! closing the dialog is what calls it.
+//! `claude auth login` blocks reading a pasted code from stdin; `codex login`
+//! finishes on its own loopback listener (port 1455). opencode signs in per
+//! provider through its server (`harness_opencode_*`), so it is not here.
+//! [`status`] is never cached: it is read where a stale "signed out" would
+//! be the one answer that must not be wrong.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -115,19 +50,12 @@ impl SignInStatus {
     }
 }
 
-/// Whether the provider has credentials, asked of the provider.
-///
-/// Blocking — spawns the CLI. Callers wrap it in `spawn_blocking`.
-///
-/// Every probe is read-only and none opens a browser: `claude auth status`
-/// prints and exits, `codex login status` prints and exits, and `agy models`
-/// lists or says "Please sign in" and exits. They disagree about how to say
-/// "no", which is why this is a match rather than a table — Claude answers
-/// exit 0 either way and puts the answer in JSON; Codex answers with its exit
-/// status and one line of prose; Antigravity with a sentence.
+/// Whether the provider has credentials, asked of the provider (blocking).
+/// Every probe is read-only; each CLI says "no" differently — Claude in JSON,
+/// Codex by exit status, Antigravity with a sentence.
 pub fn status(provider: Provider) -> SignInStatus {
     if provider == Provider::Opencode {
-        // Not "no": not a question this door can answer. See the module docs.
+        // Not "no": not answerable from here.
         return SignInStatus::unknown(provider);
     }
     if provider == Provider::Antigravity {
@@ -177,8 +105,7 @@ pub fn status(provider: Provider) -> SignInStatus {
                 account,
                 error: None,
             },
-            // A `claude` old enough not to know `auth status --json` prints
-            // something else entirely. Saying so beats guessing "no".
+            // An older `claude` without `auth status --json`: say so, not "no".
             None => SignInStatus {
                 error: Some(format!(
                     "`claude auth status --json` did not answer in JSON: {}",
@@ -187,10 +114,8 @@ pub fn status(provider: Provider) -> SignInStatus {
                 ..SignInStatus::unknown(provider)
             },
         },
-        // Codex prints `Logged in using ChatGPT` on **stderr**, not stdout —
-        // so the account is read from whichever stream actually spoke, or the
-        // row says a bare "Signed in" forever. The exit code is the answer to
-        // *whether*; only the wording of *which* comes from the line.
+        // The exit code says whether; the account line (`Logged in using
+        // ChatGPT`) arrives on stderr, so both streams are read.
         Provider::Codex => SignInStatus {
             provider,
             signed_in: Some(out.status.success()),
@@ -205,14 +130,9 @@ pub fn status(provider: Provider) -> SignInStatus {
     }
 }
 
-/// Antigravity's answer, off `agy models`.
-///
-/// There is no status subcommand, but the listing is as read-only as one:
-/// measured on 1.2.9, signed out it prints `Please sign in to view available
-/// models` and exits non-zero in about a second, opening nothing; signed in it
-/// lists. So a listing is a yes, that sentence is a no, and anything else — a
-/// network failure, a timeout — is not an answer either way. No account name:
-/// the listing does not print one.
+/// Antigravity's answer, off `agy models` (there is no status subcommand).
+/// A listing is a yes; `Please sign in…` (agy 1.2.9) is a no; anything else
+/// is no answer either way.
 fn antigravity_status() -> SignInStatus {
     let provider = Provider::Antigravity;
     let run = discover::binary(provider)
@@ -250,11 +170,8 @@ fn antigravity_status() -> SignInStatus {
 }
 
 /// `{"loggedIn": false, "authMethod": "none", …}` → (signed in, account).
-///
-/// Parsed from the first `{` rather than from byte zero: a CLI that one day
-/// prints a deprecation notice above its JSON should not read as "not signed
-/// in". `loggedIn` missing entirely is `None` — an answer this cannot read is
-/// not an answer of "no".
+/// Parsed from the first `{` so a notice above the JSON does not read as
+/// "no"; a missing `loggedIn` is `None`, not "no".
 fn parse_claude_status(stdout: &str) -> Option<(bool, Option<String>)> {
     let start = stdout.find('{')?;
     let v: serde_json::Value = serde_json::from_str(stdout[start..].trim()).ok()?;
@@ -264,17 +181,8 @@ fn parse_claude_status(stdout: &str) -> Option<(bool, Option<String>)> {
     Some((signed_in, claude_account(signed_in, email, method)))
 }
 
-/// What Claude calls the account, in words a student would recognise.
-///
-/// The email first, because it is the one field that answers *which* account
-/// rather than which door was used, and on a machine with a personal login and
-/// a work one that is the whole question. The method is the fallback for a
-/// payload that carries none — an API key has no address behind it.
-///
-/// The method names are the CLI's own, and the dot in `claude.ai` is load
-/// bearing: the arm was once spelled `claudeai`, matched nothing, and fell
-/// through to `other`, which put the raw `claude.ai` on screen as if it were
-/// an account name.
+/// What Claude calls the account: the email (it names *which* account), else
+/// the sign-in method. The CLI spells the subscription method `claude.ai`.
 fn claude_account(signed_in: bool, email: Option<&str>, method: &str) -> Option<String> {
     if !signed_in {
         return None;
@@ -294,9 +202,7 @@ fn claude_account(signed_in: bool, email: Option<&str>, method: &str) -> Option<
     )
 }
 
-/// `Logged in using ChatGPT` → `ChatGPT`. Anything else keeps the whole line,
-/// which is still more useful than nothing on a row that only has to say
-/// *which* account.
+/// `Logged in using ChatGPT` → `ChatGPT`; anything else keeps the whole line.
 fn codex_account(stdout: &str) -> Option<String> {
     let line = stdout.lines().find(|l| !l.trim().is_empty())?.trim();
     let account = match line.to_lowercase().find("using ") {
@@ -308,12 +214,9 @@ fn codex_account(stdout: &str) -> Option<String> {
 
 // ── Classifying a failure ────────────────────────────────────────────────────
 
-/// Phrases that mean "no usable credentials" whichever CLI said them.
-///
-/// Every one of these is a whole clause rather than a word, which is the
-/// discipline that keeps the list safe: `"auth"` alone would match a file
-/// named `auth.rs` in a compile error, and `"expired"` alone would match a
-/// cached download.
+/// Phrases that mean "no usable credentials" whichever CLI said them. Whole
+/// clauses, never words: `"auth"` alone would match `auth.rs` in a compile
+/// error.
 const SHARED: &[&str] = &[
     "oauth token has expired",
     "oauth session expired",
@@ -326,8 +229,6 @@ const SHARED: &[&str] = &[
     "invalid_grant",
 ];
 
-/// Claude Code's own vocabulary for it, including the two it tells a student
-/// to run.
 const CLAUDE: &[&str] = &[
     "failed to authenticate",
     "please run /login",
@@ -336,9 +237,8 @@ const CLAUDE: &[&str] = &[
     "credentials are invalid",
 ];
 
-/// Codex is the narrow one on purpose. `"chatgpt account"` is not a failure by
-/// itself — it appears in perfectly happy status output — so it only counts
-/// beside a word that makes the sentence a complaint.
+/// `"chatgpt account"` appears in happy status output too, so for Codex it
+/// only counts beside one of [`CODEX_ACCOUNT_TROUBLE`].
 const CODEX: &[&str] = &["codex login", "please sign in"];
 const CODEX_ACCOUNT_TROUBLE: &[&str] = &[
     "expired",
@@ -351,8 +251,7 @@ const CODEX_ACCOUNT_TROUBLE: &[&str] = &[
     "sign in",
 ];
 
-/// opencode's are the provider store's, not the CLI's: what a provider answers
-/// when the key behind it is wrong or absent.
+/// What an opencode provider answers when its key is wrong or absent.
 const OPENCODE: &[&str] = &[
     "opencode auth login",
     "no credentials",
@@ -361,10 +260,7 @@ const OPENCODE: &[&str] = &[
     "invalid x-api-key",
 ];
 
-/// Antigravity's. It signs in through a Google account, so its refusals are
-/// Google's words rather than a CLI's, and the keyring is a third place a
-/// credential can be missing from. `please sign in` is the CLI's own, off
-/// `agy models` signed out.
+/// Antigravity signs in through Google and keeps the credential in the keyring.
 const ANTIGRAVITY: &[&str] = &[
     "please sign in",
     "google sign-in",
@@ -374,14 +270,9 @@ const ANTIGRAVITY: &[&str] = &[
     "reauthenticate",
 ];
 
-/// Whether `msg` is the provider saying it has no usable credentials, rather
-/// than any other kind of failure.
-///
-/// This is the difference between a red row a student can only read and a row
-/// with a Sign in button on it, so the lists above are kept tight rather than
-/// generous. `401` is the one number here and it never counts alone: a byte
-/// count, a line number and a path can all carry those three digits, so it has
-/// to arrive beside the word the status code is actually about.
+/// Whether `msg` is the provider saying it has no usable credentials — which
+/// puts a Sign in button on the row, so the lists stay tight. `401` counts
+/// only beside "auth": a byte count or a path can carry those digits.
 pub fn is_auth_failure(provider: Provider, msg: &str) -> bool {
     let m = msg.to_lowercase();
     if SHARED.iter().any(|n| m.contains(n)) {
@@ -407,9 +298,7 @@ pub fn is_auth_failure(provider: Provider, msg: &str) -> bool {
 
 // ── Driving the flow ─────────────────────────────────────────────────────────
 
-/// Where a login's output reaches the webview, one event per line, the way
-/// `install::INSTALL_EVENT` carries an install's. The dialog that asked for
-/// the sign-in is the only listener and it filters by provider.
+/// A login's output, one event per line, like `install::INSTALL_EVENT`.
 pub const SIGNIN_EVENT: &str = "harness-signin";
 
 /// What the webview gets while a login runs.
@@ -427,23 +316,17 @@ pub struct SignInLine {
     pub status: Option<String>,
 }
 
-/// A login in flight. The child handle is kept because two commands have to
-/// reach back into it after [`start`] has returned: [`submit_code`] writes to
-/// its stdin, [`cancel`] kills it.
+/// A login in flight: [`submit_code`] writes to its stdin, [`cancel`] kills it.
 struct Run {
     child: Arc<Mutex<Child>>,
-    /// Taken from the child once and held here, since Claude's flow writes to
-    /// it minutes after the spawn. `None` only if the pipe could not be taken.
+    /// `None` only if the pipe could not be taken.
     stdin: Arc<Mutex<Option<ChildStdin>>>,
-    /// Set by [`cancel`], read by the supervisor, so a killed child is
-    /// reported as abandoned rather than as "stopped by a signal" — the same
-    /// exit, two different stories.
+    /// Set by [`cancel`], so a killed child reports "cancelled", not a signal.
     cancelled: Arc<AtomicBool>,
 }
 
-/// One login at a time per provider. A second `codex login` would find port
-/// 1455 taken and fail in a way nobody could read; a second `claude auth
-/// login` would leave two children waiting on two stdins for one pasted code.
+/// One login at a time per provider: a second `codex login` would find port
+/// 1455 taken, a second `claude auth login` would split one pasted code.
 fn running() -> &'static Mutex<HashMap<Provider, Run>> {
     static R: OnceLock<Mutex<HashMap<Provider, Run>>> = OnceLock::new();
     R.get_or_init(Default::default)
@@ -451,9 +334,7 @@ fn running() -> &'static Mutex<HashMap<Provider, Run>> {
 
 fn login_args(provider: Provider) -> Result<&'static [&'static str], String> {
     match provider {
-        // `--claudeai` is the default and is left off for that reason: naming
-        // it would pin this to the subscription flow, and a student on a
-        // Console account signs in through the same subcommand.
+        // No `--claudeai`: Console accounts use the same subcommand.
         Provider::Claude => Ok(&["auth", "login"]),
         Provider::Codex => Ok(&["login"]),
         Provider::Opencode => Err(
@@ -461,11 +342,7 @@ fn login_args(provider: Provider) -> Result<&'static [&'static str], String> {
              command"
                 .into(),
         ),
-        // `agy` has no login subcommand. Sign-in is the interactive CLI:
-        // `agy` with no arguments, in a terminal, which walks through Google
-        // sign-in and keeps the credential in the system keychain. Nothing
-        // headless starts it — `agy models` signed out only says "Please sign
-        // in" — so there is no flow here for this module to drive.
+        // `agy` signs in only interactively, in a terminal.
         Provider::Antigravity => Err(
             "Antigravity has no sign-in command: run `agy` in a terminal and finish the Google \
              sign-in it walks you through, then come back"
@@ -474,16 +351,9 @@ fn login_args(provider: Provider) -> Result<&'static [&'static str], String> {
     }
 }
 
-/// Start the provider's login flow, streaming its output to `emit`.
-///
-/// Returns once the child is spawned; everything after that happens on the
-/// supervisor thread. One run per provider at a time.
-///
-/// **stdin is piped, not `/dev/null`.** That is the one place this differs
-/// from `install.rs`, which nulls stdin precisely so that anything asking a
-/// question fails instead of hanging. Here the question is the point: Claude's
-/// flow *ends* in a pasted code, and a null stdin would make it fail at the
-/// last step. Codex never reads the pipe, which costs nothing.
+/// Start the provider's login flow, streaming its output to `emit`; returns
+/// once the child is spawned. stdin is piped (unlike `install.rs`) because
+/// Claude's flow ends in a pasted code.
 pub fn start<F>(provider: Provider, emit: F) -> Result<(), String>
 where
     F: Fn(SignInLine) + Send + 'static,
@@ -491,12 +361,8 @@ where
     let args = login_args(provider)?;
     let bin = discover::binary(provider)?;
 
-    // The spawn happens **under** the map's lock, not between a check and an
-    // insert. Two invokes land on the blocking pool as two threads, and a
-    // gap here would let both past the check: two `codex login` children
-    // racing for port 1455, or two `claude auth login` children waiting on
-    // two stdins for one single-use code. Nothing else locks this map while
-    // a spawn is in flight, so holding it across one is free.
+    // Spawn under the map's lock so two concurrent invokes cannot both pass
+    // the check.
     let (stdout, stderr, stdin, cancelled, child) = {
         let mut r = running().lock().unwrap();
         if r.contains_key(&provider) {
@@ -531,30 +397,8 @@ where
     };
 
     std::thread::spawn(move || {
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        let mut readers = Vec::new();
-        for pipe in [
-            stdout.map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
-            stderr.map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let tx = tx.clone();
-            readers.push(std::thread::spawn(move || {
-                for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-                    if tx.send(line).is_err() {
-                        break;
-                    }
-                }
-            }));
-        }
-        drop(tx);
-
         let mut sent_url = false;
-        // Ends when both readers have hung up, which is after the child has
-        // closed both pipes — so no output can arrive after the `done` below.
-        for raw in rx {
+        super::install::drain_lines(stdout, stderr, |raw| {
             let line = strip_ansi(&raw);
             let url = if sent_url { None } else { extract_url(&line) };
             sent_url |= url.is_some();
@@ -566,14 +410,10 @@ where
                 ok: None,
                 status: None,
             });
-        }
-        for r in readers {
-            let _ = r.join();
-        }
+        });
 
-        // Polled rather than waited under the lock: a blocking `wait` holding
-        // the child's mutex would deadlock against the `kill` in `cancel`,
-        // which is the one thing that could make it return.
+        // Polled: a blocking `wait` under the child's mutex would deadlock
+        // against `cancel`'s `kill`.
         let (ok, status) = loop {
             let reaped = child.lock().unwrap().try_wait();
             match reaped {
@@ -582,13 +422,7 @@ where
                     break if cancelled.load(Ordering::SeqCst) {
                         (false, "cancelled".to_string())
                     } else {
-                        (
-                            false,
-                            match s.code() {
-                                Some(c) => format!("exited with status {c}"),
-                                None => "stopped by a signal".to_string(),
-                            },
-                        )
+                        (false, super::install::exit_text(s))
                     }
                 }
                 Ok(None) => std::thread::sleep(std::time::Duration::from_millis(25)),
@@ -596,8 +430,6 @@ where
             }
         };
 
-        // The stdin pipe goes with the run: holding it open past the child
-        // would keep a dead write target reachable from `submit_code`.
         drop(stdin.lock().unwrap().take());
         running().lock().unwrap().remove(&provider);
         emit(SignInLine {
@@ -613,11 +445,8 @@ where
     Ok(())
 }
 
-/// Write a pasted authorization code to a waiting child's stdin. Claude's
-/// flow ends here; Codex's never needs it.
-///
-/// The newline is what commits it: the CLI is reading a line, and a code
-/// written without one sits in the pipe looking exactly like a hang.
+/// Write a pasted authorization code to a waiting child's stdin (Claude only).
+/// The newline commits it; without one the CLI waits forever.
 pub fn submit_code(provider: Provider, code: &str) -> Result<(), String> {
     let stdin = {
         let r = running().lock().unwrap();
@@ -634,13 +463,9 @@ pub fn submit_code(provider: Provider, code: &str) -> Result<(), String> {
     pipe.flush().map_err(|e| format!("could not send the code: {e}"))
 }
 
-/// Kill a run the student abandoned. Nothing above imposes a deadline — an
-/// OAuth page can sit open for as long as a person takes — so this is the only
-/// thing that ends a flow that is not going to finish.
-///
-/// The entry is left for the supervisor to remove: it is the thread that knows
-/// the child is actually reaped, and removing it here would let a second
-/// `start` spawn a child while the first was still dying on port 1455.
+/// Kill a run the student abandoned — the only way a flow ends early. The
+/// supervisor removes the entry once the child is reaped, so a second `start`
+/// cannot race a dying one.
 pub fn cancel(provider: Provider) -> Result<(), String> {
     let r = running().lock().unwrap();
     let run = r
@@ -648,17 +473,13 @@ pub fn cancel(provider: Provider) -> Result<(), String> {
         .ok_or_else(|| format!("{} is not signing in", provider.label()))?;
     run.cancelled.store(true, Ordering::SeqCst);
     let mut child = run.child.lock().unwrap();
-    // An already-exited child is not a failure to cancel: the supervisor is
-    // simply a few milliseconds ahead.
     let _ = child.kill();
     Ok(())
 }
 
 // ── Reading the output ───────────────────────────────────────────────────────
 
-/// Strip ANSI escape sequences. Codex colours its output, and a URL with a
-/// reset sequence welded to its tail is not a URL — it is a link that opens a
-/// 404 and a Copy button that pastes junk.
+/// Strip ANSI escape sequences — Codex colours its URL.
 fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
@@ -697,16 +518,9 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
-/// The first `https://` run in a line, to the end of whitespace.
-///
-/// **Only `https://`**, which is doing real work: Codex prints
-/// `Starting local login server on http://localhost:1455.` an instant before
-/// the authorize URL, and that loopback address is not somewhere to send a
-/// student's browser. Claude's authorize URL is likewise the first `https://`
-/// on its line, after `If the browser didn't open, visit: `.
-///
-/// The trailing trim is for the sentence the URL is embedded in: a full stop
-/// or a closing bracket after it belongs to the prose, not to the address.
+/// The first `https://` run in a line, minus trailing punctuation. Only
+/// https: Codex prints its `http://localhost:1455` listener just before the
+/// authorize URL.
 fn extract_url(line: &str) -> Option<String> {
     let start = line.find("https://")?;
     let rest = &line[start..];
@@ -719,16 +533,12 @@ fn extract_url(line: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// The real thing, off the screenshot that started this: the row a student
-    /// sees when Claude's OAuth session has lapsed has to become a sign-in
-    /// card rather than red text.
     #[test]
     fn the_real_expired_session_message_is_an_auth_failure() {
         let msg = "Failed to authenticate: OAuth session expired and could not be refreshed";
         assert!(is_auth_failure(Provider::Claude, msg));
     }
 
-    /// Each provider's own vocabulary, and the shared clauses under all three.
     #[test]
     fn each_provider_knows_its_own_wording() {
         assert!(is_auth_failure(Provider::Claude, "Please run /login to authenticate"));
@@ -752,9 +562,6 @@ mod tests {
         }
     }
 
-    /// The half that matters more. An ordinary failure must never be dressed
-    /// up as "sign in again" — a student who does sign in again finds the same
-    /// error waiting, and now distrusts the card.
     #[test]
     fn ordinary_failures_are_not_auth_failures() {
         let innocent = [
@@ -775,8 +582,6 @@ mod tests {
         }
     }
 
-    /// `401` is never evidence on its own, and is evidence beside the word the
-    /// status code is about.
     #[test]
     fn a_bare_401_is_not_enough() {
         assert!(!is_auth_failure(Provider::Claude, "server answered 401"));
@@ -784,9 +589,7 @@ mod tests {
         assert!(is_auth_failure(Provider::Codex, "HTTP 401 while refreshing auth token"));
     }
 
-    /// Claude's block, verbatim. The URL is the first `https://` on the third
-    /// line, and the prompt that follows carries no newline of its own — which
-    /// is why the run is not waiting for it.
+    /// Claude's block, verbatim; the prompt carries no trailing newline.
     #[test]
     fn claude_login_output_yields_its_authorize_url() {
         let block = "Opening browser to sign in…\n\
@@ -799,8 +602,7 @@ mod tests {
         );
     }
 
-    /// Codex's block, verbatim — including the loopback line above the real
-    /// one, which is the whole reason only `https://` counts.
+    /// Codex's block, verbatim.
     #[test]
     fn codex_login_output_skips_the_loopback_line() {
         let block = "Starting local login server on http://localhost:1455.\n\
@@ -830,8 +632,6 @@ mod tests {
         assert_eq!(extract_url("http://localhost:1455/auth/callback"), None);
     }
 
-    /// Colour does not survive into the URL, or into the line the dialog
-    /// shows.
     #[test]
     fn ansi_is_stripped_before_the_url_is_read() {
         let line = "\u{1b}[1mvisit:\u{1b}[0m \u{1b}[4mhttps://auth.openai.com/oauth/authorize?x=1\u{1b}[0m";
@@ -843,13 +643,11 @@ mod tests {
         );
     }
 
-    /// `claude auth status --json`, both ways round, as the CLI prints them.
     #[test]
     fn claude_status_json_parses_both_answers() {
         let out = r#"{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}"#;
         assert_eq!(parse_claude_status(out), Some((false, None)));
 
-        // The shape 3.x actually prints, email and all.
         let out = r#"{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty",
                       "email": "someone@example.com", "subscriptionType": "max"}"#;
         assert_eq!(
@@ -857,8 +655,6 @@ mod tests {
             Some((true, Some("someone@example.com".to_string())))
         );
 
-        // No address to show: the door is the next best answer, and the dotted
-        // spelling is the CLI's.
         let out = r#"{"loggedIn": true, "authMethod": "claude.ai"}"#;
         assert_eq!(
             parse_claude_status(out),
@@ -871,8 +667,7 @@ mod tests {
             Some((true, Some("Anthropic Console".to_string())))
         );
 
-        // Not JSON at all, and JSON that does not answer the question: both
-        // are "cannot say", not "signed out".
+        // Unreadable is "cannot say", not "signed out".
         assert_eq!(parse_claude_status("Unknown command: auth"), None);
         assert_eq!(parse_claude_status(r#"{"authMethod":"claude.ai"}"#), None);
     }
@@ -887,8 +682,6 @@ mod tests {
         assert_eq!(codex_account("\n\n").as_deref(), None);
     }
 
-    /// opencode is answered, not attempted: the status says "cannot say from
-    /// here" and the flow refuses with a pointer to the door that works.
     #[test]
     fn opencode_is_routed_to_its_own_dialog() {
         let s = status(Provider::Opencode);
@@ -898,8 +691,6 @@ mod tests {
         assert!(login_args(Provider::Opencode).is_err());
     }
 
-    /// Nothing to write to and nothing to kill when no run is in flight —
-    /// both say so rather than panicking on an empty map.
     #[test]
     fn code_and_cancel_need_a_run() {
         assert!(submit_code(Provider::Claude, "abc").is_err());

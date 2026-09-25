@@ -1,45 +1,24 @@
 //! Pictures the student puts into the composer, written where the agent can
 //! read them.
 //!
-//! A CLI agent has no channel for an image: it reads files, so an image has
-//! to *be* a file before it can be talked about. So a paste or a drop lands
-//! here as bytes, gets written into `agents/attachments/`, and the composer
-//! puts the path it gets back into the message — the same move
-//! [`crate::chapters::app::lecture_grab_frames`] already makes for the frames a
-//! dock message carries, and the same move the `@` menu makes for a course
-//! file. Nothing about the message format is special: it is a backticked
-//! path, and the agent opens it with its own image tool.
+//! A CLI agent only reads files, so a paste or drop is written into
+//! `agents/attachments/` and the composer puts the returned path into the
+//! message. `agents/` is the one directory every bridge's sandbox can read and
+//! write, and the thread's cwd, so the path is `./attachments/<name>`. The same
+//! cap, sniff and naming serve pictures pasted into notes.
 //!
-//! The same cap, sniff and naming serve the student's own notes, which take a
-//! pasted picture the same way and keep it somewhere else entirely —
-//! [`write_image`] takes the directory for that reason.
-//!
-//! `agents/attachments/` and not a folder of its own, because `agents/` is
-//! the one directory every bridge can both read and write (`harness/mod.rs`),
-//! and a path outside it would be refused by Claude's and Codex's sandboxes
-//! at the moment the agent tried to look. The path handed back is relative to
-//! that folder — `./attachments/<name>` — since that is the thread's cwd.
-//!
-//! **The claimed filename never reaches the filesystem.** The bytes are
-//! sniffed, the extension comes from what they actually are, and the stem is
-//! this app's own stamp. A name from a drag payload is somebody else's
-//! string; treating it as one removes path traversal, the extension lie and
-//! the collision at once.
+//! **The claimed filename never reaches the filesystem**: the extension comes
+//! from the sniffed bytes and the stem is this app's stamp, which rules out
+//! path traversal, the extension lie and collisions at once.
 
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
 
-/// The most a single picture may be. A screenshot is a megabyte or two; this
-/// is loose enough never to be met by one and tight enough that a video
-/// dropped by mistake is refused here rather than filling the library.
+/// The most a single picture may be; a video dropped by mistake is refused.
 const MAX_BYTES: usize = 20 * 1024 * 1024;
 
-/// What the bytes actually are, and the extension that follows from it.
-///
-/// Sniffed rather than trusted: every one of these formats is identified by
-/// its first few bytes, and the agent is about to be told this file is a
-/// picture.
+/// The extension for what the bytes actually are, sniffed rather than trusted.
 fn sniff(bytes: &[u8]) -> Option<&'static str> {
     let starts = |sig: &[u8]| bytes.starts_with(sig);
     if starts(b"\x89PNG\r\n\x1a\n") {
@@ -55,8 +34,7 @@ fn sniff(bytes: &[u8]) -> Option<&'static str> {
     if starts(b"RIFF") && bytes.len() > 12 && &bytes[8..12] == b"WEBP" {
         return Some("webp");
     }
-    // ISO-BMFF: `ftyp` at offset 4, then the brand. macOS screenshots of a
-    // photo, and anything straight off a phone, arrive as one of these.
+    // ISO-BMFF: `ftyp` at offset 4, then the brand (HEIC/AVIF, as phones send).
     if bytes.len() > 12 && &bytes[4..8] == b"ftyp" {
         let brand = &bytes[8..12];
         if brand == b"heic" || brand == b"heix" || brand == b"heim" || brand == b"heis" {
@@ -77,32 +55,20 @@ fn attachments_dir(data_dir: &Path) -> PathBuf {
     crate::agents::agents_dir(data_dir).join("attachments")
 }
 
-/// `20260918-034512-8f3a1b7c.png` — sortable, unique, and nothing of the
-/// caller's in it.
+/// `20260918-034512-8f3a1b7c.png` — sortable, unique, nothing of the caller's.
 fn filename(ext: &str) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let now = crate::clock::now_nanos();
     let secs = (now / 1_000_000_000) as u64;
-    // `20260918-034512`, UTC: sortable in a listing and the same order the
-    // library's own logs are stamped in.
+    // `20260918-034512`, UTC.
     let stamp = crate::paths::iso8601_utc(secs).replace(['-', ':'], "").replace('T', "-");
-    // The sub-second part of the same clock: unique within a second without
-    // reaching for a random-number crate.
+    // Sub-second nanos: unique within a second without a random crate.
     let tail = (now % 1_000_000_000) as u32;
     format!("{stamp}-{tail:08x}.{ext}")
 }
 
-/// Write one picture into `dir`, answering with the name it was given.
-///
-/// **The destination is an argument because a note's pictures do not come
-/// here.** A document keeps its own beside itself under `courses/`, where a
-/// relative `![](assets/…)` resolves for the editor's preview, for the file
-/// viewer and for anyone handed the folder (`attach_document_image` in
-/// `crate::files`). Everything *else* about taking a picture in is the same
-/// wherever it lands — the cap, the sniff, the name that is this app's own
-/// and not the caller's — so it is all here and there is one of each.
+/// Write one picture into `dir`, returning its name. `dir` is an argument
+/// because a note keeps its pictures beside itself under `courses/`
+/// (`attach_document_image` in `crate::files`).
 pub(crate) fn write_image(dir: &Path, bytes: &[u8]) -> Result<String, String> {
     if bytes.is_empty() {
         return Err("that file is empty".into());
@@ -121,18 +87,16 @@ pub(crate) fn write_image(dir: &Path, bytes: &[u8]) -> Result<String, String> {
     Ok(name)
 }
 
-/// The bytes of a picture that crossed the IPC, which is to say base64 of
-/// the clipboard's — a byte array would cross as a JSON list of numbers,
-/// roughly seven characters per byte of screenshot.
+/// Decode a pasted picture's base64; a byte array would cross the IPC as a
+/// JSON list of numbers.
 pub(crate) fn decode(data: &str) -> Result<Vec<u8>, String> {
     base64::engine::general_purpose::STANDARD
         .decode(data.as_bytes())
         .map_err(|e| format!("could not read the pasted image: {e}"))
 }
 
-/// …and of one dropped from Finder, which the OS hands over as a path, so the
-/// bytes never cross the IPC at all. The size is asked of the filesystem
-/// first: a video dropped by mistake is refused without reading it.
+/// Read a picture dropped from Finder by path. The size is checked first, so a
+/// video dropped by mistake is refused unread.
 pub(crate) fn read_dropped(path: &str) -> Result<Vec<u8>, String> {
     let src = PathBuf::from(path);
     let meta = std::fs::metadata(&src).map_err(|e| format!("{path}: {e}"))?;
@@ -146,16 +110,12 @@ pub(crate) fn read_dropped(path: &str) -> Result<Vec<u8>, String> {
     std::fs::read(&src).map_err(|e| format!("{path}: {e}"))
 }
 
-/// What the composer gets back: the path the agent opens the picture by,
-/// relative to `agents/`, which is every thread's working directory.
+/// The path the agent opens the picture by, relative to the thread's cwd.
 fn attachment_ref(name: &str) -> String {
     format!("./attachments/{name}")
 }
 
-/// A picture pasted into the composer: base64 of the clipboard's bytes.
-///
-/// Base64 rather than a byte array because the array would be a JSON list of
-/// numbers — roughly seven characters per byte of screenshot across the IPC.
+/// A picture pasted into the composer, as base64 (see [`decode`]).
 #[tauri::command]
 pub async fn harness_attach_image(data: String) -> Result<String, String> {
     let bytes = decode(&data)?;
@@ -167,8 +127,7 @@ pub async fn harness_attach_image(data: String) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// A picture dropped onto the composer from Finder: the OS hands the webview
-/// a path, so the bytes never cross the IPC at all.
+/// A picture dropped onto the composer from Finder, by path.
 #[tauri::command]
 pub async fn harness_attach_file(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
@@ -193,21 +152,16 @@ mod tests {
         assert_eq!(sniff(b"\x00\x00\x00\x18ftypheic\x00\x00"), Some("heic"));
     }
 
-    /// The whole point of sniffing: a `.png` that is a shell script is not
-    /// one, and neither is an empty file.
     #[test]
     fn refuses_what_is_not_a_picture() {
         assert_eq!(sniff(b"#!/bin/sh\nrm -rf /"), None);
         assert_eq!(sniff(b"%PDF-1.7"), None);
         assert_eq!(sniff(b""), None);
-        let dir = std::env::temp_dir().join(format!("oculus-attach-test-{}", std::process::id()));
+        let dir = crate::test_support::Scratch::new("attach");
         assert!(write_image(&dir, b"#!/bin/sh").is_err());
         assert!(write_image(&dir, b"").is_err());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Nothing of the caller's reaches the filesystem, and two pictures in
-    /// the same second are two files.
     #[test]
     fn names_are_this_app_s_own() {
         let a = filename("png");
