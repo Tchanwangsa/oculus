@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CaretRight, File as FileIcon, FilePdf, FileDoc } from "@phosphor-icons/react";
+import { CaretRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,16 +27,14 @@ import {
   sqliteUtcToMs,
 } from "@/lib/format";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import {
-  TablePagination,
-  usePagedRows,
-} from "@/components/ui/TablePagination";
+import { fileIconFor } from "@/lib/fileTypes";
+import { usePagedRows } from "@/components/ui/TablePagination";
+import { GridTable, HeaderLabels } from "@/components/ui/GridTable";
 import type { SyncProgress } from "@/stores/syncStore";
 
 /**
- * One row per sync run, newest first. A row expands into the run's changed
- * files inline; the full ledger (including everything skipped) lives in a
- * modal so a routine "nothing changed" run stays one quiet line.
+ * One row per sync run, newest first, expanding into its changed files; the
+ * full ledger (incl. skipped) is in a modal.
  */
 
 const ACTION_LABEL: Record<SyncFileAction, string> = {
@@ -52,16 +50,13 @@ const ACTION_VARIANT: Record<SyncFileAction, "success" | "default" | "secondary"
 };
 
 /** Column template shared by the header and every row. */
-// The run name is a fixed-length string ("Manual run at 9 Sep, 16:59"), so it
-// gets a fixed column rather than the leftover space — the file counts are the
-// column that actually has something to say, and they take the slack instead.
+// The run name is fixed-length, so the counts column takes the slack.
 const COLS =
   "grid grid-cols-[14px_200px_90px_80px_minmax(0,1fr)_100px] items-center gap-3 px-5";
 
 const INLINE_FILE_LIMIT = 8;
 
-/** Codes the run targeted — from the stored list, or (for runs recorded
- *  before that existed) whatever subjects its file ledger touched. */
+/** Codes the run targeted: the stored list, else (older runs) the ledger's. */
 function runSubjectCodes(run: SyncRunSummary, files: SyncRunFile[]): string[] {
   if (run.subject_codes) {
     try {
@@ -91,16 +86,9 @@ function SubjectChips({ codes }: { codes: string[] }) {
   );
 }
 
-function fileIcon(path: string) {
-  const lower = path.toLowerCase();
-  if (lower.endsWith(".pdf")) return FilePdf;
-  if (/\.(pptx?|docx?|xlsx?)$/.test(lower)) return FileDoc;
-  return FileIcon;
-}
-
 function FileLine({ file }: { file: SyncRunFile }) {
-  const Icon = fileIcon(file.relative_path);
   const name = file.relative_path.split("/").pop() ?? file.relative_path;
+  const Icon = fileIconFor(name);
   return (
     <div className="flex items-center gap-2.5 py-1.5 min-w-0">
       <Icon size={13} className="shrink-0 text-muted-foreground/70" />
@@ -289,8 +277,7 @@ function RunRow({
   const startedMs = sqliteUtcToMs(run.started_at);
   const finishedMs = sqliteUtcToMs(run.finished_at);
   const running = run.status === "running";
-  // Reconciled runs get finished_at stamped at the NEXT app launch, so the
-  // elapsed time is a fiction — show nothing rather than a made-up duration.
+  // Reconciled runs get finished_at at the next launch, so show no duration.
   const interrupted = run.error === INTERRUPTED_SYNC_ERROR;
 
   return (
@@ -366,8 +353,7 @@ function RunRow({
   );
 }
 
-/** Consecutive runs bucketed by local calendar day; input is newest-first so
- *  each day's runs stay contiguous. */
+/** Runs bucketed by local day; newest-first input keeps each day contiguous. */
 function groupByDay(runs: SyncRunSummary[]) {
   const groups: Array<{ key: string; heading: string; runs: SyncRunSummary[] }> = [];
   for (const run of runs) {
@@ -381,8 +367,7 @@ function groupByDay(runs: SyncRunSummary[]) {
   return groups;
 }
 
-/** Runs per page. Enough that a normal week fits on page one, few enough
- *  that the day groups stay scannable. */
+/** Runs per page: a normal week fits on page one. */
 const PAGE_SIZE = 25;
 
 export function SyncHistoryTable({
@@ -411,96 +396,65 @@ export function SyncHistoryTable({
     });
 
   return (
-    <div className="flex h-full flex-col">
-      {/* The header sits OUTSIDE the scroll container, not sticky inside it:
-          the scrollbar is a 6px classic bar that takes its gutter from the
-          scroller's full height, so a header within it gets a bar drawn down
-          its right edge. The wrapper's `pr-1.5` re-creates that gutter's width
-          for the header, and `scrollbar-gutter: stable` on the body keeps the
-          gutter reserved when there is nothing to scroll — without both, the
-          header and its rows would sit 6px out of column. */}
-      <div className="shrink-0 pr-1.5">
-        <div className={cn(COLS, "border-b border-border-subtle bg-card py-2")}>
-          <span />
-          {["Started", "Duration", "Subjects", "Files", "Status"].map((h, i) => (
-            <span
-              key={h}
-              className={cn(
-                "text-[11px] font-medium text-muted-foreground",
-                i === 4 && "justify-self-end",
-              )}
-            >
-              {h}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* The body scrolls between the fixed header and the pinned footer. */}
-      <div className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
-        {runs.length === 0 && (
-          <p className="px-5 py-16 text-center text-xs text-muted-foreground">
-            No sync runs yet — pick your subjects above and run one.
-          </p>
-        )}
-
-        <div className="divide-y divide-border-subtle">
-          {groupByDay(pageRows).map((group) => {
-            const collapsed = collapsedDays.has(group.key);
-            return (
-              <div key={group.key}>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => toggleDay(group.key)}
-                  onKeyDown={(e) => e.key === "Enter" && toggleDay(group.key)}
+    <GridTable
+      cols={COLS}
+      header={
+        <HeaderLabels
+          labels={["", "Started", "Duration", "Subjects", "Files", "Status"]}
+          endLast
+        />
+      }
+      empty={runs.length === 0 && "No sync runs yet — pick your subjects above and run one."}
+      pagination={{ page, pageCount, onPage: setPage, total: runs.length, unit: "sync run" }}
+    >
+      <div className="divide-y divide-border-subtle">
+        {groupByDay(pageRows).map((group) => {
+          const collapsed = collapsedDays.has(group.key);
+          return (
+            <div key={group.key}>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => toggleDay(group.key)}
+                onKeyDown={(e) => e.key === "Enter" && toggleDay(group.key)}
+                className={cn(
+                  "flex items-center gap-2 px-5 py-1.5 bg-surface/70 cursor-pointer select-none hover:bg-surface transition-colors",
+                  !collapsed && "border-b border-border-subtle",
+                )}
+              >
+                <CaretRight
+                  size={9}
                   className={cn(
-                    "flex items-center gap-2 px-5 py-1.5 bg-surface/70 cursor-pointer select-none hover:bg-surface transition-colors",
-                    !collapsed && "border-b border-border-subtle",
+                    "shrink-0 text-muted-foreground/50 transition-transform",
+                    !collapsed && "rotate-90",
                   )}
-                >
-                  <CaretRight
-                    size={9}
-                    className={cn(
-                      "shrink-0 text-muted-foreground/50 transition-transform",
-                      !collapsed && "rotate-90",
-                    )}
-                  />
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    {group.heading}
+                />
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {group.heading}
+                </span>
+                {collapsed && (
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-muted-foreground/15 px-1 text-[10px] font-medium tabular-nums text-muted-foreground">
+                    {group.runs.length}
                   </span>
-                  {collapsed && (
-                    <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-muted-foreground/15 px-1 text-[10px] font-medium tabular-nums text-muted-foreground">
-                      {group.runs.length}
-                    </span>
-                  )}
-                </div>
-                {!collapsed && (
-                  <div className="divide-y divide-border-subtle">
-                    {group.runs.map((run) => (
-                      <RunRow
-                        key={run.id}
-                        run={run}
-                        progress={run.status === "running" ? progress : null}
-                        expanded={expanded.has(run.id)}
-                        onToggle={() => toggle(run.id)}
-                      />
-                    ))}
-                  </div>
                 )}
               </div>
-            );
-          })}
-        </div>
+              {!collapsed && (
+                <div className="divide-y divide-border-subtle">
+                  {group.runs.map((run) => (
+                    <RunRow
+                      key={run.id}
+                      run={run}
+                      progress={run.status === "running" ? progress : null}
+                      expanded={expanded.has(run.id)}
+                      onToggle={() => toggle(run.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
-
-      <TablePagination
-        page={page}
-        pageCount={pageCount}
-        onPage={setPage}
-        total={runs.length}
-        unit="sync run"
-      />
-    </div>
+    </GridTable>
   );
 }

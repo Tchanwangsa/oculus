@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { CaretRight, DotsSixVertical, Plus } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { TablePagination, usePagedRows } from "@/components/ui/TablePagination";
+import { usePagedRows } from "@/components/ui/TablePagination";
+import { GridTable, HeaderLabels } from "@/components/ui/GridTable";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DRAG_SURFACE, useCardDrag, useSettledList } from "@/hooks/useCardDrag";
 import { displayCode } from "@/lib/format";
@@ -22,38 +23,18 @@ import {
 } from "./taskTree";
 
 /**
- * Every task of the project as one table — the view for reading the plan
- * rather than working it. A parent expands into its subtasks in place, so the
- * whole tree is one column of rows instead of a drill-down.
+ * Every task of the project as one table; a parent expands into its subtasks
+ * in place, in the `GridTable` shell.
  *
- * Structurally this is `app/src/components/sync/SyncHistoryTable.tsx`: one
- * `COLS` template shared by the header and every row, the header outside the
- * scroller, and a pinned `TablePagination` footer.
- *
- * **Rows reorder by dragging the grip that takes the index cell over on
- * hover** — GitHub Projects' idiom, and the reason the number and the handle
- * share one 28px cell without the row twitching as the pointer crosses it. The
- * gesture is `useCardDrag` (`app/src/hooks/useCardDrag.ts`), the same one the
- * board runs on. A drop writes `moveTask(id, task.column_id, before, after)`:
- * the row keeps the column it is in, and only its `position` moves — which is
- * exactly what this table is ordered by, since `getTasks` deliberately leaves
- * `column_id` out of its ORDER BY (`docs/projects.md`). So the midpoint between
- * two rows *is* this table's order, however many different columns the rows
- * around the drop happen to be sitting in.
- *
- * The cost of that is worth knowing before it surprises someone: one `position`
- * serves two orders. A later drag on the *board* whose gap underflows renumbers
- * that whole column to whole numbers, which can scramble an order hand-set
- * here; and two rows in different columns can already carry the same number, in
- * which case there is no midpoint between them to take and `moveTask` refuses
- * the write outright (`ProjectPage` logs it and nothing moves). A second column
- * holding the table's own order was considered and turned down — see the plan
- * in `data/plans/`.
+ * Rows reorder by the grip that replaces the row number on hover
+ * (`useCardDrag`). A drop keeps the row's column and moves only its
+ * `position`, which is all `getTasks` orders by (`docs/projects.md`). The board
+ * shares that `position`: a board renumber can scramble an order set here, and
+ * equal positions across columns leave no midpoint, so `moveTask` refuses.
  */
 
-/** Column template shared by the header and every row — the one thing that
- *  keeps them in column. The first cell is 28px and holds the row number and
- *  the drag grip, one at a time. */
+/** Shared by the header and every row. The 28px first cell holds the row
+ *  number or the drag grip. */
 const COLS =
   "grid grid-cols-[28px_minmax(0,1fr)_110px_130px_120px_150px] items-center gap-3 px-5";
 
@@ -61,20 +42,14 @@ const HEADERS = ["", "Title", "Subject", "Status", "Due", "Subtasks"];
 
 const PAGE_SIZE = 25;
 
-/**
- * The drag engine's container ids. Every top-level row is in one list; each
- * expanded parent's children are a list of their own, so a subtask is only ever
- * reordered among its siblings.
- */
+/** Drag container ids: one list for top-level rows, one per expanded parent,
+ *  so a subtask only reorders among its siblings. */
 const TOP_LIST = "top";
 const childList = (parentId: number) => `sub-${parentId}`;
 
-/** How a row looks while it is the one being dragged. It needs a ground of its
- *  own — a row has none until it is hovered — and a stacking context, or the
- *  siblings it travels over would paint on top of it. */
+/** A background and stacking context, or siblings paint over the dragged row. */
 const LIFTED = "relative z-10 bg-card shadow-md";
 
-/** The neighbours a drop lands between, the way `moveTask` wants them. */
 function slotIn<T>(rest: T[], slot: number, idOf: (item: T) => number) {
   return {
     before: slot > 0 ? idOf(rest[slot - 1]) : null,
@@ -94,9 +69,7 @@ function SubjectCell({ project }: { project: DbProject }) {
   );
 }
 
-/** The add-subtask control, which on a subtask is a dead button rather than an
- *  error: `createTask` refuses a grandchild, and a refusal you can see before
- *  you click is not a refusal at all. */
+/** Disabled on a subtask: `createTask` refuses a grandchild. */
 function AddSubtaskButton({
   disabled,
   onClick,
@@ -123,8 +96,7 @@ function AddSubtaskButton({
   if (!disabled) return button;
   return (
     <Tooltip>
-      {/* A disabled button swallows pointer events, so the tooltip hangs off a
-          span that still gets them — the SyncPage pattern. */}
+      {/* A disabled button gets no pointer events; the span does. */}
       <TooltipTrigger asChild>
         <span className="shrink-0">{button}</span>
       </TooltipTrigger>
@@ -162,22 +134,12 @@ function TaskRow({
   progress: ReturnType<typeof subtaskProgress> | null;
   onMove: (columnId: string) => void;
   onAddSubtask: (() => void) | null;
-  /** Starts the reorder gesture. It hangs off the grip alone, never the row:
-   *  a row carries a caret, a title link, a status popover and an add button,
-   *  and a press on any of them has to keep doing what it does. */
+  /** On the grip only, so the row's own controls keep their presses. */
   onGrab: (e: ReactPointerEvent<HTMLElement>) => void;
-  /** This row is the one being dragged — it drops its hover ground, since the
-   *  caller has given it a lifted one. */
   lifted: boolean;
-  /** A reorder is in flight, so no row's number is the truth: the numbers are
-   *  positions in a list that is being rearranged, and they all change at once
-   *  when it lands. They fade out for the length of the gesture and fade back
-   *  in already renumbered — which is cheaper to watch than five numbers
-   *  flicking over in the frame the row lands in. */
+  /** Numbers fade out during a reorder and back in already renumbered. */
   numbersHidden: boolean;
-  /** Set on a subtask row, where the row itself is the draggable item. A
-   *  top-level row is dragged by the block that holds it *and its expanded
-   *  children*, so there the caller registers that block instead. */
+  /** Subtask rows only; a top-level row is dragged by its enclosing block. */
   rowRef?: (node: HTMLDivElement | null) => void;
   rowStyle?: CSSProperties;
   rowClassName?: string;
@@ -193,11 +155,7 @@ function TaskRow({
         rowClassName,
       )}
     >
-      {/* Number and grip share the cell: the number sits in flow and keeps the
-          28px honest, the grip is laid over it and fades in on row hover, so
-          neither the header nor any other row shifts when the pointer arrives.
-          `aria-hidden` because it is a pointer affordance with nothing behind
-          it — the drag is mouse-only here, as it is on the board. */}
+      {/* The grip overlays the number so hovering shifts nothing. */}
       <div className="relative flex items-center">
         <span
           className={cn(
@@ -212,15 +170,10 @@ function TaskRow({
           onPointerDown={onGrab}
           className={cn(
             "absolute inset-0 flex items-center text-muted-foreground/70 transition-opacity",
-            // The press is not cancelled — doing that costs the row's links
-            // their `click` in WebKit — so the grip is made unselectable
-            // instead, or a drag begun on it would drag a text selection
-            // across the table behind the row. See `DRAG_SURFACE`.
+            // Not preventDefault on press — see CLAUDE.md (WebKit click).
             DRAG_SURFACE,
-            // The grip names the grabbing cursor rather than leaving it to
-            // `:active`: it is the element holding the pointer capture, so its
-            // cursor is the one on screen for the whole gesture — including
-            // the stretches where the pointer has left the row entirely.
+            // Set here, not via `:active`: the grip holds pointer capture, so
+            // its cursor shows for the whole gesture.
             lifted
               ? "cursor-grabbing opacity-100"
               : "cursor-grab opacity-0 hover:text-foreground group-hover/row:opacity-100",
@@ -249,10 +202,7 @@ function TaskRow({
         )}
 
         <TaskGlyph kind={columnOf(project, task.column_id)?.kind ?? null} size={depth ? 11 : 13} />
-        {/* The title is the way into the task's own page, on a subtask row as
-            well as a parent's: a subtask is a task, with the same page. The
-            row's other controls stay where they are — a whole-row link would
-            have swallowed the status pill and the add-subtask button. */}
+        {/* Title-only link: a whole-row link would swallow the other controls. */}
         <Link
           to={taskHref(project.id, task)}
           className={cn(
@@ -301,46 +251,20 @@ export function ProjectTable({
   const [composing, setComposing] = useState<number | null>(null);
   const { page, pageCount, setPage, pageRows } = usePagedRows(nodes, PAGE_SIZE);
 
-  /**
-   * The reorder.
-   *
-   * `containerRef` is deliberately never called here, which is the one thing
-   * about this that looks like an omission. The engine hit-tests the pointer
-   * against the container boxes that *are* registered — first match wins, in
-   * registration order — and in this table the lists nest: every expanded
-   * parent's child block sits inside the top-level list's own box. The
-   * top-level list is on screen before any child block can be, since the table
-   * opens with everything collapsed, so it would win every hit test and no
-   * subtask could ever be dropped into its own list. With no boxes registered
-   * the engine leaves `containerId` at the list the gesture started in, which
-   * is the confinement this table wants anyway: a row is reordered among its
-   * own kind, or not at all.
-   */
+  // `containerRef` is deliberately never registered: the lists nest, and the
+  // engine's first-match hit test would let the top-level box swallow every
+  // subtask drop. Unregistered, a drag stays in the list it started in.
   const drag = useCardDrag((drop) => {
-    // A drop that changed lists would be a *re-parent*, and `moveTask` cannot
-    // write one — `parent_id` is not among the three columns it owns. Moving
-    // the row's `position` without re-parenting it would be worse than doing
-    // nothing, since the row would sort to a slot it is not drawn in. So it is
-    // refused outright rather than half made. This is also the invariant
-    // everything below leans on, and the reason no container boxes are
-    // registered above.
+    // A list change would be a re-parent, which `moveTask` cannot write.
     if (drop.from !== drop.containerId) return;
 
     if (drop.containerId === TOP_LIST) {
-      // The engine only ever saw the 25 rows this page renders, so its index —
-      // and the `before`/`after` it derived from it — is page-local. Dropping
-      // at the top of page 2 hands back `before: null`, which `moveTask` reads
-      // as "before everything" and would land the row above page 1. The page
-      // offset maps that slot onto the full `nodes` list, and the neighbours
-      // come from there instead. The offset is the same either side of the
-      // dragged row: the engine has already taken the row out of its own
-      // neighbour list, and so has `rest`.
+      // The engine's index is page-local; map it onto the full `nodes` list,
+      // or a drop at the top of page 2 would land above page 1.
       const from = nodes.findIndex((n) => n.task.id === drop.id);
       if (from < 0) return;
       const rest = nodes.filter((n) => n.task.id !== drop.id);
       const slot = (page - 1) * PAGE_SIZE + drop.index;
-      // Already between those two rows: a write plus a project-wide re-read to
-      // change nothing on screen.
       if (slot === from) return;
       const task = nodes[from].task;
       const { before, after } = slotIn(rest, slot, (n) => n.task.id);
@@ -348,9 +272,7 @@ export function ProjectTable({
       return true;
     }
 
-    // A subtask, among the siblings it is drawn with. Its parent's children are
-    // all on screen together — the block is not paginated — so the engine's
-    // index needs no offset here.
+    // Subtasks aren't paginated, so no offset.
     const parent = nodes.find((n) => childList(n.task.id) === drop.containerId);
     if (!parent) return;
     const from = parent.children.findIndex((c) => c.id === drop.id);
@@ -363,28 +285,15 @@ export function ProjectTable({
   }, { settleOn: nodes });
   const live = drag.drag;
 
-  /**
-   * The rows the *settle* is drawn against — see `CardDragState.settling`.
-   *
-   * `onMove`'s write comes back as a project-wide re-read, which lands while
-   * the dropped row is still gliding into its slot. Drawing the new order
-   * there would put it underneath the transforms that were worked out for the
-   * old one, moving every row twice; so the table keeps the list it had when
-   * the pointer went up until the gesture lets go, and takes the new one in
-   * the same commit the transforms come off in — where they are the same
-   * picture and the swap cannot be seen.
-   *
-   * Only the rows are held. `page` is not: a reorder cannot change how many
-   * rows there are, so the paging around it is the same either way.
-   */
+  // Hold the pre-drop order until the settle animation ends, or the re-read
+  // would land under transforms computed for the old order (see
+  // `useSettledList`).
   const settledNodes = useSettledList(nodes, live);
   const rows =
     settledNodes === nodes
       ? pageRows
       : settledNodes.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  /** A row's number is a position in the list being rearranged — see
-   *  `TaskRow`'s `numbersHidden`. Only a top-level drag renumbers anything;
-   *  a subtask's siblings are unnumbered. */
+  // Subtasks are unnumbered, so only a top-level drag hides numbers.
   const numbersHidden = live != null && live.containerId === TOP_LIST;
 
   const toggle = (id: number) =>
@@ -394,8 +303,7 @@ export function ProjectTable({
       return next;
     });
 
-  // A new top-level row joins the first column you actually work in, not the
-  // backlog the project's column list happens to start with.
+  // New rows join the first working column, not the backlog.
   const defaultColumn = promotionTarget(project) ?? project.columns[0];
 
   const move = (id: number, columnId: string) => {
@@ -404,183 +312,134 @@ export function ProjectTable({
   };
 
   return (
-    <div className="flex h-full flex-col">
-      {/* The header sits OUTSIDE the scroll container, not sticky inside it:
-          the scrollbar is a 6px classic bar that takes its gutter from the
-          scroller's full height, so a header within it gets a bar drawn down
-          its right edge. The wrapper's `pr-1.5` re-creates that gutter's width
-          for the header, and `scrollbar-gutter: stable` on the body keeps it
-          reserved when there is nothing to scroll — without both, the header
-          and its rows sit 6px out of column. */}
-      <div className="shrink-0 pr-1.5">
-        <div className={cn(COLS, "border-b border-border-subtle bg-card py-2")}>
-          {HEADERS.map((h, i) => (
-            <span key={i} className="text-[11px] font-medium text-muted-foreground">
-              {h}
-            </span>
-          ))}
-        </div>
-      </div>
+    <GridTable
+      cols={COLS}
+      header={<HeaderLabels labels={HEADERS} />}
+      empty={
+        nodes.length === 0 &&
+        "No tasks yet — break the project into the first few pieces below."
+      }
+      pagination={{ page, pageCount, onPage: setPage, total: nodes.length, unit: "task" }}
+    >
 
-      <div className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
-        {nodes.length === 0 && (
-          <p className="px-5 py-16 text-center text-xs text-muted-foreground">
-            No tasks yet — break the project into the first few pieces below.
-          </p>
-        )}
+      <div className="divide-y divide-border-subtle">
+        {rows.map((node, i) => {
+          const open = expanded.has(node.task.id);
+          const progress = subtaskProgress(node);
+          const grabbed = live?.id === node.task.id;
+          // The grabbed block follows the pointer's `dy`; `shiftFor` is 0 for it.
+          const shift = grabbed && live ? live.dy : drag.shiftFor(TOP_LIST, i);
+          return (
+            // The block, not the row, is the item, so an expanded parent
+            // carries its subtasks.
+            <div
+              key={node.task.id}
+              ref={drag.itemRef(TOP_LIST, node.task.id)}
+              style={shift ? { transform: `translateY(${shift}px)` } : undefined}
+              className={cn(
+                // On the base class so the shadow fades out with `LIFTED`.
+                "transition-[box-shadow] duration-200",
+                grabbed && LIFTED,
+                // The grabbed row eases only while settling, never under the pointer.
+                (grabbed ? live?.settling : live != null) &&
+                  "transition-[transform,box-shadow] ease-out",
+              )}
+            >
+              <TaskRow
+                project={project}
+                task={node.task}
+                index={(page - 1) * PAGE_SIZE + i + 1}
+                depth={0}
+                expandable={node.children.length > 0}
+                expanded={open}
+                onToggle={() => toggle(node.task.id)}
+                progress={progress}
+                onMove={(columnId) => move(node.task.id, columnId)}
+                onAddSubtask={() => {
+                  setExpanded((prev) => new Set(prev).add(node.task.id));
+                  setComposing(node.task.id);
+                }}
+                onGrab={(e) =>
+                  drag.onPointerDown(e, { id: node.task.id, containerId: TOP_LIST })
+                }
+                lifted={grabbed}
+                numbersHidden={numbersHidden}
+              />
 
-        <div className="divide-y divide-border-subtle">
-          {rows.map((node, i) => {
-            const open = expanded.has(node.task.id);
-            const progress = subtaskProgress(node);
-            const grabbed = live?.id === node.task.id;
-            // **The grabbed block's own travel, and the reason it needs a
-            // branch of its own.** `shiftFor` answers 0 for it — it describes
-            // how far the *other* rows move to open the gap, and the grabbed
-            // row is the gap — so reading it here left the one row the hand is
-            // on sitting still while its neighbours slid around it. The lift
-            // comes from the live gesture instead. Vertically only: a row
-            // spans the table's width, so there is nowhere sideways to go, and
-            // `dx` would only tear it out of its columns.
-            const shift = grabbed && live ? live.dy : drag.shiftFor(TOP_LIST, i);
-            return (
-              // The draggable item is this block, not the row inside it, so an
-              // expanded parent travels with its subtasks instead of leaving
-              // them behind mid-gesture. The engine's displacement is the
-              // grabbed item's own height, so a block that is taller than a row
-              // still opens and closes exactly the gap it occupies.
-              //
-              // It is translated where it sits rather than drawn into a portal
-              // the way the board's lifted card is. The board portals because
-              // each of its columns is a scroller that clips on both axes and a
-              // card crosses between them; a row here only ever travels up and
-              // down inside one scroller, where being clipped at that
-              // scroller's edge is the right answer rather than a bug.
-              <div
-                key={node.task.id}
-                ref={drag.itemRef(TOP_LIST, node.task.id)}
-                style={shift ? { transform: `translateY(${shift}px)` } : undefined}
-                className={cn(
-                  // The lift's shadow fades rather than vanishing, so the row
-                  // setting down is one movement. It is on the base class
-                  // because a transition only runs on a property the style it
-                  // lands in still transitions, and `LIFTED` is *removed* here.
-                  "transition-[box-shadow] duration-200",
-                  grabbed && LIFTED,
-                  // The neighbours glide as the gap opens and closes. The
-                  // grabbed row glides only once the hand is off it: while the
-                  // pointer is down it must track it with no easing at all, or
-                  // the row lags behind the grip.
-                  (grabbed ? live?.settling : live != null) &&
-                    "transition-[transform,box-shadow] ease-out",
-                )}
-              >
-                <TaskRow
-                  project={project}
-                  task={node.task}
-                  index={(page - 1) * PAGE_SIZE + i + 1}
-                  depth={0}
-                  expandable={node.children.length > 0}
-                  expanded={open}
-                  onToggle={() => toggle(node.task.id)}
-                  progress={progress}
-                  onMove={(columnId) => move(node.task.id, columnId)}
-                  onAddSubtask={() => {
-                    setExpanded((prev) => new Set(prev).add(node.task.id));
-                    setComposing(node.task.id);
-                  }}
-                  onGrab={(e) =>
-                    drag.onPointerDown(e, { id: node.task.id, containerId: TOP_LIST })
-                  }
-                  lifted={grabbed}
-                  numbersHidden={numbersHidden}
-                />
-
-                {open && (
-                  <div className="divide-y divide-border-subtle border-t border-border-subtle bg-surface/30">
-                    {node.children.map((child, j) => {
-                      const list = childList(node.task.id);
-                      const childGrabbed = live?.id === child.id;
-                      // Same as the block above: the grabbed subtask rides the
-                      // pointer, its siblings ride `shiftFor`.
-                      const childShift =
-                        childGrabbed && live ? live.dy : drag.shiftFor(list, j);
-                      return (
-                        <TaskRow
-                          key={child.id}
-                          project={project}
-                          task={child}
-                          index={null}
-                          depth={1}
-                          expandable={false}
-                          expanded={false}
-                          onToggle={() => {}}
-                          progress={null}
-                          onMove={(columnId) => move(child.id, columnId)}
-                          onAddSubtask={null}
-                          onGrab={(e) =>
-                            drag.onPointerDown(e, { id: child.id, containerId: list })
+              {open && (
+                <div className="divide-y divide-border-subtle border-t border-border-subtle bg-surface/30">
+                  {node.children.map((child, j) => {
+                    const list = childList(node.task.id);
+                    const childGrabbed = live?.id === child.id;
+                    const childShift =
+                      childGrabbed && live ? live.dy : drag.shiftFor(list, j);
+                    return (
+                      <TaskRow
+                        key={child.id}
+                        project={project}
+                        task={child}
+                        index={null}
+                        depth={1}
+                        expandable={false}
+                        expanded={false}
+                        onToggle={() => {}}
+                        progress={null}
+                        onMove={(columnId) => move(child.id, columnId)}
+                        onAddSubtask={null}
+                        onGrab={(e) =>
+                          drag.onPointerDown(e, { id: child.id, containerId: list })
+                        }
+                        lifted={childGrabbed}
+                        numbersHidden={numbersHidden}
+                        rowRef={drag.itemRef(list, child.id)}
+                        rowStyle={
+                          childShift ? { transform: `translateY(${childShift}px)` } : undefined
+                        }
+                        rowClassName={cn(
+                          "transition-[box-shadow] duration-200",
+                          childGrabbed && LIFTED,
+                          (childGrabbed ? live?.settling : live != null) &&
+                            "transition-[transform,box-shadow] ease-out",
+                        )}
+                      />
+                    );
+                  })}
+                  {composing === node.task.id && (
+                    <div className={cn(COLS, "py-1.5")}>
+                      <span />
+                      <div className="pl-5">
+                        <InlineAdd
+                          defaultEditing
+                          label="New subtask"
+                          placeholder="Subtask title"
+                          onAdd={(title) =>
+                            onCreate({
+                              title,
+                              columnId: node.task.column_id,
+                              parentId: node.task.id,
+                            })
                           }
-                          lifted={childGrabbed}
-                          numbersHidden={numbersHidden}
-                          rowRef={drag.itemRef(list, child.id)}
-                          rowStyle={
-                            childShift ? { transform: `translateY(${childShift}px)` } : undefined
-                          }
-                          rowClassName={cn(
-                            "transition-[box-shadow] duration-200",
-                            childGrabbed && LIFTED,
-                            (childGrabbed ? live?.settling : live != null) &&
-                              "transition-[transform,box-shadow] ease-out",
-                          )}
                         />
-                      );
-                    })}
-                    {composing === node.task.id && (
-                      <div className={cn(COLS, "py-1.5")}>
-                        <span />
-                        <div className="pl-5">
-                          <InlineAdd
-                            defaultEditing
-                            label="New subtask"
-                            placeholder="Subtask title"
-                            onAdd={(title) =>
-                              onCreate({
-                                title,
-                                columnId: node.task.column_id,
-                                parentId: node.task.id,
-                              })
-                            }
-                          />
-                        </div>
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {defaultColumn && (
-          <div className={cn(COLS, "border-t border-border-subtle py-1.5")}>
-            <span />
-            <InlineAdd
-              label="New task"
-              placeholder="Task title"
-              onAdd={(title) => onCreate({ title, columnId: defaultColumn.id })}
-            />
-          </div>
-        )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      <TablePagination
-        page={page}
-        pageCount={pageCount}
-        onPage={setPage}
-        total={nodes.length}
-        unit="task"
-      />
-    </div>
+      {defaultColumn && (
+        <div className={cn(COLS, "border-t border-border-subtle py-1.5")}>
+          <span />
+          <InlineAdd
+            label="New task"
+            placeholder="Task title"
+            onAdd={(title) => onCreate({ title, columnId: defaultColumn.id })}
+          />
+        </div>
+      )}
+    </GridTable>
   );
 }

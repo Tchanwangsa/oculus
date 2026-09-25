@@ -8,10 +8,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  TablePagination,
-  usePagedRows,
-} from "@/components/ui/TablePagination";
+import { usePagedRows } from "@/components/ui/TablePagination";
+import { GridTable, HeaderLabels } from "@/components/ui/GridTable";
 import { fmtAgo, fmtClock } from "@/lib/format";
 import {
   statusOf,
@@ -22,17 +20,10 @@ import {
 } from "@/stores/pipelineStore";
 
 /**
- * The full ingest ledger: one row per PDF, walking Download → Parse → Embed. A
- * row shows the stage dots and, for whatever is running, a single percentage;
- * clicking it expands a timeline of when each step finished. Rows are ranked
- * so live work sits on page one and finished files fall to the back of the
- * pages.
- *
- * **The third dot is conditional.** With no Voyage key stored there is no
- * embedder to wait for, so the stage is not drawn and a parsed file is
- * finished at two dots — drawing a permanently grey dot for a stage that is
- * switched off would read as a stall. `embedStage` in `pipelineStore` is the
- * switch; it is set from `indexStore`, which owns readiness.
+ * The ingest ledger: one row per PDF through Download → Parse → Embed, live
+ * work ranked first; a row expands into a step timeline. With no Voyage key
+ * the embed dot isn't drawn (`embedStage` in `pipelineStore`, set from
+ * `indexStore`), so a parsed file is done at two dots rather than stalled.
  */
 
 const DOWNLOAD_PARSE = [
@@ -75,9 +66,7 @@ const BADGE_VARIANT: Record<
   failed: "destructive",
 };
 
-/** Column template shared by the header and every row. The stages column is
- *  sized to its header rather than its dots: two dots and a connector are 30px,
- *  narrower than the word "Stages". */
+/** Shared by header and rows; stages column is sized to its header word. */
 const COLS =
   "grid grid-cols-[minmax(0,1fr)_100px_60px_80px_minmax(120px,160px)] items-center gap-4 px-5";
 
@@ -139,10 +128,8 @@ function timelineSteps(item: PipelineItem, embedStage: boolean): TimelineStep[] 
           ? item.error
           : undefined;
 
-  // The embed detail is a page fraction and nothing else, because that is the
-  // only thing that moves: one document is one blocking call, and on the free
-  // Voyage programme it is ~2.8 pages a minute. A row that sat on "in
-  // progress" for an hour would be indistinguishable from a hang.
+  // Embed shows a page fraction — the only thing that moves during one long
+  // blocking call (see CLAUDE.md: parse/embed block for minutes).
   const embedDetail =
     item.embed === "active"
       ? item.embedTotalPages > 0
@@ -230,10 +217,8 @@ function Row({
   onResume?: (item: PipelineItem) => void;
 }) {
   const s = statusOf(item, embedStage);
-  // A parsed file with its embedding still outstanding gets the same ▶ as a
-  // paused one, and that is the point of the third stage being here: the
-  // backlog is not swept up automatically, so this is how one file is sent
-  // without committing to the whole library from the settings page.
+  // A parsed-but-unembedded file gets ▶ too: the backlog isn't swept
+  // automatically, so this embeds one file without committing the library.
   const embedNow = embedStage && item.parse === "done" && item.embed === "pending";
   const resumable = onResume && (s.phase === "paused" || s.phase === "failed" || embedNow);
   const percent =
@@ -306,8 +291,7 @@ function Row({
   );
 }
 
-/** Most recent stage timestamp, with the full breakdown one click away in the
- *  row's timeline. */
+/** Most recent stage timestamp; the full breakdown is in the timeline. */
 function StageDates({ item }: { item: PipelineItem }) {
   const latest = Math.max(item.downloadedAt ?? 0, item.parsedAt ?? 0);
   if (!latest) return <span className="text-[11px] text-muted-foreground/60">—</span>;
@@ -317,7 +301,7 @@ function StageDates({ item }: { item: PipelineItem }) {
 }
 
 /** Sort: running work first, then the queue, then paused, then failures;
- *  freshest first within each group. Completed rows are grouped separately. */
+ *  done last; freshest first within each group. */
 const PHASE_RANK: Record<PipelinePhase, number> = {
   active: 0,
   waiting: 1,
@@ -335,8 +319,7 @@ function byActivity(embedStage: boolean) {
   };
 }
 
-/** Files per page. The ledger runs to hundreds of PDFs, and every row here
- *  is live — capping what renders keeps the stage dots cheap to animate. */
+/** Files per page; caps how many live rows animate. */
 const PAGE_SIZE = 50;
 
 export function PipelineTable({
@@ -356,9 +339,6 @@ export function PipelineTable({
       return next;
     });
 
-  // One list, ranked: running work first, finished rows last. Paging replaces
-  // the old collapsed "Completed" group — live work is on page one either way,
-  // and the footer says how much is behind it.
   const sorted = useMemo(
     () => [...items].sort(byActivity(embedStage)),
     [items, embedStage],
@@ -366,53 +346,24 @@ export function PipelineTable({
   const { page, pageCount, setPage, pageRows } = usePagedRows(sorted, PAGE_SIZE);
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Header outside the scroller, gutter re-created by hand — see the note
-          in `SyncHistoryTable`. */}
-      <div className="shrink-0 pr-1.5">
-        <div className={cn(COLS, "border-b border-border-subtle bg-card py-2")}>
-          {["File", "Subject", "Stages", "Updated", "Status"].map((h, i) => (
-            <span
-              key={h}
-              className={cn(
-                "text-[11px] font-medium text-muted-foreground",
-                i === 4 && "justify-self-end",
-              )}
-            >
-              {h}
-            </span>
-          ))}
-        </div>
+    <GridTable
+      cols={COLS}
+      header={<HeaderLabels labels={["File", "Subject", "Stages", "Updated", "Status"]} endLast />}
+      empty={sorted.length === 0 && "Nothing in the pipeline — run a sync to pull new files."}
+      pagination={{ page, pageCount, onPage: setPage, total: sorted.length, unit: "file" }}
+    >
+      <div className="divide-y divide-border-subtle">
+        {pageRows.map((it) => (
+          <Row
+            key={it.relativePath}
+            item={it}
+            embedStage={embedStage}
+            expanded={expanded.has(it.relativePath)}
+            onToggle={() => toggle(it.relativePath)}
+            onResume={onResume}
+          />
+        ))}
       </div>
-
-      <div className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
-        {sorted.length === 0 && (
-          <p className="px-5 py-16 text-center text-xs text-muted-foreground">
-            Nothing in the pipeline — run a sync to pull new files.
-          </p>
-        )}
-
-        <div className="divide-y divide-border-subtle">
-          {pageRows.map((it) => (
-            <Row
-              key={it.relativePath}
-              item={it}
-              embedStage={embedStage}
-              expanded={expanded.has(it.relativePath)}
-              onToggle={() => toggle(it.relativePath)}
-              onResume={onResume}
-            />
-          ))}
-        </div>
-      </div>
-
-      <TablePagination
-        page={page}
-        pageCount={pageCount}
-        onPage={setPage}
-        total={sorted.length}
-        unit="file"
-      />
-    </div>
+    </GridTable>
   );
 }
