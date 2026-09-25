@@ -25,7 +25,9 @@ this page is the structure.
 | Its Projects tab (index, one board, a subject's own tab) | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/subject/ProjectsPage.tsx`, `app/src/components/projects/`, `app/src/stores/projectsStore.ts`, `app/src/lib/projects.ts` |
 | Its Tasks tab: every project's tasks and the ones filed nowhere, filtered | `app/src/pages/TasksPage.tsx`, `app/src/components/projects/TasksBoard.tsx`, `app/src/components/projects/TasksTable.tsx`, `app/src/components/projects/TaskFilters.tsx`, `app/src/components/projects/universalTasks.ts`, `app/src/hooks/useTaskList.ts` |
 | Writing a task down, and filing it later | `app/src/components/projects/NewTaskButton.tsx`, `app/src/components/projects/ProjectPicker.tsx` |
-| The card/row drag every board and table shares | `app/src/hooks/useCardDrag.ts` |
+| The card/row drag every board and table shares, and the board chrome both boards draw | `app/src/hooks/useCardDrag.ts`, `app/src/components/projects/BoardParts.tsx` |
+| The pointer gesture under every in-window drag, and the tab-strip reorder on it | `app/src/hooks/usePointerDrag.ts` |
+| Resize-style drags (the lecture dock and source-layout splitters), one move per frame | `app/src/hooks/useFrameDrag.ts` |
 | Overlap packing, shared by the week grid and the project timeline | `app/src/lib/lanes.ts` |
 | Agent/model/reasoning picker (settings rows + composer) | `app/src/components/harness/ModelPicker.tsx` |
 | Antigravity's refusal card in chat, and its approvals list in Settings → AI | `app/src/components/harness/PermissionCard.tsx`, `app/src/pages/settings/AiPage.tsx` |
@@ -45,8 +47,10 @@ this page is the structure.
 | Browser preferences (search engine, where links open) | `app/src/stores/browserPrefsStore.ts`, `app/src/components/settings/BrowserSection.tsx` |
 | Viewers | `app/src/components/files/PDFViewer.tsx`, `app/src/lib/pdfjs.ts`, `app/src/components/files/FileViewer.tsx`, `app/src/components/lectures/LecturePlayer.tsx`, `app/src/components/lectures/ChaptersPanel.tsx`, `app/src/components/lectures/ReadingList.tsx` |
 | Parse state: the words, and the row badge / viewer notice | `app/src/lib/parseState.ts`, `app/src/components/files/ParseState.tsx` |
+| Library file commands (read a course file, queue a parse, read parse state back off disk) | `app/src/lib/courseFiles.ts`, `app/src/hooks/useReconcileParseStatus.ts` |
 | shadcn components (source, editable) | `app/src/components/ui/` |
-| Table chrome: view tabs, the quieter pill strip, footer pagination | `app/src/components/ui/ViewTabs.tsx`, `app/src/components/ui/PillTabs.tsx`, `app/src/components/ui/TablePagination.tsx` |
+| Table chrome: the grid-table shell, view tabs, the quieter pill strip, footer pagination | `app/src/components/ui/GridTable.tsx`, `app/src/components/ui/ViewTabs.tsx`, `app/src/components/ui/PillTabs.tsx`, `app/src/components/ui/TablePagination.tsx` |
+| Page list parts: the bordered row card, the loading fill, the empty drop card | `app/src/components/ui/PageParts.tsx` |
 | Zustand stores | `app/src/stores/` |
 | Hooks | `app/src/hooks/` |
 | DB access (tauri-plugin-sql) | `app/src/lib/db.ts` |
@@ -56,8 +60,7 @@ this page is the structure.
 The route table is `app/src/routes.tsx`, and each **pane** builds its own
 memory router over it (`app/src/components/tabs/TabPane.tsx`) — the shell is
 above all of them, so there is no one router to name. A pane is a tab, or one
-half of a split tab — ⌥⌘T, described under **How it connects** below. `/` is **Home**; it used to
-redirect to `/chat`. Then `/chat`, `/calendar`, the Tasks section's two tabs
+half of a split tab — ⌥⌘T, described under **How it connects** below. `/` is **Home**. Then `/chat`, `/calendar`, the Tasks section's two tabs
 `/projects` and `/tasks` — plus `/projects/:projectId`,
 `/projects/:projectId/tasks/:taskId` and `/tasks/:taskId` under them —
 `/subjects`, `/subjects/:subjectId` (SubjectLayout →
@@ -112,9 +115,8 @@ by header; [projects.md](./projects.md#the-universal-view) is where that rule
 and `refileTask` are written down. The page's chrome is a fixed `h-12`
 toolbar, then a row carrying the deliberately quiet `PillTabs` strip for the two
 views on the left and the four filters — status, project, subject, due, opening
-on Todo — on the right, so switching view cannot jolt the work below. The
-`All tasks · Unfiled` scope strip that used to sit above the toolbar is gone:
-Unfiled is a value of the project filter now.
+on Todo — on the right, so switching view cannot jolt the work below.
+Unfiled is a value of the project filter, not a scope of its own.
 
 **`/chat` carries the thread itself, not just its name**: `?t=<id>&n=<title>`
 (`chatHref`). The id is what makes a Chat tab's conversation *that tab's* —
@@ -162,10 +164,10 @@ plainly *Chat*.
   is real in that seam and has no server to talk to yet, so it is listed and
   disabled in the menu rather than hidden — which is the one place these two
   sections differ, because the parser's local engine does have a server and is
-  always selectable. `unavailable_reason` is still Rust's, and Rust still
-  refuses the engine in those words; the section no longer *prints* it under
-  the control, because a paragraph about a control nobody can use was crowding
-  out the numbers that decide whether to press Index.
+  always selectable. `unavailable_reason` is Rust's, and Rust refuses the
+  engine in those words; the section does not *print* it under the control,
+  because a paragraph about a control nobody can use crowds out the numbers
+  that decide whether to press Index.
 - **The same section starts and stops the index run**
   (`app/src/stores/indexStore.ts`). Until it existed the index could only be
   built by `oculus index` from a terminal: `embedFile` was written and wired to
@@ -195,17 +197,14 @@ plainly *Chat*.
   parsed file — and the pipeline table hides its third stage for the same
   reason, since a permanently grey dot reads as a stall rather than as an
   option nobody turned on.
-- **The stats rows distinguish the two spaces, and the labels had to change to
-  do it.** `IndexStats.model` is the space this build *writes* — `stats` reads
-  it off the seam's constants so it can answer before a key exists — not the
-  space the stored vectors are in. Shown as "Vector space" it claimed the
-  library held Voyage vectors while every one of them was Qwen, so it is
-  "Search space" now.
-- **What is *not* indexed is one row, not the stale-vector essay it used to
-  be.** `pages_stale` and `stale_models` are still on `IndexStats` and still
-  the honest account of a library embedded by a retired model — but as a row
-  *and* a paragraph on this page they answered a question nobody was asking
-  here. "Not indexed" counts **files** from the same predicate the run walks
+- **The stats rows distinguish the two spaces.** `IndexStats.model` is the
+  space this build *writes* — `stats` reads it off the seam's constants so it
+  can answer before a key exists — not the space the stored vectors are in, so
+  it is labelled "Search space": "Vector space" would claim the stored vectors
+  are in it when they may all be a retired model's.
+- **What is *not* indexed is one row.** `pages_stale` and `stale_models` are on
+  `IndexStats` and are the honest account of a library embedded by a retired
+  model, but they answer a question nobody is asking on this page. "Not indexed" counts **files** from the same predicate the run walks
   (`getUnembeddedPdfs`), which already follows the current space, so a retired
   model's vectors show up in it as what they are. The stale numbers still reach
   a human through `oculus status` and through the re-index confirmation.
@@ -291,7 +290,12 @@ plainly *Chat*.
   so the hook only hands it to `harnessStore`, which keeps the streaming
   text and patches tool rows — see [harness.md](./harness.md). It is
   app-level rather than page-level because a thread keeps running on
-  another page and the sidebar's Chat row spins while one does.
+  another page and the sidebar's Chat row spins while one does. A page that
+  must read a row this hook writes reloads on the hook's own window event
+  (`FILE_SCRAPED_EVENT` in `app/src/lib/syncRunner.ts` for `scrape-file`),
+  never on the Tauri event itself, which would race the upsert. Components
+  subscribe through `useTauriEvent` / `useWindowEvent`
+  (`app/src/hooks/useEvents.ts`).
 - **`app/src/lib/tauriEvents.ts` is imported for its side effect only, before
   `./App` in `app/src/main.tsx`, and is not dead code.** Tauri's injected
   `unlisten` reads `listeners[eventId].handlerId` after checking only that the
@@ -316,7 +320,7 @@ plainly *Chat*.
 - In the app it is the **frontend** that owns scrape-table writes (the Rust
   engine only emits events); the CLI writes the same rows itself via
   `app/src-tauri/src/store.rs`. Change a table's shape and both writers must
-  move together, plus the migration in `app/src-tauri/src/lib.rs`. The
+  move together, plus the migration in `app/src-tauri/src/migrations.rs`. The
   `projects` tables are the same pair, one layer up:
   `app/src/lib/projects.ts` in the app, `app/src-tauri/src/projects.rs`
   headless ([projects.md](./projects.md)).
@@ -371,8 +375,8 @@ plainly *Chat*.
   library file, so the parse sweep, the embed hop, ⌘K, semantic search and the
   chat agent's `courses/` all reach it without knowing it was never on Canvas.
   What `app/src/lib/uploads.ts` adds is the `files` row and the first parse
-  kick — **in that order**, because `embedAfterParse` in `useBackendEvents`
-  resolves a finished parse back to a file by `(subject_id, relative_path)`,
+  kick — **in that order**, because the `parse-status` handler in
+  `app/src/hooks/useBackendEvents.ts` resolves a finished parse back to a file row by its path,
   and a file parsed before its row exists would never be indexed.
   Three choices are worth keeping. The picker and the drag both hand back
   **paths**, never bytes, so nothing large crosses the IPC bridge. A name
@@ -670,15 +674,11 @@ plainly *Chat*.
   Nothing in the viewer re-renders for a zoom — the percentage is written
   straight to its text node, and the only React state is which end of the range
   the zoom is resting on, so the toolbar can grey the button that would do
-  nothing. (`PDFViewer` no longer lays its
-  own pages out at all: it mounts pdf.js's `PDFViewer` component from
-  `pdfjs-dist/web/pdf_viewer.mjs` — Firefox's reader minus its chrome — which
-  owns the page window, the text layer and the zoom. This file used to
-  hand-roll each of those over `react-pdf`, and each hand-rolled version had a
-  visible bug: a page window sized from a guessed aspect ratio, a
-  `transform: scale()` preview folded into a real raster on an idle timer, and
-  an anchor measured across two frames that snapped the document toward the
-  middle at the end of every pinch. The library's counterparts are
+  nothing. (`PDFViewer` does not lay its own pages out at all: it mounts
+  pdf.js's `PDFViewer` component from `pdfjs-dist/web/pdf_viewer.mjs` —
+  Firefox's reader minus its chrome — which owns the page window, the text
+  layer and the zoom, each of which is easy to get visibly wrong by hand. The
+  library's counterparts are
   `updateScale({ origin, drawingDelay })` — which writes the scale to a
   `--scale-factor` CSS variable for the compositor and re-rasterises once, the
   same preview/commit split, and holds the pinched point still — and its own
@@ -842,9 +842,9 @@ plainly *Chat*.
 - **What a provider cannot do is a field on `PROVIDERS`, not a test on its
   id.** `ProviderInfo.rewind` in `app/src/lib/harness.ts` is false for
   Antigravity, whose CLI cannot take a question back out of its context, and
-  both timelines' owners (`ChatPage.tsx`,
-  `app/src/components/lectures/LectureChatPanel.tsx`) then hand `Timeline`
-  no edit, retry or rewind — all three truncate the thread, and offering them
+  `app/src/components/harness/useThreadActions.ts` — the thread actions both
+  timelines' owners (`ChatPage.tsx`, `LectureChatPanel.tsx`) share — then hands
+  `Timeline` no edit, retry or rewind — all three truncate the thread, and offering them
   would leave the agent remembering what the screen had dropped. What the
   timeline always gets is `followUp`: a plain send on the open thread with its
   own model and the composer's level.
@@ -1306,7 +1306,8 @@ plainly *Chat*.
   are read live instead of copied.
 - **Tables are full-bleed, with their own header and footer.** `SyncPage`
   gives its body no padding: `SyncHistoryTable` and `PipelineTable`
-  (`app/src/components/sync/`) each own a `h-full` column — a fixed column
+  (`app/src/components/sync/`), like the project and task tables, sit in
+  `app/src/components/ui/GridTable.tsx` — a `h-full` column of a fixed column
   header, a scrolling body, and a pinned `TablePagination` footer — so the
   rows run edge to edge inside `AppLayout`'s card and only the rows scroll.
   The header sits **outside** the scroll container rather than sticky inside
@@ -1314,8 +1315,9 @@ plainly *Chat*.
   the bar a classic one taking a 6px gutter out of its scroller's full
   height, and a header inside that scroller gets the bar drawn down its own
   right edge. The header's wrapper re-creates the gutter with `pr-1.5` and
-  the body carries `scrollbar-gutter: stable` so it is reserved even with
-  nothing to scroll — drop either and the header falls 6px out of column.
+  the body is `overflow-y: scroll` so it is reserved even with nothing to
+  scroll (`scrollbar-gutter: stable` is a no-op in WebKit) — drop either and
+  the header falls 6px out of column.
   Row gutters (`px-5`) are the table's, not the page's. `usePagedRows` in
   `app/src/components/ui/TablePagination.tsx` holds the page state and clamps
   it, so rows disappearing under a live sync can't strand the view past the
@@ -1331,23 +1333,20 @@ plainly *Chat*.
   finished for the pipeline). That toolbar has a **fixed height**: sized to
   its contents it measured taller under the subject button than under the
   pipeline's badges, so switching tabs jolted the table below.
-- The pipeline ledger no longer collapses finished files into a group — rows
+- The pipeline ledger does not collapse finished files into a group — rows
   are ranked (running, queued, paused, failed, done) and paged, so live work
   is on page one and the footer counts what is behind it.
 - **The ingest pipeline is three stages: `download → parse → embed`.**
   `app/src/stores/pipelineStore.ts` holds one row per PDF-backed file and
   `app/src/components/sync/PipelineTable.tsx` draws it — a stage dot each, one
   progress figure for whichever stage is moving, a timeline of the steps when a
-  row is expanded. It was four once (a fast local parse, then a quality one,
-  then a sidecar embed); the fast tier is gone for good and the third stage
-  that came back is not the one that left — it is a metered cloud call a file
-  reaches only after its parse has landed.
+  row is expanded. The embed stage is a metered cloud call a file reaches only
+  after its parse has landed.
   **The third stage is conditional**, which none of the others are: with no
   Voyage key stored there is no embedder, so `embedStage` in the store is
   false, the dot is not drawn and a parsed file is complete at two. Every
   derived view (`statusOf`, `isComplete`) takes that flag rather than assuming,
-  and defaults it to false — which is exactly the two-stage table this page
-  described before. `indexStore` owns the flag and sets it.
+  and defaults it to false. `indexStore` owns the flag and sets it.
   The stage is also **seeded from page coverage, never from
   `files.embed_status`**: that column is a sticky flag with no memory of which
   model wrote the vectors, so after an engine change it claims `'done'` over a
@@ -1397,7 +1396,7 @@ plainly *Chat*.
   plus the failure discriminants into a state and its words; every surface
   renders that, so a row and a document can never say different things.
   Seven states, three of them ordinary (`parsed`, `parsing`, `queued`) and
-  four that used to be invisible: `not parsed` (quiet — an unparsed file is
+  four that must each be visible: `not parsed` (quiet — an unparsed file is
   not a failure and colouring it red is a lie), `failed`, `can't parse` (the
   failure said `retryable: false`, so the sweep will never re-kick it) and
   `on hold` (a `latching` cause — no token, a rejected token, a spent quota —
@@ -1405,12 +1404,10 @@ plainly *Chat*.
   the UI must never fudge; unknown discriminants, which is every failure
   inherited from a previous session, stay their own case rather than being
   rounded to either end. `app/src/components/files/ParseState.tsx` draws it
-  twice: a word per row in `app/src/pages/subject/DownloadsPage.tsx`, where
-  three of those states used to render as the empty string and so read as
-  "fine", and `MarkdownUnavailable` in place of the PDF ↔ Markdown toggle in
-  `app/src/pages/subject/FilePage.tsx` and
-  `app/src/components/panel/FilePanel.tsx`, where the toggle used to simply not
-  be there. Its popover carries the backend's own sentence, and a button to
+  twice: a word per row in `app/src/pages/subject/DownloadsPage.tsx`, where an
+  empty cell would read as "fine", and `MarkdownUnavailable` in place of the
+  PDF ↔ Markdown toggle in `app/src/pages/subject/FilePage.tsx` and
+  `app/src/components/panel/FilePanel.tsx`. Its popover carries the backend's own sentence, and a button to
   `/settings/library` for the one cause a student can fix — a token. A quota
   gets no button, because waiting is the only move.
 - Background job progress surfaces **only** in the sidebar (driven by the
@@ -1764,8 +1761,8 @@ plainly *Chat*.
   front is a player preference (`dockTab`) like the side it is docked to. So is
   **what order they sit in** (`dockTabOrder`): the tabs are dragged with each
   other, which is why `ViewTabs` grew an opt-in `onReorder` rather than a
-  second strip component. The drag is `TopTabBar`'s — pointer capture, the
-  grabbed tab riding the hand while its neighbours slide out of its way, the
+  second strip component. The drag is `TopTabBar`'s, one `useStripReorder`
+  in `app/src/hooks/usePointerDrag.ts` — pointer capture, the grabbed tab riding the hand while its neighbours slide out of its way, the
   order written once on release — with one change it had to make: a swap is
   decided on the grabbed tab's **leading edge** crossing a neighbour's
   midpoint, not on its centre. The clamp holds the grabbed tab inside the
@@ -1839,9 +1836,8 @@ plainly *Chat*.
 - **Chat is the tab every recording has, and that is why the dock is
   unconditional.** Transcript is dropped from the strip when there are no cues
   on disk, and Chapters can only show a job's state until one has run — but a conversation needs
-  neither a file nor a run, so `hasDock` is gone from
-  `app/src/components/lectures/LecturePlayer.tsx` and the panel is always
-  mounted. Two things followed. The control bar's dock button names **the tab
+  neither a file nor a run, so the panel in
+  `app/src/components/lectures/LecturePlayer.tsx` is always mounted. Two things followed. The control bar's dock button names **the tab
   in front** (`tabInFront`, exported from `TranscriptPanel` so the strip and
   the button cannot disagree) instead of guessing from what the recording has;
   and T's third branch — fetch a transcript for a lecture whose dock would

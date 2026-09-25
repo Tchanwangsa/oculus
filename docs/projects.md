@@ -25,20 +25,20 @@ syncing again.
 
 | Piece | Location |
 | --- | --- |
-| `projects` + `project_tasks` tables (migration 27) | `app/src-tauri/src/lib.rs` |
-| `projects.tags` + `projects.event_id` (migration 33) | `app/src-tauri/src/lib.rs` |
-| Nullable `project_tasks.project_id` (migration 37) | `app/src-tauri/src/lib.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/projects.rs` |
+| `projects` + `project_tasks` tables (migration 27) | `app/src-tauri/src/migrations.rs` |
+| `projects.tags` + `projects.event_id` (migration 33) | `app/src-tauri/src/migrations.rs` |
+| Nullable `project_tasks.project_id` (migration 37) | `app/src-tauri/src/migrations.rs`, `UNFILED_TASKS_SQL` in `app/src-tauri/src/projects.rs` |
 | Frontend reads and writes | `app/src/lib/projects.ts` |
 | What is on screen | `app/src/stores/projectsStore.ts` |
 | Headless writes (CLI, and so the agent) | `app/src-tauri/src/projects.rs` |
-| `oculus project` / `oculus task` | `app/src-tauri/src/bin/oculus.rs` |
+| `oculus project` / `oculus task` | `app/src-tauri/src/bin/oculus/planning.rs` |
 | Index, one project, one task | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/TaskPage.tsx` |
 | Every task at once, filed or not | `app/src/pages/TasksPage.tsx`, `app/src/hooks/useTaskList.ts` |
 | The section's two tabs, and the row that leads to them | `app/src/components/projects/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx`, `app/src/components/sidebar/NavItem.tsx` |
 | The universal view's four filters | `app/src/components/projects/TaskFilters.tsx` |
 | Its two views, and the rules they share | `app/src/components/projects/TasksBoard.tsx`, `app/src/components/projects/TasksTable.tsx`, `app/src/components/projects/universalTasks.ts` |
 | Where a task is filed: the picker, and the composer over it | `app/src/components/projects/ProjectPicker.tsx`, `app/src/components/projects/NewTaskButton.tsx` |
-| The drag every board and table shares | `app/src/hooks/useCardDrag.ts` |
+| The drag every board and table shares, and the board chrome both boards draw | `app/src/hooks/useCardDrag.ts` (on `app/src/hooks/usePointerDrag.ts`), `app/src/components/projects/BoardParts.tsx` |
 | A board card's title: the fold, and the click into the task | `app/src/components/projects/CardTitle.tsx` |
 | A subject's Projects tab | `app/src/pages/subject/ProjectsPage.tsx` |
 | The Overview: About, properties, upcoming | `app/src/components/projects/ProjectOverview.tsx` |
@@ -65,9 +65,8 @@ from outside are these.
   really does own its tasks where a subject merely scopes them; so is
   task → subtask.
 - **The board's columns are JSON on the project, not a table.** Columns are
-  renamed per project and their shape is still moving — the same call
-  `automations.graph` made in migration 18: JSON for the part that keeps
-  changing, real columns for the part that gets queried. What the app reasons
+  renamed per project and their shape is still moving: JSON for the part that
+  keeps changing, real columns for the part that gets queried. What the app reasons
   about is a column's `kind` (`backlog` | `active` | `done`), never its name or
   its id, both of which are the user's to change.
 - **`position` is `REAL`** so that dropping a card writes one row instead of
@@ -260,16 +259,11 @@ from outside are these.
   follows the shell's departure rules at `navigateActive`
   (`app/src/lib/tabRouters.ts`), and the attribute is what gives ⌘-click the
   crumb in its own tab; the task page's project crumb is built the same way.
-- **The Backlog view is gone, and the board's drag is why.** It was the same
-  pile read as a list with a promote button per stub, which earned its keep
-  only while dragging a card out of the backlog column did not work — see the
-  WebKit bullet below. Once it did, the list was a second screen for making a
-  move the board already makes by the gesture a kanban board exists for.
-  `oculus-project-view` still holds `"backlog"` in the localStorage of anyone
-  who used it, so `isView` in `app/src/pages/ProjectPage.tsx` no longer accepts
-  that string and the stored value falls through to the board — an
-  unrecognised view would otherwise render nothing at all, on the machine of
-  whoever used the feature most.
+- **There is no Backlog view**: a list of the backlog column would be a second
+  screen for a move the board already makes by dragging a card out of it.
+  `isView` in `app/src/pages/ProjectPage.tsx` rejects any stored
+  `oculus-project-view` value it does not know, so it falls through to the
+  board rather than rendering nothing.
 - **The board's drag is a pointer gesture, not HTML5 drag-and-drop, and the
   reason is worth keeping.** It was HTML5 DnD, and it worked *sometimes*: a
   press that landed on a card's due chip or subtask counter — both `<span>`,
@@ -291,9 +285,11 @@ from outside are these.
   selection — also removes the only way into a task's page. The selection is
   held off by CSS on the drag surface instead, and a `preventDefault()` on
   `pointermove`, which suppresses the compatibility `mousemove` a selection is
-  *extended* by while leaving the click alone. The one HTML5 drag left in the
-  app is the dock's tab reorder (`app/src/components/ui/ViewTabs.tsx`), which
-  still needs its `dataTransfer.setData()` — see the root `CLAUDE.md`.
+  *extended* by while leaving the click alone. Both edges live in
+  `app/src/hooks/usePointerDrag.ts`, the gesture every in-window drag shares.
+  The one HTML5 drag left in the app is dragging a selection out of the chat
+  timeline, which needs its `dataTransfer.setData()` — see the root
+  `CLAUDE.md`.
 
   **A drop is not the end of the move, and treating it as one played the move
   backwards.** The write goes to SQLite and the new order comes back as a
@@ -327,9 +323,8 @@ from outside are these.
   (the pattern `useOverflows` in `app/src/components/harness/Timeline.tsx`
   set).
 
-  Clicking anywhere on the card that is not a control now opens the task; the
-  title alone used to be the way in, which is a link-sized target on a
-  card-sized affordance. The card stays a plain `<article>` that navigates on
+  Clicking anywhere on the card that is not a control opens the task; the title
+  alone would be a link-sized target on a card-sized affordance. The card stays a plain `<article>` that navigates on
   click rather than becoming an anchor or a button, because it *contains*
   controls — the title's anchor, the toggle — and interactive content nested in
   either is invalid markup WebKit repairs by closing the outer control early.
@@ -477,9 +472,7 @@ do at all, and it is where a task with nowhere to go gets written down.
     they are how you like to work. Project, subject and due are per-question and
     start at Any every time; carrying them would want the URL, which is also
     what would make ⌘-click and a restored tab carry a filter, and is not worth
-    building until it is asked for. `oculus-tasks-scope` is the strip's dead
-    key: nothing reads it any more and nothing cleans it up, as with
-    `oculus-project-view`.
+    building until it is asked for.
   - The `done/total` counter **stops being one under a filter** — defaulting to
     Todo it would read `0/12 done`, true of the rows on screen and nonsense as
     a summary — and says `N shown` instead. An empty list likewise names the

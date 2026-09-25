@@ -11,10 +11,9 @@ being free. The shape
 is bb's (get-bb/bb) with its plugin system taken out: one bridge per provider,
 one normalized event stream, a timeline that only ever sees the stream.
 
-The BYOK API layer this replaced is gone: its Rust, its Settings sections and
-its chat page and store were deleted once nothing routed to them. Migrations
-16 and 17 stay, so `llm_usage`, `chats` and `chat_messages` are still there
-and still empty of readers (see `app/src-tauri/src/lib.rs`).
+Migrations 16 and 17 leave `llm_usage`, `chats` and `chat_messages` in the
+schema with no readers (see `app/src-tauri/src/migrations.rs`); nothing in
+the app routes chat anywhere but a CLI agent.
 
 ## Where
 
@@ -26,13 +25,15 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | Codex bridge (`codex app-server`, JSON-RPC) | `app/src-tauri/src/harness/codex.rs` |
 | opencode bridge (`opencode serve`, HTTP + SSE) | `app/src-tauri/src/harness/opencode.rs` |
 | Antigravity bridge (`agy -p`, stream-json) | `app/src-tauri/src/harness/antigravity.rs` |
+| The child process the bridges share: stderr tail, JSON lines, exit mid-turn | `app/src-tauri/src/harness/child.rs` |
+| The paths no agent may write: Claude's and Antigravity's denies, and the test holding opencode's template to them | `app/src-tauri/src/harness/protected.rs` |
 | opencode's containment ruleset and system prompt | `app/src-tauri/templates/OPENCODE.template.json` |
 | Antigravity's permission rules, kept in `~/.gemini/antigravity-cli/settings.json` | `app/src-tauri/src/harness/antigravity_rules.rs` |
 | Finding the binaries from a GUI app | `app/src-tauri/src/harness/discover.rs` |
 | Installing a missing one from Settings → AI | `app/src-tauri/src/harness/install.rs`, `app/src/components/settings/InstallAgentDialog.tsx` |
 | Signing an installed one back in, and classifying an auth failure | `app/src-tauri/src/harness/signin.rs`, `app/src/components/harness/SignInDialog.tsx` |
 | Whether each CLI has credentials, shared by the three surfaces that ask | `app/src/hooks/useSignInStatus.ts` |
-| Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–26, 28 and 30 in `app/src-tauri/src/lib.rs` |
+| Thread and timeline rows | `app/src-tauri/src/harness/store.rs`, migrations 24–26, 28 and 30 in `app/src-tauri/src/migrations.rs` |
 | Instructions appended to the provider's prompt | `app/src-tauri/templates/HARNESS.template.md` |
 | The library's own `AGENTS.md`, which Codex reads on its own | `app/src-tauri/templates/AGENTS.template.md` |
 | The skills, and the three routes into them | `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents.rs` |
@@ -54,7 +55,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
 | The lecture brief a dock thread is scoped to | `instructions` in `app/src-tauri/src/harness/mod.rs` |
 | The frame grabs a message's moment carries | `lecture_grab_frames` in `app/src-tauri/src/chapters.rs`, `app/src/lib/lectures.ts` |
 | The lecture player's dock chat, and its composer | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx` |
-| `oculus agent` | `app/src-tauri/src/bin/oculus.rs` |
+| `oculus agent` | `app/src-tauri/src/bin/oculus/docs.rs` |
 
 ## How it connects
 
@@ -93,16 +94,16 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   of it would leave the timeline shorter than the agent's context.
 - **Antigravity's containment is rules in a file it does not own, plus a
   terminal sandbox.** Measured on `agy` 1.2.9, and each fact is why the shape
-  is what it is. `--sandbox` bounds *shell* commands only: with the
-  `--dangerously-skip-permissions` this bridge first shipped beside it,
-  `write_to_file` wrote a file outside the library while the same write from
-  the shell was refused — so that flag is gone. Without it, print mode refuses
+  is what it is. `--sandbox` bounds *shell* commands only: with
+  `--dangerously-skip-permissions` beside it, `write_to_file` writes a file
+  outside the library while the same write from the shell is refused — so the
+  bridge never passes that flag. Without it, print mode refuses
   whatever its permission rules do not allow instead of prompting: with no
   rules, reads in the library and edits in `agents/` work (`--mode
   accept-edits`), and every `run_command`, `ls` included, is refused. `agy`
   reads rules from **one place only** — the student's global
-  `~/.gemini/antigravity-cli/settings.json`; a workspace `.agents/hooks.json`,
-  a project file, environment variables and a `HOME` override were each tried
+  `~/.gemini/antigravity-cli/settings.json`; a workspace `hooks.json` under
+  `.agents/`, a project file, environment variables and a `HOME` override were each tried
   and none loads — so `app/src-tauri/src/harness/antigravity_rules.rs` keeps a
   block of Oculus's own there, written before every spawn. It is Claude's
   allow and deny lists in `agy`'s syntax: `write_file` on the database's three
@@ -235,8 +236,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   it does not stop a redirect smuggled onto the end of an allowed command.
   An opencode thread is therefore one notch less contained than a Claude or
   Codex one, by the CLI's design rather than by this app's configuration.
-  Three rule shapes were measured before the current one worked, and
-  `opencode.rs`'s module docs list them: a leading `"*": "deny"` denies
+  Three rule shapes were measured before the current one worked: a leading `"*": "deny"` denies
   everything however many allows follow it (deny wins on the path check,
   exactly as in Claude's syntax, which is why the siblings of `agents/` are
   named individually here too); whichever rule comes *last* decides whether
@@ -265,12 +265,11 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   The CLI stays the only door — but for Claude that door cannot be held shut
   with an `Edit` deny. Claude Code **merges `Edit(...)` deny rules into its own
   sandbox's `denyWrite`** ("Merged with paths from Edit(...) deny permission
-  rules", its settings schema), so naming `oculus.db*` there denied the file at
-  the OS level as well and cancelled the `allowWrite` grant above. Deny beats
-  allow, so the two halves of this fix spent a day cancelling each other while
-  every board write from a thread came back readonly with both halves looking
-  correct in the source. That deny is gone for Claude; opencode keeps its own,
-  having no sandbox for it to leak into. `sqlite3` stays denied by name for
+  rules", its settings schema), so naming `oculus.db*` there denies the file at
+  the OS level as well and cancels the `allowWrite` grant above — deny beats
+  allow, and every board write from a thread comes back readonly. So Claude
+  carries no such deny; opencode keeps its own, having no sandbox for it to
+  leak into. `sqlite3` stays denied by name for
   both, because the binary is
   what knows that a column id must exist, that `done_at` follows the
   destination column's kind, and that a whole breakdown belongs in one
@@ -296,11 +295,9 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   opencode is the odd one: it takes a top-level `skills.paths`, so
   `OPENCODE.template.json` names `skills` and nothing is linked for it at all.
   **Nothing is written outside the library.** Codex also reads
-  `$CODEX_HOME/skills`, and an earlier version of this linked there; that
-  reached into a directory shared with every other project on the machine, so
-  two Oculus skills appeared in every Codex session whether or not it had
-  anything to do with coursework. The project-level directory was there the
-  whole time.
+  `$CODEX_HOME/skills`, but that directory is shared with every other project
+  on the machine, so a link there would put Oculus skills in every Codex
+  session whether or not it had anything to do with coursework.
   **The generated paths are denied**, in the two places that have rules —
   `agents/skills/**`, `agents/.claude/**` and `agents/.agents/**` in Claude's
   settings, `skills/**`, `.claude/skills/**` and `.agents/skills/**`
@@ -339,21 +336,19 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   directory is put first on PATH — `AGENTS.md` tells the agent to run
   `oculus grep`, and advice that resolves to "command not found" is worse
   than none. Being first on PATH is also why *which* `oculus` that is matters
-  so much: in dev it is the sibling of the running app, which nothing used to
-  rebuild, and an agent met the gap as `unrecognized subcommand` rather than as
-  a stale binary. `oculus_cli` takes the newest candidate and says so when it
+  so much: in dev it is the sibling of the running app, and a stale one meets
+  the agent as `unrecognized subcommand` rather than as a stale binary. `oculus_cli` takes the newest candidate and says so when it
   is older than its own sources; the dev preflight keeps it from happening at
   all (see [development.md](./development.md#the-dev-cli)). Claude's auto-memory is switched off in the same settings
   document: asked to write to `memories/`, it reached for
   `~/.claude/projects/…/memory/` instead, and the library has its own layer.
-- **Finding the binaries is the sidecar's problem again.** A Dock-launched
+- **Finding the binaries is a GUI app's problem.** A Dock-launched
   app has launchd's PATH. `discover.rs` tries `OCULUS_CLAUDE_BIN` /
-  `OCULUS_CODEX_BIN` / `OCULUS_OPENCODE_BIN`, then PATH, then where the installers put things, then a
+  `OCULUS_CODEX_BIN` / `OCULUS_OPENCODE_BIN` / `OCULUS_ANTIGRAVITY_BIN`, then PATH, then where the installers put things, then a
   login shell's `command -v`; the answer is cached, failures included, since
   re-asking a login shell on every send would make a missing CLI slow as
   well as absent. The `--version` probe behind `health` is cached beside it,
-  because that answer is no longer read only by Settings → AI — every model
-  picker asks it now (below), and four process spawns per menu is the cost
+  because every model picker asks it as well as Settings → AI (below), and four process spawns per menu is the cost
   the login-shell fallback was cached to avoid. So `harness_health` takes a
   `recheck` flag: Settings' button passes it and drops both caches, for right
   after an install, and nothing else does.
@@ -420,18 +415,11 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   recordings in `fixtures/harness/` that the bridge tests replay are these
   files. `app-server` is marked experimental; when its shapes drift, a
   recording is the difference between a morning and a week.
-- **opencode runs on its v1 session API, and that is not a detail.** The
-  bridge was written against v2 — `/api/session`, `/api/event`, the
-  `session.next.*` event family — and moved wholesale, because on 1.18.31 a
-  v2 prompt on any provider whose credential lives in `auth.json` failed
-  inside the server with `ModelUnavailableError` and emitted no event at
-  all. That is OpenRouter, which is every student here, so the whole
-  provider story was unreachable over v2 while the same session over v1
-  answered. The v2 translator and its recordings are kept — they still fold
-  a recorded stream, and the tests still replay it — until v1 has run on
-  real threads for a while, but the endpoints are not dual: one `dispatch`
-  routes by wherever the session id is and picks the translator off the
-  envelope (`properties` is v1, `data` is v2).
+- **opencode runs on its v1 session API only.** On 1.18.31 a v2 prompt
+  (`/api/session`, `/api/event`, the `session.next.*` events) on any provider
+  whose credential lives in `auth.json` fails inside the server with
+  `ModelUnavailableError` and emits no event at all. That is OpenRouter,
+  which is every student here, while the same session over v1 answers.
 - **opencode specifics worth not rediscovering.** `--port 0` means "prefer
   4096", not "pick a free port", so the real port is parsed off the one
   stdout line that says it. Every call names `?directory=<the session dir>`,
@@ -450,12 +438,10 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   created and never completed — except during an abort, where idle arrives
   *before* the partial answer and would close the turn early. An interrupt
   is `POST /abort`, arriving as `session.error{MessageAbortedError}` and
-  mapped to `interrupted` rather than to an error row. The drain watchdog —
-  a user message with no assistant one after it in thirty seconds — is
-  inherited from v2, where a turn whose model could not be resolved emitted
-  **nothing at all** and `POST /api/session/{id}/wait`, which the schema
-  offers for exactly this, answered 503 straight away; on v1 the known cases
-  say so themselves and it is belt to the stream's braces. The free
+  mapped to `interrupted` rather than to an error row. A drain watchdog —
+  a user message with no assistant one after it in thirty seconds — fails a
+  turn the server accepted and then went silent on; the known failure cases
+  close themselves, and this is the backstop against a stranded thread. The free
   `opencode/*` Zen models cannot be driven over the HTTP API at all (the gateway answers
   "OpenCode's free tier can only be used in OpenCode"), so that 400 is
   rewritten into a sentence a student can act on — and, since that is a whole
@@ -463,7 +449,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   is what now keeps it out of the menu rather than out of the error row.
 - **The same server is also the credential store's door.** opencode reaches
   two hundred and eighteen providers and answers for the ones `opencode auth`
-  holds a key for, which used to mean a terminal. `opencode serve` exposes the
+  holds a key for. `opencode serve` exposes the
   whole auth surface — the provider list, a declarative form spec per provider,
   the credential write, and the OAuth flows including the loopback listener the
   browser comes back to — so Settings drives it over the connection the bridge
@@ -560,8 +546,8 @@ unmounted the confirm synchronously, and the click then landed on a node no
 longer in the tree. Every delete was dropped, silently, and looked exactly like
 a click that never arrived. So the confirm commits on `mousedown` (with Enter
 and Space handled by hand, since there is no click handler left to synthesise
-them into) the way the ✕ beside it already did, and `ChatPage` no longer
-swallows the rejection if the command itself fails.
+them into) the way the ✕ beside it does, and `ChatPage` does not swallow the
+rejection if the command itself fails.
 
 **Switching does not blank the timeline.** `hold` in `harnessStore` hands the
 rows of the thread being left to the one arriving, for the few milliseconds the
@@ -672,8 +658,7 @@ short-lived Claude process, or a throwaway thread on the shared Codex server.
 Sending it down the thread's own session would put a question the student
 never asked into the timeline and spend the thread's context on it. Which CLI
 and model it costs is the `threadNaming` row of the registry below — a cheap
-model by default, and no longer whichever provider the thread happens to be
-on.
+model by default, not whichever provider the thread happens to be on.
 
 The claim is the guard. `store::claim_naming` hands back the exchange only if
 it also wins the race to flip `title_generated` from 0 to 1, so two turns
@@ -740,9 +725,9 @@ tools gave it.** `HARNESS.template.md` asks for the library path and the
 matcher takes it, but a model that has just read a file cites it the way it
 read it: absolutely (`/…/com.tchan.oculus/courses/…`), with a `:97` line
 number on the end, and pointing at the parser's `.md` rather than the document.
-All three used to fall through the matcher to the anchor, and the anchor
-resolved the path against the app's own origin — `http://localhost:1420/Users/…`,
-a 404 in a browser tab. So `libraryPath` now also takes an absolute path,
+Any of the three that fell through the matcher to the anchor would resolve
+against the app's own origin — `http://localhost:1420/Users/…`, a 404 in a
+browser tab. So `libraryPath` also takes an absolute path,
 anchored on a leading `/` so a *command* that merely contains one stays a
 command, and trims a line suffix; and `openLibraryPath` looks through a `.md`
 with no row of its own to the file it was parsed from (`parsedMdSource` in
@@ -980,7 +965,7 @@ secondary) with when each one resets. Three decisions are load-bearing. The
 ring is context and nothing else: it is the number that moves every turn, it
 is thread-local like the composer it sits in, and a ring that silently
 switched to whichever number was worst could not be read at that size. Spend
-is gone — these are subscription CLIs, so the dollars the provider reports
+is not shown — these are subscription CLIs, so the dollars the provider reports
 price tokens nobody is billed for, and a number that is never charged is
 noise beside two that bind. And the control row is one height throughout
 (24px, the picker's): a send button larger than the picker beside it reads as
@@ -1002,13 +987,11 @@ reads in order, and each CLI was measured getting it wrong in its own way:
   the timeline above the answer to the previous one, there is one
   `turn/completed` for both, and the reply to the first question can look
   like it never came. This is what "the message just disappears" was.
-- **opencode was the one that would take it correctly** — the v2 prompt
-  endpoint offered `delivery: "queue"`, which holds a message until the turn
-  ends — and it was never used, nor is there an equivalent on the v1
-  `prompt_async` the bridge runs on now. The harness owns the `Queued`/`Unqueued` rows and
-  the one-turn-at-a-time rule; letting the server own the same invariant for
-  one provider out of four would put it in two places, and the half the
-  webview draws would be the half that could not see the queue.
+- **opencode has no server-side queue on v1.** `prompt_async` has no
+  `delivery: "queue"` option. Even if it had one, the harness owns the
+  `Queued`/`Unqueued` rows and the one-turn-at-a-time rule; letting the
+  server own the same invariant for one provider out of four would put it
+  in two places.
 
 So the queue is the manager's. A pending message is **not part of the
 conversation**: no row is written for it, it is held in memory rather than
@@ -1059,7 +1042,7 @@ are in `fixtures/harness/`, and the two tests replay them.
   pressed. `terminal_reason: "aborted_streaming"` is the only field that says
   what really happened, so that and the flag the bridge sets when it asks are
   what decide; the diagnostic is dropped and the turn closes `interrupted`.
-  The same line reports zeros for every token and cost, which used to blank
+  The same line reports zeros for every token and cost, which would blank
   the thread's usage, so it is skipped too.
 - **The stop is a row.** `TurnFinished { interrupted }` writes an
   `interrupted` item — the one row kind with nothing in it — and the timeline
@@ -1153,8 +1136,8 @@ differ only in being composed against their own backgrounds, so the inner
 block is drawn as the same ink at a fraction of its alpha and the theme takes
 care of itself. They are held in a
 `Record<Provider, …>` rather than picked by a ternary, so a provider added to
-the union is a compile error until its mark exists — the ternary that used to
-be there answered "not Claude" with the Codex mark.
+the union is a compile error until its mark exists rather than falling
+through to another provider's mark.
 
 Every picker in the app assembles its list through one hook,
 `app/src/hooks/useProviderModels.ts`, which names no provider: where a
@@ -1369,34 +1352,18 @@ opencode is the one agent where those two facts come apart. Two hundred and
 eighteen providers reach this app; some advertise models whose gateway refuses
 everything, and one of them — OpenRouter — is three hundred rows on its own.
 
-**There used to be a probe, and it is deleted.** An opencode model was offered
-only once a real turn had been sent to it and had come back: `probe_model`
-opened a session on the hidden `oculus-namer` agent and sent one sentence, four
-models at a time, and a sweep ran on connect *and* whenever the provider
-manager was opened with a provider it had no verdicts for. It answered the
-question correctly and it was the wrong trade, because the evidence was bought
-from the provider:
-
-- Every probe was a **billed request**, and a sweep was as long as the
-  catalogue — ~300 for OpenRouter alone, on a settings page, without a click.
-- It was **two** billed requests per model, not one. The probe created a
-  session per model, and opencode titles a new session on its own small model,
-  so each probe carried a second request nothing here asked for.
-- Tools were attached to the probe's turn, so a request the code described as
-  "a handful of tokens" was measured at **~8.6K input tokens** against some
-  providers.
-
-Nothing in this repo may spend a student's credits to populate a menu. The
-sweep, its progress events, its cancel flag and its stored verdicts are gone.
-
-**Most of what it bought was already free**, and that part is kept:
+**No model is ever probed.** Nothing in this repo may spend a student's
+credits to populate a menu, and a test turn per model is **two** billed
+requests — the turn, plus the title opencode generates for every new session —
+at up to ~8.6K input tokens each once tools are attached, against ~300
+OpenRouter models. Almost everything such a probe would learn is free:
 
 - *Is the provider signed in?* `list_models` reads `GET /config/providers`,
   which lists the providers the config can actually **use** — three of 221 on
   the machine this was measured on. A provider with no credential contributes
   no models to the list at all, so the question never had to be asked.
-- *Does the model exist?* Same list, same answer. The probe's `Model not
-  found` class cannot arise from a menu built out of the list itself.
+- *Does the model exist?* Same list, same answer: `Model not found` cannot
+  arise from a menu built out of the list itself.
 - *Can the model call a tool?* `capabilities.toolcall` on the row. This one
   matters more than it looks: the agent answers out of the student's own
   library, so a model that cannot call a tool does not fail loudly — it answers
@@ -1407,13 +1374,12 @@ sweep, its progress events, its cancel flag and its stored verdicts are gone.
   Their gateway answers `HTTP 400 … MissingSessionID … "OpenCode's free tier
   can only be used in OpenCode"` to anything that is not the opencode TUI, so
   every model under provider id `opencode` refuses every request from this
-  bridge, always. `isZen` reads that off the id for nothing; the probe used to
-  buy the same fact one model at a time.
+  bridge, always. `isZen` reads that off the id for nothing.
 
 What no free check can see is a credential that is present but **stale** — a
 401. That one fails once, in the timeline, in the provider's own words, which
 `friendly` already turns into a sentence. One failed message is the honest
-price; ~600 billed requests was not.
+price.
 
 **So three rules are left, and none of them costs anything.** An opencode
 model is offered when it can run here at all, it is not a Zen model, its
@@ -1435,13 +1401,9 @@ composer.
 
 The store for the other two is one JSON value in `settings` under
 `opencode_catalogue` (`app/src/lib/opencodeCatalogue.ts`), `isOffered` is the
-single place the rule is written, and **an absent entry means offered** — the
-reverse of what it meant while the probe existed, when "no entry" meant "not
-checked yet". The catalogue now records only what was switched off, so a
-provider nobody has touched has no rows at all. It still reads catalogues the
-probe build wrote, keeping `hidden` and discarding the verdicts: a purchased
-`ok: false` must not keep a model out of a picker that no longer re-checks
-anything.
+single place the rule is written, and **an absent entry means offered**. The
+catalogue records only what was switched off, so a provider nobody has touched
+has no rows at all; reading it keeps `hidden: true` and drops any other field.
 
 Blocked models stay **in** the Settings list rather than being filtered out of
 it, drawn with the reason and an unticked, disabled checkbox — `blockedBecause`
@@ -1456,8 +1418,8 @@ verification** — Meta's Muse Spark family, for one. Nothing marks it: opencode
 lists it `status: "active"` with full capabilities and ordinary pricing, and
 OpenRouter's public `/api/v1/models` has no verification field either
 (`top_provider.is_moderated` is content moderation, not an age gate). Verified
-2026-09-18 against both catalogues. The probe caught those empirically, at the
-price described above; they now fail once in the timeline like a stale key.
+2026-09-18 against both catalogues. Those fail once in the timeline, like a
+stale key.
 
 **The surface is a dialog, and Settings → AI keeps one line.** The provider
 list, the 218-row search, connect and disconnect, and a per-model list with its
@@ -1481,14 +1443,12 @@ providers, and typing gives the body over to the matches. Looking for one of
 with it. Row actions follow: *Models* keeps a label because it is the way
 further in, while Disconnect, Hide and Show are icons with tooltips — three
 words of chrome per row made the provider's own name the least emphatic thing
-in it. *Check* was the fourth and is gone with the sweep.
+in it.
 
 **Every model row is tickable except a blocked one.** A tick is a promise that
 the composer will offer the model, and the gate will not offer a Zen model or
 one that cannot call a tool — so an enabled checkbox there would be a control
-that appears to work and changes nothing. That was the rule for a failed probe
-too, and it survives only for the refusals that are knowable without asking
-anybody. Everywhere else a tick is the whole fact: an untick removes the row
+that appears to work and changes nothing. Everywhere else a tick is the whole fact: an untick removes the row
 rather than storing `hidden: false`, and disconnecting a provider forgets
 everything stored under it.
 
@@ -1666,8 +1626,7 @@ agree on them: either can be the one resolving an unconfigured job.
   `--provider` / `--model` / `--effort` still override the configured
   selection for one run, and with no flag `oculus lecture chapters` runs what
   the row says.
-- **Thread naming** was `TITLE_MODEL_CLAUDE`, a constant in `mod.rs`, and is
-  now a row like any other, defaulting to Claude on Haiku 4.5
+- **Thread naming** is a row like any other, defaulting to Claude on Haiku 4.5
   (`claude-haiku-4-5-20251001`, the id the CLI's catalogue lists) with no
   level, since Haiku declares none. It
   costs the rule that naming followed the thread's own provider: a thread now
@@ -1707,20 +1666,18 @@ think of the store as a live thing at the end of the turn; the read is
 cheap — a few hundred bytes, once, on the first turn — and it is what puts
 the store in view.
 
-Both halves were rewritten because the first version did not work. Over a
-semester of real use — 51 threads — the library held nine memories, two
-subjects had an empty index, and a plainly subject-scoped fact sat in the
-cross-subject bucket. The old brief gave memory one bullet in a list of
-sandbox rules, phrased as a *location* (`memory goes in ./memories/`) with no
-trigger and no read, and `TASTE.md`'s own stub asked for a preference to have
-been "said twice" — a threshold nothing on disk could ever measure, since the
-first time was never written down. That one now routes a first statement into
-`memories/` as a `feedback` fact and promotes it on the second.
+Both halves are measured necessities: a brief that named memory only as a
+*location*, with no trigger and no read, left nine memories across 51 threads
+of real use, two subjects with an empty index, and a subject fact in the
+cross-subject bucket. `TASTE.md` routes a first statement of a preference into
+`memories/` as a `feedback` fact and promotes it on the second, because "said
+twice" is not a threshold anything on disk can measure unless the first time
+was written down.
 
-**And the contract is a command, not a convention.** A memory used to be two
-writes — the file, and a line in that folder's `MEMORY.md` — and the second
-was the one that got skipped, which is the one that decides whether the next
-thread ever opens the first. `oculus memory` (`app/src-tauri/src/memory.rs`,
+**And the contract is a command, not a convention.** A memory is two writes —
+the file, and a line in that folder's `MEMORY.md` — and left to the agent the
+second is the one that gets skipped, which is the one that decides whether the
+next thread ever opens the first. `oculus memory` (`app/src-tauri/src/memory.rs`,
 [cli.md](./cli.md)) makes them one call: it writes the front matter, dates the
 fact, and **rewrites the index from the files beside it**, so an entry cannot
 go missing from it and a deleted memory cannot linger in it. The routing is a
@@ -1730,11 +1687,10 @@ as missing on the two types that are instructions rather than observations,
 because an instruction a later thread cannot act on is not worth keeping.
 
 **A name is what the store is addressed by, so the listing prints one.**
-`memory list` used to lead each line with the memory's *title*, which is the
-readable thing and the wrong thing: an agent that then wants to open one slugs
-the title back, and lands a hyphen away from the filename as often as on it —
-`info30006-topic-4-…` for a file called `info30006-topic4-…`. The listing now
-leads with the name, and `find` (`app/src-tauri/src/memory.rs`) matches on a
+A title is the readable thing and the wrong thing to lead with: an agent that
+wants to open one slugs the title back, and lands a hyphen away from the
+filename as often as on it — `info30006-topic-4-…` for a file called
+`info30006-topic4-…`. So `memory list` leads each line with the name, and `find` (`app/src-tauri/src/memory.rs`) matches on a
 ladder: the exact name, then the spellings a caller who only saw a title could
 have written, then a prefix, then a fragment, with the hyphens taken out of
 both sides below the first rung. A rung that matches several answers with
@@ -1839,7 +1795,7 @@ second copy of the menu would have stayed correct exactly until one of them
 grew a rule the other lacked, which is `FileChip`'s argument applied to the
 thing that produces the chip.
 
-That chip is why the composer's box is **no longer a `<textarea>`**: a
+That chip is why the composer's box is **not a `<textarea>`**: a
 textarea cannot draw an icon inside its text.
 `app/src/components/harness/MentionInput.tsx` is a contenteditable whose
 mentions are atomic `contenteditable="false"` spans, and it keeps the DOM as
@@ -1896,10 +1852,8 @@ unconditionally was right for the thread and wrong everywhere else: on the home
 page the list covered the subject pill and the cards above it while the lower
 half of the page sat empty.
 
-The earlier BYOK chat agent did the opposite — it read the file, embedded the
-query and packed the result into the request — because its model could only
-see what the prompt carried. A CLI agent can open the file itself, so that
-whole path was dropped rather than ported.
+A CLI agent opens the file itself, so nothing reads the file, embeds the
+query or packs the result into the request on its behalf.
 
 ## A picture in a message
 
@@ -1945,9 +1899,9 @@ wide and a 56px chip in the composer are both identifiers rather than
 something you can read, so each opens the shared viewer
 (`ImageLightbox`, `app/src/components/ui/Lightbox.tsx`) — the diagram
 lightbox generalised, so a screenshot gets the same fit, zoom and pan a
-mermaid figure does. It replaced handing the path to `openLibraryPath`, which
-found no library row for an attachment and fell through to opening the file in
-the OS: a window over the top of the app for something the app can draw.
+mermaid figure does. `openLibraryPath` finds no library row for an
+attachment and would fall through to opening the file in the OS: a window over
+the top of the app for something the app can draw.
 
 **The reply draws pictures as well as the question does.** The shared renderer
 (`app/src/components/markdown/MdComponents.tsx`) resolves a markdown
@@ -2211,7 +2165,8 @@ a player that re-renders four times a second on `timeupdate`, and the whole
 reason the virtualised transcript stays smooth beside a decoding video is that
 nothing time-varying reaches it. So the playhead travels as a **ref** whose
 identity never changes: the chip ticks itself off it once a second — the shape
-`Running`'s elapsed clock uses in `ChaptersPanel` — and the send reads it there
+`RunStatus`'s elapsed clock uses
+(`app/src/components/lectures/RunStatus.tsx`) — and the send reads it there
 rather than from a prop that would be a frame behind. The Chat tab's props are
 a third memoised bag beside the Chapters tab's and the enhanced transcript's,
 built over stable values only.
@@ -2247,23 +2202,15 @@ mid-turn (bb's `turn/steer` and a second stdin line — the queue is the
 waiting-room version of it, not steering), the plan/todo card, branching (rewind
 deliberately does not).
 
-**The third bridge was the API path, and it arrived as a bridge.** This page
-used to list "a third bridge for the API path when BYOK returns" as the plan:
-the dormant provider layer would wake up beside the CLIs and chat would have
-two kinds of backend. That is reversed. opencode *is* BYOK — the provider
-catalogue, the credential store, the streaming client and the model library
-belong to a program that already does all of it, and everything reaches the
-app through the seam that already existed. So there is one `HarnessEvent`
-stream, one timeline, one containment rule and one job registry, instead of a
-second code path with its own tools, citations and spend ledger. The BYOK layer
-is deleted rather than dormant.
-
-The half of BYOK that was left to a terminal — *where the key comes from* — is
-now in the app too, and it did not cost a code path either: opencode's server
-already owns the provider catalogue, the credential store and the browser
-flows, so [signing in to a provider](#signing-in-to-a-provider) is more HTTP
-over the connection the bridge already holds. Keys still live in opencode's
-store rather than this app's, which is what keeps the sentence above true.
+**The API path is a bridge, not a second backend.** opencode is where a
+student's own provider key goes — the provider catalogue, the credential store,
+the streaming client and the model library belong to a program that already
+does all of it, and everything reaches the app through the same seam. So there
+is one `HarnessEvent` stream, one timeline, one containment rule and one job
+registry, instead of a second code path with its own tools, citations and spend
+ledger. Keys live in opencode's store rather than this app's, and [signing in
+to a provider](#signing-in-to-a-provider) is more HTTP over the connection the
+bridge already holds.
 
 The plan/todo card is still outstanding despite projects being built, because
 the two are different things: that card would draw the provider's *own*

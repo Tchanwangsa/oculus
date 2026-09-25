@@ -49,7 +49,7 @@ the instructions gets read without opening the window.
 
 | Piece | Location |
 | --- | --- |
-| The binary | `app/src-tauri/src/bin/oculus.rs` |
+| The binary | `app/src-tauri/src/bin/oculus/` (`main.rs` dispatches, `args.rs` is the clap tree) |
 | Ranking behind `search` | `app/src-tauri/src/retrieval.rs` |
 | Shared path resolution | `app/src-tauri/src/paths.rs` |
 | Agent docs: templates, stubs, linking | `app/src-tauri/src/agents.rs` |
@@ -62,10 +62,9 @@ the instructions gets read without opening the window.
 
 ## How it connects
 
-- **`--json` is the only global flag.** `--memory-cap` went with the Python
-  sidecar it bounded, and did not come back with the local parse engine. A
-  MinerU the user installed and started is not this app's child process: its
-  memory is its own to manage, and a flag here could not bound it if it tried.
+- **`--json` is the only global flag.** There is no memory cap: a MinerU the
+  user installed and started is not this app's child process, so its memory is
+  its own to manage, and a flag here could not bound it if it tried.
   What a parse costs is the selected engine's business — MinerU's allowance on
   the cloud, this machine's RAM on a local server somebody else is running.
 - The CLI reads the same session cookie and writes the same `oculus.db` the
@@ -89,9 +88,7 @@ the instructions gets read without opening the window.
 - `run -s` scrapes, then parses and embeds each written PDF **one file at a
   time**. Both halves are idempotent; re-running is cheap.
 - **A parse finishes before the command moves on, and that is minutes per
-  file.** It used to return as soon as the old *fast* pass had markdown
-  and leave the real parse running in another process, so the good text only
-  appeared on some later `oculus index`. Parsing is in this process now
+  file.** Parsing is in this process
   (`app/src-tauri/src/parse/mod.rs`), so the wait is the whole cloud round
   trip — the page count rewrites itself on the line as pages arrive, which is
   how you tell a long parse from a hung one.
@@ -282,9 +279,8 @@ nothing here writes to a home directory. See [harness.md](./harness.md).
 than filing.** `agents/` is the only folder an in-app chat thread can write to
 (see [harness.md](./harness.md)), so a subject bucket in the course folder was
 a path every template named and no thread could use. The course folder keeps a
-symlink to it, and `agents.rs` moves any files it finds on the old path into
-the bucket the first time it runs — once, since what it leaves behind is a
-link.
+symlink to it, and `agents.rs` moves any real files it finds at that path into
+the bucket, leaving the link.
 
 Three different lifetimes, which is the whole design:
 
@@ -303,9 +299,8 @@ Three different lifetimes, which is the whole design:
   it would be the only unrecoverable thing this command could do.
 - **Merged — the half that is a prompt is regenerated, the half that is
   content is kept.** Two files are both at once, and "written once and never
-  again" leaves their prompt half to rot: this library's `TASTE.md` spent a
-  fortnight telling its reader that Oculus folded the file into every message,
-  which had not been true since the BYOK chat was deleted. So `docs` re-renders
+  again" leaves their prompt half to rot — telling its reader about behaviour
+  the app no longer has. So `docs` re-renders
   `TASTE.md`'s guidance and carries the bullets across under their headings,
   and every `MEMORY.md` is rewritten below its marker from the memories beside
   it (`oculus memory`, which does the same on every write). **Both refuse
@@ -344,8 +339,7 @@ Details worth not rediscovering:
   guaranteed to exist, so a bundle cannot ship a CLI its reference does not
   describe. It also runs from the dev preflight
   (`app/scripts/predev.mjs`), against the debug binary that preflight has just
-  built: that used to be impossible because `tauri dev` never built the CLI at
-  all, and it is one process launch now that it does. Either way the generator
+  built. Either way the generator
   rewrites the file only when the help actually changed, so a clean tree stays
   clean and a changed CLI is dirty in the same commit as its reference.
 - Why the repo needs a copy at all: `OCULUS-CLI.md` only exists on a machine

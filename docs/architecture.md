@@ -3,8 +3,7 @@
 **Two processes, one data directory.** PDF parsing and page embedding both run
 in Rust, behind the seams in `app/src-tauri/src/parse/` and
 `app/src-tauri/src/embed/`, reaching two clouds over HTTPS — or, for parsing, a
-MinerU the user runs themselves. The Python sidecar that used to own both is
-gone from the app entirely.
+MinerU the user runs themselves.
 
 ```
 ┌───────────────────────────── Tauri app ─────────────────────────────┐
@@ -25,15 +24,14 @@ worth holding onto. It is not the same as "no loopback": the parse seam has a
 second engine, and with it selected a parse is an HTTP call to
 `127.0.0.1:8000` — a MinerU server the *user* installed and runs, which Oculus
 neither launches, supervises nor ships. Same boundary as MinerU cloud, with a
-different hostname. Nothing calls back *into* the app in either case: the
-sidecar used to POST parse progress to a loopback server of ours on an
-ephemeral port, and both ends of that are deleted.
+different hostname. Nothing calls back *into* the app in either case.
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
-| App entry / migrations / startup | `app/src-tauri/src/lib.rs` |
+| App entry / startup | `app/src-tauri/src/lib.rs` |
+| Schema migrations | `app/src-tauri/src/migrations.rs` |
 | Data-dir + path resolution (no Tauri handle needed) | `app/src-tauri/src/paths.rs` |
 | PDF parse seam (trait, artifacts, errors, config) | `app/src-tauri/src/parse/mod.rs` |
 | MinerU cloud client (in-process, batched) | `app/src-tauri/src/parse/mineru/client.rs` |
@@ -44,13 +42,17 @@ ephemeral port, and both ends of that are deleted.
 | Ingest + brute-force search over `pages` | `app/src-tauri/src/retrieval.rs` |
 | Media HTTP server (lecture video streaming) | `app/src-tauri/src/media.rs` |
 | In-app browser (one page WebView per tab, in the main window) | `app/src-tauri/src/browser.rs` |
-| CLI-agent harness (Claude Code / Codex / opencode bridges) | `app/src-tauri/src/harness/mod.rs` |
+| CLI-agent harness (Claude Code / Codex / opencode / Antigravity bridges) | `app/src-tauri/src/harness/mod.rs` |
 | Projects and tasks, written headlessly | `app/src-tauri/src/projects.rs` |
 | Lecture chapters: boundary detection and the naming job | `app/src-tauri/src/chapters.rs` |
+| Token bucket, concurrency cap and retry ladder both cloud clients share | `app/src-tauri/src/ratelimit.rs` |
+| Crash-safe file replace (the usage ledgers, parse artifacts) | `app/src-tauri/src/atomic_write.rs` |
+| Wall clock and civil-date maths, without a date crate | `app/src-tauri/src/clock.rs` |
+| Shared unit-test scaffolding (scratch dirs, sample PDFs, fake HTTP server) | `app/src-tauri/src/test_support.rs` |
 | MinerU token (keychain only) | `app/src-tauri/src/mineru.rs` |
 | Voyage API key (keychain only) | `app/src-tauri/src/voyage.rs` |
 | Frontend DB access | `app/src/lib/db.ts` |
-| CLI over the same engine | `app/src-tauri/src/bin/oculus.rs` |
+| CLI over the same engine | `app/src-tauri/src/bin/oculus/` |
 
 ## How the processes talk
 
@@ -64,12 +66,9 @@ ephemeral port, and both ends of that are deleted.
   event, and neither crosses a socket on this machine. Parsing has a second
   destination — MinerU's own server on loopback — which needs no credential at
   all, so a local parse touches the keychain not at all.
-- **Anything → Rust**: nothing listens. There used to be a tiny HTTP server of
-  ours on an ephemeral port, first as a cookie proxy and WebView host for the
-  JS scraper, then — once the scraper became Rust — for parse-status callbacks
-  alone. Parsing is in-process now, so `app/src-tauri/src/parse/events.rs`
-  emits `parse-status` straight to the frontend and the loopback server is
-  deleted. The handle it emits through is bound once at startup rather than
+- **Anything → Rust**: nothing listens. Parsing is in-process, so
+  `app/src-tauri/src/parse/events.rs` emits `parse-status` straight to the
+  frontend. The handle it emits through is bound once at startup rather than
   threaded through the call path, which is also what lets the CLI run the same
   parse code with nothing to emit to.
 - **Media playback**: WebKit's media pipeline refuses `<video>` sources on
@@ -82,10 +81,11 @@ ephemeral port, and both ends of that are deleted.
 
 ## The data directory
 
-`app/src-tauri/src/paths.rs` computes the same directory Tauri would
-(`~/Library/Application Support/com.tchan.oculus` on macOS) **without** an
-`AppHandle`, so the CLI and the app can never disagree about where things
-live. Inside it:
+`paths::data_dir()` in `app/src-tauri/src/paths.rs` computes the same
+directory Tauri would (`~/Library/Application Support/com.tchan.oculus` on
+macOS) **without** an `AppHandle`, and is the only way the Rust side reaches
+it — commands included — so the CLI and the app can never disagree about where
+things live. Inside it:
 
 - `oculus.db` — SQLite, everything structured
 - `courses/<code>/…` — scraped files, mirrored to Canvas layout, plus `.md`,
@@ -137,7 +137,7 @@ live. Inside it:
 
 ## The database
 
-Schema lives in the tauri-plugin-sql migrations in `app/src-tauri/src/lib.rs`
+Schema lives in the tauri-plugin-sql migrations in `app/src-tauri/src/migrations.rs`
 — append-only and numbered, so the highest `version` in that list is the
 current schema. Ownership is split deliberately:
 
@@ -180,17 +180,15 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   the chosen engine's API root. **Changing it invalidates nothing** — both
   engines write the same artifacts at the same `PARSER_VERSION` — which is the
   opposite of the embed row beside it; see [parsing.md](./parsing.md).
-  Two dead keys from the sidecar — `memoryCapMb` and a `local|cloud|auto`
-  `backend` — still sit in the same blob and are deliberately ignored rather
-  than migrated out; only `engine` selects a parser. Embed settings
+  Unknown keys in the blob are ignored rather than migrated out; only
+  `engine` selects a parser. Embed settings
   are the row beside it, under `embed` (`embed_config` in
   `app/src-tauri/src/embed/mod.rs`) — same shape, one field over. Neither
   cloud's credential joins them: keychain → in-process client, and neither
   crosses a socket at all. Neither is in SQLite, in health, or in a progress
   event.
-- **Parsing blocks for minutes, and every caller is built around that.** The
-  sidecar answered as soon as a fast pass had produced *some* markdown; there
-  is one tier now, so a parse spans the whole cloud round trip. Concurrency
+- **Parsing blocks for minutes, and every caller is built around that.** There
+  is one tier, so a parse spans the whole round trip. Concurrency
   belongs to the batcher (`app/src-tauri/src/parse/mineru/batch.rs`: a
   five-second/twenty-file window, eight batches in flight), so a scrape hands
   each PDF to a detached thread and reports itself finished.
@@ -201,8 +199,8 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   detected and a 429 is routine, so a deadline from above could only abandon
   work that was still progressing.
 - **A finished parse writes its own page records.** `pages.markdown` — what
-  `oculus grep` searches — used to be a side effect of the embed path, which
-  would have taken it down with the embedding layer.
+  `oculus grep` searches — does not depend on the embed path, so a file with no
+  embeddings is still searchable by keyword.
 - The startup sequence in `app/src-tauri/src/lib.rs` is: bind parse events →
   start the media server → clean partial lecture downloads → seed WebKit's cookie jar
   with the Canvas session → verify the persisted session in a background
@@ -237,13 +235,11 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   written the same way, from the `browser-state` snapshot — see
   [frontend.md](./frontend.md) for what is deliberately *not* written into
   it.
-- Everything Canvas-shaped was **moved out of hidden WebViews on purpose**:
-  macOS suspends off-screen WKWebView content processes, which froze the old
-  `scraper.js` mid-run with nothing to catch. The scrape engine is Rust
-  (`app/src-tauri/src/sync.rs`); do not move background work back into a
-  WebView.
-- **Nothing local can leave a PDF unindexed any more** — there is no venv to
-  be missing and no model to fail to load. What can is a missing cloud
-  credential, a spent allowance or no network, in which case `oculus index`
+- Everything Canvas-shaped **stays out of hidden WebViews**: macOS suspends
+  off-screen WKWebView content processes, which freezes a scrape mid-run with
+  nothing to catch. The scrape engine is Rust (`app/src-tauri/src/sync.rs`);
+  do not move background work back into a WebView.
+- **What leaves a PDF unindexed** is a missing cloud credential, a spent
+  allowance, no network, or a local server that is not running, in which case `oculus index`
   picks the file up on a later run and the file row says why in the meantime
   (see [parsing.md](./parsing.md)).

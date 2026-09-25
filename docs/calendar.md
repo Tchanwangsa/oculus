@@ -12,8 +12,8 @@ notes under "The five layers".
 | Piece | Location |
 | --- | --- |
 | Canvas calendar fetch + Tauri command | `app/src-tauri/src/calendar.rs` |
-| `calendar_events` table (migration 19) | `app/src-tauri/src/lib.rs` |
-| `local_events` table (migration 22) | `app/src-tauri/src/lib.rs` |
+| `calendar_events` table (migration 19) | `app/src-tauri/src/migrations.rs` |
+| `local_events` table (migration 22) | `app/src-tauri/src/migrations.rs` |
 | Headless writes (CLI) | `app/src-tauri/src/store.rs` |
 | Frontend reads + writes | `app/src/lib/db.ts` |
 | The new/edit event dialog | `app/src/components/calendar/EventDialog.tsx`, `app/src/stores/eventEditorStore.ts` |
@@ -35,13 +35,11 @@ notes under "The five layers".
 | `note` | The `local_events` table | Anything Oculus wrote itself, rather than read from Canvas or Echo360 |
 | `task` | The `project_tasks` table, read live | A deadline you set yourself: a dated, unfinished task, on a project's board or on none at all ([projects.md](./projects.md)) |
 
-**The `note` layer is the one the user writes.** Its first writer was the
-automations feature (removed — see [index.md](./index.md)), which is why rows
-carry a `source` of `automation` or `manual` and why the card says which; for a
-while after that removal nothing wrote the layer at all. `EventDialog` writes it
-now, through `createLocalEvent` / `updateLocalEvent` in `app/src/lib/db.ts`, and
-`source` is always `manual` — an edit deliberately leaves the column alone, so
-fixing a typo on a row an automation left behind does not relabel it as
+**The `note` layer is the one the user writes.** `EventDialog` writes it,
+through `createLocalEvent` / `updateLocalEvent` in `app/src/lib/db.ts`, with
+`source` always `manual`. Rows may also carry `automation`, left by a removed
+feature (see [index.md](./index.md)), and the card says which; an edit leaves
+the column alone, so fixing a typo on such a row does not relabel it as
 something the user typed.
 
 **The dialog is mounted once, in `app/src/layouts/AppLayout.tsx`, and raised
@@ -60,7 +58,8 @@ is a way to leave the page unclickable.
   written under `courses/`, so there is no artifact to report and no
   file-manifest skip to honour. Like the Echo360 lecture list, it runs *after*
   a scrape completes: the frontend calls `calendar_sync_events` per subject and
-  writes the rows (`app/src/hooks/useBackendEvents.ts`), and the CLI calls
+  writes the rows (`syncCalendar` in `app/src/lib/calendar.ts`, called from
+  `app/src/hooks/useBackendEvents.ts`), and the CLI calls
   `calendar::fetch` then `store::replace_calendar_events` itself. Both are
   gated by the `calendar` sync option (`app/src/components/sync/SyncSettings.tsx`);
   the CLI always runs it.

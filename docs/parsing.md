@@ -7,10 +7,6 @@ starts or supervises. There is no fast tier and **no fallback between the
 two**: one engine is selected, and a PDF either has markdown or it does not.
 When it does not, the UI says so (see *The failure story* below).
 
-This page replaces the old `sidecar.md`. The Python process it described is
-gone from the app — see [architecture.md](./architecture.md) for what the two
-remaining processes are.
-
 ## Where
 
 | Piece | Location |
@@ -21,6 +17,7 @@ remaining processes are.
 | Content list → page records (what the markdown *says*) | `app/src-tauri/src/parse/mineru/render.rs` |
 | Submission queue (batching window, in-flight cap) | `app/src-tauri/src/parse/mineru/batch.rs` |
 | Daily allowance + the two rate limiters | `app/src-tauri/src/parse/mineru/ledger.rs` |
+| Token bucket, semaphore, retry ladder (shared with Voyage) | `app/src-tauri/src/ratelimit.rs` |
 | The `parse-status` event | `app/src-tauri/src/parse/events.rs` |
 | Call site, and the thread each parse parks on | `app/src-tauri/src/sync.rs` |
 | Artifact paths and purging | `app/src-tauri/src/paths.rs` |
@@ -60,11 +57,9 @@ a stopped server never marks a file permanently broken.
 `parse_config()` reads the `settings` row `parse`, key `engine` (`cloud` |
 `local`) with an optional `engineUrl` override. Absence means `Cloud`.
 
-**The old `backend` key is ignored entirely**, `"auto"` included. It named a
-*fallback policy* over the Python sidecar — "local" meant that Python parser
-specifically — so those values cannot be reinterpreted; promoting a stale
-`"local"` would aim the app at a parse server nobody installed. The stale
-`memoryCapMb` and `backend` keys are left in the blob rather than migrated out.
+**A `backend` key in the blob is ignored**, whatever it says: it named a
+fallback policy between parsers, so promoting a stale `"local"` would aim the
+app at a parse server nobody installed. Only `engine` selects.
 
 ## Choosing an engine
 
@@ -129,19 +124,15 @@ not settings**; changing either of the first two is a re-parse of everything.
 
 - **Progress is a page count and then a finish, with nothing in between.**
   `/file_parse` blocks until the whole document is done and offers nothing to
-  subscribe to. The Python's local tier filled that silence with an EMA over
-  previous parses — a bar that moves while nothing is known — and that is the
-  one behaviour from it deliberately not ported. A counter that sits still is
-  true; a bar that lies is not.
+  subscribe to. No estimate fills that silence: a counter that sits still is
+  true; a bar that moves while nothing is known is not.
 - **A connect timeout and no read timeout.** A parse on this machine's CPU is
   minutes of silence and that is not a hang, which is the rule the cloud path
   lives by for the same reason. Connecting either happens at once or the server
   is not running, so "unreachable" stays a useful word.
 - **The default is `http://127.0.0.1:8000`, because that is where MinerU binds
-  itself.** It used to be the port the Python sidecar vacated, on the reasoning
-  that one number in a firewall rule beats two — which does not survive contact
-  with a server this project does not build. A default nobody's server answers
-  on is a setting every user must change before the engine works at all.
+  itself.** A default nobody's server answers on is a setting every user must
+  change before the engine works at all.
 - **Measured against MinerU 3.4.5 on this Mac**, not inferred. The ignored test
   `a_real_mineru_answers_the_way_this_client_expects` in `mineru/local.rs` is
   the only thing in this repo that can tell you the form fields are spelled the
@@ -250,13 +241,11 @@ artifacts change shape — not when a backend changes and not on a release.
 `mode` is always `"quality"`; the field survives because records on disk have
 it, not because there is another tier.
 
-**`.pages.json` is written last, via temp+rename.** The Python wrote `.md`
-first and both non-atomically, which is what produced orphan states — an
-interrupted parse leaving markdown that read as evidence of a finished one.
-`parse_mode` reads the record and nothing else: `mode == "quality"` at this
-version means done, and **anything else — missing, unreadable, any other mode
-— means parse it**. The `.md` existence check is gone; `.md` is derived from
-the record, not evidence about it.
+**`.pages.json` is written last, via temp+rename**, so an interrupted parse
+cannot leave markdown that reads as evidence of a finished one. `parse_mode`
+reads the record and nothing else: `mode == "quality"` at this version means
+done, and **anything else — missing, unreadable, any other mode — means parse
+it**. The `.md` is derived from the record, not evidence about it.
 
 A result that comes back with no content list writes **nothing**, as an
 outright error. That *prevents* the bad state; `parse_mode` *recovers* from one
@@ -295,30 +284,24 @@ one long blocking conversation.
 - Images are staged into a scratch directory whose name deliberately differs
   from the link prefix, so a parse that dies halfway cannot have overwritten
   prior artifacts.
-- The renderer keeps the Python's 64-page boilerplate-grouping window: a
-  header or footer repeated across enough of a window is template furniture,
+- The renderer groups boilerplate over a 64-page window: a header or footer repeated across enough of a window is template furniture,
   measured per document rather than hardcoded.
 
 **Concurrency belongs to the backend, not to a worker pool.** `sync.rs` spawns
-one detached thread per PDF and the old bounded pool is gone — an inversion,
-not a regression. The pool existed because every parse was an HTTP POST into
-the sidecar and 105 decks meant 105 simultaneous POSTs at ~2 GB each; that was
-the OOM. Each engine now answers for its own share of that. The cloud client
+one detached thread per PDF, and each engine answers for its own limit. The cloud client
 parks its threads on the batcher's condvar until their window closes — no
 socket, no request in flight. The local client holds a single permit
 (`PARSE_GATE` in `mineru/local.rs`), so only one multipart POST is ever open
 against the user's server. That number is measured, not chosen: `mineru-api`
 reports `max_concurrent_requests: 1`, so a second request buys nothing — it
 queues inside that server while a socket of ours sits on it for minutes, with
-no read timeout above it. The permit is not what averts the sidecar's OOM,
-then; MinerU's own limit does that. It averts a hundred parked sockets waiting
-on a queue of one. A gate back in `sync.rs` would serve neither
+no read timeout above it. The permit averts a hundred parked sockets waiting
+on a queue of one. A gate in `sync.rs` would serve neither
 engine: it would only keep cloud files out of the window they are meant to
 share.
 
-**`parse_pdf` blocks for the whole round trip — minutes, not seconds.** The
-sidecar returned as soon as a fast pass had produced *some* markdown. Every
-caller now has to be somewhere that can wait that long.
+**`parse_pdf` blocks for the whole round trip — minutes, not seconds.** Every
+caller has to be somewhere that can wait that long.
 
 ## Progress
 
@@ -326,11 +309,8 @@ caller now has to be somewhere that can wait that long.
 `queued | running | quality | error`, and on `error` also `kind`, `retryable`
 and `latching`.
 
-This replaced `ipc.rs`, a loopback HTTP server that existed solely because the
-sidecar was another process and its ephemeral port had to be threaded through
-every call site that might cause a parse. The `AppHandle` is now set once at
-startup rather than passed down, because the alternative puts a Tauri type in
-the middle of code the CLI runs — and **a headless run leaves it unbound and
+The `AppHandle` is set once at startup rather than passed down, because the
+alternative puts a Tauri type in the middle of code the CLI runs — and **a headless run leaves it unbound and
 every emit is a no-op**, which is the honest shape of it.
 
 `"quality"` is the terminal success. The name outlived the tier: there is one
@@ -346,9 +326,8 @@ refused). The public page does not confirm account submission or file-day
 quotas, so Oculus keeps **50 submits/min, 1000 polls/min and 5000 files/day**
 as its own conservative application budgets rather than claiming larger ones.
 
-Oversized files are **refused before upload**, with the number in the message.
-The Python physically sliced them; that was deliberately not ported — a
->200 MB coursework PDF is hypothetical and slicing was the fiddliest part.
+Oversized files are **refused before upload**, with the number in the message,
+rather than sliced — a >200 MB coursework PDF is hypothetical.
 
 `mineru-usage.json`, beside the database, is the local guess at what is left,
 because MinerU exposes no endpoint that says. Two rules give it its shape:
@@ -367,8 +346,7 @@ because MinerU exposes no endpoint that says. Two rules give it its shape:
 ## The token
 
 Rust alone touches the keychain entry. It never enters SQLite, the WebView, a
-progress payload or a log. There is no loopback body to inject it into any
-more — the client reads the keychain at construction.
+progress payload or a log — the client reads the keychain at construction.
 
 A token is checked **before** it is stored: `mineru_set_api_key` GETs a
 non-existent task id, which costs nothing and creates nothing, and treats
@@ -377,10 +355,8 @@ non-existent task id, which costs nothing and creates nothing, and treats
 unreachable MinerU stores the token and reports `unverified` rather than
 blocking someone offline.
 
-**There is no rejection latch to clear any more.** The sidecar held one because
-a refused token is the same refusal for every queued file and it had no way to
-be told the user had fixed it; the in-process client keeps no such state, so
-the very next parse uses whatever is stored now. What remains is the app-wide
+**The client keeps no rejection latch**, so the very next parse uses whatever
+token is stored now. What latches is the app-wide
 `ParseLatch` in `parseStore`, which is session-scoped — saving a token lifts it
 explicitly from the settings page.
 
@@ -423,10 +399,9 @@ fixes. Both discriminants are **optional** — a failure inherited from a
 previous session is only the word `error` in the DB — so unknown is its own
 case and is never coerced into either extreme.
 
-The background sweep reads the same discriminants. It used to be free to be
-wrong, because a failure fell back to a local parser within the same run; every
-parse is now one whole trip to whichever engine is selected — metered, on the
-cloud — so `retryable === false` is never re-kicked and the sweep stands down
+The background sweep reads the same discriminants. Every parse is one whole
+trip to whichever engine is selected — metered, on the cloud — so
+`retryable === false` is never re-kicked and the sweep stands down
 entirely under a latch, rather than marching the library through the same error
 one batch at a time.
 
@@ -436,27 +411,18 @@ That pairing is deliberate. The sweep comes back once the server is up, and no
 file is marked permanently broken for an engine that simply was not running
 yet.
 
-## History worth keeping
+## Measured facts the design rests on
 
-- **The fast tier is gone.** `pymupdf4llm` returned in ~2s and had to live in
-  a throwaway subprocess because it leaked ~2 GB per deck. Nothing in the
-  library was ever left in `fast`: checked 2026-09-16, `files.parse_status` was
-  166 `quality` and 540 `NULL`, and all 161 readable records on disk said
-  `"quality"`. Files passed through fast; they never rested there.
-- **Formula decoding went pix2tex → docling enrichment → MinerU** (2026-08-15).
-  MinerU is ~100× faster than docling-with-enrichment and more correct (1% vs
-  18% KaTeX render failures on the benchmark deck).
-- **The Python's own local parser is gone**, and with it the whole-tree memory
-  governor, the 8 GB budget and the formula-batch cap. Parsing on this machine
-  came back as MinerU's own server, which is a different arrangement entirely:
-  nothing is bundled, nothing is supervised, and the models are somebody else's
-  problem — so the shape those governors solved does not exist in this process.
-  Those pins and their measurements are at `f875bb1`, the last commit holding
-  `sidecar/`.
+- **Why MinerU**: it is ~100× faster than docling-with-formula-enrichment and
+  more correct (1% vs 18% KaTeX render failures on the benchmark deck).
+- **Why there is no fast tier**: no file in the library ever rested in `fast`
+  (checked 2026-09-16), so a second, cheaper parse bought nothing that lasted.
+- **No memory governor in this process**: a local parse is MinerU's own server,
+  so its models and memory are that server's problem. The bundled parser's
+  measurements are at `f875bb1`.
 - **Office-derived PDFs (`*.pptx.pdf`) have never been parsed in this
   library**, so that path has no fixture and is unproven in practice.
-  LibreOffice conversion is Rust already (`app/src-tauri/src/sync.rs`) and was
-  not touched by any of this.
+  LibreOffice conversion is in `app/src-tauri/src/sync.rs`.
 
 ## Debugging
 
@@ -469,7 +435,7 @@ cd data/parse-fixtures && shasum -a 256 -c MANIFEST.sha256
 ```
 
 They are a local harness deliberately: neither the fixtures nor tests over them
-belong in the repo. The differential tests that pinned `render.rs` against the
-Python **are** in the repo (`app/src-tauri/src/parse/mineru/render.rs`), and
-are now the working record of what that code did — the code itself is at
-`f875bb1`, which every `sidecar/*.py` citation in Rust refers to.
+belong in the repo. The differential tests that pin `render.rs` to the
+behaviour it was ported from **are** in the repo
+(`app/src-tauri/src/parse/mineru/render.rs`); the original is at `f875bb1`,
+which every `sidecar/*.py` citation in Rust refers to.

@@ -35,7 +35,7 @@ live in the root `CLAUDE.md`, not here.
 | --- | --- |
 | `app/src/` | React 19 frontend (Vite, Tailwind v4, shadcn/ui) |
 | `app/src-tauri/src/` | Rust: Tauri commands, scrape engine, parsing, embedding, retrieval |
-| `app/src-tauri/src/bin/oculus.rs` | The headless CLI over the same engine |
+| `app/src-tauri/src/bin/oculus/` | The headless CLI over the same engine |
 | `docs/` | These pages |
 | `.agents/skills/` | Shared skills: `read-docs`, `write-docs`, `check-doc-drift` |
 | `.claude/skills/` | Symlink to `.agents/skills/` for Claude Code |
@@ -79,31 +79,10 @@ asked for in the first place.
 [chapters.md](./chapters.md#the-reading-copy) describes the shared pipeline;
 the dock is in [Reading them in the player](./chapters.md#reading-them-in-the-player).
 
-Removed: the **Python sidecar**, code and directory both. PDF parsing and page
-embedding run in Rust now, against MinerU and Voyage
-([parsing.md](./parsing.md), [retrieval.md](./retrieval.md)); the supervisor,
-the loopback port and the whole-tree memory governor went with it. Parsing on
-this machine came back, but as an *engine you select* rather than a tier that
-catches anything: Settings → Library offers MinerU's cloud service or a MinerU
-server you install and run yourself, and **there is no fallback between them**.
-A PDF that fails on the selected engine simply has no markdown, and the UI says
-so. **The last commit holding `sidecar/` is `f875bb1`** — 32 files, 6,652
-lines, every pin and measurement intact — which is where the separate
-local-server repo forks from. Same pattern as automations at `d64dc11`:
-moved, not lost.
-
-Removed: the **BYOK API layer** — provider config, keychain keys, an
-OpenAI-compatible streaming client, spend limits and its own agent tool loop —
-which the CLI-agent bridges replaced. Nothing had routed to it for a while, so
-it was deleted rather than carried; its page went with it. Migrations 16 and 17
-stay, so `llm_usage`, `chats` and `chat_messages` still exist and are read by
-nothing. The one measured fact worth keeping — how to ask macOS how much memory
-a local model can actually have — is in
-[retrieval.md](./retrieval.md#how-much-memory-a-local-model-can-actually-have).
-
-Removed: **automations and the Inbox** — the trigger/condition/action canvas
-that delivered sync digests. It worked, but it was a detour from the core, so
-it was cut rather than carried. The last version that has it is commit
-`d64dc11` (its docs page went with it); master keeps migrations 18,
-20 and 21 so the tables still exist, unused, and reinstating needs no
-migration. Scheduled sync went with it — sync is manual-only now.
+Not in this repo, and not to be re-added without being asked: a **Python
+process** (the last commit holding `sidecar/` is `f875bb1`, where the separate
+local MinerU server's repo forks from and every `sidecar/*.py` citation in Rust
+points), a **BYOK API layer** (opencode is the API path — see
+[harness.md](./harness.md)), and **automations and the Inbox** (last present
+at `d64dc11`). Their migrations stay — 16 and 17 for the API layer, 18, 20 and
+21 for automations — so those tables exist, unused. Sync is manual-only.

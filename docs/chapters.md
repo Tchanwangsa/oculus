@@ -33,11 +33,11 @@ gives.
 | The transcript parser and the merged outline | `parse_transcript` / `outline` in `app/src-tauri/src/chapters.rs` |
 | The prompt, the reply parser, the validator | `app/src-tauri/src/chapters.rs` |
 | Writing the rows and the job's status | `app/src-tauri/src/store.rs` |
-| `lecture_chapters` + the three `lectures` columns (migration 29) | `app/src-tauri/src/lib.rs` |
+| `lecture_chapters` + the three `lectures` columns (migration 29) | `app/src-tauri/src/migrations.rs` |
 | The job itself — detect, grab, ask, validate, write | `run` in `app/src-tauri/src/chapters.rs` |
 | Reading copy: segmentation, windows, prompt, validation, `para`, and the job | `app/src-tauri/src/reading.rs` |
-| `lecture_reading` + the three `lectures` columns (migration 34) | `app/src-tauri/src/lib.rs` |
-| `oculus lecture candidates`, `oculus lecture chapters`, `oculus lecture reading` | `app/src-tauri/src/bin/oculus.rs` |
+| `lecture_reading` + the three `lectures` columns (migration 34) | `app/src-tauri/src/migrations.rs` |
+| `oculus lecture candidates`, `oculus lecture chapters`, `oculus lecture reading` | `app/src-tauri/src/bin/oculus/lecture.rs` |
 | The app's trigger, its two events, and the startup sweep | `chapters::app` in `app/src-tauri/src/chapters.rs` |
 | The reading command, progress/finish events, and startup sweep | `reading::app` in `app/src-tauri/src/reading.rs` |
 | The phases a run reports, and where each one fires | `Step` in `app/src-tauri/src/chapters.rs` |
@@ -47,8 +47,10 @@ gives.
 | The tool verbs the running panel borrows from the timeline | `toolVerb` in `app/src/lib/harness.ts` |
 | Reading the rows and the job's state in the app | `getChapters` / `getChapterStatus` in `app/src/lib/db.ts` |
 | The player's chapter state, and the event it listens on | `app/src/hooks/useLectureChapters.ts` |
+| What both jobs' hooks share: status read from SQLite, the events, starting a run | `app/src/hooks/useLectureJob.ts` |
 | The Chapters tab — the card list and every state it has | `app/src/components/lectures/ChaptersPanel.tsx` |
 | The Transcript tab's Enhanced register, and every state it has | `app/src/components/lectures/ReadingList.tsx` |
+| The run status, empty state and Regenerate row both panels share | `app/src/components/lectures/RunStatus.tsx` |
 | The Standard ↔ Enhanced picker, which is also the enhance job's control | `app/src/components/lectures/TranscriptModePicker.tsx` |
 | The reading copy's rows and its job state in the app | `getReading` / `getReadingStatus` in `app/src/lib/db.ts`, `app/src/hooks/useLectureReading.ts` |
 | The reading copy's frontend binding and its two event names | `app/src/lib/lectures.ts` |
@@ -100,8 +102,8 @@ An Echo360 capture publishes up to two streams — `source1.mp4` and
 projector is not consistent, even inside one subject.** Four MULT20015
 lectures put the slides on source 1; a fifth has 44 minutes of black there,
 because the projector capture failed and the only thing that recorded the
-screen was the second stream. Chaptering that lecture used to find *one*
-candidate and hand the agent a menu of one.
+screen was the second stream. Chaptering source 1 there finds *one*
+candidate and hands the agent a menu of one.
 
 `chapters::detect` is the answer, and both jobs go through it:
 
@@ -180,8 +182,7 @@ question from fifty of slides ([harness.md](./harness.md)).
   away, because a pause bonus does not care what was said; `parse_transcript`
   beside it keeps them for the outline, off one shared timestamp reader, so a
   cue start in a reading window and a cue start in an outline are the same
-  second. It used to live in `reading.rs` (the recap, then), which was its
-  only caller.
+  second.
 - **A lecture id is a UUID, so a unique prefix is accepted.** A prefix matching
   two lectures is reported with the full ids rather than guessed, the same rule
   `one_subject` follows for subject codes. `oculus list -l` prints the first
@@ -210,11 +211,9 @@ question from fifty of slides ([harness.md](./harness.md)).
   second in its name, not the offset one.
 
   Because the name is the second, **a run deletes the grabs it is not about to
-  rewrite.** A re-run whose candidate set moved used to leave the old set
-  behind, and once the source can change that means frames off a stream this
-  run never looked at: the lecture with the dead slide capture kept a grab of
-  the room's Crestron splash — the single candidate its black stream produced —
-  sitting in the folder. Nothing reads a frame after the turn that asked for
+  rewrite.** A re-run whose candidate set moved would otherwise leave the old
+  set behind, and once the source can change that means frames off a stream
+  this run never looked at. Nothing reads a frame after the turn that asked for
   it, so an orphan's only power is to mislead whoever opens the folder next.
   The sweep touches `.jpg` files directly in the folder and nothing else, so
   the subfolders beside them survive: `live/` is the chat dock's grabs and
@@ -286,9 +285,9 @@ line `second  timestamp  text`.
 path so the agent reads only the spans it wants is the same argument the frames
 make. What merging buys is not brevity but correlation: "the picture changed
 here" and "the subject turned here" arrive on adjacent lines instead of in two
-documents with timestamp arithmetic in between. It replaces both halves of what
-the prompt used to name — the candidate table and `transcript.vtt` — so there is
-one document to read and no list to reconcile it against.
+documents with timestamp arithmetic in between. It stands in for both the
+candidate table and `transcript.vtt`, so there is one document to read and no
+list to reconcile it against.
 
 Both columns are printed because both are load-bearing: the clock is what a
 person reads, and the bare second is what a chapter's `start` has to be
@@ -316,11 +315,10 @@ boundary is one of the seconds the outline printed — the detected slide
 changes, every transcript cue start, and second 0, which always counts because
 the detector's first candidate is typically twenty seconds in.
 
-That set is wider than it used to be, and the widening is the fix for the
-lecture this page keeps coming back to. The allowed set was the candidate list
-alone, so a recording whose slide capture was black offered a menu of one
-however intact its transcript was: the agent understood the lecture perfectly
-and had nowhere to cut. **It is still closed**, though — every second on the
+The cue starts are in the set for the lecture this page keeps coming back to:
+the candidate list alone, off a recording whose slide capture was black, is a
+menu of one however intact its transcript is — the agent understands the
+lecture perfectly and has nowhere to cut. **The set is still closed**, though — every second on the
 menu came off a real file — so the agent cannot invent a timestamp and the
 all-or-nothing rollback still means something. Frames are still grabbed at the
 slide changes only; a frame per cue would be two and a half thousand JPEGs of
@@ -379,7 +377,7 @@ built](#what-is-not-built).
 
 ## A configured job
 
-Nothing about which agent runs this is hardcoded any more. The job's provider,
+Nothing about which agent runs this is hardcoded. The job's provider,
 model and reasoning level come from the per-job model registry
 ([harness.md](./harness.md#per-job-models)) — one `settings` row, one
 `ModelPicker` row in Settings → AI — and both doors read the same value:
@@ -718,10 +716,9 @@ which the scrub bar already says. Lines do not get one: ten to twenty seconds
 is not a span worth measuring, and the highlight moving down the page already
 is the progress.
 
-**The fill used to be a hairline above the scrub bar**, beside the chapter's
-name inside the controls scrim. It said the same thing over the frame, where it
-had to be white-on-black and faded out with the control bar; on the card it
-is beside the title it is measuring and it stays. Only the current chapter is
+**The fill lives on the card, not above the scrub bar.** Over the frame it
+would have to be white-on-black and fade out with the control bar; on the card
+it is beside the title it is measuring and it stays. Only the current chapter is
 given one: a track on all twelve would read as a ladder rather than as a
 playhead, and the highlight already says which card is current.
 
@@ -756,7 +753,8 @@ order survives a tab being added, removed or hidden.
 ### Two jobs, two panels
 
 Both read their state from SQLite (`app/src/hooks/useLectureChapters.ts`,
-`app/src/hooks/useLectureReading.ts`) rather than from the `lectures` row the
+`app/src/hooks/useLectureReading.ts`, both built on
+`app/src/hooks/useLectureJob.ts`) rather than from the `lectures` row the
 player was handed: in the side panel that row is a snapshot held by a store
 and in a list it is whatever the last `getLectures` returned, and neither is
 re-read when a run lands minutes later. Each hook owns its read, listens for
@@ -774,9 +772,8 @@ player unmounts on every tab switch and the job outlives it.
   It is a countable sequence of agent turns, so its running line carries
   "3/7" — a fact, where a chaptering run's single turn has no denominator and
   is still given none.
-- **Both can run at once**, claimed independently in Rust. They no longer share
-  a footer to stack their running lines in: each panel shows its own job and
-  says nothing about the other's.
+- **Both can run at once**, claimed independently in Rust. Each panel shows its
+  own job and says nothing about the other's.
 
 ### Every state is a real one
 
