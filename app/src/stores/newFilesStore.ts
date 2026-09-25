@@ -14,10 +14,12 @@ import { FILE_ACCESSED_EVENT } from "@/lib/openFile";
  */
 const COUNTED_CATEGORIES = ["file", "page", "announcement", "assignment", "quiz", "ed"];
 
-/** Which categories each subject tab surfaces. */
+/** Which categories each subject tab surfaces, keyed by the tab's path
+ *  segment under the subject (`TABS` in `SubjectLayout`). Downloads is a
+ *  sub-tab of Files, so its count lands on the Files tab. */
 export const TAB_CATEGORIES: Record<string, string[]> = {
   modules: ["page"],
-  downloads: ["file"],
+  files: ["file"],
   announcements: ["announcement"],
   assignments: ["assignment", "quiz"],
   discussion: ["ed"],

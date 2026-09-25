@@ -9,13 +9,12 @@ import {
 } from "react-router-dom";
 import {
   ChatsCircle,
-  DownloadSimple,
+  Folder,
   House,
   Kanban,
   Megaphone,
   PencilLine,
   Stack,
-  UploadSimple,
   VideoCamera,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
@@ -32,8 +31,7 @@ const TABS = [
   { to: ".",             label: "Overview",      icon: House,          end: true },
   { to: "modules",       label: "Modules",       icon: Stack,          end: false },
   { to: "lectures",      label: "Lectures",      icon: VideoCamera,    end: false },
-  { to: "downloads",     label: "Downloads",     icon: DownloadSimple, end: false },
-  { to: "uploads",       label: "Uploads",       icon: UploadSimple,   end: false },
+  { to: "files",         label: "Files",         icon: Folder,         end: false },
   { to: "announcements", label: "Announcements", icon: Megaphone,      end: false },
   { to: "assignments",   label: "Assignments",   icon: PencilLine,     end: false },
   { to: "discussion",    label: "Discussion",    icon: ChatsCircle,    end: false },

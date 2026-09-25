@@ -29,7 +29,9 @@ this page is the structure.
 | Overlap packing, shared by the week grid and the project timeline | `app/src/lib/lanes.ts` |
 | Agent/model/reasoning picker (settings rows + composer) | `app/src/components/harness/ModelPicker.tsx` |
 | Antigravity's refusal card in chat, and its approvals list in Settings → AI | `app/src/components/harness/PermissionCard.tsx`, `app/src/pages/settings/AiPage.tsx` |
-| A subject's own files (the Uploads tab) | `app/src/pages/subject/UploadsPage.tsx`, `app/src/lib/uploads.ts`, `app/src-tauri/src/files.rs` |
+| A subject's Files tab (Downloads · Uploads sub-tabs, the whole-tab drop) | `app/src/pages/subject/FilesPage.tsx`, `app/src/pages/subject/DownloadsPage.tsx`, `app/src/pages/subject/UploadsPage.tsx`, `app/src/hooks/useUploadImport.ts`, `app/src/lib/uploads.ts`, `app/src-tauri/src/files.rs` |
+| Documents: the student's own notes and their editor | `app/src/pages/subject/DocumentsPage.tsx`, `app/src/components/documents/DocumentEditor.tsx`, `app/src/lib/documents.ts`, `app/src/lib/markdownEditing.ts` |
+| A picture pasted or dropped into a note | `app/src/components/documents/DocumentEditor.tsx`, `app/src/lib/documents.ts`, `app/src-tauri/src/files.rs`, `app/src-tauri/src/harness/attach.rs` |
 | Sync page + runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
 | Settings | `app/src/layouts/SettingsLayout.tsx`, `app/src/pages/settings/` |
 | Library counts, and the page that composes the two engine sections | `app/src/pages/settings/LibraryPage.tsx` |
@@ -59,11 +61,14 @@ redirect to `/chat`. Then `/chat`, `/calendar`, the Tasks section's two tabs
 `/projects` and `/tasks` — plus `/projects/:projectId`,
 `/projects/:projectId/tasks/:taskId` and `/tasks/:taskId` under them —
 `/subjects`, `/subjects/:subjectId` (SubjectLayout →
-overview / modules / downloads / uploads / lectures / announcements /
-assignments / discussion / projects), `/subjects/:subjectId/file` and `/lecture` (the side
+overview / modules / lectures / files / announcements / assignments /
+discussion / projects — where `files` is one tab with its own child routes,
+`files/downloads` and `files/uploads`, and its index redirects to
+`downloads`), `/subjects/:subjectId/file` and `/lecture` (the side
 panel promoted to a full Notion-style page, outside SubjectLayout on purpose),
-`/sync`, and `/settings/*`. Legacy routes (`/lectures`, a subject's `files`
-tab) redirect.
+`/sync`, and `/settings/*`. Legacy routes redirect: `/lectures`, and a
+subject's old `downloads` and `uploads` tabs, which a restored tab or a
+bookmark still carries, land on the matching Files sub-tab.
 
 A project lives at the top level rather than under its subject even when it has
 one, because it can have none: the subject's Projects tab and the index are two
@@ -348,7 +353,18 @@ plainly *Chat*.
   that lands the active underline on the header's border sits on the scroller,
   not on the tabs: `overflow-x` clips on both axes, so inside it the underline
   would go with it.
-- **Uploads is the one subject tab whose rows nothing scraped**, and it is
+- **Files is one tab whose sub-tabs are routes.** Downloads and Uploads (and
+  whatever joins them) sit under `files/` as child routes of
+  `app/src/pages/subject/FilesPage.tsx`, which draws a `PillTabs` strip over
+  an `Outlet` and navigates between them — routed rather than local for the
+  reason `SectionHeader` is: a restored tab, a crumb, ⌘-click and `tabInfo`
+  all key off the path. It is a pill strip and not a second underline strip
+  because the subject's own tabs are the underline above it. The page hands
+  its sub-pages one outlet context, `useFilesTab()`: the subject spread
+  together with the upload import state, a superset rather than a wrapper
+  because `useOutletContext` reads the *nearest* Outlet, and a context of
+  its own shape would have made `useSubject()` lie under this tab.
+- **Uploads is the one sub-tab whose rows nothing scraped**, and it is
   thin because it has to add almost nothing. `import_uploads` copies the picked
   bytes into `courses/<code>/uploads/` and converts Office documents there the
   same way a download is converted; from that moment the file is an ordinary
@@ -363,11 +379,17 @@ plainly *Chat*.
   already taken steps aside (`notes.pdf` → `notes-2.pdf`) rather than
   overwriting, except for byte-identical content under the same name, which is
   the same file again and keeps its parse; adding the wrong file can therefore
-  never destroy the right one. And a Finder drag is a **native window event**
-  (`onDragDropEvent`) rather than an HTML drop — WebKit never sees those files
-  — which means it is the *window's* event, not the page's: every tab stays
-  mounted, so the page scopes it with `useTabActive` or a backgrounded Uploads
-  tab would claim a drop meant for whatever is in front.
+  never destroy the right one. And a Finder drag is Tauri's event, not the
+  page's — WebKit never sees those files — so the drop is `useFileDrop`
+  (`app/src/hooks/useFileDrop.ts`, the composers' hook) on the **Files tab's
+  root**, not on the Uploads page: a file dropped anywhere on the tab is added
+  to Uploads, and the tab switches to that sub-tab so the rows are seen
+  landing. That is why the import state lives in the tab
+  (`app/src/hooks/useUploadImport.ts`) rather than in the page: the "Adding…"
+  rows have to survive the switch. The hook hit-tests the drop against the
+  element and ignores one whose `visibility` is hidden, which is how panes are
+  hidden, so a backgrounded Files tab never claims a drop meant for the tab in
+  front and no `useTabActive` gate is needed.
   Deleting is the only destructive control in the library, and its guard is
   `is_upload_rel` in `app/src-tauri/src/paths.rs`, not a confirmation dialog:
   only a path under some subject's `uploads/` can be removed at all. It takes
@@ -386,6 +408,61 @@ plainly *Chat*.
   own. That purge is also why `purge_parse_artifacts` takes `{stem}_images/`:
   those figures are referenced only from the markdown it deletes, so keeping
   them is not a fallback, and both parse tiers rebuild the directory anyway.
+- **Documents are uploads whose bytes come from a textarea.** A document is a
+  markdown note the student writes in the app, kept by Rust at
+  `courses/<code>/documents/<title>.md` with a `files` row of
+  `category = 'document'` — so, like an upload, it is an ordinary library file
+  from the moment it exists: ⌘K finds it, the side panel renders it, the chat
+  agent reads it under `courses/`. **The title is the filename** without its
+  `.md`, never humanised (`fileTitle` in `app/src/lib/openFile.ts`); renaming
+  is moving the file, and the row keeps its id across the move, which is what
+  lets the full page (`app/src/pages/subject/FilePage.tsx`) follow a rename by
+  id and keep the editor mounted while the route catches up. The list
+  (`app/src/pages/subject/DocumentsPage.tsx`) is the Files tab's third
+  sub-tab and opens a row as a *page*, not a peek, because a note is opened to
+  be written in; the page hosts `DocumentEditor`
+  (`app/src/components/documents/DocumentEditor.tsx`) in place of the viewer
+  and draws its Write / Preview pills and save word in the same header slot
+  the PDF toggle uses. Saving is debounced — 600ms after the last keystroke,
+  and on blur, ⌘S, a switch to Preview and unmount — through
+  `app/src/lib/documents.ts`, which writes the file and then *touches* the
+  row (`touchFileRow` in `app/src/lib/db.ts`: size and stamps) after every
+  write, so recency and size stay true without a re-scrape. The list's other
+  job is `reconcileDocuments`: the folder is plain markdown on disk, and a
+  note written there from a text editor, or dragged out in Finder, never
+  touches the database, so on mount the rows are brought into line with the
+  folder — a file without a row gets one, a row without a file loses it, a
+  file rewritten by someone else is touched *unseen* so its dot comes back.
+  That is why a note written into `documents/` by hand simply appears. The
+  chat agent only reads the folder: its sandbox (`docs/harness.md`) writes
+  under `agents/` alone. The Tab and Enter handling — two-space indent, list
+  markers that continue and empty items that end the list — is pure functions
+  in `app/src/lib/markdownEditing.ts`, applied through
+  `execCommand("insertText")` so ⌘Z undoes them like typing.
+- **A note takes a picture, and keeps it beside itself.** Pasting or dropping
+  an image into the editor writes it into `courses/<code>/documents/assets/`
+  and puts an `![alt](assets/<stamp>.png)` at the caret
+  (`attach_document_image` / `attach_document_file` in
+  `app/src-tauri/src/files.rs`, reached through `app/src/lib/documents.ts`).
+  **Beside the note, not in `agents/attachments/` where a composer's picture
+  goes**, because a note is a library file and a relative link is what
+  resolves for the editor's preview, for the file viewer and for anyone handed
+  the folder — the two renderers share one image rule
+  (`useLibraryMdComponents`), so the preview draws the picture exactly as the
+  viewer will. Everything else about taking a picture in is the composer's and
+  is shared with it: the 20 MB cap, the sniffed format, and a filename that is
+  a stamp of this app's own rather than anything the clipboard claimed
+  (`write_image` in `app/src-tauri/src/harness/attach.rs`). Two differences
+  from a composer, both forced: the write happens **on arrival** rather than
+  on send, because a note has no send to defer to — the accepted cost is a
+  file left in `assets/` when its tag is deleted again, the same trade a task
+  body makes — and the tag is given a line of its own (`imageEdit` in
+  `app/src/lib/markdownEditing.ts`), because markdown would otherwise wedge a
+  full-width figure into the sentence being typed. The insertion goes through
+  `execCommand` with the rest, so ⌘Z takes a picture back out like typing.
+  `assets/` is not a note: `is_document_rel` counts segments and demands a
+  `.md`, so no save, rename or delete can land on a picture and the list never
+  offers the folder as one to edit.
 - **The shell is furniture around a floating document.** `AppLayout` puts the
   sidebar and `TopTabBar` straight onto the window ground and renders content
   as an inset rounded card, so neither needs a divider of its own. Two

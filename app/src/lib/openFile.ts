@@ -15,6 +15,9 @@ import { attachmentPath } from "@/lib/attachments";
 const REAL_FILENAME = new Set(["file", "image", "upload"]);
 
 export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
+  // A document's title *is* its filename, typed by the student — never
+  // humanised, so "COMP30026 - week 3" stays exactly as they wrote it.
+  if (file.category === "document") return file.filename.replace(/\.md$/i, "");
   return REAL_FILENAME.has(file.category ?? "")
     ? file.filename
     : humanizeSlug(file.filename);
@@ -134,6 +137,7 @@ const CATEGORY_FOLDERS: Record<string, string> = {
   "files/": "file",
   "modules/": "module",
   "images/": "image",
+  "documents/": "document",
 };
 
 /**
