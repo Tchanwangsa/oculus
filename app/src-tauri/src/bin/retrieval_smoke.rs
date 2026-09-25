@@ -1,14 +1,8 @@
 //! Headless end-to-end check of the retrieval pipeline.
 //!
-//! Runs the same `retrieval::{ingest, search, stats}` the Tauri commands call,
-//! against a real SQLite file. Exists because the commands themselves need an
-//! AppHandle, which would otherwise mean the only way to test the pipeline is
-//! to click through the app.
-//!
-//! **`ingest` here spends real quota.** It goes through `embed::backend()`,
-//! which on every install today is the Voyage client and the account's own
-//! allowance; `stats` and `search` are cheap by comparison but `search` still
-//! embeds one query.
+//! Runs the `retrieval::{ingest, search, stats}` the Tauri commands call, which
+//! need an AppHandle, against a real SQLite file. `ingest` and `search` spend
+//! real Voyage quota.
 //!
 //!   cargo run --bin retrieval_smoke -- <db_path> ingest <file_id> <pdf_path>
 //!   cargo run --bin retrieval_smoke -- <db_path> search "<query>" [limit]
