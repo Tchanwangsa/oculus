@@ -119,12 +119,53 @@ export function FileViewer({
     return convertFileSrc(`${dataDir}/${relativePath}`.replace(/\/{2,}/g, "/"));
   };
 
-  // Markdown overrides: links whose target we hold locally open in the same
-  // peek — `../`-relative ones (rewritten at scrape time) and raw Canvas
-  // `/courses/…/files/<id>` / `/pages/<slug>` URLs (assignment and
-  // announcement bodies keep those) — everything else opens externally with
-  // an explicit marker. Relative images resolve against the file's directory.
-  const components = useMemo(() => {
+  const components = useLibraryMdComponents(file, files, onOpenFile);
+
+  if (file.category === "image") {
+    return (
+      <div className="flex-1 overflow-y-auto px-6 py-5">
+        <img
+          src={assetUrl(file.relative_path)}
+          alt={file.filename}
+          className="max-w-full rounded-lg border border-border"
+        />
+      </div>
+    );
+  }
+
+  if (pdfRelPath) {
+    return (
+      <div className="flex flex-col h-full">
+        {pdfViewMode === "markdown" && mdRelPath ? (
+          <MdFromPath relPath={mdRelPath} components={components} />
+        ) : (
+          <PDFViewer src={assetUrl(pdfRelPath)} />
+        )}
+      </div>
+    );
+  }
+
+  return <MdFromPath relPath={file.relative_path} components={components} />;
+}
+
+/**
+ * `MD_COMPONENTS` as a library file needs them: links whose target we hold
+ * locally open in the same peek — `../`-relative ones (rewritten at scrape
+ * time) and raw Canvas `/courses/…/files/<id>` / `/pages/<slug>` URLs
+ * (assignment and announcement bodies keep those) — everything else opens
+ * externally with an explicit marker, and relative images resolve against the
+ * file's directory.
+ *
+ * A hook of its own so the document editor's preview draws a note exactly as
+ * the viewer will once it is saved: same link rule, same image root.
+ */
+export function useLibraryMdComponents(
+  file: Pick<DbFile, "relative_path">,
+  files: DbFile[],
+  onOpenFile: (file: DbFile) => void,
+) {
+  const dataDir = useDataDir();
+  return useMemo(() => {
     const baseDir = file.relative_path.replace(/[^/]+$/, "");
     const localTarget = (href: string): DbFile | undefined => {
       if (/^\.\.\//.test(href)) {
@@ -187,32 +228,6 @@ export function FileViewer({
       },
     };
   }, [dataDir, file.relative_path, files, onOpenFile]);
-
-  if (file.category === "image") {
-    return (
-      <div className="flex-1 overflow-y-auto px-6 py-5">
-        <img
-          src={assetUrl(file.relative_path)}
-          alt={file.filename}
-          className="max-w-full rounded-lg border border-border"
-        />
-      </div>
-    );
-  }
-
-  if (pdfRelPath) {
-    return (
-      <div className="flex flex-col h-full">
-        {pdfViewMode === "markdown" && mdRelPath ? (
-          <MdFromPath relPath={mdRelPath} components={components} />
-        ) : (
-          <PDFViewer src={assetUrl(pdfRelPath)} />
-        )}
-      </div>
-    );
-  }
-
-  return <MdFromPath relPath={file.relative_path} components={components} />;
 }
 
 // ── MdFromPath ────────────────────────────────────────────────────────────────

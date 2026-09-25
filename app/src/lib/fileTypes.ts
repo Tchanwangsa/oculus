@@ -18,6 +18,7 @@ import {
   FileXls,
   FileZip,
   Megaphone,
+  NotePencil,
   PencilLine,
   Rocket,
   Stack,
@@ -95,6 +96,7 @@ export function categoryIconFor(file: {
     case "module": return Stack;
     case "file":
     case "image": return fileIconFor(file.filename);
+    case "document": return NotePencil;
     default: return FileText;
   }
 }

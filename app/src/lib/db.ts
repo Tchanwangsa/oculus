@@ -603,6 +603,52 @@ export async function markFileAccessed(id: number): Promise<void> {
   await db.execute(`UPDATE files SET last_accessed_at = datetime('now') WHERE id = $1`, [id]);
 }
 
+/**
+ * Record that a file's bytes just changed under the app's own hand — a
+ * document the editor saved, or one the chat agent rewrote on disk.
+ *
+ * `seen` says whose hand: the student's own save stamps `last_accessed_at` in
+ * the same statement, so the row's recency reads "just now" rather than
+ * lighting the unseen dot on a note they are looking at. A change found on
+ * disk that nobody here made leaves it alone, and the dot comes back — which
+ * is exactly what "updated since last opened" means for a note the agent
+ * added to.
+ */
+export async function touchFileRow(
+  id: number,
+  sizeBytes: number,
+  seen: boolean,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    seen
+      ? `UPDATE files SET size_bytes = $1, modified_at = datetime('now'),
+                          content_changed_at = datetime('now'),
+                          last_accessed_at = datetime('now')
+         WHERE id = $2`
+      : `UPDATE files SET size_bytes = $1, modified_at = datetime('now'),
+                          content_changed_at = datetime('now')
+         WHERE id = $2`,
+    [sizeBytes, id],
+  );
+}
+
+/** Follow a file that moved on disk: same row, same id, new name and path.
+ *  The `pages` rows stay attached, which is the point of not deleting and
+ *  re-inserting. */
+export async function renameFileRow(
+  id: number,
+  filename: string,
+  relativePath: string,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE files SET filename = $1, relative_path = $2, modified_at = datetime('now')
+     WHERE id = $3`,
+    [filename, relativePath, id],
+  );
+}
+
 /** A file the chat composer's `@` can point the agent at. */
 export interface MentionFile {
   id: number;

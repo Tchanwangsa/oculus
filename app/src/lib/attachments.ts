@@ -68,8 +68,10 @@ export function releaseAttachment(a: PendingAttachment): void {
 }
 
 /** A `File` as base64, the form the IPC takes it in — a byte array would
- *  cross as a JSON list of numbers, some seven characters per byte. */
-function base64(file: Blob): Promise<string> {
+ *  cross as a JSON list of numbers, some seven characters per byte. Exported
+ *  because a note's pictures cross the same way to a different command
+ *  (`app/src/lib/documents.ts`). */
+export function base64(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {

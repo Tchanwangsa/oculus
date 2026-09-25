@@ -26,8 +26,11 @@ export const LECTURES_TAB: CrumbTab = { to: "lectures", label: "Lectures" };
 const FILE_TAB: Record<string, CrumbTab> = {
   page: { to: "modules", label: "Modules" },
   module: { to: "modules", label: "Modules" },
-  file: { to: "downloads", label: "Downloads" },
-  upload: { to: "uploads", label: "Uploads" },
+  // The three kinds of file are sub-tabs of one Files tab, so the crumb
+  // says "Files" and the path picks the sub-tab whose list holds it.
+  file: { to: "files/downloads", label: "Files" },
+  upload: { to: "files/uploads", label: "Files" },
+  document: { to: "files/documents", label: "Files" },
   announcement: { to: "announcements", label: "Announcements" },
   assignment: { to: "assignments", label: "Assignments" },
   quiz: { to: "assignments", label: "Assignments" },

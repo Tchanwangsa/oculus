@@ -20,8 +20,7 @@ import type { Subject } from "@/lib/db";
 
 const SECTION_LABELS: Record<string, string> = {
   modules: "Modules",
-  downloads: "Downloads",
-  uploads: "Uploads",
+  files: "Files",
   lectures: "Lectures",
   announcements: "Announcements",
   assignments: "Assignments",
@@ -143,10 +142,15 @@ export function tabInfo(
     ) : (
       <BookOpen size={size} />
     );
-    // Full-page documents are titled by themselves, like Notion pages.
+    // Full-page documents are titled by themselves, like Notion pages. One of
+    // the student's own notes keeps its filename verbatim minus `.md` — that
+    // *is* the title they typed, and humanising it would title-case it and
+    // eat a leading date (`fileTitle`'s rule for the category).
     if (m[2] === "file") {
       const rel = new URLSearchParams(search).get("path");
       const base = rel?.split("/").pop();
+      if (base && rel?.includes("/documents/"))
+        return { title: base.replace(/\.md$/i, ""), icon };
       if (base)
         return { title: humanizeSlug(base.replace(/\.pdf$/i, "")), icon };
     }
@@ -154,6 +158,7 @@ export function tabInfo(
       return { title: new URLSearchParams(search).get("t") ?? "Lecture", icon };
     }
     const code = subject ? displayCode(subject.code) : "Subject";
+    // The first segment only: a sub-tab of Files is still the Files tab.
     const section = m[2] ? SECTION_LABELS[m[2]] : null;
     return { title: section ? `${code} · ${section}` : code, icon };
   }

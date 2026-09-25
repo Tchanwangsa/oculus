@@ -12,8 +12,10 @@ import TasksPage from "@/pages/TasksPage";
 import SubjectsIndexPage from "@/pages/SubjectsIndexPage";
 import SubjectOverviewPage from "@/pages/subject/OverviewPage";
 import SubjectModulesPage from "@/pages/subject/ModulesPage";
+import SubjectFilesPage from "@/pages/subject/FilesPage";
 import SubjectDownloadsPage from "@/pages/subject/DownloadsPage";
 import SubjectUploadsPage from "@/pages/subject/UploadsPage";
+import SubjectDocumentsPage from "@/pages/subject/DocumentsPage";
 import SubjectLecturesPage from "@/pages/subject/LecturesPage";
 import SubjectAnnouncementsPage from "@/pages/subject/AnnouncementsPage";
 import SubjectAssignmentsPage from "@/pages/subject/AssignmentsPage";
@@ -85,15 +87,28 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <SubjectOverviewPage /> },
           { path: "modules", element: <SubjectModulesPage /> },
-          { path: "downloads", element: <SubjectDownloadsPage /> },
-          { path: "uploads", element: <SubjectUploadsPage /> },
+          {
+            // One Files tab; its sub-tabs are child routes so a restored tab,
+            // a crumb and ⌘-click all key off the path (see FilesPage).
+            path: "files",
+            element: <SubjectFilesPage />,
+            children: [
+              { index: true, element: <Navigate to="downloads" replace /> },
+              { path: "downloads", element: <SubjectDownloadsPage /> },
+              { path: "uploads", element: <SubjectUploadsPage /> },
+              { path: "documents", element: <SubjectDocumentsPage /> },
+            ],
+          },
           { path: "lectures", element: <SubjectLecturesPage /> },
           { path: "announcements", element: <SubjectAnnouncementsPage /> },
           { path: "assignments", element: <SubjectAssignmentsPage /> },
           { path: "discussion", element: <SubjectDiscussionPage /> },
           { path: "projects", element: <SubjectProjectsPage /> },
-          // The old Files tab is gone; its bookmarks land on Downloads.
-          { path: "files", element: <Navigate to="../downloads" replace /> },
+          // Downloads and Uploads were tabs of their own before they became
+          // sub-tabs of Files; a restored tab or a bookmark still carries the
+          // old path.
+          { path: "downloads", element: <Navigate to="../files/downloads" replace /> },
+          { path: "uploads", element: <Navigate to="../files/uploads" replace /> },
         ],
       },
       { path: "sync", element: <SyncPage /> },
