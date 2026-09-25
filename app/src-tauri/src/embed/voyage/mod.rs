@@ -1,10 +1,6 @@
-//! Voyage cloud embedding, split the way `parse/mineru/` is.
-//!
-//! `client` speaks the HTTP protocol and *is* the `Embedder`; `ledger` holds
-//! the allowance, the per-minute throttle and the tier it discovered; `batch`
-//! decides which pages travel in one request and how many requests run at once.
-//! There is no `render` here — the page images come from `embed/raster.rs`,
-//! which is shared with anything else that needs to look at a page.
+//! Voyage cloud embedding. `client` speaks HTTP and is the `Embedder`;
+//! `ledger` holds the allowance, the throttle and the learned tier; `batch`
+//! packs pages into requests. Page images come from `embed/raster.rs`.
 
 pub mod batch;
 pub mod client;

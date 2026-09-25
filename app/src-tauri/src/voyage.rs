@@ -1,20 +1,15 @@
 //! Voyage AI credential storage.
 //!
-//! The key never enters SQLite or the WebView. Rust reads it from the macOS
-//! keychain and hands it straight to the embedding client, so it no longer
-//! crosses a socket at all. Shape mirrors `mineru.rs` on purpose — same
-//! keychain-only rule, same three commands, same `"ok"`/`"unverified"` answer.
+//! The key lives only in the macOS keychain, never in SQLite or the WebView.
+//! Same shape as `mineru.rs`: three commands, an `"ok"`/`"unverified"` answer.
 
 use std::time::Duration;
 
 const KEYCHAIN_SERVICE: &str = "com.tchan.oculus.voyage";
 const KEYCHAIN_ACCOUNT: &str = "voyage";
 
-/// The cheapest authenticated call Voyage has. Unlike MinerU there is no free
-/// lookup to hide behind — no "list models", no GET that answers without
-/// billing — so the probe embeds a two-letter string at the smallest output
-/// width and pays one text token for the privilege. A bad key answers 401
-/// before the model is ever loaded.
+/// The cheapest authenticated call Voyage has: Voyage has no free
+/// authenticated GET, so the probe embeds a two-letter string (one text token).
 const PROBE_URL: &str = "https://api.voyageai.com/v1/embeddings";
 const PROBE_BODY: &str = r#"{"model":"voyage-3.5","input":["ok"],"output_dimension":512}"#;
 
@@ -26,17 +21,14 @@ pub(crate) fn stored_api_key() -> Option<String> {
     keychain().ok()?.get_password().ok()
 }
 
-/// What a probe learned about a key. `Unverified` means Voyage never gave a
-/// verdict — it was unreachable, or it answered about the *account* rather
-/// than the key — and offline is not a reason to refuse a key the user typed.
+/// What a probe learned about a key. `Unverified`: unreachable, or Voyage
+/// answered about the account rather than the key.
 enum Verdict {
     Good,
     Unverified,
 }
 
-/// Pull Voyage's human-readable reason out of an error body. Voyage answers
-/// `{"detail": "..."}`; the string is for *us* to read, never to show — a
-/// server body can carry anything, including an echo of the request.
+/// Voyage's `{"detail": "..."}` — for us to read, never to show.
 fn detail_of(body: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(body)
         .ok()?
@@ -45,15 +37,9 @@ fn detail_of(body: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Does this refusal describe the *account* rather than the key?
-///
-/// This is the non-obvious part. Voyage meters an account with no payment
-/// method on file at 3 requests per minute, and the probe is a real request,
-/// so a 429 — or a 401 whose detail talks about billing — is the routine
-/// answer for a perfectly good key on a free account. Reading that as "wrong
-/// key" would tell a student to re-paste a key that was right all along, and
-/// no amount of re-pasting would ever clear it. When Voyage is talking about
-/// money or pace, we learned nothing about the key: say so and store it.
+/// Does this refusal describe the *account* rather than the key? On a free
+/// account a 429, or a 401 about billing, is routine for a good key; reading
+/// it as "wrong key" would have a student re-paste a correct one forever.
 fn is_about_the_account(text: &str) -> bool {
     let text = text.to_lowercase();
     [
@@ -72,20 +58,17 @@ fn is_about_the_account(text: &str) -> bool {
     .any(|needle| text.contains(needle))
 }
 
-/// Turn a status and body into a verdict. Split out of the HTTP call so the
-/// part with the judgement in it can be tested without a network.
+/// Turn a status and body into a verdict; split out to test without a network.
 fn interpret(status: u16, body: &str) -> Result<Verdict, String> {
     let detail = detail_of(body);
-    // Fall back to the whole body only for the limit sniff — a body we could
-    // not parse may still be an HTML rate-limit page from a proxy in front.
+    // The whole body only for the limit sniff: it may be a proxy's HTML page.
     let text = detail.as_deref().unwrap_or(body);
 
     if status == 429 || is_about_the_account(text) {
         return Ok(Verdict::Unverified);
     }
     if !matches!(status, 401 | 403) {
-        // It got past the gateway. Whatever else Voyage disliked about a
-        // two-letter embedding request is not the user's problem here.
+        // It got past the gateway.
         return Ok(Verdict::Good);
     }
 
@@ -119,7 +102,6 @@ fn probe(key: &str) -> Result<Verdict, String> {
             let body = response.into_string().unwrap_or_default();
             interpret(status, &body)
         }
-        // Transport failure: no network, DNS, TLS. Nothing was learned.
         Err(_) => Ok(Verdict::Unverified),
     }
 }
@@ -175,8 +157,6 @@ mod tests {
 
     #[test]
     fn a_429_is_never_a_rejection() {
-        // The whole point: this account is capped at 3 requests a minute
-        // because no card is on file, so the probe hits this routinely.
         assert!(is_unverified(429, ""));
         assert!(is_unverified(429, r#"{"detail":"Rate limit exceeded"}"#));
         assert!(is_unverified(429, "<html>429 Too Many Requests</html>"));
@@ -220,8 +200,7 @@ mod tests {
 
     #[test]
     fn a_refusal_never_quotes_the_server() {
-        // Messages are written for a student, so nothing from the wire —
-        // no body, no URL, no key — may be spliced into one.
+        // Nothing from the wire is spliced into a message.
         for body in [
             r#"{"detail":"Provided API key pa-SECRET is invalid."}"#,
             r#"{"detail":"see https://docs.voyageai.com/errors"}"#,
@@ -234,8 +213,7 @@ mod tests {
 
     #[test]
     fn anything_that_got_past_the_gateway_is_good() {
-        // A 400 means Voyage read the key, then disliked the request body —
-        // which is ours, not the user's.
+        // A 400 means Voyage read the key and disliked our request body.
         assert!(is_good(400, r#"{"detail":"model not found"}"#));
         assert!(is_good(200, ""));
         assert!(is_good(500, "upstream error"));

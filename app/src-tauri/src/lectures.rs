@@ -1,7 +1,5 @@
-//! Tauri commands over the Echo360 core in `echo360.rs`.
-//!
-//! Everything that talks to Echo360 lives there so the CLI can use it too;
-//! this file only adds the app's session cache, its paths and its events.
+//! Tauri commands over the Echo360 core in `echo360.rs` (shared with the CLI):
+//! the app's session cache, paths and events.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub use crate::echo360::Lecture as LectureData;
+use crate::clock::now_secs;
 use crate::echo360::{self, Session};
 
 // ── Session cache (in-memory, per course) ─────────────────────────────────────
@@ -17,13 +16,8 @@ pub struct Echo360Cache(pub Arc<Mutex<HashMap<i64, CachedSession>>>);
 
 // ── Cancellable downloads ─────────────────────────────────────────────────────
 
-/// One flag per in-flight download, keyed `"{media_id}:{source}"` — the same
-/// key the frontend's progress bars use, because a lecture's two streams
-/// download independently and cancelling one must not stop the other.
-///
-/// The download itself is a blocking read loop in `stream_to_file`, so there
-/// is nothing to `abort()`: cancelling is a flag the loop checks between
-/// chunks, and the ordinary error path then cleans up the partial file.
+/// One cancel flag per in-flight download, keyed `"{media_id}:{source}"` like
+/// the frontend's progress bars. `stream_to_file` checks it between chunks.
 #[derive(Default)]
 pub struct DownloadCancels(pub Mutex<HashMap<String, Arc<AtomicBool>>>);
 
@@ -36,57 +30,40 @@ pub struct CachedSession {
     saved_unix: u64,
 }
 
-/// Echo360's JWT outlives a sync comfortably; re-launching LTI for every
-/// request would be several round trips through Canvas each time.
+/// Cached so each request does not re-run the LTI launch through Canvas.
 const SESSION_TTL_SECS: u64 = 11 * 3600;
 
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
-
-fn get_or_auth(app: &AppHandle, cache: &Echo360Cache, course_id: i64) -> Result<Session, String> {
+fn get_or_auth(cache: &Echo360Cache, course_id: i64) -> Result<Session, String> {
     {
         let g = cache.0.lock().unwrap();
         if let Some(c) = g.get(&course_id) {
-            if now_unix() - c.saved_unix < SESSION_TTL_SECS {
+            if now_secs() - c.saved_unix < SESSION_TTL_SECS {
                 eprintln!("[oculus] echo360: reusing cached session for course {course_id}");
                 return Ok(c.session.clone_fields());
             }
         }
     }
-    let session = echo360::connect(&crate::auth::saved_cookie_header(app), course_id)?;
+    let session = echo360::connect(&crate::auth::saved_cookie_header(), course_id)?;
     cache.0.lock().unwrap().insert(
         course_id,
-        CachedSession { session: session.clone_fields(), saved_unix: now_unix() },
+        CachedSession { session: session.clone_fields(), saved_unix: now_secs() },
     );
     Ok(session)
-}
-
-/// Remove the untrimmed partials left by an interrupted download.
-pub fn cleanup_partial_downloads(app: &AppHandle) {
-    if let Ok(dir) = app.path().app_data_dir() {
-        echo360::cleanup_partial_downloads(&dir);
-    }
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn echo360_sync_lectures(
-    app: AppHandle,
     cache: tauri::State<'_, Echo360Cache>,
     canvas_course_id: i64,
 ) -> Result<Vec<LectureData>, String> {
-    let session = get_or_auth(&app, &cache, canvas_course_id)?;
+    let session = get_or_auth(&cache, canvas_course_id)?;
     echo360::syllabus(&session)
 }
 
-/// Fetch one stream of a lecture. `source` is 1 for the Presenter screen and 2
-/// for the room camera; both land in the same directory as `source<n>.mp4`,
-/// and each carries its own untrimmed partial so the two can run at once.
+/// Fetch one stream of a lecture (`source` 1 = Presenter screen, 2 = room
+/// camera); each has its own partial, so both can run at once.
 #[tauri::command]
 pub async fn echo360_download_video(
     app: AppHandle,
@@ -98,26 +75,19 @@ pub async fn echo360_download_video(
     source: Option<u8>,
 ) -> Result<String, String> {
     let source = source.unwrap_or(1);
-    let session = get_or_auth(&app, &cache, canvas_course_id)?;
+    let session = get_or_auth(&cache, canvas_course_id)?;
     let url = echo360::download_url(&session, &media_id, &lesson_id, source)?;
 
-    // Registered before the first byte and removed in every exit path below,
-    // so a cancel arriving for a download that already finished is a no-op
-    // rather than a flag left set to poison the next attempt.
+    // Removed on every exit path, so a late cancel cannot poison a retry.
     let key = cancel_key(&media_id, source);
     let flag = Arc::new(AtomicBool::new(false));
     cancels.0.lock().unwrap().insert(key.clone(), Arc::clone(&flag));
 
-    let dir = echo360::lecture_dir(
-        &app.path().app_data_dir().map_err(|e| e.to_string())?,
-        &media_id,
-    );
+    let dir = echo360::lecture_dir(&crate::paths::data_dir(), &media_id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let raw = echo360::partial_path(&dir, source);
     let final_ = echo360::source_path(&dir, source);
 
-    // The frontend keys its progress by media id *and* source — two streams of
-    // one lecture download independently and would otherwise share a bar.
     let emit = |percent: u8, phase: &str| {
         app.emit(
             "lecture-download-progress",
@@ -158,17 +128,13 @@ pub async fn echo360_download_video(
     if let Err(e) = &result {
         std::fs::remove_file(&raw).ok();
         std::fs::remove_file(&final_).ok();
-        // A cancellation is a finished intention, not a fault: the frontend
-        // clears its bar on this phase without showing a failure, and the
-        // partial megabytes are already gone above.
+        // Not a fault: the frontend clears its bar without showing a failure.
         emit(0, if e == echo360::CANCELLED { "cancelled" } else { "error" });
     }
     result
 }
 
-/// Ask an in-flight download to stop. Returns false when nothing was running
-/// under that key — the download finished between the click and this call, or
-/// it was never started.
+/// Ask an in-flight download to stop; false when nothing runs under that key.
 #[tauri::command]
 pub fn echo360_cancel_download(
     cancels: tauri::State<'_, DownloadCancels>,
@@ -186,25 +152,16 @@ pub fn echo360_cancel_download(
     }
 }
 
-/// Delete a lecture's downloaded video, freeing the disk it occupies.
-///
-/// Only the video goes. The transcript, chapters and recap notes are
-/// kilobytes and are the expensive half to regenerate — an agent turn each,
-/// against a video that re-downloads unattended. `source: None` removes both
-/// streams; the directory itself stays because the transcript lives in it.
-///
-/// Returns the bytes freed, so the caller can say what it recovered.
+/// Delete a lecture's downloaded video (both streams when `source` is
+/// `None`) and return the bytes freed. Transcript, chapters and notes stay —
+/// they are the expensive half to regenerate.
 #[tauri::command]
 pub fn echo360_delete_video(
-    app: AppHandle,
     cancels: tauri::State<'_, DownloadCancels>,
     media_id: String,
     source: Option<u8>,
 ) -> Result<u64, String> {
-    let dir = echo360::lecture_dir(
-        &app.path().app_data_dir().map_err(|e| e.to_string())?,
-        &media_id,
-    );
+    let dir = echo360::lecture_dir(&crate::paths::data_dir(), &media_id);
 
     let sources: Vec<u8> = match source {
         Some(s) => vec![s],
@@ -213,9 +170,7 @@ pub fn echo360_delete_video(
 
     let mut freed = 0u64;
     for s in sources {
-        // A download still running would write its file back moments after we
-        // deleted it, so stop it first — deleting mid-download is exactly what
-        // someone does when they realise they picked the wrong lecture.
+        // A running download would write its file back, so stop it first.
         if let Some(flag) = cancels.0.lock().unwrap().get(&cancel_key(&media_id, s)) {
             flag.store(true, Ordering::Relaxed);
         }
@@ -234,19 +189,15 @@ pub fn echo360_delete_video(
 
 #[tauri::command]
 pub async fn echo360_download_transcript(
-    app: AppHandle,
     cache: tauri::State<'_, Echo360Cache>,
     lesson_id: String,
     media_id: String,
     canvas_course_id: i64,
 ) -> Result<String, String> {
-    let session = get_or_auth(&app, &cache, canvas_course_id)?;
+    let session = get_or_auth(&cache, canvas_course_id)?;
     let vtt = echo360::transcript(&session, &lesson_id, &media_id)?;
 
-    let dir = echo360::lecture_dir(
-        &app.path().app_data_dir().map_err(|e| e.to_string())?,
-        &media_id,
-    );
+    let dir = echo360::lecture_dir(&crate::paths::data_dir(), &media_id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("transcript.vtt");
     std::fs::write(&path, vtt.as_bytes()).map_err(|e| e.to_string())?;
@@ -260,12 +211,8 @@ pub fn echo360_read_transcript(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn echo360_clear_transcripts(app: AppHandle) -> Result<u32, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("lectures");
+pub fn echo360_clear_transcripts() -> Result<u32, String> {
+    let dir = crate::paths::data_dir().join("lectures");
     if !dir.exists() {
         return Ok(0);
     }

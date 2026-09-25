@@ -1,12 +1,9 @@
-//! The Canvas scrape engine.
+//! The Canvas scrape engine. Modules drive the walk, and pages and files are
+//! fetched through them, so nothing is downloaded twice. Lives in Rust, not a
+//! WebView — see CLAUDE.md ("No work in hidden WebViews").
 //!
-//! Ported from `scraper.js`, which ran in a hidden WebView and tunnelled every
-//! request and every write back through the local IPC server. The port keeps
-//! the same strategy — modules are the driver, and pages and files are fetched
-//! through them, so nothing is downloaded twice — and the same on-disk layout.
-//!
-//! Progress leaves through [`Reporter`] rather than an HTTP POST, so the app
-//! forwards it to the frontend as Tauri events and the CLI prints it.
+//! Progress leaves through [`Reporter`]: the app forwards it as Tauri events,
+//! the CLI prints it.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -17,14 +14,11 @@ use crate::md::{self, ImageMap};
 use crate::parse;
 use crate::paths;
 
-/// Types stored as-is. Everything downstream — the parsers, the page-image
-/// embedder, the viewer — is PDF-shaped; Office formats are stored as
-/// themselves plus a derived sibling PDF (see [`OFFICE_TYPES`]).
+/// Types stored as-is; everything downstream is PDF-shaped.
 const DOWNLOADABLE_TYPES: &[&str] = &["application/pdf"];
 
-/// Office formats downloaded and kept as-is, with a LibreOffice-converted PDF
-/// written beside them, mapped to the extension the converter needs on its
-/// input file.
+/// Office formats kept as-is plus a LibreOffice-converted sibling PDF, mapped
+/// to the extension the converter needs on its input file.
 const OFFICE_TYPES: &[(&str, &str)] = &[
     ("application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
     ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
@@ -37,8 +31,7 @@ const OFFICE_TYPES: &[(&str, &str)] = &[
 /// A wedged soffice must not hang the whole sync run.
 const OFFICE_CONVERT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
-/// What Canvas serves for the file kinds we know how to name; anything larger
-/// is skipped rather than filling the disk with lecture recordings.
+/// Larger files are skipped rather than filling the disk with recordings.
 const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 
 const IMAGE_EXT: &[(&str, &str)] = &[
@@ -70,18 +63,15 @@ pub struct FileEvent {
     pub size_bytes: u64,
     pub category: String,
     pub canvas_id: Option<i64>,
-    /// The Canvas URL this artifact came from, where links can name it. Set
-    /// for pages, whose *URL slug* survives renames while the saved filename
-    /// tracks the title — matching a body link to the local copy needs this.
+    /// Set for pages: the URL slug survives renames while the filename tracks
+    /// the title, so matching a body link to the local copy needs this.
     pub source_url: Option<String>,
-    /// `"new"`, `"updated"`, or `"unchanged"` — what this run's write actually
-    /// did to the file on disk. Feeds the per-run sync history.
+    /// `"new"`, `"updated"`, or `"unchanged"` — feeds the per-run sync history.
     pub action: &'static str,
 }
 
-/// Announced before a course file's bytes start moving, under the same
-/// `relative_path` the eventual [`FileEvent`] will carry — this is what lets
-/// the UI show "downloading" for a file it has never seen before.
+/// Announced before a download, under the same `relative_path` the eventual
+/// [`FileEvent`] carries, so the UI can show "downloading" for a new file.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FileStart {
     pub subject_id: i64,
@@ -91,8 +81,7 @@ pub struct FileStart {
     pub size_bytes: u64,
 }
 
-/// Where a run's side effects go. Default methods are no-ops so an embedder
-/// only implements what it cares about.
+/// Where a run's side effects go. Default methods are no-ops.
 pub trait Reporter: Send + Sync {
     fn progress(&self, _p: &Progress) {}
     fn file_start(&self, _f: &FileStart) {}
@@ -104,7 +93,7 @@ pub trait Reporter: Send + Sync {
     }
 }
 
-/// Discards everything. Useful in tests.
+/// Discards everything.
 pub struct Silent;
 impl Reporter for Silent {}
 
@@ -116,22 +105,17 @@ pub struct Subject {
     pub code: String,
 }
 
-/// Where the assignments phase put each document. Module items name
-/// assignments and quizzes by `content_id`, so the maps are keyed by Canvas
-/// id → course-relative path (`assignments/….md`).
+/// Canvas id → course-relative path of each assignment/quiz document, keyed
+/// the way module items refer to them (`content_id`).
 #[derive(Debug, Default)]
 pub struct TaskDocs {
     assignments: HashMap<i64, String>,
     quizzes: HashMap<i64, String>,
 }
 
-/// The per-course link crawl. Every phase that converts a Canvas HTML body —
-/// home/syllabus, announcements, assignment and quiz descriptions, pages —
-/// reports the course pages and files that body references here; after the
-/// content phases, `crawl_links` drains the stacks depth-first. Fetched pages
-/// surface further links (pages nest arbitrarily), the `seen` sets break
-/// cycles. This is the single mechanism that guarantees anything reachable
-/// from any scraped body lands on disk, no matter which phase found it.
+/// The per-course link crawl: every converted body queues the pages and files
+/// it references, and `crawl_links` drains them depth-first after the content
+/// phases, so anything reachable from any scraped body lands on disk.
 #[derive(Debug, Default)]
 struct LinkCrawl {
     seen_pages: HashSet<String>,
@@ -142,7 +126,6 @@ struct LinkCrawl {
 }
 
 impl LinkCrawl {
-    /// Queue everything a just-converted body linked to.
     fn absorb(&mut self, (pages, files): (Vec<String>, Vec<String>)) {
         self.pages.extend(pages);
         self.files.extend(files);
@@ -161,8 +144,7 @@ pub struct Course {
 }
 
 impl Course {
-    /// The shape the frontend's `upsertSubjects` reads — Canvas's own field
-    /// names, plus the current-term marker we computed.
+    /// The shape the frontend's `upsertSubjects` reads.
     pub fn to_canvas_json(&self) -> serde_json::Value {
         serde_json::json!({
             "id": self.id,
@@ -175,9 +157,8 @@ impl Course {
     }
 }
 
-/// Which content categories a sync fetches. Everything is on by default —
-/// the app's sync-settings gear persists the user's choice and hands it to
-/// `scrape_content` per run; the CLI always syncs everything.
+/// Which content categories a sync fetches; all on by default (the CLI
+/// always syncs everything).
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct SyncOptions {
@@ -195,17 +176,14 @@ impl Default for SyncOptions {
 
 pub struct Engine {
     pub canvas: Canvas,
-    /// Ed Discussion, when the user has saved a token; sessionless otherwise,
-    /// in which case the ed phase is a no-op.
     pub ed: crate::ed::Ed,
     data_dir: PathBuf,
     reporter: Box<dyn Reporter>,
     parse_pdfs: bool,
     options: SyncOptions,
-    /// Canvas file id → (modified_at, size) at last download, persisted as
-    /// `file-manifest.json` in the data dir. When the metadata call reports
-    /// the same pair and the artifact is on disk, the download is skipped —
-    /// the byte-compare in `write` stays the arbiter whenever we do download.
+    /// Canvas file id → (modified_at, size) at last download
+    /// (`file-manifest.json`). A matching pair with the artifact on disk skips
+    /// the download.
     manifest: std::cell::RefCell<HashMap<String, (String, u64)>>,
 }
 
@@ -245,9 +223,8 @@ impl Engine {
 
     // ── Course list ──────────────────────────────────────────────────────────
 
-    /// Academic courses only. Canvas hands back sandboxes, orientation shells
-    /// and staff training spaces alongside real subjects; the term filter is
-    /// what separates them.
+    /// Academic courses only — the term filter drops sandboxes and training
+    /// shells.
     pub fn list_courses(&self) -> Result<Vec<Course>, String> {
         const NON_SUBJECT_PREFIXES: &[&str] = &["MPMP"];
 
@@ -267,11 +244,8 @@ impl Engine {
             })
             .collect();
 
-        // The newest term that still has live courses is "current"; everything
-        // else is archive. Ranked, never compared as text: "2026 Summer Term"
-        // beats "2026 Semester 2" as a string while starting six months
-        // earlier, so `.max()` on the names handed the whole year to a single
-        // summer subject. See `crate::terms`.
+        // The newest term with live courses is "current". Ranked by
+        // `terms::term_key`, never compared as text.
         let latest = academic
             .iter()
             .filter(|c| c["workflow_state"] == "available")
@@ -299,15 +273,12 @@ impl Engine {
 
     // ── Run ──────────────────────────────────────────────────────────────────
 
-    /// Scrape each subject in turn. A subject that fails is logged and skipped —
-    /// one broken course must not cost the user the rest of the run. Returns how
-    /// many subjects were attempted.
+    /// A subject that fails is logged and skipped. Returns how many subjects
+    /// were attempted.
     pub fn scrape(&self, subjects: &[Subject]) -> usize {
         let total = subjects.len();
 
-        // Write the central `agents/AGENTS.md` before anything points at it,
-        // so the per-course links below cannot come out dangling on a library
-        // where `oculus docs` has never run.
+        // Before the per-course links below, so they never dangle.
         if let Err(e) = agents::ensure_library_docs(&self.data_dir) {
             self.reporter.log("warning", "", &format!("agent docs: {e}"));
         }
@@ -319,9 +290,7 @@ impl Engine {
             if let Err(e) = self.scrape_course(c, i, total) {
                 self.reporter.log("error", &c.code, &e);
             }
-            // A subject enrolled mid-semester gets its agent scaffold from the
-            // run that first scrapes it, rather than waiting for someone to
-            // remember `oculus docs`. Idempotent, so every later run is free.
+            // Idempotent; gives a newly scraped subject its agent scaffold.
             if let Err(e) = agents::link_course(&self.data_dir, &c.code) {
                 self.reporter.log("warning", &c.code, &format!("agent docs: {e}"));
             }
@@ -348,9 +317,6 @@ impl Engine {
             })
         };
 
-        // Collects the pages/files every converted body references; drained
-        // depth-first after the content phases so linked content is fetched
-        // regardless of which phases were on.
         let mut crawl = LinkCrawl::default();
 
         phase("home");
@@ -367,9 +333,8 @@ impl Engine {
             self.scrape_announcements(c, &mut crawl)?;
         }
 
-        // A failed assignments fetch must not cost the modules walk — the run
-        // continues with Canvas links in the TOCs instead of local documents.
-        // Switched off, the walk gets the same empty maps.
+        // A failed assignments fetch must not cost the modules walk; the TOCs
+        // fall back to Canvas links.
         let tasks = if self.options.assignments {
             phase("assignments");
             if self.reporter.cancelled() {
@@ -439,8 +404,7 @@ impl Engine {
             format!("# {title}\n\n{}\n{extra}\n", meta.join("  \n"))
         };
 
-        // Saved separately from the front page — a course can have both, and
-        // the syllabus is usually the more load-bearing of the two.
+        // Separate from the front page — a course can have both.
         if let Some(syllabus) = course["syllabus_body"].as_str().filter(|s| !s.is_empty()) {
             crawl.absorb(md::canvas_links(syllabus, c.id));
             let body = self.convert(syllabus, c, "syllabus.md");
@@ -467,7 +431,6 @@ impl Engine {
             (body, source)
         };
 
-        // No front page and no description: write nothing rather than a stub.
         if body.is_empty() {
             return Ok(());
         }
@@ -537,10 +500,8 @@ impl Engine {
 
     // ── Phase: assignments + quizzes ─────────────────────────────────────────
 
-    /// Every assignment and quiz, written as `assignments/*.md` and
-    /// `quizzes/*.md` with metadata (due date, points) above the converted
-    /// description. Returns where each landed, keyed the way module items refer
-    /// to them, so the modules phase links locally instead of out to Canvas.
+    /// Writes `assignments/*.md` and `quizzes/*.md`; returns where each landed
+    /// so the modules phase can link locally.
     fn scrape_assignments(&self, c: &Subject, crawl: &mut LinkCrawl) -> Result<TaskDocs, String> {
         let mut docs = TaskDocs::default();
         let mut used_paths: HashSet<String> = HashSet::new();
@@ -555,9 +516,8 @@ impl Engine {
         let total = quizzes.len() + assignments.len();
         let mut done = 0usize;
 
-        // The user's submission state rides on the assignments API; quizzes
-        // get theirs through their assignment shell, resolved up front since
-        // quiz documents are written first.
+        // Quizzes get submission state through their assignment shell,
+        // resolved up front since quiz documents are written first.
         let submitted_quizzes: HashSet<i64> = assignments
             .iter()
             .filter(|a| submission_status(a).is_some())
@@ -574,8 +534,7 @@ impl Engine {
             })
         };
 
-        // Classic quizzes first: their assignment shells are skipped below, so
-        // the quiz document is the one copy either kind of reference reaches.
+        // Classic quizzes first; their assignment shells are skipped below.
         for q in &quizzes {
             if self.reporter.cancelled() {
                 return Ok(docs);
@@ -662,8 +621,6 @@ impl Engine {
         Ok(docs)
     }
 
-    /// Render one assignment/quiz to Markdown and write it. The description's
-    /// Canvas links go on the crawl so the link walk fetches them.
     fn write_task_doc(
         &self,
         c: &Subject,
@@ -697,12 +654,8 @@ impl Engine {
 
     // ── Phase: Ed Discussion ─────────────────────────────────────────────────
 
-    /// Mirror the subject's Ed Discussion board into `ed/*.md`, one thread per
-    /// file including its replies. The Ed session is minted from the Canvas
-    /// session via the course's LTI launch whenever the saved token is missing
-    /// or dead — and also when the course has an Ed tool the user never opened,
-    /// since Ed only creates the enrolment on first launch. A course with no
-    /// Ed tool is skipped.
+    /// Mirror the subject's Ed board into `ed/*.md`, one thread per file. A
+    /// course with no Ed tool is skipped (session minting: `Ed::resolve_course`).
     fn scrape_ed(&self, c: &Subject) -> Result<(), String> {
         let course_id = match self.ed.resolve_course(&self.canvas, c.id, &c.code) {
             Ok(Some(id)) => id,
@@ -727,8 +680,7 @@ impl Engine {
                 label: title.to_string(),
             });
 
-            // `number` is the per-course thread number Ed shows in the UI —
-            // stable across syncs, so re-runs overwrite instead of duplicating.
+            // Ed's per-course thread number is stable across syncs.
             let number = t["number"].as_i64().unwrap_or(0);
             let path = format!("ed/{number:04}-{}.md", slug(title));
             match self.ed.thread_markdown(t) {
@@ -748,8 +700,7 @@ impl Engine {
             .canvas
             .get_all(&format!("/api/v1/courses/{}/modules?include[]=items&per_page=100", c.id))?;
 
-        // Every real module item counts once, even when it triggers nested
-        // fetches — otherwise the total moves while the bar is running.
+        // Nested fetches are not counted, so the total holds still.
         let total_items: usize = modules
             .iter()
             .map(|m| items_of(m).iter().filter(|it| it["type"] != "SubHeader").count())
@@ -810,8 +761,8 @@ impl Engine {
                                 Err(e) => self.reporter.log("warning", &c.code, &format!("file {id}: {e}")),
                             }
                         }
+                        // TOCs live in modules/, so links step up a level.
                         toc.push(match saved {
-                            // TOCs live in modules/, so links step up a level.
                             Some(path) => format!(
                                 "{indent}- [{}](../{})",
                                 escape_md(title),
@@ -825,7 +776,6 @@ impl Engine {
                         let map = if ty == "Quiz" { &tasks.quizzes } else { &tasks.assignments };
                         let local = item["content_id"].as_i64().and_then(|id| map.get(&id));
                         toc.push(match local {
-                            // TOCs live in modules/, so links step up a level.
                             Some(path) => format!(
                                 "{indent}- [{}](../{path}) _({kind})_",
                                 escape_md(title)
@@ -860,12 +810,8 @@ impl Engine {
         Ok(())
     }
 
-    /// Drain the link crawl: content every scraped body referenced but no
-    /// module listed. A DFS over the link graph — each fetched page can
-    /// surface further pages and files, which go back on the stacks; the
-    /// `seen_*` sets already hold everything the modules walk covered, so
-    /// nothing is fetched twice and cycles terminate. No progress emitted —
-    /// these are nested extras, not module items.
+    /// Drain the link crawl depth-first; the `seen_*` sets stop repeats and
+    /// cycles. No progress — these are not module items.
     fn crawl_links(&self, c: &Subject, crawl: &mut LinkCrawl) {
         while !crawl.pages.is_empty() || !crawl.files.is_empty() {
             if self.reporter.cancelled() {
@@ -921,11 +867,8 @@ impl Engine {
             if updated.is_empty() { String::new() } else { format!("_Updated: {updated}_\n\n") },
             self.convert(body, c, &out)
         );
-        // Deliberately the *requested* slug, not the canonical `full["url"]`:
-        // Canvas keeps resolving a renamed page's old URL, and old body links
-        // still use it — this is what lets the app match such a link to the
-        // local copy. The canonical slug usually equals `slug(title)`, which
-        // the filename already matches.
+        // The *requested* slug, not canonical `full["url"]`: old body links to
+        // a renamed page still use it, and Canvas still resolves it.
         let source = format!(
             "{}/courses/{}/pages/{page_url}",
             crate::canvas::CANVAS_BASE,
@@ -935,8 +878,7 @@ impl Engine {
         Ok(Some(links))
     }
 
-    /// Download one Canvas file if its type is allowlisted. Returns the saved
-    /// course-relative path.
+    /// Download one Canvas file if its type is allowlisted.
     fn fetch_file(
         &self,
         c: &Subject,
@@ -957,11 +899,8 @@ impl Engine {
             .unwrap_or("file.bin")
             .replace(['/', '\\'], "_");
 
-        // Canvas serves some uploads as a generic binary — the type depends on
-        // what the staff member's browser claimed at upload time, so the same
-        // deck can arrive typed on one course and untyped on another. Falling
-        // back to the extension is what keeps those from being silently
-        // skipped; the allowlist is still an allowlist, just keyed on the name.
+        // Canvas serves some uploads as a generic binary (whatever the
+        // uploader's browser claimed); those fall back to the extension.
         let ct = content_type_of(&info);
         let office = office_ext(&ct).or_else(|| is_generic_binary(&ct).then(|| office_ext_of(&name)).flatten());
         let downloadable = DOWNLOADABLE_TYPES.contains(&ct.as_str())
@@ -973,10 +912,8 @@ impl Engine {
             self.reporter.log("warning", &c.code, &format!("file {file_id}: over size cap, skipped"));
             return Ok(None);
         }
-        // Staff routinely publish solutions with a release date. Canvas still
-        // lists the file and answers the metadata call — it is only the
-        // download that is refused — so this has to be checked explicitly, or
-        // the run reports a scary auth failure for something entirely normal.
+        // Canvas lists a release-dated file and answers its metadata but
+        // refuses the download; check explicitly, or it reads as an auth failure.
         if info["locked_for_user"].as_bool().unwrap_or(false) {
             let name = info["display_name"].as_str().or(display).unwrap_or("file");
             let until = info["lock_info"]["unlock_at"]
@@ -988,9 +925,7 @@ impl Engine {
             return Ok(None);
         }
 
-        // Same version Canvas reported last time, and the artifacts are still
-        // on disk (the derived PDF too, for Office files) → skip the download.
-        // The metadata call above is the whole cost of an unchanged file.
+        // Unchanged since last time and on disk (derived PDF too) → skip.
         let modified = info["modified_at"]
             .as_str()
             .or_else(|| info["updated_at"].as_str())
@@ -1036,14 +971,11 @@ impl Engine {
         let Some(url) = self.download_url(&info, file_id)? else { return Ok(None) };
         let bytes = self.fetch_bytes(&url)?;
 
-        // The original is always the library file. Office documents get a
-        // *derived* PDF written beside them ("deck.pptx" → "deck.pptx.pdf") —
-        // never announced, never a database row — which is what the parser,
-        // the embedder and the in-app viewer read.
+        // The original is the library file. Office documents get a derived
+        // "deck.pptx.pdf" beside them — never announced, never a database row.
         let rel = self.write(c, &format!("files/{name}"), &bytes, Some(file_id))?;
 
-        // Only a fully-landed artifact enters the manifest — a failed Office
-        // conversion stays out so the next run retries instead of skipping.
+        // A failed Office conversion stays out of the manifest so it retries.
         let mut complete = true;
         if let Some(ext) = office {
             match office_to_pdf(&bytes, ext) {
@@ -1071,20 +1003,16 @@ impl Engine {
         Ok(Some(rel))
     }
 
-    /// Re-download a single file on demand — bypasses the unchanged-skip, the
-    /// caller explicitly wants fresh bytes. Returns its path relative to the
-    /// data directory, or `None` if Canvas will not serve it.
+    /// Re-download one file, bypassing the unchanged-skip.
     pub fn refetch_file(&self, c: &Subject, canvas_id: i64) -> Result<Option<String>, String> {
         let rel = self.fetch_file(c, canvas_id, None, true)?;
         self.save_manifest();
         Ok(rel)
     }
 
-    /// Canvas file URLs redirect to a CDN that rejects our cookie, so the
-    /// signed `public_url` is the one that actually downloads. `info.url` is
-    /// the fallback for files that have none — but it comes back as `""` for
-    /// anything we may not read, and an empty URL resolves to the Canvas home
-    /// page, which would be saved as if it were the file.
+    /// Canvas file URLs redirect to a CDN that rejects our cookie, so prefer
+    /// the signed `public_url`. An empty `info.url` must be refused: it would
+    /// resolve to the Canvas home page and be saved as the file.
     fn download_url(&self, info: &serde_json::Value, file_id: i64) -> Result<Option<String>, String> {
         if let Ok(r) = self.canvas.get(&format!("/api/v1/files/{file_id}/public_url")) {
             if r.ok() {
@@ -1113,13 +1041,9 @@ impl Engine {
 
     // ── Inline images ────────────────────────────────────────────────────────
 
-    /// Convert a body to Markdown, downloading its inline images first and
-    /// pointing the Markdown at the local copies.
-    ///
-    /// Images are shared per course, so they all live in one `images/` folder
-    /// at the course root. `out_path` is where the Markdown itself will land:
-    /// the app resolves image `src` against the *document's* directory, so a
-    /// page one level down has to reach back up or the image 404s.
+    /// Convert a body to Markdown with its inline images downloaded to the
+    /// course's `images/`. Image `src` resolves against the document at
+    /// `out_path`, so nested documents climb back to the course root.
     fn convert(&self, html: &str, c: &Subject, out_path: &str) -> String {
         let up = up_to_course_root(out_path);
         let mut images = ImageMap::new();
@@ -1138,8 +1062,7 @@ impl Engine {
         md::to_markdown(html, &images)
     }
 
-    /// Returns the image's course-relative path (`images/…`), not yet adjusted
-    /// for the referring document's depth.
+    /// Returns `images/…`, not yet adjusted for the document's depth.
     fn fetch_image(&self, c: &Subject, endpoint: &str) -> Result<Option<String>, String> {
         let r = self.canvas.get(endpoint)?;
         if !r.ok() {
@@ -1153,8 +1076,7 @@ impl Engine {
             .find(|(k, _)| *k == ct)
             .map(|(_, v)| *v)
             .unwrap_or("png");
-        // Fall back to the id in the endpoint: without it, several images in
-        // one course would all be written as `images/0.png`.
+        // Without an id every image would be `images/0.png`.
         let fid = info["id"].as_i64().unwrap_or_else(|| {
             endpoint
                 .rsplit('/')
@@ -1196,14 +1118,11 @@ impl Engine {
 
     // ── Output ───────────────────────────────────────────────────────────────
 
-    /// Write one artifact and announce it. Returns the path relative to the
-    /// data directory (`courses/CODE/...`), which is what the database stores.
+    /// Write one artifact and announce it. Returns `courses/CODE/...`.
     fn write(&self, c: &Subject, rel_path: &str, data: &[u8], canvas_id: Option<i64>) -> Result<String, String> {
         self.write_from(c, rel_path, data, canvas_id, None)
     }
 
-    /// `write`, plus the Canvas URL the artifact came from (see
-    /// [`FileEvent::source_url`]).
     fn write_from(
         &self,
         c: &Subject,
@@ -1213,10 +1132,8 @@ impl Engine {
         source_url: Option<String>,
     ) -> Result<String, String> {
         let (rel, size, action) = paths::write_course_bytes(&self.data_dir, &c.code, rel_path, data)?;
-        // Changed bytes invalidate the old parse and embeddings. Purge the
-        // artifacts before the parse trigger below, or the skip checks would
-        // read the stale records and keep serving the old markdown and
-        // vectors.
+        // Purge the stale parse before the trigger below, or its skip check
+        // would keep serving the old markdown and vectors.
         if action == paths::WriteAction::Updated {
             paths::purge_parse_artifacts(&self.data_dir, &rel);
         }
@@ -1237,31 +1154,13 @@ impl Engine {
         Ok(rel)
     }
 
-    /// Start the parse without waiting for it. The app wants each deck queued
-    /// the moment it lands so the UI can show parse progress alongside the
-    /// download, and a scrape must finish reporting whatever the parser is
-    /// doing.
-    ///
-    /// **One detached thread per PDF, and the bounded worker pool that used to
-    /// be here is gone** — not a regression, an inversion. The old pool existed
-    /// because every parse was an HTTP request into the sidecar, and 105 decks
-    /// meant 105 simultaneous POSTs, which FastAPI happily ran 40-wide at ~2 GB
-    /// each. That was the OOM. Parsing is in-process now and concurrency is the
-    /// batcher's: it coalesces up to twenty files into one submit and keeps at
-    /// most eight batches in flight (`parse/mineru/batch.rs`). A second gate
-    /// here would only stop files reaching the window they are supposed to
-    /// share, so twenty PDFs would go as twenty batches instead of one.
-    ///
-    /// Something still has to be off the scrape thread, because `parse_pdf`
-    /// blocks for the whole cloud round trip now — minutes, not the seconds the
-    /// sidecar's fast pass used to answer in. What each thread does with that
-    /// time is park on the batcher's condvar: no socket, no request in flight,
-    /// a stack and nothing else.
+    /// Start the parse without waiting for it. One detached thread per PDF,
+    /// deliberately unpooled: concurrency belongs to the batcher
+    /// (`parse/mineru/batch.rs`), and a gate here would split its batches.
     fn trigger_parse(&self, rel: &str, subject_id: i64) {
         let data_dir = self.data_dir.clone();
         let rel = rel.to_string();
-        // A thread we cannot start is not worth failing a scrape over — the
-        // file is on disk and `oculus index` re-runs the parse, idempotently.
+        // Not worth failing a scrape over — `oculus index` re-runs the parse.
         let _ = std::thread::Builder::new().name("oculus-parse".into()).spawn(move || {
             match parse_pdf(&data_dir, &rel, subject_id) {
                 Ok(summary) => eprintln!("[oculus] parse-pdf {rel}: {summary}"),
@@ -1271,23 +1170,15 @@ impl Engine {
     }
 }
 
-/// What a finished `parse_pdf` actually did.
-///
-/// The old return was the sidecar's `"mode"` string, read leniently enough that
-/// an unparseable response and a successful quality parse both came back as
-/// `"ok"`. There is nothing to be lenient about any more: either the artifacts
-/// are on disk and this says how much of them there is, or the call returned a
-/// typed `ParseError`.
+/// What a finished `parse_pdf` did.
 #[derive(Debug, Clone)]
 pub struct ParseSummary {
-    /// True when the PDF already had a current `.pages.json` and nothing was
-    /// sent anywhere. `pages` is then whatever the existing record holds.
+    /// The PDF already had a current `.pages.json`; nothing was sent.
     pub skipped: bool,
     pub pages: u32,
     pub images: u32,
-    /// Page rows written to `pages` — how much of this parse `oculus grep` can
-    /// see. Zero with `skipped` false means the database could not be reached
-    /// or the file has no row yet; the artifacts are still on disk.
+    /// Page rows written to `pages`. Zero with `skipped` false means no
+    /// database or no file row yet; the artifacts are still on disk.
     pub pages_recorded: usize,
 }
 
@@ -1304,26 +1195,12 @@ impl std::fmt::Display for ParseSummary {
     }
 }
 
-/// Parse a PDF, blocking until the artifacts are on disk.
+/// Parse a PDF, blocking (for minutes) until the artifacts are on disk.
+/// Deliberately no timeout here — the client's `POLL_DEADLINE` is the only
+/// one (see CLAUDE.md). Idempotent.
 ///
-/// **This is minutes, not seconds.** The sidecar answered as soon as its fast
-/// pass had produced *some* markdown and finished the quality pass on its own
-/// thread; there is no fast tier now, so the call spans the entire round trip —
-/// batching window, upload, MinerU's queue, download, render. Every caller has
-/// to be somewhere that can wait that long.
-///
-/// There is no timeout here on purpose. `sync.rs` used to impose 20 minutes
-/// because `ureq` has no default and an unbounded wait would hang a headless
-/// run forever; the in-process client has its own `POLL_DEADLINE` of 60
-/// minutes, measured from the batch's first poll and returned as a typed
-/// `Offline`. Two limits that disagree means the shorter one silently
-/// abandons work the longer one is still doing, so **the client's deadline is
-/// the only one** — it is the one that knows what it is waiting for.
-///
-/// Idempotent: a PDF with a current record returns immediately.
-///
-/// `rel_path` is the *library file* (what the database and every event key on);
-/// for Office documents the bytes actually parsed are its derived sibling PDF.
+/// `rel_path` is the library file; for Office documents the bytes parsed are
+/// its derived sibling PDF.
 pub fn parse_pdf(
     data_dir: &Path,
     rel_path: &str,
@@ -1332,11 +1209,8 @@ pub fn parse_pdf(
     parse_pdf_reporting(data_dir, rel_path, subject_id, &|_| {})
 }
 
-/// `parse_pdf`, plus a callback for a caller that renders its own progress.
-///
-/// The app does not need this — it reads the `parse-status` events, which are
-/// emitted either way — but the CLI has no event listener and a multi-minute
-/// parse with a silent terminal looks like a hang.
+/// `parse_pdf` plus a progress callback, for the CLI (the app reads the
+/// `parse-status` events).
 pub fn parse_pdf_reporting(
     data_dir: &Path,
     rel_path: &str,
@@ -1358,9 +1232,8 @@ fn run_parse(
     subject_id: i64,
     on_progress: &dyn Fn(parse::Progress),
 ) -> Result<ParseSummary, parse::ParseError> {
-    // Both of these are local facts about this machine, not something a backend
-    // said, so they take the local-failure variant: retryable, not latching —
-    // a missing file must never stop the rest of the library parsing.
+    // Local failures: `Io` is retryable, not latching, so a missing file never
+    // stops the rest of the library parsing.
     let pdf_rel = paths::doc_pdf_rel(rel_path).ok_or_else(|| {
         parse::ParseError::Io(format!("{rel_path} has no PDF representation to parse"))
     })?;
@@ -1370,12 +1243,7 @@ fn run_parse(
     }
 
     if parse::parse_mode(&pdf).is_some() {
-        // Skipping the parse is not skipping the page records. The library
-        // holds files parsed long before this write existed — by the Python
-        // parser, and only ever reaching `pages` if the embedder happened to
-        // run over them afterwards — so an artifact on disk is no promise the
-        // database can see it. Re-reading the record costs a file read and,
-        // when there is genuinely nothing to do, one `COUNT(*)`.
+        // An artifact on disk is no promise its page rows exist; backfill.
         let record = parse::read_record(&pdf);
         let pages = record.as_ref().map(|r| r.page_count).unwrap_or(0);
         let pages_recorded = match record {
@@ -1386,8 +1254,7 @@ fn run_parse(
                 }),
             None => 0,
         };
-        // Still terminal-status the file: a sweep that kicked an
-        // already-parsed row is waiting to hear that it is done.
+        // A sweep that kicked this row is waiting for a terminal status.
         parse::events::parsed(rel_path, subject_id);
         return Ok(ParseSummary { skipped: true, pages, images: 0, pages_recorded });
     }
@@ -1402,14 +1269,11 @@ fn run_parse(
         parse::events::running(rel_path, subject_id, progress);
         on_progress(progress);
     })?;
-    // Artifacts land before anything else hears about it: `.pages.json` is the
-    // only evidence a parse finished, and it is written last and atomically.
+    // `.pages.json` is the only evidence a parse finished; written last, atomically.
     output.write(&pdf, staging)?;
 
-    // Page records are best-effort *after* the artifacts. A database that is
-    // locked, missing or has no row for this file yet must not turn a parse
-    // that succeeded into a failure — the markdown is on disk, and
-    // `oculus index` folds it in on the next pass.
+    // Best-effort: a database problem must not fail a successful parse;
+    // `oculus index` folds it in later.
     let pages_recorded = match record_pages(data_dir, rel_path, subject_id, &output) {
         Ok(n) => n,
         Err(e) => {
@@ -1427,12 +1291,8 @@ fn run_parse(
     })
 }
 
-/// Fold an *already-parsed* file's record in, but only if nothing has.
-///
-/// Deliberately not the same call as `record_pages`: a parse that just ran has
-/// the freshest text and always writes, while this one is repairing history and
-/// must not touch a file whose rows are already there. The guard is what makes
-/// `oculus index` safe to run over the whole library.
+/// Fold an already-parsed file's record in only if it has no rows yet —
+/// unlike `record_pages`, which always writes fresh text.
 fn backfill_pages(
     data_dir: &Path,
     rel_path: &str,
@@ -1457,11 +1317,6 @@ fn backfill_pages(
 }
 
 /// Fold a finished parse into the `pages` table.
-///
-/// This write used to live on the embed path (`retrieval::ingest`), so
-/// `pages.markdown` — what `oculus grep` searches — only ever appeared as a
-/// side effect of building the vector index. It belongs to the parse, and now
-/// that the parse is in this process it happens here.
 fn record_pages(
     data_dir: &Path,
     rel_path: &str,
@@ -1487,16 +1342,12 @@ fn office_ext(ct: &str) -> Option<&'static str> {
     OFFICE_TYPES.iter().find(|(k, _)| *k == ct).map(|(_, v)| *v)
 }
 
-/// A content type that says nothing about the file — the only case where the
-/// filename is allowed to decide what this is.
+/// The only case where the filename decides the type.
 fn is_generic_binary(ct: &str) -> bool {
     matches!(ct, "" | "application/octet-stream" | "binary/octet-stream")
 }
 
-/// The converter extension an untyped file's *name* claims, if it claims one
-/// this engine knows. `.pptx` is tested before `.ppt` by construction: the
-/// table's entries are whole extensions, and "deck.pptx" does not end in
-/// ".ppt".
+/// The converter extension an untyped file's name claims, if known.
 pub(crate) fn office_ext_of(name: &str) -> Option<&'static str> {
     let lower = name.to_ascii_lowercase();
     OFFICE_TYPES
@@ -1505,9 +1356,8 @@ pub(crate) fn office_ext_of(name: &str) -> Option<&'static str> {
         .find(|e| lower.ends_with(&format!(".{e}")))
 }
 
-/// pptx/docx/xlsx/ppt/doc/xls → PDF via LibreOffice headless. Everything happens in a
-/// scratch directory soffice writes into alone, so the read-back name is
-/// unambiguous; the directory is removed whatever the outcome.
+/// Office → PDF via headless LibreOffice, in a private scratch directory that
+/// is removed whatever the outcome.
 pub(crate) fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> {
     let soffice = find_soffice().ok_or_else(|| {
         "LibreOffice not installed — `brew install --cask libreoffice` enables Office → PDF conversion"
@@ -1517,10 +1367,7 @@ pub(crate) fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> 
     let scratch = std::env::temp_dir().join(format!(
         "oculus-office-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
+        crate::clock::now_nanos()
     ));
     std::fs::create_dir_all(&scratch).map_err(|e| format!("scratch dir: {e}"))?;
     let result = convert_in(&soffice, &scratch, bytes, ext);
@@ -1528,19 +1375,9 @@ pub(crate) fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> 
     result
 }
 
-/// What to ask soffice to convert *to*. Plain `pdf` for documents and decks,
-/// which already know their own page breaks.
-///
-/// A spreadsheet does not. Calc paginates a wide sheet by slicing it into
-/// page-width columns, and the slices carry no headers: measured on a
-/// 300-row × 25-column marks sheet, the default export was 54 pages of which
-/// only the first band held the ID and name columns — page 14 is a bare grid
-/// of numbers, useless as a page image and worse as the markdown a citation
-/// hydrates from. `SinglePageSheets` puts each sheet on one page instead, so
-/// every row keeps its headers. A sheet that lands on one enormous page is
-/// then kept in bounds by `dpi_for_page` in
-/// `app/src-tauri/src/embed/raster.rs`, which lowers the DPI rather than
-/// rendering it at full size.
+/// Calc slices a wide sheet into header-less page-width columns, so
+/// spreadsheets export with `SinglePageSheets`; the resulting huge page is
+/// kept in bounds by `embed/raster.rs::dpi_for_page`.
 fn convert_target(ext: &str) -> &'static str {
     match ext {
         "xlsx" | "xls" => {
@@ -1625,20 +1462,17 @@ fn content_type_of(info: &serde_json::Value) -> String {
         .to_string()
 }
 
-/// `courses/CODE/files/x.pdf` → `files/x.pdf`, for links written into module
-/// TOCs (which live one directory down).
+/// `courses/CODE/files/x.pdf` → `files/x.pdf`.
 fn rel_within_course(rel: &str) -> String {
     rel.splitn(3, '/').nth(2).unwrap_or(rel).to_string()
 }
 
-/// The `../` prefix a document at `out_path` needs to reach the course root,
-/// where shared assets like `images/` live.
+/// The `../` prefix a document at `out_path` needs to reach the course root.
 fn up_to_course_root(out_path: &str) -> String {
     "../".repeat(out_path.matches('/').count())
 }
 
-/// `assignments/<slug>.md`, falling back to `<slug>-<id>.md` when two titles
-/// slug identically — without this the second document overwrites the first.
+/// `<dir>/<slug>.md`, or `<slug>-<id>.md` when two titles slug identically.
 fn task_path(dir: &str, title: &str, id: i64, used: &mut HashSet<String>) -> String {
     let base = format!("{dir}/{}", slug(title));
     if used.insert(base.clone()) {
@@ -1648,9 +1482,8 @@ fn task_path(dir: &str, title: &str, id: i64, used: &mut HashSet<String>) -> Str
     }
 }
 
-/// Append `**Label:** <timestamp>` when Canvas supplied one.
-/// `"submitted"`/`"graded"` when the current user has handed the task in,
-/// `None` otherwise. From `include[]=submission` on the assignments API.
+/// `"submitted"`/`"graded"` when the user has handed the task in. From
+/// `include[]=submission` on the assignments API.
 fn submission_status(item: &serde_json::Value) -> Option<&'static str> {
     match item["submission"]["workflow_state"].as_str() {
         Some("graded") => Some("graded"),
@@ -1659,15 +1492,14 @@ fn submission_status(item: &serde_json::Value) -> Option<&'static str> {
     }
 }
 
+/// Append `**Label:** <timestamp>` when Canvas supplied one.
 fn push_ts(meta: &mut Vec<String>, label: &str, iso: Option<&str>) {
     if let Some(ts) = iso.filter(|s| !s.is_empty()) {
         meta.push(format!("**{label}:** {}", fmt_ts(ts)));
     }
 }
 
-/// `"2026-09-12T13:59:59Z"` → `"2026-09-12 13:59 UTC"`. Canvas timestamps are
-/// UTC; without a timezone library the honest move is to keep them that way
-/// and let the frontend localise.
+/// `"2026-09-12T13:59:59Z"` → `"2026-09-12 13:59 UTC"`; left in UTC.
 fn fmt_ts(iso: &str) -> String {
     if iso.len() >= 16 && iso.as_bytes()[10] == b'T' {
         format!("{} {} UTC", &iso[..10], &iso[11..16])
@@ -1676,7 +1508,7 @@ fn fmt_ts(iso: &str) -> String {
     }
 }
 
-/// `20.0` → `"20"`, `12.5` → `"12.5"` — Canvas points are floats, titles not.
+/// `20.0` → `"20"`, `12.5` → `"12.5"`.
 fn fmt_points(p: f64) -> String {
     if p.fract() == 0.0 {
         format!("{}", p as i64)
@@ -1694,8 +1526,7 @@ fn escape_md(s: &str) -> String {
         .collect()
 }
 
-/// Filename-safe, URL-ish slug. Capped so a long Canvas title cannot produce a
-/// path the filesystem rejects.
+/// Filename-safe slug, capped so the filesystem never rejects the path.
 pub fn slug(s: &str) -> String {
     let mut out = String::new();
     let mut pending_dash = false;
@@ -1739,8 +1570,6 @@ mod tests {
 
     #[test]
     fn assets_are_addressed_from_the_document_that_references_them() {
-        // The viewer resolves an image src against the markdown file's own
-        // directory, so a page has to climb back to the course root.
         assert_eq!(up_to_course_root("home.md"), "");
         assert_eq!(up_to_course_root("pages/week-one.md"), "../");
         assert_eq!(up_to_course_root("announcements/2026-08-14-x.md"), "../");

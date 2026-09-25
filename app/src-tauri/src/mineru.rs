@@ -1,17 +1,15 @@
 //! MinerU cloud credential storage.
 //!
-//! The token never enters SQLite or the WebView. Rust reads it from the macOS
-//! keychain and hands it straight to the in-process cloud client
-//! (`parse::mineru::client`), so it no longer crosses a socket at all.
+//! The token lives only in the macOS keychain, never in SQLite or the
+//! WebView; `parse::mineru::client` reads it at construction.
 
 use std::time::Duration;
 
 const KEYCHAIN_SERVICE: &str = "com.tchan.oculus.mineru";
 const KEYCHAIN_ACCOUNT: &str = "mineru";
 
-/// A task id that cannot exist. Reading a task is the cheapest authenticated
-/// GET MinerU has: a good token answers "no such task", a bad one answers 401
-/// before the id is ever looked at. Nothing is created or charged either way.
+/// A task id that cannot exist: a good token answers "no such task", a bad
+/// one 401. Nothing is created or charged.
 const PROBE_URL: &str =
     "https://mineru.net/api/v4/extract/task/00000000-0000-0000-0000-000000000000";
 
@@ -39,8 +37,7 @@ fn probe(key: &str) -> Result<Verdict, String> {
         .set("Accept", "application/json")
         .call()
     {
-        // Any answer that is not an auth failure means the token got past the
-        // gateway — including the "task not found" this probe expects.
+        // Anything but an auth failure got past the gateway.
         Ok(_) => Ok(Verdict::Good),
         Err(ureq::Error::Status(401 | 403, response)) => {
             let code = response
@@ -67,15 +64,6 @@ fn probe(key: &str) -> Result<Verdict, String> {
         Err(_) => Ok(Verdict::Unverified),
     }
 }
-
-// There is no rejection latch to clear any more, and nothing replaces the
-// `/mineru-token-reset` POST that used to be here. The sidecar held one
-// because a refused token is the same refusal for every queued file and it had
-// no way to be told the user had fixed it. The in-process client keeps no such
-// state: it reads the keychain at construction (`MinerUCloud::from_config`), so
-// the very next parse uses whatever is stored now. The only latch left is the
-// daily quota one in `parse::mineru::ledger`, which is about MinerU's
-// allowance rather than the token and clears itself when the day rolls over.
 
 /// Store a token, but only one MinerU has agreed to. Returns `"ok"` when it
 /// was checked against MinerU and `"unverified"` when MinerU was unreachable

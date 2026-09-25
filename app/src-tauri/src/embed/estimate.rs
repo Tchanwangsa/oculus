@@ -1,30 +1,15 @@
-//! What the outstanding index run will cost, before it is started.
+//! What the outstanding index run will cost, before it is started — computed
+//! from the same arithmetic the run bills against, without sending anything:
 //!
-//! An index run on a Voyage account with no payment method is **most of a day**
-//! for this library, and until this module existed the settings page said only
-//! "this can take hours". That is the difference between a number somebody can
-//! plan around and a warning they learn to ignore — so the estimate is
-//! computed, from the same arithmetic the run itself bills against, rather than
-//! phrased.
+//! * Voyage bills pixels, capped per image (`batch::BILLED_PIXEL_CAP`,
+//!   `ledger::USD_PER_BILLION_PIXELS`); page boxes come from pdfium without
+//!   rasterising (`raster::page_sizes`).
+//! * Packing is deterministic: `batch::plan` is the run's own function.
+//! * The pace is the learned tier: tokens over TPM or requests over RPM,
+//!   whichever is slower.
 //!
-//! Three facts make an exact answer possible without sending anything:
-//!
-//! * **Voyage bills a page image by its pixels**, $0.60 per billion past the
-//!   free grant, capped at 2,000,000 pixels an image
-//!   (`ledger::USD_PER_BILLION_PIXELS`, `batch::BILLED_PIXEL_CAP`). Pixels come
-//!   from the page box, which pdfium reads without rasterising anything
-//!   (`raster::page_sizes`).
-//! * **The packing is deterministic.** `batch::plan` is the same function the
-//!   run uses, at the same ceiling, so the request count here is the request
-//!   count that will happen.
-//! * **The pace is the tier**, which the ledger has already learned. Tokens
-//!   over TPM and requests over RPM, whichever is slower — on the free
-//!   programme that is TPM by a factor of two, and on tier 1 it is TPM by a
-//!   factor of a hundred.
-//!
-//! What this module must **never** do is quietly turn into a limiter. It
-//! predicts; `ledger` decides. The one number they share is the spend guard,
-//! and this module only reports where the run would land against it.
+//! It predicts; `ledger` decides. It only reports where the run would land
+//! against the spend guard, never enforces it.
 
 use std::path::{Path, PathBuf};
 
@@ -50,12 +35,9 @@ pub struct EmbedEstimate {
     /// Files that would be embedded, and the pages inside them.
     pub files: u32,
     pub pages: u32,
-    /// Files in the backlog pdfium could not open to measure. They are still in
-    /// `files`; the run will fail them one at a time, and an estimate that
-    /// silently dropped them would under-count the work.
+    /// Files pdfium could not open to measure; still counted in `files`.
     pub unreadable: u32,
-    /// Billed pixels and the tokens they pace against — `billed`, so a page
-    /// over the 2M cap counts as 2M, exactly as Voyage bills it.
+    /// Billed (capped) pixels and the tokens they pace against.
     pub pixels: u64,
     pub tokens: u64,
     /// How many HTTP requests, at the ceiling in force now.
@@ -73,25 +55,18 @@ pub struct EmbedEstimate {
     pub stops_after_pages: Option<u32>,
 
     // ── Against the clock ────────────────────────────────────────────────────
-    /// Seconds at the tier the ledger has learned, and at tier 1 — the second
-    /// number is what a payment method buys, and it is the only reason to
-    /// mention a payment method at all.
+    /// Seconds at the learned tier, and at tier 1 — what a payment method buys.
     pub seconds: f64,
     pub seconds_tier1: f64,
     pub tier_rpm: f64,
     pub tier_tpm: f64,
     pub tier_free: bool,
-    /// `assumed` / `observed` / `stated` — how much the two numbers above are
-    /// worth. An `assumed` tier has never been tested against the API.
+    /// `ledger::TierSource`: how much the two numbers above are worth.
     pub tier_source: &'static str,
 }
 
-/// Measure the backlog.
-///
-/// `base` is the app data dir; paths in `files.relative_path` hang off it.
-/// Blocking: it opens every outstanding PDF with pdfium. That is page boxes
-/// only — no rasterising, no decompression of content streams — but it is
-/// still file I/O over a whole library, so callers run it off the UI thread.
+/// Measure the backlog. `base` is the app data dir. Opens every outstanding
+/// PDF (page boxes only), so callers run it off the UI thread.
 pub async fn estimate(db_file: &Path, base: &Path) -> Result<EmbedEstimate, String> {
     let backlog = backlog(db_file).await?;
     let usage = UsageLedger::shared().snapshot();
@@ -119,12 +94,10 @@ pub async fn estimate(db_file: &Path, base: &Path) -> Result<EmbedEstimate, Stri
     };
 
     let mut kinds: Vec<Bucket> = Vec::new();
-    // Every page's token cost, kept per document. The library is read from disk
-    // **once**: the tier-1 comparison re-plans these same numbers at the other
-    // ceiling rather than opening 166 PDFs a second time.
+    // Per-document page costs, so the tier-1 comparison re-plans without
+    // reopening every PDF.
     let mut per_file: Vec<Vec<u64>> = Vec::with_capacity(backlog.len());
-    // Pixels spent, page by page, so the spend guard's cut-off can be reported
-    // as a page number rather than as a fraction.
+    // Running pixel total, so the guard's cut-off is reported as a page.
     let mut running = usage.pixels;
     let budget = usage.budget();
 
@@ -138,8 +111,6 @@ pub async fn estimate(db_file: &Path, base: &Path) -> Result<EmbedEstimate, Stri
         for (width, height) in &sizes {
             costs.push(batch::tokens_for(*width, *height));
 
-            // Billed, not raw: Voyage downscales anything over the cap before
-            // it charges, so a 200-DPI page costs the cap however big it is.
             let billed = (*width as u64 * *height as u64).min(batch::BILLED_PIXEL_CAP);
             out.pixels += billed;
             out.pages += 1;
@@ -166,9 +137,7 @@ pub async fn estimate(db_file: &Path, base: &Path) -> Result<EmbedEstimate, Stri
     out.cost_usd =
         out.billable_pixels as f64 / 1_000_000_000.0 * ledger::USD_PER_BILLION_PIXELS;
     out.seconds = seconds_for(out.tokens, out.requests, tier.tpm, tier.rpm);
-    // Tier 1 packs far more pages into one request, so its request count is its
-    // own — reusing the current tier's would flatten the comparison that is the
-    // only reason to mention a payment method at all.
+    // Tier 1 packs more pages per request, so its request count is its own.
     let tier1_ceiling = batch::MAX_TOKENS_PER_REQUEST.min(ledger::TIER1_TPM as u64);
     let tier1_requests: u32 = per_file
         .iter()
@@ -189,12 +158,8 @@ fn bump(buckets: &mut Vec<Bucket>, label: &str, files: u32, pages: u32) {
     }
 }
 
-/// Wall clock, from whichever ceiling binds.
-///
-/// Both, not either: TPM governs at every tier Voyage runs today, but a library
-/// of tiny pages on the free programme would run out of *requests* first, and a
-/// model that only knew about tokens would promise a run four times faster than
-/// it is.
+/// Wall clock, from whichever ceiling binds. TPM usually does, but tiny pages
+/// on the free programme run out of requests first.
 fn seconds_for(tokens: u64, requests: u32, tpm: f64, rpm: f64) -> f64 {
     let by_tokens = tokens as f64 / tpm.max(1.0) * 60.0;
     let by_requests = requests as f64 / rpm.max(1.0) * 60.0;
@@ -204,24 +169,17 @@ fn seconds_for(tokens: u64, requests: u32, tpm: f64, rpm: f64) -> f64 {
 // ── The backlog ──────────────────────────────────────────────────────────────
 
 struct Outstanding {
-    /// Relative to the app data dir, and already resolved to the PDF sibling an
-    /// Office document gets.
+    /// Relative to the app data dir, resolved to an Office document's PDF.
     pdf: PathBuf,
-    /// The extension as the library recorded it, lower-cased — what the
-    /// breakdown groups by.
+    /// Lower-cased extension; what the breakdown groups by.
     kind: String,
 }
 
 /// Parsed, PDF-backed files with no usable vectors in the current space.
 ///
-/// **The same predicate as `getUnembeddedPdfs` in
-/// `app/src/lib/retrieval.ts`**, and it has to stay that way: an estimate over
-/// a different set of files than the run walks is worse than no estimate. It is
-/// duplicated rather than shared because one side is SQL over the WebView's
-/// pool and the other is SQL over Rust's, and neither can call the other.
-/// Both count *current-space page vectors* rather than reading
-/// `files.embed_status`, for the reason recorded there: that column is a sticky
-/// flag with no memory of which space set it.
+/// Must match `getUnembeddedPdfs` in `app/src/lib/retrieval.ts` (duplicated
+/// because each side queries its own pool). Both count current-space page
+/// vectors, since `files.embed_status` does not record which space set it.
 async fn backlog(db_file: &Path) -> Result<Vec<Outstanding>, String> {
     let db = crate::store::pool(db_file).await?;
     let rows = sqlx::query(
@@ -255,9 +213,7 @@ async fn backlog(db_file: &Path) -> Result<Vec<Outstanding>, String> {
 mod tests {
     use super::*;
 
-    /// The whole reason the banner can promise a number: the free programme's
-    /// 10,000 TPM is what makes this library a day's work, and it is TPM that
-    /// binds, not RPM.
+    /// On the free programme TPM binds, not RPM.
     #[test]
     fn the_free_tier_is_governed_by_tokens_not_requests() {
         // 2,980 pages at the 2M-pixel cap.
@@ -272,7 +228,6 @@ mod tests {
         assert!(free > requests as f64 / ledger::FREE_RPM * 60.0, "TPM must be the binding limit");
     }
 
-    /// And the number that justifies telling anyone about a payment method.
     #[test]
     fn tier_one_turns_the_same_run_into_minutes() {
         let tokens = 2_980 * batch::tokens_for(2339, 1653);
@@ -280,14 +235,10 @@ mod tests {
         assert!(paid < 10.0 * 60.0, "tier 1 is single-digit minutes, got {paid}s");
     }
 
-    /// The claim the banner makes about money, checked against the constants
-    /// rather than against a sentence someone wrote once.
+    /// The banner's claim about money, checked against the constants.
     #[test]
     fn this_library_fits_inside_the_free_grant() {
         let pixels = 2_980u64 * batch::BILLED_PIXEL_CAP;
         assert!(pixels < ledger::FREE_PIXELS / 10, "the grant is not the constraint here");
     }
 }
-
-
-

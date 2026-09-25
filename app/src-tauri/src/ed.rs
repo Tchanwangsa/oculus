@@ -1,13 +1,10 @@
 //! Ed Discussion access: token auth, course mapping, thread fetching, and the
 //! `<document>` XML → Markdown converter.
 //!
-//! Ed has no OAuth for third parties; the web app authenticates every API call
-//! with an `x-token` JWT. The sync engine mints that token itself by walking
-//! the Canvas → Ed LTI 1.3 launch (see [`Ed::connect_via_canvas`]), so holding
-//! a Canvas session is enough — nothing needs to be pasted. Tokens live ~2
-//! weeks, `POST /api/renew_token` extends them, and a dead one is simply
-//! re-minted from Canvas on the next sync. `oculus auth ed <TOKEN>` remains as
-//! a manual override.
+//! Ed authenticates API calls with an `x-token` JWT, minted from the Canvas
+//! session by walking the LTI 1.3 launch ([`Ed::connect_via_canvas`]);
+//! `renew_token` extends it and a dead one is re-minted on the next sync.
+//! `oculus auth ed <TOKEN>` is a manual override. See `docs/auth.md`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,15 +16,13 @@ use scraper::Html;
 
 const ED_BASE: &str = "https://edstem.org/api";
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-/// A course's board rarely exceeds a few hundred threads in a semester; this
-/// is a hard stop, not a target.
+/// A hard stop, not a target.
 const MAX_THREADS: usize = 1000;
 
 pub fn token_path(data_dir: &Path) -> PathBuf {
     data_dir.join("ed-session.token")
 }
 
-/// One Ed course as `/api/user` lists it, reduced to what course matching uses.
 #[derive(Debug, Clone)]
 struct EdCourse {
     id: i64,
@@ -40,14 +35,12 @@ struct EdCourse {
 pub struct Ed {
     token: Mutex<String>,
     token_path: PathBuf,
-    /// `/api/user` result, fetched once per process — every subject in a run
-    /// maps against the same enrolment list.
+    /// `/api/user` enrolments, fetched once per process.
     courses: Mutex<Option<Vec<EdCourse>>>,
 }
 
 impl Ed {
-    /// Load the persisted token. Succeeds even without one — callers check
-    /// [`Ed::has_session`], and a session-less `Ed` simply syncs nothing.
+    /// Load the persisted token; without one, [`Ed::has_session`] is false.
     pub fn open(data_dir: &Path) -> Self {
         let token_path = token_path(data_dir);
         let token = std::fs::read_to_string(&token_path).unwrap_or_default();
@@ -62,8 +55,7 @@ impl Ed {
         !self.token.lock().unwrap().is_empty()
     }
 
-    /// Validate a pasted token against `/api/user`, then persist it.
-    /// Returns the account's display name.
+    /// Validate a pasted token against `/api/user`, persist it, return the name.
     pub fn set_token(data_dir: &Path, token: &str) -> Result<String, String> {
         let token = token.trim();
         let user = get_json(token, "/user")?;
@@ -72,7 +64,6 @@ impl Ed {
         Ok(name)
     }
 
-    /// The signed-in user's display name, or an error describing why not.
     pub fn whoami(&self) -> Result<String, String> {
         if !self.has_session() {
             return Err("No saved Ed token.".to_string());
@@ -86,8 +77,7 @@ impl Ed {
         get_json(&token, path)
     }
 
-    /// Extend the session and persist the fresh token. Best-effort: a failed
-    /// renewal only means the current token keeps being used until it expires.
+    /// Extend the session and persist the fresh token. Best-effort.
     fn renew(&self) {
         let token = self.token.lock().unwrap().clone();
         if token.is_empty() {
@@ -119,14 +109,9 @@ impl Ed {
 
     // ── LTI auto-connect ─────────────────────────────────────────────────────
 
-    /// The Ed course backing a Canvas course, connecting as needed.
-    ///
-    /// The fast path matches against the saved session's enrolment list. But
-    /// Ed only creates an enrolment when a board is first *opened* — a course
-    /// whose Ed tab the user never clicked is invisible to `/api/user` — so a
-    /// miss (or a dead session) falls back to launching the course's own LTI
-    /// tool, which both enrols the account and names the Ed course in the
-    /// launch's final redirect. `Ok(None)` means the course has no Ed tool.
+    /// The Ed course backing a Canvas course. Ed only enrols an account when a
+    /// board is first opened, so a miss in `/api/user` falls back to the LTI
+    /// launch, which enrols and names the course. `Ok(None)`: no Ed tool.
     pub fn resolve_course(
         &self,
         canvas: &crate::canvas::Canvas,
@@ -145,13 +130,9 @@ impl Ed {
         }
     }
 
-    /// Mint an Ed session from the Canvas session by walking the LTI 1.3
-    /// launch the way a browser would: Canvas's tool page auto-submits a form
-    /// to Ed's `oidc_login`, Ed bounces through Canvas's authorize endpoint,
-    /// Canvas posts the signed `id_token` back to Ed's `launch`, and the final
-    /// redirect lands on the Ed course carrying a one-shot `_logintoken` —
-    /// which `POST /api/login_token` exchanges for the x-token JWT. Returns
-    /// the Ed course id the launch landed on.
+    /// Mint an Ed session by walking the LTI 1.3 launch like a browser; the
+    /// final redirect carries a one-shot `_logintoken` that `login_token`
+    /// exchanges for the x-token. Returns the Ed course id it landed on.
     pub fn connect_via_canvas(
         &self,
         canvas: &crate::canvas::Canvas,
@@ -213,12 +194,9 @@ impl Ed {
         Ok(list)
     }
 
-    /// The Ed course matching a Canvas course code, or `None`.
-    ///
-    /// Ed codes are staff-typed free text ("INFO30006", "comp10002 2024s2",
-    /// "SWEN20003_2025_S2"), so matching is on the leading subject token, with
-    /// the year and semester from the Canvas code ("INFO30006_2026_SM2")
-    /// breaking ties between offerings, then recency.
+    /// The Ed course matching a Canvas course code. Ed codes are staff-typed
+    /// free text, so match on the leading subject token; year and semester
+    /// from the Canvas code break ties, then recency.
     pub fn course_for(&self, canvas_code: &str) -> Result<Option<i64>, String> {
         let want = code_token(canvas_code);
         if want.is_empty() {
@@ -274,8 +252,7 @@ impl Ed {
         let detail = self.get(&format!("/threads/{id}?view=1"))?;
         let thread = if detail["thread"].is_object() { &detail["thread"] } else { listing };
 
-        // Names for user_ids, from whichever level of the response carries the
-        // roster; comments may also embed their author directly.
+        // The roster may sit at either level; comments may embed their author.
         let mut users: HashMap<i64, String> = HashMap::new();
         for list in [&detail["users"], &detail["thread"]["users"]] {
             if let Some(arr) = list.as_array() {
@@ -301,9 +278,7 @@ impl Ed {
         if !kind.is_empty() {
             meta.push(kind.to_string());
         }
-        // Questions carry Ed's answered flags; surfaced as resolved/unresolved
-        // so the board view can badge them. Re-synced every run, so a thread
-        // answered later flips on the next sync.
+        // Surfaced so the board view can badge questions.
         if kind == "question" {
             let answered = [thread, listing].iter().any(|t| {
                 t["is_answered"].as_bool().unwrap_or(false)
@@ -371,8 +346,7 @@ fn get_json(token: &str, path: &str) -> Result<serde_json::Value, String> {
 
 // ── LTI chain ────────────────────────────────────────────────────────────────
 
-/// The Canvas path of the course's "Ed Discussion" tool, from the course tabs.
-/// Tool ids differ per sub-account, so this is discovered, never assumed.
+/// The course's "Ed Discussion" tool path — tool ids differ per sub-account.
 fn find_ed_tool(canvas: &crate::canvas::Canvas, course_id: i64) -> Result<String, String> {
     let tabs = canvas.get_json(&format!("/api/v1/courses/{course_id}/tabs"))?;
     tabs.as_array()
@@ -395,11 +369,9 @@ fn ed_course_in_url(u: &url::Url) -> Option<i64> {
     segments.next()?.parse().ok()
 }
 
-/// Follow the launch chain — redirects and auto-submit forms — until a
-/// redirect carries `_logintoken`; returns the token and where the launch was
-/// headed (the Ed course page). Cookies are kept per host and the Canvas
-/// session is only ever attached to Canvas requests; Ed's own state cookies
-/// (set during `oidc_login`, checked at `launch`) ride in the same jar.
+/// Follow redirects and auto-submit forms until a redirect carries
+/// `_logintoken`; returns it and the Ed course URL. Cookies are jarred per
+/// host, so the Canvas session only goes to Canvas.
 fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::Url), String> {
     let mut jar: HashMap<String, HashMap<String, String>> = HashMap::new();
     let canvas_host = url::Url::parse(crate::paths::CANVAS_BASE)
@@ -486,8 +458,7 @@ fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::
     Err("LTI launch never produced a login token (redirect loop?)".to_string())
 }
 
-/// The auto-submit form on a launch page: prefer the one aimed at Ed, since
-/// Canvas pages carry unrelated forms too.
+/// The auto-submit form on a launch page, preferring one aimed at Ed.
 fn parse_lti_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
     let doc = Html::parse_document(html);
     let form_sel = scraper::Selector::parse("form").ok()?;
@@ -525,8 +496,7 @@ fn author_name(item: &serde_json::Value, users: &HashMap<i64, String>) -> String
         .unwrap_or_else(|| "Anonymous".to_string())
 }
 
-/// A reply (answer or comment) and its nested children, each level one
-/// blockquote deeper so the conversation shape survives in Markdown.
+/// A reply and its children, each level one blockquote deeper.
 fn render_reply(
     item: &serde_json::Value,
     users: &HashMap<i64, String>,
@@ -561,8 +531,8 @@ fn render_reply(
     }
 }
 
-/// A post's body: the `<document>` XML when present (it carries images and
-/// links the plain-text `document` field drops), that field otherwise.
+/// The `<document>` XML when present (it keeps images and links), else the
+/// plain-text `document` field.
 fn content_md(item: &serde_json::Value) -> String {
     let xml = item["content"].as_str().unwrap_or("");
     if !xml.is_empty() {
@@ -576,12 +546,8 @@ fn content_md(item: &serde_json::Value) -> String {
 
 // ── `<document>` XML → Markdown ──────────────────────────────────────────────
 //
-// Ed bodies are a custom XML dialect (<paragraph>, <bold>, <link href>,
-// <image src>, <list style>, <callout>, <break/>). Parsed with the same HTML
-// parser as Canvas bodies — which means void-style tags like <break/> swallow
-// their following siblings as children, so every renderer below emits its own
-// marker and then still recurses into children. Nothing is lost, whichever way
-// the parser nested it.
+// Parsed with the HTML parser, so void-style tags like <break/> swallow their
+// following siblings: every renderer emits its marker and still recurses.
 
 type Ref<'a> = NodeRef<'a, Node>;
 
@@ -594,10 +560,8 @@ fn attr<'a>(n: &Ref<'a>, name: &str) -> Option<&'a str> {
 }
 
 pub fn document_md(xml: &str) -> String {
-    // `<link>` is a void element to an HTML parser, which would strand the
-    // link text outside it; renamed before parsing so it nests normally.
-    // (`<image>` needs no such help — html5ever rewrites it to `<img>`, which
-    // keeps its `src`.)
+    // `<link>` is void to an HTML parser and would strand its text; rename it.
+    // (html5ever rewrites `<image>` to `<img>`, keeping `src`.)
     let xml = xml.replace("<link ", "<edlink ").replace("</link>", "</edlink>");
     let doc = Html::parse_fragment(&xml);
     let mut out = String::new();
@@ -611,8 +575,6 @@ fn render_nodes(n: Ref<'_>, out: &mut String) {
     }
 }
 
-/// Children rendered into a fresh buffer — for wrappers (bold, links) that
-/// only emit their markers around non-empty content.
 fn inner(n: Ref<'_>) -> String {
     let mut s = String::new();
     render_nodes(n, &mut s);
@@ -691,9 +653,7 @@ fn render_node(n: Ref<'_>, out: &mut String) {
             }
             out.push('\n');
         }
-        // Raw LaTeX in a block element. Emitted as $$ display math, which the
-        // viewer's remark-math + KaTeX pipeline renders. (The HTML parser puts
-        // <math> children in foreign content, but they're all text nodes.)
+        // Raw LaTeX, emitted as $$ display math.
         "math" => {
             let latex: String = n
                 .descendants()
@@ -725,8 +685,7 @@ fn wrap(n: Ref<'_>, marks: &str, out: &mut String) {
     }
 }
 
-/// List items must stay on one line; a paragraph inside one otherwise breaks
-/// the list apart.
+/// A list item must stay on one line or the list breaks apart.
 fn squeeze_item(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -742,8 +701,7 @@ fn code_token(code: &str) -> String {
         .to_uppercase()
 }
 
-/// `"2026-08-07T15:42:01.522942+10:00"` → `"2026-08-07 15:42"`. Ed timestamps
-/// arrive in the course's local timezone, so the offset can simply drop.
+/// `"2026-08-07T15:42:01.522942+10:00"` → `"2026-08-07 15:42"` (already local).
 fn fmt_ts(iso: &str) -> String {
     if iso.len() >= 16 && iso.as_bytes()[10] == b'T' {
         format!("{} {}", &iso[..10], &iso[11..16])
@@ -780,8 +738,6 @@ mod tests {
 
     #[test]
     fn void_tags_do_not_swallow_content() {
-        // The HTML parser nests everything after <break/> inside it; the
-        // converter must still emit that content.
         let md = document_md(
             r#"<document><paragraph>one<break/>two <bold>three</bold></paragraph></document>"#,
         );
@@ -795,7 +751,6 @@ mod tests {
         let md = document_md(
             r#"<document><paragraph>So starting with</paragraph><math>\left(\begin{matrix}1&amp;0\\0&amp;1\end{matrix}\right)</math><paragraph>using dagger.</paragraph><math/></document>"#,
         );
-        // Entities decode and the double backslash survives; empty <math/> is dropped.
         assert_eq!(
             md,
             "So starting with\n\n$$\n\\left(\\begin{matrix}1&0\\\\0&1\\end{matrix}\\right)\n$$\n\nusing dagger."

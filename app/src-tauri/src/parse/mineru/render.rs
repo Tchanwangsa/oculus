@@ -1,15 +1,8 @@
-//! Turning MinerU's `content_list.json` into page records — a behaviour-exact
-//! port of `sidecar/mineru_render.py`.
+//! Turning MinerU's `content_list.json` into page records, for both backends.
 //!
-//! This module decides what the markdown *says*, so it is the one place in the
-//! parse path where a subtle divergence would silently rewrite the library
-//! rather than fail. Every rule below was ported against the Python by
-//! differential test, and the tests at the bottom pin the Python's own output
-//! so the pinning outlives the sidecar's deletion.
-//!
-//! Nothing here knows whether the content list came from the cloud API or a
-//! local parse server: both backends emit the same legacy content-list shape,
-//! which is exactly why the rendering lives on this side of the seam.
+//! This decides what the markdown *says*, so a subtle change here silently
+//! rewrites the library rather than failing. The tests pin the exact output
+//! the existing library was rendered with.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -20,14 +13,11 @@ use serde_json::Value;
 
 use crate::parse::{ParseError, ParsePage};
 
-/// A header/footer repeated on at least this fraction of a window's pages is
-/// template furniture — a running head, a unit code, a university name — not
-/// content. Measured per document rather than hardcoded, because every faculty
-/// has its own.
+/// A header/footer on at least this fraction of a window's pages is template
+/// furniture, not content.
 const BOILERPLATE_PAGE_RATIO: f64 = 0.5;
 
-/// Below this many pages the ratio means nothing: on a 2-page handout a title
-/// that happens to appear twice is not furniture, it is the title.
+/// Below this many pages the ratio means nothing.
 const BOILERPLATE_MIN_PAGES: i64 = 4;
 
 /// Equations may also carry an `img_path`, but are rendered as LaTeX.
@@ -37,23 +27,14 @@ const IMAGE_TYPES: [&str; 3] = ["image", "chart", "table"];
 /// retaining the smallest real figure in the measured deck (58k px²).
 const MIN_IMAGE_AREA: u64 = 20_000;
 
-/// Boilerplate is detected in fixed 64-page windows, and **this number is
-/// bug-compatibility, not a heuristic.**
-///
-/// It preserves the legacy parser's boilerplate decisions independently of how
-/// the backend happened to chunk the document: cloud tasks are 200 pages, the
-/// old local pipeline's memory-retry chunks were 16, and all of them must
-/// render identically. Changing 64 changes the markdown of documents already
-/// in the library — with no version bump to signal it, because
-/// `PARSER_VERSION` guards the artifact *shape*, not the text.
+/// Boilerplate is detected in fixed 64-page windows. **Bug-compatibility, not
+/// a heuristic**: changing it rewrites markdown already in the library with no
+/// version bump (`PARSER_VERSION` guards shape, not text).
 const RENDER_GROUP_PAGES: i64 = 64;
 
 // ── Content-list accessors ───────────────────────────────────────────────────
 //
-// The content list is untyped JSON from a backend we do not control, so every
-// read has a default and none of them can fail. The Python used `dict.get`
-// with the same defaults; a missing key must produce a rendering decision, not
-// an error.
+// Untyped JSON from a backend we do not control: every read has a default.
 
 fn kind_of(item: &Value) -> &str {
     item.get("type").and_then(Value::as_str).unwrap_or("")
@@ -67,15 +48,12 @@ fn page_idx(item: &Value) -> i64 {
     item.get("page_idx").and_then(Value::as_i64).unwrap_or(0)
 }
 
-/// `img_path`, when it is a non-empty string. The Python tested it for
-/// truthiness, so an empty path falls through to `table_body` rather than
-/// producing `![](prefix/)`.
+/// `img_path`, when non-empty: an empty one falls through to `table_body`.
 fn img_path(item: &Value) -> Option<&str> {
     item.get("img_path").and_then(Value::as_str).filter(|path| !path.is_empty())
 }
 
-/// Python truthiness, which is what `item.get("text_level")` was tested for:
-/// `text_level: 0` is a level-less item, `text_level: 3` is a heading.
+/// Python-style truthiness: `text_level: 0` is level-less, `3` is a heading.
 fn truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,
@@ -87,13 +65,12 @@ fn truthy(value: Option<&Value>) -> bool {
     }
 }
 
-/// `Path(value).name` — the link written into the markdown is the basename, so
-/// the backend's own directory layout inside its result archive never leaks.
+/// The link is the basename, so the archive's layout never leaks.
 fn basename(path: &str) -> String {
     Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// `" ".join(item[key] or []).strip()`, for the caption/footnote lists.
+/// The caption/footnote list, space-joined and trimmed.
 fn join_parts(item: &Value, key: &str) -> String {
     let Some(parts) = item.get(key).and_then(Value::as_array) else {
         return String::new();
@@ -107,9 +84,7 @@ fn join_parts(item: &Value, key: &str) -> String {
         .to_string()
 }
 
-/// The comparison form for boilerplate: whitespace-collapsed and lowercased,
-/// so a running head that reflows or changes case across pages still counts as
-/// the same string.
+/// The comparison form for boilerplate: whitespace-collapsed and lowercased.
 fn norm(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
@@ -118,9 +93,8 @@ fn norm(text: &str) -> String {
 
 /// Convert one content-list entry to a markdown block, or drop it.
 ///
-/// The order of these branches is load-bearing; two of the interactions look
-/// like bugs and are deliberately preserved, because changing either rewrites
-/// markdown that is already in the library:
+/// The branch order is load-bearing; two interactions look like bugs and are
+/// preserved, because changing either rewrites the library's markdown:
 ///
 /// * a `table` carrying **both** `img_path` and `table_body` loses the HTML
 ///   body — the image wins, and the caption survives only as alt text;
@@ -135,8 +109,7 @@ fn render_item(
 ) -> Option<String> {
     let kind = kind_of(item);
 
-    // MinerU emits its own `$$` delimiters inside the equation text; wrapping
-    // it again here produced `$$$$` in the rendered markdown.
+    // MinerU's equation text carries its own `$$` delimiters.
     if kind == "equation" {
         let text = text_of(item).trim();
         return (!text.is_empty()).then(|| text.to_string());
@@ -147,8 +120,7 @@ fn render_item(
         let footnote = join_parts(item, &format!("{kind}_footnote"));
 
         let block = match img_path(item) {
-            // Dropped by the size filter: the caption goes with it, since a
-            // caption with nothing above it reads as a stray line of prose.
+            // Dropped by the size filter, caption with it.
             Some(path) if dropped.contains(&basename(path)) => String::new(),
             Some(path) => format!("![{caption}]({images_rel}/{})", basename(path)),
             None => item.get("table_body").and_then(Value::as_str).unwrap_or("").trim().to_string(),
@@ -167,9 +139,7 @@ fn render_item(
         return None;
     }
 
-    // One fixed heading level whatever `text_level`'s number is: MinerU's
-    // levels are per-page guesses and produced a document whose heading
-    // hierarchy jumped around between slides.
+    // One fixed level: MinerU's `text_level` numbers are per-page guesses.
     if kind == "header" || truthy(item.get("text_level")) {
         return Some(format!("## {text}"));
     }
@@ -181,11 +151,9 @@ fn render_item(
 
 // ── Ordering ─────────────────────────────────────────────────────────────────
 
-/// Put headers first while preserving MinerU's body reading order.
-///
-/// Every non-header gets the *same* key, so the sort must be stable — that is
-/// the only thing keeping the backend's reading order for body content. Rust's
-/// `sort_by` is stable; `sort_unstable_by` here would shuffle prose.
+/// Put headers first while preserving MinerU's body reading order. Every
+/// non-header shares one key, so the sort must be stable (`sort_by`, never
+/// `sort_unstable_by`).
 fn sort_key(item: &Value) -> (u8, f64, f64) {
     if kind_of(item) != "header" {
         return (1, 0.0, 0.0);
@@ -200,8 +168,7 @@ fn sort_key(item: &Value) -> (u8, f64, f64) {
 fn compare(left: &Value, right: &Value) -> Ordering {
     let (a, b) = (sort_key(left), sort_key(right));
     a.0.cmp(&b.0)
-        // A NaN coordinate is not orderable; treating it as equal keeps the
-        // stable order rather than panicking on a malformed bbox.
+        // A NaN coordinate compares equal rather than panicking.
         .then_with(|| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal))
         .then_with(|| a.2.partial_cmp(&b.2).unwrap_or(Ordering::Equal))
 }
@@ -209,8 +176,7 @@ fn compare(left: &Value, right: &Value) -> Ordering {
 // ── Boilerplate ──────────────────────────────────────────────────────────────
 
 /// The normalised header/footer strings repeated across most of a window's
-/// pages. Counts **distinct** pages, not occurrences: a footer printed three
-/// times on one slide is not on three pages.
+/// pages — counted by **distinct** page, not occurrence.
 fn find_boilerplate(items: &[&Value], window_pages: i64) -> HashSet<String> {
     if window_pages < BOILERPLATE_MIN_PAGES {
         return HashSet::new();
@@ -239,16 +205,12 @@ fn find_boilerplate(items: &[&Value], window_pages: i64) -> HashSet<String> {
 // ── The renderer ─────────────────────────────────────────────────────────────
 
 /// Render a backend result and copy only the referenced, useful image crops.
+/// Items must carry **absolute** `page_idx` values, or the 64-page windows
+/// would restart at every task boundary.
 ///
-/// `content_list` items must already carry **absolute** `page_idx` values —
-/// a backend that split the document into tasks rebases them before calling,
-/// because the 64-page windowing below is defined over the whole document and
-/// would otherwise restart at every task boundary.
-///
-/// `source_images` is the `images` directory inside the extracted result;
-/// `images_dir` is the staging directory to copy the keepers into; and
-/// `images_rel` is the link prefix written into the markdown. Returns the page
-/// records and the number of images actually copied.
+/// `source_images` is the extracted result's `images` directory; `images_dir`
+/// the staging directory; `images_rel` the link prefix. Returns the page
+/// records and the number of images copied.
 pub fn render(
     content_list: &[Value],
     total_pages: u32,
@@ -256,9 +218,7 @@ pub fn render(
     images_dir: &Path,
     images_rel: &str,
 ) -> Result<(Vec<ParsePage>, u32), ParseError> {
-    // 1. Which crops the markdown will reference. A `BTreeSet` both dedupes
-    //    and gives the sorted copy order the Python had, so a run over the
-    //    same result touches the disk in the same order twice.
+    // 1. Which crops the markdown will reference, deduped and in stable order.
     let wanted: BTreeSet<String> = content_list
         .iter()
         .filter(|item| IMAGE_TYPES.contains(&kind_of(item)))
@@ -272,9 +232,7 @@ pub fn render(
             .map_err(|e| ParseError::Io(format!("create {}: {e}", images_dir.display())))?;
         for name in &wanted {
             let source = source_images.join(name);
-            // A crop the backend named but did not ship is skipped silently
-            // and not counted; its item still renders a link, which is what
-            // the Python did and what the markdown on disk already contains.
+            // Named but not shipped: not counted, though its item still links.
             if !source.is_file() {
                 continue;
             }
@@ -289,9 +247,8 @@ pub fn render(
         }
     }
 
-    // 2. Partition into fixed 64-page windows and detect boilerplate inside
-    //    each one, against that window's own page count — the last window is
-    //    short, and a short window skips detection entirely.
+    // 2. Detect boilerplate per 64-page window, against that window's own
+    //    page count (the last is short).
     let mut windows: BTreeMap<i64, Vec<&Value>> = BTreeMap::new();
     for item in content_list {
         windows.entry(page_idx(item).div_euclid(RENDER_GROUP_PAGES)).or_default().push(item);
@@ -314,38 +271,30 @@ pub fn render(
                 .filter_map(|item| render_item(item, images_rel, &dropped, &boilerplate))
                 .collect();
             if !blocks.is_empty() {
-                // Windows partition by page, so no two of them can write the
-                // same page number.
+                // Windows partition by page: no page is written twice.
                 by_page.insert(page_no, blocks.join("\n\n"));
             }
         }
     }
 
     // 3. Blank and furniture-only pages still need records: `page_no` is the
-    //    citation and deep-link join key, and a hole would misalign every page
-    //    after it. `ParseOutput::new` gap-fills too; that is belt-and-braces,
-    //    not a reason to hand it holes.
+    //    citation join key.
     for page_no in 1..=i64::from(total_pages) {
         by_page.entry(page_no).or_default();
     }
 
     let pages = by_page
         .into_iter()
-        // A backend with a broken offset could hand us a page_idx below the
-        // first page; those records have nowhere to attach, and the seam would
-        // drop them anyway.
+        // A broken offset below the first page has nowhere to attach.
         .filter(|(page_no, _)| *page_no >= 1)
         .map(|(page_no, markdown)| ParsePage { page_no: page_no as u32, markdown })
         .collect();
     Ok((pages, image_count))
 }
 
-/// Is this crop too small to be a real figure?
-///
-/// `imagesize` reads the dimensions out of the file header rather than
-/// decoding the pixels, which is the whole reason PIL is not missed here.
-/// An unreadable image **fails open** — losing a real figure is worse than
-/// keeping a piece of template furniture.
+/// Is this crop too small to be a real figure? Reads the header only. An
+/// unreadable image **fails open**: losing a figure is worse than keeping
+/// furniture.
 fn too_small(path: &Path) -> bool {
     match imagesize::size(path) {
         Ok(size) => (size.width as u64) * (size.height as u64) < MIN_IMAGE_AREA,
@@ -356,12 +305,11 @@ fn too_small(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
     use serde_json::json;
 
-    /// Every expected value in this module was produced by running
-    /// `sidecar/mineru_render.py` on the identical input and inlining what it
-    /// returned. When the sidecar is deleted these become the only record of
-    /// what the library's existing markdown was rendered by.
+    /// Every expected value here is the output the library's existing
+    /// markdown was rendered with. Do not "fix" one to match new code.
     fn rendered(content: &[Value], total_pages: u32) -> Vec<ParsePage> {
         let nowhere = Path::new("/nonexistent-source-images");
         let (pages, count) = render(content, total_pages, nowhere, nowhere, "deck_images").unwrap();
@@ -373,10 +321,8 @@ mod tests {
         pages.iter().map(|page| page.markdown.as_str()).collect()
     }
 
-    /// The 64-page windowing, pinned from `sidecar/test_mineru_render.py`: a
-    /// header on pages 0-31 hits exactly the 32-page threshold of the first
-    /// full window and is stripped, while an identical-shaped header on page
-    /// 129 lands in a 2-page window where detection is skipped entirely.
+    /// A header on pages 0-31 hits the first window's 32-page threshold and is
+    /// stripped; one on page 129 lands in a 2-page window and is kept.
     #[test]
     fn boilerplate_is_detected_per_64_page_window() {
         let mut content: Vec<Value> = (0..32)
@@ -391,8 +337,7 @@ mod tests {
         assert_eq!(pages[129].page_no, 130);
     }
 
-    /// One page short of the window's threshold keeps the header: the ratio is
-    /// `>=`, and 31 of 64 pages is furniture nobody asked us to remove.
+    /// One page short of the threshold keeps the header (the ratio is `>=`).
     #[test]
     fn one_page_short_of_the_threshold_is_not_boilerplate() {
         let content: Vec<Value> = (0..31)
@@ -409,14 +354,12 @@ mod tests {
         let content: Vec<Value> = (0..3)
             .map(|page| json!({"type": "footer", "text": "University", "page_idx": page}))
             .collect();
-        // Footers are dropped anyway; what this pins is that they are dropped
-        // by the footer rule and not by boilerplate detection.
+        // Dropped by the footer rule, not by boilerplate detection.
         assert_eq!(markdown(&rendered(&content, 3)), vec!["", "", ""]);
     }
 
     /// Stable ordering with a header after body text, plus the image block and
-    /// blank-page handling — the Python's second pinned test, minus the image
-    /// copy (covered separately).
+    /// blank-page handling.
     #[test]
     fn headers_lead_the_page_and_blank_pages_keep_records() {
         let content = vec![
@@ -462,7 +405,7 @@ mod tests {
         );
     }
 
-    /// Equations are passed through untouched — MinerU ships its own `$$`.
+    /// Equations are passed through untouched.
     #[test]
     fn equations_are_not_wrapped() {
         let content = vec![
@@ -527,19 +470,11 @@ mod tests {
     /// shipped is skipped without being counted.
     #[test]
     fn undersized_crops_are_dropped_with_their_captions() {
-        let root = std::env::temp_dir().join(format!(
-            "oculus-render-images-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
+        let root = Scratch::new("render-images");
         let source = root.join("source");
         let out = root.join("deck_images");
         fs::create_dir_all(&source).unwrap();
-        // Minimal PNG headers: 300x200 = 60000 px² (kept), 100x100 = 10000
-        // px² (dropped). `imagesize` reads the IHDR and never decodes.
+        // Minimal PNG headers: 300x200 (kept), 100x100 (dropped).
         fs::write(source.join("big.png"), png_header(300, 200)).unwrap();
         fs::write(source.join("small.png"), png_header(100, 100)).unwrap();
 
@@ -562,20 +497,16 @@ mod tests {
                 "![Figure 1](deck_images/big.png)",
                 // Caption gone with the crop; the footnote is prose and stays.
                 "Faculty mark",
-                // A crop the backend named but never shipped still links: the
-                // markdown on disk already reads this way.
+                // Named but never shipped: still links.
                 "![Absent](deck_images/missing.png)",
             ]
         );
-
-        fs::remove_dir_all(&root).ok();
     }
 
     /// Two items pointing at the same crop copy it once and both link it.
     #[test]
     fn a_duplicate_crop_name_is_copied_once() {
-        let root = std::env::temp_dir()
-            .join(format!("oculus-render-dupe-{}", std::process::id()));
+        let root = Scratch::new("render-dupe");
         let source = root.join("source");
         let out = root.join("deck_images");
         fs::create_dir_all(&source).unwrap();
@@ -591,8 +522,6 @@ mod tests {
             markdown(&pages),
             vec!["![](deck_images/fig.png)", "![](deck_images/fig.png)"]
         );
-
-        fs::remove_dir_all(&root).ok();
     }
 
     /// Whitespace and case do not save a running head from detection.
@@ -605,8 +534,7 @@ mod tests {
             json!({"type": "header", "text": "mast20004\n probability", "page_idx": page})
         }));
         content.push(json!({"type": "text", "text": "Mast20004 Probability", "page_idx": 0}));
-        // 4 distinct pages out of 4 — over the threshold, so every spelling
-        // goes, including the plain text item that normalises to the same key.
+        // Every spelling goes, including a plain text item with the same key.
         assert_eq!(markdown(&rendered(&content, 4)), vec!["", "", "", ""]);
     }
 

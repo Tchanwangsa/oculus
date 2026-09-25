@@ -1,11 +1,6 @@
-//! Canvas HTTP access: session cookie, retries, Link-header pagination.
-//!
-//! This is the whole Canvas surface for both the app and the `oculus` CLI. It
-//! replaces the old arrangement where a hidden WebView ran `scraper.js` and
-//! tunnelled every request back through the local IPC server — that indirection
-//! bought nothing (the cookie always lived here in Rust) and cost everything:
-//! macOS suspends an off-screen WKWebView's content process, which froze the
-//! scraper mid-run with no error to catch.
+//! Canvas HTTP access for the app and the `oculus` CLI: session cookie,
+//! retries, Link-header pagination. In Rust, not a WebView — see CLAUDE.md
+//! ("No work in hidden WebViews").
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -13,9 +8,8 @@ use std::sync::Mutex;
 
 pub use crate::paths::CANVAS_BASE;
 
-/// A finished response. 4xx/5xx are values, not errors — callers branch on
-/// `status` (a locked module is a 403 to skip, not a run to abort). `Err` is
-/// reserved for "the request never completed", after retries.
+/// A finished response. 4xx/5xx are values (a locked module is a 403 to
+/// skip); `Err` means the request never completed, after retries.
 pub struct Res {
     pub status: u16,
     pub body: Vec<u8>,
@@ -33,9 +27,7 @@ impl Res {
     }
 }
 
-/// Long enough for a big file on a slow link, short enough that a wedged
-/// request always ends. Nothing above this layer has its own timeout, so this
-/// value is what guarantees a sync terminates.
+/// Nothing above this layer has a timeout, so this is what ends a wedged sync.
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 const RETRIES: u32 = 2;
 
@@ -60,9 +52,7 @@ fn display_name(v: &serde_json::Value) -> String {
 }
 
 impl Canvas {
-    /// Load the persisted session cookie. Succeeds even with no cookie —
-    /// callers check [`Canvas::has_session`] so they can report "not signed in"
-    /// rather than a wall of 401s.
+    /// Load the persisted session cookie; check [`Canvas::has_session`].
     pub fn open(data_dir: &Path) -> Self {
         let cookie_path = crate::paths::cookie_path(data_dir);
         let cookie = std::fs::read_to_string(&cookie_path).unwrap_or_default();
@@ -80,18 +70,14 @@ impl Canvas {
         self.cookie.lock().unwrap().clone()
     }
 
-    /// The raw cookie header, for flows that drive Canvas pages outside this
-    /// client — the Ed LTI launch hops between hosts and needs to attach it
-    /// to the Canvas legs itself.
+    /// The raw cookie header, for the Ed LTI launch's Canvas legs.
     pub fn cookie_header(&self) -> String {
         self.cookie()
     }
 
-    /// Fold a response's `Set-Cookie` values back into the store.
-    ///
-    /// `canvas_session` carries no Expires — Canvas rotates it server-side now
-    /// and then. Keeping the login snapshot forever means eventually presenting
-    /// a value the server has moved past, so every response updates it.
+    /// Fold a response's `Set-Cookie` values back into the store: Canvas
+    /// rotates the HttpOnly `canvas_session` server-side, so the login snapshot
+    /// alone goes stale.
     fn absorb(&self, resp: &ureq::Response) {
         let set: Vec<String> = resp.all("set-cookie").into_iter().map(str::to_string).collect();
         if set.is_empty() {
@@ -107,11 +93,8 @@ impl Canvas {
         *guard = merged;
     }
 
-    /// GET an absolute URL or a Canvas-relative path.
-    ///
-    /// Only Canvas gets the session cookie: a `public_url` points at a
-    /// pre-signed S3 link, and handing our cookie to a third-party host would
-    /// be a credential leak.
+    /// GET an absolute URL or a Canvas-relative path. Only Canvas gets the
+    /// cookie — a `public_url` is a pre-signed S3 link on another host.
     pub fn get(&self, url_or_path: &str) -> Result<Res, String> {
         let url = if url_or_path.starts_with("http") {
             url_or_path.to_string()
@@ -165,8 +148,8 @@ impl Canvas {
         r.json()
     }
 
-    /// Follow `rel="next"` to the end and concatenate every page.
-    /// 403/404 mid-walk means "locked or absent" — stop with what we have.
+    /// Follow `rel="next"` and concatenate every page; a 403/404 mid-walk
+    /// stops with what we have.
     pub fn get_all(&self, url_or_path: &str) -> Result<Vec<serde_json::Value>, String> {
         let mut out = Vec::new();
         let mut next = Some(url_or_path.to_string());
@@ -187,15 +170,9 @@ impl Canvas {
         Ok(out)
     }
 
-    /// Ping Canvas and classify the answer.
-    ///
-    /// `Unreachable` is deliberately distinct from `Rejected` — a flat network
-    /// is no reason to throw away a working session and force a fresh SSO
-    /// login, and it is the difference between the keep-alive burning an Okta
-    /// sign-in attempt and waiting for the wifi to come back.
-    ///
-    /// The request doubles as the keep-alive itself: Canvas rolls the session
-    /// forward on use, and `get` folds any rotated cookie back to disk.
+    /// Ping Canvas and classify the answer — also the keep-alive, since Canvas
+    /// rolls the session forward on use. `Unreachable` is distinct from
+    /// `Rejected` so a flat network never forces a fresh SSO login.
     pub fn probe(&self) -> SessionProbe {
         if !self.has_session() {
             return SessionProbe::Rejected("No saved Canvas session.".to_string());
@@ -213,7 +190,6 @@ impl Canvas {
         }
     }
 
-    /// The signed-in user's display name, or an error describing why not.
     pub fn whoami(&self) -> Result<String, String> {
         match self.probe() {
             SessionProbe::Valid(name) => Ok(name),
@@ -262,10 +238,8 @@ fn parse_cookie_header(header: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Merge `Set-Cookie` values into a cookie header. Returns the new header, or
-/// `None` when nothing changed — a sync makes hundreds of requests and most
-/// carry no rotation, so this is what keeps us from rewriting the file
-/// constantly. Order is preserved so the header stays stable.
+/// Merge `Set-Cookie` values into a cookie header, preserving order. `None`
+/// when nothing changed, so the file is not rewritten on every request.
 pub fn merged_cookie_header(current: &str, set_cookies: &[String]) -> Option<String> {
     if current.is_empty() {
         return None;
@@ -341,8 +315,7 @@ mod tests {
 
     #[test]
     fn keeps_base64_padding_in_values() {
-        // Canvas session values are base64 and end in '='; splitting on the
-        // first '=' only is what preserves them.
+        // Session values are base64 ending in '='; split on the first '=' only.
         let out = merged_cookie_header("s=old", &sc(&["s=abc==; path=/"])).unwrap();
         assert_eq!(out, "s=abc==");
     }

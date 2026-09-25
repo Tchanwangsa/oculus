@@ -1,35 +1,17 @@
-//! Projects: boards, tasks and one level of subtask, written headlessly.
+//! Projects: boards, tasks and one level of subtask, written headlessly — the
+//! same SQL as `app/src/lib/projects.ts`, so the `oculus` CLI (and the chat
+//! agent) can plan work the board picks up. Change a table and both writers
+//! change. Rules mirrored from that module:
 //!
-//! The window side of these tables belongs to the frontend
-//! (`app/src/lib/projects.ts`); this is the same SQL without a window, so the
-//! `oculus` CLI — and through it the chat agent — can plan work and the board
-//! picks it up. Exactly the pair `store.rs` is for the scrape tables: change a
-//! table's shape and both writers change.
-//!
-//! Three rules are why this is more than a few INSERTs, and all three are
-//! mirrored from that module rather than reinvented:
-//!
-//! - **A column id is checked against a board** before anything is filed under
-//!   it — the project's own `columns`, or the default board for a task that
-//!   belongs to no project at all ({@link board_of}). A task in a column no
-//!   view renders is not misfiled, it is invisible — and here `--column` is
-//!   free text an agent typed, which is the case the frontend's
-//!   `requireColumn` was written for.
+//! - **A column id is checked against a board** ({@link board_of}): a task in a
+//!   column no view renders is invisible, and `--column` is free text.
 //! - **`done_at` is derived from the destination column's `kind`**, never
-//!   passed in, on create as well as on move. So "which column is it in" and
-//!   "is it finished" cannot disagree whichever door the task came through.
-//! - **Subtasks are one level deep**, enforced in code because SQLite cannot
-//!   express "the parent has no parent" as a constraint. The board draws a
-//!   task and its children, not a tree; a grandchild would never be drawn.
-//! - **A task may belong to no project at all** (migration 37). That is the
-//!   absence of a project, not an "Inbox" project: `project_id` is NULL, the
-//!   board it is checked against is the default one, and there is no
-//!   `updated_at` to move.
+//!   passed in, on create and on move.
+//! - **Subtasks are one level deep**, enforced in code (SQLite cannot express it).
+//! - **A task may belong to no project** (`project_id` NULL): its board is the
+//!   default one.
 //!
-//! Schema is migration 27 in `lib.rs`, plus 33 (`tags`, `event_id`) and 37
-//! (`project_id` nullable, whose SQL is {@link UNFILED_TASKS_SQL} below).
-//! Nothing here creates it — same rule as `store.rs`: a fresh machine opens the
-//! app once first.
+//! Schema: migrations 27, 33 and 37 in `migrations.rs`. Nothing here creates it.
 
 use std::sync::OnceLock;
 
@@ -38,31 +20,18 @@ use sqlx::{Row, SqliteConnection, SqlitePool};
 
 // ── Migration 37 ─────────────────────────────────────────────────────────────
 
-/// The table rebuild that lets a task belong to no project — migration 37's
-/// whole body, held here so the tests can run the very string the app runs.
-///
-/// **The why is in the migration's comment block in `lib.rs`**; one line of it
-/// is worth having in front of the SQL. `parent_id` deliberately references
-/// `project_tasks_new`, *itself*, rather than the `project_tasks` it is about to
-/// become: pointed at the old table, the `DROP TABLE` below would fire the
-/// self-reference's `ON DELETE CASCADE` and empty the copy it had just made,
-/// because `defer_foreign_keys` defers the *check*, not the action — measured,
-/// and the case
-/// {@link unfiled_tests::the_rebuild_keeps_parents_children_and_their_cascades}
-/// fails on. The rename fixes the clause up to the final name.
-///
-/// `ORDER BY id` and the `PRAGMA` are belt and braces rather than one fix each:
-/// SQLite checks this copy's foreign keys at the *end* of the one
-/// `INSERT … SELECT` rather than per row, so either alone carries it and
-/// dropping both still passes. They are here for the edit that splits the copy
-/// in two, or runs it outside a transaction.
+/// Migration 37 (nullable `project_id`), held here so the tests run the string
+/// the app runs. `parent_id` references `project_tasks_new` *itself*: pointed at
+/// the old table, `DROP TABLE` fires its `ON DELETE CASCADE` and empties the copy
+/// (`defer_foreign_keys` defers the check, not the action). The rename fixes the
+/// name up. `ORDER BY id` and the `PRAGMA` are belt and braces.
 pub const UNFILED_TASKS_SQL: &str = r#"
 PRAGMA defer_foreign_keys = ON;
 
 CREATE TABLE project_tasks_new (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-    -- Itself, not `project_tasks`, until the rename below — see the doc comment.
+    -- Itself, not `project_tasks` — see the doc comment.
     parent_id   INTEGER REFERENCES project_tasks_new(id) ON DELETE CASCADE,
     title       TEXT    NOT NULL,
     body        TEXT,
@@ -104,9 +73,7 @@ pub struct Column {
     pub kind: String,
 }
 
-/// The board a new project opens with — the same four `DEFAULT_COLUMNS` the
-/// frontend serialises, so a project created from the CLI is indistinguishable
-/// from one created on the board.
+/// The frontend's `DEFAULT_COLUMNS`; also the board of an unfiled task.
 pub fn default_columns() -> Vec<Column> {
     [
         ("backlog", "Backlog", "backlog"),
@@ -123,20 +90,11 @@ pub fn default_columns() -> Vec<Column> {
     .collect()
 }
 
-/// The board a task's column is checked against: the project's own, or the
-/// default one when the task belongs to no project.
-///
-/// `column_id` is NOT NULL on every task, unfiled ones included, so a task with
-/// no project still has to name a column that something can draw. It names one
-/// of {@link default_columns}' four ids — which are also the ids a *new*
-/// project is born with, so filing an unfiled task into a default board later
-/// needs no translation. `boardOf` in `app/src/lib/projects.ts` is the same
-/// helper on the window side.
+/// The project's own board, or the default one for an unfiled task
+/// (`boardOf` in `app/src/lib/projects.ts`).
 fn board_of(project: Option<&Project>) -> &[Column] {
     match project {
         Some(p) => &p.columns,
-        // Built once rather than per write: `default_columns` allocates, and
-        // every unfiled create, move and check reads this.
         None => {
             static DEFAULT_BOARD: OnceLock<Vec<Column>> = OnceLock::new();
             DEFAULT_BOARD.get_or_init(default_columns)
@@ -144,9 +102,7 @@ fn board_of(project: Option<&Project>) -> &[Column] {
     }
 }
 
-/// Resolve a column id against a board, or refuse with the ids it does have —
-/// the agent's next attempt should not need a second command to find out what
-/// the board is called.
+/// Resolve a column id against a board, or refuse naming the ids it does have.
 fn require_column<'a>(
     project: Option<&'a Project>,
     column_id: &str,
@@ -164,8 +120,7 @@ fn require_column<'a>(
 
 // ── Rows ─────────────────────────────────────────────────────────────────────
 
-/// A project, with the subject's code resolved through a join — the code is
-/// never stored, so a renamed subject cannot leave a stale copy behind.
+/// A project, with the subject's code resolved through a join (never stored).
 #[derive(Serialize, Clone, Debug)]
 pub struct Project {
     pub id: i64,
@@ -177,13 +132,10 @@ pub struct Project {
     pub starts_at: Option<String>,
     pub due_at: Option<String>,
     pub columns: Vec<Column>,
-    /// The user's own labels, parsed out of JSON at the boundary the way
-    /// `columns` is. Always a list — `[]` is untagged, never null.
+    /// Parsed from JSON; `[]` when untagged, never null.
     pub tags: Vec<String>,
-    /// The calendar event this project answers to, as a `CalEvent.id`
-    /// (`app/src/lib/calendar.ts`). Read-only here: the CLI has no way to list
-    /// the grid, so pinning is the app's, and this is carried so
-    /// `oculus project show` can say a project already has one.
+    /// A `CalEvent.id` (`app/src/lib/calendar.ts`). Read-only here: pinning is
+    /// the app's.
     pub event_id: Option<String>,
     pub position: f64,
     pub source: String,
@@ -194,8 +146,7 @@ pub struct Project {
 #[derive(Serialize, Clone, Debug)]
 pub struct Task {
     pub id: i64,
-    /// NULL on an unfiled task — one that belongs to no project at all
-    /// (migration 37), rather than to an "Inbox" project.
+    /// NULL on an unfiled task.
     pub project_id: Option<i64>,
     pub parent_id: Option<i64>,
     pub title: String,
@@ -217,12 +168,9 @@ const PROJECT_SELECT: &str = r#"SELECT p.id, p.subject_id, s.code AS subject_cod
   FROM projects p
   LEFT JOIN subjects s ON s.id = p.subject_id"#;
 
-/// Trimmed, emptied out, deduplicated case-insensitively and capped — the same
-/// normalisation `normaliseTags` in `app/src/lib/projects.ts` applies, so a tag
-/// typed at the CLI and a tag typed on the About page store identically. First
-/// spelling wins.
+/// Trimmed, deduplicated case-insensitively (first spelling wins) and capped —
+/// must match `normaliseTags` in `app/src/lib/projects.ts`.
 pub fn normalise_tags(tags: impl IntoIterator<Item = String>) -> Vec<String> {
-    /// A project is labelled, not catalogued.
     const MAX_TAGS: usize = 24;
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<String> = Vec::new();
@@ -243,15 +191,11 @@ pub fn normalise_tags(tags: impl IntoIterator<Item = String>) -> Vec<String> {
 }
 
 fn to_project(r: &sqlx::sqlite::SqliteRow) -> Project {
-    // A board that will not parse is a board nothing can be drawn on, and the
-    // tasks still name their column by id — so fall back rather than fail the
-    // whole read on one bad row, the way `toProject` does.
+    // Fall back rather than fail the whole read on one bad row, as `toProject` does.
     let columns = serde_json::from_str::<Vec<Column>>(&r.get::<String, _>("columns"))
         .ok()
         .filter(|c| !c.is_empty())
         .unwrap_or_else(default_columns);
-    // Same fallback as the board: a tag list that will not parse is not worth
-    // failing the whole read over.
     let tags = r
         .get::<Option<String>, _>("tags")
         .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
@@ -296,16 +240,14 @@ fn to_task(r: &sqlx::sqlite::SqliteRow) -> Task {
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
-/// Which projects a listing wants. `Personal` is `subject_id IS NULL` — the
-/// planning that belongs to no course.
+/// `Personal` is `subject_id IS NULL`.
 pub enum SubjectFilter {
     Any,
     Personal,
     Subject(i64),
 }
 
-/// Every project, in the board's own `position` order. `status` is `active`,
-/// `archived`, or `all`.
+/// `status` is `active`, `archived`, or `all`.
 pub async fn projects(
     pool: &SqlitePool,
     subject: SubjectFilter,
@@ -317,8 +259,7 @@ pub async fn projects(
         SubjectFilter::Personal => where_parts.push("p.subject_id IS NULL".into()),
         SubjectFilter::Subject(id) => where_parts.push(format!("p.subject_id = {id}")),
     }
-    // One placeholder either way: sqlx refuses a bind the statement does not
-    // use, and "all" is a value here rather than a different query.
+    // Always bound: sqlx refuses a bind the statement does not use.
     where_parts.push("(?1 = 'all' OR p.status = ?1)".into());
     let sql = format!(
         "{PROJECT_SELECT}{}\n ORDER BY p.position ASC, p.id ASC",
@@ -350,12 +291,8 @@ async fn project_on(conn: &mut SqliteConnection, id: i64) -> Result<Option<Proje
     Ok(row.as_ref().map(to_project))
 }
 
-/// Every task of one project, parents and subtasks together, in `position`
-/// order.
-///
-/// Deliberately not ordered by `column_id`: that would sort the columns
-/// alphabetically, which is not the board's order and never will be. The
-/// board's order is the project's `columns` array; the caller groups.
+/// Every task of one project in `position` order. Not ordered by `column_id`
+/// (that is alphabetical); the board's order is `columns` and the caller groups.
 pub async fn tasks(pool: &SqlitePool, project_id: i64) -> Result<Vec<Task>, String> {
     let rows = sqlx::query(
         "SELECT * FROM project_tasks WHERE project_id = ?1 ORDER BY position ASC, id ASC",
@@ -367,28 +304,15 @@ pub async fn tasks(pool: &SqlitePool, project_id: i64) -> Result<Vec<Task>, Stri
     Ok(rows.iter().map(to_task).collect())
 }
 
-/// Which tasks a cross-project listing wants: everything, or only the ones
-/// filed nowhere.
-///
-/// The same two scopes the app's universal page offers (`TaskScope` in
-/// `app/src/hooks/useTaskList.ts`, backed by `getAllTasks` and
-/// `getUnfiledTasks`), so `oculus task list` and that page answer the same two
-/// questions rather than two nearly-identical ones.
+/// The app's `TaskScope` (`app/src/hooks/useTaskList.ts`).
 pub enum TaskScope {
     All,
     Unfiled,
 }
 
-/// Every task in the library, across every project and including the ones
-/// filed nowhere — what `oculus task list` prints without `-p`.
-///
-/// Ordered unfiled-first, then by project, then by `position`: the caller
-/// prints one board per project, and `position` is the only order a board has.
-/// Deliberately *not* the app's `UNIVERSAL_ORDER`, which sorts by due date
-/// first — that is the order of a list you read, and this is a set of boards
-/// you print. The project's name and columns are not joined in: a caller that
-/// groups needs the whole project anyway, and `projects()` hands it over in
-/// one more read rather than a row's worth of duplicated columns per task.
+/// Every task across projects — `oculus task list` without `-p`. Ordered
+/// unfiled-first, then by project, then `position`, because the caller prints
+/// one board per project (not the app's due-date `UNIVERSAL_ORDER`).
 pub async fn all_tasks(pool: &SqlitePool, scope: TaskScope) -> Result<Vec<Task>, String> {
     let filter = match scope {
         TaskScope::All => "",
@@ -404,8 +328,7 @@ pub async fn all_tasks(pool: &SqlitePool, scope: TaskScope) -> Result<Vec<Task>,
     Ok(rows.iter().map(to_task).collect())
 }
 
-/// How many tasks a project has, and how many are finished — what a listing
-/// shows instead of reading every row.
+/// `(total, done)` for one project.
 pub async fn task_counts(pool: &SqlitePool, project_id: i64) -> Result<(i64, i64), String> {
     let row = sqlx::query(
         "SELECT COUNT(*) AS total, COUNT(done_at) AS done
@@ -427,12 +350,11 @@ pub struct NewProject {
     pub starts_at: Option<String>,
     pub due_at: Option<String>,
     pub tags: Vec<String>,
-    /// `manual` | `agent` — the board says which ones you did not write.
+    /// `manual` | `agent`.
     pub source: String,
 }
 
-/// Create a project at the end of the list and return its id. The board is the
-/// same default one the app creates.
+/// Create a project at the end of the list with the default board.
 pub async fn create_project(pool: &SqlitePool, input: &NewProject) -> Result<i64, String> {
     let next: f64 = sqlx::query_scalar("SELECT CAST(COALESCE(MAX(position), -1) + 1 AS REAL) FROM projects")
         .fetch_one(pool)
@@ -471,8 +393,7 @@ pub struct ProjectPatch {
     pub status: Option<String>,
     pub starts_at: Option<Option<String>>,
     pub due_at: Option<Option<String>>,
-    /// Replaces the whole set, like the frontend's — there is no add/remove
-    /// patch. `Some(vec![])` clears it.
+    /// Replaces the whole set; `Some(vec![])` clears it.
     pub tags: Option<Vec<String>>,
 }
 
@@ -481,10 +402,8 @@ pub async fn update_project(
     id: i64,
     patch: &ProjectPatch,
 ) -> Result<(), String> {
-    // Placeholders are numbered as the sets are collected and bound in the
-    // same order: sqlx refuses a statement whose highest parameter is lower
-    // than the number of binds, so a fixed ?1..?n list with holes in it would
-    // fail on every partial patch.
+    // Placeholders numbered as collected: sqlx refuses a statement whose
+    // highest parameter is lower than the number of binds.
     let mut sets: Vec<String> = Vec::new();
     let mut put = |column: &str| sets.push(format!("{column} = ?{}", sets.len() + 1));
     if patch.name.is_some() {
@@ -516,8 +435,7 @@ pub async fn update_project(
         sets.join(", "),
         sets.len() + 1
     );
-    // Held outside the builder: `q.bind(&tags_json)` borrows, so the string has
-    // to outlive every `q` reassignment below it.
+    // Outlives `q`, which borrows it.
     let tags_json: String;
     let mut q = sqlx::query(&sql);
     if let Some(v) = &patch.name {
@@ -557,9 +475,7 @@ pub async fn update_project(
 
 // ── Task writes ──────────────────────────────────────────────────────────────
 
-/// Whose child a new task is: an existing task's id, or the `key` of an
-/// earlier item in the same batch, which is how one call can create a parent
-/// and its subtasks together.
+/// An existing task's id, or the `key` of an earlier item in the same batch.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum ParentRef {
@@ -567,8 +483,7 @@ pub enum ParentRef {
     Key(String),
 }
 
-/// One task to create. Deserialised straight from a `--batch` item, so the
-/// field names here are the batch's contract.
+/// One `--batch` item: the field names are the batch's contract.
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub struct NewTask {
@@ -586,19 +501,13 @@ pub struct NewTask {
     pub starts: Option<String>,
     #[serde(default, alias = "estimate_minutes")]
     pub estimate: Option<i64>,
-    /// A name this item can be referred to by `parent` later in the same
-    /// batch. Never stored.
+    /// Referred to by a later item's `parent`. Never stored.
     #[serde(default)]
     pub key: Option<String>,
 }
 
-/// Create one or many tasks and return their ids **in input order**.
-///
-/// One transaction for the whole batch: a breakdown is a shape, not a pile of
-/// rows, and half a breakdown on the board would be worse than none — so a
-/// rejected item (an unknown column, a parent that is itself a subtask) rolls
-/// the lot back and nothing is written. The single-task path is this function
-/// with one item, so both doors behave identically.
+/// Create tasks and return their ids in input order. One transaction: any
+/// rejected item rolls the whole batch back.
 pub async fn create_tasks(
     pool: &SqlitePool,
     project_id: Option<i64>,
@@ -609,8 +518,6 @@ pub async fn create_tasks(
         return Err("no tasks given".to_string());
     }
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    // `None` is a task filed nowhere, and its board is the default one — so
-    // there is nothing to look up and nothing to refuse.
     let project = match project_id {
         Some(id) => Some(
             project_on(&mut *tx, id)
@@ -624,8 +531,7 @@ pub async fn create_tasks(
     let mut ids: Vec<i64> = Vec::with_capacity(items.len());
 
     for (n, item) in items.iter().enumerate() {
-        // Which item failed only means something in a batch; on a single add
-        // the prefix would be noise in front of the real message.
+        // Prefix errors with the item only in a batch.
         let where_ = || {
             if items.len() > 1 {
                 format!("task {} ({:?}): ", n + 1, item.title)
@@ -654,13 +560,8 @@ pub async fn create_tasks(
             );
         }
 
-        // A subtask with no column of its own inherits its **parent's**, not
-        // the board's first column. The first column is Backlog on a default
-        // board, and a subtask of an in-progress task filed there is a row the
-        // Backlog view never draws — it lists top-level tasks — while the
-        // board and the table look right, because both draw a subtask under
-        // its parent wherever it claims to be. An explicit `--column` still
-        // wins: a subtask can legitimately be done while its parent is not.
+        // A subtask with no `--column` inherits its parent's, not the first
+        // column: the Backlog view lists only top-level tasks, so it would vanish.
         let board = board_of(project.as_ref());
         let column = match &item.column {
             Some(id) => {
@@ -668,16 +569,13 @@ pub async fn create_tasks(
             }
             None => parent_column
                 .as_deref()
-                // A column the board has since dropped falls back rather than
-                // failing: the parent's row is already there either way.
                 .and_then(|id| board.iter().find(|c| c.id == id))
                 .or_else(|| board.first())
                 .ok_or("project has no columns")?,
         };
         let done = column.kind == "done";
 
-        // `IS`, not `=`: an unfiled task's neighbours are the other unfiled
-        // tasks in that column, and `project_id = NULL` matches nothing.
+        // `IS`, not `=`: `project_id = NULL` matches nothing.
         let next: f64 = sqlx::query_scalar(
             "SELECT CAST(COALESCE(MAX(position), -1) + 1 AS REAL) FROM project_tasks
               WHERE project_id IS ?1 AND column_id = ?2",
@@ -717,25 +615,14 @@ pub async fn create_tasks(
         ids.push(id);
     }
 
-    // The project's own timestamp moves with its board: a listing sorted by
-    // "last touched" should not call a project untouched because the change
-    // was a task.
     touch_project(&mut *tx, project_id).await?;
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(ids)
 }
 
-/// A task exists, belongs to the same project, and may take children — and if
-/// it does, which column it is sitting in.
-///
-/// Both directions of the one-level rule are checked — here, and in
-/// {@link update_task} for the task being reparented. The project check is the
-/// one thing stricter than the frontend, which never has to ask: a drag can
-/// only land on a board that is already on screen, while an id typed into
-/// `--parent` can name anything. The column comes back because a subtask with
-/// no column of its own belongs in its parent's — see {@link create_tasks}.
-/// "The same project" includes *no* project: a subtask of an unfiled task is
-/// unfiled too, since a subtask cannot sit anywhere its parent does not.
+/// Check a would-be parent exists, is in the same project (NULL included) and
+/// is not itself a subtask; returns its column. {@link update_task} checks the
+/// other direction.
 async fn assert_can_parent(
     conn: &mut SqliteConnection,
     parent_id: i64,
@@ -769,8 +656,7 @@ async fn has_children(conn: &mut SqliteConnection, id: i64) -> Result<bool, Stri
     Ok(n > 0)
 }
 
-/// Move a project's own `updated_at` when its board changes — and do nothing
-/// at all for an unfiled task, which has no project to have been touched.
+/// Bump a project's `updated_at`; a no-op for `None`.
 async fn touch_project(conn: &mut SqliteConnection, id: Option<i64>) -> Result<(), String> {
     let Some(id) = id else { return Ok(()) };
     sqlx::query("UPDATE projects SET updated_at = datetime('now') WHERE id = ?1")
@@ -795,10 +681,8 @@ async fn task_on(conn: &mut SqliteConnection, id: i64) -> Result<Option<Task>, S
     Ok(row.as_ref().map(to_task))
 }
 
-/// Everything about a task *except* where it sits: `column_id`, `position` and
-/// `done_at` are one fact in three columns and {@link move_task} is their only
-/// writer, because it is the only thing that reads the board to learn whether
-/// the destination is a `done` column.
+/// Everything except where a task sits: `column_id`, `position` and `done_at`
+/// are written only by {@link move_task}, which reads the column's kind.
 #[derive(Default)]
 pub struct TaskPatch {
     pub title: Option<String>,
@@ -880,8 +764,7 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
     tx.commit().await.map_err(|e| e.to_string())
 }
 
-/// Deletes the task and, by the migration's self-referential cascade, its
-/// subtasks. Returns how many rows went.
+/// Deletes the task and (by cascade) its subtasks; returns how many rows went.
 pub async fn delete_task(pool: &SqlitePool, id: i64) -> Result<u64, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     let existing = task_on(&mut *tx, id)
@@ -902,9 +785,7 @@ pub async fn delete_task(pool: &SqlitePool, id: i64) -> Result<u64, String> {
     Ok(children as u64 + 1)
 }
 
-/// The gap at which fractional positions have to be given up on: repeated
-/// midpoints halve it every time, and well before a double runs out the
-/// midpoint stops landing strictly between its neighbours.
+/// Below this gap a column is renumbered before taking a midpoint.
 const MIN_GAP: f64 = 1e-6;
 
 /// Renumber one column to 0, 1, 2, … so midpoints have room again.
@@ -913,7 +794,6 @@ async fn renumber_column(
     project_id: Option<i64>,
     column_id: &str,
 ) -> Result<(), String> {
-    // `IS`: the unfiled tasks of one column are a group like any other.
     let rows = sqlx::query(
         "SELECT id FROM project_tasks WHERE project_id IS ?1 AND column_id = ?2
           ORDER BY position ASC, id ASC",
@@ -942,21 +822,9 @@ async fn position_of(conn: &mut SqliteConnection, id: i64) -> Result<Option<f64>
         .map_err(|e| e.to_string())
 }
 
-/// Drop a task into a column, between two neighbours.
-///
-/// `above` is the task it should sit *after* and `below` the one it should sit
-/// *before*; either may be absent, and both absent means the end of the
-/// column. The new position is their midpoint, which is the whole point of
-/// `position REAL`: a move writes one row instead of renumbering a column. The
-/// one case that is not arithmetic is the gap underflowing ({@link MIN_GAP}) —
-/// the column is renumbered to whole numbers and the midpoint is taken again.
-///
-/// Landing in a `kind: "done"` column stamps `done_at`; leaving one clears it.
-/// The *kind* decides, never the name or the id, both of which are the user's
-/// to change.
-///
-/// An unfiled task moves among the *unfiled* tasks of that column: `project_id
-/// IS NULL` is a group like any other here, and its board is the default one.
+/// Drop a task into a column after `above` and before `below` (either may be
+/// absent) at their midpoint, renumbering the column if the gap underflows
+/// ({@link MIN_GAP}). A `done`-kind column stamps `done_at`; leaving clears it.
 pub async fn move_task(
     pool: &SqlitePool,
     id: i64,
@@ -998,8 +866,6 @@ pub async fn move_task(
         renumber_column(&mut *tx, existing.project_id, column_id).await?;
         position = midpoint(&mut *tx, above, below).await?;
     }
-    // Two neighbours still too close after a renumber would mean the column
-    // holds more rows than a double can separate, which it cannot.
     let position = position.ok_or("could not find a position for the task")?;
 
     sqlx::query(
@@ -1050,15 +916,8 @@ async fn midpoint(
     })
 }
 
-/// The kind a task's column means **on its own board**, and `backlog` for a
-/// column that board no longer has.
-///
-/// The fallback is not a shrug: `kindOf` in
-/// `app/src/components/projects/universalTasks.ts` draws such a card in
-/// Backlog for the same reason — the leftmost column, where a card's life
-/// starts — because a card nothing draws is a card nobody can fix. The two
-/// have to agree, or a refile would move a task somewhere other than the
-/// column the universal board just showed it in.
+/// A column's kind on its own board, `backlog` for one the board dropped —
+/// must agree with `kindOf` in `app/src/components/projects/universalTasks.ts`.
 fn kind_of(project: Option<&Project>, column_id: &str) -> String {
     board_of(project)
         .iter()
@@ -1067,40 +926,15 @@ fn kind_of(project: Option<&Project>, column_id: &str) -> String {
         .unwrap_or_else(|| "backlog".to_string())
 }
 
-/// File a task under another project, or under none at all — and take its
-/// subtasks with it. Returns how many rows moved.
+/// File a task under another project (or none), taking its subtasks with it;
+/// returns how many rows moved. A lone subtask is refused — it sits in its
+/// parent's project ({@link assert_can_parent}).
 ///
-/// The one operation that writes `project_id` after a task exists, and the one
-/// allowed to move a parent and its children at once: a subtask sits in its
-/// parent's project, which {@link assert_can_parent} enforces in both
-/// directions, so moving only one side of that pair would write the exact row
-/// it refuses to create. A subtask on its own is therefore refused and names
-/// its parent — there is no honest half of this move.
-///
-/// **The column maps across by *kind*, never by id.** A column id only means
-/// something against the board it was checked against, and two projects share
-/// nothing but what a column *means*: so the destination is the **first**
-/// column of that kind on the destination's board — `columnForKind`'s rule in
-/// `app/src/components/projects/universalTasks.ts`, which is what the
-/// universal board's drag already writes. Entering a kind puts you at its
-/// start, so a task filed into a default board lands in Todo rather than
-/// skipping to In progress. A board with no column of that kind is refused
-/// outright rather than quietly given the nearest one: there is no such thing
-/// as the nearest kind.
-///
-/// `done_at` is still derived from the destination column's kind, exactly as
-/// {@link move_task} derives it. The kind is preserved by construction, so
-/// this normally changes nothing — except for the one case it has to, a task
-/// whose old column its own board had dropped, which reads as `backlog` here
-/// and must not arrive in a work column still stamped finished.
-///
-/// It **appends**, at the end of the destination column. `position` is a
-/// fractional slot inside one project's column and nothing else, so there is
-/// no slot in the destination to aim at and no order in the source worth
-/// preserving; `MAX(position) + 1` over `project_id IS <destination>` is
-/// `appendNeighbour`'s neighbour plus one, computed in the one place it can be
-/// read atomically. `IS`, not `=`: filing *out* of every project is a group
-/// like any other and `project_id = NULL` matches nothing.
+/// The column maps across by *kind*, never id: the first column of that kind on
+/// the destination board (`columnForKind` in
+/// `app/src/components/projects/universalTasks.ts`); none of that kind is an
+/// error. `done_at` is re-derived as in {@link move_task}, and rows append at
+/// the end of the column. `IS`, not `=`, for the NULL project.
 pub async fn refile_task(
     pool: &SqlitePool,
     id: i64,
@@ -1117,8 +951,6 @@ pub async fn refile_task(
              project \u{2014} refile task {parent} and this one travels with it"
         ));
     }
-    // Already there: nothing to write, and writing anyway would append the
-    // task to the end of the column it is already sitting in.
     if existing.project_id == project_id {
         return Ok(0);
     }
@@ -1140,8 +972,7 @@ pub async fn refile_task(
         None => None,
     };
 
-    // The parent first, then its children in their own order, so the parent
-    // takes the lower position in any column the two end up sharing.
+    // Parent first, so it takes the lower position in a shared column.
     let rows = sqlx::query(
         "SELECT * FROM project_tasks WHERE parent_id = ?1 ORDER BY position ASC, id ASC",
     )
@@ -1205,8 +1036,6 @@ pub async fn refile_task(
         .map_err(|e| e.to_string())?;
     }
 
-    // Both boards changed: the one that lost the task and the one that gained
-    // it. `None` is a no-op, so neither side spells the absence of a project.
     touch_project(&mut *tx, existing.project_id).await?;
     touch_project(&mut *tx, project_id).await?;
     tx.commit().await.map_err(|e| e.to_string())?;
@@ -1215,13 +1044,9 @@ pub async fn refile_task(
 
 // ── Timestamps ───────────────────────────────────────────────────────────────
 
-/// Check that a date is a date, and hand back exactly the text that came in.
-///
-/// **Nothing is normalised.** Times are stored as each source gives them (see
-/// `docs/calendar.md`): rewriting a zone here would only add a way to be
-/// wrong, and the app reads these with `new Date`, which understands all of
-/// the shapes below. Accepted: `YYYY-MM-DD`, and that plus `T` or a space and
-/// `HH:MM[:SS[.fff]]`, optionally followed by `Z` or `±HH:MM`.
+/// Validate an ISO 8601 date and return the text unchanged — times are stored
+/// as each source gives them (see `docs/calendar.md`). Accepts `YYYY-MM-DD`,
+/// optionally plus `T`/space, `HH:MM[:SS[.fff]]` and `Z` or `±HH:MM`.
 pub fn check_iso8601(value: &str) -> Result<String, String> {
     let text = value.trim();
     let bad = || format!("\"{text}\" is not an ISO 8601 date (want 2026-09-20 or 2026-09-20T23:59:00Z)");
@@ -1294,8 +1119,6 @@ mod tests {
 
     #[test]
     fn accepts_the_shapes_the_library_actually_stores() {
-        // Canvas UTC, a bare date, SQLite's own datetime('now'), an Echo360
-        // wall clock, and an offset — all kept verbatim.
         for good in [
             "2026-09-20",
             "2026-09-20T23:59:00Z",
@@ -1323,7 +1146,6 @@ mod tests {
         assert_eq!(columns.last().unwrap().kind, "done");
     }
 
-    /// The batch's contract, since an agent writes this JSON by hand.
     #[test]
     fn batch_items_parse_from_the_documented_json() {
         let items: Vec<NewTask> = serde_json::from_str(
@@ -1336,7 +1158,6 @@ mod tests {
         assert!(matches!(items[1].parent, Some(ParentRef::Id(1))));
         assert!(matches!(items[2].parent, Some(ParentRef::Key(ref k)) if k == "intro"));
         assert_eq!(items[1].estimate, Some(90));
-        // A typo'd field is refused rather than silently dropped.
         assert!(serde_json::from_str::<Vec<NewTask>>(r#"[{"title":"x","deu":"2026-01-01"}]"#).is_err());
     }
 }
@@ -1349,14 +1170,8 @@ mod unfiled_tests {
 
     use super::*;
 
-    /// The tables migration 37 touches, **as migration 27 wrote them** —
-    /// `project_id INTEGER NOT NULL` included, since that constraint is the
-    /// thing being rebuilt away and a fixture that omitted it would assert
-    /// nothing. `subjects` is here only because `PROJECT_SELECT` joins it.
-    ///
-    /// Foreign keys are on: sqlx's default, and the app's, which is what makes
-    /// the copy's ordering and `defer_foreign_keys` load-bearing rather than
-    /// decorative.
+    /// The tables as migration 27 wrote them (`project_id NOT NULL`), with
+    /// foreign keys on as in the app.
     async fn pre_37() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -1406,9 +1221,6 @@ mod unfiled_tests {
         pool
     }
 
-    /// The same pool with migration 37 applied — what every writer test runs
-    /// against, so the writers are exercised over the schema the app will
-    /// actually have rather than one hand-written to suit them.
     async fn migrated() -> SqlitePool {
         let pool = pre_37().await;
         sqlx::raw_sql(UNFILED_TASKS_SQL)
@@ -1451,21 +1263,12 @@ mod unfiled_tests {
             .expect("count")
     }
 
-    /// The rebuild's whole risk, as a test.
-    ///
-    /// A parent and its subtasks go through a `CREATE`/`INSERT`/`DROP`/`RENAME`
-    /// with the self-reference live. The way to lose them is the `DROP TABLE`
-    /// cascading into the copy, which is exactly what happens if the new
-    /// table's `parent_id` names the old one — flip that single word in
-    /// {@link UNFILED_TASKS_SQL} and this fails on the first assertion. The
-    /// cascades are then asserted *afterwards*, to prove the rename carried the
-    /// foreign keys over rather than quietly dropping them.
+    /// Fails if {@link UNFILED_TASKS_SQL}'s `parent_id` names the old table;
+    /// then checks the rename kept both cascades.
     #[tokio::test]
     async fn the_rebuild_keeps_parents_children_and_their_cascades() {
         let pool = pre_37().await;
         let project = seed_project(&pool, "Essay").await;
-        // Written straight to SQL: `create_tasks` writes the *new* shape, and
-        // what is being tested is the copy of rows that predate it.
         sqlx::raw_sql(&format!(
             "INSERT INTO project_tasks (id, project_id, parent_id, title, column_id, position)
              VALUES (1, {project}, NULL, 'Draft', 'todo', 0),
@@ -1487,8 +1290,6 @@ mod unfiled_tests {
         assert_eq!(task_row(&pool, 3).await.unwrap().1, Some(1));
         assert_eq!(task_row(&pool, 4).await.unwrap().0, Some(project), "and its project");
 
-        // Ids continue rather than restarting: AUTOINCREMENT's sequence is
-        // re-seeded by the copy, so a new task cannot collide with an old one.
         let fresh = create_tasks(
             &pool,
             Some(project),
@@ -1499,12 +1300,10 @@ mod unfiled_tests {
         .expect("create after the rebuild");
         assert!(fresh[0] > 4, "new ids continue past the copied ones (got {})", fresh[0]);
 
-        // The self-reference survived the rename.
         delete_task(&pool, 1).await.expect("delete the parent");
         assert!(task_row(&pool, 2).await.is_none(), "parent → subtask cascade");
         assert!(task_row(&pool, 3).await.is_none());
 
-        // And so did the project reference.
         sqlx::query("DELETE FROM projects WHERE id = ?1")
             .bind(project)
             .execute(&pool)
@@ -1513,8 +1312,6 @@ mod unfiled_tests {
         assert_eq!(count(&pool).await, 0, "project → tasks cascade");
     }
 
-    /// A task with no project at all, through the writers rather than through
-    /// SQL: created, placed on the default board, moved, patched and read back.
     #[tokio::test]
     async fn an_unfiled_task_round_trips() {
         let pool = migrated().await;
@@ -1542,9 +1339,7 @@ mod unfiled_tests {
         .expect("unfiled create");
 
         let first = task(&pool, ids[0]).await.unwrap().unwrap();
-        assert_eq!(first.project_id, None, "no project, not a project called Inbox");
-        // No `--column` and no parent: the first column of the board it is
-        // checked against, which for an unfiled task is the default one.
+        assert_eq!(first.project_id, None);
         assert_eq!(first.column_id, "backlog");
 
         let child = task(&pool, ids[2]).await.unwrap().unwrap();
@@ -1552,11 +1347,8 @@ mod unfiled_tests {
         assert_eq!(child.project_id, None, "a subtask of an unfiled task is unfiled");
         assert_eq!(child.column_id, "todo", "and inherits its parent's column");
 
-        // Positions are taken among the *unfiled* tasks of that column, which
-        // `project_id = NULL` would never have matched.
         assert_eq!(first.position, 0.0);
 
-        // The done column of the default board still decides done-ness.
         move_task(&pool, ids[0], "done", None, None).await.expect("move");
         let done = task(&pool, ids[0]).await.unwrap().unwrap();
         assert_eq!(done.column_id, "done");
@@ -1564,7 +1356,6 @@ mod unfiled_tests {
         move_task(&pool, ids[0], "doing", None, None).await.expect("move back");
         assert!(task(&pool, ids[0]).await.unwrap().unwrap().done_at.is_none(), "leaving clears it");
 
-        // Everything but where it sits still patches, with no project to touch.
         update_task(
             &pool,
             ids[0],
@@ -1575,15 +1366,13 @@ mod unfiled_tests {
         assert_eq!(task_row(&pool, ids[0]).await.unwrap().2, "Renew the Myki");
     }
 
-    /// The board an unfiled task is checked against is the default one — which
-    /// is a real check, not a waiver.
     #[tokio::test]
     async fn an_unfiled_column_is_checked_against_the_default_board() {
         let pool = migrated().await;
         let err = create_tasks(
             &pool,
             None,
-            &[NewTask { title: "x".into(), column: Some("inbox".into()), ..Default::default() }],
+            &[NewTask { title: "x".into(), column: Some("nowhere".into()), ..Default::default() }],
             "manual",
         )
         .await
@@ -1593,8 +1382,6 @@ mod unfiled_tests {
         assert_eq!(count(&pool).await, 0, "and nothing was written");
     }
 
-    /// A subtask cannot cross the line in either direction: its parent's
-    /// project is its own, and "no project" is one of the answers.
     #[tokio::test]
     async fn a_subtask_cannot_cross_between_filed_and_unfiled() {
         let pool = migrated().await;
@@ -1645,8 +1432,6 @@ mod unfiled_tests {
         assert!(err.contains("belongs to no project"), "{err}");
     }
 
-    /// Filing a task out of a project: the column maps across by kind, and
-    /// nothing is left behind on the board it came from.
     #[tokio::test]
     async fn refiling_a_task_out_of_a_project_maps_the_column_by_kind() {
         let pool = migrated().await;
@@ -1663,24 +1448,18 @@ mod unfiled_tests {
         assert_eq!(refile_task(&pool, id, None).await.expect("unfile"), 1);
         let row = task(&pool, id).await.unwrap().unwrap();
         assert_eq!(row.project_id, None);
-        // `doing` is `active`, and the **first** active column of the board it
-        // arrives on is `todo` — entering a kind puts you at its start.
+        // `doing` is `active`; the first active column is `todo`.
         assert_eq!(row.column_id, "todo");
         assert!(row.done_at.is_none());
-        // And nothing of it stayed on the project.
         assert!(tasks(&pool, project).await.unwrap().is_empty());
 
-        // Filing it back the other way is the same rule read backwards.
         assert_eq!(refile_task(&pool, id, Some(project)).await.expect("file"), 1);
         let row = task(&pool, id).await.unwrap().unwrap();
         assert_eq!(row.project_id, Some(project));
         assert_eq!(row.column_id, "todo");
-        // A second refile to where it already is writes nothing at all.
         assert_eq!(refile_task(&pool, id, Some(project)).await.unwrap(), 0);
     }
 
-    /// A subtask sits in its parent's project, so a refile moves both — each
-    /// by its own column's kind, and the parent is refused nothing on the way.
     #[tokio::test]
     async fn refiling_carries_the_subtasks_with_it() {
         let pool = migrated().await;
@@ -1712,19 +1491,14 @@ mod unfiled_tests {
             let row = task(&pool, *id).await.unwrap().unwrap();
             assert_eq!(row.project_id, Some(project), "task {id} came along");
         }
-        // Each row kept its own kind: the parent was in flight, one subtask
-        // was finished, the other inherited the parent's column.
         assert_eq!(task(&pool, ids[1]).await.unwrap().unwrap().column_id, "done");
         assert!(task(&pool, ids[1]).await.unwrap().unwrap().done_at.is_some());
         assert_eq!(task(&pool, ids[2]).await.unwrap().unwrap().column_id, "todo");
-        // Two rows landing in the same column do not land on top of each other.
         let parent = task(&pool, ids[0]).await.unwrap().unwrap();
         let sibling = task(&pool, ids[2]).await.unwrap().unwrap();
         assert_ne!(parent.position, sibling.position);
         assert!(parent.position < sibling.position, "the parent goes in first");
 
-        // And a subtask cannot be refiled on its own: that is the one row
-        // `assert_can_parent` exists to refuse.
         let err = refile_task(&pool, ids[1], None).await.expect_err("a lone subtask");
         assert!(err.contains(&format!("subtask of task {}", ids[0])), "{err}");
         assert_eq!(
@@ -1734,13 +1508,10 @@ mod unfiled_tests {
         );
     }
 
-    /// A destination with no column of the source's kind is refused, whole —
-    /// there is no nearest kind to fall back to.
     #[tokio::test]
     async fn refiling_refuses_a_board_with_no_column_of_that_kind() {
         let pool = migrated().await;
         let project = seed_project(&pool, "Essay").await;
-        // A board of one active column: nothing on it means "finished".
         sqlx::query("UPDATE projects SET columns = ?1 WHERE id = ?2")
             .bind(r#"[{"id":"now","name":"Now","kind":"active"}]"#)
             .bind(project)
@@ -1764,8 +1535,6 @@ mod unfiled_tests {
         assert_eq!(task(&pool, id).await.unwrap().unwrap().project_id, None, "nothing moved");
     }
 
-    /// The cross-project read `oculus task list` prints: unfiled first, then a
-    /// project's own rows in `position` order.
     #[tokio::test]
     async fn all_tasks_spans_projects_and_can_ask_for_the_unfiled_alone() {
         let pool = migrated().await;
@@ -1797,8 +1566,6 @@ mod unfiled_tests {
         assert_eq!(unfiled[0].title, "Errand");
     }
 
-    /// Two unfiled tasks and a filed one in the same column id are two separate
-    /// runs of positions, and a move only ever looks at its own.
     #[tokio::test]
     async fn a_move_will_not_take_a_neighbour_from_the_other_side() {
         let pool = migrated().await;

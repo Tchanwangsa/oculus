@@ -1,18 +1,8 @@
 //! `parse-status` — the one event the parse path emits.
 //!
-//! This replaces `ipc.rs`, a loopback HTTP server that existed for exactly one
-//! reason: the Python sidecar was another process, so its progress had to come
-//! back over a socket, and the port it posted to had to be threaded through
-//! every call site that might eventually cause a parse. Parsing is in-process
-//! now, so the progress is already here and the only thing missing is somewhere
-//! to send it.
-//!
-//! That somewhere is a handle set once at startup rather than a parameter.
-//! The alternative — passing an `AppHandle` down through `Engine`, `parse_pdf`
-//! and the batcher — puts a Tauri type in the middle of code the CLI runs, and
-//! the CLI has no handle at all. **A headless run leaves this unbound and every
-//! emit is a no-op**, which is the honest shape of the thing: the events exist
-//! for a window that may not be there.
+//! The handle is set once at startup rather than passed down, so no Tauri type
+//! sits in code the CLI runs. **A headless run leaves it unbound and every
+//! emit is a no-op.**
 
 use std::sync::OnceLock;
 
@@ -29,16 +19,11 @@ pub fn bind(app: AppHandle) {
     let _ = APP.set(app);
 }
 
-/// The payload, and it is a **fixed contract** — `app/src/stores/parseStore.ts`
-/// and `app/src/hooks/useBackendEvents.ts` are already shipping against exactly
-/// these field names. Optional fields are omitted rather than sent as null, so
-/// a reader that sees a key can trust it.
+/// The payload: a **fixed contract** with `app/src/stores/parseStore.ts` and
+/// `app/src/hooks/useBackendEvents.ts`. Optional fields are omitted, not null.
 ///
 /// `status` is `queued | running | quality | error`. **`"quality"` is the
-/// terminal success** and the name outlived the tier it was named after: there
-/// is one parse now, but `files.parse_status = 'quality'` is what every
-/// already-parsed row in the user's library says and what the "already done"
-/// check reads. Renaming it would invalidate that library.
+/// terminal success**: it matches `files.parse_status` on every parsed row.
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
     pub relative_path: String,
@@ -83,16 +68,13 @@ impl Status {
     }
 }
 
-/// Accepted, not started. The batcher holds a file for up to five seconds
-/// before its batch goes, and the queue behind it is unordered, so `position`
-/// is left absent rather than invented.
+/// Accepted, not started. The queue is unordered, so no `position`.
 pub fn queued(relative_path: &str, subject_id: i64) {
     Status::new(relative_path, subject_id, "queued").emit();
 }
 
-/// A page landed. `total_pages` is zero until the backend knows how long the
-/// document is; it is dropped rather than sent as a zero denominator, which
-/// the UI would render as a finished bar.
+/// A page landed. A zero `total_pages` is dropped: the UI would draw a zero
+/// denominator as a finished bar.
 pub fn running(relative_path: &str, subject_id: i64, progress: Progress) {
     let mut status = Status::new(relative_path, subject_id, "running");
     status.pages_done = Some(progress.pages_done);
@@ -105,10 +87,8 @@ pub fn parsed(relative_path: &str, subject_id: i64) {
     Status::new(relative_path, subject_id, "quality").emit();
 }
 
-/// Terminal failure. `error` is `ParseError`'s `Display`, which is written for
-/// a student and — load-bearing — **never contains server response text**:
-/// MinerU's error bodies can carry the signed URLs it issued for the upload,
-/// and this string ends up on screen, in logs and in bug reports.
+/// Terminal failure. `error` is `ParseError`'s `Display`, which never carries
+/// server text (see `ParseError`).
 pub fn failed(relative_path: &str, subject_id: i64, error: &ParseError) {
     let mut status = Status::new(relative_path, subject_id, "error");
     status.error = Some(error.to_string());

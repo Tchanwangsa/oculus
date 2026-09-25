@@ -1,22 +1,13 @@
 //! The MinerU cloud protocol, and the `Parser` the app parses through.
 //!
-//! The shape of a parse is fixed by the API, not by us: a batch of documents
-//! is *submitted* as a list of names, MinerU answers with one signed upload URL
-//! per name, each file is `PUT` to its URL, and then one endpoint is polled
-//! until every task in the batch reports `done` with a result zip. There is no
-//! per-file endpoint and no callback, so the whole thing is one long blocking
-//! conversation per batch.
+//! A batch is submitted as a list of names, MinerU answers with one signed
+//! upload URL per name, each file is `PUT` to its URL, and one endpoint is
+//! polled until every task reports `done` with a result zip.
 //!
-//! Three rules run through all of it:
-//!
-//! * **Errors carry a code, never the server's text.** MinerU's messages can
-//!   quote the signed URLs it issued, and those must not reach the UI, a log
-//!   or a pasted bug report. Every `ParseError` built here is a short code.
-//! * **Failures are scoped.** A malformed result, a `failed` task or a refused
-//!   upload condemns *that document*; only credentials, quota and a dead poll
-//!   channel condemn the batch. See `Scope`.
-//! * **Progress is counted, never inferred.** Per-task page counts are summed;
-//!   nothing is derived from page offsets or from how many tasks have finished.
+//! * **Errors carry a code, never the server's text** (see `ParseError`).
+//! * **Failures are scoped**: only credentials, quota and a dead poll channel
+//!   condemn the batch. See `Scope`.
+//! * **Progress is counted**: per-task page counts are summed, never inferred.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -24,7 +15,7 @@ use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use url::Url;
@@ -33,41 +24,35 @@ use crate::parse::{
     check_size, parse_config, Health, ParseError, ParseOutput, ParsePage, Parser, Progress,
     PARSER_VERSION,
 };
+use crate::ratelimit::{hold, nap, Retry, TokenBucket};
 
 use super::batch::{BatchRun, Batcher};
 use super::ledger::{
-    hold, poll_bucket, submit_bucket, TokenBucket, UsageLedger, DAILY_FILES, MAX_FILES_PER_BATCH,
-    MAX_FILE_BYTES, MAX_PAGES_PER_TASK,
+    poll_bucket, submit_bucket, UsageLedger, MAX_FILES_PER_BATCH, MAX_FILE_BYTES,
+    MAX_PAGES_PER_TASK,
 };
-use super::render;
+use super::{render, WorkDir};
 
 /// The `backend` stamped into every record this client writes.
 pub const BACKEND: &str = "mineru-cloud";
 
 /// Attempts per API call. A 429 deliberately does not consume one.
 const ATTEMPTS: u32 = 4;
-const FIRST_RETRY: Duration = Duration::from_secs(1);
-const MAX_RETRY: Duration = Duration::from_secs(10);
 const API_TIMEOUT: Duration = Duration::from_secs(30);
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const UPLOAD_CHUNK: usize = 1024 * 1024;
-/// How long a batch may stay unfinished before it is abandoned. This is also
-/// the *only* bound on the submit path's 429 loop — see `api_json`.
+/// How long a batch may stay unfinished. Also the only bound on the 429 loop
+/// in `api_json`.
 const POLL_DEADLINE: Duration = Duration::from_secs(60 * 60);
 const FIRST_POLL_DELAY: Duration = Duration::from_millis(2_000);
 const MAX_POLL_DELAY: Duration = Duration::from_secs(10);
 
 // ── One document in flight ───────────────────────────────────────────────────
 
-/// What a batch worker fills in, and what the blocked caller reads out.
-///
-/// The caller is parked in `wait` for the whole parse while a worker thread
-/// does the work, so everything they share lives behind this one lock. The
-/// progress callback is deliberately *not* shared: `Parser::parse` takes a
-/// plain `&dyn Fn`, which is neither `Send` nor `'static`, so the worker
-/// records numbers and the caller — who owns the callback and is awake anyway
-/// — is the thread that calls it.
+/// What a batch worker fills in, and what the caller parked in `wait` reads
+/// out. The progress callback is not `Send`, so the worker records numbers and
+/// the caller's thread calls it.
 pub struct CloudDocument {
     pdf: PathBuf,
     images_dir: PathBuf,
@@ -115,8 +100,7 @@ impl CloudDocument {
     /// delivering progress on this thread as it changes.
     pub fn wait(&self, on_progress: &dyn Fn(Progress)) -> Result<DocumentOutput, ParseError> {
         let mut state = hold(&self.state);
-        // Seeded with the opening zeroes so a document that finishes before
-        // anything is known does not emit a pointless 0/0.
+        // Seeded so a document that finishes early does not emit 0/0.
         let mut last = (0u32, 0u32);
         loop {
             if let Some(outcome) = state.outcome.take() {
@@ -169,9 +153,8 @@ impl CloudDocument {
         hold(&self.state).source_images.clone()
     }
 
-    /// Monotonic per task, clamped to that task's own length: MinerU's
-    /// `extracted_pages` has been seen to go backwards between polls, and a
-    /// progress bar that retreats reads as a stall.
+    /// Monotonic per task, clamped to its length: MinerU's `extracted_pages`
+    /// can go backwards between polls.
     fn report(&self, data_id: &str, done: u32, page_count: u32) {
         let mut state = hold(&self.state);
         let slot = state.task_pages.entry(data_id.to_string()).or_default();
@@ -190,9 +173,7 @@ impl CloudDocument {
 }
 
 impl DocumentState {
-    /// The sum over this document's tasks, never more than the document is
-    /// long — tasks can only report their own pages, so the clamp is belt to
-    /// the per-task brace.
+    /// The sum over this document's tasks, never more than its length.
     fn pages_done(&self) -> u32 {
         self.task_pages.values().sum::<u32>().min(self.total_pages)
     }
@@ -200,14 +181,9 @@ impl DocumentState {
 
 // ── Tasks ────────────────────────────────────────────────────────────────────
 
-/// One extraction task: a page range of one document.
-///
-/// A document over `MAX_PAGES_PER_TASK` becomes several tasks that each upload
-/// **the whole original PDF** and let the server take the range. That is what
-/// the API offers — there is no "upload once, extract twice" — so a 600-page
-/// file crosses the wire three times. Physically slicing it locally would save
-/// the bandwidth and cost a PDF writer, a temp file per slice, and a second
-/// page-offset scheme to get wrong.
+/// One extraction task: a page range of one document. A document over
+/// `MAX_PAGES_PER_TASK` becomes several tasks that each upload the whole PDF
+/// and let the server take the range; the API has no "upload once".
 struct Task {
     document: usize,
     data_id: String,
@@ -232,13 +208,8 @@ impl Task {
     }
 }
 
-/// Who a failure belongs to.
-///
-/// The Python caught `BaseException` around a whole batch and gave every job
-/// in it the same error, so one unreadable PDF failed the other nineteen. That
-/// was survivable only because each of those nineteen then fell back to the
-/// local parser. **There is no fallback now**, so the same code would turn one
-/// bad file into nineteen files with no markdown at all. Hence this split.
+/// Who a failure belongs to. Nothing falls back, so one bad file must never
+/// fail the rest of its batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scope {
     Document,
@@ -265,9 +236,7 @@ pub struct MinerUCloud {
     submit: Arc<TokenBucket>,
     poll: Arc<TokenBucket>,
     pages_per_task: u32,
-    /// Every wait in this client is multiplied by this. Production is 1.0;
-    /// tests shrink it so a retry ladder or a poll loop costs milliseconds
-    /// instead of seconds.
+    /// Every wait is multiplied by this: 1.0 in production, tiny in tests.
     time_scale: f64,
 }
 
@@ -280,8 +249,7 @@ impl MinerUCloud {
         Self::new(&config.base_url, &token)
     }
 
-    /// `base_url` is always passed in — nothing here knows MinerU's address,
-    /// which is what lets the tests point the whole protocol at a local server.
+    /// `base_url` is passed in so tests can point the protocol at a local server.
     pub fn new(base_url: &str, token: &str) -> Result<Self, ParseError> {
         let token = token.trim();
         if token.is_empty() {
@@ -319,10 +287,8 @@ impl MinerUCloud {
         self
     }
 
-    /// Which batch this client's documents may travel in. Only same-token jobs
-    /// can share a `POST`, and the API root is part of it so a redirected
-    /// client never lands in another one's batch. Hashed rather than
-    /// concatenated so no structure that might be printed holds the token.
+    /// Which batch this client's documents may travel in: same token, same API
+    /// root. Hashed so nothing printable holds the token.
     pub fn batch_key(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -331,23 +297,11 @@ impl MinerUCloud {
         hasher.finish()
     }
 
-    fn nap(&self, duration: Duration) {
-        let scaled = duration.mul_f64(self.time_scale);
-        if !scaled.is_zero() {
-            std::thread::sleep(scaled);
-        }
-    }
-
     // ── Protocol ─────────────────────────────────────────────────────────────
 
-    /// One API call, with the retry policy the whole client shares.
-    ///
-    /// A 429 sleeps `Retry-After` (default 60, clamped to 1..60 seconds) and
-    /// retries **without consuming an attempt**: per-minute pressure is a wait,
-    /// not a failure, and there is nothing else to do with the work. That does
-    /// mean sustained 429s loop here indefinitely on the submit path; the poll
-    /// path's `POLL_DEADLINE` is the only thing that ever bounds it, and that
-    /// is accepted rather than accidental.
+    /// One API call, with the shared retry policy. A 429 sleeps `Retry-After`
+    /// (clamped to 1..60s) **without consuming an attempt** — per-minute
+    /// pressure is a wait, not a failure — so only `POLL_DEADLINE` bounds it.
     fn api_json(
         &self,
         method: &str,
@@ -356,18 +310,15 @@ impl MinerUCloud {
         bucket: &TokenBucket,
     ) -> Result<Value, ParseError> {
         let url = format!("{}{}", self.base_url, path);
-        let mut attempt = 0;
-        let mut delay = FIRST_RETRY;
+        let mut retry = Retry::new(ATTEMPTS, self.time_scale);
 
-        while attempt < ATTEMPTS {
+        while retry.attempts_left() {
             bucket.acquire();
             let request = ureq::request(method, &url)
                 .timeout(API_TIMEOUT)
                 .set("Authorization", &format!("Bearer {}", self.token))
                 .set("Accept", "application/json");
-            // `ureq`'s `json` feature is not enabled in this crate, so the
-            // body is encoded here. The `Content-Type` is wanted on *this*
-            // request — it is only the signed upload that must go without one.
+            // `ureq`'s `json` feature is off, so the body is encoded here.
             let sent = match &body {
                 Some(value) => {
                     let encoded = serde_json::to_vec(value).unwrap_or_default();
@@ -384,23 +335,20 @@ impl MinerUCloud {
                         .and_then(|value| value.trim().parse::<f64>().ok())
                         .unwrap_or(60.0)
                         .clamp(1.0, 60.0);
-                    self.nap(Duration::from_secs_f64(wait));
+                    nap(Duration::from_secs_f64(wait), self.time_scale);
                     continue;
                 }
-                // A token MinerU refuses cannot be retried into working.
                 Err(ureq::Error::Status(401 | 403, response)) => {
                     return Err(auth_error(response.into_string().unwrap_or_default().as_str()))
                 }
                 Err(ureq::Error::Status(status, _)) => {
-                    if status >= 500 && attempt + 1 < ATTEMPTS {
-                        backoff(self, &mut attempt, &mut delay);
+                    if status >= 500 && retry.back_off() {
                         continue;
                     }
                     return Err(ParseError::Document { code: format!("http-{status}") });
                 }
                 Err(ureq::Error::Transport(transport)) => {
-                    if attempt + 1 < ATTEMPTS {
-                        backoff(self, &mut attempt, &mut delay);
+                    if retry.back_off() {
                         continue;
                     }
                     return Err(ParseError::Offline(transport_detail(&transport)));
@@ -410,10 +358,7 @@ impl MinerUCloud {
             let body_text = response.into_string().unwrap_or_default();
             let payload = match serde_json::from_str::<Value>(&body_text).ok() {
                 Some(payload) => payload,
-                None if attempt + 1 < ATTEMPTS => {
-                    backoff(self, &mut attempt, &mut delay);
-                    continue;
-                }
+                None if retry.back_off() => continue,
                 None => return Err(ParseError::Offline("unreadable response".into())),
             };
             if !payload.is_object() {
@@ -428,14 +373,12 @@ impl MinerUCloud {
                 return Err(auth_error(&payload.to_string()));
             }
             if code.and_then(Value::as_i64) == Some(-60018) {
-                // The server's own answer, which outranks the local guess.
                 self.ledger.latch_exhausted();
                 return Err(ParseError::QuotaExhausted);
             }
             if matches!(code.and_then(Value::as_i64), Some(-60009 | -10001 | -60007))
-                && attempt + 1 < ATTEMPTS
+                && retry.back_off()
             {
-                backoff(self, &mut attempt, &mut delay);
                 continue;
             }
             // Only the code. The message beside it can quote a signed URL.
@@ -444,18 +387,10 @@ impl MinerUCloud {
         Err(ParseError::Offline("request failed".into()))
     }
 
-    /// `PUT` the file to a signed URL.
-    ///
-    /// **No `Content-Type`.** MinerU rejects the upload when one is present,
-    /// which is why the Python hand-rolled `http.client` rather than use a
-    /// normal HTTP library. `ureq` turns out not to need that: it only ever
-    /// adds `Host`, `User-Agent` and `Accept` of its own, and a `Content-Type`
-    /// appears solely when the caller sets one or uses `send_json`/`send_form`.
-    /// Setting `Content-Length` explicitly also keeps it out of chunked
-    /// encoding, which a signed PUT would reject.
-    ///
-    /// No `Authorization` either — the signature in the URL is the auth — and
-    /// no retry: a second PUT to a consumed signature is a second failure.
+    /// `PUT` the file to a signed URL. **No `Content-Type`**: MinerU rejects
+    /// the upload when one is present (`ureq` adds none unless asked). An
+    /// explicit `Content-Length` avoids chunked encoding, which a signed PUT
+    /// rejects. No `Authorization` and no retry: the signature is single-use.
     fn put_file(&self, url: &str, path: &Path) -> Result<(), ParseError> {
         check_transfer_url(url, "upload")?;
         let size = fs::metadata(path)
@@ -466,8 +401,7 @@ impl MinerUCloud {
 
         let agent = ureq::AgentBuilder::new()
             .timeout(UPLOAD_TIMEOUT)
-            // A signed PUT that redirects has lost its signature; treat the
-            // 3xx as the failure it is rather than replaying the body.
+            // A redirected signed PUT has lost its signature.
             .redirects(0)
             .build();
         match agent
@@ -516,7 +450,7 @@ impl MinerUCloud {
                 }
             }
             if attempt < 2 {
-                self.nap(Duration::from_secs(1 << attempt));
+                nap(Duration::from_secs(1 << attempt), self.time_scale);
             }
         }
         Err(last)
@@ -526,11 +460,6 @@ impl MinerUCloud {
 
     fn build_tasks(&self, index: usize, document: &CloudDocument) -> Result<Vec<Task>, ParseError> {
         let path = document.path().to_path_buf();
-        // The Python sliced a >200 MB PDF into physically smaller files and
-        // recursed when a slice was still too big. That was the fiddliest part
-        // of the client and it existed for a document nobody has: coursework
-        // does not reach 200 MB. It is a refusal now, made before anything is
-        // uploaded.
         check_size(&path, MAX_FILE_BYTES)?;
 
         let total = page_count(&path)?;
@@ -572,7 +501,8 @@ impl MinerUCloud {
         &self,
         documents: &[Arc<CloudDocument>],
     ) -> Vec<Result<DocumentOutput, ParseError>> {
-        let workspace = match Scratch::new() {
+        // For the zips and the staged crops.
+        let workspace = match WorkDir::new(format!("mineru-cloud-{}", data_id())) {
             Ok(workspace) => workspace,
             Err(error) => return documents.iter().map(|_| Err(error.clone())).collect(),
         };
@@ -659,21 +589,17 @@ impl MinerUCloud {
 
         let body = json!({
             "files": live.iter().map(|task| task.api_entry()).collect::<Vec<_>>(),
-            // Hardcoded for every document, as in the Python. `pipeline` is the
-            // model this app's page records were built with; `language: "ch"`
-            // is MinerU's own default and its multilingual model handles the
-            // English coursework here, so changing it is a re-parse of the
-            // whole library, not a setting.
+            // Fixed: the library's records were built with these, so changing
+            // one is a re-parse, not a setting. `"ch"` is MinerU's multilingual
+            // default.
             "model_version": "pipeline",
             "enable_formula": true,
             "enable_table": true,
             "language": "ch",
         });
 
-        // Reserve *before* the network call. Nothing gives this back: a POST
-        // that fails, an upload that dies, a kill halfway through all keep
-        // their reservation, because the server may have counted the work and
-        // there is no way to ask. See `ledger`.
+        // Reserved before the call and never given back: the server may have
+        // counted the work. See `ledger`.
         self.ledger.record(live.len() as u64, live.iter().map(|t| u64::from(t.page_count)).sum())?;
 
         let data = self.api_json("POST", "/file-urls/batch", Some(body), &self.submit)?;
@@ -692,8 +618,6 @@ impl MinerUCloud {
 
         let mut remaining: HashMap<&str, &Task> = HashMap::new();
         for (task, url) in live.iter().copied().zip(urls) {
-            // An earlier range of this document already failed, so its signed
-            // URL is spent on nothing — but the file is not going to parse.
             if failures[task.document].is_some() {
                 continue;
             }
@@ -715,8 +639,7 @@ impl MinerUCloud {
         let mut delay = FIRST_POLL_DELAY;
         while !remaining.is_empty() {
             if Instant::now() >= deadline {
-                // Not `Document`: a stall is worth retrying later, and the
-                // seam's retryable errors are the transport ones.
+                // Not `Document`: a stall is worth retrying later.
                 return Err(ParseError::Offline("batch timed out after 60 minutes".into()));
             }
             let data = self.api_json(
@@ -753,10 +676,6 @@ impl MinerUCloud {
                     continue;
                 }
                 if state == "failed" {
-                    // The file is implied: this error reaches exactly the one
-                    // document it belongs to, which is the whole point of the
-                    // scoping. The Python named the file because its single
-                    // exception was about to be handed to nineteen others.
                     fail_document(failures, &mut remaining, task, ParseError::Document {
                         code: "task-failed".into(),
                     });
@@ -777,9 +696,7 @@ impl MinerUCloud {
                     Ok(()) => {
                         completed.insert(task.data_id.clone());
                         remaining.remove(task.data_id.as_str());
-                        // A finished task reports its full length, so the
-                        // total is exact even when `extract_progress` never
-                        // arrived for it.
+                        // Full length, even if `extract_progress` never came.
                         document.report(&task.data_id, task.page_count, task.page_count);
                     }
                     Err(error) if scope_of(&error) == Scope::Batch => return Err(error),
@@ -788,7 +705,7 @@ impl MinerUCloud {
             }
 
             if !remaining.is_empty() {
-                self.nap(delay);
+                nap(delay, self.time_scale);
                 delay = delay.mul_f64(1.4).min(MAX_POLL_DELAY);
             }
         }
@@ -809,10 +726,9 @@ impl MinerUCloud {
         self.download_zip(zip_url, &zip_path)?;
         safe_extract(&zip_path, &result_dir)?;
 
-        // Globbed, not named: the archive's layout has changed between MinerU
-        // versions, and the flat `.md` beside it is not a substitute — it has
-        // no page boundaries at all and drops every `header` item, which on
-        // slides is the titles.
+        // Globbed, not named: the archive layout varies between MinerU
+        // versions. The flat `.md` is no substitute — no page boundaries, and
+        // it drops `header` items (slide titles).
         let content_path = find_content_list(&result_dir)
             .ok_or(ParseError::Document { code: "no-content-list".into() })?;
         let content: Value = fs::read_to_string(&content_path)
@@ -844,9 +760,8 @@ impl MinerUCloud {
                     .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
                     .ok_or(ParseError::Document { code: "invalid-page-index".into() })?,
             };
-            // Hard error rather than a silent drop. `ParseOutput::new` gap-fills
-            // anything out of range, so swallowing this would turn a wrong
-            // offset into a document that is quietly half empty.
+            // Hard error: `ParseOutput::new` would gap-fill a wrong offset
+            // into a quietly half-empty document.
             if page_idx < 0 || page_idx >= i64::from(task.page_count) {
                 return Err(ParseError::Document { code: "page-index-out-of-range".into() });
             }
@@ -867,8 +782,7 @@ impl MinerUCloud {
                 let mut target = original.clone();
                 let mut destination = staging.join(&target);
                 if destination.exists() {
-                    // Two tasks of the same document both named `4.jpg`. The
-                    // page offset is the only thing guaranteed to differ.
+                    // Two tasks both named `4.jpg`; the page offset differs.
                     target = format!("p{}_{original}", task.page_offset + 1);
                     destination = staging.join(&target);
                 }
@@ -898,8 +812,7 @@ fn fail_document(
     error: ParseError,
 ) {
     failures[task.document] = Some(error);
-    // Its other ranges are pointless now, and polling for them would hold the
-    // batch open for a document that cannot be assembled.
+    // Its other ranges are pointless now; stop polling for them.
     remaining.retain(|_, queued| queued.document != task.document);
 }
 
@@ -917,9 +830,7 @@ impl Parser for MinerUCloud {
         images_rel: &str,
         on_progress: &dyn Fn(Progress),
     ) -> Result<ParseOutput, ParseError> {
-        // Refused here rather than in the batch: an oversized file should
-        // never take a seat in a batch, and the limit is known from the
-        // filesystem alone.
+        // Before the batch, so an oversized file never takes a seat.
         check_size(pdf, MAX_FILE_BYTES)?;
 
         let document = CloudDocument::new(pdf, images_dir, images_rel);
@@ -935,31 +846,16 @@ impl Parser for MinerUCloud {
         ))
     }
 
-    /// The cloud is ready whenever it has a token, which `new` guarantees.
-    /// Quota is not readiness — an exhausted allowance is a `QuotaExhausted`
-    /// on the call that hits it, which says something true about waiting;
-    /// `NotReady` would send the UI to "try again in a moment".
+    /// Ready whenever it has a token, which `new` guarantees. Quota is not
+    /// readiness: it surfaces as `QuotaExhausted` on the call that hits it.
     fn health(&self) -> Health {
         Health { backend: BACKEND.to_string(), parser_version: PARSER_VERSION, ready: true }
     }
 }
 
-/// How much of the day's allowance is left, for the settings page.
-pub fn usage_status() -> Value {
-    let usage = UsageLedger::shared().snapshot();
-    json!({
-        "date": usage.date,
-        "files": usage.files,
-        "pages": usage.pages,
-        "quota_exhausted": usage.quota_exhausted,
-        "daily_file_limit": DAILY_FILES,
-    })
-}
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// A0211 is a token that has expired; A0202 is one MinerU never accepted.
-/// Either way the fix is a new token, so this latches the run.
+/// A0211 is an expired token; A0202 one MinerU never accepted.
 fn auth_error(body: &str) -> ParseError {
     let code = serde_json::from_str::<Value>(body).ok().and_then(|payload| {
         payload
@@ -972,9 +868,7 @@ fn auth_error(body: &str) -> ParseError {
     ParseError::RejectedCredentials { code, expired }
 }
 
-/// A `code` field is supposed to be a short token, but it arrives from the
-/// network and the seam promises errors carry no server prose — so it is
-/// clipped to something that can only ever be a code.
+/// Clip a network-supplied `code` to something that can only be a code.
 fn sanitise_code(code: &str) -> String {
     code.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
@@ -990,13 +884,6 @@ fn safe_code(code: Option<&Value>) -> String {
     }
 }
 
-/// One step of the shared retry ladder: 1s, doubling to a 10s ceiling.
-fn backoff(client: &MinerUCloud, attempt: &mut u32, delay: &mut Duration) {
-    *attempt += 1;
-    client.nap(*delay);
-    *delay = (*delay * 2).min(MAX_RETRY);
-}
-
 pub(super) fn transport_detail(transport: &ureq::Transport) -> String {
     match transport.message() {
         Some(message) => format!("{}: {message}", transport.kind()),
@@ -1004,9 +891,8 @@ pub(super) fn transport_detail(transport: &ureq::Transport) -> String {
     }
 }
 
-/// Signed URLs are always `https`. The loopback exemption exists so the tests
-/// can drive the whole protocol against a local server; a loopback address
-/// cannot carry a signature off this machine, which is what the rule protects.
+/// Signed URLs must be `https`; loopback is exempt so tests can drive the
+/// protocol, and cannot carry a signature off this machine.
 fn check_transfer_url(url: &str, what: &str) -> Result<(), ParseError> {
     let parsed =
         Url::parse(url).map_err(|_| ParseError::Document { code: format!("{what}-url-invalid") })?;
@@ -1035,17 +921,12 @@ fn basename(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 
-/// A `data_id` only has to be unique inside one batch, and MinerU echoes it
-/// back as the join key. The `oculus-` prefix is how a task is recognisable in
-/// MinerU's own console.
+/// Unique within a batch; MinerU echoes it back as the join key.
 fn data_id() -> String {
     use std::hash::{BuildHasher, Hasher};
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     let sequence = SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or_default();
+    let nanos = crate::clock::now_nanos() as u64;
     let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
     hasher.write_u64(nanos);
     hasher.write_u64(sequence);
@@ -1053,33 +934,8 @@ fn data_id() -> String {
     format!("oculus-{:016x}{:016x}", nanos ^ (sequence << 40), hasher.finish())
 }
 
-/// A working directory that deletes itself, for the zips and the staged crops.
-struct Scratch {
-    root: PathBuf,
-}
-
-impl Scratch {
-    fn new() -> Result<Self, ParseError> {
-        let root = std::env::temp_dir().join(format!("mineru-cloud-{}", data_id()));
-        fs::create_dir_all(&root)
-            .map_err(|e| ParseError::Io(format!("create {}: {e}", root.display())))?;
-        Ok(Self { root })
-    }
-
-    fn path(&self) -> &Path {
-        &self.root
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        fs::remove_dir_all(&self.root).ok();
-    }
-}
-
-/// Extract with a zip-slip guard: every member has to resolve inside the
-/// destination. `enclosed_name` already refuses `..` and absolute paths; the
-/// prefix check is the second lock on the same door.
+/// Extract with a zip-slip guard: every member must resolve inside the
+/// destination.
 pub(super) fn safe_extract(zip_path: &Path, destination: &Path) -> Result<(), ParseError> {
     fs::create_dir_all(destination)
         .map_err(|e| ParseError::Io(format!("create {}: {e}", destination.display())))?;
@@ -1116,8 +972,7 @@ pub(super) fn safe_extract(zip_path: &Path, destination: &Path) -> Result<(), Pa
     Ok(())
 }
 
-/// The first `*_content_list.json` anywhere under the extracted result, in a
-/// stable order so two runs over the same archive pick the same file.
+/// The first `*_content_list.json` under the extracted result, in stable order.
 pub(super) fn find_content_list(root: &Path) -> Option<PathBuf> {
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -1144,211 +999,8 @@ pub(super) fn find_content_list(root: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::io::Write;
-    use std::sync::atomic::AtomicBool;
 
-    use super::super::ledger::TokenBucket;
-
-    // ── A MinerU that is not MinerU ──────────────────────────────────────────
-    //
-    // Every test below drives the real protocol — submit, signed PUT, poll,
-    // download, collect — against a `tiny_http` server on loopback. Nothing
-    // here ever reaches mineru.net; the base URL is configuration, which is
-    // exactly why it is configuration.
-
-    #[derive(Clone)]
-    struct Hit {
-        method: String,
-        url: String,
-        headers: Vec<(String, String)>,
-        body: Vec<u8>,
-    }
-
-    impl Hit {
-        fn header(&self, name: &str) -> Option<&str> {
-            self.headers
-                .iter()
-                .find(|(field, _)| field == name)
-                .map(|(_, value)| value.as_str())
-        }
-
-        fn json(&self) -> Value {
-            serde_json::from_slice(&self.body).unwrap_or(Value::Null)
-        }
-    }
-
-    struct Reply {
-        status: u16,
-        body: Vec<u8>,
-        headers: Vec<(String, String)>,
-    }
-
-    impl Reply {
-        fn json(value: Value) -> Self {
-            Self { status: 200, body: value.to_string().into_bytes(), headers: Vec::new() }
-        }
-
-        fn status(status: u16, value: Value) -> Self {
-            Self { status, body: value.to_string().into_bytes(), headers: Vec::new() }
-        }
-
-        fn bytes(body: Vec<u8>) -> Self {
-            Self { status: 200, body, headers: Vec::new() }
-        }
-
-        fn with_header(mut self, name: &str, value: &str) -> Self {
-            self.headers.push((name.into(), value.into()));
-            self
-        }
-    }
-
-    struct Fake {
-        port: u16,
-        hits: Arc<Mutex<Vec<Hit>>>,
-        stop: Arc<AtomicBool>,
-        handle: Option<std::thread::JoinHandle<()>>,
-    }
-
-    impl Fake {
-        fn start<H>(handler: H) -> Self
-        where
-            H: Fn(&Hit, usize, u16) -> Reply + Send + 'static,
-        {
-            let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-            let port = server.server_addr().to_ip().unwrap().port();
-            let hits: Arc<Mutex<Vec<Hit>>> = Arc::new(Mutex::new(Vec::new()));
-            let stop = Arc::new(AtomicBool::new(false));
-
-            let handle = {
-                let hits = hits.clone();
-                let stop = stop.clone();
-                std::thread::spawn(move || {
-                    while !stop.load(AtomicOrdering::SeqCst) {
-                        let Ok(Some(mut request)) =
-                            server.recv_timeout(Duration::from_millis(20))
-                        else {
-                            continue;
-                        };
-                        let mut body = Vec::new();
-                        request.as_reader().read_to_end(&mut body).ok();
-                        let hit = Hit {
-                            method: request.method().as_str().to_string(),
-                            url: request.url().to_string(),
-                            headers: request
-                                .headers()
-                                .iter()
-                                .map(|header| {
-                                    (
-                                        header.field.as_str().to_string().to_lowercase(),
-                                        header.value.as_str().to_string(),
-                                    )
-                                })
-                                .collect(),
-                            body,
-                        };
-                        let index = {
-                            let mut log = hold(&hits);
-                            log.push(hit.clone());
-                            log.len() - 1
-                        };
-                        let reply = handler(&hit, index, port);
-                        let mut response = tiny_http::Response::from_data(reply.body)
-                            .with_status_code(reply.status);
-                        for (name, value) in reply.headers {
-                            response.add_header(
-                                tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes())
-                                    .unwrap(),
-                            );
-                        }
-                        request.respond(response).ok();
-                    }
-                })
-            };
-            Self { port, hits, stop, handle: Some(handle) }
-        }
-
-        fn origin(&self) -> String {
-            format!("http://127.0.0.1:{}", self.port)
-        }
-
-        fn base(&self) -> String {
-            format!("{}/api/v4", self.origin())
-        }
-
-        fn hits(&self) -> Vec<Hit> {
-            hold(&self.hits).clone()
-        }
-    }
-
-    impl Drop for Fake {
-        fn drop(&mut self) {
-            self.stop.store(true, AtomicOrdering::SeqCst);
-            if let Some(handle) = self.handle.take() {
-                handle.join().ok();
-            }
-        }
-    }
-
-    // ── Scratch files ────────────────────────────────────────────────────────
-
-    struct Scratch {
-        root: PathBuf,
-    }
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let stamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or_default();
-            let root = std::env::temp_dir().join(format!("oculus-cloud-{name}-{stamp}"));
-            fs::create_dir_all(&root).unwrap();
-            Self { root }
-        }
-
-        fn join(&self, name: &str) -> PathBuf {
-            self.root.join(name)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            fs::remove_dir_all(&self.root).ok();
-        }
-    }
-
-    /// A real PDF with `pages` empty pages — `build_tasks` counts them with
-    /// `lopdf`, so a stub file would not do.
-    fn write_pdf(path: &Path, pages: usize) {
-        use lopdf::{dictionary, Document, Object};
-        let mut document = Document::with_version("1.5");
-        let pages_id = document.new_object_id();
-        let kids: Vec<Object> = (0..pages)
-            .map(|_| {
-                document
-                    .add_object(dictionary! {
-                        "Type" => "Page",
-                        "Parent" => pages_id,
-                    })
-                    .into()
-            })
-            .collect();
-        let count = kids.len() as i64;
-        document.objects.insert(
-            pages_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages",
-                "Kids" => kids,
-                "Count" => count,
-                "MediaBox" => vec![0.into(), 0.into(), 72.into(), 72.into()],
-            }),
-        );
-        let catalog = document.add_object(dictionary! {
-            "Type" => "Catalog",
-            "Pages" => pages_id,
-        });
-        document.trailer.set("Root", catalog);
-        document.save(path).unwrap();
-    }
+    use crate::test_support::{write_pdf, FakeServer, Reply, Scratch};
 
     fn zip_of(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {
         let mut buffer = std::io::Cursor::new(Vec::new());
@@ -1372,12 +1024,11 @@ mod tests {
         Value::Array(items).to_string().into_bytes()
     }
 
-    fn client(fake: &Fake, ledger: Arc<UsageLedger>) -> MinerUCloud {
-        MinerUCloud::new(&fake.base(), "test-only-token")
+    fn client(fake: &FakeServer, ledger: Arc<UsageLedger>) -> MinerUCloud {
+        MinerUCloud::new(&format!("{}/api/v4", fake.origin()), "test-only-token")
             .unwrap()
             .with_ledger(ledger)
-            // Private buckets so one test cannot pace another, and a scale
-            // that turns every retry ladder into milliseconds.
+            // Private buckets so one test cannot pace another.
             .with_buckets(
                 Arc::new(TokenBucket::new(60_000.0)),
                 Arc::new(TokenBucket::new(60_000.0)),
@@ -1393,8 +1044,8 @@ mod tests {
 
     #[test]
     fn the_signed_put_carries_a_length_and_no_content_type() {
-        let fake = Fake::start(|_, _, _| Reply::bytes(Vec::new()));
-        let scratch = Scratch::new("put");
+        let fake = FakeServer::start(|_| Reply::bytes(Vec::new()));
+        let scratch = Scratch::new("cloud-put");
         let pdf = scratch.join("deck.pdf");
         fs::write(&pdf, vec![7u8; 3_000]).unwrap();
 
@@ -1405,11 +1056,9 @@ mod tests {
         assert_eq!(hits.len(), 1);
         let hit = &hits[0];
         assert_eq!(hit.method, "PUT");
-        // The one requirement that made the Python hand-roll `http.client`.
         assert_eq!(hit.header("content-type"), None, "{:?}", hit.headers);
         assert_eq!(hit.header("content-length"), Some("3000"));
-        // The signature in the URL is the auth; a bearer token here would be
-        // a token handed to whatever storage host MinerU happens to use.
+        // A bearer token here would go to whatever storage host MinerU uses.
         assert_eq!(hit.header("authorization"), None);
         assert_eq!(hit.body.len(), 3_000);
     }
@@ -1417,8 +1066,7 @@ mod tests {
     #[test]
     fn an_upload_url_that_is_not_signed_https_is_refused() {
         assert!(check_transfer_url("http://mineru.net/upload", "upload").is_err());
-        // Hostname-less, in the two shapes that reach this: nothing after the
-        // scheme, and a scheme that never has an authority at all.
+        // Hostname-less, in both shapes.
         assert!(check_transfer_url("https://", "upload").is_err());
         assert!(check_transfer_url("file:///etc/passwd", "upload").is_err());
         assert!(check_transfer_url("not a url", "upload").is_err());
@@ -1430,10 +1078,10 @@ mod tests {
     #[test]
     fn a_refused_token_is_never_retried() {
         for (code, expired) in [("A0211", true), ("A0202", false)] {
-            let fake = Fake::start(move |_, _, _| {
+            let fake = FakeServer::start(move |_| {
                 Reply::status(401, json!({ "msgCode": code, "msg": "user authenticate failed" }))
             });
-            let scratch = Scratch::new("auth");
+            let scratch = Scratch::new("cloud-auth");
             let client = client(&fake, ledger(&scratch));
             let error = client
                 .api_json("GET", "/extract/task/x", None, &client.poll.clone())
@@ -1452,8 +1100,8 @@ mod tests {
 
     #[test]
     fn the_quota_code_latches_the_ledger() {
-        let fake = Fake::start(|_, _, _| Reply::json(json!({ "code": -60018, "msg": "no quota" })));
-        let scratch = Scratch::new("quota");
+        let fake = FakeServer::start(|_| Reply::json(json!({ "code": -60018, "msg": "no quota" })));
+        let scratch = Scratch::new("cloud-quota");
         let book = ledger(&scratch);
         let client = client(&fake, book.clone());
 
@@ -1461,49 +1109,45 @@ mod tests {
             client.api_json("GET", "/extract-results/batch/x", None, &client.poll.clone()).unwrap_err();
         assert!(matches!(error, ParseError::QuotaExhausted));
         assert!(book.snapshot().quota_exhausted);
-        // And it survives: a ledger reopened over the same file still refuses,
-        // without going near the network.
+        // A ledger reopened over the same file still refuses, offline.
         let reopened = UsageLedger::at(book.path());
         assert!(matches!(reopened.ensure_available(1), Err(ParseError::QuotaExhausted)));
     }
 
     #[test]
     fn a_429_waits_and_does_not_spend_an_attempt() {
-        let fake = Fake::start(|_, index, _| {
-            if index < 6 {
+        let fake = FakeServer::start(|hit| {
+            if hit.index < 6 {
                 Reply::status(429, json!({ "msg": "slow down" })).with_header("Retry-After", "1")
             } else {
                 Reply::json(json!({ "code": 0, "data": { "batch_id": "late" } }))
             }
         });
-        let scratch = Scratch::new("429");
+        let scratch = Scratch::new("cloud-429");
         let client = client(&fake, ledger(&scratch));
 
         let data = client
             .api_json("GET", "/extract-results/batch/x", None, &client.poll.clone())
             .unwrap();
         assert_eq!(data["batch_id"], "late");
-        // Six waits is well past the four attempts a failure gets: throttling
-        // is a wait, not a failure.
+        // Six waits, past the four attempts a failure gets.
         assert_eq!(fake.hits().len(), 7);
     }
 
     #[test]
     fn a_server_error_says_the_code_and_nothing_else() {
-        let fake = Fake::start(|_, _, _| {
+        let fake = FakeServer::start(|_| {
             Reply::json(json!({
                 "code": -60099,
                 "msg": "failed: https://oss.example/file?signature=secret-value",
             }))
         });
-        let scratch = Scratch::new("codes");
+        let scratch = Scratch::new("cloud-codes");
         let client = client(&fake, ledger(&scratch));
         let error = client.api_json("GET", "/x", None, &client.poll.clone()).unwrap_err();
 
         let shown = error.to_string();
         assert!(shown.contains("-60099"), "{shown}");
-        // The rule the whole error vocabulary exists for: MinerU's prose can
-        // quote a signed URL, so none of it travels.
         assert!(!shown.contains("signature"), "{shown}");
         assert!(!shown.contains("oss.example"), "{shown}");
     }
@@ -1512,10 +1156,10 @@ mod tests {
 
     #[test]
     fn a_long_document_becomes_server_side_page_ranges() {
-        let scratch = Scratch::new("split");
+        let scratch = Scratch::new("cloud-split");
         let pdf = scratch.join("long.pdf");
         write_pdf(&pdf, 401);
-        let fake = Fake::start(|_, _, _| Reply::bytes(Vec::new()));
+        let fake = FakeServer::start(|_| Reply::bytes(Vec::new()));
         let client = client(&fake, ledger(&scratch));
 
         let document = CloudDocument::new(&pdf, &scratch.join("out"), "out");
@@ -1550,15 +1194,14 @@ mod tests {
 
     #[test]
     fn an_oversized_document_is_refused_before_anything_is_sent() {
-        let scratch = Scratch::new("big");
+        let scratch = Scratch::new("cloud-big");
         let pdf = scratch.join("huge.pdf");
         write_pdf(&pdf, 1);
-        let fake = Fake::start(|_, _, _| Reply::bytes(Vec::new()));
+        let fake = FakeServer::start(|_| Reply::bytes(Vec::new()));
         let client = client(&fake, ledger(&scratch));
         let document = CloudDocument::new(&pdf, &scratch.join("out"), "out");
 
-        // The seam's own refusal, with the real ceiling standing in as a
-        // 1-byte one — the Python sliced such a file up instead.
+        // A 1-byte ceiling stands in for the real one.
         assert!(matches!(
             check_size(&pdf, 1),
             Err(ParseError::TooLarge { limit_bytes: 1, .. })
@@ -1573,7 +1216,7 @@ mod tests {
     /// document completing in the wrong order.
     #[test]
     fn a_batch_runs_end_to_end_and_sums_progress_monotonically() {
-        let scratch = Scratch::new("e2e");
+        let scratch = Scratch::new("cloud-e2e");
         let pdf = scratch.join("deck.pdf");
         write_pdf(&pdf, 3);
 
@@ -1587,8 +1230,8 @@ mod tests {
         let fake = {
             let submitted = submitted.clone();
             let polls = polls.clone();
-            Fake::start(move |hit, _, port| {
-                let origin = format!("http://127.0.0.1:{port}");
+            FakeServer::start(move |hit| {
+                let origin = hit.origin.clone();
                 if hit.method == "POST" {
                     assert_eq!(hit.url, "/api/v4/file-urls/batch");
                     let body = hit.json();
@@ -1641,8 +1284,7 @@ mod tests {
         let client = client(&fake, book.clone()).with_pages_per_task(2);
         let document = CloudDocument::new(&pdf, &scratch.join("deck_images"), "deck_images");
 
-        // The batcher's job, done by hand: a worker parses while this thread
-        // pumps progress out of `wait`, which is exactly the real split.
+        // The batcher's split, by hand: a worker parses, this thread `wait`s.
         let worker = {
             let client = client.clone();
             let document = document.clone();
@@ -1679,12 +1321,10 @@ mod tests {
         assert_eq!(usage.pages, 3);
     }
 
-    /// The divergence from the Python: one bad document used to fail all
-    /// twenty in its batch, which was survivable only while a local parser
-    /// stood behind it.
+    /// One bad document must not fail the rest of its batch.
     #[test]
     fn one_bad_document_does_not_take_the_batch_with_it() {
-        let scratch = Scratch::new("isolation");
+        let scratch = Scratch::new("cloud-isolation");
         let mut pdfs = Vec::new();
         for name in ["a.pdf", "b.pdf", "c.pdf"] {
             let path = scratch.join(name);
@@ -1705,8 +1345,8 @@ mod tests {
 
         let fake = {
             let submitted = submitted.clone();
-            Fake::start(move |hit, _, port| {
-                let origin = format!("http://127.0.0.1:{port}");
+            FakeServer::start(move |hit| {
+                let origin = hit.origin.clone();
                 if hit.method == "POST" {
                     let files = hit.json()["files"].as_array().unwrap().clone();
                     *hold(&submitted) = files
@@ -1759,14 +1399,14 @@ mod tests {
 
     #[test]
     fn a_rejected_token_fails_the_whole_batch() {
-        let scratch = Scratch::new("batch-auth");
+        let scratch = Scratch::new("cloud-batch-auth");
         let mut documents = Vec::new();
         for name in ["a.pdf", "b.pdf"] {
             let path = scratch.join(name);
             write_pdf(&path, 1);
             documents.push(CloudDocument::new(&path, &scratch.join("images"), "images"));
         }
-        let fake = Fake::start(|_, _, _| Reply::status(403, json!({ "msgCode": "A0202" })));
+        let fake = FakeServer::start(|_| Reply::status(403, json!({ "msgCode": "A0202" })));
         let client = client(&fake, ledger(&scratch));
 
         let results = client.extract_documents(&documents);
@@ -1780,18 +1420,17 @@ mod tests {
 
     #[test]
     fn a_failed_submit_still_burns_its_reservation() {
-        let scratch = Scratch::new("burn");
+        let scratch = Scratch::new("cloud-burn");
         let pdf = scratch.join("a.pdf");
         write_pdf(&pdf, 5);
-        let fake = Fake::start(|_, _, _| Reply::status(500, json!({ "msg": "server" })));
+        let fake = FakeServer::start(|_| Reply::status(500, json!({ "msg": "server" })));
         let book = ledger(&scratch);
         let client = client(&fake, book.clone());
         let document = CloudDocument::new(&pdf, &scratch.join("images"), "images");
 
         let results = client.extract_documents(&[document]);
         assert!(results[0].is_err());
-        // Deliberate: the POST may well have been counted server-side, and
-        // there is no way to ask. Uncertain failures count against us.
+        // The POST may have been counted server-side; uncertain failures count.
         let usage = book.snapshot();
         assert_eq!(usage.files, 1);
         assert_eq!(usage.pages, 5);
@@ -1801,7 +1440,7 @@ mod tests {
 
     #[test]
     fn a_zip_that_climbs_out_of_its_directory_is_refused() {
-        let scratch = Scratch::new("slip");
+        let scratch = Scratch::new("cloud-slip");
         let archive = scratch.join("bad.zip");
         fs::write(&archive, zip_of(&[("../escape.txt", b"bad".to_vec())])).unwrap();
 
@@ -1812,11 +1451,10 @@ mod tests {
 
     #[test]
     fn the_content_list_is_found_by_shape_not_by_name() {
-        let scratch = Scratch::new("glob");
+        let scratch = Scratch::new("cloud-glob");
         let root = scratch.join("result");
         fs::create_dir_all(root.join("deep/nested")).unwrap();
-        // The flat markdown beside it is never the source: it has no page
-        // boundaries and drops every header item.
+        // Never the flat markdown beside it.
         fs::write(root.join("deck.md"), "# not this").unwrap();
         fs::write(root.join("deep/nested/whatever_content_list.json"), "[]").unwrap();
 

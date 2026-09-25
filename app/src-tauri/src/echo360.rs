@@ -1,10 +1,6 @@
-//! Echo360 lecture capture, independent of Tauri.
-//!
-//! Access is not an API key — it is an LTI launch. Canvas mints an OAuth-signed
-//! form on the course's external-tool page; POSTing that form to Echo360 is
-//! what mints the Echo360 session, and the CloudFront cookies that come back
-//! are what the media CDN accepts. So everything here starts from the Canvas
-//! session cookie we already hold.
+//! Echo360 lecture capture, independent of Tauri. Access is an LTI launch:
+//! POSTing Canvas's OAuth-signed tool form to Echo360 mints the session and the
+//! CloudFront cookies the media CDN accepts.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -57,14 +53,12 @@ pub struct Lecture {
     pub title: String,
     pub date: String,
     pub duration_seconds: i64,
-    /// Whether the capture has a camera stream alongside the Presenter screen.
-    /// See `second_source_hint` — one media id, two downloadable files.
+    /// A room-camera stream alongside the Presenter screen (`second_source_hint`).
     pub has_second_source: bool,
 }
 
-/// A capture is published as one or two streams: `hd1.mp4` is the Presenter
-/// screen, `hd2.mp4` the room camera where the theatre has one. Both hang off
-/// the same media id, so a "source" is a file name, not a second recording.
+/// `hd1.mp4` is the Presenter screen, `hd2.mp4` the room camera if any — two
+/// files under one media id.
 pub type SourceNum = u8;
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -106,8 +100,7 @@ pub fn connect(canvas_cookie: &str, course_id: i64) -> Result<Session, String> {
         .collect::<Vec<_>>()
         .join("&");
 
-    // The agent follows redirects and accumulates Set-Cookie along the way —
-    // the session is spread across that redirect chain, not in one response.
+    // The session cookies are spread across the redirect chain; the agent jars them.
     let agent = ureq::AgentBuilder::new().build();
     let resp = agent
         .post(&action)
@@ -203,8 +196,8 @@ fn extract_section_id(path: &str) -> Result<String, String> {
 
 // ── Syllabus ─────────────────────────────────────────────────────────────────
 
-/// Every past lesson with a finished, available recording. Anything still
-/// processing is skipped: its media id resolves, but the download 404s.
+/// Every past lesson with a finished recording — one still processing has a
+/// media id but its download 404s.
 pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
     let url = format!("https://echo360.net.au/section/{}/syllabus", session.section_id);
     let raw = ureq::get(&url)
@@ -218,9 +211,7 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
     let items = body["data"].as_array().ok_or("syllabus: no data array")?;
 
     let mut out = Vec::new();
-    // How many lectures the syllabus couldn't answer for. Zero is the normal
-    // case; anything else means Echo360 has stopped sending its file lists and
-    // every sync is now paying a redirect per lecture to find the camera.
+    // Lectures the syllabus had no file lists for; nonzero is worth a warning.
     let mut probed = 0usize;
     for item in items {
         let lesson = &item["lesson"];
@@ -242,8 +233,6 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
             lesson["captureEndedAt"].as_str().unwrap_or(""),
         );
         let lesson_id = inner["id"].as_str().unwrap_or("").to_string();
-        // The syllabus usually says outright whether there is a camera stream.
-        // When it doesn't, one redirect request per lecture does — see below.
         let has_second_source = match second_source_hint(lesson) {
             Some(known) => known,
             None => {
@@ -257,7 +246,7 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
             lesson_id,
             title: inner["name"].as_str().unwrap_or("").to_string(),
             date: inner["timing"]["start"].as_str().unwrap_or("").to_string(),
-            // The stored duration is post-trim, so it matches the file on disk.
+            // Post-trim, to match the file on disk.
             duration_seconds: (raw_dur - TRIM_SECS as i64).max(0),
             has_second_source,
         });
@@ -273,15 +262,9 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
     Ok(out)
 }
 
-/// Does this lesson have a camera stream as well as the Presenter screen?
-///
-/// Echo360 carries the two as `primaryFiles` / `secondaryFiles`, but the
-/// nesting under `lesson` has moved between versions of the syllabus payload,
-/// so this searches for the keys rather than walking a fixed path.
-///
-/// `None` means the payload isn't carrying file lists at all — a *negative* is
-/// only trustworthy when `primaryFiles` is there to prove the shape is present.
-/// The caller falls back to probing the download endpoint in that case.
+/// Whether a lesson has a camera stream, from `primaryFiles`/`secondaryFiles`
+/// (searched for, since their nesting is not stable). `None` when there are no
+/// file lists at all — the caller then probes the download endpoint.
 fn second_source_hint(lesson: &serde_json::Value) -> Option<bool> {
     let non_empty = |v: &serde_json::Value| v.as_array().is_some_and(|a| !a.is_empty());
     if find_key(lesson, "secondaryFiles").is_some_and(non_empty) {
@@ -290,8 +273,7 @@ fn second_source_hint(lesson: &serde_json::Value) -> Option<bool> {
     find_key(lesson, "primaryFiles").map(|_| false)
 }
 
-/// First value under `key` anywhere in the tree, breadth of shape over depth
-/// of assumption.
+/// First value under `key` anywhere in the tree.
 fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
     match v {
         serde_json::Value::Object(map) => {
@@ -308,17 +290,13 @@ fn find_key<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::V
 fn duration_between(start: &str, end: &str) -> i64 {
     fn secs(s: &str) -> Option<i64> {
         let t = s.split('T').nth(1)?;
-        // Keep only HH:MM:SS — stopping at the first character that is neither
-        // a digit nor a colon drops the fraction and the zone in one pass.
-        // Without this, a plain "…T10:00:00Z" leaves "00Z" in the seconds slot
-        // and the whole duration silently reads as zero.
+        // Keep only HH:MM:SS, dropping any fraction and zone.
         let t: String = t.chars().take_while(|c| c.is_ascii_digit() || *c == ':').collect();
         let p: Vec<i64> = t.split(':').filter_map(|x| x.parse().ok()).collect();
         (p.len() >= 3).then(|| p[0] * 3600 + p[1] * 60 + p[2])
     }
     let s = secs(start).unwrap_or(0);
     let e = secs(end).unwrap_or(0);
-    // Crossing midnight is rare but real for evening lectures.
     if e >= s { e - s } else { e + 86400 - s }
 }
 
@@ -340,16 +318,9 @@ pub fn transcript(session: &Session, lesson_id: &str, media_id: &str) -> Result<
     Ok(vtt)
 }
 
-/// The download endpoint answers with a 302 to a signed CDN URL rather than
-/// the bytes, so redirects are disabled and the Location header is the result.
-///
-/// `source` picks the stream: 1 is the Presenter screen, 2 the room camera.
-///
-/// This doubles as the availability probe above, because Echo360 resolves the
-/// stream before it signs anything: a source that does not exist answers 500
-/// rather than handing back a URL that would 404 on the CDN (measured against
-/// `hd3.mp4`, which is never a real stream). So a redirect here means the file
-/// is there.
+/// The signed CDN URL from the download endpoint's 302 (redirects disabled).
+/// Doubles as the availability probe: a missing source answers 500, not a
+/// redirect.
 pub fn download_url(
     session: &Session,
     media_id: &str,
@@ -376,17 +347,11 @@ pub fn download_url(
     }
 }
 
-/// Stream a URL to disk, calling `on_progress` with a percentage as it goes.
-/// The error `stream_to_file` returns when `should_cancel` asked it to stop.
-/// Callers match on it to tell a user's cancellation apart from a failure —
-/// one is a finished intention, the other is worth reporting.
+/// The error `stream_to_file` returns when `should_cancel` stopped it.
 pub const CANCELLED: &str = "cancelled";
 
-/// Stream `url` to `dest`, reporting whole-percent progress.
-///
-/// `should_cancel` is polled once per 64 KB chunk rather than per byte: the
-/// read blocks on the network, so a finer check would not stop sooner, and a
-/// coarser one would leave a cancelled download running for megabytes.
+/// Stream `url` to `dest`, reporting whole-percent progress; `should_cancel`
+/// is polled per 64 KB chunk.
 pub fn stream_to_file(
     url: &str,
     dest: &Path,
@@ -426,8 +391,7 @@ pub fn stream_to_file(
         }
     }
 
-    // A truncated download still looks like a file; the size check is what
-    // stops a broken one from being trimmed and kept.
+    // A truncated download still looks like a file.
     if done < MIN_VIDEO_BYTES {
         return Err(format!("Download incomplete: {done} bytes received"));
     }
@@ -446,8 +410,7 @@ fn is_runnable(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// The ffmpeg we ship, else a system install. `resource_dir` is only known
-/// inside the app; the CLI passes `None` and finds the dev copy or the system.
+/// The ffmpeg we ship, else a system install. The CLI passes `None`.
 pub fn find_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
     let name = format!("ffmpeg{}", std::env::consts::EXE_SUFFIX);
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -462,8 +425,7 @@ pub fn find_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
         candidates.push(res.join(&name));
     }
 
-    // Dev: `bun run ffmpeg` writes src-tauri/binaries/ffmpeg-<target-triple>.
-    // The triple is not known at runtime, so take whatever the script left.
+    // Dev: `bun run ffmpeg` writes binaries/ffmpeg-<target-triple>.
     let dev_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
     if let Ok(entries) = std::fs::read_dir(&dev_dir) {
         for entry in entries.flatten() {
@@ -489,7 +451,7 @@ pub fn find_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
     candidates.into_iter().find(|p| is_runnable(p))
 }
 
-/// Drop the lead-in with a stream copy — no re-encode, so it costs seconds.
+/// Drop the lead-in with a stream copy (no re-encode).
 pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path) -> bool {
     std::process::Command::new(ffmpeg)
         .args([
@@ -509,9 +471,7 @@ pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Remove the untrimmed downloads left behind by an interrupted run. Both
-/// sources land in the same lecture directory, so this matches by prefix
-/// rather than by name (and still catches the pre-source-2 `raw.mp4`).
+/// Remove untrimmed `raw*.mp4` downloads left by an interrupted run.
 pub fn cleanup_partial_downloads(data_dir: &Path) {
     let dir = data_dir.join("lectures");
     let Ok(lectures) = std::fs::read_dir(&dir) else { return };
@@ -532,8 +492,7 @@ pub fn lecture_dir(data_dir: &Path, media_id: &str) -> PathBuf {
     data_dir.join("lectures").join(media_id)
 }
 
-/// Where a trimmed stream lives. Source 1 keeps the name it has always had,
-/// so nothing already downloaded has to be fetched again.
+/// Where a trimmed stream lives.
 pub fn source_path(dir: &Path, source: SourceNum) -> PathBuf {
     dir.join(format!("source{source}.mp4"))
 }
@@ -600,15 +559,12 @@ mod tests {
         });
         assert_eq!(second_source_hint(&screen_only), Some(false));
 
-        // No file lists at all: unknowable from the syllabus, so the caller
-        // probes rather than being told a confident "no".
         let no_files = serde_json::json!({ "medias": [{ "id": "abc", "isAvailable": true }] });
         assert_eq!(second_source_hint(&no_files), None);
     }
 
     #[test]
     fn durations_read_every_timestamp_shape_echo360_sends() {
-        // Fractional seconds, a zone suffix, or neither.
         assert_eq!(duration_between("2026-01-01T10:00:00.000Z", "2026-01-01T10:50:00.000Z"), 3000);
         assert_eq!(duration_between("2026-01-01T10:00:00+11:00", "2026-01-01T10:50:00+11:00"), 3000);
         assert_eq!(duration_between("2026-01-01T10:00:00", "2026-01-01T10:50:00"), 3000);

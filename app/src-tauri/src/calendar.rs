@@ -1,37 +1,20 @@
-//! Canvas calendar: scheduled classes and dated coursework.
+//! Canvas calendar: timetabled classes (`type=event`) and dated coursework
+//! (`type=assignment`), flattened into one row shape. See `docs/calendar.md`.
 //!
-//! This is the answer to "when are my classes?" — Canvas's calendar API is
-//! where a course's timetabled events live (`type=event`), and where every
-//! assignment and quiz surfaces as a dated item (`type=assignment`). Both come
-//! back through the same endpoint, so one module fetches both and flattens
-//! them into one row shape the app and the CLI store identically.
-//!
-//! Two things about the shape of Canvas's answer drive the code below.
-//!
-//! **A repeating class is not one event.** Canvas expands a series server-side
-//! into an event per occurrence, so there is no recurrence rule to interpret —
-//! a semester of lectures is simply a lot of rows. `all_events=true` is what
-//! gets the whole semester in one walk instead of guessing a date window that
-//! would clip the first or last week.
-//!
-//! **A class with sections is a parent plus children.** When staff schedule an
-//! event per tutorial section, Canvas returns one parent spanning them all with
-//! the real, per-section occurrences as `child_events`. Rendering the parent
-//! would show every section's tutorial as if the student attended all of them,
-//! so children replace their parent — filtered to the sections this user is
-//! actually enrolled in when that is knowable (see [`my_section_codes`]).
+//! - Canvas expands a repeating class server-side into one event per
+//!   occurrence; `all_events=true` fetches the whole semester.
+//! - A sectioned class is a parent spanning every section plus per-section
+//!   `child_events`: children replace the parent, filtered to this user's
+//!   sections when known ([`my_section_codes`]).
 
 use std::collections::HashSet;
 
 use crate::canvas::Canvas;
 
-/// One dated thing, already flattened: no parents, no recurrence, no sections.
-/// `start_at`/`end_at` are Canvas's ISO8601 UTC strings, stored verbatim and
-/// rendered in local time by the frontend.
+/// One dated item. `start_at`/`end_at` are Canvas's UTC strings, verbatim.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct CalendarEvent {
-    /// Canvas's own context id (`event_123`, `assignment_456`) — stable across
-    /// syncs, which is what makes the upsert an upsert.
+    /// `event_123` / `assignment_456` — stable across syncs, the upsert key.
     pub id: String,
     /// `class` for a scheduled event, `due` for a deadline.
     pub kind: String,
@@ -40,19 +23,16 @@ pub struct CalendarEvent {
     pub end_at: Option<String>,
     pub all_day: bool,
     pub location: Option<String>,
-    /// The Canvas page for this item, for the "Open in Canvas" affordance.
     pub url: Option<String>,
-    /// Event description, converted from Canvas HTML to markdown.
+    /// Markdown, converted from Canvas HTML.
     pub description: Option<String>,
 }
 
 pub const KIND_CLASS: &str = "class";
 pub const KIND_DUE: &str = "due";
 
-/// Every dated item for one course: scheduled events first, then deadlines.
-///
-/// Errors from either half are contained — a course with the calendar tab
-/// disabled still yields its assignment due dates, and vice versa.
+/// Every dated item for one course, sorted by start. Either half failing still
+/// yields the other.
 pub fn fetch(canvas: &Canvas, course_id: i64) -> Result<Vec<CalendarEvent>, String> {
     let sections = my_section_codes(canvas, course_id);
     let mut out = Vec::new();
@@ -70,12 +50,9 @@ pub fn fetch(canvas: &Canvas, course_id: i64) -> Result<Vec<CalendarEvent>, Stri
     Ok(out)
 }
 
-/// The `course_section_<id>` codes this user is enrolled in.
-///
-/// `include[]=sections` on the courses API returns the *calling user's*
-/// sections, not the course's — which is exactly the filter needed to keep
-/// other tutorials' times off this student's calendar. An empty set means
-/// "unknown", and callers must then keep every child rather than none.
+/// The `course_section_<id>` codes this user is enrolled in
+/// (`include[]=sections` returns the caller's own). Empty means unknown:
+/// callers then keep every child.
 fn my_section_codes(canvas: &Canvas, course_id: i64) -> HashSet<String> {
     let mut out = HashSet::new();
     let Ok(v) = canvas.get_json(&format!("/api/v1/courses/{course_id}?include[]=sections")) else {
@@ -94,18 +71,13 @@ fn fetch_events(
     course_id: i64,
     sections: &HashSet<String>,
 ) -> Result<Vec<CalendarEvent>, String> {
-    // Ask about the sections as well as the course. Canvas returns a
-    // section-scoped occurrence either way — nested under its parent, or
-    // top-level when its own context was requested — and which one you get has
-    // varied. Requesting both and deduplicating by id is what makes the answer
-    // the same either way.
+    // Ask for the sections as well as the course: a section occurrence may come
+    // nested or top-level, so request both and deduplicate by id.
     let contexts: String = std::iter::once(format!("&context_codes[]=course_{course_id}"))
         .chain(sections.iter().map(|c| format!("&context_codes[]={c}")))
         .collect();
 
-    // `include[]` and `includes[]` are both spelled in Canvas's own docs for
-    // this endpoint depending on where you look; an unknown query parameter is
-    // ignored, so sending both is cheaper than being wrong.
+    // Canvas's docs spell it both ways; an unknown parameter is ignored.
     let raw = canvas.get_all(&format!(
         "/api/v1/calendar_events?type=event&all_events=true&per_page=100\
          {contexts}&include[]=child_events&includes[]=child_events"
@@ -113,8 +85,7 @@ fn fetch_events(
     Ok(flatten_events(&raw, sections))
 }
 
-/// Parents → occurrences, deduplicated. Pure, so the section rule is testable
-/// without a Canvas round trip.
+/// Parents → occurrences, deduplicated.
 fn flatten_events(raw: &[serde_json::Value], sections: &HashSet<String>) -> Vec<CalendarEvent> {
     let mut out: Vec<CalendarEvent> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -131,9 +102,7 @@ fn flatten_events(raw: &[serde_json::Value], sections: &HashSet<String>) -> Vec<
             .unwrap_or_default();
 
         if children.is_empty() {
-            // `hidden` marks a parent Canvas expects to be drawn as its
-            // children instead. With no children in hand there is nothing to
-            // draw it as, so drawing the span would be worse than skipping.
+            // A `hidden` parent is meant to be drawn as its children.
             if ev["hidden"].as_bool().unwrap_or(false) {
                 continue;
             }
@@ -143,10 +112,8 @@ fn flatten_events(raw: &[serde_json::Value], sections: &HashSet<String>) -> Vec<
             continue;
         }
 
-        // Section-scoped occurrences replace the parent that spans them. Keep
-        // only this student's sections; if none match — sections unknown, or
-        // the children are scoped some other way — keep all of them rather
-        // than silently dropping the course's whole timetable.
+        // Keep this student's sections; if none match, keep all rather than
+        // drop the course's whole timetable.
         let mine: Vec<&&serde_json::Value> = children
             .iter()
             .filter(|c| {
@@ -172,9 +139,7 @@ fn flatten_events(raw: &[serde_json::Value], sections: &HashSet<String>) -> Vec<
     out
 }
 
-/// Assignments and quizzes as calendar items. Undated ones come back too (the
-/// calendar API includes them under `all_events`) and are dropped here — a
-/// deadline with no date has nowhere to sit on a calendar.
+/// Assignments and quizzes as calendar items; undated ones are dropped.
 fn fetch_due(canvas: &Canvas, course_id: i64) -> Result<Vec<CalendarEvent>, String> {
     let raw = canvas.get_all(&format!(
         "/api/v1/calendar_events?type=assignment&all_events=true&per_page=100\
@@ -195,8 +160,7 @@ fn fetch_due(canvas: &Canvas, course_id: i64) -> Result<Vec<CalendarEvent>, Stri
                 end_at: None,
                 all_day: false,
                 location: None,
-                // The event's own `html_url` is the course's assignment
-                // *index*; the nested assignment carries the deep link.
+                // The event's own `html_url` is the assignment index.
                 url: a["assignment"]["html_url"]
                     .as_str()
                     .or_else(|| a["html_url"].as_str())
@@ -232,14 +196,8 @@ fn event_row(ev: &serde_json::Value) -> Option<CalendarEvent> {
     })
 }
 
-/// Timetabled events arrive titled with the whole course name in front of the
-/// activity — "IT Project (COMP30022_2026_SM2) (Tutorial 1 (16))". On a
-/// calendar that already colours and labels by subject that prefix is pure
-/// noise, so it goes, leaving "Tutorial 1 (16)". The trailing group number
-/// stays: it is which tutorial you are actually in.
-///
-/// Staff-created one-off events ("Week 9 Tutorial Wireshark") carry no prefix
-/// and are left exactly as written.
+/// "IT Project (COMP30022_2026_SM2) (Tutorial 1 (16))" → "Tutorial 1 (16)":
+/// strip the course-name prefix and one outer pair of parens.
 fn clean_title(title: &str, context_name: &str) -> String {
     let mut t = title.trim();
     if !context_name.is_empty() {
@@ -247,10 +205,8 @@ fn clean_title(title: &str, context_name: &str) -> String {
             t = rest.trim();
         }
     }
-    // What is left is usually the activity wrapped in one pair of parens.
     if let Some(inner) = t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
-        // Only unwrap when that pair is the outermost one — "(a) and (b)"
-        // must survive intact.
+        // Only when that pair is outermost — "(a) and (b)" survives.
         if balanced(inner) {
             t = inner.trim();
         }
@@ -279,9 +235,7 @@ fn balanced(s: &str) -> bool {
     depth == 0
 }
 
-/// Venue strings carry a room capacity nobody needs —
-/// "PAR-192-L2-L108-Laby Theatre (210)". The building and room codes stay:
-/// they are how you find the room.
+/// Drop the room capacity: "PAR-192-L2-L108-Laby Theatre (210)" → "… Theatre".
 fn clean_location(raw: &str) -> String {
     let t = raw.trim();
     let Some(open) = t.rfind(" (") else {
@@ -296,9 +250,8 @@ fn clean_location(raw: &str) -> String {
     }
 }
 
-/// Canvas ids arrive as a number for events and as an already-prefixed string
-/// (`"assignment_123"`) for assignments. Normalise both to one prefixed key so
-/// the two kinds can never collide in the table.
+/// Events carry a numeric id, assignments a prefixed string; normalise both to
+/// a prefixed key so the kinds cannot collide.
 fn context_id(v: &serde_json::Value, prefix: &str) -> Option<String> {
     match &v["id"] {
         serde_json::Value::Number(n) => Some(format!("{prefix}_{n}")),
@@ -308,8 +261,6 @@ fn context_id(v: &serde_json::Value, prefix: &str) -> Option<String> {
     }
 }
 
-/// Descriptions are Canvas HTML bodies like any other, so they go through the
-/// same converter — the calendar renders them with the app's markdown stack.
 fn markdown_of(html: Option<&str>) -> Option<String> {
     let md = crate::md::to_markdown(html?, &Default::default());
     (!md.trim().is_empty()).then_some(md)
@@ -317,18 +268,12 @@ fn markdown_of(html: Option<&str>) -> Option<String> {
 
 // ── Tauri command ─────────────────────────────────────────────────────────────
 
-/// Fetch one course's calendar. The frontend owns the write, exactly as it does
-/// for lectures: this returns rows, `upsertCalendarEvents` stores them.
+/// Fetch one course's calendar; the frontend's `upsertCalendarEvents` stores it.
 #[tauri::command]
 pub async fn calendar_sync_events(
-    app: tauri::AppHandle,
     canvas_course_id: i64,
 ) -> Result<Vec<CalendarEvent>, String> {
-    let dir = {
-        use tauri::Manager;
-        app.path().app_data_dir().map_err(|e| e.to_string())?
-    };
-    let canvas = Canvas::open(&dir);
+    let canvas = Canvas::open(&crate::paths::data_dir());
     if !canvas.has_session() {
         return Err("Not signed in to Canvas.".to_string());
     }
@@ -355,7 +300,6 @@ mod tests {
 
     #[test]
     fn timetabled_titles_lose_the_course_prefix_and_keep_the_group() {
-        // Real UniMelb shapes.
         assert_eq!(
             clean_title(
                 "IT Project (COMP30022_2026_SM2) (Tutorial 1 (16))",
@@ -370,14 +314,11 @@ mod tests {
             ),
             "Lecture 2 (1)"
         );
-        // A staff-written one-off has no prefix to strip.
         assert_eq!(
             clean_title("Week 9 Tutorial Wireshark Monday 12pm", "Information Security"),
             "Week 9 Tutorial Wireshark Monday 12pm"
         );
-        // Unwrapping must not eat text that merely starts and ends with parens.
         assert_eq!(clean_title("(a) then (b)", ""), "(a) then (b)");
-        // Nothing left after stripping falls back to the original.
         assert_eq!(clean_title("Course X", "Course X"), "Course X");
     }
 
@@ -391,7 +332,6 @@ mod tests {
             clean_location("X-Departmentally Organised Venue"),
             "X-Departmentally Organised Venue"
         );
-        // A trailing parenthetical that is not a number stays put.
         assert_eq!(clean_location("Room 4 (online)"), "Room 4 (online)");
     }
 
@@ -440,8 +380,6 @@ mod tests {
 
     #[test]
     fn the_same_occurrence_arriving_twice_is_kept_once() {
-        // Requesting the course and its sections can return a section event
-        // both nested under its parent and on its own.
         let raw = ev(r#"[
           {"id": 1, "start_at": "2026-08-10T01:00:00Z", "hidden": true,
            "child_events": [

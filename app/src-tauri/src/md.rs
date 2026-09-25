@@ -1,9 +1,5 @@
-//! HTML → Markdown for Canvas bodies.
-//!
-//! A direct port of the DOM converter that used to run inside the worker
-//! WebView, minus the DOM mutation: instead of stripping cruft nodes up front
-//! and re-reading the tree, the walk simply refuses to descend into them.
-//! Same output, no mutable tree needed.
+//! HTML → Markdown for Canvas bodies. Cruft nodes are skipped during the walk
+//! rather than stripped up front.
 
 use std::collections::HashMap;
 
@@ -16,8 +12,7 @@ const NBSP: char = '\u{a0}';
 /// Never rendered, in any position.
 const SKIP_TAGS: &[&str] = &["script", "style", "noscript", "svg", "path"];
 
-/// Rewrites for `<img src>` — original src → local relative path, filled in by
-/// the image downloader before conversion.
+/// `<img src>` → local relative path, filled in by the image downloader.
 pub type ImageMap = HashMap<String, String>;
 
 /// Convert a Canvas HTML body to Markdown. `images` may be empty.
@@ -35,9 +30,8 @@ pub fn to_markdown(html: &str, images: &ImageMap) -> String {
     collapse_blank_lines(&out).trim().to_string()
 }
 
-/// Every `<img>` in a body, as (data-api-endpoint or /api/v1/files/{data-id},
-/// src). The endpoint is what the file API is asked about; the src is the key
-/// the rewrite map is looked up by during conversion.
+/// Every `<img>` in a body, as (file API endpoint, src); the src keys the
+/// rewrite map.
 pub fn image_refs(html: &str) -> Vec<(String, String)> {
     let doc = Html::parse_document(html);
     doc.tree
@@ -48,8 +42,6 @@ pub fn image_refs(html: &str) -> Vec<(String, String)> {
             let el = n.value().as_element()?;
             let endpoint = match el.attr("data-api-endpoint") {
                 Some(e) => e.to_string(),
-                // The <img> carries the file id even when the endpoint
-                // attribute is absent.
                 None => format!("/api/v1/files/{}", el.attr("data-id")?),
             };
             Some((endpoint, el.attr("src").unwrap_or_default().to_string()))
@@ -57,9 +49,8 @@ pub fn image_refs(html: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Canvas page slugs and course file ids linked from a body. Pages link to
-/// pages that no module lists, so one level of this is what keeps content from
-/// being silently missed.
+/// Canvas page slugs and course file ids linked from a body — pages no module
+/// lists are reachable only this way.
 pub fn canvas_links(html: &str, course_id: i64) -> (Vec<String>, Vec<String>) {
     let doc = Html::parse_document(html);
     let prefix = format!("/courses/{course_id}/");
@@ -256,8 +247,7 @@ fn list_md(node: Ref<'_>, depth: usize, ordered: bool, ctx: &Ctx) -> String {
     out
 }
 
-/// `inline_md` renders a node's *children*; a child element reached directly
-/// needs itself rendered, which is what this wrapper does.
+/// `inline_md` renders a node's children; this renders the node itself.
 fn inline_md_self(n: Ref<'_>, ctx: &Ctx) -> String {
     if dropped(&n, ctx.in_cell) {
         return String::new();
@@ -336,7 +326,6 @@ fn cell_md(cell: Ref<'_>, images: &ImageMap) -> String {
     segs.join(" · ").replace(NBSP, " ").replace('|', "\\|").trim().to_string()
 }
 
-/// Collapse all whitespace runs to single spaces and trim.
 fn squeeze(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
