@@ -46,8 +46,8 @@ use serde::{Deserialize, Serialize};
 use antigravity::{AntigravitySession, AntigravitySpawn};
 use claude::{ClaudeSession, ClaudeSpawn};
 use codex::{CodexServer, CodexSpawn, CodexThreadOpts, ModelInfo};
-use opencode::{OpencodeServer, OpencodeSessionOpts, OpencodeSpawn, ProviderList};
 pub use event::{HarnessEvent, Provider, ToolKind};
+use opencode::{OpencodeServer, OpencodeSessionOpts, OpencodeSpawn, ProviderList};
 
 /// Where a bridge hands its events. Called from the bridge's reader thread,
 /// in stream order; must not block on the bridge.
@@ -74,7 +74,11 @@ pub fn thread_cwd(data_dir: &Path) -> PathBuf {
 /// appended after the subject section rather than instead of it: a lecture
 /// thread is still scoped to that lecture's course, and the agent still reads
 /// the whole library.
-pub fn instructions(data_dir: &Path, scope: Option<&str>, lecture: Option<&LectureBrief>) -> String {
+pub fn instructions(
+    data_dir: &Path,
+    scope: Option<&str>,
+    lecture: Option<&LectureBrief>,
+) -> String {
     let mut courses: Vec<String> = std::fs::read_dir(data_dir.join("courses"))
         .map(|rd| {
             rd.flatten()
@@ -88,7 +92,11 @@ pub fn instructions(data_dir: &Path, scope: Option<&str>, lecture: Option<&Lectu
     let courses = if courses.is_empty() {
         "none synced yet".to_string()
     } else {
-        courses.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
+        courses
+            .iter()
+            .map(|c| format!("`{c}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
     let base = INSTRUCTIONS_TEMPLATE
         .replace("{{DATA_DIR}}", &data_dir.display().to_string())
@@ -113,12 +121,11 @@ pub fn thread_sections(scope: Option<&str>, lecture: Option<&LectureBrief>) -> S
             "\n\n## This conversation\n\n\
              It is scoped to **{code}** — the folder `../courses/{code}/`. Unless the \
              student names another subject, answer from that folder, and pass `{code}` \
-             as the subject to the CLI. Read its `AGENTS.md` for the layout, and \
-             `./memories/{code}/` for what you have already learned about it — that is \
-             where a fact worth keeping from this conversation belongs, rather than in \
-             `./memories/` itself. (The course folder's own `agents/memories/` is a \
-             link to it; write the path above, since the folder it links to is the one \
-             you can write.)\n"
+             as the subject to the CLI. Read its `AGENTS.md` for the layout, and run \
+             `oculus memory list -s {code}` for what you already know about it — that \
+             bucket, and not the cross-subject one, is where a fact from this \
+             conversation belongs, so `-s {code}` rides every `oculus memory write` \
+             you make here.\n"
         ));
     }
     if let Some(lec) = lecture {
@@ -230,7 +237,9 @@ impl RawLog {
     pub fn write(&self, line: &str) {
         use std::io::Write;
         if let Ok(mut f) = self.0.lock() {
-            let _ = f.write_all(line.as_bytes()).and_then(|_| f.write_all(b"\n"));
+            let _ = f
+                .write_all(line.as_bytes())
+                .and_then(|_| f.write_all(b"\n"));
         }
     }
 }
@@ -490,8 +499,14 @@ fn naming_prompt(first_message: &str, reply: &str) -> String {
 /// long — is refused so the first-line title stays instead.
 fn clean_title(raw: &str) -> Option<String> {
     let line = raw.lines().find(|l| !l.trim().is_empty())?.trim();
-    let line = line.strip_prefix("Title:").or_else(|| line.strip_prefix("Name:")).unwrap_or(line);
-    let line = line.trim().trim_matches(|c| matches!(c, '"' | '\'' | '`' | '*' | '#')).trim();
+    let line = line
+        .strip_prefix("Title:")
+        .or_else(|| line.strip_prefix("Name:"))
+        .unwrap_or(line);
+    let line = line
+        .trim()
+        .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '*' | '#'))
+        .trim();
     let line = line.trim_end_matches(['.', '!']).trim();
     if line.is_empty() || line.chars().count() > 60 {
         return None;
@@ -833,7 +848,8 @@ impl Harness {
         method: usize,
         code: Option<&str>,
     ) -> Result<ProviderList, String> {
-        self.opencode_server()?.oauth_callback(provider, method, code)?;
+        self.opencode_server()?
+            .oauth_callback(provider, method, code)?;
         self.opencode_providers(true)
     }
 
@@ -910,7 +926,8 @@ impl Harness {
         live.remove(&thread_id);
 
         let cwd = thread_cwd(&self.data_dir);
-        std::fs::create_dir_all(&cwd).map_err(|e| format!("cannot create {}: {e}", cwd.display()))?;
+        std::fs::create_dir_all(&cwd)
+            .map_err(|e| format!("cannot create {}: {e}", cwd.display()))?;
         let raw_log = RawLog::open(&self.data_dir, thread_id);
         let session = match provider {
             Provider::Claude => {
@@ -924,7 +941,11 @@ impl Harness {
                         model: opts.model.clone(),
                         effort: opts.reasoning_effort.clone(),
                         permission_mode: "acceptEdits".into(),
-                        system_append: instructions(&self.data_dir, opts.scope.as_deref(), opts.lecture.as_ref()),
+                        system_append: instructions(
+                            &self.data_dir,
+                            opts.scope.as_deref(),
+                            opts.lecture.as_ref(),
+                        ),
                         env: discover::child_env(),
                         raw_log,
                     },
@@ -953,7 +974,11 @@ impl Harness {
                         .collect(),
                     model: opts.model.clone(),
                     reasoning_effort: opts.reasoning_effort.clone(),
-                    instructions: instructions(&self.data_dir, opts.scope.as_deref(), opts.lecture.as_ref()),
+                    instructions: instructions(
+                        &self.data_dir,
+                        opts.scope.as_deref(),
+                        opts.lecture.as_ref(),
+                    ),
                 };
                 let tid = match resume {
                     Some(id) => {
@@ -1165,7 +1190,9 @@ impl Harness {
                 Ok(HarnessEvent::Error { message, .. }) => failed = Some(message),
                 Ok(HarnessEvent::TurnFinished { .. }) => break,
                 Ok(HarnessEvent::Exited { code }) => {
-                    failed.get_or_insert(format!("provider exited (code {code:?}) before naming the thread"));
+                    failed.get_or_insert(format!(
+                        "provider exited (code {code:?}) before naming the thread"
+                    ));
                     break;
                 }
                 Ok(_) => {}
@@ -1238,7 +1265,11 @@ impl Harness {
     }
 
     pub fn is_live(&self, thread_id: i64) -> bool {
-        self.live.lock().unwrap().get(&thread_id).map_or(false, |l| l.is_alive())
+        self.live
+            .lock()
+            .unwrap()
+            .get(&thread_id)
+            .map_or(false, |l| l.is_alive())
     }
 
     /// Everything, on quit.
@@ -1296,7 +1327,6 @@ pub fn run_once(
 }
 
 // ── Tauri ────────────────────────────────────────────────────────────────────
-
 
 pub mod app {
     use super::*;
@@ -1383,7 +1413,9 @@ pub mod app {
                     // The claim is atomic, so this asks at most once; the turn
                     // itself takes seconds and cannot run on this loop, which
                     // every other thread's events are waiting behind.
-                    if thread_id > 0 && matches!(&ev, HarnessEvent::TurnFinished { status } if status == "completed") {
+                    if thread_id > 0
+                        && matches!(&ev, HarnessEvent::TurnFinished { status } if status == "completed")
+                    {
                         match rt.block_on(store::claim_naming(p, thread_id)) {
                             Ok(Some(seed)) => {
                                 // Read here rather than in the naming thread:
@@ -1392,9 +1424,14 @@ pub mod app {
                                 let sel = rt.block_on(jobs::selection(p, jobs::Job::ThreadNaming));
                                 let (namer, bus) = (namer.clone(), bus.clone());
                                 std::thread::spawn(move || {
-                                    match namer.name_thread(&sel, &seed.first_message, &seed.reply) {
+                                    match namer.name_thread(&sel, &seed.first_message, &seed.reply)
+                                    {
                                         Ok(title) => {
-                                            let _ = bus.send((thread_id, provider, HarnessEvent::ThreadTitled { title }));
+                                            let _ = bus.send((
+                                                thread_id,
+                                                provider,
+                                                HarnessEvent::ThreadTitled { title },
+                                            ));
                                         }
                                         Err(e) => eprintln!("[oculus] harness title: {e}"),
                                     }
@@ -1413,9 +1450,12 @@ pub mod app {
                     let next = queued.lock().unwrap().next(thread_id);
                     if let Some((msg, opts)) = next {
                         let (h, b) = (namer.clone(), bus.clone());
-                        let _ = b.send((thread_id, provider, HarnessEvent::Unqueued { id: msg.id }));
+                        let _ =
+                            b.send((thread_id, provider, HarnessEvent::Unqueued { id: msg.id }));
                         tauri::async_runtime::spawn(async move {
-                            if let Err(e) = dispatch(h, b, thread_id, provider, opts, msg.text).await {
+                            if let Err(e) =
+                                dispatch(h, b, thread_id, provider, opts, msg.text).await
+                            {
                                 eprintln!("[oculus] harness queued send: {e}");
                             }
                         });
@@ -1494,7 +1534,9 @@ pub mod app {
             title: l.title.clone(),
             date: l.date.clone(),
             has_transcript: l.has_transcript,
-            chapters: crate::store::chapters(pool, &l.id).await.unwrap_or_default(),
+            chapters: crate::store::chapters(pool, &l.id)
+                .await
+                .unwrap_or_default(),
         })
     }
 
@@ -1509,7 +1551,10 @@ pub mod app {
         let pool = crate::store::open_pool().await?;
         let row = store::thread(&pool, thread_id).await?;
         if row.provider != provider {
-            return Err(format!("thread {thread_id} is a {} thread", row.provider.label()));
+            return Err(format!(
+                "thread {thread_id} is a {} thread",
+                row.provider.label()
+            ));
         }
         if opts.model.is_some() && opts.model != row.model {
             store::set_model(&pool, thread_id, opts.model.as_deref()).await?;
@@ -1577,7 +1622,10 @@ pub mod app {
             if recheck {
                 discover::forget();
             }
-            discover::PROVIDERS.iter().map(|p| discover::health(*p)).collect()
+            discover::PROVIDERS
+                .iter()
+                .map(|p| discover::health(*p))
+                .collect()
         })
         .await
         .unwrap_or_default()
@@ -1878,9 +1926,11 @@ pub mod app {
     ) -> Result<opencode::ProviderList, String> {
         let h = state.harness.clone();
         let answers = answers.unwrap_or_default();
-        tokio::task::spawn_blocking(move || h.opencode_set_api_key(&provider, method, &key, &answers))
-            .await
-            .map_err(|e| e.to_string())?
+        tokio::task::spawn_blocking(move || {
+            h.opencode_set_api_key(&provider, method, &key, &answers)
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
 
     #[tauri::command]
@@ -1924,9 +1974,11 @@ pub mod app {
         code: Option<String>,
     ) -> Result<opencode::ProviderList, String> {
         let h = state.harness.clone();
-        tokio::task::spawn_blocking(move || h.opencode_oauth_callback(&provider, method, code.as_deref()))
-            .await
-            .map_err(|e| e.to_string())?
+        tokio::task::spawn_blocking(move || {
+            h.opencode_oauth_callback(&provider, method, code.as_deref())
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
 
     /// Send a message; creates the thread when `thread_id` is null. Returns
@@ -1945,7 +1997,8 @@ pub mod app {
         text: String,
         options: Option<SendOptions>,
     ) -> Result<i64, String> {
-        let provider = Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?;
+        let provider =
+            Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?;
         let mut opts = options.unwrap_or_default();
         opts.reasoning_effort = validate_effort(opts.reasoning_effort)?;
         let pool = crate::store::open_pool().await?;
@@ -1979,7 +2032,15 @@ pub mod app {
             });
             return Ok(id);
         }
-        dispatch(state.harness.clone(), state.bus.clone(), id, provider, opts, text).await?;
+        dispatch(
+            state.harness.clone(),
+            state.bus.clone(),
+            id,
+            provider,
+            opts,
+            text,
+        )
+        .await?;
         Ok(id)
     }
 
@@ -2151,7 +2212,11 @@ pub mod app {
         queue_id: String,
         text: String,
     ) -> Result<(), String> {
-        let edited = state.queue.lock().unwrap().edit(thread_id, &queue_id, &text);
+        let edited = state
+            .queue
+            .lock()
+            .unwrap()
+            .edit(thread_id, &queue_id, &text);
         if let Some(msg) = edited {
             let pool = crate::store::open_pool().await?;
             let row = store::thread(&pool, thread_id).await?;
@@ -2189,11 +2254,30 @@ pub mod app {
     }
 
     #[tauri::command]
-    pub async fn harness_delete_thread(state: State<'_, HarnessState>, thread_id: i64) -> Result<(), String> {
+    pub async fn harness_delete_thread(
+        state: State<'_, HarnessState>,
+        thread_id: i64,
+    ) -> Result<(), String> {
         state.harness.close(thread_id);
         state.queue.lock().unwrap().forget(thread_id);
         let pool = crate::store::open_pool().await?;
         store::delete_thread(&pool, thread_id).await
+    }
+
+    /// Startup: collect the opencode servers a previous run was signalled
+    /// out of. `tauri dev` terminates the app to relaunch it, and a
+    /// force-quit or a crash does the same in production — neither runs
+    /// [`Harness::shutdown`] or any `Drop`, so the server is left listening
+    /// with launchd for a parent and nothing else will ever take it. See
+    /// [`opencode::sweep`] for what makes one safe to kill.
+    pub fn sweep_strays() {
+        let killed = opencode::sweep();
+        if !killed.is_empty() {
+            eprintln!(
+                "[oculus] harness: killed {} stray opencode server(s): {killed:?}",
+                killed.len()
+            );
+        }
     }
 
     /// Startup: nothing survives a restart as `running`.
@@ -2226,10 +2310,22 @@ mod tests {
     /// because the first-line title it would replace is better than prose.
     #[test]
     fn a_name_is_taken_out_of_whatever_the_model_wrapped_it_in() {
-        assert_eq!(clean_title("Dijkstra worked example").as_deref(), Some("Dijkstra worked example"));
-        assert_eq!(clean_title("\"Week 6 tutorial questions\"\n").as_deref(), Some("Week 6 tutorial questions"));
-        assert_eq!(clean_title("Title: **Semaphores and deadlock**").as_deref(), Some("Semaphores and deadlock"));
-        assert_eq!(clean_title("Assignment 2 marking scheme.").as_deref(), Some("Assignment 2 marking scheme"));
+        assert_eq!(
+            clean_title("Dijkstra worked example").as_deref(),
+            Some("Dijkstra worked example")
+        );
+        assert_eq!(
+            clean_title("\"Week 6 tutorial questions\"\n").as_deref(),
+            Some("Week 6 tutorial questions")
+        );
+        assert_eq!(
+            clean_title("Title: **Semaphores and deadlock**").as_deref(),
+            Some("Semaphores and deadlock")
+        );
+        assert_eq!(
+            clean_title("Assignment 2 marking scheme.").as_deref(),
+            Some("Assignment 2 marking scheme")
+        );
         assert_eq!(clean_title(""), None);
         assert_eq!(clean_title("   \n\n "), None);
         assert_eq!(
@@ -2256,8 +2352,15 @@ mod tests {
         // Another thread is not held up by this one.
         assert!(q.try_claim(2));
 
-        assert_eq!(q.next(1).map(|(m, _)| m), Some(a), "in the order they were typed");
-        assert!(!q.try_claim(1), "the thread stays claimed while one is going out");
+        assert_eq!(
+            q.next(1).map(|(m, _)| m),
+            Some(a),
+            "in the order they were typed"
+        );
+        assert!(
+            !q.try_claim(1),
+            "the thread stays claimed while one is going out"
+        );
         assert_eq!(q.next(1).map(|(m, _)| m.text), Some("second".into()));
         assert!(q.next(1).is_none(), "nothing left");
         assert!(q.try_claim(1), "and the thread is free again");
@@ -2274,7 +2377,10 @@ mod tests {
         q.push(7, "one", &opts);
         let two = q.push(7, "two", &opts);
         q.push(7, "three", &opts);
-        assert!(q.remove(7, &two.id), "a pending message can be dropped on its own");
+        assert!(
+            q.remove(7, &two.id),
+            "a pending message can be dropped on its own"
+        );
         assert_eq!(
             q.clear(7).into_iter().map(|m| m.text).collect::<Vec<_>>(),
             vec!["one".to_string(), "three".to_string()]
@@ -2297,16 +2403,47 @@ mod tests {
         std::fs::create_dir_all(root.join("courses/COMP30026_2026_SM2")).unwrap();
 
         let general = instructions(&root, None, None);
-        assert!(general.contains("`COMP30026_2026_SM2`"), "the course list is filled in");
-        assert!(!general.contains("This conversation"), "no scope section on a general thread");
+        assert!(
+            general.contains("`COMP30026_2026_SM2`"),
+            "the course list is filled in"
+        );
+        assert!(
+            !general.contains("This conversation"),
+            "no scope section on a general thread"
+        );
+        // The memory contract rides every brief, scoped or not, and it is two
+        // halves: the index is opened at the top, and a fact is written the
+        // moment it is true. Trimming either one is what made memory
+        // something that happened in the threads that happened to think of it.
+        assert!(
+            general.contains("oculus memory list"),
+            "the index is read with the command"
+        );
+        assert!(
+            general.contains("oculus memory write"),
+            "and written with it"
+        );
+        assert!(
+            general.contains("`./TASTE.md`"),
+            "the standing preferences are named too"
+        );
+        assert!(
+            general.contains("## Memory"),
+            "and the contract is its own section"
+        );
 
         let scoped = instructions(&root, Some("COMP30026_2026_SM2"), None);
-        assert!(scoped.starts_with(&general), "the scope is appended to the same brief");
+        assert!(
+            scoped.starts_with(&general),
+            "the scope is appended to the same brief"
+        );
         assert!(scoped.contains("`../courses/COMP30026_2026_SM2/`"));
-        // The memory bucket it names has to be one the thread can write:
-        // `agents/memories/<CODE>/` under the cwd, never the course folder's
-        // own, which every sandbox here refuses.
-        assert!(scoped.contains("`./memories/COMP30026_2026_SM2/`"));
+        // The bucket is reached by flag rather than by path, which is what
+        // stopped a subject fact from being filed across subjects — and what
+        // keeps the unwritable path (the course folder's own
+        // `agents/memories/`, which every sandbox here refuses) out of the
+        // brief entirely.
+        assert!(scoped.contains("oculus memory list -s COMP30026_2026_SM2"));
         assert!(
             !scoped.contains("../courses/COMP30026_2026_SM2/agents/memories"),
             "the unwritable path is not offered as a place to write"
@@ -2340,10 +2477,19 @@ mod tests {
         };
         let full = instructions(&root, Some("COMP30026_2026_SM2"), Some(&lecture));
 
-        assert!(full.starts_with(&scoped), "the lecture is appended to the subject's brief");
-        assert!(full.contains("`../lectures/abc-123/`"), "the folder as the agent would type it");
+        assert!(
+            full.starts_with(&scoped),
+            "the lecture is appended to the subject's brief"
+        );
+        assert!(
+            full.contains("`../lectures/abc-123/`"),
+            "the folder as the agent would type it"
+        );
         assert!(full.contains("`../lectures/abc-123/transcript.vtt`"));
-        assert!(full.contains("00:23:02 — Resolution"), "chapters are inline");
+        assert!(
+            full.contains("00:23:02 — Resolution"),
+            "chapters are inline"
+        );
         assert!(full.contains("the moment it was sent at"));
         // The date is the only thing here that says which week's deck goes
         // with the recording — the title is the timetable's.

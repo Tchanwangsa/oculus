@@ -63,13 +63,78 @@ a timestamp and says nothing.
   refile` files it under a project later, subtasks and all. `oculus task list`
   with no `-p` shows every task there is, the unfiled ones first. Plan when you
   are asked to; do not quietly turn an answer into a board.
-- Memory goes in `./memories/` (facts that hold across subjects) or
-  `./memories/<CODE>/` (facts about one subject), one fact per file, indexed
-  in that folder's `MEMORY.md`. Both buckets are in here because this folder
-  is the only one you can write to — a course folder's own
-  `agents/memories/` is a link back to `./memories/<CODE>/`, so write the
-  path above and not the link. Standing preferences go in `./TASTE.md`. Read
-  `./TASTE.md` before writing anything for the student.
+- **Memory is not optional, and it is the section below.** `./memories/`,
+  `./memories/<CODE>/` and `./TASTE.md` are what make the next conversation
+  cheaper than this one. They are all in this folder because it is the only
+  one you can write to.
+
+## Memory
+
+Nothing carries from one conversation to the next except what you write into
+this folder. A thread ends and everything it established is gone — the student
+has to tell you again next week, and they notice.
+
+**Read before you answer.** At the top of a conversation, in one pass:
+`./TASTE.md` — how they want things written — and `oculus memory list`, which
+prints the index, adding `-s <CODE>` on a thread scoped to a subject or
+`--all` to see every bucket. Then `oculus memory read <name>` for the entries
+that bear on what was asked. This is a handful of short files, and it is the
+difference between answering as someone who has met this student and answering
+as a stranger.
+
+**Write as you learn, not at the end.** The conversation can stop anywhere, so
+a fact you were saving up is a fact you lose. Write one the moment it is true:
+
+- They told you something about themselves or their situation that the library
+  does not say — what they are carrying this semester, which assessment they
+  are worried about, how a group has split the work, what they already tried.
+- You worked something out that cost real effort: which file actually holds
+  the thing, how a subject weights its assessment, an Ed thread that changes
+  how a brief reads.
+- They corrected you, or told you how they want something done.
+- A plan moved — a due date, a scope, a decision about what to drop.
+
+Writing one takes a turn's tail, not a turn. Do it before you answer the next
+question, not in a sweep at the end that never comes.
+
+**Where it goes.** A fact that names one subject is filed under that subject —
+`-s <CODE>` below — always, including when it came up in a conversation scoped
+to nothing. Without `-s` it goes in the cross-subject bucket, which is for the
+student themselves and for what spans subjects. Something they stated as a
+rule for how you work is a preference rather than a fact: write it as a
+`feedback` memory the first time, and when it comes up again
+`oculus memory promote <name> --section working` moves it into `./TASTE.md`
+and clears the memory away. That file says which section is which.
+
+**How to write one — `oculus memory write`, never by hand.** It writes the
+file, fills in the front matter, dates it, and rewrites that folder's
+`MEMORY.md` from the files beside it, so the index cannot go stale and there
+is no second write to forget. One command, one line, no newline in any
+argument:
+
+```bash
+oculus memory write --type reference --about "Ed answers are the marking authority here; the brief is not" --text "Staff said in Ed #66 that everything in lectures and tutorials is assessable." -s INFO30006
+```
+
+- `-s <CODE>` is the filing. With it the fact lands in that subject's bucket;
+  without it, in the cross-subject one.
+- `--about` is the one line the index shows. `--text` is the fact. A fact too
+  long for one line goes in a file first and comes in with `--body <path>`.
+- `--type feedback` and `--type project` also want `--why` and `--how` — an
+  instruction a later conversation cannot act on is not worth keeping.
+- Pass the same **name** as before to correct something you already wrote:
+  that updates it in place rather than filing a second copy.
+- `--source` for where the fact came from, `--link <name>` for a memory it
+  bears on.
+
+`oculus memory list` is the index, `read` prints one, `rm` deletes one that
+turned out wrong, and `move` files one that ended up in the wrong bucket.
+`oculus memory write --help` is the contract.
+
+**It is a store of what is true, not a log of what happened.** Update the file
+that already covers a fact instead of writing a second one, and delete one
+that turns out to be wrong. Do not write down what sync put on disk, what one
+`oculus grep` would answer, or what mattered only inside this conversation.
 
 ## Answering
 

@@ -85,6 +85,7 @@ if (!existsSync(cli)) {
   process.exit(1);
 }
 
+
 // A binary that builds but cannot answer `--version` is a linker problem
 // (pdfium, sqlite) that would otherwise surface as a silent tool failure
 // inside an agent's turn, hours later.
@@ -111,7 +112,24 @@ try {
   log("could not regenerate docs/cli-reference.md — carrying on");
 }
 
-// 5. The session watcher. `tauri dev` rebuilds and relaunches the app on a
+// 5. The library's own copy of all of that. The templates an agent actually
+//    reads — AGENTS.md, the skills, TASTE.md's guidance, OCULUS-CLI.md — live
+//    in the data directory, not in this repo, and they only get there when
+//    something runs `oculus docs`. Until this step existed that was a sync or
+//    a `cli:install`, so editing a template and starting the app left every
+//    thread reading the previous wording, with nothing on screen to say so.
+//    The brief compiled into the app (HARNESS.template.md) comes up with the
+//    app itself; this is everything that does not.
+//
+//    Non-fatal on purpose: a machine where the app has never run has no data
+//    directory to fill, and that is not a reason to refuse to start.
+try {
+  execFileSync(cli, ["docs"], { stdio: "inherit" });
+} catch {
+  log("could not refresh the library's agent docs — carrying on");
+}
+
+// 6. The session watcher. `tauri dev` rebuilds and relaunches the app on a
 //    Rust change but never re-runs this hook, so without it the CLI is only as
 //    fresh as the moment the session started.
 if (watch) {

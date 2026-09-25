@@ -10,6 +10,10 @@
 //! file. Nothing about the message format is special: it is a backticked
 //! path, and the agent opens it with its own image tool.
 //!
+//! The same cap, sniff and naming serve the student's own notes, which take a
+//! pasted picture the same way and keep it somewhere else entirely —
+//! [`write_image`] takes the directory for that reason.
+//!
 //! `agents/attachments/` and not a folder of its own, because `agents/` is
 //! the one directory every bridge can both read and write (`harness/mod.rs`),
 //! and a path outside it would be refused by Claude's and Codex's sandboxes
@@ -90,25 +94,62 @@ fn filename(ext: &str) -> String {
     format!("{stamp}-{tail:08x}.{ext}")
 }
 
-/// Write one picture into `agents/attachments/`, answering with the path the
-/// agent opens it by.
-fn write(bytes: &[u8]) -> Result<String, String> {
+/// Write one picture into `dir`, answering with the name it was given.
+///
+/// **The destination is an argument because a note's pictures do not come
+/// here.** A document keeps its own beside itself under `courses/`, where a
+/// relative `![](assets/…)` resolves for the editor's preview, for the file
+/// viewer and for anyone handed the folder (`attach_document_image` in
+/// `crate::files`). Everything *else* about taking a picture in is the same
+/// wherever it lands — the cap, the sniff, the name that is this app's own
+/// and not the caller's — so it is all here and there is one of each.
+pub(crate) fn write_image(dir: &Path, bytes: &[u8]) -> Result<String, String> {
     if bytes.is_empty() {
         return Err("that file is empty".into());
     }
     if bytes.len() > MAX_BYTES {
         return Err(format!(
-            "that file is {} MB — attachments are capped at {} MB",
+            "that file is {} MB — pictures are capped at {} MB",
             bytes.len() / (1024 * 1024),
             MAX_BYTES / (1024 * 1024)
         ));
     }
-    let ext = sniff(bytes).ok_or("that is not an image the agent can open")?;
-    let dir = attachments_dir(&crate::paths::data_dir());
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let ext = sniff(bytes).ok_or("that is not a picture — PNG, JPEG, GIF, WebP, HEIC or AVIF")?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let name = filename(ext);
     std::fs::write(dir.join(&name), bytes).map_err(|e| format!("{name}: {e}"))?;
-    Ok(format!("./attachments/{name}"))
+    Ok(name)
+}
+
+/// The bytes of a picture that crossed the IPC, which is to say base64 of
+/// the clipboard's — a byte array would cross as a JSON list of numbers,
+/// roughly seven characters per byte of screenshot.
+pub(crate) fn decode(data: &str) -> Result<Vec<u8>, String> {
+    base64::engine::general_purpose::STANDARD
+        .decode(data.as_bytes())
+        .map_err(|e| format!("could not read the pasted image: {e}"))
+}
+
+/// …and of one dropped from Finder, which the OS hands over as a path, so the
+/// bytes never cross the IPC at all. The size is asked of the filesystem
+/// first: a video dropped by mistake is refused without reading it.
+pub(crate) fn read_dropped(path: &str) -> Result<Vec<u8>, String> {
+    let src = PathBuf::from(path);
+    let meta = std::fs::metadata(&src).map_err(|e| format!("{path}: {e}"))?;
+    if meta.len() as usize > MAX_BYTES {
+        return Err(format!(
+            "that file is {} MB — pictures are capped at {} MB",
+            meta.len() / (1024 * 1024),
+            MAX_BYTES / (1024 * 1024)
+        ));
+    }
+    std::fs::read(&src).map_err(|e| format!("{path}: {e}"))
+}
+
+/// What the composer gets back: the path the agent opens the picture by,
+/// relative to `agents/`, which is every thread's working directory.
+fn attachment_ref(name: &str) -> String {
+    format!("./attachments/{name}")
 }
 
 /// A picture pasted into the composer: base64 of the clipboard's bytes.
@@ -117,12 +158,13 @@ fn write(bytes: &[u8]) -> Result<String, String> {
 /// numbers — roughly seven characters per byte of screenshot across the IPC.
 #[tauri::command]
 pub async fn harness_attach_image(data: String) -> Result<String, String> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data.as_bytes())
-        .map_err(|e| format!("could not read the pasted image: {e}"))?;
-    tokio::task::spawn_blocking(move || write(&bytes))
-        .await
-        .map_err(|e| e.to_string())?
+    let bytes = decode(&data)?;
+    tokio::task::spawn_blocking(move || {
+        let dir = attachments_dir(&crate::paths::data_dir());
+        write_image(&dir, &bytes).map(|name| attachment_ref(&name))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// A picture dropped onto the composer from Finder: the OS hands the webview
@@ -130,17 +172,9 @@ pub async fn harness_attach_image(data: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn harness_attach_file(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let src = PathBuf::from(&path);
-        let meta = std::fs::metadata(&src).map_err(|e| format!("{path}: {e}"))?;
-        if meta.len() as usize > MAX_BYTES {
-            return Err(format!(
-                "that file is {} MB — attachments are capped at {} MB",
-                meta.len() / (1024 * 1024),
-                MAX_BYTES / (1024 * 1024)
-            ));
-        }
-        let bytes = std::fs::read(&src).map_err(|e| format!("{path}: {e}"))?;
-        write(&bytes)
+        let bytes = read_dropped(&path)?;
+        let dir = attachments_dir(&crate::paths::data_dir());
+        write_image(&dir, &bytes).map(|name| attachment_ref(&name))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -166,7 +200,10 @@ mod tests {
         assert_eq!(sniff(b"#!/bin/sh\nrm -rf /"), None);
         assert_eq!(sniff(b"%PDF-1.7"), None);
         assert_eq!(sniff(b""), None);
-        assert!(write(b"#!/bin/sh").is_err());
+        let dir = std::env::temp_dir().join(format!("oculus-attach-test-{}", std::process::id()));
+        assert!(write_image(&dir, b"#!/bin/sh").is_err());
+        assert!(write_image(&dir, b"").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Nothing of the caller's reaches the filesystem, and two pictures in

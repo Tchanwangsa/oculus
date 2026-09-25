@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use app_lib::agents;
+use app_lib::memory;
 use app_lib::paths;
 use app_lib::projects;
 use app_lib::store;
@@ -135,6 +136,11 @@ enum Command {
     Task {
         #[command(subcommand)]
         action: TaskAction,
+    },
+    /// Read and write the memory store the agents keep in the library
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
     },
     /// Look inside a downloaded lecture recording
     Lecture {
@@ -838,16 +844,221 @@ struct LectureReadingArgs {
     source: Option<u8>,
 }
 
+// ── memory ──────────────────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+enum MemoryAction {
+    List(MemoryListArgs),
+    Read(MemoryReadArgs),
+    Write(MemoryWriteArgs),
+    Rm(MemoryRmArgs),
+    Move(MemoryMoveArgs),
+    Reindex(MemoryReindexArgs),
+    Promote(MemoryPromoteArgs),
+}
+
+/// What is already known, as the index shows it.
+///
+/// Read this before answering, not after: it is a few hundred bytes and it is
+/// the only thing that carries between conversations. Without `-s` it lists
+/// the cross-subject bucket; `--all` walks every bucket there is.
+///
+/// Each line leads with the **name**, which is what `read`, `rm`, `move` and
+/// `--link` take, and what a second `write` under updates rather than
+/// duplicates. Its one-line description follows underneath.
+#[derive(Args)]
+struct MemoryListArgs {
+    /// Only this subject's memories (a code, e.g. INFO30006)
+    #[arg(short = 's', long, value_name = "CODE")]
+    subject: Option<String>,
+    /// Every bucket: across subjects, then one per course
+    #[arg(long, conflicts_with = "subject")]
+    all: bool,
+    /// Only memories of this type
+    #[arg(long, value_name = "TYPE", value_parser = app_lib::memory::TYPES)]
+    r#type: Option<String>,
+}
+
+/// Print one memory in full.
+///
+/// The name is the file's, without `.md` — `memory list` prints it. A
+/// close-enough spelling finds it anyway: the hyphens need not fall where the
+/// filename puts them, the title works in place of the name, and a prefix or a
+/// distinctive fragment works when only one memory answers to it. Both buckets
+/// are searched unless `-s` narrows it.
+#[derive(Args)]
+struct MemoryReadArgs {
+    /// Which memory
+    #[arg(value_name = "NAME")]
+    name: String,
+    /// Look only in this subject's bucket
+    #[arg(short = 's', long, value_name = "CODE")]
+    subject: Option<String>,
+}
+
+/// Write a memory — front matter, dates and index included.
+///
+/// **This is the way to remember something, rather than writing the markdown
+/// by hand.** A memory is two files — the fact, and a line in that folder's
+/// `MEMORY.md` — and the second is the one that gets skipped, which is the one
+/// that decides whether the next conversation ever opens the first. Here the
+/// index is rewritten from the files every time, so it cannot go stale, and
+/// the front matter is built from the flags: pass the fact and how it is
+/// filed, and `name`, `created`, `updated` and the index are not yours to
+/// remember.
+///
+/// **Filing is `-s` or nothing.** A fact that names one subject takes
+/// `-s <CODE>` and lands in that subject's bucket — always, including when it
+/// came up in a conversation scoped to nothing. Without `-s` it goes in the
+/// cross-subject bucket, which is for the student themselves and for what
+/// spans subjects.
+///
+/// **A name that is already filed is updated, not duplicated**, keeping its
+/// `created` date and anything this call leaves out. That is what makes the
+/// store a record of what is true rather than a log of what was said.
+///
+/// The body is one line as `--text`, or a file with `--body` (`-` for stdin) —
+/// the shell an in-app agent runs through refuses a newline inside an
+/// argument, so anything with paragraphs in it is written to a file first.
+///
+///     oculus memory write --type reference --about "Ed answers are the marking authority for INFO30006; the brief is not" --text "Staff said in Ed #66 that everything in lectures and tutorials is assessable." -s INFO30006
+///
+///     oculus memory write tchan-study-workflow --type feedback --about "Wants a verdict then the evidence, never a survey of options" --text "Triages by return on investment and does the arithmetic before asking." --why "He is asking for the missing evidence, not to be told what to do." --how "Lead with one recommendation, then the specific evidence under it."
+#[derive(Args)]
+struct MemoryWriteArgs {
+    /// The file's name. Omit and it is taken from --about — but **name it to
+    /// update it**: a write that derives a name from a changed line is a new
+    /// memory, the same as it would be for any other file.
+    #[arg(value_name = "NAME")]
+    name: Option<String>,
+    /// File it under this subject (omit for the cross-subject bucket)
+    #[arg(short = 's', long, value_name = "CODE")]
+    subject: Option<String>,
+    /// The one line the index shows — what a reader sees before opening it
+    #[arg(long, visible_alias = "description", value_name = "TEXT")]
+    about: Option<String>,
+    /// What kind of memory this is
+    #[arg(long, value_name = "TYPE", value_parser = app_lib::memory::TYPES)]
+    r#type: Option<String>,
+    /// What the index calls it (default: the name, read back as words)
+    #[arg(long, value_name = "TEXT")]
+    title: Option<String>,
+    /// The fact itself, on one line
+    #[arg(long, value_name = "TEXT", conflicts_with = "body")]
+    text: Option<String>,
+    /// The fact, from a file — or `-` for stdin
+    #[arg(long, value_name = "FILE")]
+    body: Option<String>,
+    /// Why it is true, or why it matters. Required for feedback and project.
+    #[arg(long, value_name = "TEXT")]
+    why: Option<String>,
+    /// What a later session should do about it. Required for feedback and project.
+    #[arg(long, value_name = "TEXT")]
+    how: Option<String>,
+    /// Where the fact came from — a library path, an Ed number, a lecture
+    #[arg(long, value_name = "TEXT")]
+    source: Option<String>,
+    /// Another memory this one bears on, by name. Repeatable.
+    #[arg(long, value_name = "NAME")]
+    link: Vec<String>,
+    /// Any other front-matter field, as key=value. Repeatable.
+    #[arg(long, value_name = "K=V")]
+    meta: Vec<String>,
+}
+
+/// Delete a memory that turned out to be wrong.
+///
+/// The store is what is true, not what was said, so a fact that has been
+/// overtaken is deleted rather than left to be read again. **There is no
+/// undo** — nothing upstream has a copy of this, the way a course file comes
+/// back on the next sync. The index is rewritten without it.
+#[derive(Args)]
+struct MemoryRmArgs {
+    /// Which memory
+    #[arg(value_name = "NAME")]
+    name: String,
+    /// Look only in this subject's bucket
+    #[arg(short = 's', long, value_name = "CODE")]
+    subject: Option<String>,
+}
+
+/// File a memory under a different bucket.
+///
+/// For the mistake the two buckets exist to make visible: a fact about one
+/// subject that ended up in the cross-subject store, or the reverse. The file
+/// moves whole — body, dates and all — and both indexes are rewritten, which
+/// is the part that made this worth a command rather than a delete and a
+/// retype.
+#[derive(Args)]
+struct MemoryMoveArgs {
+    /// Which memory
+    #[arg(value_name = "NAME")]
+    name: String,
+    /// File it under this subject
+    #[arg(short = 's', long, value_name = "CODE", conflicts_with = "global")]
+    subject: Option<String>,
+    /// File it across subjects instead
+    #[arg(long)]
+    global: bool,
+}
+
+/// Rebuild a bucket's `MEMORY.md` from the files in it.
+///
+/// Every write does this already, so it is here for the store as it stands
+/// today: memories written by hand before this command existed, or a file
+/// dropped in from somewhere. Whatever prose sits above the generated list is
+/// kept.
+#[derive(Args)]
+struct MemoryReindexArgs {
+    /// Only this subject's bucket
+    #[arg(short = 's', long, value_name = "CODE")]
+    subject: Option<String>,
+    /// Every bucket there is
+    #[arg(long, conflicts_with = "subject")]
+    all: bool,
+}
+
+/// Turn a memory into a standing preference in `TASTE.md`.
+///
+/// The second half of the rule that file states: the first time something is
+/// said about how work should be done it is a `feedback` memory, and when it
+/// comes up again it earns a line in `TASTE.md` and the memory goes. This does
+/// both ends of that in one call, so the promotion is not a hand-edit nobody
+/// makes.
+#[derive(Args)]
+struct MemoryPromoteArgs {
+    /// Which memory
+    #[arg(value_name = "NAME")]
+    name: String,
+    /// Which heading it belongs under
+    #[arg(long, value_name = "NAME", value_parser = ["writing", "working", "study"])]
+    section: String,
+    /// The bullet, written as an instruction (default: the memory's own line)
+    #[arg(long = "as", value_name = "TEXT")]
+    text: Option<String>,
+    /// Leave the memory in place instead of deleting it
+    #[arg(long)]
+    keep: bool,
+    /// Look only in this subject's bucket
+    #[arg(short = 's', long, value_name = "CODE")]
+    subject: Option<String>,
+}
+
 /// Write the agent-facing docs into the library
 ///
 /// Fills `agents/` in the data directory: `OCULUS-CLI.md`, rendered from this
 /// binary's own `--help` so it can never drift from the flags it documents,
-/// and one `AGENTS.md` symlinked into every course folder. `OCULUS.md`,
-/// `TASTE.md` and the `MEMORY.md` index in each memory folder are stubbed on
-/// first run and never touched again — they are what an agent writes back to.
+/// one `AGENTS.md` symlinked into every course folder, and the skills.
 ///
-/// Idempotent, and run by `cli:install`, so the docs always describe the
-/// binary that is actually installed.
+/// It also brings the two generated-but-shared files up to date.
+/// `TASTE.md`'s guidance is re-rendered with the preferences you wrote in it
+/// carried across — a file that is half prompt and half content cannot be
+/// "written once and never again" without the prompt half going stale. Every
+/// `MEMORY.md` index is rewritten from the memories beside it. `OCULUS.md` is
+/// the one stub nothing here ever touches twice.
+///
+/// Idempotent, and run by the dev preflight and by `cli:install`, so a
+/// library's instructions always match the binary that is installed.
 #[derive(Args)]
 struct DocsArgs {
     /// Print the markdown instead of writing the file
@@ -902,6 +1113,15 @@ fn main() {
             LectureAction::Candidates(a) => ctx.lecture_candidates(&a),
             LectureAction::Chapters(a) => ctx.lecture_chapters(&a),
             LectureAction::Reading(a) => ctx.lecture_reading(&a),
+        },
+        Some(Command::Memory { action }) => match action {
+            MemoryAction::List(a) => ctx.memory_list(&a),
+            MemoryAction::Read(a) => ctx.memory_read(&a),
+            MemoryAction::Write(a) => ctx.memory_write(&a),
+            MemoryAction::Rm(a) => ctx.memory_rm(&a),
+            MemoryAction::Move(a) => ctx.memory_move(&a),
+            MemoryAction::Reindex(a) => ctx.memory_reindex(&a),
+            MemoryAction::Promote(a) => ctx.memory_promote(&a),
         },
         Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
@@ -3630,6 +3850,303 @@ impl Ctx {
         })
     }
 
+    // ── memory ───────────────────────────────────────────────────────────────
+
+    /// A subject flag to the course folder its bucket is named for, or `None`
+    /// for the cross-subject one. Resolved on the filesystem, so every command
+    /// here works from a sandbox that cannot open the database and on a
+    /// machine where the app has never run.
+    fn memory_bucket(&self, subject: &Option<String>) -> Result<Option<String>, String> {
+        match subject {
+            Some(code) => memory::resolve_subject(&self.data_dir, code).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    fn memory_list(&self, args: &MemoryListArgs) -> Result<(), String> {
+        let scope: Vec<Option<String>> = if args.all {
+            memory::buckets(&self.data_dir)
+        } else {
+            vec![self.memory_bucket(&args.subject)?]
+        };
+
+        let mut all: Vec<memory::Entry> = Vec::new();
+        for bucket in &scope {
+            let mut rows = memory::list(&self.data_dir, bucket.as_deref())?;
+            if let Some(kind) = &args.r#type {
+                rows.retain(|e| e.front.meta("type") == Some(kind.as_str()));
+            }
+            all.extend(rows);
+        }
+
+        if self.json {
+            return self.emit(&all);
+        }
+        if all.is_empty() {
+            println!("nothing filed here yet");
+            return Ok(());
+        }
+        let mut current: Option<Option<String>> = None;
+        for entry in &all {
+            if current.as_ref() != Some(&entry.subject) {
+                if current.is_some() {
+                    println!();
+                }
+                let name = entry
+                    .subject
+                    .clone()
+                    .unwrap_or_else(|| "across subjects".into());
+                println!("{}", paint(&name, BOLD));
+                current = Some(entry.subject.clone());
+            }
+            let kind = entry.front.meta("type").unwrap_or("—");
+            let (created, updated) = entry.dates();
+            let created = created.unwrap_or_default();
+            // The date a fact was last touched, only where it is not the one
+            // in the column: a memory nobody has revisited says so by having
+            // nothing here, and the column stays the order the list is in.
+            let revised = match &updated {
+                Some(u) if *u != created => format!("  {}", paint(&format!("updated {u}"), DIM)),
+                _ => String::new(),
+            };
+            // The **name**, not the title: this listing is read to decide what
+            // to open next, and the name is the one thing here that cannot be
+            // guessed back from the rest. A title slugged by hand lands a
+            // hyphen away from the filename as often as on it. The title is
+            // what `MEMORY.md` and `read` show; the description says the same
+            // thing at length, one line below.
+            println!(
+                "  {}  {}  {}{}\n      {}",
+                paint(&format!("{created:<10}"), DIM),
+                paint(&format!("[{kind}]"), DIM),
+                entry.front.name,
+                revised,
+                paint(entry.front.description.trim(), DIM)
+            );
+        }
+        Ok(())
+    }
+
+    fn memory_read(&self, args: &MemoryReadArgs) -> Result<(), String> {
+        let bucket = self.memory_bucket(&args.subject)?;
+        let entry = memory::find(&self.data_dir, &args.name, bucket.as_deref())?;
+        if self.json {
+            return self.emit(&entry);
+        }
+        println!("{}", paint(&entry.front.display(), BOLD));
+        if let (Some(created), updated) = entry.dates() {
+            let revised = match updated {
+                Some(u) if u != created => format!(", updated {u}"),
+                _ => String::new(),
+            };
+            println!("{}", paint(&format!("written {created}{revised}"), DIM));
+        }
+        println!("{}", paint(&entry.path, DIM));
+        println!();
+        println!("{}", entry.body.as_deref().unwrap_or_default().trim());
+        Ok(())
+    }
+
+    fn memory_write(&self, args: &MemoryWriteArgs) -> Result<(), String> {
+        let bucket = self.memory_bucket(&args.subject)?;
+
+        let body = match (&args.text, &args.body) {
+            (Some(text), _) => Some(text.clone()),
+            (None, Some(source)) => Some(if source == "-" {
+                let mut buffer = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut buffer)
+                    .map_err(|e| format!("reading the memory from stdin: {e}"))?;
+                buffer
+            } else {
+                std::fs::read_to_string(source).map_err(|e| format!("reading {source}: {e}"))?
+            }),
+            (None, None) => None,
+        };
+
+        let mut extra = Vec::new();
+        for pair in &args.meta {
+            let (k, v) = pair
+                .split_once('=')
+                .ok_or_else(|| format!("--meta wants key=value, got {pair}"))?;
+            extra.push((memory::slug(k).replace('-', "_"), v.to_string()));
+        }
+
+        let spec = memory::WriteSpec {
+            name: args.name.clone(),
+            title: args.title.clone(),
+            description: args.about.clone(),
+            kind: args.r#type.clone(),
+            body,
+            why: args.why.clone(),
+            how: args.how.clone(),
+            source: args.source.clone(),
+            links: args.link.clone(),
+            extra,
+        };
+        let written = memory::write(&self.data_dir, bucket.as_deref(), spec)?;
+
+        if self.json {
+            return self.emit(&written);
+        }
+        let where_ = written
+            .subject
+            .clone()
+            .unwrap_or_else(|| "across subjects".into());
+        println!(
+            "{} {} in {where_} ({} filed there now)",
+            paint(if written.created { "wrote" } else { "updated" }, GREEN),
+            written.name,
+            written.indexed
+        );
+        Ok(())
+    }
+
+    fn memory_rm(&self, args: &MemoryRmArgs) -> Result<(), String> {
+        let bucket = self.memory_bucket(&args.subject)?;
+        let entry = memory::remove(&self.data_dir, &args.name, bucket.as_deref())?;
+        if self.json {
+            return self
+                .emit(&serde_json::json!({ "deleted": entry.front.name, "path": entry.path }));
+        }
+        println!("{} {}", paint("deleted", YELLOW), entry.front.name);
+        Ok(())
+    }
+
+    fn memory_move(&self, args: &MemoryMoveArgs) -> Result<(), String> {
+        if args.subject.is_none() && !args.global {
+            return Err("say where it goes: -s <CODE>, or --global".into());
+        }
+        let to = self.memory_bucket(&args.subject)?;
+        let entry = memory::find(&self.data_dir, &args.name, None)?;
+        let moved = memory::relocate(&self.data_dir, &entry, to.as_deref())?;
+        if self.json {
+            return self.emit(&moved);
+        }
+        println!(
+            "{} {} to {}",
+            paint("moved", GREEN),
+            moved.name,
+            moved
+                .subject
+                .clone()
+                .unwrap_or_else(|| "across subjects".into())
+        );
+        Ok(())
+    }
+
+    fn memory_reindex(&self, args: &MemoryReindexArgs) -> Result<(), String> {
+        let scope: Vec<Option<String>> = if args.all {
+            memory::buckets(&self.data_dir)
+        } else {
+            vec![self.memory_bucket(&args.subject)?]
+        };
+        let mut done: Vec<(String, usize)> = Vec::new();
+        for bucket in &scope {
+            let n = memory::reindex(&self.data_dir, bucket.as_deref())?;
+            done.push((
+                bucket.clone().unwrap_or_else(|| "across subjects".into()),
+                n,
+            ));
+        }
+        if self.json {
+            return self.emit(
+                &done
+                    .iter()
+                    .map(|(b, n)| serde_json::json!({ "bucket": b, "entries": n }))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        for (bucket, n) in &done {
+            println!("{bucket}: {n} indexed");
+        }
+        Ok(())
+    }
+
+    /// A memory into a `TASTE.md` bullet, and out of the store.
+    ///
+    /// The bullet goes under the heading named rather than at the end of the
+    /// file, because that file's whole shape is three headings and a reader
+    /// who skims them. A missing heading is appended rather than refused: the
+    /// stub ships with all three, and a student who deleted one still meant
+    /// the preference.
+    fn memory_promote(&self, args: &MemoryPromoteArgs) -> Result<(), String> {
+        let bucket = self.memory_bucket(&args.subject)?;
+        let entry = memory::find(&self.data_dir, &args.name, bucket.as_deref())?;
+        let line = args
+            .text
+            .clone()
+            .unwrap_or_else(|| entry.front.description.trim().to_string());
+        if line.trim().is_empty() {
+            return Err("nothing to write — pass --as".into());
+        }
+
+        let path = agents::agents_dir(&self.data_dir).join("TASTE.md");
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let heading = format!("## {}", memory::humanize(&args.section));
+        let bullet = format!("- {}", line.trim());
+        if text.contains(&bullet) {
+            return Err(format!("{} already says that", path.display()));
+        }
+
+        let updated = match text.find(&heading) {
+            Some(at) => {
+                // The end of that section: the next heading, or the file's.
+                let after = at + heading.len();
+                let end = text[after..]
+                    .find("\n## ")
+                    .map(|i| after + i)
+                    .unwrap_or(text.len());
+                let section = text[after..end].trim_end();
+                // A bullet joins the ones already under the heading; the first
+                // one takes a blank line after the heading, the way the stub
+                // is written.
+                let body = if section.trim().is_empty() {
+                    format!("\n\n{bullet}\n")
+                } else if section.lines().any(|l| l.trim_start().starts_with("- ")) {
+                    format!("{section}\n{bullet}\n")
+                } else {
+                    format!("{section}\n\n{bullet}\n")
+                };
+                format!("{}{body}{}", &text[..after], &text[end..])
+            }
+            None => format!("{}\n\n{heading}\n\n{bullet}\n", text.trim_end()),
+        };
+        std::fs::write(&path, &updated)
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+
+        let removed = if args.keep {
+            None
+        } else {
+            Some(memory::remove(
+                &self.data_dir,
+                &entry.front.name,
+                entry.subject.as_deref(),
+            )?)
+        };
+
+        if self.json {
+            return self.emit(&serde_json::json!({
+                "taste": path.to_string_lossy(),
+                "section": args.section,
+                "bullet": bullet,
+                "memory_removed": removed.is_some(),
+            }));
+        }
+        println!(
+            "{} {bullet}",
+            paint(&format!("TASTE.md / {}:", args.section), GREEN)
+        );
+        if removed.is_some() {
+            println!(
+                "{} {} (it is a preference now)",
+                paint("deleted", DIM),
+                entry.front.name
+            );
+        }
+        Ok(())
+    }
+
     fn docs(&self, args: &DocsArgs) -> Result<(), String> {
         if args.stdout {
             print!("{}", render_cli_docs());
@@ -3652,20 +4169,41 @@ impl Ctx {
 
         let links = agents::link_all(&self.data_dir)?;
 
+        // The memory indexes are generated too, and this is the one command
+        // that runs over every bucket — including the ones a write has not
+        // touched since the shape of an index changed.
+        let mut indexed = 0;
+        for bucket in memory::buckets(&self.data_dir) {
+            indexed += memory::reindex(&self.data_dir, bucket.as_deref())?;
+        }
+
         if self.json {
             self.emit(&serde_json::json!({
                 "dir": dir.to_string_lossy(),
                 "generated": written,
                 "created": docs.created,
+                "refreshed": docs.refreshed,
+                "diverged": docs.diverged,
                 "linked": links.linked,
                 "already_linked": links.current,
                 "skipped": links.skipped,
+                "memories_indexed": indexed,
             }))
         } else {
             println!("{} in {}", written.join(", "), dir.display());
             for name in &docs.created {
                 println!("created {name} (yours now — it will not be overwritten)");
             }
+            for name in &docs.refreshed {
+                println!("refreshed {name} (its guidance; what you wrote in it was kept)");
+            }
+            for name in &docs.diverged {
+                eprintln!(
+                    "{} {name} has been edited past what a merge can be sure about, so its \n                              guidance was left as it is",
+                    paint("warning:", YELLOW)
+                );
+            }
+            println!("{indexed} memories indexed");
             let n = links.linked.len();
             println!(
                 "{n} course folder{} linked ({} already current)",

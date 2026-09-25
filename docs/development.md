@@ -12,7 +12,7 @@
 ```sh
 cd app
 bun install
-bun run predev        # deps, ffmpeg, libpdfium and the `oculus` CLI
+bun run predev        # deps, ffmpeg, libpdfium, the `oculus` CLI, the agent docs
 ```
 
 `predev` is the whole preflight and it is idempotent — run it any time. It is
@@ -111,6 +111,25 @@ cheap: the release binary is already built and current, so regenerating
 too, against the debug binary it has just built, and the generator only writes
 when the help actually changed — so the reference moves in the same commit as
 the CLI rather than waiting for the next bundle.
+
+### The library's copy of the prompts
+
+`predev` then runs `oculus docs`, which is the same step `cli:install` and
+every sync perform: the agent-facing layer — `AGENTS.md`, the skills,
+`OCULUS-CLI.md`, `TASTE.md`'s guidance, the `MEMORY.md` indexes — lives in the
+**data directory**, not in this repo, and the templates in
+`app/src-tauri/templates/` only get there when something writes them out. Until
+this step existed, editing a template and starting the app left every thread
+reading the previous wording with nothing on screen to say so, until the next
+sync happened to fix it.
+
+The one prompt this does *not* move is `HARNESS.template.md`, which is
+`include_str!`'d into the app and arrives with the app's own rebuild — so a
+brief edit needs the Rust rebuild `tauri dev` already does, and everything
+else needs this. Non-fatal by design: a machine whose app has never run has no
+library to fill, which is not a reason to refuse to start. See
+[cli.md](./cli.md) for which of those files are overwritten, which are merged,
+and which are never touched twice.
 
 ## Checks
 
