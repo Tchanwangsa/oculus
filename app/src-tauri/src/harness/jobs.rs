@@ -1,17 +1,9 @@
 //! Which agent runs which job, on what model, at what reasoning level.
 //!
-//! The composer's rule generalised past chat: nothing is defaulted out of
-//! sight. A model-backed job that is not a conversation — naming a thread,
-//! chaptering a lecture — still names its provider, its model and its level
-//! outright, and the row in Settings → AI that names them is the same
-//! `ModelPicker` the composer uses, so what is on screen is what the CLI is
-//! told.
-//!
-//! One JSON value in `settings` under [`SETTINGS_KEY`], written by the
-//! frontend (`getJobModels` / `setJobModels` in `app/src/lib/db.ts`) and read
-//! here, beside the app's other settings rows. The read is tolerant on
-//! purpose: a half-written or older value should cost the job its
-//! configuration, not its run.
+//! Nothing is defaulted out of sight: a non-chat job names its provider, model
+//! and level, set in Settings → AI with the composer's `ModelPicker`. Stored as
+//! one JSON value under [`SETTINGS_KEY`] (`getJobModels`/`setJobModels` in
+//! `app/src/lib/db.ts`); an unreadable value costs the job its config, not its run.
 
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
@@ -21,10 +13,8 @@ use super::Provider;
 /// The `settings` key holding the whole registry — one object, one row.
 pub const SETTINGS_KEY: &str = "job_models";
 
-/// A model-backed job that is not a chat turn.
-///
-/// The variants are the registry's keys, so adding a job is a variant, a
-/// default, and a row in the frontend's `JOBS` list — nothing else.
+/// A model-backed job that is not a chat turn. Adding one is a variant, a
+/// default, and a row in the frontend's `JOBS` list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Job {
     /// `oculus lecture chapters` / `lecture_find_chapters`.
@@ -36,8 +26,7 @@ pub enum Job {
 }
 
 impl Job {
-    /// The key inside the stored object. camelCase, like the rest of the
-    /// JSON this side shares with the webview.
+    /// The key inside the stored object (camelCase, like the webview's JSON).
     pub fn key(self) -> &'static str {
         match self {
             Job::LectureChapters => "lectureChapters",
@@ -47,8 +36,7 @@ impl Job {
     }
 }
 
-/// One job's agent, model and reasoning level. Every field is answered:
-/// `reasoning_effort` is `None` only when the model takes no level at all.
+/// One job's agent, model and level; `reasoning_effort` is None only for a model with none.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobSelection {
@@ -64,11 +52,6 @@ impl JobSelection {
 }
 
 /// What a job runs on until someone says otherwise.
-///
-/// Chaptering is a long look at fifty slide frames and a transcript, which is
-/// what the reasoning level is for. Naming is one line about a clipped
-/// exchange, so it is the cheapest model in the catalogue — the same model
-/// this was a `TITLE_MODEL_CLAUDE` constant for.
 pub fn default_selection(job: Job) -> JobSelection {
     match job {
         Job::LectureChapters => JobSelection {
@@ -83,19 +66,15 @@ pub fn default_selection(job: Job) -> JobSelection {
         },
         Job::ThreadNaming => JobSelection {
             provider: Provider::Claude,
-            // The id the CLI's own catalogue lists for Haiku, which declares
-            // no effort levels — so none is asked for.
+            // Haiku declares no effort levels, so none is asked for.
             model: "claude-haiku-4-5-20251001".into(),
             reasoning_effort: None,
         },
     }
 }
 
-/// The job's configured selection, or its default.
-///
-/// Anything unreadable — no row, bad JSON, a key that is not there, a
-/// provider this build does not know, an empty model — falls back to the
-/// default rather than failing the job. A settings row is not worth a run.
+/// The job's configured selection, or its default when anything about the
+/// stored row is unreadable.
 pub async fn selection(pool: &SqlitePool, job: Job) -> JobSelection {
     let stored = sqlx::query("SELECT value FROM settings WHERE key = ?1")
         .bind(SETTINGS_KEY)
@@ -110,8 +89,7 @@ pub async fn selection(pool: &SqlitePool, job: Job) -> JobSelection {
         .unwrap_or_else(|| default_selection(job))
 }
 
-/// The parse half of [`selection`], kept separate so it can be tested without
-/// a database.
+/// The parse half of [`selection`], testable without a database.
 fn from_json(raw: &str, job: Job) -> Option<JobSelection> {
     let value: serde_json::Value = serde_json::from_str(raw).ok()?;
     let picked: JobSelection = serde_json::from_value(value.get(job.key())?.clone()).ok()?;

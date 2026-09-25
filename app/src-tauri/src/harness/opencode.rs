@@ -1,196 +1,42 @@
-//! The opencode bridge: HTTP and SSE against one `opencode serve`.
+//! The opencode bridge: HTTP and SSE against one `opencode serve` per app.
 //!
-//! Codex's shape, over a different wire. One server per app — started on
-//! first use, killed on quit — and one *session* per thread inside it, with
-//! a single server-wide event stream that the reader thread routes by
-//! session id. A process per thread would buy nothing: the protocol already
-//! carries the session on every event.
+//! One server (started on first use, killed on quit), one session per thread,
+//! and one `GET /event` stream whose reader routes each event by session id.
+//! Everything is opencode's v1 session API, scoped with `?directory=<agents>`
+//! because an unscoped call binds to the server's own cwd. Not v2 (`/api/*`):
+//! on 1.18.31 a v2 prompt on an `auth.json` provider fails inside the server
+//! and emits nothing. The stream's rules are on [`translate`].
 //!
-//! Everything here drives opencode's **v1** session API — `POST /session`,
-//! `/prompt_async`, `/abort`, `/revert`, `GET /event` — each call scoped
-//! with `?directory=<the session dir>`, because a bare `/event` or
-//! `/session` binds to the server's own cwd, which is not ours. It was
-//! written against v2 (`/api/session`, `/api/event`, `session.next.*`
-//! events) first and moved, because on 1.18.31 a v2 prompt on any provider
-//! signed in through `auth.json` — OpenRouter, for every student — failed
-//! inside the server (`ModelUnavailableError`) and emitted nothing, while
-//! the same session over v1 answered (upstream #47577 / #47888 / #42737).
-//! The v2 translator ([`translate`]) and its recordings are kept until v1
-//! has run on real threads for a while; the endpoints are not dual.
-//!
-//! [`dispatch`] routes each event by wherever its session id is and picks
-//! the translator by the envelope ([`fold`]): `properties` is v1,
-//! `data` is v2. The parts that are easy to get wrong, and were:
-//!
-//! - **`--port 0` does not mean "pick a free port".** It means "prefer
-//!   4096", and it takes something else only when 4096 is busy. The real
-//!   port is printed on **stdout** as `opencode server listening on
-//!   http://127.0.0.1:<port>`, and that line is the only place it appears —
-//!   `--print-logs` puts structured logs on stderr and never the port.
-//! - **Bootstrap is a gate, not a wait.** `GET /agent?directory=` answers
-//!   synchronously with the directory's own `opencode.json` already read
-//!   (measured: 0.04 s on a never-seen directory, both agents listed), and
-//!   the bridge still checks that `oculus` is in the list before creating
-//!   any session — a session created without it would run as a built-in
-//!   agent with none of the containment.
-//! - **The agent and model a session is created with are decorative.** A
-//!   prompt that does not name them runs as opencode's stock `build` agent
-//!   with its 8k-token coding prompt and no permission story. So every
-//!   `prompt_async` carries `agent` and `model` ([`SessionRoute`]), and
-//!   the model is spelled `{providerID, id}` on create but
-//!   `{providerID, modelID}` on the prompt — each a 400 the other way.
-//! - **`prompt_async` answers 204 with no body.** The user message's
-//!   `msg_…` — the anchor a rewind names — comes off the stream, as the
-//!   first user `message.updated`, and [`translate_v1`] emits `TurnAnchor`
-//!   there. The stream is the only place anything about a turn is said.
-//! - **Revert is one call, inclusive and lazy.** `POST /revert {messageID}`
-//!   drops the named message *and* everything after it, so the anchor is
-//!   the question's own id (and the first message of a session can go);
-//!   nothing is deleted until the next prompt, when `message.removed`
-//!   events say so, and the message list keeps showing the reverted rows
-//!   until then. 409 `SessionBusyError` while a turn runs.
-//! - **An interrupt is `POST /abort`**, and on the stream it is
-//!   `session.error{MessageAbortedError}` followed, out of order, by the
-//!   partial answer — see the v1 family below for why the first idle after
-//!   it must not close the turn.
-//! - **The session id is `properties.sessionID`** on every session-scoped
-//!   v1 event, and also inside `info` (messages, and the session itself on
-//!   `session.created`/`updated`) and `part`; on v2 it was `data.sessionID`
-//!   or the durable envelope. [`session_of`] tries all of them. Thirty of
-//!   the eighty-eight event types carry no session at all (pty, workspace,
-//!   tui, lsp, mcp, installation, `server.heartbeat`…), so they are
-//!   translated and dispatched before the route lookup, into a sink that
-//!   belongs to the harness — exactly what Codex does with its
-//!   account-scoped rate limits.
-//! - **The v2 stream never sent `session.idle`**, and its turn opened on
-//!   `session.next.prompted` and closed on the first `step.ended` whose
-//!   `finish` was not `tool-calls`, or on any `step.failed` — an interrupt
-//!   being a `step.failed` saying exactly `Provider turn interrupted`. That
-//!   is what [`translate`] still folds, for a recorded stream; a turn whose
-//!   model could not be resolved emitted nothing at all there, which is
-//!   where [`OpencodeServer::watch_drains`] comes from.
-//!
-//! ## The v1 family (`/event`, measured on 1.18.31)
-//!
-//! [`translate_v1`] folds it, and is replayed from the recordings in
-//! `fixtures/harness/opencode-v1-*.ndjson` — a text answer, a tool chain, a
-//! reasoning model, an abort and an unresolvable model. What it has to know:
-//!
-//! - **Deltas for text and reasoning, snapshots for everything else.** A
-//!   part opens as a `message.part.updated` with `text: ""` and `time.start`,
-//!   streams as `message.part.delta` (`field` is `"text"` for reasoning too,
-//!   so the part's type is remembered from the opening snapshot), and closes
-//!   as a `message.part.updated` with `time.end` and the whole text. Tool
-//!   parts never delta: a running bash re-sends the whole part with
-//!   `state.metadata.output` grown, and the new suffix is the delta. Every
-//!   snapshot is the whole part.
-//! - **One assistant message per step, not per turn.** A tool chain makes
-//!   several `msg_…` rows, each `parentID` = the user message, each finishing
-//!   with `finish: "tool-calls"` or `"stop"` and emitted twice at completion.
-//!   The user row is re-emitted (with `summary`) after every step, so only
-//!   the first sight of a user id opens a turn — and that is also where
-//!   `TurnAnchor` comes from, since `prompt_async` answers 204 with no id.
-//!   The user's own prompt is a text part too, on the user message, and is
-//!   not an answer.
-//! - **An abort arrives out of order.** `session.error{MessageAbortedError}`,
-//!   then `session.idle`, *then* the final text snapshot and the assistant
-//!   `message.updated` carrying the same error, then a second idle. Closing
-//!   on the first idle would lose the partial answer, so idle only closes a
-//!   turn that has no assistant message at all, and the errored
-//!   `message.updated` is what says `interrupted`.
-//! - **A bad model gets `session.error`, then idle, and never an assistant
-//!   message; a bad agent gets `session.error` and no idle at all.** So a
-//!   `session.error` closes the turn itself when no assistant message is
-//!   pending, and idle is the backstop: outside an abort, an idle with the
-//!   turn still open — no assistant row, or one never completed — closes it
-//!   `failed`, because nothing else ever will. Each error is sent twice, the
-//!   second time as a stack trace (`\n    at …`), which is dropped.
-//!
-//! ## Containment, and what it does not buy
-//!
-//! The other two bridges lean on an OS sandbox: Claude's seatbelt profile
-//! and Codex's `workspace-write` both make the cwd the only writable root
-//! *at the kernel*, so a shell redirect out of it is refused by the system
-//! rather than by the agent. **opencode has no sandbox.** Its permission
-//! system is a rule list the runner checks before it calls a tool, and for
-//! `bash` the rule is a glob over the command string. So:
-//!
-//! - `edit` (which governs `write`, `edit` and `apply_patch` together — there
-//!   is no separate `write` key) is genuinely enforced per path, and that is
-//!   what keeps `courses/`, `lectures/`, `canvas-session/` and `oculus.db`
-//!   safe from the file tools. Measured, all three refuse.
-//! - `bash` is allow-listed to `oculus …` and `ls …` and denied otherwise,
-//!   which stops the obvious `rm -rf ../courses`. It is a speed bump, not a
-//!   boundary: `oculus files X > ../oculus.db` matches the allowed prefix and
-//!   opencode has nothing underneath it to refuse the redirect. This is the
-//!   one place an opencode thread is weaker than a Claude or Codex one, and
-//!   it is written down here rather than discovered later.
-//!
-//! Three rule shapes were measured and only one works, which is worth not
-//! relearning (`templates/OPENCODE.template.json` is the result):
-//!
-//! - `{"*": "deny", "<cwd>/**": "allow"}` **denies everything**. The path
-//!   check is deny-wins regardless of order, exactly as in Claude's rule
-//!   syntax — so the siblings of `agents/` are named individually and the
-//!   root is left allowed, which is the same shape `claude.rs` arrived at
-//!   for the same reason.
-//! - Whichever rule is **last** decides whether the tool is offered to the
-//!   model at all. A trailing `"*": "deny"` does not just refuse calls, it
-//!   deletes the tool from the request — `Unknown tool: write`. So the bash
-//!   map's last entry has to be an allow, or bash disappears.
-//! - A pattern for a path **inside** the session directory has to be
-//!   *relative* to it; one for a path outside has to be absolute. An
-//!   absolute `<agents>/opencode.json` silently matched nothing, while a
-//!   bare `opencode.json` refused it. That last rule is what stops the agent
-//!   rewriting the permissions it runs under, and `skills/**` and
-//!   `.opencode/**` are denied the same relative way and for the same
-//!   reason: the generated skills (`crate::agents`) and the directory
-//!   opencode would read a hand-made one from both sit inside the session
-//!   directory, which is the one place the agent may write.
-//!
-//! Skills are the one thing here that is config rather than a link. opencode
-//! scans `.opencode/skill/` in the project root, and also takes a top-level
-//! `skills.paths`, so the config names `skills` — *relative*, by the same
-//! rule as the denies above — and the generated directory is read where it
-//! already is instead of being copied or linked into a second place.
-//!
-//! The prompt is the other difference. There is no `--append-system-prompt`
-//! here: an agent's `prompt` **replaces** the whole system prompt (opencode
-//! then appends its own `<env>` block, the date, `AGENTS.md` and a skills
-//! index). So the rendered `HARNESS.template.md` *is* the `oculus` agent's
-//! prompt, written into `agents/opencode.json`, and the per-thread part of
-//! the brief — the subject, the lecture — rides the first prompt of the
-//! session instead, since the config is one document for every thread.
+//! opencode has no OS sandbox. Containment is its permission ruleset
+//! (`templates/OPENCODE.template.json`, rule shapes in docs/harness.md), and
+//! `bash` is a glob over the command string — a speed bump, not a boundary.
+//! An agent's `prompt` replaces the whole system prompt, so the rendered
+//! harness brief is the `oculus` agent's prompt and the per-thread part rides
+//! the session's first message.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use super::child::{str_of as s, ChildProc};
 use super::event::{cap_output, classify, HarnessEvent, Provider};
 use super::{RawLog, Sink};
 
-/// The server answers in well under a second cold; past this it is wedged.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-/// From `exec` to the listening line was 0.5s measured, warm.
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
-/// How long to keep asking for the agent list while the instance boots.
 const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(20);
-/// How long a turn may go between the user's `message.updated` and the
-/// first assistant one before the bridge calls it dead. Measured, that row
-/// is created within about a tenth of a second — this is not a slow-model
-/// budget, it is the gap [`SessionState::awaiting_step`] describes.
+/// User row to first assistant row, which opencode creates at once: not a
+/// slow-model budget ([`OpencodeServer::watch_drains`]).
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The argv [`OpencodeServer::spawn`] hands the server, after the binary
-/// path. [`sweep`] recognises a stray by exactly this list, so the two are
-/// one thing and move together.
+/// The server's argv after the binary. [`sweep`] recognises a stray by exactly
+/// this list. `--port 0` means "prefer 4096", not "any free port".
 const SERVE_ARGS: [&str; 6] = [
     "serve",
     "--port",
@@ -202,8 +48,7 @@ const SERVE_ARGS: [&str; 6] = [
 
 /// The agent id the sessions run as, defined in the rendered config.
 pub const AGENT: &str = "oculus";
-/// The throwaway agent a naming turn runs as: the same permissions, a
-/// one-line prompt, and hidden so it never shows up in a picker.
+/// The hidden agent a naming turn runs as: same permissions, one-line prompt.
 pub const NAMING_AGENT: &str = "oculus-namer";
 
 const CONFIG_TEMPLATE: &str = include_str!("../../templates/OPENCODE.template.json");
@@ -211,31 +56,24 @@ pub const CONFIG_NAME: &str = "opencode.json";
 
 pub struct OpencodeSpawn {
     pub bin: PathBuf,
-    /// The library's `agents/` folder. It is the session directory, the
-    /// project root opencode reads `opencode.json` and `AGENTS.md` from, and
-    /// the only place the agent may write.
+    /// The library's `agents/` folder: session directory, opencode's project
+    /// root, and the only place the agent may write.
     pub directory: PathBuf,
     pub env: Vec<(String, String)>,
     pub raw_log: Option<RawLog>,
-    /// Takes the events that name no session — thirty of the eighty-eight
-    /// types — the way Codex's account sink takes its rate limits.
+    /// Takes the events that name no session.
     pub default_sink: Option<Sink>,
 }
 
-/// How to open a session. The model is opencode's own spelling,
-/// `providerID/id`, and the variant is a reasoning level the *model*
-/// declared — there is no fixed vocabulary here, and in 1.18.2 every model
-/// declares none, so this is almost always `None`.
+/// How to open a session. `model` is `providerID/id`; `variant` is a reasoning
+/// level the model itself declared (none do as of 1.18.x).
 #[derive(Default, Clone)]
 pub struct OpencodeSessionOpts {
     pub model: Option<String>,
     pub variant: Option<String>,
-    /// The scope and lecture sections of the thread's brief. The library-wide
-    /// part is the agent's `prompt` in the config; this is the per-thread
-    /// part, and since the config cannot carry it, it goes out ahead of the
-    /// session's first message.
+    /// The per-thread part of the brief, sent ahead of the first message.
     pub brief: String,
-    /// `oculus` for a conversation, `oculus-namer` for a naming turn.
+    /// [`AGENT`] or [`NAMING_AGENT`].
     pub agent: &'static str,
 }
 
@@ -244,29 +82,16 @@ pub struct OpencodeSessionOpts {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
-    /// `providerID/id`, the spelling `opencode models` prints and the API
-    /// takes back. Free-form: an id can itself contain a slash, so it is
-    /// split on the **first** one and nowhere else.
+    /// `providerID/id`; see [`split_model`].
     pub id: String,
     pub display_name: String,
     pub description: String,
-    /// The model's own reasoning levels. Empty for every model in 1.18.2,
-    /// which is why the picker draws no level row for opencode — and why it
-    /// will draw one with no code change if a later version fills them in.
+    /// The model's own reasoning levels (empty for every model in 1.18.x).
     pub variants: Vec<String>,
     pub default_variant: Option<String>,
     pub is_default: bool,
-    /// What the catalogue says this model can do, carried through so the
-    /// picker can refuse a model that structurally cannot be the Oculus
-    /// agent. Measured on this machine's 369 OpenRouter rows: **69 cannot
-    /// call tools**, and every one of them takes and answers in text — so
-    /// `tool_call` is the flag that bites and the other two are assertions
-    /// against a catalogue that grows (an image-only or transcription model
-    /// appearing here would otherwise reach the composer).
-    ///
-    /// The rule that reads them is `unusableReason` in
-    /// `app/src/lib/opencodeCatalogue.ts`, not this file: Rust reports what
-    /// the provider claims, the picker decides what that means.
+    /// What the catalogue claims; `unusableReason` in
+    /// `app/src/lib/opencodeCatalogue.ts` decides what that means.
     pub tool_call: bool,
     pub text_input: bool,
     pub text_output: bool,
@@ -279,23 +104,16 @@ pub struct ModelInfo {
 pub struct ProviderInfo {
     pub id: String,
     pub name: String,
-    /// `env` | `config` | `custom` | `api`. `custom` is opencode's compiled-in
-    /// catalogue and `api` is one a credential has been written for; `config`
-    /// means the provider is *declared* in an `opencode.json` rather than
-    /// signed in to, which is why the row does not offer to disconnect it —
-    /// there is no credential to remove, and the catalogue would not change if
-    /// there were.
+    /// `env` | `config` | `custom` | `api`. `config` is declared in an
+    /// `opencode.json`, not signed in to, so it has no credential to remove.
     pub source: String,
-    /// The environment variables this provider would read a key from. Shown
-    /// as a hint only: the harness strips `ANTHROPIC_API_KEY` and
-    /// `OPENAI_API_KEY` from the child on purpose, so a shell's key is not
-    /// what is running here.
+    /// Env vars the provider reads a key from. A hint only: the harness
+    /// strips provider keys from the child's environment.
     pub env: Vec<String>,
     pub model_count: usize,
     pub connected: bool,
-    /// How this provider can be signed in to. Never empty:
-    /// [`DEFAULT_METHOD`] stands in for the 208 providers that declare
-    /// nothing and take a plain key.
+    /// Never empty: [`default_method`] stands in for a provider that
+    /// declares none.
     pub methods: Vec<AuthMethod>,
 }
 
@@ -304,31 +122,22 @@ pub struct ProviderInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderList {
     pub providers: Vec<ProviderInfo>,
-    /// A refresh was asked for and skipped because a turn was running. The
-    /// credential write still happened — `PUT`/`DELETE` answered — but the
-    /// instance has not re-read `auth.json`, so `connected` is the state
-    /// before it. Said out loud in the UI rather than papered over.
+    /// A refresh was skipped because a turn was running: the credential was
+    /// written, but `connected` is still the state before it.
     pub stale: bool,
 }
 
-/// One way in, as opencode declares it — a **form spec**, not a hard-coded
-/// flow. Everything the dialog draws comes from here, so a provider added to
-/// opencode after this was written gets its own correct form with no change
-/// on this side.
+/// One way in, as opencode declares it: a form spec the dialog draws from.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthMethod {
-    /// Position in this provider's `/provider/auth` array. It is the *only*
-    /// name the OAuth endpoints have for a method, so it is carried through
-    /// rather than recomputed, and [`parse_methods`] neither filters nor
-    /// re-sorts.
+    /// Position in the provider's `/provider/auth` array — the only name the
+    /// OAuth endpoints have for a method, so [`parse_methods`] never reorders.
     pub index: usize,
     /// `oauth` | `api`.
     pub kind: String,
     pub label: String,
-    /// The extra fields this method needs. An `api` method always also needs
-    /// a key, which is not a prompt — `openai`'s "Manually enter API Key"
-    /// declares none at all.
+    /// Extra fields. An `api` method's key is not one of them.
     pub prompts: Vec<AuthPrompt>,
 }
 
@@ -342,9 +151,7 @@ pub struct AuthPrompt {
     pub placeholder: Option<String>,
     /// Empty unless `kind` is `select`.
     pub options: Vec<AuthOption>,
-    /// Shows this field only when another answer matches. `github-copilot`
-    /// asks for an enterprise URL only when the deployment select says
-    /// `enterprise`.
+    /// Shows this field only when another answer matches.
     pub when: Option<AuthWhen>,
 }
 
@@ -366,8 +173,7 @@ pub struct AuthWhen {
 }
 
 /// What `POST …/oauth/authorize` answers. `method` is `auto` when the server
-/// finishes the flow by itself — a loopback listener it owns, or a device
-/// poll it runs — and `code` when the student has to paste something back.
+/// finishes the flow itself, `code` when the student pastes something back.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Authorization {
@@ -378,13 +184,9 @@ pub struct Authorization {
 
 struct SessionRoute {
     sink: Sink,
-    /// What every prompt on this session names. Measured on 1.18.31, the
-    /// `agent` a session was *created* with is stored and ignored — a prompt
-    /// that does not repeat it runs as opencode's stock `build` agent, with
-    /// its 8k-token coding prompt and none of the containment — and the
-    /// model is the same story. So the three ride the route, fixed at
-    /// create or attach time, and [`OpencodeServer::prompt`] sends them
-    /// every time.
+    /// Sent on every prompt: the agent and model a session was created with
+    /// are ignored, and a prompt that omits them runs as opencode's stock
+    /// `build` agent with none of the containment (1.18.31).
     agent: &'static str,
     model: Option<String>,
     variant: Option<String>,
@@ -393,126 +195,67 @@ struct SessionRoute {
 
 #[derive(Default)]
 struct SessionState {
-    /// A turn of ours is open. `TurnFinished` fires exactly once per turn
-    /// because every path that closes one goes through [`close_turn`], and
-    /// that returns nothing when this is already false.
+    /// Only [`close_turn`] clears this, so `TurnFinished` fires once per turn.
     turn_open: bool,
-    /// Assistant text by `textID`, accumulated from the deltas. `text.ended`
-    /// carries the whole thing and clears it; what is left when a turn ends
-    /// is a part that never ended, which is committed rather than lost.
+    /// Text by part id, from the deltas. Whatever is left at close is a part
+    /// that never got its closing snapshot, and is committed rather than lost.
     text: HashMap<String, String>,
     reasoning: HashMap<String, String>,
-    /// `callID` → the tool's name, learned from `tool.input.started` or
-    /// `tool.called`, so a result for a call we never saw open can still
-    /// synthesise one.
+    /// `callID` → tool name.
     tools: HashMap<String, String>,
     open_tools: std::collections::HashSet<String>,
     /// `callID` → how much of a running tool's `state.metadata.output` has
-    /// already gone out as [`HarnessEvent::ToolOutputDelta`]. v1 has no
-    /// tool-output delta: a running bash re-sends the whole part with the
-    /// output so far, and the part past this mark is the delta.
+    /// gone out as [`HarnessEvent::ToolOutputDelta`].
     tool_output_len: HashMap<String, usize>,
-    /// User message ids this session has opened a turn on. v1 re-emits the
-    /// user row (with `summary`) after every step; only the first sight of
-    /// an id is a turn starting.
+    /// User message ids a turn has opened on; the user row is re-emitted after
+    /// every step.
     seen_user: std::collections::HashSet<String>,
-    /// Assistant messages created since this turn's user message, and
-    /// whether each has `time.completed`. v1 makes one assistant message per
-    /// *step*, so a turn accumulates several; the close rules ask "does one
-    /// exist" and "is the latest still open", which is what this answers.
+    /// This turn's assistant messages (one per step) and whether each has
+    /// `time.completed`.
     assistants: Vec<(String, bool)>,
-    /// An `Error` row has gone out in this turn, so a backstop close need
-    /// not invent one.
+    /// An `Error` row has gone out, so a backstop close need not add one.
     turn_errored: bool,
-    /// `session.error{MessageAbortedError}` has been seen this turn. An
-    /// abort's first `session.idle` arrives *before* the errored assistant
-    /// `message.updated` that says `interrupted`, so while this is set idle
-    /// is not the close; on any other turn an idle with the assistant still
-    /// open means the server gave up without saying so, and idle is.
+    /// An abort's `session.error` has been seen, so the next idle is not the
+    /// close (see [`translate`]).
     aborting: bool,
-    /// Running totals: `step.ended` reports one step, not the session.
+    /// Running totals: `step-finish` reports one step, not the session.
     total_input: u64,
     total_output: u64,
     total_cost: f64,
     context_window: Option<u64>,
     /// The per-thread brief, until the first prompt carries it.
     pending_brief: Option<String>,
-    /// Set when a turn opens — the user's `message.updated` on the v1 wire,
-    /// `session.next.prompted` on v2 — and cleared by the first assistant
-    /// `message.updated` (v1) or `step.started` (v2) that answers it.
-    ///
-    /// It exists because of what v2 did: **a turn whose model could not be
-    /// resolved emitted no event at all.** opencode logged `Failed to drain
-    /// Session: ModelUnavailableError` to its own file and sent nothing — no
-    /// `step.failed`, no `session.error`, no `session.idle` — so the turn
-    /// would stay open for ever and the thread behind it would never take
-    /// another message (`POST /api/session/{id}/wait` answered 503 at once
-    /// in the same situation and was no use). [`OpencodeServer::watch_drains`]
-    /// is the watchdog, and it is narrow on purpose: it fires on the gap
-    /// between the turn opening and the first sign of an assistant, never
-    /// on a model that is merely thinking — measured, that first assistant
-    /// row is created within about a tenth of a second of the user's.
-    ///
-    /// On v1 the unresolvable-model case does say so (`session.error`, then
-    /// idle), so there this is belt to the stream's braces: it only fires
-    /// for a server that accepted the prompt and then went silent.
+    /// Set when the user row opens a turn, cleared by the first assistant row.
     awaiting_step: Option<Instant>,
 }
 
 pub struct OpencodeServer {
-    child: Mutex<Child>,
+    proc: ChildProc,
     base: String,
     directory: PathBuf,
-    /// Ordinary calls, with a timeout. The event stream gets its own agent
-    /// with none: a read timeout would cut a healthy idle stream.
+    /// With a timeout. `stream` has none: it would cut a healthy idle stream.
     api: ureq::Agent,
     stream: ureq::Agent,
     routes: Mutex<HashMap<String, Arc<SessionRoute>>>,
     default_sink: Option<Sink>,
     raw_log: Option<RawLog>,
-    alive: Arc<AtomicBool>,
-    stderr_tail: Arc<Mutex<Vec<String>>>,
 }
 
 impl OpencodeServer {
     pub fn spawn(cfg: OpencodeSpawn) -> Result<Arc<Self>, String> {
-        let mut child = Command::new(&cfg.bin)
-            .args(SERVE_ARGS)
+        let mut cmd = Command::new(&cfg.bin);
+        cmd.args(SERVE_ARGS)
             .env_clear()
             .envs(cfg.env.iter().map(|(k, v)| (k, v)))
-            // Neither belongs in a server the app owns: an autoupdate would
-            // swap the binary under a running thread, and sharing would put
-            // a student's coursework conversation on the web.
+            // No binary swapped under a running thread, no coursework on the web.
             .env("OPENCODE_DISABLE_AUTOUPDATE", "1")
-            .env("OPENCODE_DISABLE_SHARE", "1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("cannot start {}: {e}", cfg.bin.display()))?;
-        let stdout = child.stdout.take().ok_or("no stdout on opencode child")?;
-        let stderr = child.stderr.take().ok_or("no stderr on opencode child")?;
+            .env("OPENCODE_DISABLE_SHARE", "1");
+        // stderr is the structured log, kept only as a tail.
+        let (proc, stdout) = ChildProc::spawn("opencode", &mut cmd, false)?;
 
-        // stderr is the structured log — every plugin loading, every config
-        // file read. Keep a tail for the exit message and drop the rest.
-        let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        {
-            let tail = stderr_tail.clone();
-            std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    let mut t = tail.lock().unwrap();
-                    if t.len() >= 20 {
-                        t.remove(0);
-                    }
-                    t.push(line);
-                }
-            });
-        }
-
-        // The port comes off stdout, and the same thread then owns stdout
-        // for the life of the process — its EOF is how the bridge learns the
-        // server is gone. It parks on `srv_rx` until the server exists to be
-        // told.
+        // The real port is printed only on stdout. This thread then owns
+        // stdout for the process's life: its EOF is how the bridge learns the
+        // server is gone.
         let (port_tx, port_rx) = mpsc::channel::<Result<u16, String>>();
         let (srv_tx, srv_rx) = mpsc::channel::<Arc<OpencodeServer>>();
         std::thread::spawn(move || {
@@ -537,7 +280,7 @@ impl OpencodeServer {
         let port = match port_rx.recv_timeout(READY_TIMEOUT) {
             Ok(r) => r?,
             Err(_) => {
-                let _ = child.kill();
+                proc.kill();
                 return Err(format!(
                     "opencode serve did not start in {}s",
                     READY_TIMEOUT.as_secs()
@@ -546,27 +289,22 @@ impl OpencodeServer {
         };
 
         let server = Arc::new(OpencodeServer {
-            child: Mutex::new(child),
+            proc,
             base: format!("http://127.0.0.1:{port}"),
             directory: cfg.directory.clone(),
             api: ureq::AgentBuilder::new()
                 .timeout_connect(Duration::from_secs(5))
                 .timeout(REQUEST_TIMEOUT)
                 .build(),
-            // No timeout: this one holds the event stream open for hours.
             stream: ureq::AgentBuilder::new()
                 .timeout_connect(Duration::from_secs(5))
                 .build(),
             routes: Mutex::new(HashMap::new()),
             default_sink: cfg.default_sink,
             raw_log: cfg.raw_log,
-            alive: Arc::new(AtomicBool::new(true)),
-            stderr_tail,
         });
         let _ = srv_tx.send(server.clone());
 
-        // `{healthy, version}` — the v1 spelling; `/api/health` answers too,
-        // but nothing else here speaks that prefix any more.
         server.get("/global/health")?;
         server.await_bootstrap()?;
         {
@@ -580,16 +318,9 @@ impl OpencodeServer {
         Ok(server)
     }
 
-    /// The config-sanity gate: no session is created until `oculus` is in
-    /// the agent list for the session directory, because a session created
-    /// without it would run as a built-in agent with none of the containment.
-    ///
-    /// `GET /agent?directory=` is synchronous — measured on 1.18.31, the
-    /// first-ever request naming a fresh directory answered in 0.04 s with
-    /// both agents already listed — so the loop is expected to pass on its
-    /// first turn. It stays a loop because the v2 `/api/agent` it replaced
-    /// bootstrapped lazily and answered `[]` for a while, and a gate that
-    /// can wait costs nothing when it does not have to.
+    /// No session is created until `oculus` is in the directory's agent list:
+    /// without it a session runs as a built-in agent with none of the
+    /// containment. Normally passes on the first request.
     fn await_bootstrap(&self) -> Result<(), String> {
         let deadline = Instant::now() + BOOTSTRAP_TIMEOUT;
         let mut last;
@@ -616,18 +347,14 @@ impl OpencodeServer {
         }
     }
 
-    /// `?directory=<session dir>`, on every call. Naming it matters: the
-    /// server's own cwd is wherever the app was launched from, and a bare
-    /// `/event` or `/session` binds to *that* — measured, an unscoped
-    /// stream saw the server's cwd and nothing of ours — so an unscoped call
-    /// reads, streams and refreshes a different instance from the one every
-    /// session and every model list here belongs to.
+    /// On every instance-scoped call: an unscoped one binds to the server's
+    /// own cwd, a different instance from ours.
     fn directory_query(&self) -> String {
         format!("directory={}", urlencode(&self.directory.display().to_string()))
     }
 
     pub fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::SeqCst)
+        self.proc.is_alive()
     }
 
     // ── HTTP ─────────────────────────────────────────────────────────────
@@ -636,8 +363,7 @@ impl OpencodeServer {
         self.finish(self.api.get(&format!("{}{path}", self.base)).call(), path)
     }
 
-    /// `send_string` rather than `send_json`: ureq's `json` feature is not
-    /// on in this crate, and a bridge is not a reason to turn one on.
+    /// `send_string`: ureq's `json` feature is off in this crate.
     fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         self.finish(
             self.api
@@ -648,9 +374,7 @@ impl OpencodeServer {
         )
     }
 
-    /// A `POST` with no body at all, for the endpoints whose schema declares
-    /// none (`/abort`). What was recorded against them was a bare
-    /// `curl -X POST`, and that is what this sends.
+    /// A `POST` with no body, for endpoints that declare none (`/abort`).
     fn post_empty(&self, path: &str) -> Result<Value, String> {
         self.finish(self.api.post(&format!("{}{path}", self.base)).call(), path)
     }
@@ -659,13 +383,8 @@ impl OpencodeServer {
         self.finish(self.api.delete(&format!("{}{path}", self.base)).call(), path)
     }
 
-    /// One place for "204 is success, a body may be empty, and an error body
-    /// is one of opencode's envelopes" — `{name, data:{message}}` on the v1
-    /// endpoints, `{_tag, message}` on the older ones, and
-    /// [`error_sentence`] reads both. Anything that goes into an error
-    /// string is scrubbed first: `GET /api/model` echoes provider API keys,
-    /// and an error message is exactly the sort of thing that ends up in a
-    /// log or a timeline row.
+    /// 204 or an empty body is `Null`. Error text is [`scrub`]bed: response
+    /// bodies can echo provider keys, and errors end up in logs and rows.
     fn finish(&self, r: Result<ureq::Response, ureq::Error>, path: &str) -> Result<Value, String> {
         match r {
             Ok(resp) => {
@@ -690,40 +409,17 @@ impl OpencodeServer {
 
     // ── Models ───────────────────────────────────────────────────────────
 
-    /// The catalogue for the session directory, so a provider the project's
-    /// own config declares is in it.
-    ///
-    /// Deprecated and disabled rows are dropped, which is what
-    /// `opencode models` prints; the API returns everything. The response
-    /// itself is never logged and never quoted into an error —
-    /// `request.body.apiKey` on each row is the provider's real key.
-    /// Every model opencode can reach, from `GET /config/providers`.
-    ///
-    /// **Not `/api/model`, which is a different question wearing the same
-    /// name.** That endpoint answers with the models of the providers the
-    /// running *instance* has instantiated, which is a subset that has no
-    /// relation to what the student signed in to: measured against 1.18.2
-    /// with OpenRouter connected, `/api/provider` listed two providers,
-    /// `/api/model` listed 33 models with **not one** of OpenRouter's in it,
-    /// and `/provider` in the same breath called OpenRouter connected with
-    /// 369. It is not staleness — a server process spawned hours *after* the
-    /// credential was written answered identically, and a `POST
-    /// /instance/dispose` changed nothing — so no amount of refreshing or
-    /// restarting reaches it. `/config/providers` is what `opencode models`
-    /// itself prints: 369 + 8 + 1 for the same machine, and the three
-    /// providers the config can actually use rather than all 221.
-    ///
-    /// The whole thing was one symptom for a student: a provider they had
-    /// just connected sat in Settings reading *not checked yet* for ever,
-    /// because a sweep over zero models records nothing.
+    /// Every model opencode can reach, from `GET /config/providers` — what
+    /// `opencode models` prints. Not `/api/model`: that lists only the
+    /// providers the instance happened to instantiate, and omits signed-in
+    /// ones like OpenRouter entirely (1.18.2). The response is never logged
+    /// or quoted into an error: rows can carry the provider's real key.
     pub fn list_models(&self) -> Result<Vec<ModelInfo>, String> {
         parse_models(&self.get(&format!("/config/providers?{}", self.directory_query()))?)
     }
 
-    /// The context window of one `providerID/id`, for the usage ring. Same
-    /// source as [`Self::list_models`], and for the same reason: a model the
-    /// student picked from that list must be findable here, and `/api/model`
-    /// does not contain all of them.
+    /// One `providerID/id`'s context window, for the usage ring. Same source
+    /// as [`Self::list_models`], so any model picked there is found here.
     fn context_window(&self, model: &str) -> Option<u64> {
         let (provider, id) = split_model(model)?;
         let v = self
@@ -741,51 +437,12 @@ impl OpencodeServer {
 
     // ── Providers and credentials ────────────────────────────────────────
     //
-    // opencode's catalogue is 218 providers wide and two of them answer,
-    // because a provider is only reachable once `opencode auth` holds a
-    // credential for it. That store is a file of opencode's
-    // (`~/.local/share/opencode/auth.json`) and this server is the only
-    // supported door to it: `PUT`/`DELETE /auth/{id}` write it, and the
-    // OAuth pair below runs the browser flows — including the loopback
-    // listener the redirect lands on, which is *inside this process*. That
-    // is why the app drives its own long-lived server here rather than a
-    // throwaway one.
-    //
-    // Three facts were measured against 1.18.2 and are all easy to get
-    // wrong:
-    //
-    // - **`connected` is not read from the file.** It comes off the
-    //   instance's provider state, which is built once and never
-    //   invalidated by a write — `PUT /auth/anthropic` answers `true`, the
-    //   file on disk grows the credential, and `GET /provider` keeps
-    //   reporting the old list for the life of the instance.
-    //   `POST /instance/dispose` is what re-reads it ([`Self::refresh`]),
-    //   and the next `GET /provider` is correct. The model catalogue is a
-    //   separate question with a separate answer — see [`Self::list_models`],
-    //   which reads `/config/providers` and never `/api/model`, for reasons
-    //   measured there.
-    // - **Disposing is survivable.** Measured: the process stays up, the
-    //   event stream keeps heart-beating, sessions created before it
-    //   are still readable by id afterwards, and an OAuth loopback listener
-    //   opened before it is still bound after. What it does release is
-    //   "all resources", so it is not done while a turn is open
-    //   ([`Self::busy`]).
-    // - **A provider with no entry in `/provider/auth` takes a plain API
-    //   key.** Only ten of the 218 declare a method; measured,
-    //   `PUT /auth/anthropic {type:"api",key}` on one of the other 208 is
-    //   accepted and the provider comes back connected after a refresh. So
-    //   [`DEFAULT_METHOD`] is a real method rather than a guess, and one
-    //   generic form covers the whole catalogue.
-    //
-    // Nothing here goes near [`RawLog`]: only the SSE payloads are written
-    // to `agents/threads/*.ndjson`, and a credential never travels on that
-    // stream. The one place a key could leak is an error body echoing the
-    // request, so [`Self::set_api_key`] redacts its own secret out of
-    // whatever it is about to return, on top of [`scrub`].
+    // This server is the supported door to opencode's `auth.json`, and runs
+    // the OAuth loopback listener in-process. `connected` comes from instance
+    // state that a credential write does not invalidate (1.18.2), so a write
+    // is followed by [`Self::refresh`].
 
-    /// True while any session on this server has a turn open. Dispose
-    /// releases the instance's resources, and doing that under a running turn
-    /// is the one way this refresh could cost something.
+    /// True while any session has a turn open.
     pub fn busy(&self) -> bool {
         self.routes
             .lock()
@@ -794,9 +451,9 @@ impl OpencodeServer {
             .any(|r| r.state.lock().unwrap().turn_open)
     }
 
-    /// Make the instance re-read `auth.json`. Answers whether it actually
-    /// did: a refusal is a running turn, not a failure, and the caller says
-    /// so rather than pretending the list is current.
+    /// `POST /instance/dispose`, which re-reads `auth.json`. Sessions and the
+    /// stream survive it, but it releases the instance's resources, so it is
+    /// skipped (and `false` returned) while a turn runs.
     pub fn refresh(&self) -> bool {
         if self.busy() {
             return false;
@@ -805,31 +462,19 @@ impl OpencodeServer {
             .is_ok()
     }
 
-    /// Every provider opencode knows, which ones are connected, and how each
-    /// one can be signed in to.
-    ///
-    /// Two calls: `GET /provider` for the catalogue and the connected list,
-    /// `GET /provider/auth` for the declarative form specs. Both name the
-    /// session directory, so the state read here is the state of the same
-    /// instance the model list and every session belong to — and the one
-    /// [`Self::refresh`] disposes.
+    /// Every provider opencode knows, whether it is connected, and its
+    /// sign-in methods.
     pub fn list_providers(&self) -> Result<Vec<ProviderInfo>, String> {
         let v = self.get(&format!("/provider?{}", self.directory_query()))?;
-        // A `/provider/auth` that will not answer is not a reason to refuse
-        // the list: every provider then reads as taking a plain API key,
-        // which is what 208 of them do anyway.
+        // Unreadable methods degrade every provider to the plain-key form.
         let methods = self
             .get(&format!("/provider/auth?{}", self.directory_query()))
             .unwrap_or(Value::Null);
         parse_providers(&v, &methods)
     }
 
-    /// The form spec for one method, read back from the server rather than
-    /// taken from the webview. The dialog is drawn from a spec it was handed
-    /// earlier, but what is *sent* is filtered against the spec opencode
-    /// declares now — so a stale form cannot smuggle a field into a flow, and
-    /// the index the OAuth endpoints are given is checked against the same
-    /// array they will read it out of.
+    /// One method's form spec, read back from the server so what is sent is
+    /// filtered against what opencode declares now, not a stale webview copy.
     pub fn auth_method(&self, provider: &str, index: usize) -> Result<AuthMethod, String> {
         let v = self.get(&format!("/provider/auth?{}", self.directory_query()))?;
         let methods = parse_methods(&v[provider]);
@@ -839,9 +484,8 @@ impl OpencodeServer {
             .ok_or_else(|| format!("opencode has no sign-in method {index} for {provider}"))
     }
 
-    /// Write an API key straight through to opencode's store. The key is a
-    /// parameter and a request body and nothing else — it is not returned,
-    /// not held, and redacted out of any error on the way back.
+    /// Write an API key to opencode's store. Never held, and redacted out of
+    /// any error on the way back.
     pub fn set_api_key(
         &self,
         provider: &str,
@@ -856,11 +500,7 @@ impl OpencodeServer {
         self.delete(&format!("/auth/{}", urlencode(provider))).map(|_| ())
     }
 
-    /// Start a browser flow. `method` is the index into the provider's own
-    /// array from `/provider/auth`, which is why [`AuthMethod::index`] is
-    /// carried rather than recomputed: the server has no other name for a
-    /// method, and the list is never filtered or re-sorted on the way
-    /// through.
+    /// Start a browser flow. `method` is [`AuthMethod::index`].
     pub fn oauth_authorize(
         &self,
         provider: &str,
@@ -883,9 +523,7 @@ impl OpencodeServer {
     }
 
     /// Finish a `code` flow with what the student pasted. An `auto` flow
-    /// never gets here: the server's own loopback listener answers the
-    /// redirect and writes the credential, and the app finds out by
-    /// refreshing.
+    /// completes server-side and is noticed by refreshing.
     pub fn oauth_callback(&self, provider: &str, method: usize, code: Option<&str>) -> Result<(), String> {
         let mut body = json!({ "method": method });
         if let Some(c) = code {
@@ -895,18 +533,13 @@ impl OpencodeServer {
             &format!("/provider/{}/oauth/callback?{}", urlencode(provider), self.directory_query()),
             body,
         )?;
-        // The endpoint answers a bare boolean, and `false` is a refusal with
-        // no message behind it.
         if v.as_bool() == Some(false) {
             return Err("opencode rejected the code. It may have expired — try again.".into());
         }
         Ok(())
     }
 
-    /// `PUT` is the one verb the bridge did not already have, and it exists
-    /// only for this: a credential is set, never posted. The path takes no
-    /// directory — a credential belongs to the machine, and `/auth/{id}` is
-    /// the one endpoint here that is not instance-scoped.
+    /// No `?directory=`: `/auth/{id}` is machine-wide, not instance-scoped.
     fn put_auth(&self, provider: &str, body: Value) -> Result<(), String> {
         let path = format!("/auth/{}", urlencode(provider));
         let v = self.finish(
@@ -928,19 +561,13 @@ impl OpencodeServer {
         self.routes.lock().unwrap().insert(session.to_string(), Arc::new(route));
     }
 
-    /// `POST /session?directory=`. The model is spelled `{providerID, id}`
-    /// here and `{providerID, modelID}` on a prompt — each is a 400 the
-    /// other way round, measured — and what is sent at creation is stored
-    /// on the session row and otherwise decorative: the prompt is what
-    /// decides which agent and model a turn runs on ([`Self::prompt`]).
+    /// `POST /session`. The model is `{providerID, id}` here but
+    /// `{providerID, modelID}` on a prompt — each a 400 the other way round.
     pub fn start_session(&self, opts: &OpencodeSessionOpts, sink: Sink) -> Result<String, String> {
         let mut body = json!({ "agent": opts.agent });
         if let Some((provider, id)) = opts.model.as_deref().and_then(split_model) {
             let mut m = json!({ "providerID": provider, "id": id });
-            // Sent only when a level was actually chosen. opencode declares
-            // no variants for any model in 1.18.x, so in practice this is
-            // never set — and a made-up one would fail the session, not the
-            // turn.
+            // Only a chosen level: a made-up one fails the session.
             if let Some(v) = &opts.variant {
                 m["variant"] = json!(v);
             }
@@ -974,11 +601,8 @@ impl OpencodeServer {
         Ok(id)
     }
 
-    /// Take up a session this app created in an earlier run. The brief is
-    /// not repeated: it is already in that session's own history, which the
-    /// server kept. The model asked for wins over the one the session was
-    /// created with — a thread reopened on a different pick runs its next
-    /// turn on that pick, since the prompt is what names it.
+    /// Take up a session from an earlier run. The brief is already in its
+    /// history; the model asked for wins over the stored one.
     pub fn attach_session(
         &self,
         session: &str,
@@ -1003,9 +627,7 @@ impl OpencodeServer {
                 model: model.clone(),
                 variant: opts.variant.clone(),
                 state: Mutex::new(SessionState {
-                    // Seeded from the server's own totals, so a thread
-                    // reopened tomorrow does not report its usage as having
-                    // started over.
+                    // Seeded so a reopened thread's usage does not restart.
                     total_input: d["tokens"]["input"].as_u64().unwrap_or(0)
                         + d["tokens"]["cache"]["read"].as_u64().unwrap_or(0)
                         + d["tokens"]["cache"]["write"].as_u64().unwrap_or(0),
@@ -1025,19 +647,10 @@ impl OpencodeServer {
         Ok(())
     }
 
-    /// Put one turn in: `POST /session/{id}/prompt_async?directory=`.
-    ///
-    /// The agent and the model go out on **every** prompt, because the ones
-    /// the session was created with are not what a turn runs on
-    /// ([`SessionRoute::agent`]). The pending brief rides the first prompt's
-    /// text. The queue upstream is what guarantees there is only ever one
-    /// turn in flight — the harness owns the `Queued`/`Unqueued` rows and the
-    /// one-turn-at-a-time rule, which cannot be half-owned by a server.
-    ///
-    /// The answer is a 204 with no body, so nothing about the turn is known
-    /// here: the user message's `msg_…` — the anchor a rewind will name —
-    /// arrives on the stream a few milliseconds later as the first user
-    /// `message.updated`, and [`translate_v1`] emits `TurnAnchor` from it.
+    /// `POST /session/{id}/prompt_async`, naming agent and model every time
+    /// ([`SessionRoute::agent`]). Answers 204 with no body: the turn's anchor
+    /// arrives on the stream ([`translate`]). The harness queue guarantees
+    /// one turn in flight.
     pub fn prompt(&self, session: &str, text: &str) -> Result<(), String> {
         let route = self
             .routes
@@ -1068,29 +681,16 @@ impl OpencodeServer {
         Ok(())
     }
 
-    /// `POST /session/{id}/abort?directory=`, which answers `true`. What it
-    /// does to the stream — error, idle, the partial answer, the errored
-    /// assistant row, a second idle — is folded by [`translate_v1`].
+    /// `POST /session/{id}/abort`; the stream's side is in [`translate`].
     pub fn interrupt(&self, session: &str) -> Result<(), String> {
         self.post_empty(&format!("/session/{session}/abort?{}", self.directory_query()))?;
         Ok(())
     }
 
-    /// Drop a question and everything after it from the session's own
-    /// history, so the agent's context matches the thread being read.
-    ///
-    /// One call, and the anchor is **inclusive**: `POST /session/{id}/revert
-    /// {messageID}` drops the named message and everything after it, so
-    /// "rewind to this question" names the question's own `msg_…` — the one
-    /// its row carries from `TurnAnchor` — and the first message of a
-    /// session can be rewound like any other. Nothing is deleted at call
-    /// time: the server marks the session (`revert.messageID`) and applies
-    /// it when the next prompt arrives, emitting `message.removed` per
-    /// dropped row then, and `GET /session/{id}/message` keeps listing the
-    /// reverted rows until that happens — which is why nothing here reads
-    /// the message list to confirm. A 409 `SessionBusyError` means a turn
-    /// is running; the manager only offers a rewind while idle, so that is
-    /// surfaced as the error it is rather than retried.
+    /// `POST /session/{id}/revert {messageID}` drops the named message *and*
+    /// everything after it, so the anchor is the question's own id. Lazy: it
+    /// applies on the next prompt, and the message list shows the reverted
+    /// rows until then. 409 while a turn runs.
     pub fn revert(&self, session: &str, anchor: &str) -> Result<(), String> {
         self.post(
             &format!("/session/{session}/revert?{}", self.directory_query()),
@@ -1114,28 +714,15 @@ impl OpencodeServer {
         self.routes.lock().unwrap().contains_key(session)
     }
 
-    /// Ask one model whether it can actually answer a turn through this app.
-    ///
     pub fn kill(&self) {
-        self.alive.store(false, Ordering::SeqCst);
-        let mut child = self.child.lock().unwrap();
-        let _ = child.kill();
-        let _ = child.wait();
+        self.proc.kill();
     }
 
     // ── Inbound ──────────────────────────────────────────────────────────
 
-    /// One connection to `GET /event?directory=` for the whole app, routed
-    /// by session id. The directory is load-bearing: a bare `/event` is the
-    /// server's own cwd and carries nothing of ours (measured — three
-    /// streams on one server, each saw only its directory's sessions).
-    ///
-    /// A dropped stream fails whatever turns were open before reconnecting.
-    /// The gap may have swallowed the `message.updated` that would have
-    /// closed them, and a turn that never closes strands its thread for ever
-    /// (`Queue` upstream releases a thread on `TurnFinished` and nothing
-    /// else) — a turn wrongly marked failed is a row the student can see and
-    /// retry, which is the better half to be wrong on.
+    /// One `GET /event` for the whole app. A dropped stream fails the open
+    /// turns before reconnecting: the gap may have eaten their close, and the
+    /// queue releases a thread only on `TurnFinished`.
     fn read_events(self: Arc<Self>) {
         let mut backoff = Duration::from_millis(200);
         let url = format!("{}/event?{}", self.base, self.directory_query());
@@ -1145,8 +732,6 @@ impl OpencodeServer {
                     backoff = Duration::from_millis(200);
                     for line in BufReader::new(resp.into_reader()).lines().map_while(Result::ok) {
                         let Some(payload) = line.strip_prefix("data: ") else {
-                            // `: heartbeat` comment lines, and blank
-                            // separators.
                             continue;
                         };
                         if let Some(log) = &self.raw_log {
@@ -1170,11 +755,9 @@ impl OpencodeServer {
         }
     }
 
-    /// Close turns the server accepted and then silently never started —
-    /// a user `message.updated` with no assistant one after it in
-    /// [`DRAIN_TIMEOUT`]. See [`SessionState::awaiting_step`] for what this
-    /// is standing in for; on v1 the known cases say so themselves, and this
-    /// is the backstop for one that does not.
+    /// Backstop: fail a turn whose user row arrived with no assistant row in
+    /// [`DRAIN_TIMEOUT`]. The known failures close themselves; a server that
+    /// goes silent instead would otherwise strand the thread for good.
     fn watch_drains(self: Arc<Self>) {
         while self.is_alive() {
             std::thread::sleep(Duration::from_secs(2));
@@ -1210,35 +793,30 @@ impl OpencodeServer {
 
     fn dispatch(&self, v: &Value) {
         let Some(ty) = v["type"].as_str() else { return };
-        // Server-scoped first. Thirty of the event types name no session —
-        // and `session.error`'s own id is optional — so the route lookup
-        // below would silently eat them, which is the bug Codex's account
-        // sink exists to prevent. `server.heartbeat` lands here too, and is
-        // nothing.
+        // Session-less events go to the harness sink rather than being lost
+        // to the route lookup.
         let Some(session) = session_of(v) else {
             if let Some(sink) = &self.default_sink {
-                for ev in translate_server(ty, envelope(v)) {
+                for ev in translate_server(ty, &v["properties"]) {
                     sink(ev);
                 }
             }
             return;
         };
         let route = self.routes.lock().unwrap().get(session).cloned();
-        // Not ours: the student's own TUI, or a naming session already
-        // detached.
+        // Not ours: the student's own TUI, or a detached naming session.
         let Some(route) = route else { return };
         let events = {
             let mut st = route.state.lock().unwrap();
-            fold(ty, v, &mut st)
+            translate(ty, &v["properties"], &mut st)
         };
         for ev in events {
             (route.sink)(ev);
         }
     }
 
-    /// Close every turn that is still open, with a reason. Used when the
-    /// stream drops and when the process dies: both are moments after which
-    /// no `step.ended` is ever coming.
+    /// Close every open turn as failed, when the stream drops or the process
+    /// dies.
     fn fail_open_turns(&self, why: &str) {
         let routes: Vec<Arc<SessionRoute>> = self.routes.lock().unwrap().values().cloned().collect();
         for r in routes {
@@ -1257,21 +835,11 @@ impl OpencodeServer {
     }
 
     fn on_exit(&self) {
-        self.alive.store(false, Ordering::SeqCst);
-        let code = self.child.lock().unwrap().wait().ok().and_then(|s| s.code());
-        let tail = self.stderr_tail.lock().unwrap().join("\n");
-        self.fail_open_turns(&format!("opencode serve exited (code {code:?})\n{tail}"));
+        let code = self.proc.reap();
+        self.fail_open_turns(&self.proc.with_tail(format!("opencode serve exited (code {code:?})")));
         let routes: Vec<Arc<SessionRoute>> = self.routes.lock().unwrap().drain().map(|(_, r)| r).collect();
         for r in routes {
             (r.sink)(HarnessEvent::Exited { code });
-        }
-    }
-}
-
-impl Drop for OpencodeServer {
-    fn drop(&mut self) {
-        if let Ok(mut c) = self.child.lock() {
-            let _ = c.kill();
         }
     }
 }
@@ -1281,31 +849,13 @@ impl Drop for OpencodeServer {
 /// How long a server gets to close its listener before it is killed outright.
 const STRAY_GRACE: Duration = Duration::from_secs(2);
 
-/// Kill the `opencode serve` processes this app started and then lost, and
-/// answer with the pids. Called once at startup, before anything can ask for
-/// a server.
+/// Kill the `opencode serve` processes a signalled app left behind (a
+/// `tauri dev` relaunch, a force-quit or crash runs neither `Drop` nor
+/// `RunEvent::Exit`), and answer with the pids. Called once at startup.
 ///
-/// Two paths already clean one up the ordinary way — `RunEvent::Exit` into
-/// [`super::Harness::shutdown`], and [`Drop`] on the handle — and **neither
-/// of them runs when the app is signalled**. `tauri dev` terminates the app
-/// outright to relaunch it after a Rust change, and a force-quit or a crash
-/// does the same in production: no `Drop`, no `RunEvent`, and the server is
-/// reparented to launchd, still listening, still holding its heap. Nothing
-/// ever collected them, so they accumulated one per rebuild — measured, forty
-/// of them holding 5 GB, the oldest two days old.
-///
-/// A stray is two facts together, and it takes both:
-///
-/// - **our own argv** ([`SERVE_ARGS`]) — a student's hand-run `opencode
-///   serve` takes the default port and none of these flags, and a `tui` is
-///   not a `serve` at all;
-/// - **`ppid == 1`**, which is launchd having adopted it because the process
-///   that started it is gone. This is the whole safety story: a server a
-///   *living* app owns is parented to that app, so a second instance built
-///   from a worktree and running beside this one is never touched.
-///
-/// The uid test is belt — `kill` would fail on another user's process anyway
-/// — and it keeps the sweep from reporting work it did not do.
+/// A stray is **our argv** ([`SERVE_ARGS`]) **and `ppid == 1`** (adopted by
+/// launchd): a living app's server, such as a worktree build running beside
+/// this one, is parented to that app and never touched. Same uid, too.
 pub fn sweep() -> Vec<u32> {
     let uid = unsafe { libc::getuid() };
     let found = strays(&ps_listing(), uid);
@@ -1313,10 +863,7 @@ pub fn sweep() -> Vec<u32> {
         return found;
     }
     send_signal(&found, libc::SIGTERM);
-    // Then take out whatever ignored it. The listing is read again rather
-    // than remembered, because between the two signals a pid could have been
-    // reused: one that is no longer a stray by the same two tests is not
-    // ours to SIGKILL.
+    // SIGKILL survivors, re-listing first in case a pid was reused.
     let sent = found.clone();
     std::thread::spawn(move || {
         std::thread::sleep(STRAY_GRACE);
@@ -1343,11 +890,8 @@ fn send_signal(pids: &[u32], sig: i32) {
     }
 }
 
-/// The stray pids in a `ps -axww -o pid=,ppid=,uid=,command=` listing.
-///
-/// The command is matched from its *end* — the argv tail, then whatever is
-/// left is the binary path — so a home directory with a space in it still
-/// resolves, which splitting the line on whitespace would not.
+/// The stray pids in a `ps -axww -o pid=,ppid=,uid=,command=` listing. The
+/// command is matched from its end so a binary path with a space resolves.
 fn strays(listing: &str, uid: u32) -> Vec<u32> {
     let tail = SERVE_ARGS.join(" ");
     listing
@@ -1377,14 +921,8 @@ fn ps_field<'a>(rest: &mut &'a str) -> Option<&'a str> {
 
 // ── The config document ──────────────────────────────────────────────────────
 
-/// Write `agents/opencode.json`, the whole of what an opencode session is
-/// allowed to do and the only way to give it a system prompt.
-///
-/// Rewritten on every server start, like Claude's inline `--settings`: the
-/// prompt has the library's real paths and course folders in it, and a stale
-/// permission list is a stale containment story. Paths and prompts go in
-/// through `serde_json`, so a data directory with a quote or a backslash in
-/// it cannot break the document.
+/// Write `agents/opencode.json`: the permissions and the system prompt.
+/// Rewritten on every server start, since both carry the library's paths.
 pub fn write_config(directory: &Path, library: &Path, prompt: &str, naming_prompt: &str) -> Result<PathBuf, String> {
     std::fs::create_dir_all(directory).map_err(|e| format!("cannot create {}: {e}", directory.display()))?;
     let path = directory.join(CONFIG_NAME);
@@ -1393,14 +931,9 @@ pub fn write_config(directory: &Path, library: &Path, prompt: &str, naming_promp
     Ok(path)
 }
 
-/// Substitution over the template's *text*, and it has to stay that way.
-/// The ruleset above is ordered — last rule wins, and a trailing wildcard
-/// deny deletes the tool — while a JSON object is unordered by spec and
-/// `serde_json`'s default map sorts its keys. Parse this template into a
-/// `Value` and re-serialize it and the rules come back alphabetized, which
-/// silently inverts the containment without changing a byte of the template
-/// or failing to compile. The test below parses the *output* to prove it is
-/// valid JSON; nothing in the write path may.
+/// Text substitution, never a parse/re-serialize: the ruleset is ordered
+/// (last rule wins) and `serde_json`'s map sorts keys, which would silently
+/// invert the containment. Values are JSON-escaped.
 fn render_config(library: &Path, prompt: &str, naming_prompt: &str) -> String {
     CONFIG_TEMPLATE
         .replace("{{LIBRARY}}", &json_fragment(&library.display().to_string()))
@@ -1412,8 +945,7 @@ fn json_string(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into())
 }
 
-/// The same escaping, without the quotes, for a value the template already
-/// has quotes around.
+/// [`json_string`] without the quotes.
 fn json_fragment(s: &str) -> String {
     let q = json_string(s);
     q[1..q.len() - 1].to_string()
@@ -1421,8 +953,7 @@ fn json_fragment(s: &str) -> String {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// `opencode server listening on http://127.0.0.1:4096` — the only place the
-/// port is ever said, and on stdout rather than in the logs.
+/// `opencode server listening on http://127.0.0.1:4096` (stdout only).
 fn parse_port(line: &str) -> Option<u16> {
     let rest = line.split("listening on").nth(1)?;
     let host = rest.trim().trim_end_matches('/');
@@ -1436,17 +967,10 @@ pub fn split_model(model: &str) -> Option<(String, String)> {
     (!p.is_empty() && !id.is_empty()).then(|| (p.to_string(), id.to_string()))
 }
 
-/// `GET /provider` and `GET /provider/auth`, merged into the rows Settings
-/// draws. Pure, so the merge rules — which provider counts as connected, and
-/// what a provider with no declared method takes — are pinned by tests rather
-/// than by a live server.
-///
-/// **`/provider` echoes the credential.** A connected provider's row carries
-/// its real API key in `key`, and `scrub` does not catch that field name —
-/// measured: a key written through `PUT /auth` comes straight back out of the
-/// next `/provider`. So the field is not read here and nothing built from it
-/// crosses to the webview, which is what the test below pins. It is also why
-/// this response is never quoted into an error, the way `/api/model`'s is not.
+/// `GET /provider` and `GET /provider/auth`, merged into Settings' rows.
+/// `/provider` echoes a connected provider's real key in `key`, which
+/// [`scrub`] does not catch: that field is never read, and the response is
+/// never quoted into an error.
 fn parse_providers(all: &Value, methods: &Value) -> Result<Vec<ProviderInfo>, String> {
     let list = all["all"].as_array().ok_or("opencode /provider: no providers")?;
     let connected: std::collections::HashSet<&str> = all["connected"]
@@ -1476,11 +1000,8 @@ fn parse_providers(all: &Value, methods: &Value) -> Result<Vec<ProviderInfo>, St
     Ok(out)
 }
 
-/// The body of `PUT /auth/{id}` for an API key. The extra fields a method
-/// asks for (`accountId`, `resourceName`, a GitLab instance URL) are
-/// `metadata`, not part of the key, and the field is left off entirely when
-/// there are none — opencode's own store writes `{type, key}` for the plain
-/// case and an empty object would be a difference for nothing.
+/// The body of `PUT /auth/{id}`. A method's extra fields are `metadata`,
+/// omitted when empty to match what opencode's own store writes.
 fn api_credential(key: &str, metadata: &std::collections::BTreeMap<String, String>) -> Value {
     let mut body = json!({ "type": "api", "key": key });
     if !metadata.is_empty() {
@@ -1489,12 +1010,8 @@ fn api_credential(key: &str, metadata: &std::collections::BTreeMap<String, Strin
     body
 }
 
-/// What a provider that declares nothing takes. Measured, not assumed: only
-/// ten of the 218 have an entry in `/provider/auth`, and
-/// `PUT /auth/{id} {type:"api",key}` on one of the others is accepted and
-/// leaves the provider connected after a refresh. So the absence of a
-/// declared method is "a plain API key", not "no way in", and the dialog
-/// draws the same form it draws for `openai`'s third method.
+/// What a provider with no `/provider/auth` entry takes: a plain API key,
+/// which opencode accepts for any provider.
 fn default_method() -> AuthMethod {
     AuthMethod {
         index: 0,
@@ -1504,9 +1021,8 @@ fn default_method() -> AuthMethod {
     }
 }
 
-/// `/provider/auth`'s array for one provider. The index is the position in
-/// that array and nothing is dropped or reordered, because the index is what
-/// `oauth/authorize` and `oauth/callback` are told.
+/// `/provider/auth`'s array for one provider, never dropped or reordered
+/// ([`AuthMethod::index`]).
 fn parse_methods(v: &Value) -> Vec<AuthMethod> {
     let Some(arr) = v.as_array() else {
         return vec![default_method()];
@@ -1530,10 +1046,7 @@ fn parse_methods(v: &Value) -> Vec<AuthMethod> {
     if out.len() == arr.len() && !out.is_empty() {
         out
     } else {
-        // A method the parser could not read would shift every index after
-        // it, and a wrong index starts the wrong flow silently. Fall back to
-        // the key form rather than hand the server an index that no longer
-        // means what it said.
+        // An unreadable method would shift every index after it.
         vec![default_method()]
     }
 }
@@ -1572,31 +1085,19 @@ fn parse_prompt(p: &Value) -> Option<AuthPrompt> {
     })
 }
 
-/// Whether a prompt is on screen, given what has been answered so far. An
-/// unanswered dependency reads as the empty string, so `neq "enterprise"`
-/// shows the field before the select has been touched and `eq "enterprise"`
-/// does not — which is what the dialog wants, and what the server would
-/// infer anyway.
+/// Whether a prompt is on screen. An unanswered dependency reads as "".
 fn prompt_visible(p: &AuthPrompt, answers: &std::collections::BTreeMap<String, String>) -> bool {
     let Some(w) = &p.when else { return true };
     let actual = answers.get(&w.key).map(String::as_str).unwrap_or("");
     match w.op.as_str() {
         "eq" => actual == w.value,
         "neq" => actual != w.value,
-        // An operator this build does not know is not a reason to hide a
-        // field the provider asked for.
         _ => true,
     }
 }
 
-/// The answers that actually belong to a method's form — dropping anything
-/// the student typed into a field that a later choice hid again, and
-/// anything the method never asked for.
-///
-/// This runs on the way *out*, not only in the dialog: the enterprise URL
-/// typed before switching the select back to GitHub.com is still in the
-/// webview's form state, and sending it would start a flow against a host
-/// nobody chose.
+/// The answers that belong to a method's visible fields, applied on the way
+/// out: a field hidden again still holds its value in the webview's state.
 pub fn visible_answers(
     method: &AuthMethod,
     answers: &std::collections::BTreeMap<String, String>,
@@ -1612,10 +1113,8 @@ pub fn visible_answers(
         .collect()
 }
 
-/// Take one specific secret out of a string that is about to be shown or
-/// logged. [`scrub`] handles the keys opencode names in its own payloads;
-/// this handles the one the app is holding at that moment, for the case
-/// where a validation error quotes the request back.
+/// Take the secret the app is holding out of an error that may quote the
+/// request back.
 fn redact(s: &str, secret: &str) -> String {
     if secret.len() < 8 {
         return s.to_string();
@@ -1623,9 +1122,8 @@ fn redact(s: &str, secret: &str) -> String {
     s.replace(secret, "[redacted]")
 }
 
-/// Never put a provider key in a string that might be logged. `/api/model`
-/// echoes one per row in `request.body.apiKey`, and an error message is
-/// exactly where a response body ends up.
+/// Truncate at the first key-like field name, so a response body echoing a
+/// provider key never reaches a log.
 fn scrub(s: &str) -> String {
     let mut out = s.to_string();
     for key in ["apiKey", "api_key", "Authorization", "authorization"] {
@@ -1650,11 +1148,8 @@ fn urlencode(s: &str) -> String {
     out
 }
 
-/// One line for the picker's row. The catalogue has no description field, so
-/// it is built from what is there: the family and the context window.
-/// The rows of a `GET /config/providers`. Pure, so the shape is pinned by a
-/// test rather than by a live server — which is what the endpoint it replaced
-/// never was.
+/// The rows of a `GET /config/providers`, minus disabled and deprecated
+/// models, sorted by id.
 fn parse_models(v: &Value) -> Result<Vec<ModelInfo>, String> {
     let list = v["providers"]
         .as_array()
@@ -1662,9 +1157,7 @@ fn parse_models(v: &Value) -> Result<Vec<ModelInfo>, String> {
     let mut out = Vec::new();
     for p in list {
         let provider = p["id"].as_str().unwrap_or("");
-        // A map keyed by id, not the array `/api/model` returns. The entry's
-        // own `id` is what is read, never the key: they agree here, and a key
-        // is the wrong thing to build a model id out of if they ever stop.
+        // A map keyed by id; the entry's own `id` is what is read.
         let Some(models) = p["models"].as_object() else {
             continue;
         };
@@ -1682,11 +1175,8 @@ fn parse_models(v: &Value) -> Result<Vec<ModelInfo>, String> {
             let variants = variant_ids(&m["variants"]);
             let name = m["name"].as_str().unwrap_or(id);
             let caps = &m["capabilities"];
-            // Absent reads as *capable*, which is the only safe default here:
-            // a provider whose rows say nothing about tools would otherwise
-            // have its whole catalogue gated out of the picker. A claim that
-            // turns out to be wrong costs one failed turn; a missing claim
-            // read as a refusal costs the provider.
+            // Absent reads as capable, or a provider whose rows say nothing
+            // would have its whole catalogue gated out.
             let flag = |v: &Value| v.as_bool() != Some(false);
             out.push(ModelInfo {
                 id: format!("{provider}/{id}"),
@@ -1701,18 +1191,11 @@ fn parse_models(v: &Value) -> Result<Vec<ModelInfo>, String> {
             });
         }
     }
-    // A map has no order worth keeping, so the list is sorted here rather
-    // than left to whatever iteration order the JSON happened to have.
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(out)
 }
 
-/// A model's reasoning levels, from either spelling opencode uses: the array
-/// of `{id}` that `/api/model` returns, or the object keyed by id that
-/// `/config/providers` does. Both are empty for every model in 1.18.2, which
-/// is why the picker draws no level row for opencode — and why reading both
-/// costs nothing today and is the difference between a level row and none at
-/// all the moment a provider fills them in.
+/// A model's reasoning levels: an object keyed by id, or an array of `{id}`.
 fn variant_ids(v: &Value) -> Vec<String> {
     if let Some(a) = v.as_array() {
         return a.iter().filter_map(|x| x["id"].as_str().map(String::from)).collect();
@@ -1723,17 +1206,8 @@ fn variant_ids(v: &Value) -> Vec<String> {
     }
 }
 
-/// Where a fresh pick of this model lands. The catalogue names no default
-/// among a model's variants, and the list above arrives in whatever order the
-/// spelling gave it — a JSON map's keys are alphabetical, so taking the first
-/// one *looked* like it meant "high" and would have meant "low" the day a
-/// provider dropped that level. This asks for a level by name instead:
-/// `high` where it exists, then down, since a level stronger than the one
-/// asked for is the expensive way to be wrong. A model whose levels are all
-/// exotic falls back to whatever it has.
-///
-/// The picker sorts the levels themselves (`sortReasoning` in
-/// `app/src/lib/harness.ts`); this only picks among them.
+/// Where a fresh pick of this model lands: `high`, else the nearest level
+/// below it, by name — the list's order is a JSON map's alphabetical one.
 fn default_variant(variants: &[String]) -> Option<String> {
     ["high", "medium", "low", "minimal", "none"]
         .iter()
@@ -1755,37 +1229,15 @@ fn describe(m: &Value) -> String {
     bits.join(" · ")
 }
 
-fn s(v: &Value, key: &str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
-}
-
-/// The text of a tool's `content[]`, which is a list of `{type, text}` parts.
-fn content_text(v: &Value) -> String {
-    let Some(parts) = v["content"].as_array() else {
-        return String::new();
-    };
-    parts
-        .iter()
-        .filter_map(|p| p["text"].as_str())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 // ── Translation ──────────────────────────────────────────────────────────────
 
-/// Where the session id lives, on either family. v2 puts it at
-/// `data.sessionID` or on the durable envelope; v1 puts it at
-/// `properties.sessionID` on every session-scoped event, and also inside
-/// `info` (messages carry `info.sessionID`; `session.created`/`updated`
-/// carry the session itself, so its `info.id`) and `part`. `info.id` is
-/// only read for the session events, because on a message event it is the
-/// *message* id.
+/// The session id: `properties.sessionID` on most events, else inside `info`
+/// or `part`. `info.id` is the session only on `session.created`/`updated`;
+/// on a message event it is the message id.
 fn session_of(v: &Value) -> Option<&str> {
     let p = &v["properties"];
-    v["data"]["sessionID"]
+    p["sessionID"]
         .as_str()
-        .or_else(|| v["durable"]["aggregateID"].as_str())
-        .or_else(|| p["sessionID"].as_str())
         .or_else(|| p["info"]["sessionID"].as_str())
         .or_else(|| p["part"]["sessionID"].as_str())
         .or_else(|| {
@@ -1795,35 +1247,8 @@ fn session_of(v: &Value) -> Option<&str> {
         })
 }
 
-/// An event's payload, whichever family it came from: v2 wraps it in
-/// `data`, v1 in `properties`.
-fn envelope(v: &Value) -> &Value {
-    if v["properties"].is_object() {
-        &v["properties"]
-    } else {
-        &v["data"]
-    }
-}
-
-/// One session-scoped event through the translator for its family. The
-/// envelope is the tell — the v2 stream never sends `properties` and the v1
-/// stream never sends `data` — and it matters for the one type both share:
-/// a `session.error` is closed by whichever family's rules the turn is
-/// running under.
-fn fold(ty: &str, v: &Value, st: &mut SessionState) -> Vec<HarnessEvent> {
-    if v["properties"].is_object() && !ty.starts_with("session.next.") {
-        translate_v1(ty, &v["properties"], st)
-    } else {
-        translate(ty, &v["data"], st)
-    }
-}
-
-/// Events that name no session. Thirty of the eighty-eight types are like
-/// this — pty, workspace, tui, lsp, mcp, installation, `server.connected`,
-/// `server.heartbeat` — and none of them is about a conversation. The one
-/// that is worth hearing is a `session.error` whose own `sessionID` is
-/// missing, which the schema allows on both families: dropping it would
-/// leave a failure with nowhere to be read.
+/// Events that name no session (pty, lsp, mcp, `server.heartbeat`…). Only a
+/// `session.error` whose optional `sessionID` is missing is worth surfacing.
 fn translate_server(ty: &str, data: &Value) -> Vec<HarnessEvent> {
     if ty == "session.error" {
         let msg = data["error"]["data"]["message"]
@@ -1838,15 +1263,12 @@ fn translate_server(ty: &str, data: &Value) -> Vec<HarnessEvent> {
     Vec::new()
 }
 
-/// v1 sends every `session.error` twice: once with the message, once with
-/// the same message as the head of a stack trace. The second is the same
-/// news, unreadably.
+/// Every `session.error` is sent twice, the second as a stack trace.
 fn is_trace(msg: &str) -> bool {
     msg.contains("\n    at ")
 }
 
-/// A turn opens: forget what the last one accumulated, and start the
-/// watchdog that [`SessionState::awaiting_step`] describes.
+/// A turn opens: reset the per-turn state and start the drain watchdog.
 fn begin_turn(st: &mut SessionState) -> HarnessEvent {
     st.text.clear();
     st.reasoning.clear();
@@ -1861,10 +1283,8 @@ fn begin_turn(st: &mut SessionState) -> HarnessEvent {
     HarnessEvent::TurnStarted
 }
 
-/// One step's token report folded into the running totals. The shape is the
-/// same on v2's `step.ended` and v1's `step-finish` part. Measured: `input`
-/// excludes cached reads and `output` excludes reasoning, so they are added
-/// rather than assumed included.
+/// One `step-finish` folded into the running totals. `input` excludes cache
+/// reads and `output` excludes reasoning, so both are added.
 fn usage(st: &mut SessionState, t: &Value, cost: f64) -> HarnessEvent {
     let n = |k: &str| t[k].as_u64().unwrap_or(0);
     let input = n("input") + t["cache"]["read"].as_u64().unwrap_or(0) + t["cache"]["write"].as_u64().unwrap_or(0);
@@ -1881,14 +1301,9 @@ fn usage(st: &mut SessionState, t: &Value, cost: f64) -> HarnessEvent {
     }
 }
 
-/// A turn finishes exactly once, and only here.
-///
-/// Every path that ends a turn — the step that says `stop`, the step that
-/// failed, an interrupt, a dropped stream, a dead server — goes through this
-/// function, and it answers with nothing when the turn is already closed. A
-/// thread upstream is released for its next message by `TurnFinished` and
-/// nothing else, so a second one would send the queued message twice and a
-/// missing one would strand it for ever.
+/// Every path that ends a turn comes here, and a closed turn yields nothing.
+/// The queue releases a thread on `TurnFinished` alone, so a second one would
+/// send a queued message twice and a missing one would strand the thread.
 fn close_turn(st: &mut SessionState, status: &str) -> Vec<HarnessEvent> {
     if !st.turn_open {
         return Vec::new();
@@ -1896,9 +1311,7 @@ fn close_turn(st: &mut SessionState, status: &str) -> Vec<HarnessEvent> {
     st.turn_open = false;
     st.awaiting_step = None;
     let mut out = Vec::new();
-    // A text part that never got its `ended` — an interrupt usually does
-    // send one, but a stream that dropped mid-answer does not, and live text
-    // has no row behind it.
+    // Text whose closing snapshot never came (a dropped stream).
     let mut leftover: Vec<String> = st.text.drain().map(|(_, v)| v).collect();
     leftover.sort();
     for text in leftover {
@@ -1908,7 +1321,6 @@ fn close_turn(st: &mut SessionState, status: &str) -> Vec<HarnessEvent> {
     }
     st.reasoning.clear();
     st.tool_output_len.clear();
-    // Any tool still open when the turn ends never reported a result.
     let open: Vec<String> = st.open_tools.drain().collect();
     for id in open {
         out.push(HarnessEvent::ToolFinished {
@@ -1924,9 +1336,8 @@ fn close_turn(st: &mut SessionState, status: &str) -> Vec<HarnessEvent> {
     out
 }
 
-/// opencode's own wording, where it would be read as something it is not.
-/// Anything else goes through as is — in particular v1's `Model not found:
-/// … Did you mean: …`, which already names the fix.
+/// The free Zen models always refuse the HTTP API; that 400 becomes something
+/// actionable. Everything else passes through.
 fn friendly(msg: &str) -> String {
     if msg.contains("free tier can only be used in OpenCode") || msg.contains("MissingSessionID") {
         return "opencode's free Zen models only work inside opencode itself — its gateway \
@@ -1937,11 +1348,8 @@ fn friendly(msg: &str) -> String {
     msg.to_string()
 }
 
-
-/// opencode's `{name, data:{message}}` error envelope — the same shape on a
-/// message's `info.error`, on a `session.error` event and on an HTTP error
-/// body — as one sentence: the message when there is one, the name when
-/// there is not, and never an empty string.
+/// opencode's `{name, data:{message}}` error envelope (or `{message}`) as one
+/// non-empty sentence.
 fn error_sentence(e: &Value) -> String {
     let message = e["data"]["message"]
         .as_str()
@@ -1955,167 +1363,8 @@ fn error_sentence(e: &Value) -> String {
     }
 }
 
-fn translate(ty: &str, d: &Value, st: &mut SessionState) -> Vec<HarnessEvent> {
-    let mut out = Vec::new();
-    match ty {
-        // `prompt.admitted` fires with the HTTP POST; `prompted` fires when
-        // the input is promoted into the agent loop, which is 1:1 with a
-        // turn. With something already running the two are a whole turn
-        // apart.
-        "session.next.prompted" => {
-            out.push(begin_turn(st));
-        }
-        // Only for the watchdog: the step itself has nothing to draw.
-        "session.next.step.started" => {
-            st.awaiting_step = None;
-        }
-        "session.next.text.started" => {
-            st.text.insert(s(d, "textID"), String::new());
-        }
-        "session.next.text.delta" => {
-            let text = s(d, "delta");
-            if !text.is_empty() {
-                st.text.entry(s(d, "textID")).or_default().push_str(&text);
-                out.push(HarnessEvent::AssistantDelta { text });
-            }
-        }
-        "session.next.text.ended" => {
-            st.text.remove(&s(d, "textID"));
-            let text = s(d, "text");
-            if !text.trim().is_empty() {
-                out.push(HarnessEvent::AssistantMessage { text });
-            }
-        }
-        "session.next.reasoning.started" => {
-            st.reasoning.insert(s(d, "reasoningID"), String::new());
-        }
-        "session.next.reasoning.delta" => {
-            let text = s(d, "delta");
-            if !text.is_empty() {
-                st.reasoning.entry(s(d, "reasoningID")).or_default().push_str(&text);
-                out.push(HarnessEvent::ThinkingDelta { text });
-            }
-        }
-        "session.next.reasoning.ended" => {
-            st.reasoning.remove(&s(d, "reasoningID"));
-            let text = s(d, "text");
-            if !text.trim().is_empty() {
-                out.push(HarnessEvent::Thinking { text });
-            }
-        }
-        // The name is on `input.started` and the arguments are still
-        // streaming as raw JSON; nothing useful can be titled yet, so the row
-        // opens on `tool.called`, which is also when the tool actually runs.
-        "session.next.tool.input.started" => {
-            st.tools.insert(s(d, "callID"), s(d, "name"));
-        }
-        // Naming trap: the tool's name is `name` above and `tool` here.
-        "session.next.tool.called" => {
-            let id = s(d, "callID");
-            let name = s(d, "tool");
-            st.tools.insert(id.clone(), name.clone());
-            let input = d.get("input").cloned().unwrap_or(Value::Null);
-            let (kind, title) = classify(&name, &input);
-            st.open_tools.insert(id.clone());
-            out.push(HarnessEvent::ToolStarted {
-                id,
-                kind,
-                name,
-                title,
-                input,
-            });
-        }
-        "session.next.tool.progress" => {
-            let text = content_text(d);
-            if !text.is_empty() {
-                out.push(HarnessEvent::ToolOutputDelta {
-                    id: s(d, "callID"),
-                    text,
-                });
-            }
-        }
-        "session.next.tool.success" => {
-            let id = s(d, "callID");
-            ensure_open(&mut out, st, &id, &Value::Null);
-            st.open_tools.remove(&id);
-            let mut output = content_text(d);
-            if output.is_empty() {
-                // `read` puts the file in `structured`, not in `content`.
-                output = d["structured"]["content"]
-                    .as_str()
-                    .map(String::from)
-                    .unwrap_or_else(|| match &d["structured"] {
-                        Value::Null => String::new(),
-                        v => v.to_string(),
-                    });
-            }
-            out.push(HarnessEvent::ToolFinished {
-                id,
-                ok: true,
-                output: cap_output(&output),
-                title: None,
-            });
-        }
-        // A tool that fails does **not** end the turn: the loop keeps going
-        // and a later step closes it.
-        "session.next.tool.failed" => {
-            let id = s(d, "callID");
-            ensure_open(&mut out, st, &id, &Value::Null);
-            st.open_tools.remove(&id);
-            let msg = d["error"]["message"].as_str().unwrap_or("the tool failed");
-            out.push(HarnessEvent::ToolFinished {
-                id,
-                ok: false,
-                output: cap_output(msg),
-                title: None,
-            });
-        }
-        // A turn is a chain of steps. `tool-calls` means the model asked for
-        // a tool and the loop continues; anything else is the end of it.
-        "session.next.step.ended" => {
-            out.push(usage(st, &d["tokens"], d["cost"].as_f64().unwrap_or(0.0)));
-            if d["finish"].as_str() != Some("tool-calls") {
-                out.extend(close_turn(st, "completed"));
-            }
-        }
-        "session.next.step.failed" => {
-            let msg = d["error"]["message"].as_str().unwrap_or("");
-            // An interrupt arrives here and nowhere else, and it is not a
-            // failure: this exact string is what the stop button leaves
-            // behind.
-            if msg == "Provider turn interrupted" {
-                out.extend(close_turn(st, "interrupted"));
-            } else {
-                st.turn_errored = true;
-                out.push(HarnessEvent::error_for(Provider::Opencode, friendly(msg)));
-                out.extend(close_turn(st, "failed"));
-            }
-        }
-        // Never observed in five runs, but the schema has it and a failure
-        // with nowhere to go is worse than a duplicate row.
-        "session.error" => {
-            let msg = d["error"]["data"]["message"]
-                .as_str()
-                .or_else(|| d["error"]["name"].as_str())
-                .unwrap_or("opencode error");
-            st.turn_errored = true;
-            out.push(HarnessEvent::error_for(Provider::Opencode, friendly(msg)));
-            out.extend(close_turn(st, "failed"));
-        }
-        // prompt.admitted (the POST's own echo), context.updated (the
-        // re-rendered AGENTS.md, not context accounting), tool.input.delta
-        // (partial JSON), retried, compaction.*, revert.*, agent/model
-        // switched, session.idle (which never fires): not surfaced.
-        _ => {}
-    }
-    out
-}
-
-/// Open a tool's row if it is not open yet. On v2 that is a result for a
-/// call that never opened one — a reconnect can land in the middle of one —
-/// and there is no input to title it with. On v1 it is the ordinary path:
-/// every tool snapshot carries the whole part, so the first `running` (or a
-/// `completed` that skipped `running`) opens the row with the real input.
+/// Open a tool's row on its first `running` snapshot, or on a `completed`
+/// that skipped `running`.
 fn ensure_open(out: &mut Vec<HarnessEvent>, st: &mut SessionState, id: &str, input: &Value) {
     if st.open_tools.contains(id) {
         return;
@@ -2132,23 +1381,28 @@ fn ensure_open(out: &mut Vec<HarnessEvent>, st: &mut SessionState, id: &str, inp
     });
 }
 
-/// The v1 family: `message.*` and `session.*` in a `properties` envelope,
-/// measured on 1.18.31 and replayed from `fixtures/harness/opencode-v1-*`.
-/// The shapes are in the module docs; the rules below are the ones that
-/// keep `TurnFinished` at exactly one per turn on every recording.
-fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent> {
+/// One session event's `properties` into harness events. The stream's rules
+/// (1.18.31, replayed from `fixtures/harness/opencode-v1-*.ndjson`):
+///
+/// - Text and reasoning open as a `message.part.updated` snapshot, stream as
+///   `message.part.delta` (`field` is `"text"` for both), and close as a
+///   snapshot with the whole text. Tool parts never delta: each snapshot
+///   re-sends the output so far.
+/// - One assistant message per step. The user row is re-emitted after every
+///   step, so only the first sight of its id opens a turn; that id is also
+///   the `TurnAnchor`, since `prompt_async` returns none.
+/// - An abort is `session.error{MessageAbortedError}`, idle, *then* the
+///   partial answer and the errored assistant row, then a second idle.
+/// - A bad model gets `session.error` then idle, and no assistant row; a bad
+///   agent gets `session.error` and no idle at all.
+fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent> {
     let mut out = Vec::new();
     match ty {
         "message.updated" => {
             let info = &p["info"];
             let id = s(info, "id");
             match info["role"].as_str() {
-                // The user row is the turn: `prompt_async` answers 204 with
-                // no id, so the anchor a rewind will name comes off the
-                // stream here. It is re-emitted (with `summary`) after every
-                // step, and only the first sight of an id opens anything —
-                // the id, not the presence of `summary`, is the test, so a
-                // first sight that happened to carry one still opens.
+                // First sight of the id opens the turn, `summary` or not.
                 Some("user") => {
                     if !st.seen_user.insert(id.clone()) {
                         return out;
@@ -2156,9 +1410,8 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
                     out.push(begin_turn(st));
                     out.push(HarnessEvent::TurnAnchor { anchor: id });
                 }
-                // One per step. Created bare, then completed twice
-                // (identical), then — on an abort — completed with `error`.
-                // Only the *transition* to completed decides anything.
+                // Created bare, then completed twice (plus once with `error`
+                // on an abort). Only the transition to completed decides.
                 Some("assistant") => {
                     st.awaiting_step = None;
                     let completed = !info["time"]["completed"].is_null();
@@ -2184,7 +1437,6 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
                         out.push(HarnessEvent::error_for(Provider::Opencode, friendly(msg)));
                         out.extend(close_turn(st, "failed"));
                     } else if info["finish"].as_str() != Some("tool-calls") {
-                        // `tool-calls` means the next step's message follows.
                         out.extend(close_turn(st, "completed"));
                     }
                 }
@@ -2193,8 +1445,7 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
         }
         "message.part.updated" => {
             let part = &p["part"];
-            // The user's own prompt is a text part too — on the user
-            // message, with no `time` — and it is not an answer.
+            // The user's own prompt is a text part too.
             if st.seen_user.contains(&s(part, "messageID")) {
                 return out;
             }
@@ -2204,14 +1455,8 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
                     let thinking = kind == "reasoning";
                     let map = if thinking { &mut st.reasoning } else { &mut st.text };
                     if part["time"]["end"].is_null() {
-                        // The opening snapshot (`text: ""`, `time.start`).
-                        // Never clobber deltas already folded.
                         map.entry(id).or_default();
                     } else {
-                        // The closing snapshot carries the whole text. After
-                        // an abort this is the partial answer, and it
-                        // arrives after the first idle — which is why idle
-                        // does not close a turn that has an assistant row.
                         map.remove(&id);
                         let text = s(part, "text");
                         if !text.trim().is_empty() {
@@ -2223,10 +1468,7 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
                         }
                     }
                 }
-                // Keyed by `callID`, which is what the timeline closes on —
-                // the same id v2 used. `pending` has `input: {}` and nothing
-                // to title; the row opens on the first `running`, or on a
-                // `completed` that went straight there.
+                // Keyed by `callID`. `pending` has `input: {}` and is skipped.
                 Some("tool") => {
                     let call = s(part, "callID");
                     st.tools.insert(call.clone(), s(part, "tool"));
@@ -2235,9 +1477,6 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
                     match state["status"].as_str() {
                         Some("running") => {
                             ensure_open(&mut out, st, &call, &input);
-                            // No tool-output delta on this wire: each
-                            // `running` snapshot carries the output so far,
-                            // and what is past the last mark is new.
                             let output = state["metadata"]["output"].as_str().unwrap_or("");
                             let seen = st.tool_output_len.entry(call.clone()).or_insert(0);
                             if output.len() > *seen {
@@ -2255,9 +1494,7 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
                             ensure_open(&mut out, st, &call, &input);
                             st.open_tools.remove(&call);
                             st.tool_output_len.remove(&call);
-                            // A permission refusal and `Tool execution
-                            // aborted` both land as `error`; neither ends
-                            // the turn on its own.
+                            // A tool error (refusal, abort) does not end the turn.
                             let output = if ok {
                                 s(state, "output")
                             } else {
@@ -2276,13 +1513,10 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
                 Some("step-finish") => {
                     out.push(usage(st, &part["tokens"], part["cost"].as_f64().unwrap_or(0.0)));
                 }
-                // `step-start`, and anything newer than the recordings.
                 _ => {}
             }
         }
-        // `field` is `"text"` for reasoning too; the part's type is what
-        // the opening snapshot said. A part never opened — a reconnect
-        // landed mid-answer — is read as answer text.
+        // A part never opened (a reconnect mid-answer) is read as answer text.
         "message.part.delta" => {
             let text = s(p, "delta");
             if text.is_empty() {
@@ -2300,10 +1534,8 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
         "session.error" => {
             let err = &p["error"];
             if err["name"].as_str() == Some("MessageAbortedError") {
-                // The errored assistant `message.updated` that follows is
-                // what closes an abort — unless nothing was ever created to
-                // carry it, in which case this is all there will be. Either
-                // way the idle in between is not the close.
+                // The errored assistant row that follows closes an abort,
+                // unless none exists to carry it.
                 st.aborting = true;
                 if st.assistants.is_empty() {
                     out.extend(close_turn(st, "interrupted"));
@@ -2319,22 +1551,15 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
             }
             st.turn_errored = true;
             out.push(HarnessEvent::error_for(Provider::Opencode, friendly(msg)));
-            // An unresolvable model sends this and then idle; a bad agent
-            // sends this and nothing else. With no assistant message left
-            // open there is no `message.updated` coming to close the turn.
+            // With no assistant row left open, nothing else will close it.
             let pending = st.assistants.last().is_some_and(|(_, done)| !done);
             if !pending {
                 out.extend(close_turn(st, "failed"));
             }
         }
-        // Fires on every v1 turn. On a normal one the completed assistant
-        // `message.updated` has already closed the turn and this is nothing;
-        // on an abort it arrives *before* the final text snapshot and the
-        // errored row, so `aborting` keeps it from closing early. Anything
-        // else still open here — no assistant row at all (the unresolvable
-        // model), or one created and never completed (a provider error the
-        // server did not write back onto the row) — is a turn nothing else
-        // will ever close, and idle is the server saying it is over.
+        // Normally the turn is already closed. Outside an abort, a turn still
+        // open here (no assistant row, or one never completed) has nothing
+        // else coming to close it.
         "session.idle" => {
             if !st.turn_open || st.aborting {
                 return out;
@@ -2347,10 +1572,6 @@ fn translate_v1(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent>
             }
             out.extend(close_turn(st, "failed"));
         }
-        // session.status (busy/idle), session.updated (running totals —
-        // the step parts already carry them), session.diff, session.created
-        // (our own POST made it; `start_session` says so), message.removed
-        // (a revert being applied), and the rest: not surfaced.
         _ => {}
     }
     out
@@ -2361,13 +1582,8 @@ mod tests {
     use super::super::event::ToolKind;
     use super::*;
 
-    /// The order the live dispatcher uses: server-scoped events are
-    /// translated *before* the session lookup, so a replay that only called
-    /// `translate` would go green on a stream the app routes differently.
-    /// That is the lesson written at `codex.rs`'s own fixture test. Routing
-    /// goes through the same `session_of`/`fold` as `dispatch`, so a v1
-    /// recording exercises the family split too; the session the turn ran
-    /// in is the first one the stream names, and any other is not ours.
+    /// Routes like [`OpencodeServer::dispatch`]: session-less events first,
+    /// then the first session the stream names is ours and any other is not.
     fn replay(raw: &str) -> Vec<HarnessEvent> {
         let mut st = SessionState::default();
         let mut ours: Option<String> = None;
@@ -2376,10 +1592,10 @@ mod tests {
             let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
             let Some(ty) = v["type"].as_str() else { continue };
             match session_of(&v) {
-                None => events.extend(translate_server(ty, envelope(&v))),
+                None => events.extend(translate_server(ty, &v["properties"])),
                 Some(id) => {
                     if ours.get_or_insert_with(|| id.to_string()) == id {
-                        events.extend(fold(ty, &v, &mut st));
+                        events.extend(translate(ty, &v["properties"], &mut st));
                     }
                 }
             }
@@ -2431,138 +1647,12 @@ mod tests {
         events.iter().filter(|e| f(e)).count()
     }
 
-    /// A recorded opencode 1.18.2 turn: reasoning, a tool call, a second
-    /// step, an answer. Two steps, and only the second closes the turn.
-    #[test]
-    fn folds_a_recorded_turn() {
-        let events = replay(include_str!("../../fixtures/harness/opencode-ls.ndjson"));
-        assert!(matches!(events.first(), Some(HarnessEvent::TurnStarted)));
-
-        let tools: Vec<_> = events
-            .iter()
-            .filter_map(|e| match e {
-                HarnessEvent::ToolStarted { kind, name, title, .. } => {
-                    Some((*kind, name.clone(), title.clone()))
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(tools.len(), 1, "one tool call in the recording");
-        assert_eq!(tools[0].0, ToolKind::Read);
-        assert_eq!(tools[0].1, "read");
-        // Titled off `path`. Claude's arm would have read `file_path` and
-        // left this empty, which is the bug this recording exists to catch.
-        assert_eq!(tools[0].2, "w1.md");
-
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, HarnessEvent::ToolFinished { ok: true, .. })));
-        assert!(events.iter().any(|e| matches!(e, HarnessEvent::Thinking { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, HarnessEvent::Usage { context_tokens: Some(n), .. } if *n > 0)));
-        // The first step says `tool-calls`, which is not the end of a turn.
-        let finished: Vec<&str> = events
-            .iter()
-            .filter_map(|e| match e {
-                HarnessEvent::TurnFinished { status } => Some(status.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(finished, vec!["completed"], "exactly one, at the end");
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })));
-        // Spend, not a subscription: no plan windows are invented.
-        assert!(!events.iter().any(|e| matches!(e, HarnessEvent::RateLimits { .. })));
-    }
-
-    /// A turn stopped mid-answer. `session.idle` never comes; what does is a
-    /// `step.failed` carrying opencode's own interrupt string, and the half
-    /// written answer arrives before it as an ordinary `text.ended`.
-    #[test]
-    fn a_stopped_turn_is_not_an_error() {
-        let events = replay(include_str!("../../fixtures/harness/opencode-interrupt.ndjson"));
-        let deltas: String = events
-            .iter()
-            .filter_map(|e| match e {
-                HarnessEvent::AssistantDelta { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert!(!deltas.is_empty(), "the fixture streams an answer");
-        let message = events.iter().find_map(|e| match e {
-            HarnessEvent::AssistantMessage { text } => Some(text.clone()),
-            _ => None,
-        });
-        assert_eq!(message.as_deref(), Some(deltas.as_str()), "the partial is a row");
-        assert!(
-            !events.iter().any(|e| matches!(e, HarnessEvent::Error { .. })),
-            "stopping a turn is not an error"
-        );
-        assert!(
-            matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted")
-        );
-    }
-
-    /// The invariant the queue upstream depends on: one `TurnFinished` per
-    /// turn, whatever arrives afterwards.
-    #[test]
-    fn a_turn_finishes_exactly_once() {
-        let mut st = SessionState::default();
-        let go = |st: &mut SessionState, ty: &str, d: Value| translate(ty, &d, st);
-
-        assert!(go(&mut st, "session.next.prompted", json!({})).len() == 1);
-        // A step that wanted tools does not end anything.
-        let mid = go(&mut st, "session.next.step.ended", json!({"finish": "tool-calls", "tokens": {}}));
-        assert!(!mid.iter().any(|e| matches!(e, HarnessEvent::TurnFinished { .. })));
-        // A tool that failed does not end anything either.
-        let tool = go(&mut st, "session.next.tool.failed", json!({"callID": "c1", "error": {"message": "no"}}));
-        assert!(!tool.iter().any(|e| matches!(e, HarnessEvent::TurnFinished { .. })));
-
-        let end = go(&mut st, "session.next.step.ended", json!({"finish": "stop", "tokens": {}}));
-        assert_eq!(
-            end.iter().filter(|e| matches!(e, HarnessEvent::TurnFinished { .. })).count(),
-            1
-        );
-        // Anything after the close is not a second turn ending.
-        for ty in ["session.next.step.ended", "session.next.step.failed", "session.idle"] {
-            let late = go(&mut st, ty, json!({"finish": "stop", "tokens": {}, "error": {"message": "x"}}));
-            assert!(!late.iter().any(|e| matches!(e, HarnessEvent::TurnFinished { .. })), "{ty}");
-        }
-    }
-
-    /// An interrupt is a `step.failed` with one particular message, and the
-    /// difference between that and a real failure is the whole of what the
-    /// timeline draws.
-    #[test]
-    fn an_interrupt_and_a_provider_error_are_told_apart() {
-        for (msg, status, is_error) in [
-            ("Provider turn interrupted", "interrupted", false),
-            ("Provider request failed with HTTP 401", "failed", true),
-        ] {
-            let mut st = SessionState::default();
-            translate("session.next.prompted", &json!({}), &mut st);
-            let out = translate(
-                "session.next.step.failed",
-                &json!({ "error": { "type": "unknown", "message": msg } }),
-                &mut st,
-            );
-            assert!(matches!(out.last(), Some(HarnessEvent::TurnFinished { status: s }) if s == status));
-            assert_eq!(
-                out.iter().any(|e| matches!(e, HarnessEvent::Error { .. })),
-                is_error,
-                "{msg}"
-            );
-        }
-    }
-
-    // ── The v1 family, replayed from the 1.18.31 recordings ───────────────
+    // ── Replayed from the 1.18.31 recordings ─────────────────────────────
 
     const V1_LS: &str = include_str!("../../fixtures/harness/opencode-v1-ls.ndjson");
 
-    /// A tool chain on the v1 stream: two steps, two assistant messages, one
-    /// bash call whose output arrives as growing snapshots, then a streamed
-    /// answer. The turn opens on the user row (which is also the anchor)
-    /// and closes on the second step's `finish: "stop"`, once.
+    /// Two steps, one bash call with growing output snapshots, then a streamed
+    /// answer. Opens on the user row (the anchor), closes once on `stop`.
     #[test]
     fn folds_a_recorded_v1_turn() {
         let events = replay(V1_LS);
@@ -2587,14 +1677,13 @@ mod tests {
             })
             .collect();
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].0, "call_UnhBtW5By24FPWOwYzi30lZ6", "keyed by callID, as v2 was");
+        assert_eq!(tools[0].0, "call_UnhBtW5By24FPWOwYzi30lZ6", "keyed by callID");
         assert_eq!(tools[0].1, ToolKind::Bash);
         assert_eq!(tools[0].2, "bash");
         assert!(tools[0].3.contains("ls"), "titled off the running snapshot's input, not pending's `{{}}`");
         assert_eq!(tools[0].4["command"], "ls");
 
-        // Three `running` snapshots: two with an empty `metadata.output`,
-        // then one with the whole listing. That is one delta, of all of it.
+        // Two empty `running` snapshots, then the whole listing: one delta.
         let out_deltas: Vec<&str> = events
             .iter()
             .filter_map(|e| match e {
@@ -2624,8 +1713,7 @@ mod tests {
         assert!(!text[0].is_empty());
         assert!(!events.iter().any(|e| matches!(e, HarnessEvent::ThinkingDelta { .. } | HarnessEvent::Thinking { .. })));
 
-        // One `Usage` per `step-finish`, accumulating: step 2's input is
-        // 160 fresh + 5760 cached on top of step 1's 5827.
+        // One `Usage` per `step-finish`, accumulating fresh + cached input.
         let usage: Vec<(u64, u64, Option<u64>)> = events
             .iter()
             .filter_map(|e| match e {
@@ -2656,9 +1744,8 @@ mod tests {
         assert!(!events.iter().any(|e| matches!(e, HarnessEvent::ToolStarted { .. })));
     }
 
-    /// A reasoning part streams with `field: "text"` exactly like an answer
-    /// does; the only thing that says it is thinking is the part's type on
-    /// the opening snapshot.
+    /// Reasoning deltas say `field: "text"` too; only the opening snapshot's
+    /// part type marks them as thinking.
     #[test]
     fn folds_a_recorded_v1_reasoning_turn() {
         let events = replay(include_str!("../../fixtures/harness/opencode-v1-reasoning.ndjson"));
@@ -2688,14 +1775,11 @@ mod tests {
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::Usage { output_tokens: 31, .. })));
         assert_eq!(finishes(&events), vec!["completed"]);
         assert!(errors(&events).is_empty());
-        // The trailing `server.heartbeat` JSON event is nothing.
         assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })));
     }
 
-    /// `POST /abort` mid-answer. The wire order is error, idle, *then* the
-    /// final text snapshot and the errored `message.updated`, then a second
-    /// idle — so the first idle must not close the turn, or the partial
-    /// answer is lost and the row paints failed.
+    /// The first idle of an abort must not close the turn, or the partial
+    /// answer that follows it is lost.
     #[test]
     fn a_v1_abort_is_interrupted_not_failed() {
         let events = replay(include_str!("../../fixtures/harness/opencode-v1-interrupt.ndjson"));
@@ -2711,10 +1795,8 @@ mod tests {
         assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })), "the two idles add nothing");
     }
 
-    /// A model id the provider does not know. No assistant message is ever
-    /// created; the turn is closed by the `session.error` itself, in the
-    /// provider's own words, and the stack-trace re-emit of the same error
-    /// is dropped.
+    /// An unknown model: no assistant row; the `session.error` closes the
+    /// turn in the provider's words, and its stack-trace re-emit is dropped.
     #[test]
     fn a_v1_model_not_found_fails_once_with_the_providers_words() {
         let events = replay(include_str!("../../fixtures/harness/opencode-v1-error.ndjson"));
@@ -2732,8 +1814,7 @@ mod tests {
         assert!(messages(&events).is_empty(), "the user's own text part is not an answer");
     }
 
-    /// The queue's invariant on the v1 wire: the completed `message.updated`
-    /// is already sent twice, and a late idle is routine.
+    /// A repeated completed row and a late idle add no second finish.
     #[test]
     fn a_v1_turn_finishes_exactly_once() {
         let last_of = |ty: &str, role: Option<&str>| {
@@ -2759,12 +1840,11 @@ mod tests {
         assert!(errors(&events).is_empty());
     }
 
-    /// A bad agent name: 204, then `session.error` twice and **no idle**.
-    /// Nothing else will ever close the turn, so the error does.
+    /// A bad agent name: `session.error` twice and no idle, so the error closes.
     #[test]
     fn a_v1_bad_agent_closes_on_the_error_because_no_idle_follows() {
         let mut st = SessionState::default();
-        let go = |st: &mut SessionState, ty: &str, p: Value| translate_v1(ty, &p, st);
+        let go = |st: &mut SessionState, ty: &str, p: Value| translate(ty, &p, st);
         let opened = go(&mut st, "message.updated", json!({"info": {"id": "msg_u1", "role": "user", "sessionID": "ses_1"}}));
         assert!(matches!(opened.as_slice(), [HarnessEvent::TurnStarted, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1"));
         let msg = "Agent not found: \"nope-agent\". Available agents: build, explore, general, oculus, plan";
@@ -2775,12 +1855,12 @@ mod tests {
         assert!(trace.is_empty(), "{trace:?}");
     }
 
-    /// A tool that skips `running` — and an abort that lands before any
-    /// assistant message exists — both still leave the timeline balanced.
+    /// A tool that skips `running`, and an abort before any assistant row,
+    /// both leave the timeline balanced.
     #[test]
     fn a_v1_tool_that_never_ran_still_opens_a_row_off_its_input() {
         let mut st = SessionState::default();
-        let go = |st: &mut SessionState, ty: &str, p: Value| translate_v1(ty, &p, st);
+        let go = |st: &mut SessionState, ty: &str, p: Value| translate(ty, &p, st);
         go(&mut st, "message.updated", json!({"info": {"id": "msg_u1", "role": "user"}}));
         go(&mut st, "message.updated", json!({"info": {"id": "msg_a1", "role": "assistant", "parentID": "msg_u1", "time": {"created": 1}}}));
         let pending = go(&mut st, "message.part.updated", json!({"part": {"id": "prt_1", "messageID": "msg_a1", "type": "tool", "callID": "call_1", "tool": "read", "state": {"status": "pending", "input": {}}}}));
@@ -2798,9 +1878,6 @@ mod tests {
         assert!(go(&mut st, "session.idle", json!({"sessionID": "ses_1"})).is_empty());
     }
 
-    /// The free Zen models cannot be driven over the HTTP API at all, and a
-    /// student picking one out of the list gets a bare HTTP 400 unless this
-    /// says what happened.
     #[test]
     fn the_zen_free_tier_gets_a_sentence_rather_than_a_400() {
         let raw = "Provider request failed with HTTP 400: {\"type\":\"error\",\"error\":\
@@ -2811,11 +1888,8 @@ mod tests {
         assert!(!out.contains("HTTP 400"));
     }
 
-    /// A provider error that lands after the assistant row was created but
-    /// never completes it: the recording's turn cut off at the bare first
-    /// assistant `message.updated`, then idle. Nothing else would ever close
-    /// that turn — the manager releases a thread on `TurnFinished` and
-    /// nothing else — so idle does, once, and says so once.
+    /// An assistant row created and never completed, then idle: idle fails
+    /// the turn, once.
     #[test]
     fn a_v1_idle_with_the_assistant_still_open_fails_the_turn_once() {
         let cut: Vec<&str> = V1_LS.lines().take(7).collect();
@@ -2834,37 +1908,28 @@ mod tests {
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert!(errs[0].contains("without answering"));
         assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })));
-        // And once is once: a second idle, or the row completing late, adds
-        // nothing.
         let mut st = SessionState::default();
         for line in raw.lines() {
             let v: Value = serde_json::from_str(line).unwrap();
             if let Some(ty) = v["type"].as_str() {
                 if session_of(&v).is_some() {
-                    fold(ty, &v, &mut st);
+                    translate(ty, &v["properties"], &mut st);
                 }
             }
         }
-        assert!(translate_v1("session.idle", &json!({"sessionID": "ses_1"}), &mut st).is_empty());
+        assert!(translate("session.idle", &json!({"sessionID": "ses_1"}), &mut st).is_empty());
     }
 
-    /// The first sight of a user id opens a turn whether or not the row
-    /// happens to carry `summary`; it is the id that is the test. A re-emit
-    /// of a known id, with or without one, opens nothing.
     #[test]
     fn a_v1_user_row_opens_on_its_id_not_on_the_absence_of_summary() {
         let mut st = SessionState::default();
-        let go = |st: &mut SessionState, p: Value| translate_v1("message.updated", &p, st);
+        let go = |st: &mut SessionState, p: Value| translate("message.updated", &p, st);
         let first = go(&mut st, json!({"info": {"id": "msg_u1", "role": "user", "summary": {"diffs": []}}}));
         assert!(matches!(first.as_slice(), [HarnessEvent::TurnStarted, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1"));
         assert!(go(&mut st, json!({"info": {"id": "msg_u1", "role": "user", "summary": {"diffs": []}}})).is_empty());
         assert!(go(&mut st, json!({"info": {"id": "msg_u1", "role": "user"}})).is_empty());
     }
 
-    /// A row's capabilities decide whether the picker may offer it at all, so
-    /// the three flags the gate reads come off the catalogue rather than
-    /// being assumed. **Absent is capable**: a provider whose rows say
-    /// nothing about tools must not have its whole catalogue gated out.
     #[test]
     fn a_model_s_capabilities_come_off_the_row_and_default_to_capable() {
         let v = json!({
@@ -2890,9 +1955,8 @@ mod tests {
         );
     }
 
-    /// The picker reads these names off the wire (`OpencodeModel` in
-    /// `app/src/lib/harness.ts`), so a rename on either side is a silently
-    /// empty model list rather than a type error.
+    /// `OpencodeModel` in `app/src/lib/harness.ts` reads these names; a rename
+    /// is a silently empty model list, not a type error.
     #[test]
     fn a_model_row_is_spelled_the_way_the_picker_reads_it() {
         let json = serde_json::to_value(ModelInfo {
@@ -2938,7 +2002,6 @@ mod tests {
         assert_eq!(parse_port("Warning: OPENCODE_SERVER_PASSWORD is not set"), None);
     }
 
-    /// An id can itself contain a slash, so only the first one separates.
     #[test]
     fn a_model_is_split_on_its_first_slash_only() {
         assert_eq!(
@@ -2952,13 +2015,8 @@ mod tests {
         assert_eq!(split_model("no-slash"), None);
     }
 
-    /// The containment document has to parse, and it has to say the three
-    /// things that were measured to matter: the siblings of `agents/` are
-    /// denied individually rather than the root being denied; the bash map's
-    /// last rule is an allow, or the tool disappears from the model's list
-    /// entirely; and the paths inside the session directory — the agent's own
-    /// config, and the skills it runs under — are named *relatively*, because
-    /// an absolute pattern for one of those matches nothing.
+    /// Pins the rule shapes that work: siblings of `agents/` denied one by one,
+    /// the bash map ending on an allow, and in-directory paths relative.
     #[test]
     fn the_rendered_config_denies_the_right_things() {
         let rendered = render_config(
@@ -2977,24 +2035,17 @@ mod tests {
         for inside in ["opencode.json", "skills/**", ".opencode/**"] {
             assert_eq!(edit[inside], "deny", "{inside} is relative, being inside the cwd");
         }
-        // The generated skills are read where they are, rather than linked
-        // into a second place — and the path is relative for the same reason
-        // the denies above are.
         assert_eq!(v["skills"]["paths"], json!(["skills"]));
 
         let bash: Vec<(&String, &Value)> = v["permission"]["bash"].as_object().unwrap().iter().collect();
         assert_eq!(bash.first().unwrap().1, "deny", "the default is no");
         assert_eq!(bash.last().unwrap().1, "allow", "or bash is removed from the tool list");
 
-        // `deny` removes a tool entirely, which is what makes `question`
-        // airtight: nothing can hang waiting for an answerer this app has
-        // nowhere to put.
+        // `deny` removes the tool, so nothing waits on an answerer.
         for key in ["question", "task"] {
             assert_eq!(v["permission"][key], "deny", "{key}");
         }
-        // The web is allowed, because Claude and Codex both have it and an
-        // agent that cannot look anything up is a different agent. It is the
-        // one permission here that is about parity rather than containment.
+        // Parity with Claude and Codex.
         for key in ["webfetch", "websearch"] {
             assert_eq!(v["permission"][key], "allow", "{key}");
         }
@@ -3007,10 +2058,7 @@ mod tests {
         assert_eq!(v["agent"][NAMING_AGENT]["hidden"], true);
     }
 
-    // ── Provider credentials ─────────────────────────────────────────────
-    //
-    // The JSON below is verbatim from opencode 1.18.2 on the machine this
-    // was built against, trimmed to the providers that exercise each rule.
+    // ── Provider credentials (JSON verbatim from opencode 1.18.2) ─────────
 
     /// `openai`'s three ways in, as `/provider/auth` declares them.
     const OPENAI_METHODS: &str = r#"[
@@ -3019,8 +2067,7 @@ mod tests {
       { "type": "api",   "label": "Manually enter API Key" }
     ]"#;
 
-    /// `github-copilot`: one method whose form is a select and a text field
-    /// that only exists for one of the select's answers.
+    /// `github-copilot`: a select, and a text field shown for one answer.
     const COPILOT_METHODS: &str = r#"[
       { "type": "oauth", "label": "Login with GitHub Copilot", "prompts": [
         { "type": "select", "key": "deploymentType", "message": "Select GitHub deployment type",
@@ -3044,8 +2091,6 @@ mod tests {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }
 
-    /// The index **is** the name: `oauth/authorize` and `oauth/callback` have
-    /// no other handle on a method, so parsing must not filter or re-sort.
     #[test]
     fn method_indices_are_positions_in_the_array() {
         let ms = parse_methods(&serde_json::from_str::<Value>(OPENAI_METHODS).unwrap());
@@ -3058,9 +2103,6 @@ mod tests {
         assert!(ms[0].prompts.is_empty(), "the browser flow asks nothing up front");
     }
 
-    /// A method this build cannot read would shift every index after it, and
-    /// a wrong index starts the wrong flow with no error — so the whole list
-    /// is given up rather than renumbered.
     #[test]
     fn an_unreadable_method_gives_up_the_list_rather_than_renumbering() {
         let ms = parse_methods(&serde_json::from_str::<Value>(
@@ -3069,8 +2111,6 @@ mod tests {
         assert_eq!(ms, vec![default_method()]);
     }
 
-    /// 208 of the 218 providers declare nothing, and measured they take a
-    /// plain `{type:"api",key}`. So "no entry" is a form, not a dead end.
     #[test]
     fn a_provider_with_no_declared_method_takes_a_plain_key() {
         for v in [Value::Null, json!({}), json!([])] {
@@ -3095,10 +2135,6 @@ mod tests {
                    ("deploymentType", "eq", "enterprise"));
     }
 
-    /// The `when` rule, evaluated where it matters: on the way out. An
-    /// enterprise URL typed and then abandoned by switching the select back
-    /// is still in the webview's form state, and sending it would point the
-    /// flow at a host nobody chose.
     #[test]
     fn hidden_answers_are_dropped_on_the_way_out() {
         let m = method(COPILOT_METHODS, 0);
@@ -3120,9 +2156,6 @@ mod tests {
         assert_eq!(visible_answers(&m, &padded), answers(&[("deploymentType", "github.com")]));
     }
 
-    /// The credential body. `metadata` carries a method's extra fields and is
-    /// left off entirely when there are none, which is the shape opencode's
-    /// own store writes.
     #[test]
     fn the_credential_body_is_the_key_and_nothing_else() {
         assert_eq!(
@@ -3135,9 +2168,6 @@ mod tests {
         );
     }
 
-    /// The one path a key could take back out is an error body quoting the
-    /// request. `scrub` covers the names opencode uses in its own payloads;
-    /// this covers the secret the app is holding at that moment.
     #[test]
     fn an_error_cannot_carry_the_key_back_out() {
         let msg = redact(
@@ -3146,14 +2176,9 @@ mod tests {
         );
         assert!(!msg.contains("sk-proj"), "{msg}");
         assert!(msg.contains("[redacted]"));
-        // A short string is not a secret worth blanking half an error for.
         assert_eq!(redact("cannot reach opencode", "abc"), "cannot reach opencode");
     }
 
-    /// `GET /provider` hands back the real key for a provider that has one —
-    /// `source` flips to `api` and `key` holds the credential — and `scrub`
-    /// does not know that field name. Nothing built from that row may reach
-    /// the webview.
     #[test]
     fn a_connected_providers_key_never_leaves_rust() {
         let all = json!({
@@ -3170,10 +2195,6 @@ mod tests {
         assert!(!wire.contains("SECRETVALUE"), "{wire}");
     }
 
-    /// The merge: who is connected, who takes what form. `tss-nvidia-spark`
-    /// is connected because it is declared in an `opencode.json`, not because
-    /// a credential exists — which is why the row does not offer to
-    /// disconnect a `config` provider.
     #[test]
     fn providers_merge_their_connected_state_and_their_forms() {
         let all = json!({
@@ -3191,7 +2212,6 @@ mod tests {
         let methods: Value = serde_json::from_str(&format!("{{\"openai\": {OPENAI_METHODS}}}")).unwrap();
         let rows = parse_providers(&all, &methods).unwrap();
 
-        // Sorted by name, case-folded.
         assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
                    vec!["anthropic", "openai", "tss-nvidia-spark"]);
 
@@ -3208,10 +2228,8 @@ mod tests {
         assert_eq!(spark.source, "config", "declared, not signed in to");
     }
 
-    /// `/config/providers` in the shape 1.18.2 answers with: a provider list,
-    /// each carrying a **map** of models keyed by id. The endpoint this
-    /// replaced returned a flat array and a subset, which is the bug this
-    /// test exists to stop coming back.
+    /// `/config/providers` as 1.18.2 answers: providers, each with a map of
+    /// models keyed by id.
     #[test]
     fn the_model_list_is_every_configured_provider_s_models() {
         let v = json!({
@@ -3250,21 +2268,15 @@ mod tests {
         assert_eq!(models[0].description, "131K context");
         assert!(models[0].variants.is_empty(), "an empty object is no levels");
 
-        // The object spelling of `variants`, which the array-reading endpoint
-        // never produced.
         assert_eq!(models[1].variants, vec!["high".to_string(), "low".to_string()]);
         assert_eq!(models[1].default_variant.as_deref(), Some("high"));
     }
 
-    /// The default level is asked for by name, not taken off the front of a
-    /// list whose order is a JSON map's alphabetical accident.
     #[test]
     fn the_default_level_is_high_or_the_nearest_below_it() {
         let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
         assert_eq!(default_variant(&v(&["low", "medium", "high"])).as_deref(), Some("high"));
-        // Alphabetically first is "low"; the answer is the strongest level at
-        // or below high that the model actually has.
         assert_eq!(default_variant(&v(&["low", "medium", "xhigh"])).as_deref(), Some("medium"));
         assert_eq!(default_variant(&v(&["max", "xhigh"])).as_deref(), Some("max"));
         assert_eq!(default_variant(&[]), None);
@@ -3273,29 +2285,6 @@ mod tests {
 
     // ── The real thing ───────────────────────────────────────────────────────
 
-    /// A session directory shaped like the one a thread runs in, deleted on
-    /// the way out.
-    struct Dir {
-        root: PathBuf,
-    }
-
-    impl Dir {
-        fn new(name: &str) -> Self {
-            let root = std::env::temp_dir()
-                .join(format!("oculus-opencode-{name}-{}", std::process::id()));
-            std::fs::create_dir_all(&root).unwrap();
-            Self { root }
-        }
-    }
-
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            std::fs::remove_dir_all(&self.root).ok();
-        }
-    }
-
-    /// Kills the server however the test leaves — an assertion that fires is
-    /// still an `opencode serve` this process started.
     struct Kill(Arc<OpencodeServer>);
 
     impl Drop for Kill {
@@ -3304,8 +2293,6 @@ mod tests {
         }
     }
 
-    /// Everything a route's sink saw up to and including the next
-    /// `TurnFinished`, or a panic with what did arrive.
     fn one_turn(rx: &mpsc::Receiver<HarnessEvent>, budget: Duration) -> Vec<HarnessEvent> {
         let deadline = Instant::now() + budget;
         let mut out = Vec::new();
@@ -3324,14 +2311,9 @@ mod tests {
         }
     }
 
-    /// The bridge on a real thread: a tool turn streams and folds, a rewind
-    /// is accepted, a second prompt on another model runs on it, and a stop
-    /// lands as `interrupted`. Everything else here replays a recording;
-    /// this is the one place the endpoints themselves are exercised.
-    ///
-    /// Ignored, because it needs a binary, OpenRouter signed in and about a
-    /// cent of somebody's tokens (gpt-4.1-mini for the tool turn, gpt-4.1-nano
-    /// for the other two):
+    /// The endpoints themselves: a tool turn, a rewind, a prompt on another
+    /// model, and a stop. Needs opencode, OpenRouter signed in, and about a
+    /// cent of tokens:
     ///
     /// ```text
     /// cargo test --lib harness::opencode::tests::a_real_opencode_runs -- --ignored --nocapture
@@ -3348,11 +2330,11 @@ mod tests {
                 return;
             }
         };
-        let dir = Dir::new("thread");
-        let directory = dir.root.join("agents");
+        let dir = crate::test_support::Scratch::new("opencode-thread");
+        let directory = dir.join("agents");
         write_config(
             &directory,
-            &dir.root,
+            &dir,
             "You are a test agent. Do exactly what the message asks, briefly.",
             "You name conversations.",
         )
@@ -3411,13 +2393,11 @@ mod tests {
         assert!(!server.busy(), "the turn is closed");
         eprintln!("  anchor {anchor}, answer {:?}", messages(&events));
 
-        // 2. Rewind to that question — inclusive, so the anchor is the
-        //    question's own id, and accepted while idle.
+        // 2. Rewind to that question (inclusive).
         server.revert(&session, &anchor).expect("revert");
         eprintln!("  revert {anchor}: ok");
 
-        // 3. Another prompt, on another model: the model asked for on attach
-        //    wins over the one the session was created with.
+        // 3. Another model: the one asked for on attach wins.
         server.attach_session(&session, &opts(TEXT_MODEL), sink.clone()).expect("attach");
         assert!(matches!(rx.recv_timeout(Duration::from_secs(1)), Ok(HarnessEvent::SessionStarted { model: Some(m), .. }) if m == TEXT_MODEL));
         let started = Instant::now();
@@ -3452,10 +2432,6 @@ mod tests {
         server.delete_session(&session);
     }
 
-    /// The sweep's two tests, against a listing shaped like the real one.
-    /// Only a process with *our* argv **and** launchd for a parent is a
-    /// stray — everything else here is somebody's live server, somebody's
-    /// own opencode, or another user's.
     #[test]
     fn a_stray_is_our_own_argv_that_launchd_has_adopted() {
         let ours = format!("serve {}", SERVE_ARGS[1..].join(" "));

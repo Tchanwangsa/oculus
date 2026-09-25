@@ -1,251 +1,83 @@
-//! The Antigravity bridge: one long-lived `agy -p` process per thread.
+//! The Antigravity bridge: one long-lived `agy --print=` process per thread,
+//! stream-json both ways. Claude's shape with a different vocabulary:
+//! `init` / `step_update` / `result` events, `--conversation` for `--resume`.
+//! No inline settings, no rewind and no protocol-level interrupt; containment
+//! is rules in agy's global settings file ([`super::antigravity_rules`]) plus
+//! `--sandbox`, which bounds shell commands only. See docs/harness.md.
 //!
-//! Shape-for-shape this is the Claude bridge. `agy` takes
-//! `--input-format stream-json` on stdin and answers `--output-format
-//! stream-json` on stdout, one NDJSON object per line, and the process stays
-//! up between turns; a thread whose process has gone is resumed with
-//! `--conversation <id>`, which is Claude's `--resume` under another name.
-//! What differs is the vocabulary, and only the vocabulary:
-//!
-//! | Claude | Antigravity |
-//! | --- | --- |
-//! | `{"type": "system", "subtype": "init"}` | `{"event": "init"}` |
-//! | stream deltas + `assistant` blocks | `{"event": "step_update"}` |
-//! | `{"type": "result"}` | `{"event": "result"}` |
-//! | `--resume` | `--conversation` |
-//!
-//! A `step_update` is the whole middle of the protocol: it carries the
-//! incremental `text_delta` for agent text, the tool call and its output, and
-//! a per-step `usage`. `state` moves `ACTIVE` → `DONE` and `step_type` says
-//! which kind of step it is, so one arm handles what Claude spreads over a
-//! stream event, an `assistant` line and a `user` line.
-//!
-//! ## What this bridge does *not* have, and why
-//!
-//! **No per-turn reasoning level.** The level is part of the model slug here
-//! (`gemini-3.8-flash-high`), which is a process flag as Claude's `--effort`
-//! is, so a level chosen mid-thread applies from the next resume; the manager
-//! already respawns on a level change for exactly that reason. The picker
-//! shows the slug's base as the model and its suffixes as levels, and
-//! `model_slug` puts the two back together — see `parse_models`.
-//!
-//! **No inline settings document.** Claude gets its whole containment through
-//! `--settings <json>` on the command line. `agy` has no such flag, and in
-//! 1.2.9 reads rules from one place only — the student's global
-//! `~/.gemini/antigravity-cli/settings.json`; a workspace `.agents/hooks.json`,
-//! a project file, environment variables and a `HOME` override were each
-//! tried and none loads. So Oculus keeps a block of its own in that file,
-//! rewritten before every spawn and never touching the student's entries
-//! ([`super::antigravity_rules`]).
-//!
-//! **No rewind.** Nothing in the published protocol takes a conversation back
-//! to an earlier message: `--conversation` resumes, there is no control
-//! channel to ask anything else of, and the CLI's own `/rewind` is refused in
-//! print mode ("/rewind is not available in print mode", measured on 1.2.9).
-//! [`AntigravitySession::rewind`] therefore refuses rather than pretending,
-//! and the manager surfaces that refusal — a rewind that quietly did nothing
-//! would leave the thread and the agent out of step in the one place a
-//! student is guaranteed to notice.
-//!
-//! **No interrupt over the protocol either**, for the same reason. Stopping a
-//! turn is a signal to the child, and the turn is closed here rather than by
-//! anything the CLI says.
-//!
-//! ## Containment: rules, and a sandbox
-//!
-//! Measured on 1.2.9, and each fact is why the flags are what they are:
-//!
-//! - **`--sandbox` is a terminal sandbox only.** It bounds what a *shell*
-//!   command may write, not what the file tools may. With
-//!   `--dangerously-skip-permissions` beside it — this bridge's first shape —
-//!   `write_to_file` wrote a file outside the library while a shell write to
-//!   the same place was refused `operation not permitted`. That flag is gone.
-//! - **Without it, print mode refuses whatever its rules do not allow**,
-//!   rather than hanging on a prompt nothing can answer. With no rules at all,
-//!   `view_file` in the library works, `write_to_file` in the workspace
-//!   (`agents/`, the cwd) works under `--mode accept-edits`, and every
-//!   `run_command` — `ls` included — is refused. The rules
-//!   (`antigravity_rules::rules_for`) are Claude's allow and deny lists in
-//!   `agy`'s syntax: the database's three files writable, the `oculus` binary
-//!   readable and runnable by both spellings, a handful of read-only commands,
-//!   the app's own folders and `sqlite3` denied, and whatever the student
-//!   approved. A `read_file` / `write_file` grant widens the terminal
-//!   sandbox's allowlists too, which is what lets a bare `oculus` run at all:
-//!   the sandbox otherwise cannot *read* the binary behind the
-//!   `~/.local/bin` symlink, and says `operation not permitted: oculus`.
-//! - **A refusal no rule answered ends the turn.** The step arrives as a tool
-//!   `step_update` with `state: "ERROR"` and a `tool_info.error.message`
-//!   starting `permission check failed`, and the turn closes straight after
-//!   with a `result` of `SUCCESS`, an empty `response` and a `denied_actions`
-//!   list. The row is closed failed and a [`HarnessEvent::PermissionNeeded`]
-//!   carries the rule that would have let it; the turn is `completed`,
-//!   because it is. A *deny* rule's refusal shares the prefix but not the
-//!   rest: its message ends `Matches user-configured deny rule.`, the agent is
-//!   told and carries on in the same turn, and nothing is offered, since no
-//!   allow beats a deny.
-//! - **A live `agy` never re-reads its rules**, so approving one
-//!   (`harness_antigravity_allow`) stores it and drops the thread's process;
-//!   the next message resumes the conversation with the rules rewritten.
-//!
-//! Codex gets a seatbelt with an explicit writable-file list, opencode a
-//! rendered `opencode.json`, Claude the settings document; this one gets the
-//! same lists by way of a file it does not own, which is the price of the one
-//! door `agy` has.
-//!
-//! One smaller consequence of the shape: a command that exits non-zero is
-//! still a *successful tool call* — `tool_info.error` is for the tool failing
-//! (or being refused), not for the command's exit status — so such a row is
-//! closed `ok` with the failure in its output, which is what the timeline
-//! shows.
-//!
-//! ## Two things the published reference gets wrong
-//!
-//! Both cost a turn and neither is visible from the docs, so they are written
-//! down here rather than rediscovered.
-//!
-//! **`-p` takes the prompt as its value.** It is `--print <prompt>`, not
-//! Claude's bare flag, so `-p --input-format stream-json` hands the CLI
-//! `"--input-format"` as the prompt and leaves the rest as stray arguments.
-//! `agy` says so and exits 2. In stream-json mode the prompt comes from
-//! stdin, so the flag is `--print=` with an **empty attached value** — the
-//! `=` is load-bearing, because a separate empty argument is a positional one.
-//!
-//! **The parameters are PascalCase.** `run_command` takes `CommandLine` and
-//! `view_file` takes `AbsolutePath`, where all three other CLIs use
-//! `command` / `file_path` / `path`. Read with a lowercase key every row is
-//! titled with an empty string, which reads as a missing title rather than as
-//! a wrong lookup — the same trap opencode's `path`-vs-`file_path` arms are
-//! already in `event.rs` for.
-//!
-//! Both are measured off `agy` 1.2.9, as is every event shape here:
-//! `fixtures/harness/antigravity-ls.ndjson` is a real session and
-//! [`tests::folds_a_recorded_session`] replays it. What is still *inferred* is
-//! the parameter key of the tools that recording did not exercise — the lists
-//! in `event.rs` say which.
+//! Two quirks of agy 1.2.9 that its reference does not show: `-p` takes the
+//! prompt as its value, so stream-json mode needs `--print=` with an empty
+//! *attached* value; and tool parameters are PascalCase (`CommandLine`,
+//! `AbsolutePath`). `fixtures/harness/antigravity-ls.ndjson` is a real session.
 
-use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
+use super::child::{self, ChildProc, ThreadSpawn};
 use super::event::{cap_output, classify, HarnessEvent, Provider};
-use super::{RawLog, Sink};
+use super::Sink;
 
 pub struct AntigravitySpawn {
-    pub bin: PathBuf,
-    /// The library's `agents/` folder — the session's workspace, the sandbox's
-    /// writable root, and the directory `AGENTS.md` is read from.
-    pub cwd: PathBuf,
-    /// The library root, opened for reads with `--add-dir` — the same flag
-    /// and the same job as Claude's. The workspace is `cwd` (`agents/`), so
-    /// without this the course folders beside it are outside every tool's
-    /// reach.
-    pub library: PathBuf,
-    /// Resume this conversation rather than starting one.
-    pub resume: Option<String>,
-    pub model: Option<String>,
-    /// The level picked beside `model`. Antigravity has no working level
-    /// flag of its own for these: the level *is* the slug's suffix, so it is
-    /// folded back into `--model` by `model_slug` rather than sent alongside.
-    pub effort: Option<String>,
-    /// The per-thread half of the brief. There is no `--append-system-prompt`,
-    /// and the library-wide half is already on disk as `agents/AGENTS.md`,
-    /// which `agy` reads by itself — so this rides the first user message, the
-    /// way opencode's `brief` does.
+    /// `base.cwd` is also where `agy` reads `AGENTS.md` from; `base.effort`
+    /// is folded into `--model` by [`model_slug`].
+    pub base: ThreadSpawn,
+    /// The per-thread half of the brief, riding the first user message (no
+    /// system-prompt flag; `agy` reads `AGENTS.md` itself).
     pub brief: String,
-    pub env: Vec<(String, String)>,
-    pub raw_log: Option<RawLog>,
-    /// The student's approved rules, read from the database by a caller that
-    /// has it; `None` reuses the ones the last spawn wrote. See
+    /// Approved rules; `None` reuses the last written. See
     /// [`super::antigravity_rules::install`].
     pub approved: Option<Vec<String>>,
 }
 
 pub struct AntigravitySession {
-    child: Mutex<Child>,
-    stdin: Mutex<ChildStdin>,
-    alive: Arc<AtomicBool>,
-    /// Prepended to the first message and then gone, like opencode's.
+    proc: ChildProc,
     pending_brief: Mutex<Option<String>>,
-    /// Set between asking the child to stop and the turn closing, so the
-    /// translator can call the difference between a cancelled turn and a
-    /// failed one.
+    /// Set by [`Self::interrupt`], so the killed turn reads as interrupted.
     interrupting: Arc<AtomicBool>,
-    /// A turn is owed a `result`. A process that dies inside that window has
-    /// to close the turn anyway, or the manager never releases the thread for
-    /// its next message.
+    /// A turn is owed a `result`; a death meanwhile must still close it.
     expecting: Arc<AtomicBool>,
 }
 
 impl AntigravitySession {
     pub fn spawn(cfg: AntigravitySpawn, sink: Sink) -> Result<Arc<Self>, String> {
-        // The rules first, and a failure to write them is a failure to spawn:
-        // `agy` reads them once, at start, and a process started without them
-        // would run with whatever the file held before — or nothing.
-        super::antigravity_rules::install(&cfg.library, cfg.approved.clone())
+        let base = cfg.base;
+        // `agy` reads its rules once at start, so failing to write them fails
+        // the spawn.
+        super::antigravity_rules::install(&base.library, cfg.approved.clone())
             .map_err(|e| format!("Antigravity was not started: {e}"))?;
-        let mut cmd = Command::new(&cfg.bin);
-        // `--print=` with an **empty attached value**, and the `=` is the whole
-        // point. `-p` here is not Claude's bare flag: it is
-        // `--print <prompt>`, so `-p --input-format …` hands the CLI
-        // "--input-format" as the prompt and leaves the rest as stray
-        // arguments — which it says out loud and exits 2 over. In stream-json
-        // mode the prompt comes from stdin, so the value is empty and has to
-        // be attached rather than positional.
+        let mut cmd = Command::new(&base.bin);
+        // The `=` is load-bearing: see the module docs.
         cmd.arg("--print=")
             .args(["--input-format", "stream-json"])
             .args(["--output-format", "stream-json"])
-            // A chat message is text, not a command line. Without this a
-            // student who opens a message with `/` has it expanded as a slash
-            // command or a skill, which is never what they meant in a bubble.
+            // A message starting with `/` is text, not a slash command.
             .arg("--disable-slash-commands")
-            // The terminal sandbox. It bounds shell commands only — the file
-            // tools answer to the rules `antigravity_rules` just wrote — and
-            // there is deliberately no `--dangerously-skip-permissions` beside
-            // it: measured, with that flag `write_to_file` wrote outside the
-            // library. Without it print mode refuses what the rules do not
-            // allow, and the refusal ends the turn. See the module docs.
+            // Shell commands only; file tools answer to the rules. Never add
+            // `--dangerously-skip-permissions`: it lets file tools write
+            // outside the library (docs/harness.md).
             .arg("--sandbox")
-            // Claude's `acceptEdits` by another name: edits inside the
-            // workspace land without an approval round-trip, which is the only
-            // workable setting when nothing can approve.
+            // Claude's `acceptEdits`: workspace edits need no approval.
             .args(["--mode", "accept-edits"])
-            // The library, opened for reads. The workspace is `agents/`
-            // because that is the cwd, and without this the courses beside it
-            // are outside every tool's reach — the same job Claude's
-            // `--add-dir` does, spelled the same way.
             .arg("--add-dir")
-            .arg(&cfg.library);
-        if let Some(m) = &cfg.model {
-            cmd.args(["--model", &model_slug(m, cfg.effort.as_deref())]);
+            .arg(&base.library);
+        if let Some(m) = &base.model {
+            cmd.args(["--model", &model_slug(m, base.effort.as_deref())]);
         }
-        if let Some(id) = &cfg.resume {
+        if let Some(id) = &base.resume {
             cmd.args(["--conversation", id]);
         }
-        cmd.current_dir(&cfg.cwd)
+        cmd.current_dir(&base.cwd)
             .env_clear()
-            .envs(cfg.env.iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .envs(base.env.iter().map(|(k, v)| (k, v)));
+        let (proc, stdout) = ChildProc::spawn("agy", &mut cmd, true)?;
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("cannot start {}: {e}", cfg.bin.display()))?;
-        let stdin = child.stdin.take().ok_or("no stdin on agy child")?;
-        let stdout = child.stdout.take().ok_or("no stdout on agy child")?;
-        let stderr = child.stderr.take().ok_or("no stderr on agy child")?;
-
-        let alive = Arc::new(AtomicBool::new(true));
         let interrupting = Arc::new(AtomicBool::new(false));
         let expecting = Arc::new(AtomicBool::new(false));
         let session = Arc::new(AntigravitySession {
-            child: Mutex::new(child),
-            stdin: Mutex::new(stdin),
-            alive: alive.clone(),
+            proc,
             pending_brief: Mutex::new(
                 (!cfg.brief.trim().is_empty()).then(|| cfg.brief.clone()),
             ),
@@ -253,85 +85,32 @@ impl AntigravitySession {
             expecting: expecting.clone(),
         });
 
-        // The CLI's own log. Kept as a tail so a process that dies before
-        // saying anything on stdout can still explain itself — which for this
-        // agent is the likely shape of a run on a signed-out machine.
-        let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        {
-            let tail = stderr_tail.clone();
-            std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    let mut t = tail.lock().unwrap();
-                    if t.len() >= 20 {
-                        t.remove(0);
-                    }
-                    t.push(line);
-                }
-            });
-        }
-
         let reader_session = session.clone();
-        let raw_log = cfg.raw_log;
+        let raw_log = base.raw_log;
         std::thread::spawn(move || {
             let mut state = Translator {
                 interrupting,
                 expecting: expecting.clone(),
                 ..Default::default()
             };
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(log) = &raw_log {
-                    log.write(&line);
-                }
-                let Ok(v) = serde_json::from_str::<Value>(&line) else {
-                    continue;
-                };
+            child::read_json_lines(stdout, raw_log.as_ref(), |v| {
                 for ev in state.translate(&v) {
                     sink(ev);
                 }
-            }
-            alive.store(false, Ordering::SeqCst);
-            let code = reader_session
-                .child
-                .lock()
-                .unwrap()
-                .wait()
-                .ok()
-                .and_then(|s| s.code());
-            if expecting.swap(false, Ordering::SeqCst) || state.turn_open {
-                let tail = stderr_tail.lock().unwrap().join("\n");
-                let msg = if tail.trim().is_empty() {
-                    format!("agy exited (code {code:?}) mid-turn")
-                } else {
-                    format!("agy exited (code {code:?}) mid-turn:\n{tail}")
-                };
-                sink(HarnessEvent::error_for(Provider::Antigravity, msg));
-                sink(HarnessEvent::TurnFinished {
-                    status: "failed".into(),
-                });
-            }
-            sink(HarnessEvent::Exited { code });
+            });
+            reader_session.proc.finish(&sink, Provider::Antigravity, || {
+                expecting.swap(false, Ordering::SeqCst) || state.turn_open
+            });
         });
 
         Ok(session)
     }
 
     pub fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::SeqCst)
+        self.proc.is_alive()
     }
 
-    fn write_line(&self, v: &Value) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().unwrap();
-        let line = serde_json::to_string(v).map_err(|e| e.to_string())?;
-        stdin
-            .write_all(line.as_bytes())
-            .and_then(|_| stdin.write_all(b"\n"))
-            .and_then(|_| stdin.flush())
-            .map_err(|e| format!("agy stdin: {e}"))
-    }
-
-    /// One user turn. The brief, if this is the first one, goes out ahead of
-    /// the message in the same envelope — there is no system-prompt flag to
-    /// carry it and no second channel to send it down.
+    /// One user turn, with the brief ahead of the first message.
     pub fn send(&self, text: &str) -> Result<(), String> {
         let brief = self.pending_brief.lock().unwrap().take();
         let text = match brief {
@@ -339,21 +118,14 @@ impl AntigravitySession {
             None => text.to_string(),
         };
         self.expecting.store(true, Ordering::SeqCst);
-        self.write_line(&serde_json::json!({
+        self.proc.write_line(&serde_json::json!({
             "event": "user",
             "message": { "content": text },
         }))
     }
 
-    /// Stop the current turn.
-    ///
-    /// The protocol has no interrupt: there is no control channel, and the
-    /// only thing that ends a turn early is the process ending. So this kills
-    /// the child and closes the turn itself — the flag tells the reader thread
-    /// that the death it is about to see was asked for, so the turn is
-    /// reported `interrupted` rather than `failed`. The thread's next message
-    /// resumes the conversation by id, which is what makes this survivable:
-    /// nothing is lost but the half-written answer.
+    /// Stop the current turn by killing the child (the protocol has no
+    /// interrupt); the next message resumes the conversation by id.
     pub fn interrupt(&self) -> Result<(), String> {
         if !self.is_alive() {
             return Ok(());
@@ -363,14 +135,8 @@ impl AntigravitySession {
         Ok(())
     }
 
-    /// Antigravity cannot rewind, and says so rather than no-opping.
-    ///
-    /// `--conversation` resumes a conversation whole; nothing in the protocol
-    /// drops a message and everything after it, and the CLI's own `/rewind`
-    /// answers "not available in print mode" (measured, 1.2.9) — so there is
-    /// no headless way to it at all. The manager deletes rows on
-    /// the strength of this call, so answering `Ok(())` here would leave the
-    /// timeline shorter than the agent's context with nothing to show for it.
+    /// Refuses: agy 1.2.9 has no headless rewind (`/rewind` is not available
+    /// in print mode), and the manager deletes rows on an `Ok`.
     pub fn rewind(&self, _anchor: &str) -> Result<(), String> {
         Err("Antigravity cannot take a question back out of a conversation — \
              edit it in a new thread instead"
@@ -378,47 +144,23 @@ impl AntigravitySession {
     }
 
     pub fn kill(&self) {
-        let mut child = self.child.lock().unwrap();
-        let _ = child.kill();
-        let _ = child.wait();
-        self.alive.store(false, Ordering::SeqCst);
-    }
-}
-
-impl Drop for AntigravitySession {
-    fn drop(&mut self) {
-        if let Ok(mut c) = self.child.lock() {
-            let _ = c.kill();
-        }
+        self.proc.kill();
     }
 }
 
 // ── Translation ──────────────────────────────────────────────────────────────
 
-/// Per-process translation state.
-///
-/// Smaller than Claude's, because `step_update` already carries the structure
-/// Claude's stream has to be reassembled into: a step is identified by its
-/// `step_index`, so a delta and the block it belongs to arrive under the same
-/// number and nothing has to be matched up after the fact.
+/// Per-process translation state, keyed by `step_index`.
 #[derive(Default)]
 struct Translator {
-    /// Between the first event of a turn and its `result`.
     turn_open: bool,
-    /// Text accumulated for the step currently `ACTIVE`, flushed as one
-    /// `AssistantMessage` when it goes `DONE`. The deltas are display only;
-    /// this is what gets persisted.
+    /// The `ACTIVE` step's text, persisted as one `AssistantMessage` at `DONE`.
     step_text: String,
-    /// Which step `step_text` belongs to. A step index that changes without a
-    /// `DONE` in between still flushes, so a dropped terminator cannot merge
-    /// two answers into one row.
+    /// A new index flushes too, so a missing `DONE` cannot merge two answers.
     step_index: Option<i64>,
-    /// Tool steps that have had their `ToolStarted` emitted, by step index —
-    /// `tool_info` is repeated on every update of the step, and the row must
-    /// open once.
+    /// Steps whose `ToolStarted` went out (`tool_info` repeats every update).
     started_tools: std::collections::HashSet<i64>,
-    /// A refused step already said what it needed this turn, so the
-    /// `result`'s `denied_actions` has nothing to add.
+    /// A step already emitted `PermissionNeeded`; skip `denied_actions`.
     refused: bool,
     interrupting: Arc<AtomicBool>,
     expecting: Arc<AtomicBool>,
@@ -471,12 +213,8 @@ impl Translator {
                 if let Some(u) = r.get("usage") {
                     out.push(usage_event(u));
                 }
-                // A turn a refusal ended is a `SUCCESS` with an empty
-                // `response` and the refusals listed — measured, and closed as
-                // `completed` below, because nothing failed: the agent asked
-                // for something it was not given. The step itself normally
-                // said what it needed; this is the fallback for a refusal
-                // that never showed up as a step.
+                // A refusal-ended turn is a `SUCCESS` listing its refusals;
+                // this covers one that never showed up as a step.
                 if !std::mem::take(&mut self.refused) {
                     for d in r
                         .get("denied_actions")
@@ -493,11 +231,7 @@ impl Translator {
                         });
                     }
                 }
-                // `status` is an enum of seven, not the three the timeline
-                // knows. INTERRUPTED and CANCELED are the same thing to a
-                // reader; WAITING and RUNNING should never close a turn, and
-                // if one does it is a failure rather than a success, because
-                // the turn is over either way and nothing more is coming.
+                // Seven statuses onto three; anything unexpected is a failure.
                 let status = r.get("status").and_then(|s| s.as_str()).unwrap_or("");
                 let interrupted = self.interrupting.swap(false, Ordering::SeqCst);
                 let mapped = match status {
@@ -526,16 +260,13 @@ impl Translator {
         out
     }
 
-    /// One `step_update`. Four `step_type`s, and only two of them say
-    /// anything the timeline has a row for: `agent_response` is the answer,
-    /// `tool` is a call. `user_input` is the message this app already echoed
-    /// itself, and `checkpoint` is the CLI's own bookkeeping.
+    /// One `step_update`. Only `agent_response` and `tool` steps make rows;
+    /// `user_input` and `checkpoint` are ignored.
     fn step(&mut self, su: &Value, out: &mut Vec<HarnessEvent>) {
         let index = su.get("step_index").and_then(|i| i.as_i64()).unwrap_or(0);
         let state = su.get("state").and_then(|s| s.as_str()).unwrap_or("");
         let kind = su.get("step_type").and_then(|s| s.as_str()).unwrap_or("");
 
-        // A new step means the previous one is over, whatever it claimed.
         if self.step_index.is_some_and(|i| i != index) {
             self.flush_text(out);
         }
@@ -565,8 +296,7 @@ impl Translator {
                     .get("parameters")
                     .cloned()
                     .unwrap_or(Value::Object(Default::default()));
-                // The step index is the id: `tool_info` has no call id of its
-                // own, and a step is exactly one call.
+                // `tool_info` has no call id; a step is one call.
                 let id = format!("step-{index}");
                 if self.started_tools.insert(index) {
                     let (tool_kind, title) = classify(&name, &input);
@@ -578,16 +308,9 @@ impl Translator {
                         input,
                     });
                 }
-                // Refused: the row closes failed with the CLI's own sentence.
-                // Two refusals share the `permission check failed` prefix and
-                // only one is a question. No rule allowed it ("user denied
-                // permission to run command: …") is print mode's automatic
-                // no, the turn ends right after, and the event says what to
-                // allow. A deny rule matched ("Matches user-configured deny
-                // rule", or for a command the `for unsandboxed "…"` wording)
-                // is Oculus's own answer or the student's: measured, the agent
-                // is told and carries on in the same turn, and there is
-                // nothing to approve — an allow never beats a deny.
+                // Refused: the row fails with the CLI's sentence, and only a
+                // no-rule refusal (not a deny) asks for approval — see
+                // [`is_question`].
                 if state == "ERROR" {
                     let message = info
                         .pointer("/error/message")
@@ -636,9 +359,7 @@ impl Translator {
             _ => {}
         }
 
-        // Per-step usage is cumulative for the turn in the `result`, so this
-        // is the live figure and the `result`'s is the final one. Both are
-        // emitted: the timeline shows the last it was told.
+        // The live figure; the `result`'s is the final one.
         if state == "DONE" {
             if let Some(u) = su.get("usage") {
                 out.push(usage_event(u));
@@ -647,13 +368,10 @@ impl Translator {
     }
 }
 
-/// Whether a refused step is one the student can answer — print mode's
-/// automatic no, which ends the turn — rather than a deny rule, which does not
-/// and cannot be approved past. Both begin `permission check failed`. A deny
-/// says `Matches user-configured deny rule`, and a command deny was measured
-/// arriving as `permission check failed for unsandboxed "sqlite3 …"`; that
-/// wording counts as a deny unless it also carries the automatic no's own
-/// `user denied permission`.
+/// Whether a refusal is print mode's automatic no (answerable; ends the turn)
+/// rather than a deny rule (no allow beats it). Both start `permission check
+/// failed`; a deny says `deny rule`, or for a command `for unsandboxed "…"`
+/// without `user denied permission`.
 fn is_question(message: &str) -> bool {
     let unsandboxed = message.starts_with("permission check failed for unsandboxed");
     message.starts_with("permission check failed")
@@ -661,15 +379,9 @@ fn is_question(message: &str) -> bool {
         && (!unsandboxed || message.contains("user denied permission"))
 }
 
-/// What a refused step needed: the permission (`agy`'s own word for it), the
-/// thing it was refused on, and a rule that would allow it.
-///
-/// The message is `permission check failed for <action> "<target>": …`
-/// (measured for `command`; the file variant reads the same way), so the
-/// action and target come off it first and off the tool's parameters when it
-/// does not parse. The suggestion is deliberately narrow: a command's first
-/// word, a file's folder — the student is approving *this* kind of thing, not
-/// the whole machine.
+/// A refusal's (action, target, suggested rule), off `permission check failed
+/// for <action> "<target>": …` or else the tool's parameters. The rule is
+/// narrow on purpose: a command's first word, a file's folder.
 fn refusal(tool: &str, params: &Value, message: &str) -> (String, Option<String>, Option<String>) {
     let param = |ks: &[&str]| {
         ks.iter()
@@ -738,10 +450,7 @@ fn command_word(line: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// Antigravity's `usage` object → the timeline's. It reports no cost and no
-/// context window, so both stay `None` rather than being invented; `context`
-/// is the total the last step occupied, which is the same thing Claude's
-/// per-request figure means.
+/// Antigravity's `usage` → the timeline's. No cost or window is reported.
 fn usage_event(u: &Value) -> HarnessEvent {
     let n = |k: &str| u.get(k).and_then(|v| v.as_u64());
     HarnessEvent::Usage {
@@ -755,10 +464,7 @@ fn usage_event(u: &Value) -> HarnessEvent {
 
 // ── The catalogue ────────────────────────────────────────────────────────────
 
-/// One model `agy models` printed.
-///
-/// The same shape Codex's `ModelInfo` has, so the frontend adapts both with
-/// one function and the picker stays provider-blind.
+/// One model `agy models` printed; the same shape as Codex's `ModelInfo`.
 #[derive(serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
@@ -768,20 +474,8 @@ pub struct ModelInfo {
     pub default_reasoning_effort: Option<String>,
 }
 
-/// Ask `agy` what this account can actually use.
-///
-/// `agy models` is a plain listing subcommand — no session, no turn, nothing
-/// billed — which is what makes it safe to call from a picker at all. (The
-/// rule this repo learned the hard way: nothing in Settings may spend money.
-/// A listing that costs a request is exactly what opencode's deleted probe
-/// was.) It opens nothing either: signed out, it prints `Please sign in to
-/// view available models` and exits non-zero in about a second (measured,
-/// 1.2.9), which is why `signin::status` asks it too.
-///
-/// It has no `--json` flag, so the output is parsed as lines. Anything that
-/// does not look like a slug is skipped rather than guessed at, and an empty
-/// list is returned as an empty list — the picker says "no models" and the
-/// student can run `agy models` themselves to see the same nothing.
+/// What this account can use, off `agy models` — a listing, nothing billed.
+/// No `--json`, so lines are parsed (see [`parse_models`]).
 pub fn list_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<Vec<ModelInfo>, String> {
     let out = run_models(bin, env)?;
     if !out.success {
@@ -801,13 +495,10 @@ pub struct ModelsRun {
     pub stderr: String,
 }
 
-/// Well past any answer measured — a signed-in listing takes about 3.5 s, a
-/// signed-out refusal about 1 s — and short enough that a wedged `agy` cannot
-/// hold a model picker open. The same bound `claude::list_models` has.
+/// Enough that a wedged `agy` cannot hold a model picker open.
 const MODELS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// `agy models`, with a deadline: past it the child is killed and the answer
-/// is an error that says so.
+/// `agy models`, killed past [`MODELS_TIMEOUT`].
 pub fn run_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<ModelsRun, String> {
     use std::io::Read;
     let mut child = Command::new(bin)
@@ -819,8 +510,7 @@ pub fn run_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<Mod
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cannot run {}: {e}", bin.display()))?;
-    // Each pipe drained on a thread of its own: a child that fills the unread
-    // one blocks, and would then look like exactly the hang this bounds.
+    // One thread per pipe, or a child filling the unread one blocks.
     fn drain(r: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<String> {
         std::thread::spawn(move || {
             let mut s = String::new();
@@ -860,22 +550,10 @@ pub fn run_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<Mod
     })
 }
 
-/// Models out of `agy models`' output.
-///
-/// The listing is a column of ids, possibly with a marker or a description
-/// beside them, so the first whitespace-separated word of each line is the
-/// candidate and everything else on the line is ignored. A line whose first
-/// word is not slug-shaped — a heading, a blank, a box-drawing rule — is not a
-/// model.
-///
-/// **Effort is baked into most slugs** (`gemini-3.8-flash-high`), so the
-/// listing is one row per level: eleven Gemini rows that are three models. The
-/// suffix is split off here and slugs sharing a base become one model whose
-/// `reasoning_efforts` are those suffixes — the same shape Codex and Claude
-/// report, so the picker gets a level row rather than a special case. The
-/// model's id is the base, and `model_slug` rebuilds the real slug at spawn.
-/// A slug with no level suffix (`claude-sonnet-4-6`) is a model with no
-/// levels, and is passed through untouched.
+/// Models out of `agy models`' output: the first slug-shaped word per line.
+/// The level is baked into the slug (`gemini-3.8-flash-high`), so slugs
+/// sharing a base fold into one model whose `reasoning_efforts` are the
+/// suffixes; [`model_slug`] rebuilds the slug at spawn.
 fn parse_models(stdout: &str) -> Vec<ModelInfo> {
     let mut seen = std::collections::HashSet::new();
     let mut models: Vec<ModelInfo> = Vec::new();
@@ -902,8 +580,7 @@ fn parse_models(stdout: &str) -> Vec<ModelInfo> {
             }),
         }
     }
-    // Medium where the model has it, as the middle of the road; otherwise the
-    // first the listing gave, which is the order `agy` itself leads with.
+    // Medium where offered, else the listing's first.
     for m in &mut models {
         m.default_reasoning_effort = m
             .reasoning_efforts
@@ -915,15 +592,8 @@ fn parse_models(stdout: &str) -> Vec<ModelInfo> {
     models
 }
 
-/// The name `agy models` prints beside a slug, when it prints one.
-///
-/// Measured on 1.2.9: after a `Fetching available models...` line, each row
-/// is `<slug>\t<Display Name>` — `gemini-3.8-flash-high\tGemini 3.8 Flash
-/// (High)`, `claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)`. The vendor's
-/// own name beats one rebuilt from the slug; for a row folded into its base,
-/// the level's parenthetical is dropped, since the level is now its own row in
-/// the picker. `None` for a line with no tab, which falls back to
-/// [`display_name`].
+/// The name after the tab in a `<slug>\t<Display Name>` row (agy 1.2.9),
+/// minus a folded level's ` (High)`. `None` without a tab.
 fn listed_name(line: &str, level: Option<&str>) -> Option<String> {
     let name = line.split_once('\t')?.1.trim();
     let name = match level {
@@ -936,8 +606,7 @@ fn listed_name(line: &str, level: Option<&str>) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// The level suffixes a slug can end in: the names the manager's
-/// `validate_effort` accepts, so a level split off here is one it will pass.
+/// The level suffixes a slug can end in; the names `validate_effort` accepts.
 const LEVELS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 /// `gemini-3.8-flash-high` → (`gemini-3.8-flash`, `high`). A slug that is
@@ -949,10 +618,8 @@ fn split_level(slug: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// The inverse of `split_level`: the slug `agy --model` is given for a model
-/// and the level picked beside it. A slug that already ends in a level — a
-/// thread started before the listing was grouped, which stored the whole slug
-/// — is passed as it is rather than doubled.
+/// The inverse of `split_level`. A slug that already ends in a level is
+/// passed as it is rather than doubled.
 fn model_slug(model: &str, effort: Option<&str>) -> String {
     match effort {
         Some(e) if split_level(model).1.is_none() => format!("{model}-{e}"),
@@ -962,11 +629,6 @@ fn model_slug(model: &str, effort: Option<&str>) -> String {
 
 /// A slug as a person reads it: `claude-opus-4-6-thinking` → "Claude Opus 4.6
 /// Thinking", `gpt-oss-120b` → "GPT-OSS 120B".
-///
-/// Runs of bare numbers are one version (`4-6` is 4.6), a size suffix is
-/// upper-cased, and `gpt` keeps the hyphen its vendor writes it with. The
-/// brand stays: unlike Claude's or Codex's own lists, this one mixes vendors
-/// under one mark, so the name is the only thing saying whose model it is.
 fn display_name(slug: &str) -> String {
     let mut words: Vec<String> = Vec::new();
     let mut prev_number = false;
@@ -1001,10 +663,7 @@ fn display_name(slug: &str) -> String {
     words.join(" ")
 }
 
-/// Slug-shaped: lowercase alphanumerics and dashes, containing at least one
-/// dash and one digit-or-letter run, and long enough not to be a table rule.
-/// Deliberately strict — a false positive is a row in a picker that cannot be
-/// selected, which is worse than a missing one the student can report.
+/// Slug-shaped, strictly: a false positive is an unselectable picker row.
 fn is_slug(w: &str) -> bool {
     w.len() >= 3
         && w.contains('-')
@@ -1017,9 +676,7 @@ mod tests {
     use super::*;
     use crate::harness::event::ToolKind;
 
-    /// A real `agy` 1.2.9 session, recorded off the wire with the same flags
-    /// the bridge spawns — the thing that turns every field name in this
-    /// module from documented into measured.
+    /// A real `agy` 1.2.9 session, recorded with the bridge's flags.
     #[test]
     fn folds_a_recorded_session() {
         let raw = include_str!("../../fixtures/harness/antigravity-ls.ndjson");
@@ -1040,8 +697,7 @@ mod tests {
         assert!(!id.is_empty());
         assert!(cwd.ends_with("agytest"));
 
-        // The one place the PascalCase parameter bites: a lowercase lookup
-        // titles this row with an empty string instead of the command.
+        // PascalCase `CommandLine`: a lowercase lookup titles this "".
         let tools: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
@@ -1056,8 +712,6 @@ mod tests {
             vec![(ToolKind::Bash, "ls -a".to_string(), "run_command".to_string())]
         );
 
-        // Opened once, though `tool_info` is repeated on every update of the
-        // step, and closed once with the command's output.
         let finished: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
@@ -1067,11 +721,8 @@ mod tests {
             .collect();
         assert_eq!(finished.len(), 1);
         assert!(finished[0].0, "the command succeeded");
-        // `ls -a` in the sandbox's own empty working directory. The point is
-        // that stdout rode `tool_info.output` at all, not what it said.
         assert!(finished[0].1.contains(".."), "stdout rode `output`");
 
-        // Text arrives as deltas and is persisted once per step.
         let deltas: String = events
             .iter()
             .filter_map(|e| match e {
@@ -1086,7 +737,6 @@ mod tests {
             .count();
         assert!(messages >= 1);
 
-        // One turn, opened once and closed once.
         assert_eq!(
             events.iter().filter(|e| matches!(e, HarnessEvent::TurnStarted)).count(),
             1
@@ -1095,14 +745,9 @@ mod tests {
             events.last(),
             Some(HarnessEvent::TurnFinished { status }) if status == "completed"
         ));
-        // SUCCESS is not an error.
         assert!(!events.iter().any(|e| matches!(e, HarnessEvent::Error { .. })));
     }
 
-    /// The statuses that are not `SUCCESS`. `INTERRUPTED` is a stop the
-    /// student asked for and must not paint the timeline red; anything
-    /// unrecognised is a failure, because the turn is over either way and a
-    /// quiet non-answer is the one thing a parse or a turn may never be.
     #[test]
     fn a_result_status_maps_to_one_of_three() {
         for (status, want, err) in [
@@ -1131,9 +776,6 @@ mod tests {
         }
     }
 
-    /// An interrupt is a signal here, not a protocol message, so the flag is
-    /// what tells a killed turn from a failed one — whatever the CLI managed
-    /// to put in `status` on its way out.
     #[test]
     fn an_asked_for_stop_is_not_a_failure() {
         let mut t = Translator::default();
@@ -1162,9 +804,7 @@ Models available to your account
         assert_eq!(ids, ["gemini-3.8-flash", "claude-opus-5"]);
     }
 
-    /// The listing as 1.2.9 prints it, header and tabs included: the name
-    /// beside the slug is the one shown, less the level a folded row has
-    /// moved into its own picker row.
+    /// The listing as 1.2.9 prints it.
     #[test]
     fn a_real_listing_keeps_the_names_it_prints() {
         let out = "Fetching available models...\n\
@@ -1188,9 +828,6 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
         );
     }
 
-    /// The listing `agy` 1.2.9 actually prints: one row per level. Levels fold
-    /// into their base, a slug with no level stands alone, and a lone suffix
-    /// is still a level.
     #[test]
     fn level_suffixes_become_reasoning_levels() {
         let out = "\
@@ -1220,8 +857,6 @@ gpt-oss-120b-medium
         );
     }
 
-    /// The level goes back on the slug at spawn, and a whole slug stored by a
-    /// thread from before the grouping is not given a second one.
     #[test]
     fn the_level_is_folded_back_into_the_slug() {
         assert_eq!(model_slug("gemini-3.8-flash", Some("high")), "gemini-3.8-flash-high");
@@ -1230,8 +865,6 @@ gpt-oss-120b-medium
         assert_eq!(model_slug("gemini-3.8-flash-low", None), "gemini-3.8-flash-low");
     }
 
-    /// Headings, rules and prose are not models. A picker row that cannot be
-    /// selected is worse than one that is missing.
     #[test]
     fn furniture_is_not_a_model() {
         assert!(parse_models("Models\n\n──────────\nNone found.\n").is_empty());
@@ -1241,8 +874,6 @@ gpt-oss-120b-medium
         assert!(is_slug("gemini-3.8-flash"));
     }
 
-    /// The same slug twice — a listing that groups by provider and repeats —
-    /// is one row.
     #[test]
     fn a_repeated_slug_is_one_model() {
         let ids: Vec<String> = parse_models("gemini-3.8-flash\ngemini-3.8-flash\n")
@@ -1252,9 +883,7 @@ gpt-oss-120b-medium
         assert_eq!(ids, ["gemini-3.8-flash"]);
     }
 
-    /// A refused step, as 1.2.9 sends it, and the `result` that ends the turn
-    /// straight after: the row closes failed, the rule to allow is named, and
-    /// the turn is `completed` — nothing broke, the agent was stopped.
+    /// A refused step as 1.2.9 sends it, then the `result` that ends the turn.
     #[test]
     fn a_refusal_closes_the_row_and_names_the_rule() {
         let mut t = Translator::default();
@@ -1298,7 +927,6 @@ gpt-oss-120b-medium
                 _ => None,
             })
             .collect();
-        // Once: the step said it, so `denied_actions` adds nothing.
         assert_eq!(
             needed,
             vec![(
@@ -1312,9 +940,7 @@ gpt-oss-120b-medium
         assert!(!out.iter().any(|e| matches!(e, HarnessEvent::Error { .. })));
     }
 
-    /// A deny rule's refusal, verbatim off 1.2.9: the row fails, but nothing
-    /// is offered — the agent carries on in the same turn, and approving it
-    /// could not beat the deny.
+    /// A deny rule's refusal, verbatim off 1.2.9.
     #[test]
     fn a_deny_rule_is_not_a_question() {
         let mut t = Translator::default();
@@ -1331,7 +957,6 @@ gpt-oss-120b-medium
         }));
         assert!(out.iter().any(|e| matches!(e, HarnessEvent::ToolFinished { ok: false, .. })));
         assert!(!out.iter().any(|e| matches!(e, HarnessEvent::PermissionNeeded { .. })));
-        // The command deny's wording, measured without `--sandbox`.
         assert!(!is_question(
             "permission check failed for unsandboxed \"sqlite3 /lib/oculus.db 'select 1'\": denied"
         ));
@@ -1340,8 +965,6 @@ gpt-oss-120b-medium
         ));
     }
 
-    /// `denied_actions` alone still says the turn was stopped, with no rule
-    /// to offer since it names no target.
     #[test]
     fn a_denied_action_with_no_step_is_still_reported() {
         let mut t = Translator::default();

@@ -1,51 +1,18 @@
 //! Installing a missing CLI agent, from Settings → AI.
 //!
-//! `discover.rs` answers *where* a CLI is, or that it is nowhere. That left
-//! the student's next move outside the app entirely: work out which of four
-//! install routes this machine wants, run it in a terminal, come back. This
-//! module is the way through, and it is deliberately **not** a package
-//! manager wrapper:
+//! Every route is a literal vendor command, shown verbatim with a Copy
+//! button; the click on Run is the confirmation. The webview names only a
+//! provider and a manager — never the string handed to `$SHELL -lc` — and
+//! nothing needing `sudo` is offered or run. macOS routes only, matching
+//! `discover.rs`.
 //!
-//! - **Nothing is installed for you that you were not shown.** Every route is
-//!   a literal command string from the vendor's own documentation, displayed
-//!   verbatim with a Copy button. The copy path is the one that always works —
-//!   no package manager, a locked-down machine, or a student who would rather
-//!   run it themselves — so it is offered even when the Run button is.
-//! - **The click on a button showing the command is the confirmation.** There
-//!   is no other one, and nothing runs without it.
-//! - **Nothing that needs elevation is ever offered.** A GUI app has no
-//!   terminal to put a password prompt in, and `sudo` under a pipe with no tty
-//!   hangs rather than fails; so a provider whose only route on this machine
-//!   would need it gets the command and nothing more. [`start`] refuses one
-//!   anyway, and a test pins it.
-//! - **The webview never names the command.** It names a provider and a
-//!   manager; the string comes out of the table below. An invoke that could
-//!   pass an arbitrary string to `$SHELL -lc` would be a shell for anything
-//!   that reached the webview, in the one app that also holds the student's
-//!   Canvas session.
-//!
-//! **macOS only.** The routes here are macOS ones and detection itself is
-//! macOS-shaped (see `discover.rs`'s module docs: `binary_name` has no
-//! `.cmd`/`.exe`, and npm on Windows installs `claude.cmd` resolved through
-//! `PATHEXT`), as is the rest of the app. `scoop` and `winget` are real and
-//! are not here; offering them would mean a button that installs something
-//! discovery then cannot find.
-//!
-//! The commands run through `$SHELL -lc` for the same reason discovery asks a
-//! login shell: a Dock-launched app has launchd's PATH, and `brew` is not on
-//! it. Output is streamed line by line as it arrives — an install that prints
-//! nothing for forty seconds is indistinguishable from one that hung.
-//!
-//! What this module does *not* do is forget the discovery cache when a run
-//! finishes. `discover::binary` caches failures for the life of the process,
-//! so a freshly installed CLI stays "missing" until something calls
-//! `discover::forget()` — and the webview has a second cache of its own
-//! (`app/src/hooks/useBridgeHealth.ts`). Dropping only Rust's here would leave
-//! the module-level one stale, so the recheck is the frontend's to fire, on
-//! the exit event, through the one path that invalidates both.
+//! Commands run through a login shell because a Dock-launched app lacks the
+//! profile's PATH. The discovery caches are not dropped here: the frontend
+//! rechecks on the `done` event, which invalidates Rust's cache and its own
+//! (`app/src/hooks/useBridgeHealth.ts`) together.
 
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::{ChildStderr, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -89,35 +56,21 @@ impl Manager {
 /// One way to install one provider.
 struct Route {
     manager: Manager,
-    /// Verbatim, and it has to stay verbatim: it is both what is shown and
-    /// what is run.
+    /// Both what is shown and what is run.
     command: &'static str,
-    /// Where the binary lands, which has to be somewhere
-    /// `discover::well_known_dirs` already looks — a route that installed
-    /// out of discovery's sight would leave the row saying "missing" after a
-    /// successful install.
+    /// Must be a directory `discover::well_known_dirs` searches, or a
+    /// successful install still reads as missing.
     lands_in: &'static str,
 }
 
 // ── The routes ───────────────────────────────────────────────────────────────
 //
-// Verified 2026-09-17 against the vendors' own documentation; re-check these
-// rather than trusting them, they move. The URL beside each is where it came
-// from. Order is the vendor's own recommendation first, and the frontend shows
-// whichever of them this machine can actually run.
+// From the vendors' own documentation (URL beside each); they move, so
+// re-check rather than trust. Vendor-recommended route first.
 
-/// Claude Code.
-/// - script: <https://code.claude.com/docs/en/setup> ("Native Install
-///   (Recommended)"). The same page says the launcher it manages is
-///   `~/.local/bin/claude`, and that native installs auto-update.
-/// - brew: same page, "Homebrew" tab. The `claude-code` cask tracks the stable
-///   channel; `claude-code@latest` tracks latest. Casks do not auto-update.
-/// - npm: same page, "Install with npm".
-///
-/// No bun route: the vendor documents none, and the npm package pulls its real
-/// binary in through a per-platform optional dependency plus a postinstall
-/// link step — bun does not run postinstall scripts for untrusted packages, so
-/// a bun route would look like it worked and leave nothing to run.
+/// Claude Code: <https://code.claude.com/docs/en/setup> (script, brew, npm).
+/// No bun route: bun skips the npm package's postinstall, which is what
+/// links the real binary.
 const CLAUDE: &[Route] = &[
     Route {
         manager: Manager::Curl,
@@ -136,14 +89,8 @@ const CLAUDE: &[Route] = &[
     },
 ];
 
-/// Codex.
-/// - script: <https://learn.chatgpt.com/docs/codex/cli> and the repo's README,
-///   <https://github.com/openai/codex>. Reading the script itself:
-///   `BIN_DIR="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"`, and no `sudo`
-///   anywhere in it.
-/// - brew / npm: <https://github.com/openai/codex> README, install section.
-///
-/// No bun route, for the same reason as Claude's.
+/// Codex: <https://learn.chatgpt.com/docs/codex/cli>,
+/// <https://github.com/openai/codex>. No bun route, as for Claude.
 const CODEX: &[Route] = &[
     Route {
         manager: Manager::Curl,
@@ -162,15 +109,9 @@ const CODEX: &[Route] = &[
     },
 ];
 
-/// opencode.
-/// - script: <https://opencode.ai/docs/>. Reading the script itself:
-///   `INSTALL_DIR=$HOME/.opencode/bin`, no `sudo`.
-/// - brew: <https://github.com/anomalyco/opencode> README. The tap moved with
-///   the project — it is `anomalyco/tap`, not the `sst/tap` older writeups
-///   name.
-/// - npm / bun: same README (`npm i -g opencode-ai@latest`, "or bun/pnpm/
-///   yarn"). This is the one vendor that documents bun, which is why it is the
-///   one provider with a bun route.
+/// opencode: <https://opencode.ai/docs/>,
+/// <https://github.com/anomalyco/opencode> (tap `anomalyco/tap`, not
+/// `sst/tap`). The one vendor that documents bun.
 const OPENCODE: &[Route] = &[
     Route {
         manager: Manager::Curl,
@@ -194,10 +135,8 @@ const OPENCODE: &[Route] = &[
     },
 ];
 
-/// Antigravity. One route only, and that is the vendor's doing rather than an
-/// omission here: `agy` is a Go binary its own installer places, with no
-/// Homebrew formula and no npm package to stand in for one — the npm route
-/// every other agent has does not exist for this one.
+/// Antigravity: the vendor ships only its install script — no formula, no
+/// npm package.
 const ANTIGRAVITY: &[Route] = &[Route {
     manager: Manager::Curl,
     command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
@@ -213,8 +152,7 @@ fn routes(provider: Provider) -> &'static [Route] {
     }
 }
 
-/// Which of the four this machine has. Taken as a value rather than read
-/// inside [`offer`] so the choice is testable without a machine that has them.
+/// Which managers this machine has; a value so [`offer`] is testable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Managers {
     pub curl: bool,
@@ -234,9 +172,7 @@ impl Managers {
     }
 }
 
-/// What is on this machine, found the same way the CLIs themselves are — PATH,
-/// then the well-known directories, then a login shell — and cached beside
-/// them, because `brew` does not move mid-session either.
+/// What is on this machine, found and cached the way the CLIs are.
 pub fn detect() -> Managers {
     let has = |m: Manager| discover::tool(m.binary()).is_some();
     Managers {
@@ -255,9 +191,8 @@ pub struct InstallRoute {
     pub label: &'static str,
     pub command: &'static str,
     pub lands_in: &'static str,
-    /// Whether the tool it needs is on this machine. A route that is not
-    /// available is still worth showing the command for; it just has no
-    /// button.
+    /// Whether the tool it needs is here. An unavailable route is still
+    /// shown, to copy, without a button.
     pub available: bool,
 }
 
@@ -269,9 +204,7 @@ pub struct InstallOffer {
     pub label: &'static str,
     /// In the vendor's own order of preference. Never empty.
     pub routes: Vec<InstallRoute>,
-    /// Whether any of them can be run from here. False means the dialog is a
-    /// command to copy and nothing else — which is the honest answer on a
-    /// machine with neither Homebrew, nor node, nor bun, nor `curl`.
+    /// Whether any of them can be run from here; false means copy only.
     pub runnable: bool,
 }
 
@@ -303,9 +236,8 @@ pub fn command_for(provider: Provider, manager: Manager) -> Option<&'static str>
         .map(|r| r.command)
 }
 
-/// Where an install's output reaches the webview. One event for the whole
-/// run, the way `chapters.rs` streams a job's progress — the dialog that
-/// asked for the install is the only listener, and it filters by provider.
+/// Where an install's output reaches the webview; the dialog filters by
+/// provider.
 pub const INSTALL_EVENT: &str = "harness-install";
 
 /// What the webview gets, line by line, while an install runs.
@@ -313,8 +245,7 @@ pub const INSTALL_EVENT: &str = "harness-install";
 #[serde(rename_all = "camelCase")]
 pub struct InstallLine {
     pub provider: Provider,
-    /// One line of the child's output — stdout and stderr both, because an
-    /// installer's progress and its complaints are one story.
+    /// One line of the child's output, stdout and stderr both.
     pub line: Option<String>,
     /// The last event of a run, and the one the frontend rechecks on.
     pub done: bool,
@@ -323,9 +254,7 @@ pub struct InstallLine {
     pub status: Option<String>,
 }
 
-/// One install at a time per provider. Two runs of the same command racing
-/// each other through the same package manager is a lock file's problem at
-/// best.
+/// One install at a time per provider.
 fn running() -> &'static Mutex<std::collections::HashSet<Provider>> {
     static R: OnceLock<Mutex<std::collections::HashSet<Provider>>> = OnceLock::new();
     R.get_or_init(Default::default)
@@ -378,8 +307,8 @@ where
     }
 }
 
-/// The same shape as [`InstallLine`] with no provider on it — what the runner
-/// itself produces, so it can be driven by a test with a harmless command.
+/// [`InstallLine`] without the provider — what the runner produces, so a
+/// test can drive it with a harmless command.
 #[derive(Clone, Debug)]
 pub struct Line {
     pub line: Option<String>,
@@ -388,23 +317,14 @@ pub struct Line {
     pub status: Option<String>,
 }
 
-/// Spawn `$SHELL -lc "<command>"` and stream it.
-///
-/// Three details are load-bearing. The **login** shell is what has the
-/// profile's PATH, which is the only reason `brew` resolves from a
-/// Dock-launched app. **stdin is `/dev/null`**, so anything that decides to
-/// ask a question — a `sudo` password, a confirmation prompt — fails
-/// immediately instead of hanging forever behind a dialog that would go on
-/// saying "working". And stdout and stderr are drained by **two threads into
-/// one channel**: read one after the other, a child that fills the pipe
-/// nobody is reading yet deadlocks. The ordering between the two streams is
-/// therefore approximate, which is the right trade for a log nobody parses.
+/// Spawn `$SHELL -lc "<command>"` and stream it. stdin is `/dev/null`, so
+/// anything that asks a question (a `sudo` password, a prompt) fails at once
+/// instead of hanging.
 fn run_command<F>(command: &str, emit: F) -> Result<(), String>
 where
     F: Fn(Line) + Send + 'static,
 {
-    // Belt and braces over the table above: the rule is that nothing needing
-    // elevation is ever run, and the table is the thing a future edit changes.
+    // Guards the table against a future edit.
     if command.split_whitespace().any(|w| w == "sudo") {
         return Err("that command needs sudo, which this app cannot ask for".into());
     }
@@ -421,47 +341,17 @@ where
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     std::thread::spawn(move || {
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        let mut readers = Vec::new();
-        for pipe in [
-            stdout.map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
-            stderr.map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let tx = tx.clone();
-            readers.push(std::thread::spawn(move || {
-                for line in BufReader::new(pipe).lines().map_while(Result::ok) {
-                    if tx.send(line).is_err() {
-                        break;
-                    }
-                }
-            }));
-        }
-        drop(tx);
-        // Ends when both readers have hung up, which is after the child has
-        // closed both pipes — so no output can arrive after the `done` below.
-        for line in rx {
+        drain_lines(stdout, stderr, |line| {
             emit(Line {
                 line: Some(line),
                 done: false,
                 ok: None,
                 status: None,
-            });
-        }
-        for r in readers {
-            let _ = r.join();
-        }
+            })
+        });
         let (ok, status) = match child.wait() {
             Ok(s) if s.success() => (true, "installed".to_string()),
-            Ok(s) => (
-                false,
-                match s.code() {
-                    Some(c) => format!("exited with status {c}"),
-                    None => "stopped by a signal".to_string(),
-                },
-            ),
+            Ok(s) => (false, exit_text(s)),
             Err(e) => (false, format!("could not be waited for: {e}")),
         };
         emit(Line {
@@ -472,6 +362,50 @@ where
         });
     });
     Ok(())
+}
+
+/// Hand a child's stdout and stderr lines to `on_line` until both pipes
+/// close — so nothing arrives after the caller's final `done`. One reader
+/// thread per pipe: read in turn, a child filling the unread pipe deadlocks.
+/// Order across the two streams is approximate.
+pub(super) fn drain_lines(
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
+    mut on_line: impl FnMut(String),
+) {
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let mut readers = Vec::new();
+    for pipe in [
+        stdout.map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+        stderr.map(|s| Box::new(s) as Box<dyn std::io::Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let tx = tx.clone();
+        readers.push(std::thread::spawn(move || {
+            for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(tx);
+    for line in rx {
+        on_line(line);
+    }
+    for r in readers {
+        let _ = r.join();
+    }
+}
+
+/// How a child that did not succeed ended.
+pub(super) fn exit_text(s: ExitStatus) -> String {
+    match s.code() {
+        Some(c) => format!("exited with status {c}"),
+        None => "stopped by a signal".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -486,17 +420,10 @@ mod tests {
         Provider::Antigravity,
     ];
 
-    /// The three agents a package manager can install. Antigravity is out, and
-    /// not by oversight: `agy` is a Go binary its own script places, with no
-    /// formula and no npm package, so the manager-shaped tests below have
-    /// nothing to assert about it. [`antigravity_is_curl_only`] is its half.
+    /// The agents a package manager can install (not Antigravity).
     const PACKAGED: [Provider; 3] = [Provider::Claude, Provider::Codex, Provider::Opencode];
 
-    /// A machine with Homebrew and nothing else runs the brew route, and is
-    /// offered the others as text. `curl` is the interesting half: it is on
-    /// every macOS, so the script route is nearly always the one a student
-    /// sees — but "nearly always" is not "assume", and it is gated like the
-    /// rest.
+    /// `curl` is gated like every other manager, though macOS always has it.
     #[test]
     fn brew_only_machine_runs_the_brew_route() {
         let have = Managers {
@@ -516,8 +443,6 @@ mod tests {
         }
     }
 
-    /// The offer follows the machine, not the provider: node and nothing else
-    /// gets the npm route, and opencode's bun route stays dark.
     #[test]
     fn npm_only_machine_runs_the_npm_route() {
         let have = Managers {
@@ -543,10 +468,6 @@ mod tests {
         assert!(!offer(Provider::Codex, bun).runnable);
     }
 
-    /// Antigravity ships one way in, and a machine without `curl` is offered
-    /// the line to paste rather than a button that cannot work. The other
-    /// three each have a package manager to fall back on; this one does not,
-    /// which makes `curl` load-bearing rather than merely first.
     #[test]
     fn antigravity_is_curl_only() {
         let managers: Vec<Manager> = routes(Provider::Antigravity)
@@ -572,10 +493,7 @@ mod tests {
         }
     }
 
-    /// A machine with no package manager at all — not even `curl` — is still
-    /// given something to copy. This is the case the whole "show the command"
-    /// half exists for: no route can be offered, no button is drawn, and the
-    /// commands are still there.
+    /// No manager at all still leaves every command to copy.
     #[test]
     fn no_manager_offers_copy_only() {
         for p in ALL {
@@ -587,8 +505,6 @@ mod tests {
         }
     }
 
-    /// Nothing offered may need elevation: a GUI app cannot answer a password
-    /// prompt, and the prompt arrives on a pipe nobody is reading.
     #[test]
     fn no_route_needs_sudo() {
         for p in ALL {
@@ -602,8 +518,7 @@ mod tests {
         }
     }
 
-    /// One route per manager per provider — the manager *is* the route id
-    /// over the invoke boundary, so a duplicate would make a run ambiguous.
+    /// The manager is the route id over the invoke boundary.
     #[test]
     fn routes_are_keyed_by_manager() {
         for p in ALL {
@@ -617,9 +532,7 @@ mod tests {
         assert!(start(Provider::Claude, Manager::Bun, |_| {}).is_err());
     }
 
-    /// The runner itself, against something harmless: output arrives as lines
-    /// while it runs, a non-zero exit is reported as a failure rather than as
-    /// silence, and the `done` line is always last.
+    /// Lines stream, a non-zero exit is a failure, and `done` is last.
     #[test]
     fn runner_streams_then_reports_the_exit() {
         let (tx, rx) = mpsc::channel::<Line>();

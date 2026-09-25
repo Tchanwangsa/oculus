@@ -1,20 +1,10 @@
 //! Finding the provider CLIs from inside a GUI app.
 //!
-//! A Tauri app launched from the Dock inherits launchd's PATH — `/usr/bin`,
-//! `/bin` and little else — so neither `~/.local/bin/claude` nor
-//! `/opt/homebrew/bin/codex` resolves the way it does in a terminal. Same
-//! class of problem as the sidecar's venv, same answer: an explicit override,
-//! then the places the installers actually put things, then a login shell's
-//! opinion as the last resort. Results are cached for the life of the
-//! process; the binaries do not move mid-session.
-//!
-//! **This is macOS-shaped, and knowingly so.** `binary_name` answers a bare
-//! `claude`, `is_executable` off unix is only "is it a file", and npm on
-//! Windows writes `claude.cmd`, resolved through `PATHEXT` — so discovery
-//! would miss an npm install there even before anything tried to run it. The
-//! rest of the app leans the same way (launchd's PATH, `/opt/homebrew`, the
-//! keep-alive LaunchAgent), so [`install`](super::install) offers macOS routes
-//! only rather than pretending otherwise.
+//! A Dock-launched app inherits launchd's PATH (`/usr/bin`, `/bin`), so
+//! `~/.local/bin/claude` or `/opt/homebrew/bin/codex` would not resolve. So:
+//! an explicit override, PATH, the installers' usual dirs, then a login shell.
+//! Results are cached for the process. macOS-shaped on purpose (no Windows
+//! `.cmd`/`PATHEXT`), like [`install`](super::install).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -23,9 +13,7 @@ use serde::Serialize;
 
 use super::event::Provider;
 
-/// `OCULUS_CLAUDE_BIN` / `OCULUS_CODEX_BIN` / `OCULUS_OPENCODE_BIN` /
-/// `OCULUS_ANTIGRAVITY_BIN` — bb's `BB_CLAUDE_CODE_EXECUTABLE`, for a build
-/// that lives somewhere unusual.
+/// The env var that points discovery at a build somewhere unusual.
 pub fn override_env(provider: Provider) -> &'static str {
     match provider {
         Provider::Claude => "OCULUS_CLAUDE_BIN",
@@ -40,15 +28,13 @@ fn binary_name(provider: Provider) -> &'static str {
         Provider::Claude => "claude",
         Provider::Codex => "codex",
         Provider::Opencode => "opencode",
-        // The product is Antigravity; the binary it installs is `agy`. This
-        // is the one place the short name is written.
+        // The one place Antigravity's binary name is written.
         Provider::Antigravity => "agy",
     }
 }
 
-/// Every provider, in the order Settings lists them. One array rather than a
-/// literal at each call site: a provider added to the enum without being
-/// added here is a bridge nobody can find.
+/// Every provider, in the order Settings lists them. A provider missing here
+/// is a bridge nobody can find.
 pub const PROVIDERS: [Provider; 4] = [
     Provider::Claude,
     Provider::Codex,
@@ -60,10 +46,7 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-/// Where the installers put things, in the order worth trying. `~/.claude/local`
-/// is Claude's own migrate-installer target and `~/.opencode/bin` is where
-/// opencode's install script puts its binary; the rest are npm-global, bun and
-/// Homebrew defaults.
+/// Where the installers put things, in the order worth trying.
 fn well_known_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(h) = home() {
@@ -107,9 +90,8 @@ fn search_path_env(name: &str) -> Option<PathBuf> {
         .find(|p| is_executable(p))
 }
 
-/// Ask a login shell, which sources the user's profile and therefore has the
-/// PATH a terminal would. Slow (a few hundred ms), so it is the last step and
-/// the result is cached.
+/// Ask a login shell, which has the PATH a terminal would. Slow, so it is the
+/// last step and cached.
 fn ask_login_shell(name: &str) -> Option<PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let out = std::process::Command::new(shell)
@@ -159,9 +141,8 @@ fn cache() -> &'static Mutex<std::collections::HashMap<Provider, Result<PathBuf,
     CACHE.get_or_init(Default::default)
 }
 
-/// The provider's binary, or why it cannot be found. Cached per provider;
-/// a failure is cached too, since re-probing a login shell on every send
-/// would make a missing CLI slow as well as absent. [`forget`] clears it.
+/// The provider's binary, or why not. A miss is cached too, so a missing CLI
+/// does not re-probe a login shell on every send; [`forget`] clears it.
 pub fn binary(provider: Provider) -> Result<PathBuf, String> {
     let mut c = cache().lock().unwrap();
     c.entry(provider).or_insert_with(|| locate(provider)).clone()
@@ -173,15 +154,8 @@ fn tool_cache() -> &'static Mutex<std::collections::HashMap<String, Option<PathB
     CACHE.get_or_init(Default::default)
 }
 
-/// Where some *other* tool is, by the same three steps and the same cache
-/// discipline as [`binary`].
-///
-/// [`install`](super::install) asks this about `brew`, `npm`, `bun` and
-/// `curl`, and the login-shell fallback is the whole point for the first of
-/// them: `brew` lives in `/opt/homebrew/bin`, which launchd's PATH does not
-/// have, so a Dock-launched app that only read PATH would tell a Homebrew
-/// user they have no Homebrew. A miss is cached like a hit, for the same
-/// reason it is on the providers; [`forget`] drops both.
+/// Where some other tool (`brew`, `npm`, …) is, by the same steps and cache as
+/// [`binary`]. The login shell matters for `brew`, whose dir launchd's PATH lacks.
 pub fn tool(name: &str) -> Option<PathBuf> {
     if let Some(hit) = tool_cache().lock().unwrap().get(name) {
         return hit.clone();
@@ -198,18 +172,16 @@ pub fn tool(name: &str) -> Option<PathBuf> {
     found
 }
 
-/// Drop the cached lookups *and* the cached health, for a recheck after the
-/// user installs one.
+/// Drop cached lookups and health, for a recheck after an install.
 pub fn forget() {
     cache().lock().unwrap().clear();
     health_cache().lock().unwrap().clear();
     tool_cache().lock().unwrap().clear();
 }
 
-/// The `oculus` binary the child should find on its PATH. In a bundle it is
-/// a sibling of the app executable; in `tauri dev` it is the debug binary the
-/// preflight builds (`app/scripts/predev.mjs`), the release one `bun run cli`
-/// leaves, or the `~/.local/bin` symlink from `cli:install`.
+/// The `oculus` binary the child should find on its PATH: the app's sibling in a
+/// bundle; in dev the preflight's debug build (`app/scripts/predev.mjs`), the
+/// release one `bun run cli` leaves, or the `~/.local/bin` symlink.
 pub fn oculus_cli() -> Option<PathBuf> {
     let mut found: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
@@ -230,20 +202,8 @@ pub fn oculus_cli() -> Option<PathBuf> {
     if found.is_empty() {
         return search_path_env("oculus");
     }
-    // Newest wins, rather than first-found. This is the second half of a fix
-    // whose first half is `app/scripts/predev.mjs`: `bun run cli` builds the
-    // *release* binary, and until that preflight existed nothing built
-    // `target/debug/oculus` at all, so under `tauri dev` the sibling of the
-    // running app was whatever a stray `cargo test` last left there —
-    // measured, ten days old with no `project` subcommand. Its directory goes
-    // to the front of the thread's PATH (see `child_env`), so a bare
-    // `oculus project create` from an agent died on `unrecognized subcommand`
-    // while the real CLI sat one entry further along, and the agent's own
-    // notes learned to reach past the name to an absolute path that no
-    // permission rule matches. The preflight should keep all the candidates
-    // current now; ordering them is what makes that safe rather than
-    // load-bearing. A bundle has a single candidate, so this changes nothing
-    // there.
+    // Newest wins: its dir heads the thread's PATH (`child_env`), so a stale dev
+    // build would shadow the current CLI. See CLAUDE.md: Toolchain.
     found.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
     let chosen = found.pop();
     if let Some(bin) = &chosen {
@@ -252,11 +212,8 @@ pub fn oculus_cli() -> Option<PathBuf> {
     chosen
 }
 
-/// The `src/` directory of the checkout that built a
-/// `<root>/target/{debug,release}/oculus`, or `None` for a CLI that came from
-/// anywhere else — a bundle's sidecar, `~/.local/bin`, the PATH. Only a
-/// checkout can be *out of date with its own sources*; an installed binary has
-/// no sources to be behind.
+/// The `src/` of the checkout that built a `<root>/target/{debug,release}/oculus`;
+/// `None` for an installed CLI, which has no sources to be behind.
 fn dev_checkout_src(bin: &Path) -> Option<PathBuf> {
     let profile = bin.parent()?;
     match profile.file_name()?.to_str()? {
@@ -271,8 +228,7 @@ fn dev_checkout_src(bin: &Path) -> Option<PathBuf> {
     src.is_dir().then_some(src)
 }
 
-/// The newest mtime under `dir`, counting `.rs` files only — the set cargo
-/// would rebuild from.
+/// The newest `.rs` mtime under `dir` — the set cargo rebuilds from.
 fn newest_rs_mtime(dir: &Path) -> Option<std::time::SystemTime> {
     let mut newest: Option<std::time::SystemTime> = None;
     let mut stack = vec![dir.to_path_buf()];
@@ -295,17 +251,9 @@ fn newest_rs_mtime(dir: &Path) -> Option<std::time::SystemTime> {
     newest
 }
 
-/// Say so, once, when the CLI a coding agent is about to be handed was built
-/// before the sources sitting next to it.
-///
-/// `scripts/predev.mjs` builds the CLI at the start of every dev session and
-/// `scripts/watch-cli.mjs` keeps it current through one, so this should never
-/// fire. It exists because the failure it names is invisible from the other
-/// end: a stale `oculus` runs, answers `--version`, and rejects a subcommand
-/// it has simply never heard of, which reads as the agent doing something
-/// wrong. A line in the dev terminal is the difference between that and an
-/// afternoon. Nothing outside a checkout can reach here, so a bundle is
-/// silent by construction.
+/// Warn once when the CLI an agent is about to get predates its sources. The dev
+/// scripts should prevent it, but a stale `oculus` just rejects new
+/// subcommands, which reads as the agent's mistake.
 fn warn_if_stale(bin: &Path) {
     static CHECKED: OnceLock<()> = OnceLock::new();
     CHECKED.get_or_init(|| {
@@ -338,23 +286,14 @@ fn health_cache() -> &'static Mutex<std::collections::HashMap<Provider, BridgeHe
     CACHE.get_or_init(Default::default)
 }
 
-/// Where each binary is, which version it reports, and if it is not there,
-/// why — cached for the life of the process beside the lookup itself.
-///
-/// The cache is what makes reading this cheap enough to ask on every composer.
-/// The picker now dims a provider whose CLI is missing rather than offering
-/// its catalogue, so `health` is read wherever a model is chosen, not only on
-/// the Settings page; `binary` was already cached, but the `--version` spawn
-/// behind it was not, and three of those on every menu is the same cost the
-/// login-shell fallback was avoided for. [`forget`] clears both, which is what
-/// Settings' *Recheck* does after an install.
+/// Where each binary is, its version, or why not. Cached, because the model
+/// picker reads it on every composer; [`forget`] clears it.
 pub fn health(provider: Provider) -> BridgeHealth {
     if let Some(h) = health_cache().lock().unwrap().get(&provider) {
         return h.clone();
     }
     let h = probe_health(provider);
-    // Probed outside the lock: a `--version` is a process spawn, and two
-    // callers racing it write the same answer twice rather than block.
+    // Probed outside the lock: racing callers write the same answer rather than block.
     health_cache().lock().unwrap().insert(provider, h.clone());
     h
 }
@@ -374,8 +313,7 @@ fn probe_health(provider: Provider) -> BridgeHealth {
             match std::process::Command::new(&p).arg("--version").output() {
                 Ok(out) if out.status.success() => {
                     let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    // `2.1.267 (Claude Code)` / `codex-cli 0.153.4` — keep the
-                    // number, drop the branding.
+                    // `2.1.267 (Claude Code)` / `codex-cli 0.153.4` — keep the number.
                     let num = v
                         .split_whitespace()
                         .find(|w| w.chars().next().map_or(false, |c| c.is_ascii_digit()))
@@ -396,20 +334,10 @@ fn probe_health(provider: Provider) -> BridgeHealth {
     h
 }
 
-/// The environment a provider child gets.
-///
-/// Two deliberate edits to the inherited env. The API keys are stripped so
-/// that a `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the user's shell cannot
-/// silently move a subscription session onto per-token billing — the entire
-/// reason this layer drives the CLIs rather than the APIs. The same strip is
-/// what keeps opencode on the student's own `opencode auth` store rather than
-/// on a key that happens to be in a shell: measured, a server started with
-/// either name set grows a whole provider (16 anthropic models, 61 openai)
-/// that nobody chose, so the same app would offer a different catalogue
-/// launched from a terminal than from the Dock. And the `oculus` binary's
-/// directory is put in front of PATH, because `AGENTS.md` tells the agent to
-/// run `oculus grep`, and advice that resolves to "command not found" is
-/// worse than none.
+/// The environment a provider child gets. API keys are stripped so a key in the
+/// user's shell cannot move a subscription onto per-token billing, or grow
+/// opencode a provider nobody chose. The `oculus` binary's dir heads PATH,
+/// because `AGENTS.md` tells the agent to run it.
 pub fn child_env() -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(k, _)| {
@@ -418,9 +346,7 @@ pub fn child_env() -> Vec<(String, String)> {
                 "ANTHROPIC_API_KEY"
                     | "OPENAI_API_KEY"
                     | "CLAUDE_AGENT_SDK_CLIENT_APP"
-                    // Set when *this* process is itself a Claude Code child
-                    // (a dev session run from inside one); the CLI refuses
-                    // to nest and would exit immediately.
+                    // Set inside a Claude Code session; the CLI refuses to nest.
                     | "CLAUDECODE"
                     | "CLAUDE_CODE_ENTRYPOINT"
             )
@@ -459,16 +385,12 @@ pub fn child_env() -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
 
-    fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("oculus-discover-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        d
+    fn scratch(name: &str) -> Scratch {
+        Scratch::new(&format!("discover-{name}"))
     }
 
-    /// The whole point of the guard is that it fires in a checkout and nowhere
-    /// else: an installed binary has no `src/` to be behind, so reporting it as
-    /// stale would be a warning nobody could act on.
     #[test]
     fn only_a_checkout_has_sources_to_be_behind() {
         let root = scratch("shapes");
@@ -487,9 +409,6 @@ mod tests {
         let bare = scratch("bare");
         std::fs::create_dir_all(bare.join("target/debug")).unwrap();
         assert_eq!(dev_checkout_src(&bare.join("target/debug/oculus")), None);
-
-        std::fs::remove_dir_all(&root).ok();
-        std::fs::remove_dir_all(&bare).ok();
     }
 
     #[test]
@@ -501,8 +420,7 @@ mod tests {
         std::fs::write(&bin, b"binary").unwrap();
         let built = std::fs::metadata(&bin).unwrap().modified().unwrap();
 
-        // Nested, so the walk has to recurse to find it, and written after the
-        // binary the way an edit lands after a build.
+        // Nested, so the walk must recurse, and written after the binary.
         std::thread::sleep(std::time::Duration::from_millis(20));
         std::fs::write(root.join("src/harness/discover.rs"), b"fn main() {}").unwrap();
         let newest = newest_rs_mtime(&root.join("src")).unwrap();
@@ -512,7 +430,5 @@ mod tests {
         std::fs::remove_file(root.join("src/harness/discover.rs")).unwrap();
         std::fs::write(root.join("src/notes.md"), b"# not a rebuild").unwrap();
         assert_eq!(newest_rs_mtime(&root.join("src")), None);
-
-        std::fs::remove_dir_all(&root).ok();
     }
 }

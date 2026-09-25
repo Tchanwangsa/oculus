@@ -1,16 +1,12 @@
-//! Thread and timeline rows, written here and read by the frontend.
-//!
-//! Same split as the chat agent before it: Rust owns the writes because the
-//! events that make a row arrive on Rust's side, in order, and a crash
-//! between "tool started" and "tool finished" must leave a row that says
-//! so — not a webview that never heard the second half.
+//! Thread and timeline rows, written here and read by the frontend. Rust owns
+//! the writes because events arrive here in order, so a crash mid-tool still
+//! leaves a row that says so.
 
 use sqlx::{Row, SqlitePool};
 
 use super::event::{HarnessEvent, Provider};
 
-/// A `harness_items` row's `meta` for a tool call. Everything the expanded
-/// row shows that is not the title.
+/// A tool row's `meta`: everything the expanded row shows but the title.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct ToolMeta {
     kind: Option<String>,
@@ -20,15 +16,9 @@ struct ToolMeta {
     output: Option<String>,
 }
 
-/// Start a thread. `lecture_id` is the recording a dock conversation is about
-/// (migration 30); every other thread passes None.
-///
-/// **A lecture thread's subject is the lecture's, not the payload's.** The
-/// player has no subject picker — the recording already answers that question
-/// — so trusting a `subject_id` sent alongside a lecture would be trusting the
-/// webview to repeat a fact the database already holds, and a stale one would
-/// point the appended instructions at the wrong course folder. So it is read
-/// off the `lectures` row here and the payload's is ignored.
+/// Start a thread. `lecture_id` is the recording a dock conversation is about.
+/// A lecture thread's subject is read off the `lectures` row, never trusted
+/// from the payload: a stale one would point at the wrong course folder.
 pub async fn create_thread(
     pool: &SqlitePool,
     provider: Provider,
@@ -62,9 +52,8 @@ pub async fn create_thread(
     Ok(res.last_insert_rowid())
 }
 
-/// The first line of the first message, clipped: the name a thread has for
-/// the length of its first turn, until the naming turn replaces it
-/// (`claim_naming` below, `Harness::name_thread`).
+/// The first line of the first message, clipped: the name until the naming
+/// turn replaces it ([`claim_naming`]).
 fn title_from(text: &str) -> String {
     let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
     let mut t: String = line.chars().take(72).collect();
@@ -83,32 +72,23 @@ pub struct ThreadRow {
     pub provider: Provider,
     pub provider_session_id: Option<String>,
     pub model: Option<String>,
-    /// The scoped subject's Canvas code, which is also its folder name under
-    /// `courses/`. Joined rather than stored so a renamed subject cannot
-    /// leave a thread pointing at a folder that no longer exists; None is
-    /// the general thread, or a subject that has since been removed.
+    /// The subject's Canvas code, i.e. its `courses/` folder. Joined, not stored,
+    /// so a rename cannot strand the thread; None is the general thread.
     pub subject_code: Option<String>,
-    /// The recording a dock conversation is about, joined the same way and
-    /// for the same reason. None is every thread outside the player — and a
-    /// lecture thread whose recording has since been deleted, which clears
-    /// the column rather than taking the conversation with it.
+    /// The dock conversation's recording, joined likewise. Deleting the
+    /// recording clears the column, not the conversation.
     pub lecture: Option<LectureRef>,
 }
 
-/// What a lecture thread's instructions have to name: the recording, and
-/// whether there is a transcript beside it to read.
+/// What a lecture thread's instructions name: the recording and its transcript.
 pub struct LectureRef {
     pub id: String,
     pub title: String,
-    /// The day it was recorded, `YYYY-MM-DD`. A lecture's own title is the
-    /// timetable's (`MULT20015_2026_SM2 TU L105`), so the date is the only
-    /// thing on the row that says *which* lecture this is — and which week's
-    /// slide deck goes with it.
+    /// `YYYY-MM-DD`. The title is the timetable's (`… TU L105`), so the date is
+    /// what says which lecture this is, and which week's slides go with it.
     pub date: String,
-    /// Whether `transcript.vtt` is actually on disk. The column holds the
-    /// path it was written to, which a cleared transcript folder
-    /// (`echo360_clear_transcripts`) leaves behind — and the instructions
-    /// must not point the agent at a file that is gone.
+    /// Whether `transcript.vtt` is on disk: clearing transcripts leaves the
+    /// column's path behind, and the agent must not be sent to a missing file.
     pub has_transcript: bool,
 }
 
@@ -221,19 +201,14 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
         }
         HarnessEvent::UserMessage { text, at } => {
             set_status(pool, thread_id, "running").await?;
-            // `content` is what the student typed and nothing else — the
-            // moment the message was sent at rides the prompt, not the row
-            // (`SendOptions::context` in `super`). The second it was sent at
-            // is a fact *about* the message, so it goes in `meta`, which is
-            // what lets the bubble say "at 3:40".
+            // `content` is only what the student typed; the playhead second is
+            // a fact about the message, so it goes in `meta` ("at 3:40").
             let meta = at.map(|at| serde_json::json!({ "at": at }).to_string());
             insert_item(pool, thread_id, "user", None, Some(text), meta).await.map(Some)
         }
         HarnessEvent::TurnStarted => set_status(pool, thread_id, "running").await.map(|_| None),
         HarnessEvent::TurnAnchor { anchor } => {
-            // The newest question is the one this turn is answering: the
-            // manager runs one turn per thread (`Queue` in `super`), so there
-            // is no second question in flight to confuse it with.
+            // The newest question is this turn's: one turn per thread runs at a time.
             sqlx::query(
                 "UPDATE harness_items SET anchor = ?2 WHERE id =
                    (SELECT id FROM harness_items
@@ -278,8 +253,7 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             .map(Some)
         }
         HarnessEvent::ToolFinished { id, ok, output, title } => {
-            // Read-modify-write on the JSON: SQLite's json_set is there, but
-            // a string round trip is one query fewer to get wrong.
+            // Read-modify-write on the JSON rather than json_set.
             let row = sqlx::query(
                 "SELECT id, meta FROM harness_items WHERE thread_id = ?1 AND ref_id = ?2 ORDER BY id DESC LIMIT 1",
             )
@@ -298,10 +272,7 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
                 .unwrap_or_default();
             meta.ok = Some(*ok);
             meta.output = Some(output.clone());
-            // A title the bridge only learned on completion (Codex's web
-            // search) replaces the row's own. Skipped when absent or empty,
-            // so every other tool keeps the title it opened with rather than
-            // having it blanked by a finish that had nothing to say.
+            // A title learned on completion replaces the row's; absent or empty keeps it.
             let retitle = title.as_deref().filter(|t| !t.trim().is_empty());
             match retitle {
                 Some(t) => sqlx::query("UPDATE harness_items SET meta = ?2, content = ?3 WHERE id = ?1")
@@ -317,17 +288,14 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             .map_err(|e| e.to_string())?;
             Ok(None)
         }
-        // The row carries which provider's credentials failed, when they
-        // did: a reload has to be able to draw the same sign-in card the live
-        // event drew, and `meta` on an error row was otherwise unused, so this
-        // costs no migration.
+        // `meta` records which provider's credentials failed, so a reload can
+        // redraw the sign-in card.
         HarnessEvent::Error { message, auth } => {
             let meta = auth.map(|p| serde_json::json!({ "auth": p.as_str() }).to_string());
             insert_item(pool, thread_id, "error", None, Some(message), meta).await.map(Some)
         }
-        // A row of its own rather than an error: the turn it ended finished
-        // normally, and what the row offers is a rule to allow, which a reload
-        // has to be able to offer again. `content` is the refused target.
+        // Its own row, not an error: the turn ended normally, and a reload must
+        // offer the rule again. `content` is the refused target.
         HarnessEvent::PermissionNeeded { tool, action, target, rule } => {
             let meta = serde_json::json!({
                 "tool": tool,
@@ -373,9 +341,7 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
         HarnessEvent::TurnFinished { status } => {
             let s = if status == "failed" { "error" } else { "idle" };
             set_status(pool, thread_id, s).await?;
-            // A stopped turn leaves a mark. The answer above it breaks off
-            // mid-sentence on purpose, and a thread reopened tomorrow should
-            // say that rather than look like the agent gave up.
+            // A stopped turn leaves a mark, so a cut-off answer reads as stopped.
             if status == "interrupted" {
                 return insert_item(pool, thread_id, "interrupted", None, None, None)
                     .await
@@ -384,13 +350,10 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             Ok(None)
         }
         HarnessEvent::Exited { .. } => {
-            // A process gone mid-turn already produced a failed TurnFinished;
-            // an idle one leaving changes nothing the reader can see.
+            // A mid-turn exit already produced a failed TurnFinished.
             Ok(None)
         }
-        // The queue is not the conversation: a message waiting behind a
-        // running turn has no row until it is sent, and the rewind has
-        // already deleted its rows by the time it is announced.
+        // No rows: a queued message has none until sent, and a rewind already deleted its.
         HarnessEvent::AssistantDelta { .. }
         | HarnessEvent::ThinkingDelta { .. }
         | HarnessEvent::ToolOutputDelta { .. }
@@ -401,13 +364,9 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
     }
 }
 
-/// A question in this thread: what it said, and the provider's handle for the
-/// turn it started. The guard on an edit — the id comes from the webview, and
-/// everything after it is about to be deleted, so it is checked against the
-/// row rather than trusted.
-///
-/// The anchor is None for a question asked before migration 28, and for one
-/// whose turn never started. A rewind falls back to the thread alone there.
+/// A question in this thread and its turn's anchor, checked against the row
+/// before an edit deletes everything after it. `anchor` is None for a question
+/// predating migration 28 or whose turn never started.
 pub struct Question {
     pub text: String,
     pub anchor: Option<String>,
@@ -431,9 +390,8 @@ pub async fn user_item(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Resul
     })
 }
 
-/// Delete this row and everything after it in the thread — the local half of
-/// a rewind. The provider's own session is rewound separately, by the command
-/// that calls this (`Harness::rewind`); this one only touches our rows.
+/// Delete this row and everything after it — the local half of a rewind
+/// (`Harness::rewind` rewinds the provider's session).
 pub async fn truncate_from(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Result<u64, String> {
     sqlx::query("DELETE FROM harness_items WHERE thread_id = ?1 AND id >= ?2")
         .bind(thread_id)
@@ -444,8 +402,7 @@ pub async fn truncate_from(pool: &SqlitePool, thread_id: i64, item_id: i64) -> R
         .map_err(|e| e.to_string())
 }
 
-/// The exchange a naming turn is given: the first thing the student asked and
-/// the last thing the agent answered.
+/// A naming turn's input: the first question and the last answer.
 pub struct NamingSeed {
     pub first_message: String,
     pub reply: String,
@@ -472,13 +429,9 @@ async fn one_item(
     .map(|r| r.and_then(|r| r.get::<Option<String>, _>("content")))
 }
 
-/// Claim the right to name this thread, and hand back what to name it from.
-///
-/// The claim is the same statement as the read: `title_generated` flips to 1
-/// only if it was 0, so two turns finishing at once cannot both spawn a
-/// naming turn, and a thread is never named twice. A naming turn that then
-/// fails leaves the first-line title in place rather than retrying on every
-/// message — the cost of a name is a real turn on the student's subscription.
+/// Claim the right to name this thread and return what to name it from. The
+/// claim flips `title_generated` 0→1 atomically, so a thread is named once; a
+/// failed naming turn is not retried, since each costs a real turn.
 pub async fn claim_naming(pool: &SqlitePool, thread_id: i64) -> Result<Option<NamingSeed>, String> {
     let first_message = one_item(pool, thread_id, "user", "ASC").await?;
     let reply = one_item(pool, thread_id, "assistant", "DESC").await?;

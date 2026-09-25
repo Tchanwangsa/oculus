@@ -1,40 +1,30 @@
 //! The Codex bridge: JSON-RPC over stdio to `codex app-server`.
 //!
-//! One app-server process serves every Codex thread in the app. The
-//! protocol is built for that — every notification carries a `threadId` —
-//! and it keeps the process count at one rather than one per thread. bb
-//! chose a process per thread for isolation; this app is a single user with
-//! a handful of threads, and a shared server is what `codex` itself does for
-//! its own desktop client.
+//! One app-server process serves every Codex thread; each notification
+//! carries a `threadId`. Framing is one JSON object per line: responses echo
+//! a numeric `id` with no `method`, notifications have a `method` and no
+//! `id`, and a line with both is the server asking *us* something, which must
+//! be answered or the turn hangs.
 //!
-//! Framing is one JSON object per line in both directions. Requests carry a
-//! numeric `id`; responses echo it and have no `method`; notifications have
-//! a `method` and no `id`; a line with both is the server asking *us*
-//! something (an approval), which must be answered or the turn hangs.
-//!
-//! The shapes here were taken from `codex app-server` 0.153 and cross-read
-//! against bb's `provider-codex` plugin. Two of them are easy to get wrong:
-//! `thread/start` takes `sandbox` (a mode string) while `turn/start` takes
-//! `sandboxPolicy` (an object), and a resumed thread replays its last turn's
-//! token usage before doing anything new, which must not be shown as this
-//! turn's usage.
+//! Shapes are from `codex app-server` 0.153. `thread/start` takes `sandbox`
+//! (a mode string) while `turn/start` takes `sandboxPolicy` (an object), and a
+//! resumed thread replays its last turn's token usage first.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::process::Command;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use super::child::{self, str_of as s, ChildProc};
 use super::event::{cap_output, classify, HarnessEvent, Provider, RateWindow, ToolKind};
 use super::{RawLog, Sink};
 
-/// A request that gets no answer in this long is a hung server, not a slow
-/// one — `model/list` and `thread/start` are sub-second.
+/// No answer in this long is a hung server, not a slow one.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct CodexSpawn {
@@ -46,19 +36,11 @@ pub struct CodexSpawn {
     pub account_sink: Option<Sink>,
 }
 
-/// How to open a thread. `cwd` is the sandbox's writable root as well as
-/// the working directory — under `workspace-write`, that plus `writable_files`
-/// is the whole containment story.
+/// How to open a thread. `cwd` is also the sandbox's writable root.
 pub struct CodexThreadOpts {
     pub cwd: PathBuf,
-    /// Single files that are writable besides everything under `cwd`: the
-    /// database and its WAL sidecars, so `oculus project` / `oculus task`
-    /// can write the student's board. Without them SQLite fails with
-    /// "attempt to write a readonly database" — see
-    /// `paths::db_write_paths`. Codex's sandbox is the only containment it
-    /// has (there are no per-path tool rules to pair with it, the way
-    /// Claude's `Edit` denies pair with its seatbelt), so this list is
-    /// deliberately three files and not the folder they live in.
+    /// The database's three files (`paths::db_write_paths`) — files, not
+    /// their folder, since the sandbox is Codex's only containment.
     pub writable_files: Vec<PathBuf>,
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
@@ -87,103 +69,52 @@ struct ThreadState {
     active_turn: Option<String>,
     /// Set on resume: the server replays the previous turn's usage first.
     ignore_usage_until_turn: bool,
-    /// Items that were announced with `item/started`, so a delta arriving
-    /// first (which the server does) can synthesise the open.
+    /// Items already announced, so a completion arriving first can synthesise
+    /// the open.
     open_items: HashMap<String, ToolKind>,
-    /// Agent messages whose deltas have been streamed; `item/completed`
-    /// carries the whole text again.
     streamed_messages: std::collections::HashSet<String>,
-    /// The answer as it streams, until the `item/completed` that commits it.
-    /// An interrupted turn never sends that completion — measured, and the
-    /// recording is `fixtures/harness/codex-interrupt.ndjson` — so without
-    /// this the half-written answer is only ever live text, and stopping a
-    /// turn wiped what the agent had already said off the screen.
+    /// The answer as it streams; an interrupted turn never sends the
+    /// `item/completed` that would commit it.
     partial_message: String,
 }
 
 pub struct CodexServer {
-    child: Mutex<Child>,
-    stdin: Mutex<ChildStdin>,
+    proc: ChildProc,
     next_id: AtomicI64,
     pending: Mutex<HashMap<i64, mpsc::Sender<Result<Value, String>>>>,
     routes: Mutex<HashMap<String, Arc<ThreadRoute>>>,
-    /// Where account-scoped events go. Set for the app, absent for headless
-    /// runs, which have no place to put them.
+    /// Where account-scoped events go; absent for headless runs.
     account_sink: Option<Sink>,
-    alive: Arc<AtomicBool>,
 }
 
 impl CodexServer {
     pub fn spawn(cfg: CodexSpawn) -> Result<Arc<Self>, String> {
-        let mut child = Command::new(&cfg.bin)
-            .arg("app-server")
+        let mut cmd = Command::new(&cfg.bin);
+        cmd.arg("app-server")
             .env_clear()
-            .envs(cfg.env.iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("cannot start {}: {e}", cfg.bin.display()))?;
-        let stdin = child.stdin.take().ok_or("no stdin on codex child")?;
-        let stdout = child.stdout.take().ok_or("no stdout on codex child")?;
-        let stderr = child.stderr.take().ok_or("no stderr on codex child")?;
-
-        let alive = Arc::new(AtomicBool::new(true));
+            .envs(cfg.env.iter().map(|(k, v)| (k, v)));
+        // stderr is tracing and the user's MCP noise, kept only as a tail.
+        let (proc, stdout) = ChildProc::spawn("codex", &mut cmd, true)?;
         let server = Arc::new(CodexServer {
-            child: Mutex::new(child),
-            stdin: Mutex::new(stdin),
+            proc,
             next_id: AtomicI64::new(1),
             pending: Mutex::new(HashMap::new()),
             routes: Mutex::new(HashMap::new()),
             account_sink: cfg.account_sink,
-            alive: alive.clone(),
         });
-
-        // stderr is tracing plus every MCP server in the user's own codex
-        // config failing to start; none of it is ours. Keep a tail for the
-        // exit message and drop the rest.
-        let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        {
-            let tail = stderr_tail.clone();
-            std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    let mut t = tail.lock().unwrap();
-                    if t.len() >= 20 {
-                        t.remove(0);
-                    }
-                    t.push(line);
-                }
-            });
-        }
 
         let reader = server.clone();
         let raw_log = cfg.raw_log;
         std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(log) = &raw_log {
-                    log.write(&line);
-                }
-                let Ok(v) = serde_json::from_str::<Value>(&line) else {
-                    continue;
-                };
-                reader.dispatch(v);
-            }
-            alive.store(false, Ordering::SeqCst);
-            let code = reader.child.lock().unwrap().wait().ok().and_then(|s| s.code());
-            // Every waiting request fails, every routed thread hears it.
+            child::read_json_lines(stdout, raw_log.as_ref(), |v| reader.dispatch(v));
+            let code = reader.proc.reap();
             reader.pending.lock().unwrap().clear();
             let routes: Vec<Arc<ThreadRoute>> = reader.routes.lock().unwrap().drain().map(|(_, r)| r).collect();
             for r in routes {
                 let mid_turn = r.state.lock().unwrap().active_turn.take().is_some();
                 if mid_turn {
-                    let tail = stderr_tail.lock().unwrap().join("\n");
-                    (r.sink)(HarnessEvent::error_for(
-                        Provider::Codex,
-                        format!("codex app-server exited (code {code:?})\n{tail}"),
-                    ));
-                    (r.sink)(HarnessEvent::TurnFinished {
-                        status: "failed".into(),
-                    });
+                    let msg = reader.proc.with_tail(format!("codex app-server exited (code {code:?})"));
+                    child::fail_turn(&r.sink, Provider::Codex, msg);
                 }
                 (r.sink)(HarnessEvent::Exited { code });
             }
@@ -194,17 +125,7 @@ impl CodexServer {
     }
 
     pub fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::SeqCst)
-    }
-
-    fn write_line(&self, v: &Value) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().unwrap();
-        let line = serde_json::to_string(v).map_err(|e| e.to_string())?;
-        stdin
-            .write_all(line.as_bytes())
-            .and_then(|_| stdin.write_all(b"\n"))
-            .and_then(|_| stdin.flush())
-            .map_err(|e| format!("codex stdin: {e}"))
+        self.proc.is_alive()
     }
 
     fn request(&self, method: &str, params: Value) -> Result<Value, String> {
@@ -214,7 +135,7 @@ impl CodexServer {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();
         self.pending.lock().unwrap().insert(id, tx);
-        self.write_line(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
+        self.proc.write_line(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
         match rx.recv_timeout(REQUEST_TIMEOUT) {
             Ok(r) => r,
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -226,15 +147,15 @@ impl CodexServer {
     }
 
     fn notify(&self, method: &str) -> Result<(), String> {
-        self.write_line(&json!({ "jsonrpc": "2.0", "method": method }))
+        self.proc.write_line(&json!({ "jsonrpc": "2.0", "method": method }))
     }
 
     fn respond(&self, id: &Value, result: Value) {
-        let _ = self.write_line(&json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+        let _ = self.proc.write_line(&json!({ "jsonrpc": "2.0", "id": id, "result": result }));
     }
 
     fn respond_error(&self, id: &Value, code: i64, message: &str) {
-        let _ = self.write_line(&json!({
+        let _ = self.proc.write_line(&json!({
             "jsonrpc": "2.0", "id": id,
             "error": { "code": code, "message": message },
         }));
@@ -292,12 +213,9 @@ impl CodexServer {
         Ok(out)
     }
 
-    /// Ask for the plan windows instead of waiting for a turn to push them.
-    /// The push (`account/rateLimits/updated`) only comes with a model call,
-    /// so without this the meter shows the last turn's numbers — which after
-    /// a night's gap can be a window that has since reset. The answer goes
-    /// out on the account sink, the same path the push takes, so it is stored
-    /// and drawn identically.
+    /// Ask for the plan windows: the push only comes with a model call, so the
+    /// meter could show a window that has since reset. Goes out on the
+    /// account sink, like the push.
     pub fn read_rate_limits(&self) -> Result<(), String> {
         let r = self.request("account/rateLimits/read", json!({}))?;
         let windows = rate_windows(&r["rateLimits"]);
@@ -312,15 +230,10 @@ impl CodexServer {
 
     fn thread_params(opts: &CodexThreadOpts) -> Value {
         let mut config = json!({
-            // Native questions have no UI yet; a request for one would sit
-            // unanswered and hang the turn.
+            // A native question has nowhere to go and would hang the turn.
             "features.default_mode_request_user_input": false,
-            // `thread/start` takes a sandbox *mode* and no policy, so the
-            // extra writable files have to arrive as config overrides here;
-            // `turn/start` below sends the same set as a policy object. Both,
-            // because which one governs a given call is the server's business
-            // and a thread that could not write the database would fail the
-            // student's first breakdown.
+            // `thread/start` takes a mode, not a policy, so the writable files
+            // go in as config here and as `sandboxPolicy` on `turn/start`.
             "sandbox_workspace_write.writable_roots": opts.writable_files,
             "sandbox_workspace_write.network_access": true,
         });
@@ -371,8 +284,7 @@ impl CodexServer {
     pub fn resume_thread(&self, thread_id: &str, opts: &CodexThreadOpts, sink: Sink) -> Result<(), String> {
         let mut p = Self::thread_params(opts);
         p["threadId"] = json!(thread_id);
-        // The turns are in our own database; asking for them back would be
-        // a full transcript on every resume.
+        // The turns are in our own database.
         p["excludeTurns"] = json!(true);
         let r = self.request("thread/resume", p)?;
         let id = thread_id_of(&r).unwrap_or_else(|| thread_id.to_string());
@@ -385,9 +297,7 @@ impl CodexServer {
         Ok(())
     }
 
-    /// The turn's own payload, including the sandbox policy that actually
-    /// governs it. A free function so a test can read the containment without
-    /// a server to send it to.
+    /// The turn's payload, including its sandbox policy.
     fn turn_params(thread_id: &str, text: &str, opts: &CodexThreadOpts) -> Value {
         let mut p = json!({
             "threadId": thread_id,
@@ -410,21 +320,13 @@ impl CodexServer {
     pub fn start_turn(&self, thread_id: &str, text: &str, opts: &CodexThreadOpts) -> Result<(), String> {
         let p = Self::turn_params(thread_id, text, opts);
         let r = self.request("turn/start", p)?;
-        // The turn id also arrives on the `turn/started` notification, but
-        // not until the server has warmed its MCP servers and hooks — a
-        // second or more. In that window an interrupt had no turn to name
-        // and a server that died had no turn to fail, so a thread waiting on
-        // its `TurnFinished` (`Queue` in the manager) would have waited for
-        // ever. The response says it straight away, so it is taken from here.
+        // Taken from the response: `turn/started` can lag while the server
+        // warms MCP and hooks, leaving an interrupt or exit no turn to name.
         if let Some(id) = r.pointer("/turn/id").and_then(|s| s.as_str()) {
             let route = self.routes.lock().unwrap().get(thread_id).cloned();
             if let Some(route) = route {
                 route.state.lock().unwrap().active_turn.get_or_insert(id.to_string());
-                // The same id is what a later `thread/revert` names, so it is
-                // kept on the question's row. It is announced here rather
-                // than from the `turn/started` notification for the same
-                // reason the line above reads it here: that notification can
-                // be a second or more behind.
+                // What a later `thread/revert` names.
                 (route.sink)(HarnessEvent::TurnAnchor { anchor: id.to_string() });
             }
         }
@@ -445,15 +347,8 @@ impl CodexServer {
         Ok(())
     }
 
-    /// Drop a turn and every later one from the server's own history of this
-    /// thread, so the agent's context matches the thread being read.
-    ///
-    /// `before_turn_id` is the turn the question started, kept on its row
-    /// when the turn went out. The server keeps the thread — only the history
-    /// is replaced — so the session id on our row stays good.
-    ///
-    /// Files the agent wrote are not put back: the schema says outright that
-    /// reverting those is the client's job, and this bridge does not try.
+    /// Drop a turn and every later one from the server's history; the thread
+    /// id stays valid. Files the agent wrote are not put back.
     pub fn revert(&self, thread_id: &str, before_turn_id: &str) -> Result<(), String> {
         self.request(
             "thread/revert",
@@ -472,10 +367,7 @@ impl CodexServer {
     }
 
     pub fn kill(&self) {
-        let mut child = self.child.lock().unwrap();
-        let _ = child.kill();
-        let _ = child.wait();
-        self.alive.store(false, Ordering::SeqCst);
+        self.proc.kill();
     }
 
     // ── Inbound ──────────────────────────────────────────────────────────
@@ -504,9 +396,8 @@ impl CodexServer {
         }
     }
 
-    /// Approvals cannot reach the user yet, so they are refused rather than
-    /// left hanging. `approvalPolicy: never` should mean none arrive; this is
-    /// the guard for the one that does.
+    /// `approvalPolicy: never` should mean no approvals arrive; one that does
+    /// is refused rather than left hanging.
     fn handle_server_request(&self, id: &Value, method: &str, _params: &Value) {
         match method {
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
@@ -520,9 +411,7 @@ impl CodexServer {
     }
 
     fn handle_notification(&self, method: &str, params: &Value) {
-        // Account-scoped first: rate limits belong to the subscription, not to
-        // a thread, so they arrive without a `threadId` and would otherwise be
-        // dropped by the route lookup below.
+        // Account-scoped first: they carry no `threadId`.
         let account = translate_account(method, params);
         if !account.is_empty() {
             if let Some(sink) = &self.account_sink {
@@ -554,28 +443,13 @@ impl CodexServer {
     }
 }
 
-impl Drop for CodexServer {
-    fn drop(&mut self) {
-        if let Ok(mut c) = self.child.lock() {
-            let _ = c.kill();
-        }
-    }
-}
-
 fn thread_id_of(r: &Value) -> Option<String> {
     r.pointer("/thread/id").and_then(|s| s.as_str()).map(String::from)
 }
 
-fn s(v: &Value, key: &str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
-}
-
 // ── Translation ──────────────────────────────────────────────────────────────
 
-/// Notifications about the *account*, not a thread. They carry no `threadId`
-/// — one server serves every thread and the limits are the same for all of
-/// them — so `handle_notification` takes them before it looks a route up, and
-/// they go to the harness's account sink instead of a thread's.
+/// Notifications about the account, not a thread.
 fn translate_account(method: &str, p: &Value) -> Vec<HarnessEvent> {
     let mut out = Vec::new();
     if method == "account/rateLimits/updated" {
@@ -587,10 +461,8 @@ fn translate_account(method: &str, p: &Value) -> Vec<HarnessEvent> {
     out
 }
 
-/// The `rateLimits` object, pushed after a turn and returned by
-/// `account/rateLimits/read`, as the two windows the meter draws. Codex names
-/// them by length rather than by role, so the duration is the label and the
-/// key is only the fallback.
+/// The `rateLimits` object as the meter's windows. The keys are only
+/// `primary`/`secondary`, so the duration is the label and the key a fallback.
 fn rate_windows(rl: &Value) -> Vec<RateWindow> {
     let mut windows = Vec::new();
     for (key, fallback) in [("primary", "5-hour"), ("secondary", "Weekly")] {
@@ -632,11 +504,8 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
             if let Some(msg) = p.pointer("/turn/error/message").and_then(|m| m.as_str()) {
                 out.push(HarnessEvent::error_for(Provider::Codex, msg));
             }
-            // Whatever the agent had said when the turn was cut short. It is
-            // committed here rather than left as live text, so the row
-            // survives the turn ending and a reload after it. A turn that
-            // ended on its own has already cleared this on `item/completed`,
-            // so nothing is written twice.
+            // Commit what a cut-short turn had said; a normal turn already
+            // cleared this on `item/completed`.
             let partial = std::mem::take(&mut st.partial_message);
             if !partial.trim().is_empty() {
                 out.push(HarnessEvent::AssistantMessage { text: partial });
@@ -703,8 +572,6 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
                         input: json!({ "query": s(item, "query") }),
                     });
                 }
-                // agentMessage / reasoning: content arrives as deltas and
-                // again on completion. userMessage is our own text.
                 _ => {}
             }
         }
@@ -819,19 +686,10 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
                     let (title, output) = web_search_detail(item);
                     out.push(HarnessEvent::ToolFinished {
                         id,
-                        // **A finished search carries no `status` at all** —
-                        // measured against 0.153.4, whose completed item is
-                        // the query, the action and the results and nothing
-                        // else. Comparing it to `"completed"` the way the
-                        // arms above do is why every web search the student
-                        // ever ran was drawn `failed` in red while the model
-                        // was quietly answering out of the results it got.
-                        // So: no status is a search that ran, and only a
-                        // status that says otherwise is a failure.
+                        // A finished search carries no `status` (0.153.4).
                         ok: matches!(status.as_str(), "" | "completed"),
                         output: cap_output(&output),
-                        // The queries are only known now: `item/started`
-                        // announces the search with an empty `query`.
+                        // `item/started` announces an empty `query`.
                         title: Some(title),
                     });
                 }
@@ -859,30 +717,18 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
                 out.push(HarnessEvent::error_for(Provider::Codex, msg));
             }
         }
-        // thread/status/changed, mcpServer/*, hook/*, warning, deprecationNotice,
-        // turn/plan/updated, turn/diff/updated, rawResponseItem/*: not
-        // surfaced yet.
         _ => {}
     }
     out
 }
 
-/// `String` → `&'static str` for the one label built at runtime. Leaks a
-/// few bytes per distinct window length ever seen, which is a handful.
+/// Leaks a few bytes per distinct window length ever seen.
 fn return_label(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
 
-/// The server can complete an item it never announced (or announce it after
-/// its first delta). Give the timeline an open row to close.
-/// A finished web search, as a row title and an expandable body.
-///
-/// The item says what was searched for twice: `query` is the model's own
-/// summary of it, elided with an ellipsis, and `action.queries` is the list it
-/// actually sent. The list is the truthful one, so the title is its first
-/// entry (with a count of the rest, since one row cannot hold four searches)
-/// and the body is every query followed by every result — titles and URLs,
-/// which are what a student reads a search row to get at.
+/// A finished web search as a row title and body. `query` is an elided
+/// summary; `action.queries` is what was actually sent, so it wins.
 fn web_search_detail(item: &Value) -> (String, String) {
     let queries: Vec<String> = item
         .pointer("/action/queries")
@@ -913,6 +759,7 @@ fn web_search_detail(item: &Value) -> (String, String) {
     (title, body)
 }
 
+/// The server can complete an item it never announced; give it a row to close.
 fn ensure_open(out: &mut Vec<HarnessEvent>, st: &mut ThreadState, id: &str, name: &str, input: Value) {
     if st.open_items.contains_key(id) {
         return;
@@ -932,13 +779,6 @@ fn ensure_open(out: &mut Vec<HarnessEvent>, st: &mut ThreadState, id: &str, name
 mod tests {
     use super::*;
 
-    /// What the sandbox is, in the two places Codex will read it.
-    ///
-    /// The database's three files are the only writable thing outside the
-    /// thread's cwd, and they are there because `oculus task add` is how a
-    /// plan reaches the board — see `paths::db_write_paths`. `thread/start`
-    /// takes a sandbox *mode* and no policy, so the same set has to go in as
-    /// config overrides as well as on the turn.
     #[test]
     fn a_thread_may_write_the_database_and_nothing_else_outside_its_cwd() {
         let library = std::path::Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
@@ -966,13 +806,8 @@ mod tests {
         assert_eq!(turn["approvalPolicy"], "never", "a prompt has nowhere to go");
     }
 
-    /// A real web search, recorded from a thread that ran two of them
-    /// (0.153.4).
-    ///
-    /// The regression it pins: a finished `webSearch` item carries no
-    /// `status`, so comparing it to `"completed"` marked every successful
-    /// search `failed` in the timeline — and the query, which `item/started`
-    /// leaves empty, never reached the row at all.
+    /// Recorded (0.153.4): a finished `webSearch` has no `status`, and
+    /// `item/started` leaves its query empty.
     #[test]
     fn a_web_search_that_worked_is_not_drawn_as_a_failure() {
         let raw = include_str!("../../fixtures/harness/codex-websearch.ndjson");
@@ -991,18 +826,14 @@ mod tests {
             panic!("no finish: {events:?}");
         };
         assert!(*ok, "a search with results is not a failure");
-        // Titled with the first real query, and told how many others rode
-        // with it — the row is one line and this search sent four.
         let title = title.as_deref().unwrap_or_default();
         assert!(title.starts_with("site:torproject.org bridges obfs4"), "{title}");
         assert!(title.ends_with("(+3 more)"), "{title}");
-        // Every query, then the results, for the expanded card.
         assert_eq!(output.matches("search: ").count(), 4);
         assert!(output.contains("https://support.torproject.org/little-t-tor/circumvention/using-bridges/"));
     }
 
-    /// Replays a recorded `codex app-server` thread (0.153.4) asked to `ls`
-    /// the library and describe it.
+    /// Recorded from `codex app-server` 0.153.4 asked to `ls` the library.
     #[test]
     fn folds_a_recorded_thread() {
         let raw = include_str!("../../fixtures/harness/codex-ls.ndjson");
@@ -1011,9 +842,7 @@ mod tests {
         for line in raw.lines() {
             let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
             let Some(method) = v.get("method").and_then(|m| m.as_str()) else { continue };
-            // The same order `handle_notification` uses: account-scoped
-            // notifications never reach the thread translator, so a test that
-            // only called `translate` would pass on a stream the app drops.
+            // As `handle_notification` routes them.
             let account = translate_account(method, &v["params"]);
             if !account.is_empty() {
                 events.extend(account);
@@ -1031,7 +860,6 @@ mod tests {
             .collect();
         assert_eq!(tools, vec![(ToolKind::Bash, "/bin/zsh -lc ls".to_string())]);
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::ToolFinished { ok: true, output, .. } if output.contains("oculus.db"))));
-        // Two agent messages: commentary, then the final answer.
         let messages = events.iter().filter(|e| matches!(e, HarnessEvent::AssistantMessage { .. })).count();
         assert_eq!(messages, 2);
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::Usage { context_window: Some(_), .. })));
@@ -1039,12 +867,7 @@ mod tests {
         assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed"));
     }
 
-    /// A turn stopped mid-answer. Recorded: the deltas simply stop, the
-    /// `item/completed` that would carry the whole text never comes, and
-    /// `turn/completed` says `interrupted`. Without the partial being
-    /// committed here, everything the agent had already said was live text
-    /// with no row behind it — so stopping a turn wiped the answer off the
-    /// screen, which is exactly what it looked like from the outside.
+    /// Recorded: an interrupted turn never sends the `item/completed`.
     #[test]
     fn a_stopped_turn_keeps_what_was_said() {
         let raw = include_str!("../../fixtures/harness/codex-interrupt.ndjson");

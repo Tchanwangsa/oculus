@@ -1,38 +1,16 @@
-//! Oculus's permission rules, kept in `agy`'s own global settings file.
+//! Oculus's permission rules, kept in `agy`'s own global settings file
+//! (`~/.gemini/antigravity-cli/settings.json`, `permissions.allow`/`deny`) —
+//! the only place agy 1.2.9 reads rules from. See docs/harness.md.
 //!
-//! **Why the global file.** Claude takes its whole containment inline, as
-//! `--settings <json>`; `agy` 1.2.9 takes rules from exactly one place,
-//! `~/.gemini/antigravity-cli/settings.json` under `permissions.allow` /
-//! `permissions.deny`. Measured, every other door was tried and none loads: a
-//! workspace `.agents/hooks.json`, a project file under
-//! `~/.gemini/config/projects/`, environment variables, and a `HOME` override
-//! (which also loses the keychain sign-in). So Oculus writes a block into the
-//! student's own file — which is why this module is careful about it:
+//! Because the file is the student's: Oculus records which entries it wrote
+//! ([`state_path`]) and only ever removes those; every other key keeps its
+//! value and order; invalid JSON is refused (and the spawn fails) rather than
+//! overwritten; the write is atomic and skipped when nothing changed. A live
+//! `agy` never re-reads the file, so rules are written before every spawn.
 //!
-//! - It remembers exactly which entries **it** wrote last time
-//!   ([`state_path`]), so a stale one — an old library path, a revoked
-//!   approval — can be taken out again while an entry the student added by
-//!   hand is never touched, even when it is spelled the same as one of ours.
-//! - Every other key, and the order of every key, is kept as it was. The file
-//!   is read as an ordered list of raw values and only `permissions.allow` and
-//!   `permissions.deny` are re-rendered.
-//! - A file that is not valid JSON is refused, never overwritten, and the
-//!   spawn that needed it fails with the reason: running `agy` without its
-//!   rules would be running it unconstrained.
-//! - The write is a temp file and a rename, and only happens when something
-//!   changed, so a spawn with nothing new to say leaves the file's mtime alone.
-//!
-//! **A live `agy` does not re-read the file** (measured: a rule added
-//! mid-session is ignored until the process is respawned). So the rules are
-//! written before every spawn, and an approval takes effect by dropping the
-//! thread's process so the next message resumes it with `--conversation`.
-//!
-//! The rule syntax is `agy`'s: `write_file(/abs)` is recursive and implies
-//! read, `read_file(/abs)`, `command(prefix)` matched word by word,
-//! `read_url(domain)`. Deny beats ask beats allow. Grants under `read_file`
-//! and `write_file` also widen the *terminal* sandbox's read and write
-//! allowlists, which is what makes a shell `echo > file` and a bare `oculus`
-//! work at all.
+//! Rule syntax is agy's: `write_file(/abs)` (recursive, implies read),
+//! `read_file(/abs)`, `command(prefix)` matched word by word, `read_url(host)`.
+//! Deny beats allow. File grants also widen the terminal sandbox.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -44,37 +22,25 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::value::RawValue;
 use serde_json::Value;
 
-/// The `settings` row holding the student's own approvals: a JSON array of
-/// rule strings, added from a thread's "allow" and removed from Settings.
+use super::protected::{LIBRARY_DIRS, WORKSPACE_DIRS};
+
+/// The `settings` row holding the student's approvals, a JSON array of rules.
 pub const SETTINGS_KEY: &str = "antigravity_allowed_rules";
 
-/// Commands that only read, allowed by name, so a turn is not refused over an
-/// `ls` — measured: with no rules at all *every* `run_command` is refused,
-/// `ls` included, and a refusal ends the turn.
-///
-/// The list is short **because the rules are global**: they live in the
-/// student's own settings file, so they apply in the `agy` the student runs
-/// in a terminal too, where the sandbox is usually off. A command belongs here
-/// only if no *argument* can make it write or run something, since the
-/// matcher is a word-by-word prefix and flags are just more words. A redirect
-/// is not: measured without `--sandbox`, `command(cat)` allowed did *not*
-/// cover `cat <lib>/notes.md > <outside>/cat.txt`, which was refused. `find`
-/// and `rg` are out for that reason — `find … -delete` or `-exec rm`, and
-/// `rg --pre <cmd>`, are all still `find …` and `rg …` to a prefix rule.
+/// Commands allowed by name (with no rules, every `run_command` is refused).
+/// The rules are global — they apply to the student's own terminal `agy` too
+/// — so only commands no argument can make write or run something: not `find`
+/// (`-delete`, `-exec`) or `rg` (`--pre`).
 const READ_ONLY_COMMANDS: [&str; 7] = ["ls", "cat", "head", "tail", "wc", "grep", "pwd"];
 
-/// The rule shapes a student may approve. `mcp(...)` is left out on purpose:
-/// nothing in a thread's refusals suggests one, and an MCP server is not a
-/// thing this app configures.
+/// The rule shapes a student may approve (no `mcp(...)`).
 pub fn is_valid_rule(rule: &str) -> bool {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| regex::Regex::new(r"^(command|read_file|write_file|read_url)\(.+\)$").unwrap())
         .is_match(rule)
 }
 
-/// The student's approvals, from the `settings` row. A row that does not
-/// parse is no approvals — the cost is a refusal the student can approve
-/// again, never a rule they did not give.
+/// The student's approvals; a row that does not parse is none.
 pub async fn stored(pool: &sqlx::SqlitePool) -> Result<Vec<String>, String> {
     let raw: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?1")
         .bind(SETTINGS_KEY)
@@ -103,7 +69,6 @@ pub async fn save(pool: &sqlx::SqlitePool, rules: &[String]) -> Result<(), Strin
     .map_err(|e| e.to_string())
 }
 
-/// One set of rules.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Rules {
     #[serde(default)]
@@ -112,12 +77,8 @@ pub struct Rules {
     pub deny: Vec<String>,
 }
 
-/// What Oculus wrote into the settings file last time, kept in the library.
-///
-/// `approved` is the approvals as they stood then, so a spawn that does not
-/// read the database — the thread-naming throwaway, `oculus agent` — writes
-/// the same block the last thread did instead of taking the student's
-/// approvals out of the file and the next thread putting them back.
+/// What Oculus wrote into the settings file last time. `approved` lets a
+/// spawn with no database (the namer, `oculus agent`) rewrite the same block.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 struct State {
     #[serde(default)]
@@ -128,37 +89,22 @@ struct State {
     approved: Vec<String>,
 }
 
-/// `~/.gemini/antigravity-cli/settings.json` — the one place `agy` reads
-/// rules from.
 pub fn settings_path() -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME").ok_or("HOME is not set, so agy's settings cannot be found")?;
     Ok(PathBuf::from(home).join(".gemini/antigravity-cli/settings.json"))
 }
 
-/// Where the record of Oculus's own entries lives: the library root, beside
-/// `oculus.db` and the other app-owned files. Not `agents/`, which is the one
-/// folder a thread may write — an agent that could edit this list could make
-/// Oculus claim, and later delete, a rule the student wrote themselves. At the
-/// root it is outside every bridge's writable roots, and Claude's `*.json`
-/// deny already names it.
+/// The record of Oculus's own entries, at the library root — outside every
+/// agent's writable roots, so no agent can make Oculus delete a student rule.
 pub fn state_path(library: &Path) -> PathBuf {
     library.join("antigravity-rules.json")
 }
 
-/// The `oculus` binary as a thread's shell will meet it: the resolved file
-/// `discover::oculus_cli` puts first on PATH, and the `~/.local/bin` launcher
-/// when there is one.
-///
-/// Both matter. Measured: `oculus --version` inside `agy`'s sandbox fails with
-/// `zsh:1: operation not permitted: oculus` — not a permission rule refusing
-/// but the sandbox unable to *read* the binary, because `~/.local/bin/oculus`
-/// is a symlink into `target/release/`, outside every readable root. With
-/// `read_file` on the resolved directory and `command` on both spellings,
-/// the bare name and the absolute path both print `oculus 0.1.0`.
+/// The `oculus` binary and its `~/.local/bin` launcher. The sandbox must be
+/// able to *read* the resolved binary behind the symlink, or a bare `oculus`
+/// fails with `operation not permitted`.
 pub struct OculusCli {
-    /// Canonical path of the binary.
     pub bin: PathBuf,
-    /// `~/.local/bin/oculus`, when it exists.
     pub launcher: Option<PathBuf>,
 }
 
@@ -173,25 +119,10 @@ impl OculusCli {
     }
 }
 
-/// Oculus's rules for a thread over `library`, plus the student's approvals.
-///
-/// The mirror of Claude's `settings_json` in `claude.rs`, translated:
-///
-/// - **Writes**: the database's three files and nothing else outside the
-///   workspace. The workspace is `agents/` (the cwd), and measured with no
-///   rules, `write_to_file` there already lands under `--mode accept-edits`
-///   while one in the library beside it is refused — so, like Claude's
-///   `allowWrite` of cwd plus `paths::db_write_paths`, only the three files
-///   are named. A single file is enough for the shell too: measured, with
-///   this set a thread's `echo hi >> <library>/oculus.db-wal` lands, and its
-///   bare `oculus --version` prints the version.
-/// - **Denies**: Claude's `Edit(//…)` list as `write_file(…)`, and its
-///   `Bash(sqlite3:*)` as `command(sqlite3 <db>)` — the database is writable so the
-///   CLI can reach it, and a hand-written `UPDATE` is the one way around the
-///   CLI. Claude's root globs (`*.cookie`, `*.token`, `*.log`, `*.json`) are
-///   named as the files they stand for, since no glob in `agy`'s syntax has
-///   been measured.
-/// - **The CLI**: see [`OculusCli`].
+/// Oculus's rules for a thread over `library`, plus the student's approvals:
+/// Claude's `settings_json` (`claude.rs`) in agy's syntax. The workspace
+/// (`agents/`) is writable under `accept-edits` already, so only the
+/// database's files are granted.
 pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]) -> Rules {
     let at = |rel: &str| library.join(rel).display().to_string();
     let mut allow: Vec<String> = crate::paths::db_write_paths(library)
@@ -214,35 +145,21 @@ pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]
     allow.extend(READ_ONLY_COMMANDS.iter().map(|c| format!("command({c})")));
     allow.extend(approved.iter().cloned());
 
-    let mut deny: Vec<String> = [
-        "courses",
-        "lectures",
-        "canvas-session",
-        // The app's own files inside the writable workspace: the generated
-        // skills and both folders a scanning CLI discovers them through. See
-        // the same list in `claude.rs`.
-        "agents/skills",
-        "agents/.claude",
-        "agents/.agents",
-    ]
-    .iter()
-    .map(|p| format!("write_file({})", at(p)))
-    .collect();
+    let mut deny: Vec<String> = LIBRARY_DIRS
+        .iter()
+        .map(|d| at(d))
+        .chain(WORKSPACE_DIRS.iter().map(|d| at(&format!("agents/{d}"))))
+        .map(|p| format!("write_file({p})"))
+        .collect();
+    // `ROOT_FILE_GLOBS` as the files they cover.
     deny.push(format!("write_file({})", crate::paths::cookie_path(library).display()));
     deny.push(format!("write_file({})", at("ed-session.token")));
     deny.push(format!("write_file({})", crate::paths::keepalive_log_path(library).display()));
     deny.push(format!("write_file({})", state_path(library).display()));
-    // `sqlite3` pointed at *this* database, not `sqlite3` at large: the rules
-    // are global, and a blanket `command(sqlite3)` — re-added on every spawn —
-    // would ban the tool from every one of the student's own `agy` sessions.
-    // Measured without `--sandbox`: `command(sqlite3 <lib>/oculus.db)` refused
-    // `sqlite3 <lib>/oculus.db 'select 1'` while `sqlite3 :memory: 'select 2'`
-    // ran; a `command(regex:^sqlite3\s.*<lib>)` deny had no effect at all, so
-    // no regex rules. Both spellings of the path are named when they differ
-    // (`/tmp` is `/private/tmp` on macOS). The gap is a `cd` into the library
-    // and a relative path, which no prefix can see — like Claude's
-    // `Bash(sqlite3:*)`, this is a speed bump in front of the CLI, which is
-    // the intended door, not a wall.
+    // `sqlite3` on *this* database only: the rules are global, and a blanket
+    // deny would ban it from the student's own sessions. A speed bump in front
+    // of the CLI, not a wall (a `cd` and a relative path pass). agy ignores
+    // `regex:` denies.
     for db in sqlite_paths(library) {
         deny.push(format!("command(sqlite3 {db})"));
     }
@@ -253,13 +170,8 @@ pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]
     }
 }
 
-/// `oculus.db` as a command line may spell it: as given, and resolved.
-///
-/// The real library is under `~/Library/Application Support`, and a path with
-/// a space reaches a command line quoted or escaped. How `agy` splits a rule
-/// into words is not measured for quotes, so a path with whitespace is also
-/// named in the three ways a shell would write it — each is just one more
-/// deny, and a spelling that never matches costs nothing.
+/// `oculus.db` as a command line may spell it: as given and resolved, and a
+/// path with a space also double-quoted, single-quoted and escaped.
 fn sqlite_paths(library: &Path) -> Vec<String> {
     let db = crate::paths::db_path(library);
     let mut plain = vec![db.display().to_string()];
@@ -281,8 +193,7 @@ fn sqlite_paths(library: &Path) -> Vec<String> {
 }
 
 /// Whether one of Oculus's own denies already covers `rule`, so approving it
-/// would change nothing — deny beats allow in `agy`. Said up front rather
-/// than stored as an approval that silently does not work.
+/// would change nothing.
 pub fn denied_by(library: &Path, rule: &str) -> Option<String> {
     let deny = rules_for(library, None, &[]).deny;
     let inner = |r: &str, head: &str| {
@@ -299,10 +210,7 @@ pub fn denied_by(library: &Path, rule: &str) -> Option<String> {
                 return Some(d.clone());
             }
         }
-        // A command rule is a word-by-word prefix, so an allow is shadowed
-        // when the deny is a prefix of it — `command(sqlite3 /lib/oculus.db
-        // .dump)` under `command(sqlite3 /lib/oculus.db)` — but not when it is
-        // wider than the deny: `command(sqlite3)` still allows `:memory:`.
+        // Shadowed when the deny is a word prefix of it; a wider allow is not.
         if let (Some(want), Some(closed)) = (inner(rule, "command("), inner(d, "command(")) {
             let want: Vec<&str> = want.split_whitespace().collect();
             let closed: Vec<&str> = closed.split_whitespace().collect();
@@ -314,14 +222,10 @@ pub fn denied_by(library: &Path, rule: &str) -> Option<String> {
     None
 }
 
-/// Write the rules for a spawn over `library`.
-///
-/// `approved` is the student's approvals as read from the database, or `None`
-/// from a caller that has no database to hand — which then gets the ones the
-/// last write used ([`State::approved`]).
+/// Write the rules for a spawn over `library`. `None` approvals reuses the
+/// last written ([`State::approved`]).
 pub fn install(library: &Path, approved: Option<Vec<String>>) -> Result<(), String> {
-    // One writer at a time inside this process: a thread and its namer can
-    // spawn together, and both read-modify-write the same file.
+    // A thread and its namer can spawn together.
     static LOCK: Mutex<()> = Mutex::new(());
     let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     install_at(
@@ -340,8 +244,7 @@ fn install_at(
     oculus: Option<&OculusCli>,
     approved: Option<Vec<String>>,
 ) -> Result<(), String> {
-    // A missing or unreadable record is an empty one: the worst that costs is
-    // one stale entry left behind, never a student's entry taken out.
+    // Missing is empty: at worst a stale entry stays, never a student's goes.
     let last: State = std::fs::read_to_string(state_file)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -370,16 +273,11 @@ fn install_at(
 }
 
 /// Merge `rules` into the settings file at `path`, given what Oculus wrote
-/// last time, and return what Oculus owns now.
-///
-/// Per list: an entry the student wrote (present, and not in `last`) stays
-/// where it is; an entry of Oculus's that is still wanted stays where it is;
-/// one that is no longer wanted goes; a new one is appended. Oculus owns only
-/// what it added — an entry the student already had is theirs, so it survives
-/// the day Oculus stops asking for it.
+/// last time, and return what Oculus owns now. Student entries stay put;
+/// Oculus's unwanted ones go; new ones are appended. An entry the student
+/// already had stays theirs.
 fn apply(path: &Path, last: &Rules, rules: &Rules) -> Result<Rules, String> {
-    // Through a symlink (a dotfiles repo) to the file itself, so the rename
-    // replaces the file rather than the link.
+    // Rename onto the file, not a dotfiles symlink.
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => Some(t),
@@ -402,8 +300,7 @@ fn apply(path: &Path, last: &Rules, rules: &Rules) -> Result<Rules, String> {
         }
     };
 
-    // `permissions`, opened one level so its other keys (`ask`, anything a
-    // later `agy` adds) ride through untouched.
+    // Opened one level so its other keys (`ask`, …) pass through untouched.
     let mut perms: Vec<(String, Node)> = match top.iter().find(|(k, _)| k == "permissions") {
         Some((_, Node::Raw(raw))) => {
             let Ordered(entries) = serde_json::from_str(raw.get())
@@ -497,9 +394,7 @@ fn set(entries: &mut Vec<(String, Node)>, key: &str, value: Node) {
     }
 }
 
-/// Temp file beside the target, then a rename: `agy` reading the file while
-/// it is written sees the old one or the new one, never half of either. The
-/// original's permission bits are carried over.
+/// Temp file beside the target, then a rename; permission bits carried over.
 fn write_atomic(path: &Path, body: &str) -> std::io::Result<()> {
     use std::io::Write;
     let mut tmp = path.as_os_str().to_owned();
@@ -520,10 +415,8 @@ fn write_atomic(path: &Path, body: &str) -> std::io::Result<()> {
 
 // ── Order-keeping JSON ───────────────────────────────────────────────────────
 //
-// `serde_json::Map` sorts its keys (this crate does not enable
-// `preserve_order`, and turning it on would reorder every other JSON the app
-// writes), so the student's file is read as an ordered list of raw values and
-// written back in the same order, with only the two lists re-rendered.
+// `serde_json::Map` sorts keys (no `preserve_order`, which would change every
+// other JSON the app writes), so the file is read as ordered raw values.
 
 /// A JSON object read as its entries, in file order, values untouched.
 struct Ordered(Vec<(String, Box<RawValue>)>);
@@ -548,8 +441,6 @@ impl<'de> Deserialize<'de> for Ordered {
     }
 }
 
-/// A value on its way back out: verbatim, re-rendered, or an object of
-/// either.
 enum Node {
     Raw(Box<RawValue>),
     Value(Value),
@@ -575,14 +466,11 @@ impl Serialize for Node {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
 
-    /// A fresh directory under the system temp dir. Never `~/.gemini`: every
-    /// test here writes only below this.
-    fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("oculus-agy-rules-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    /// Never `~/.gemini`: tests write only below this.
+    fn scratch(name: &str) -> Scratch {
+        Scratch::new(&format!("agy-rules-{name}"))
     }
 
     fn rules(allow: &[&str], deny: &[&str]) -> Rules {
@@ -606,13 +494,9 @@ mod tests {
             read(&path),
             serde_json::json!({"permissions": {"allow": ["command(ls)"], "deny": ["command(sqlite3)"]}})
         );
-        // Two-space indentation, as asked.
         assert!(std::fs::read_to_string(&path).unwrap().contains("\n  \"permissions\""));
     }
 
-    /// The student's keys keep their values and their order, and their own
-    /// rules stay where they were — including one spelled the same as ours,
-    /// which stays theirs.
     #[test]
     fn the_students_keys_and_rules_are_kept() {
         let d = scratch("merge");
@@ -627,7 +511,7 @@ mod tests {
         )
         .unwrap();
         let owned = apply(&path, &Rules::default(), &rules(&["command(ls)", "command(oculus)"], &["command(sqlite3)"])).unwrap();
-        // `command(ls)` was the student's before Oculus asked for it.
+        // `command(ls)` was the student's first, so it stays theirs.
         assert_eq!(owned.allow, ["command(oculus)"]);
         let text = std::fs::read_to_string(&path).unwrap();
         let t = text.find("trustedWorkspaces").unwrap();
@@ -671,7 +555,6 @@ mod tests {
         let err = apply(&path, &Rules::default(), &rules(&["command(ls)"], &[])).unwrap_err();
         assert!(err.contains("not valid JSON"), "{err}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json");
-        // And a `permissions` of the wrong shape is the same refusal.
         std::fs::write(&path, r#"{"permissions":{"allow":"command(ls)"}}"#).unwrap();
         assert!(apply(&path, &Rules::default(), &rules(&["command(ls)"], &[])).is_err());
     }
@@ -692,8 +575,6 @@ mod tests {
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), mtime, "not rewritten");
     }
 
-    /// The whole round trip through the state file: a revoked approval leaves
-    /// the settings file, and a spawn that passes `None` keeps the last ones.
     #[test]
     fn approvals_come_and_go_through_the_record() {
         let d = scratch("install");
@@ -701,10 +582,8 @@ mod tests {
         install_at(&settings, &state, &lib, None, Some(vec!["command(python3)".into()])).unwrap();
         let allow = |p: &Path| read(p)["permissions"]["allow"].clone();
         assert!(allow(&settings).as_array().unwrap().contains(&"command(python3)".into()));
-        // The namer: no database, same block.
         install_at(&settings, &state, &lib, None, None).unwrap();
         assert!(allow(&settings).as_array().unwrap().contains(&"command(python3)".into()));
-        // Revoked.
         install_at(&settings, &state, &lib, None, Some(vec![])).unwrap();
         assert!(!allow(&settings).as_array().unwrap().contains(&"command(python3)".into()));
     }
@@ -731,12 +610,8 @@ mod tests {
         ] {
             assert!(r.allow.iter().any(|a| a == want), "allow {want}: {:?}", r.allow);
         }
-        // Nothing grants the library or the workspace wholesale, and nothing
-        // whose arguments can write or run something (the rules are global).
         assert!(!r.allow.iter().any(|a| a == "write_file(/lib)" || a == "write_file(/lib/agents)"));
         assert!(!r.allow.iter().any(|a| a == "command(find)" || a == "command(rg)"));
-        // `sqlite3` is shut on this database only, never in the student's
-        // own sessions at large.
         assert!(!r.deny.iter().any(|d| d == "command(sqlite3)"));
         for want in [
             "write_file(/lib/courses)",
@@ -749,8 +624,6 @@ mod tests {
         }
     }
 
-    /// A library whose path resolves elsewhere (`/var` → `/private/var` on
-    /// macOS) has its database denied under both spellings.
     #[test]
     fn sqlite3_is_denied_on_both_spellings_of_the_database() {
         let lib = scratch("spellings");
@@ -761,8 +634,6 @@ mod tests {
         assert!(r.deny.contains(&want(&real)), "{:?}", r.deny);
     }
 
-    /// The real library has a space in its path; the deny names the quoted
-    /// and escaped spellings beside the bare one.
     #[test]
     fn a_database_path_with_a_space_is_denied_however_it_is_quoted() {
         let lib = Path::new("/Users/s/Library/Application Support/com.tchan.oculus");
@@ -789,7 +660,6 @@ mod tests {
         assert!(denied_by(lib, "write_file(/lib/courses/COMP30026)").is_some());
         assert!(denied_by(lib, "command(sqlite3 /lib/oculus.db)").is_some());
         assert!(denied_by(lib, "command(sqlite3 /lib/oculus.db .dump)").is_some());
-        // Wider than the deny: still allows `sqlite3 :memory:`, so not refused.
         assert!(denied_by(lib, "command(sqlite3)").is_none());
         assert!(denied_by(lib, "write_file(/lib/agents/notes)").is_none());
         assert!(denied_by(lib, "command(python3)").is_none());
