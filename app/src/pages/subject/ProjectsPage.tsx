@@ -7,15 +7,9 @@ import { useSubject } from "@/layouts/SubjectLayout";
 import { displayCode } from "@/lib/format";
 import { PROJECTS_UPDATED_EVENT } from "@/lib/projects";
 import { useProjectsStore } from "@/stores/projectsStore";
+import { useWindowEvent } from "@/hooks/useEvents";
 
-/**
- * One subject's projects. The subject comes from the layout's outlet context —
- * a tab page never resolves it again.
- *
- * There is no archived section here, and that is the difference between this
- * page and the index: a subject's tab is where you work, and the index is where
- * you keep the record.
- */
+/** One subject's projects. No archived section: that belongs to the index. */
 export default function SubjectProjectsPage() {
   const subject = useSubject();
   const navigate = useNavigate();
@@ -26,20 +20,11 @@ export default function SubjectProjectsPage() {
   const createProject = useProjectsStore((s) => s.createProject);
 
   useEffect(() => {
-    // `status` spelled out even though `"active"` is `getProjects`' default.
-    // The store replaces its whole query rather than merging into it, so the
-    // index asking for `"all"` cannot leak in here — but the two pages sit on
-    // one store and both re-run *their own* query on every update, so which of
-    // them this list belongs to should be readable without going and checking
-    // what the default is.
+    // Spelled out though it is the default: the store is shared with the index.
     void loadProjects({ subjectId: subject.id, status: "active" });
   }, [loadProjects, subject.id]);
 
-  useEffect(() => {
-    const onUpdated = () => void loadProjects();
-    window.addEventListener(PROJECTS_UPDATED_EVENT, onUpdated);
-    return () => window.removeEventListener(PROJECTS_UPDATED_EVENT, onUpdated);
-  }, [loadProjects]);
+  useWindowEvent(PROJECTS_UPDATED_EVENT, () => void loadProjects());
 
   const create = useCallback(
     (name: string) => {

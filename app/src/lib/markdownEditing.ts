@@ -1,18 +1,11 @@
 /**
- * The keyboard niceties of the document editor, as pure functions over a
- * string and a selection — the part of a markdown editor that is worth
- * testing without a DOM.
- *
- * Each returns a `TextEdit`, a replacement of one span by another with the
- * caret's landing spot, or `null` to say "this key means nothing special
- * here, let the textarea have it". The component turns an edit into a real
- * insertion (`document.execCommand("insertText")`), which is why the shape is
- * a splice rather than a new value: an insertion the browser makes is one it
- * can undo, and a value swapped in from React is not.
+ * The document editor's key handling as pure functions. Each returns a
+ * `TextEdit` or `null` (let the textarea have the key). It is a splice, not a
+ * new value, because the component applies it with `execCommand("insertText")`
+ * — an insertion the browser makes is undoable; a React value swap is not.
  */
 
-/** Replace `value.slice(start, end)` with `text`, then put the caret at
- *  `caret`. */
+/** Replace `value.slice(start, end)` with `text`, caret at `caret`. */
 export interface TextEdit {
   start: number;
   end: number;
@@ -20,40 +13,27 @@ export interface TextEdit {
   caret: number;
 }
 
-/** Two spaces: what Tab writes, and what Shift+Tab takes back. */
 export const INDENT = "  ";
 
-/** A list marker at the start of a line — `- `, `* `, `+ `, `1. `, `1) ` —
- *  optionally carrying a task box (`- [ ] `, `- [x] `). Groups: indentation,
- *  the marker itself, the box. */
+/** A list-line prefix, optionally with a task box. Groups: indent, marker, box. */
 const LIST_LINE = /^([ \t]*)([-*+]|\d+[.)])[ \t]+(\[[ xX]\][ \t]+)?/;
 
-/** Start of the line the caret is on. */
 function lineStart(value: string, at: number): number {
   return value.lastIndexOf("\n", at - 1) + 1;
 }
 
-/** End of the line the caret is on (the index of its `\n`, or the end). */
 function lineEnd(value: string, at: number): number {
   const i = value.indexOf("\n", at);
   return i === -1 ? value.length : i;
 }
 
-/** The pure form of a `TextEdit`, for tests and for the fallback path when the
- *  browser will not perform the insertion itself. */
+/** For tests, and the fallback when the browser will not insert. */
 export function applyEdit(value: string, edit: TextEdit): string {
   return value.slice(0, edit.start) + edit.text + value.slice(edit.end);
 }
 
-/**
- * Tab and Shift+Tab.
- *
- * With the caret on one line, Tab writes two spaces where the caret is —
- * the thing a Tab in a note is almost always for, a nested list item — and
- * Shift+Tab removes up to two leading spaces from that line. Across a
- * multi-line selection both act on every line touched, the way a code editor
- * does, so a block of list items nests and un-nests together.
- */
+/** Tab inserts INDENT at the caret; Shift+Tab strips up to two leading spaces.
+ *  A multi-line selection indents or outdents every line touched. */
 export function tabEdit(
   value: string,
   selStart: number,
@@ -83,16 +63,9 @@ export function tabEdit(
 }
 
 /**
- * Enter at the end of a list line.
- *
- * Continues the list: `- ` gives another `- `, `3. ` gives `4. `, `- [x] `
- * gives an unticked `- [ ] `, each at the same indentation. Enter on an item
- * that is still empty — the marker and nothing after it — is the gesture for
- * "I am done with this list", so the marker is removed and the line left
- * blank rather than a second empty bullet being added.
- *
- * `null` when the caret is not at the end of a list line, or when there is a
- * selection: both are an ordinary Enter.
+ * Enter at the end of a list line continues the list (`3. ` → `4. `, a ticked
+ * box → `[ ] `); on an empty item it removes the marker to end the list.
+ * `null` for a selection or a caret not at the end of a list line.
  */
 export function enterEdit(value: string, selStart: number, selEnd: number): TextEdit | null {
   if (selStart !== selEnd) return null;
@@ -105,7 +78,6 @@ export function enterEdit(value: string, selStart: number, selEnd: number): Text
 
   const [prefix, indent, marker, box] = m;
   if (line.length === prefix.length) {
-    // An empty item: drop the marker and stay on the line.
     return { start: from, end: to, text: "", caret: from };
   }
 
@@ -116,20 +88,8 @@ export function enterEdit(value: string, selStart: number, selEnd: number): Text
   return { start: selStart, end: selEnd, text, caret: selStart + text.length };
 }
 
-/**
- * A picture arriving at the caret.
- *
- * Markdown is happy to put an image inside a paragraph, and inline is exactly
- * what a pasted screenshot must not be: it lands on the baseline of whatever
- * was being typed, a full-width figure wedged into a sentence. So the tag is
- * given a line of its own — a blank line before it unless the caret already
- * has one, a break after it unless the text already breaks — which is what
- * the preview needs to draw it as a block, and what the student would have
- * typed by hand.
- *
- * The caret lands *after* the picture, on the line below, so writing carries
- * on under it.
- */
+/** Insert an image as its own block (blank lines around it, so it is not drawn
+ *  inline), caret after it. */
 export function imageEdit(
   value: string,
   selStart: number,

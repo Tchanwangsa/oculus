@@ -12,19 +12,8 @@ import { displayCode } from "@/lib/format";
 import type { DbProject } from "@/lib/projects";
 
 /**
- * Where a task lives, as a list: nowhere, or one project.
- *
- * One control for the two questions that have the same answer — *where shall
- * this new task go* (`NewTaskButton`) and *where does this task actually
- * belong* (`refileTask`, on the task page and in the universal table). They
- * were the same forty lines twice, which is the kind of duplication that stays
- * right until one of them grows a fold the other does not have.
- *
- * A plain list rather than a `Select`: a select inside a popover is a portal
- * inside a portal, and each row wants its subject's glyph beside the project's
- * name anyway. Archived projects sit behind a fold — `NewProjectButton`'s
- * `Past subjects (n)` disclosure, behind the same caret — because filing
- * something into last semester's work is rare but not wrong.
+ * Where a task lives: Unfiled or one project, archived ones behind a fold.
+ * A plain list, not a `Select` — that would be a portal inside the popover.
  */
 export function ProjectDestinations({
   projects,
@@ -33,14 +22,11 @@ export function ProjectDestinations({
   unfiledHint,
   className,
 }: {
-  /** Every project the caller wants offered, archived ones included —
-   *  `status: "all"`, as the pages that use this read them. */
+  /** Archived ones included (`status: "all"`). */
   projects: DbProject[];
-  /** The destination currently set; `null` is unfiled. */
+  /** `null` is unfiled. */
   value: number | null;
   onPick: (projectId: number | null) => void;
-  /** The line under the Unfiled row. It differs by caller: a new task has not
-   *  been decided about, an existing one is being taken out of a project. */
   unfiledHint?: string;
   className?: string;
 }) {
@@ -53,8 +39,7 @@ export function ProjectDestinations({
   );
   const [archivedOpen, setArchivedOpen] = useState(false);
 
-  // A selection inside the fold can never be hidden by it, or a task filed in
-  // an archived project would reopen the picker showing a tick nowhere at all.
+  // The fold never hides the current selection.
   const archivedSelected = archived.some((p) => p.id === value);
 
   return (
@@ -109,14 +94,7 @@ export function ProjectDestinations({
   );
 }
 
-/**
- * {@link ProjectDestinations} in a popover, over whatever the caller draws as
- * the trigger — a cell in the universal table, a property row on a task's
- * page.
- *
- * Picking closes it, because unlike the composer's copy there is nothing else
- * to fill in: the pick *is* the write.
- */
+/** {@link ProjectDestinations} in a popover; picking closes it and writes. */
 export function ProjectPicker({
   projects,
   value,
@@ -129,7 +107,6 @@ export function ProjectPicker({
   projects: DbProject[];
   value: number | null;
   onPick: (projectId: number | null) => void;
-  /** The heading over the list — "In", "Move to", whatever the verb is. */
   label?: string;
   unfiledHint?: string;
   align?: "start" | "center" | "end";
@@ -160,8 +137,6 @@ export function ProjectPicker({
   );
 }
 
-/** One destination: nowhere, or a project. Its own component only so the open
- *  list and the folded one cannot drift apart. */
 function DestinationRow({
   label,
   hint,
@@ -171,7 +146,7 @@ function DestinationRow({
 }: {
   label: string;
   hint?: string;
-  /** `null` is the unfiled row, which wears a tray rather than a board. */
+  /** `null` is the unfiled row. */
   project: DbProject | null;
   selected: boolean;
   onPick: () => void;

@@ -29,12 +29,8 @@ import {
 import { libraryPath, openLibraryPath } from "@/lib/openFile";
 import { cn } from "@/lib/utils";
 
-/**
- * One line of work in the timeline — a tool call, a block of reasoning, an
- * error — collapsed to `[icon] [title] [status]` with a chevron that shows on
- * hover, expanding to its detail. bb's row shape: the timeline stays a
- * readable list of what happened, and the transcript is behind a click.
- */
+/** Timeline work rows (tool call, reasoning, error): `[icon] [title] [status]`,
+ *  expanding to detail on click. */
 
 export const TOOL_ICON: Record<ToolKind, Icon> = {
   read: FileText,
@@ -73,8 +69,7 @@ export function RowShell({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const canOpen = expandable && !!children;
-  // A path the agent touched is a file the reader may want to see, so it opens
-  // in the side panel instead of being text to retype into the ⌘K palette.
+  // A library path in `em` becomes a link that opens the file.
   const path = libraryPath(em);
   const tint =
     tone === "error"
@@ -84,17 +79,12 @@ export function RowShell({
         : "text-muted-foreground";
   return (
     <div className={cn("min-w-0 transition-opacity", dim && !open && "opacity-40 hover:opacity-100")}>
-      {/* The row is a div holding two controls rather than one button wrapping
-          another: a path is a link and the rest of the row is a disclosure, and
-          nesting those would be both invalid and unreachable from a keyboard.
-          The hover tint they share is the group's, so it still reads as one
-          row. */}
+      {/* Sibling controls, not nested buttons: the path link and the disclosure. */}
       <div
         className={cn(
           "group/row flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-left text-xs leading-5 transition-colors",
           tint,
-          // `hover:`, not `group-hover/row:` — this *is* the group, and a
-          // group-hover utility only ever matches its descendants.
+          // `hover:`, not `group-hover/row:` — this *is* the group.
           tone !== "error" && "hover:text-foreground",
         )}
       >
@@ -109,17 +99,9 @@ export function RowShell({
           )}
         >
           <IconC size={14} className="shrink-0" />
-          {/* **Which part of the row gives way is the row's own answer.** With
-              an `em` the title is a verb — "Read", "Ran", "Looked up" — and the
-              path or command beside it is both the long part and the part
-              worth clipping, so the verb holds its width and the `em`
-              truncates. With no `em` the title *is* the long part: a bundle's
-              whole summary ("Explored 1 file, 1 search, looked up the library
-              once, ran 1 command") or an error's first line. Left at
-              `shrink-0` that row cannot narrow at all, and in a 300px dock it
-              does not merely overflow its own line — the scroller it sits in
-              gains a horizontal axis and the entire conversation slides
-              sideways under it. Nothing is lost to the clip: the row opens. */}
+          {/* With an `em`, the verb holds and the `em` truncates; without one the
+              title is the long part and must truncate, or a narrow dock's
+              scroller gains a horizontal axis. */}
           <span
             className={cn("min-w-0", em ? "shrink-0" : "truncate")}
             title={em ? undefined : title}
@@ -166,8 +148,7 @@ export function RowShell({
   );
 }
 
-/** Tool args as `key: value` lines, values clipped — the arguments are the
- *  header of the detail card, not its content. */
+/** Tool args as `key: value` lines, values clipped. */
 function args(input: unknown): [string, string][] {
   if (!input || typeof input !== "object") return [];
   return Object.entries(input as Record<string, unknown>)
@@ -259,18 +240,8 @@ export const ThinkingRow = memo(function ThinkingRow({
   );
 });
 
-/**
- * A turn that failed because the agent has no usable credentials — which is
- * not a crash and should not be drawn as one.
- *
- * The plain error row is `destructive` throughout, and that is right for a
- * turn that genuinely broke: there is nothing to do but read it. This is the
- * opposite case. The agent is fine, the app is fine, and one button fixes it,
- * so the card is the timeline's own `card` on a hairline border with the mark
- * in `brand` — the accent this app uses for things in flight and things you
- * can act on — and only the provider's own sentence underneath stays quiet.
- * Red here would put a student off a two-click repair.
- */
+/** A turn that failed for lack of credentials: a fixable state, so `brand` and
+ *  a Sign in button rather than a destructive error row. */
 const SignedOutCard = memo(function SignedOutCard({
   provider,
   message,
@@ -284,9 +255,6 @@ const SignedOutCard = memo(function SignedOutCard({
     <div className="flex items-start gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5">
       <SignIn size={14} className="mt-0.5 shrink-0 text-brand" />
       <div className="min-w-0 flex-1">
-        {/* The fact, not the raw message: "Failed to authenticate: OAuth
-            session expired and could not be refreshed" says what happened to
-            a program, not what happened to the student. */}
         <div className="text-xs text-foreground">{providerLabel(provider)} is signed out</div>
         <p className="mt-0.5 break-words text-[11.5px] leading-relaxed text-muted-foreground">
           {message}
@@ -307,8 +275,7 @@ export const ErrorRow = memo(function ErrorRow({
   onSignIn,
 }: {
   text: string;
-  /** Set when the message is that provider saying it has no credentials —
-   *  `parseErrorMeta` on the row, or the `error` event's own `auth`. */
+  /** The provider reporting missing credentials (`parseErrorMeta`, or the event's `auth`). */
   auth?: Provider;
   onSignIn?: (provider: Provider) => void;
 }) {

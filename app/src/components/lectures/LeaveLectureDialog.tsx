@@ -11,11 +11,8 @@ import { useLeaveLecture } from "@/stores/leaveLectureStore";
 
 /**
  * Asks before a playing lecture is left with no tab to come back to. Mounted
- * once, in the shell — the things that raise it (the tab strip's ×, a
- * navigation out of the lecture's own tab) don't share a subtree.
- *
- * It says where the progress went, because that is the actual worry behind the
- * hesitation, and the answer is that it is already saved.
+ * once in the shell, since its triggers (tab ×, navigating away) share no
+ * subtree. It says the place is saved, which is the actual worry.
  */
 export function LeaveLectureDialog() {
   const pending = useLeaveLecture((s) => s.pending);

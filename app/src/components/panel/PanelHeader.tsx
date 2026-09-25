@@ -8,27 +8,17 @@ import {
 
 interface PanelHeaderProps {
   title: string;
-  /**
-   * Promote what the panel is showing to a full page. `newTab` is the ⌘-click
-   * — the web's own rule for "same thing, somewhere else" — and plain clicks
-   * take over the tab the peek was opened from, which is the page it is
-   * already docked against.
-   */
+  /** Promote to a full page: in this tab, or a new one on ⌘-click (`newTab`). */
   onExpand?: (newTab: boolean) => void;
   onClose: () => void;
   /** Right-aligned controls (e.g. the PDF ↔ Markdown toggle). */
   actions?: React.ReactNode;
 }
 
-/**
- * The side panel's title row. It lives with the *contents* rather than with
- * the shell because its controls belong to them: the expand target and the
- * actions are both things only the open item knows, and hoisting them into the
- * shell would mean threading that state back up through it.
- */
+/** The side panel's title row, rendered by each item since only it knows its
+ *  expand target and actions. */
 export function PanelHeader({ title, onExpand, onClose, actions }: PanelHeaderProps) {
   return (
-    /* Controls sit together top-left, Notion-style. */
     <div className="h-10 shrink-0 flex items-center gap-0.5 px-2 border-b border-border-subtle">
       {onExpand && (
         <Tooltip>

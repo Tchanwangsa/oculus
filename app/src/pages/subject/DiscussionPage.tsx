@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import {
   ChatCircle,
   ChatsCircle,
@@ -12,8 +11,10 @@ import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
-import { humanizeSlug } from "@/lib/format";
+import { fmtShortDate, humanizeSlug } from "@/lib/format";
 import type { DbFile } from "@/lib/db";
+import { readCourseFile } from "@/lib/courseFiles";
+import { ListCard } from "@/components/ui/PageParts";
 
 /** Header metadata parsed from a scraped thread doc (see ed.rs). */
 interface ThreadMeta {
@@ -27,11 +28,8 @@ interface ThreadMeta {
   category: string | null;
 }
 
-/**
- * The doc's header is `# title`, a `**#31 · question · Category · resolved**`
- * meta line, then the By-line — all written by ed.rs, so only the first few
- * hundred bytes matter.
- */
+/** The header ed.rs writes: `# title`, a `**#31 · question · Category ·
+ *  resolved**` meta line, then the By-line. */
 function parseThreadMeta(md: string): ThreadMeta {
   const head = md.slice(0, 500);
 
@@ -48,8 +46,7 @@ function parseThreadMeta(md: string): ThreadMeta {
     : tokens.includes("unresolved")
       ? false
       : null;
-  // Whatever the meta line carries beyond number, type and status is the
-  // board category path ("Assignments / A1").
+  // The rest of the meta line is the category path.
   const category =
     tokens.find(
       (t) =>
@@ -74,9 +71,7 @@ function useThreadMetas(files: DbFile[]): Record<number, ThreadMeta> {
     let cancelled = false;
     Promise.all(
       files.map(async (f) => {
-        const md = await invoke<string>("read_course_file", {
-          relativePath: f.relative_path,
-        }).catch(() => "");
+        const md = await readCourseFile(f.relative_path).catch(() => "");
         return [f.id, parseThreadMeta(md)] as const;
       }),
     ).then((entries) => {
@@ -88,10 +83,6 @@ function useThreadMetas(files: DbFile[]): Record<number, ThreadMeta> {
   }, [files]);
 
   return metas;
-}
-
-function fmtDay(d: Date): string {
-  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 }
 
 /**
@@ -139,7 +130,7 @@ export default function SubjectDiscussionPage() {
   return (
     <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-5">
-        <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">
+        <ListCard>
           {threads.map((f) => {
             const number = /^(\d+)-/.exec(f.filename)?.[1];
             const meta = metas[f.id];
@@ -175,7 +166,7 @@ export default function SubjectDiscussionPage() {
                   </span>
                 )}
                 <span className="shrink-0 w-12 text-right text-[11px] text-muted-foreground">
-                  {meta?.posted ? fmtDay(meta.posted) : ""}
+                  {meta?.posted ? fmtShortDate(meta.posted) : ""}
                 </span>
                 <span className="shrink-0 w-10 text-right text-[11px] text-muted-foreground tabular-nums">
                   {number ? `#${Number(number)}` : ""}
@@ -186,7 +177,7 @@ export default function SubjectDiscussionPage() {
               </button>
             );
           })}
-        </div>
+        </ListCard>
       </div>
     </div>
   );

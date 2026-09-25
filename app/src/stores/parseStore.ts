@@ -1,26 +1,17 @@
 import { create } from "zustand";
 
-/**
- * The `parse-status` event, exactly as Rust emits it.
- *
- * `status` is `"queued" | "running" | "quality" | "error"`. **`"quality"` is
- * the terminal success**, and the name outlived the tier it was named after:
- * there is only one parse now, but `files.parse_status = 'quality'` is what
- * every already-parsed row in the library says and what Rust's "already done"
- * check reads, so the string is frozen.
- */
+/** The `parse-status` event. `status`: queued | running | quality | error, where
+ *  `"quality"` is success (frozen: every parsed row's `files.parse_status`). */
 export interface ParseJob {
   relative_path: string;
   subject_id: number;
   status: string;
-  /** "running". */
   pages_done?: number;
   total_pages?: number;
   /** "queued": place in line, when it is known. */
   position?: number;
-  /** "error": human-readable, safe to display. */
+  /** "error": safe to display. */
   error?: string;
-  /** "error": machine-readable discriminant. */
   kind?: string;
   /** "error": could retrying THIS file ever work? */
   retryable?: boolean;
@@ -28,8 +19,8 @@ export interface ParseJob {
   latching?: boolean;
 }
 
-/** The discriminants of a file's last failure, kept so the failure UI can say
- *  what went wrong and so the background sweep knows what not to re-kick. */
+/** A file's last failure; the background sweep reads it to know what not to
+ *  re-kick. */
 export interface ParseFailure {
   message: string;
   kind?: string;
@@ -38,10 +29,8 @@ export interface ParseFailure {
   at: number;
 }
 
-/** A failure that condemns the whole library rather than one file — no token,
- *  a rejected token, exhausted quota. Every parse now costs metered cloud
- *  quota, so this is what the sweep backs off against instead of marching
- *  every remaining file into the same error. */
+/** A failure that condemns every file (no token, rejected token, spent
+ *  quota); the sweep backs off against it rather than repeat the error. */
 export interface ParseLatch {
   message: string;
   kind?: string;
@@ -49,20 +38,16 @@ export interface ParseLatch {
 }
 
 interface ParseState {
-  /** relative_path -> latest status string (for file-row badges). */
+  /** Keyed by relative_path, as are `jobs` (queued/running only) and `failures`. */
   statuses: Record<string, string>;
-  /** relative_path -> active job (only queued/running kept). */
   jobs: Record<string, ParseJob>;
-  /** relative_path -> why its last attempt failed. Cleared when it moves again. */
   failures: Record<string, ParseFailure>;
-  /** The latching condition in force, if any. */
   latch: ParseLatch | null;
 
   update: (ev: ParseJob) => void;
   /** Merge in disk-derived statuses without touching live jobs. */
   merge: (statuses: Record<string, string>) => void;
-  /** Lift the latch — anything that plausibly fixed the condition (a token
-   *  saved, a parse that then succeeded) should call this. */
+  /** Call on anything that plausibly fixed the latch, e.g. a token saved. */
   clearLatch: () => void;
 }
 
@@ -96,9 +81,7 @@ export const useParseStore = create<ParseState>((set) => ({
           latch = { message: ev.error ?? "Parsing is unavailable", kind: ev.kind, at: Date.now() };
         }
       } else {
-        // The file is moving, so whatever it last failed with is history — and
-        // a parse getting anywhere at all is proof the latching condition (if
-        // there was one) has lifted.
+        // Any progress clears this file's failure and proves the latch lifted.
         delete failures[ev.relative_path];
         latch = null;
       }

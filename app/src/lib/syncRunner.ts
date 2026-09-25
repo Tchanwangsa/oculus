@@ -1,21 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import {
-  getSubjects, getSyncOptions, startSyncRun,
-  type SyncOrigin,
-} from "@/lib/db";
+import { getSubjects, getSyncOptions, startSyncRun } from "@/lib/db";
 import { useSyncStore } from "@/stores/syncStore";
 
-/**
- * Kick off a sync of the currently selected subjects.
- *
- * The Sync page's button is the only caller since automations were removed, so
- * every run is `manual` today; the `origin` parameter stays because `sync_runs`
- * already records it and rows written by the old scheduler still say
- * `scheduled`.
- *
- * Returns the run id — the key the run's file ledger is written under.
- */
-export async function triggerSync(origin: SyncOrigin): Promise<number> {
+/** Window event raised once a `scrape-file`'s row is written, so a page that
+ *  reloads on it reads the new row rather than racing the upsert. */
+export const FILE_SCRAPED_EVENT = "oculus:file-scraped";
+export type FileScraped = { subject_id: number; canvas_id: number | null };
+
+/** Syncs the selected subjects; returns the run id its file ledger is keyed
+ *  under. */
+export async function triggerSync(): Promise<number> {
   if (useSyncStore.getState().scraping) throw new Error("A sync is already running");
   const sel = (await getSubjects())
     .filter((s) => s.selected)
@@ -23,7 +17,7 @@ export async function triggerSync(origin: SyncOrigin): Promise<number> {
   if (sel.length === 0) throw new Error("No subjects selected");
 
   const options = await getSyncOptions();
-  const runId = await startSyncRun(sel.map((s) => s.code), origin);
+  const runId = await startSyncRun(sel.map((s) => s.code));
   useSyncStore.getState().begin(runId, sel);
   try {
     await invoke("scrape_content", { subjects: sel, options });

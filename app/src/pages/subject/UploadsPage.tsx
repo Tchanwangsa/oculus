@@ -1,42 +1,31 @@
-import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useMemo, useState } from "react";
 import { CircleNotch, Trash, UploadSimple, Warning } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useParseStore } from "@/stores/parseStore";
-import { setParseStatusByPath, type DbFile } from "@/lib/db";
+import { useReconcileParseStatus } from "@/hooks/useReconcileParseStatus";
+import type { DbFile } from "@/lib/db";
 import { fileIconFor, isPdfBacked } from "@/lib/fileTypes";
 import { fmtSize } from "@/lib/format";
 import { openFileSmart } from "@/lib/openFile";
 import { useFilesTab } from "@/pages/subject/FilesPage";
 import { UPLOADS_CHANGED_EVENT, removeUpload } from "@/lib/uploads";
+import { useWindowEvent } from "@/hooks/useEvents";
+import { EmptyState, ListCard } from "@/components/ui/PageParts";
 
 /**
- * A subject's own files — the tutor's handout, last year's exam, a friend's
- * notes: material that belongs to the subject but was never on Canvas.
+ * A subject's own files — material that belongs to the subject but was never
+ * on Canvas. Once Rust has copied the bytes into `courses/<code>/uploads/`, an
+ * upload is an ordinary library file, so the pipeline does the rest.
  *
- * The page is thin on purpose. Once Rust has copied the bytes into
- * `courses/<code>/uploads/`, an upload is an ordinary library file, so nothing
- * here re-implements parsing, conversion, badges or opening — it reuses the
- * Downloads row's shapes and lets the pipeline do the rest.
- *
- * The adding — the picker, the copy, the "Adding…" rows and the problems —
- * is the Files tab's (`useUploadImport`, reached through `useFilesTab()`),
- * not this page's, because so is the drop: a file dragged from Finder lands
- * anywhere on the tab, on whichever sub-tab is showing, and the rows it
- * produces have to outlive a switch to this one. This page only draws them.
+ * The adding (picker, copy, "Adding…" rows, problems) belongs to the Files tab
+ * (`useUploadImport` via `useFilesTab()`), because a Finder drop lands on
+ * whichever sub-tab is showing and its rows must outlive a switch to this one.
  */
 export default function SubjectUploadsPage() {
   const subject = useFilesTab();
@@ -48,26 +37,10 @@ export default function SubjectUploadsPage() {
   const [deleting, setDeleting] = useState(false);
 
   const liveStatuses = useParseStore((s) => s.statuses);
-  const mergeParseStatuses = useParseStore((s) => s.merge);
 
-  useEffect(() => {
-    window.addEventListener(UPLOADS_CHANGED_EVENT, reload);
-    return () => window.removeEventListener(UPLOADS_CHANGED_EVENT, reload);
-  }, [reload]);
+  useWindowEvent(UPLOADS_CHANGED_EVENT, reload);
 
-  // Same reconciliation Downloads does: a file parsed in an earlier session has
-  // its artifacts on disk and nothing in this session's store.
-  useEffect(() => {
-    const paths = uploads.filter((f) => isPdfBacked(f.filename)).map((f) => f.relative_path);
-    if (paths.length === 0) return;
-    invoke<Array<[string, string]>>("scan_parsed_files", { relativePaths: paths })
-      .then((entries) => {
-        if (entries.length === 0) return;
-        mergeParseStatuses(Object.fromEntries(entries));
-        setParseStatusByPath(entries).catch(() => {});
-      })
-      .catch(() => {});
-  }, [uploads, mergeParseStatuses]);
+  useReconcileParseStatus(uploads);
 
   const empty = !loading && uploads.length === 0 && !busy;
 
@@ -114,9 +87,17 @@ export default function SubjectUploadsPage() {
               ))}
             </div>
           ) : empty ? (
-            <EmptyState onChoose={choose} />
+            <EmptyState
+              icon={<UploadSimple size={24} className="text-muted-foreground/40" aria-hidden />}
+              title="Drop files here"
+              body="PDF, Word, PowerPoint and Excel are parsed and become searchable."
+            >
+              <Button variant="outline" size="sm" onClick={choose}>
+                Choose files
+              </Button>
+            </EmptyState>
           ) : (
-            <div className="divide-y divide-border-subtle overflow-hidden rounded-lg border border-border">
+            <ListCard>
               {importing.map((name) => (
                 <ImportingRow key={`importing:${name}`} name={name} />
               ))}
@@ -128,81 +109,44 @@ export default function SubjectUploadsPage() {
                   onDelete={() => setPendingDelete(f)}
                 />
               ))}
-            </div>
+            </ListCard>
           )}
         </div>
       </div>
 
-      <Dialog
+      <ConfirmDialog
         open={!!pendingDelete}
-        onOpenChange={(open) => !open && !deleting && setPendingDelete(null)}
-      >
-        <DialogContent className="sm:max-w-sm" showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>Remove this file?</DialogTitle>
-            <DialogDescription>
-              {pendingDelete
-                ? `“${pendingDelete.filename}” is deleted from your library, along with what was read out of it. Nothing on Canvas changes, and your own copy of the file is untouched.`
-                : ""}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={deleting}
-              onClick={() => setPendingDelete(null)}
-            >
-              Keep it
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={deleting}
-              onClick={async () => {
-                if (!pendingDelete) return;
-                setDeleting(true);
-                try {
-                  await removeUpload(pendingDelete);
-                  setPendingDelete(null);
-                } catch (e) {
-                  report(String(e));
-                  setPendingDelete(null);
-                } finally {
-                  setDeleting(false);
-                }
-              }}
-            >
-              {deleting && <CircleNotch className="animate-spin" aria-hidden />}
-              {deleting ? "Removing…" : "Remove"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onCancel={() => setPendingDelete(null)}
+        title="Remove this file?"
+        description={
+          pendingDelete
+            ? `“${pendingDelete.filename}” is deleted from your library, along with what was read out of it. Nothing on Canvas changes, and your own copy of the file is untouched.`
+            : ""
+        }
+        confirmLabel="Remove"
+        busyLabel="Removing…"
+        busy={deleting}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          setDeleting(true);
+          try {
+            await removeUpload(pendingDelete);
+            setPendingDelete(null);
+          } catch (e) {
+            report(String(e));
+            setPendingDelete(null);
+          } finally {
+            setDeleting(false);
+          }
+        }}
+      />
     </>
   );
 }
 
-/** Nothing here yet — the one screen where the drop target is worth drawing in
- *  the layout, since there is no list for the Files tab's overlay to sit
- *  over. "Drop files here" is true of the whole tab, not just this box. */
-function EmptyState({ onChoose }: { onChoose: () => void }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border px-6 py-14 text-center">
-      <UploadSimple size={24} className="text-muted-foreground/40" aria-hidden />
-      <div className="space-y-1">
-        <p className="text-sm text-foreground">Drop files here</p>
-        <p className="text-[12px] text-muted-foreground">
-          PDF, Word, PowerPoint and Excel are parsed and become searchable.
-        </p>
-      </div>
-      <Button variant="outline" size="sm" onClick={onChoose}>
-        Choose files
-      </Button>
-    </div>
-  );
-}
-
-/** A file mid-copy. Same geometry as a real row so the list doesn't jump when
- *  the two swap. */
+/** With no list for the Files tab's drop overlay to sit over, the drop target
+ *  is drawn in the layout. "Drop files here" is true of the whole tab. */
+/** A file mid-copy; same geometry as a real row so the list doesn't jump. */
 function ImportingRow({ name }: { name: string }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2">
@@ -225,9 +169,7 @@ function UploadRow({
   onDelete: () => void;
 }) {
   const Icon = fileIconFor(file.filename);
-  // This session's live status if there is one, the column it was left at
-  // otherwise. Only PDF-backed files have a state worth a word — for the rest
-  // the column stays empty rather than saying "not searchable" on every row.
+  // Live status, else the stored column. Only PDF-backed files get a word.
   const label = useMemo(() => {
     if (!isPdfBacked(file.filename)) return "";
     switch (status ?? file.parse_status) {
@@ -250,7 +192,6 @@ function UploadRow({
         <span className="flex-1 truncate text-[12px] text-foreground">
           {file.filename}
         </span>
-        {/* Fixed-width, right-aligned columns so every row lines up. */}
         <span
           className={cn(
             "w-14 shrink-0 text-right text-[10px] uppercase tracking-wide",

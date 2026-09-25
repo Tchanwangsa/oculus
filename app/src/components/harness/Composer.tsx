@@ -24,44 +24,11 @@ import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
 import { cn } from "@/lib/utils";
 
 /**
- * One box: the text, then a row carrying the model picker on the left and the
- * usage wheel and send/stop button on the right. Enter sends, Shift+Enter
- * breaks a line — bb's keys.
- *
- * While a turn runs the box still takes a message: it is *queued* rather than
- * sent (Rust holds it — `Queue` in `app/src-tauri/src/harness/mod.rs`) and it
- * appears as a pending bubble at the end of the thread. Stop then keeps its
- * word — nothing more goes out — and hands back what was waiting, which
- * arrives here as `restore` and lands in the box rather than being lost.
- * So while a turn runs there are two buttons and not one: stop is always
- * reachable, and send appears beside it as soon as there is something to
- * queue.
- *
- * The row's controls are all one height (24px). A send button larger than the
- * picker beside it reads as the box's subject rather than its verb.
- *
- * Scope sits *above* the box rather than in the control row, and only while
- * the thread is new: it is a choice made once, before the first message, and
- * an open thread cannot change it. Showing a dead control under every message
- * for the rest of the thread spends the row on nothing.
- *
- * `@` opens a file menu, narrowed to the thread's subject. Picking a file
- * writes its **library path** into the message — nothing is read here and no
- * content is attached. The agent has the library in front of it and its own
- * tools for opening a file; a path is all it was ever missing, and one it can
- * hand straight to `oculus read`. The box *draws* that path as a chip
- * carrying the file's own glyph and display name (`MentionInput.tsx` over the
- * shared `app/src/components/markdown/FileChip.tsx`, which the thread's own
- * bubbles use too), which is why the text here is not the box's value but its
- * serialization: what is read out of the editor, checked for emptiness and
- * handed to `onSend` is always the path form.
- *
- * The `@` machinery itself is no longer this file's: the token parser, the
- * lookup, the list and its keys live in `./useMentionMenu.ts` and
- * `./MentionMenu.tsx`, because a task body wants the same mentions
- * (`app/src/pages/TaskPage.tsx`). What stays here is the only part that was
- * ever the composer's — the scope it narrows to, and the Enter that sends
- * when the menu is not the one claiming it.
+ * The chat box: text, then model picker / usage / send+stop. Enter sends,
+ * Shift+Enter breaks. While a turn runs a send is queued by Rust (`Queue` in
+ * `app/src-tauri/src/harness/mod.rs`); Stop hands the queue back as `restore`.
+ * Scope is chosen above the box, only while the thread is new. `@` mentions
+ * insert library paths (drawn as chips by `MentionInput`), never file content.
  */
 export function Composer({
   provider,
@@ -94,13 +61,11 @@ export function Composer({
   /** null is the general thread — the whole library. */
   subjectId: number | null;
   onSubject: (id: number | null) => void;
-  /** An open thread keeps its scope too, for the same reason. */
   subjectLocked: boolean;
   running: boolean;
   usage: ThreadUsage | null;
   rateLimits: RateWindow[];
-  /** Messages stop dropped out of the queue, handed back to be typed over.
-   *  The counter is what is watched: the same text twice is two restores. */
+  /** What Stop dropped from the queue; `n` makes the same text twice two restores. */
   restore?: { text: string; n: number } | null;
   onRestored?: () => void;
   onProvider: (p: Provider) => void;
@@ -110,69 +75,34 @@ export function Composer({
   onStop: () => void;
   autoFocus?: boolean;
 }) {
-  /** The message the box would send: chips already back in their path form.
-   *  Every emptiness check below reads this, not the editor. */
+  /** The serialized message (chips as paths); emptiness checks read this. */
   const [text, setText] = useState("");
   const ref = useRef<MentionInputHandle>(null);
-  /** The `@` menu, scoped to this thread's subject — `null` being the general
-   *  thread, which is the whole library. It positions itself at the caret and
-   *  needs nothing from this file to do it. */
   const mentions = useMentionMenu({ subjectId, input: ref });
-  /** This whole box, for the file drop below: a drag is aimed at a surface,
-   *  and the surface is the box and its strip of attachments rather than the
-   *  editor's text. It is no longer the `@` menu's anchor — that is the caret
-   *  now — so it is this file's own ref. */
+  /** The drop target for attachments: the whole box, not just the editor. */
   const wrapRef = useRef<HTMLDivElement>(null);
-  /**
-   * Pictures pasted or dropped in, still only in memory.
-   *
-   * They are written to the library on send and not before, so a screenshot
-   * pasted and then removed leaves nothing on disk; what goes out is their
-   * paths, appended to the message — the agent opens them itself, exactly as
-   * it opens a mention. The whole gesture is `useAttachments`, shared with the
-   * lecture dock's box so a drop means the same thing in both.
-   */
+  /** Pasted/dropped pictures, in memory until send writes them to the library. */
   const att = useAttachments(wrapRef);
 
-  // What stop gave back. It is put *before* anything already typed, because
-  // it was typed first, and the box is focused with the caret at the end of
-  // it so the next key carries on where the student left off. Its mentions
-  // come back as chips rather than as the paths they were sent as — a
-  // restored message should read the way it read when it was typed.
+  // Restored text goes before anything typed since, because it was typed first.
   useEffect(() => {
     if (!restore) return;
     ref.current?.prepend(restore.text);
     onRestored?.();
   }, [restore, onRestored]);
 
-  // Only the provider the picker is on is worth asking a CLI about: a
-  // composer that is on Claude should not spawn the others for lists nobody
-  // has opened the menu to see.
+  // Only the selected provider's CLI is asked for its models.
   const { providers: pickerProviders } = useProviderModels(provider);
 
-  /**
-   * The warning *before* the failure: the agent this box would send to has no
-   * credentials, said here rather than found out as a red row after sending.
-   *
-   * Three states, the discipline `providerHealth` already follows for the same
-   * reason: `unknown` — the probe has not landed, or this is opencode, whose
-   * store is per provider — draws **nothing at all**, because a line that
-   * flashed the wrong answer for a beat would be worse than no line. Only a
-   * measured `out` says so.
-   *
-   * And it never disables sending. The status is a cached read of a CLI's own
-   * store, which a student can change in a terminal without this app hearing
-   * about it; locking the box on a stale read would be the app refusing to do
-   * the one thing it is for.
-   */
+  // Warn only on a measured `out` (never `unknown`), and never disable sending:
+  // the status is a cached read the student can change from a terminal.
   const { statuses, recheck } = useSignInStatus();
   const signedOut = signInState(statuses, provider) === "out";
   const [signInOpen, setSignInOpen] = useState(false);
   const signIn = useSignIn(recheck);
 
-  // No turn goes out without a model and a level, so an empty selection — a
-  // fetched catalogue before its CLI has answered — is filled the moment a
-  // list exists.
+  // A turn always names an explicit model + level: fill an empty selection as
+  // soon as the list arrives, rather than sending with none.
   const active = pickerProviders.find((p) => p.id === provider);
   useEffect(() => {
     if (model || !active || active.loading || active.models.length === 0) return;
@@ -182,17 +112,9 @@ export function Composer({
     onReasoning(pick.reasoning);
   }, [model, active, onModel, onReasoning]);
 
-  /** Whether there is a message at all: words, pictures, or both. */
   const ready = text.trim().length > 0 || att.items.length > 0;
 
-  /**
-   * Send, or queue.
-   *
-   * Pictures are written first and the message is only assembled once they
-   * are on disk: a path in a message that points at nothing is worse than a
-   * send that did not happen, so a refusal keeps the box exactly as it was
-   * and says why.
-   */
+  /** Send or queue. Pictures are written first; if that fails the box is kept as is. */
   const send = async () => {
     const t = text.trim();
     if ((!t && !att.items.length) || att.writing) return;
@@ -202,8 +124,7 @@ export function Composer({
 
     ref.current?.clear();
     mentions.close();
-    // Whether this goes out now or waits behind the running turn is Rust's
-    // call, not this box's: it owns the queue and the order.
+    // Rust decides send-now vs queue.
     onSend(withAttachments(t, paths));
   };
 
@@ -220,9 +141,7 @@ export function Composer({
         </div>
       )}
 
-      {/* Where this sits in the tree no longer decides where it draws: it
-          portals out and hangs off the caret's own rect. It stays here
-          because this is the box it belongs to. */}
+      {/* Portals out and positions itself at the caret. */}
       <MentionMenu {...mentions.menu} />
 
       {att.error && (
@@ -259,9 +178,6 @@ export function Composer({
       <div
         className={cn(
           "flex flex-col gap-4 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
-          // A drag over the box says so on the box itself, in the same
-          // vocabulary focus uses — there is nowhere else for a drop target
-          // to be announced without a panel this app does not have.
           att.dropping && "border-brand ring-[3px] ring-brand/25",
         )}
       >
@@ -277,9 +193,7 @@ export function Composer({
             onFiles={att.attach}
             onBlur={mentions.close}
             onKeyDown={(e) => {
-              // The menu's keys first, and only its own: anything it claims
-              // comes back prevented, so Enter-sends below never fires on the
-              // keystroke that picked a file.
+              // The menu's claimed keys come back prevented, so a pick never sends.
               mentions.keyDown(e);
               if (e.defaultPrevented) return;
               if (e.key === "Enter" && !e.shiftKey) {

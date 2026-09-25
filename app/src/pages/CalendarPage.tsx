@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { ArrowsClockwise, CaretLeft, CaretRight, Plus } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import {
-  getSubjects,
-  replaceCalendarEvents,
-  type CalendarEventData,
-} from "@/lib/db";
+import { getSubjects } from "@/lib/db";
 import {
   CALENDAR_UPDATED_EVENT,
   addDays,
@@ -18,6 +13,7 @@ import {
   loadCalendar,
   startOfWeek,
   subjectColors,
+  syncCalendar,
   type CalEvent,
 } from "@/lib/calendar";
 import { PROJECTS_UPDATED_EVENT } from "@/lib/projects";
@@ -25,6 +21,7 @@ import { newEvent } from "@/stores/eventEditorStore";
 import { MonthView } from "@/components/calendar/MonthView";
 import { WeekView } from "@/components/calendar/WeekView";
 import { AgendaView } from "@/components/calendar/AgendaView";
+import { useWindowEvent } from "@/hooks/useEvents";
 
 type View = "month" | "week" | "agenda";
 
@@ -35,12 +32,9 @@ const VIEWS: { id: View; label: string }[] = [
 ];
 
 /**
- * Classes, deadlines, recordings and task due dates across every subject, in
- * one place.
- *
- * The rows come from Canvas's calendar API during a sync (see
- * `app/src-tauri/src/calendar.rs`); this page only reads them, and its refresh
- * button re-runs that fetch for the selected subjects without a full scrape.
+ * Classes, deadlines, recordings and task due dates across every subject. Rows
+ * come from Canvas's calendar API during a sync (`app/src-tauri/src/calendar.rs`);
+ * refresh re-runs that fetch without a full scrape.
  */
 export default function CalendarPage() {
   const [view, setView] = useState<View>("week");
@@ -59,19 +53,10 @@ export default function CalendarPage() {
       });
   }, []);
 
-  // Two signals, one reload: a sync raises CALENDAR_UPDATED_EVENT for the rows
-  // it replaced, and every project write raises PROJECTS_UPDATED_EVENT. The
-  // task layer is read live off `project_tasks`, so a task re-dated or ticked
-  // off on its board has to leave the grid without a refresh.
-  useEffect(() => {
-    reload();
-    window.addEventListener(CALENDAR_UPDATED_EVENT, reload);
-    window.addEventListener(PROJECTS_UPDATED_EVENT, reload);
-    return () => {
-      window.removeEventListener(CALENDAR_UPDATED_EVENT, reload);
-      window.removeEventListener(PROJECTS_UPDATED_EVENT, reload);
-    };
-  }, [reload]);
+  // A sync raises CALENDAR_UPDATED_EVENT; tasks are read live from
+  // `project_tasks`, so every project write (PROJECTS_UPDATED_EVENT) reloads too.
+  useEffect(reload, [reload]);
+  useWindowEvent([CALENDAR_UPDATED_EVENT, PROJECTS_UPDATED_EVENT], reload);
 
   // Colours are keyed off the full set, not the visible one, so hiding a
   // subject never recolours the others.
@@ -87,9 +72,8 @@ export default function CalendarPage() {
     [events, hidden],
   );
 
-  /** Re-fetch the selected subjects' calendars without a full scrape. One
-   *  subject failing (no calendar tab, an expired session) must not cost the
-   *  rest, so failures are collected rather than thrown. */
+  /** Re-fetch the selected subjects' calendars; failures are collected so one
+   *  subject can't cost the rest. */
   const refresh = () => {
     setRefreshing(true);
     setError(null);
@@ -99,10 +83,7 @@ export default function CalendarPage() {
         const selected = (await getSubjects()).filter((s) => s.selected);
         for (const s of selected) {
           try {
-            const rows = await invoke<CalendarEventData[]>("calendar_sync_events", {
-              canvasCourseId: s.id,
-            });
-            await replaceCalendarEvents(s.id, rows);
+            await syncCalendar(s.id);
           } catch (e) {
             failures.push(`${s.code}: ${e}`);
           }
@@ -127,11 +108,7 @@ export default function CalendarPage() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <header className="shrink-0 border-b border-border-subtle px-6">
-        {/* Two groups, not seven siblings. The title shrinks and its period
-            truncates; the controls never do — they wrap, right-aligned, onto as
-            many lines as they need. Every one of them used to sit in one
-            no-wrap row, so with the side panel open the page's
-            `overflow-hidden` simply cut the last pill in half. */}
+        {/* The title's period truncates; the controls wrap, right-aligned. */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-5 pb-3">
           <div className="flex min-w-32 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
             <div className="flex min-w-0 items-baseline gap-3">
@@ -145,12 +122,8 @@ export default function CalendarPage() {
               )}
             </div>
 
-            {/* On the left, with the title, rather than out at the end of the
-                control run: it is the page's one action, and the six controls
-                over there are all about *looking*. It also keeps the right-hand
-                group narrow enough to stay on one line when the side panel
-                squeezes the page. The day the calendar is looking at, not
-                today — paging to October and pressing this means October. */}
+            {/* The page's one action, beside the title. Creates on the day in
+                view, not today. */}
             <Button
               variant="secondary"
               size="sm"
@@ -290,8 +263,6 @@ function Empty({
           <ArrowsClockwise size={13} className={cn(refreshing && "animate-spin")} />
           Fetch from Canvas
         </Button>
-        {/* The other way to have something here, and the only one that works
-            before a first sync. */}
         <Button variant="ghost" size="sm" onClick={() => newEvent()}>
           <Plus size={13} />
           Add your own

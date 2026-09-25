@@ -1,26 +1,9 @@
 /**
- * A virtualised list that follows playback.
- *
- * This is the transcript's scroller, lifted out of `TranscriptPanel` so the
- * Read tab — the same recording as one sentence per line, ~600 rows — can be
- * the second list to use it rather than a second copy of it. Everything that
- * was hard-won in the transcript lives here and only here: the snap on first
- * sync, the 20–80% band rule that keeps text from sliding under the eye, the
- * nudge / unfollow / soft-resume handover, the 8 s idle re-sync with its
- * countdown ring on the Back-to-live pill, the edge fades, and the reopen
- * scroll after the dock slides. The caller decides what a row *is*: it hands
- * over a count, a key per row, which row playback is at, and a `renderRow`
- * that draws one — and the list never learns whether that row is a cue or a
- * line.
- *
- * **Virtualised, and it has to be.** A 2-hour lecture is ~2500 cues; rendered
- * in full that is over 12,000 nodes for WebKit to lay out and paint in a
- * scroller that sits next to a decoding video, which was the floor on how
- * smooth scrolling could get no matter how little React did. Windowed, the
- * list is ~40 rows and the cost stops scaling with the lecture's length.
- *
- * Rows are variable height (a cue wraps to two lines often enough), so heights
- * are measured rather than assumed — `estimateSize` only has to be close.
+ * A virtualised list that follows playback, behind the transcript and the Read
+ * tab: snap on first sync, the 20–80% band rule, nudge / unfollow /
+ * soft-resume, idle re-sync with a countdown ring, edge fades, reopen scroll.
+ * Virtualised because a transcript runs to thousands of rows beside a decoding
+ * video; heights are measured, so `estimateSize` need only be close.
  */
 import {
   Fragment,
@@ -42,36 +25,25 @@ import { cn } from "@/lib/utils";
 /** A one-line cue at the panel's default width; two-liners are measured. */
 const ESTIMATED_ROW = 26;
 
-/** The dock's slide duration, matched to the sidebar's collapse so the app has
- *  one feel. The panel's box transitions with `duration-200`; that class and
- *  this number are the same 200 ms, and the reopen-scroll below waits it out. */
+/** The dock's slide, matching the panel's `duration-200`; the reopen-scroll waits it out. */
 const SLIDE_MS = 200;
 
 /** How long the list has to sit untouched before it re-syncs to playback. */
 const IDLE_RESYNC_MS = 8000;
 
-/** The countdown ring drawn on the pill, in px. Hairline, like every border. */
+/** The countdown ring's stroke, in px. */
 const RING_STROKE = 1.5;
 
 export interface FollowListProps {
-  /** Rows the caller has decided to show. */
   count: number;
   /** Row index playback is at; -1 = none, which also hides the pill. */
   followIdx: number;
-  /**
-   * The key the virtualizer keeps a row's measured height under. Key by what
-   * the row *is* (a cue index), not by its position in the list: see the
-   * `resetKey` effect for what that buys.
-   */
+  /** Height-cache key: key by what the row *is* (a cue index), not its
+   *  position — see the `resetKey` effect. */
   getItemKey: (row: number) => string | number;
-  /** A one-line row at the panel's default width; the rest are measured. */
   estimateSize?: number;
-  /**
-   * Draw one row. The element returned must be positioned by `item.start`
-   * (`position: absolute; top: 0; transform: translateY(...)`) and carry
-   * `data-index={item.index}` with `ref={measure}`, which is how the
-   * virtualizer learns its real height.
-   */
+  /** Draw one row, positioned by `item.start` and carrying
+   *  `data-index={item.index}` and `ref={measure}`. */
   renderRow: (
     row: number,
     item: VirtualItem,
@@ -87,11 +59,8 @@ export interface FollowListProps {
   onScrollAway: () => void;
   /** Resume following and snap back to the playing row. */
   onBackToLive: () => void;
-  /**
-   * A change arms the snap; a truthy value also scrolls to the top. The search
-   * needle: results start from the top, and clearing the query hands the list
-   * back to the follow-scroll, which knows better where to put it.
-   */
+  /** A change arms the snap; a truthy value (the search needle) also scrolls
+   *  to the top. */
   resetKey?: unknown;
   /** Drawn over the list, under the top fade — "No matches". */
   overlay?: ReactNode;
@@ -119,10 +88,8 @@ export function FollowList({
   /** Read by the delayed scroll below, which fires after the panel slides. */
   const followingRef = useRef(following);
   followingRef.current = following;
-  /**
-   * Hand-scrolled, but the playing row is still in frame: the list holds where
-   * it was put and stays live. Only the row leaving the frame ends following.
-   */
+  /** Hand-scrolled with the playing row still in frame: hold position, stay
+   *  live. Only the row leaving the frame ends following. */
   const [nudged, setNudged] = useState(false);
   const nudgedRef = useRef(false);
   /** Re-following because the row was scrolled back into view — don't snap. */
@@ -141,15 +108,9 @@ export function FollowList({
     overscan: 12,
   });
 
-  // Results start from the top; clearing the query hands the list back to the
-  // follow-scroll, which knows better where to put it.
-  //
-  // Nothing re-measures here, and calling `virtualizer.measure()` would be
-  // actively wrong: `getItemKey` keys the height cache by what the row *is* —
-  // a cue index — so a row's measured height survives the query that moved it
-  // to a different row — while `measure()` wipes the cache after the new rows
-  // have already reported their heights, leaving every row on the estimate and
-  // two-line rows overlapping the ones below them.
+  // No `virtualizer.measure()` here: heights are cached by row key and survive
+  // a query moving them, while `measure()` would wipe them after the new rows
+  // reported, leaving two-line rows overlapping.
   useEffect(() => {
     snapRef.current = true;
     if (resetKey) listRef.current?.scrollTo({ top: 0, behavior: "auto" });
@@ -158,8 +119,7 @@ export function FollowList({
 
   const items = virtualizer.getVirtualItems();
 
-  // React 19 treats a ref callback's return value as a cleanup function, so
-  // this must return nothing.
+  // React 19 treats a ref callback's return value as cleanup: return nothing.
   const measure = useCallback(
     (el: HTMLElement | null) => {
       if (el) virtualizer.measureElement(el);
@@ -169,31 +129,26 @@ export function FollowList({
 
   // ── Follow the playing row ───────────────────────────────────────────────
 
-  // Keyed on the row index, never on `timeupdate`: re-issuing a smooth scroll
-  // four times a second cancels and retargets it before it can land, so it
-  // creeps forever and snatches the list back the instant you touch it.
+  // Keyed on the row index, never `timeupdate`: re-issuing a smooth scroll
+  // retargets it before it lands, so it creeps forever.
   useEffect(() => {
     if (!open || !following || nudged || followIdx < 0) return;
     const list = listRef.current;
     if (!list) return;
 
-    // A row the window isn't rendering is certainly off screen. One it is
-    // rendering has a measured offset, so the maths below is exact.
+    // An unrendered row is off screen; a rendered one has an exact offset.
     const item = items.find((i) => i.index === followIdx);
     const h = list.clientHeight;
 
     if (snapRef.current || !item) {
-      // Coming back from a scroll, or from far away: let the virtualizer do
-      // it — the target may never have been measured, and it corrects itself
-      // once the row renders. Instant, because a smooth scroll across
-      // unmeasured rows chases a moving target.
+      // Far away or re-syncing: instant `scrollToIndex`, which corrects itself
+      // once unmeasured rows render (a smooth scroll would chase them).
       snapRef.current = false;
       virtualizer.scrollToIndex(followIdx, { align: "center" });
       return;
     }
 
-    // Only move once the row drifts out of the middle band, so the text is not
-    // sliding under the eye on every line.
+    // Move only once the row drifts out of the middle band.
     const rel = item.start - list.scrollTop;
     if (rel >= h * 0.2 && rel + item.size <= h * 0.8) return;
 
@@ -202,17 +157,12 @@ export function FollowList({
       top: Math.max(0, Math.min(virtualizer.getTotalSize() - h, centred)),
       behavior: "smooth",
     });
-    // `items` is deliberately not a dependency: it changes on every scroll
-    // frame, and this should run when the row changes, not when the window does.
+    // Not on `items`: it changes every scroll frame.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followIdx, following, nudged, virtualizer, open]);
 
-  // Reopening lands on the playing row rather than wherever the list was when
-  // it closed — and only once the box has finished growing, since a scroll
-  // computed against a collapsing height ends up nowhere useful. Coming back
-  // from another tab counts as reopening: the list is unmounted while that
-  // tab is in front, so it returns scrolled to the top with the row index
-  // unchanged, which is the one case the follow effect above cannot see.
+  // Reopening (or returning from another tab, which remounts the list at the
+  // top with the row unchanged) lands on the playing row once the slide ends.
   useEffect(() => {
     if (!open || !active) return;
     snapRef.current = true;
@@ -222,30 +172,20 @@ export function FollowList({
       }
     }, SLIDE_MS + 30);
     return () => clearTimeout(t);
-    // Only on open: the follow effect above owns every other reason to scroll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, active]);
 
-  // Arm the snap whenever following resumes, so Back to live and play both
-  // land on the row rather than easing towards it. A nudge only means anything
-  // while following, so either edge clears it.
+  // Resuming follow arms the snap, and either edge clears the nudge.
   useEffect(() => {
     if (following) {
-      // Except when the row is already on screen because the reader scrolled
-      // it back: there is nothing to jump to, so the band rule takes over.
+      // Unless the reader scrolled the row back into view: then the band rule.
       snapRef.current = !softResumeRef.current;
-      // Being live again is the end of the countdown, however it was reached:
-      // a deliberate Back to live cancels the pending re-sync it would race,
-      // and a re-sync that has already fired has nothing left to cancel.
+      // Live again ends the countdown, however it was reached.
       clearTimeout(idleRef.current);
       ringAnimRef.current?.cancel();
     }
-    // The *other* edge must leave the countdown alone. Losing the row off the
-    // top of the frame is what unfollows, and it is decided by the scroll
-    // event *after* the last wheel tick — so clearing the timer here killed
-    // the re-sync armed by that tick, and with it the ring on the pill that
-    // had just appeared. The whole point of the idle timer is that this state
-    // ends on its own.
+    // Unfollowing must not clear the timer: it is decided by the scroll event
+    // after the last wheel tick, which has just armed the re-sync.
     softResumeRef.current = false;
     nudgedRef.current = false;
     setNudged(false);
@@ -261,11 +201,8 @@ export function FollowList({
 
   // ── Which way is live ────────────────────────────────────────────────────
 
-  // The button points at the row, not at a fixed direction: read ahead and it
-  // sends you back up, read behind and it sends you down. Measured against the
-  // middle of the viewport so the answer doesn't flicker as the row crosses an
-  // edge, and against the virtualizer's cache because the row is usually off
-  // screen — that is why the button is showing — and so has no DOM node.
+  // Which way the pill points, measured from the viewport's middle against the
+  // virtualizer's cache — the row is usually off screen and has no node.
   const [liveAbove, setLiveAbove] = useState(false);
 
   const readDirection = useCallback(() => {
@@ -276,8 +213,7 @@ export function FollowList({
     setLiveAbove(start < list.scrollTop + list.clientHeight / 2);
   }, [followIdx, virtualizer, estimateSize]);
 
-  // Playback keeps moving while the list is being read by hand, so the row can
-  // cross the viewport with nobody scrolling.
+  // Playback moves the row even while nobody scrolls.
   useEffect(readDirection, [readDirection]);
 
   // ── Nudge, unfollow, re-sync ─────────────────────────────────────────────
@@ -293,10 +229,8 @@ export function FollowList({
     return rel + size > 0 && rel < list.clientHeight;
   }, [followIdx, virtualizer, estimateSize]);
 
-  // The ring is drawn from the pill's own box rather than a fixed size: the
-  // label is text, so its width is whatever the font renders. Measured even
-  // while the pill is hidden — it is faded out, not unmounted, so it still has
-  // a layout.
+  // Sized from the pill's rendered box. It is faded, not unmounted, so it
+  // measures while hidden.
   const [pill, setPill] = useState({ w: 0, h: 0 });
   useEffect(() => {
     const el = pillRef.current;
@@ -309,29 +243,24 @@ export function FollowList({
     return () => ro.disconnect();
   }, []);
 
-  // A stadium's perimeter, computed rather than asked for: `getTotalLength()`
-  // on a `<rect>` is SVG2 and not worth betting a silent blank ring on.
+  // A stadium's perimeter by hand: `<rect>.getTotalLength()` is SVG2.
   const ringW = Math.max(0, pill.w - RING_STROKE);
   const ringH = Math.max(0, pill.h - RING_STROKE);
   const ringLen = 2 * Math.max(0, ringW - ringH) + Math.PI * ringH;
 
-  // Driven by hand, not by a state flag: this restarts on every scroll, and a
-  // re-render per wheel tick to redraw a ring is not a trade worth making.
+  // Web Animations, not state: it restarts on every scroll.
   const startRing = useCallback(() => {
     ringAnimRef.current?.cancel();
     const el = ringRef.current;
     if (!el || ringLen <= 0) return;
-    // Dash pattern `[len on, len off]`, so the offset eats the outline from the
-    // far end back to the start — full pill at zero seconds used, bare at eight.
+    // Offset eats the outline over the idle window: full → bare.
     ringAnimRef.current = el.animate(
       [{ strokeDashoffset: 0 }, { strokeDashoffset: ringLen }],
       { duration: IDLE_RESYNC_MS, easing: "linear", fill: "forwards" },
     );
   }, [ringLen]);
 
-  // A hand-scroll is a glance until it is proven otherwise, so the list comes
-  // back on its own once it has been left alone. Every scroll pushes this back:
-  // what it waits for is the hand stopping, not the first touch.
+  // A hand-scroll is a glance: every scroll pushes the re-sync deadline back.
   const armResync = useCallback(() => {
     startRing();
     clearTimeout(idleRef.current);
@@ -339,8 +268,8 @@ export function FollowList({
       snapRef.current = true;
       nudgedRef.current = false;
       setNudged(false);
-      // Following already: clearing the nudge above is what re-scrolls. Not
-      // following: this is the Back to live press the user didn't have to make.
+      // Following: clearing the nudge re-scrolls. Not following: this is the
+      // Back to live press.
       onBackToLive();
     }, IDLE_RESYNC_MS);
   }, [onBackToLive, startRing]);
@@ -351,9 +280,8 @@ export function FollowList({
     if (!list || virtualizer.getTotalSize() <= list.clientHeight) return;
     // Cancel any follow-scroll still animating, or it fights the wheel.
     list.scrollTo({ top: list.scrollTop, behavior: "auto" });
-    // Hold the list still under the hand, but stay live: whether this scroll
-    // actually left the row behind is decided once it has landed, since a wheel
-    // event still reads the pre-scroll `scrollTop`.
+    // Stay live for now: whether the row was left behind is decided on
+    // `scroll`, since a wheel event reads the pre-scroll `scrollTop`.
     if (followingRef.current) {
       nudgedRef.current = true;
       setNudged(true);
@@ -363,8 +291,7 @@ export function FollowList({
 
   // ── Edges ────────────────────────────────────────────────────────────────
 
-  // Whether there is anything above or below what's on screen, so the fades
-  // only appear over content they are actually hiding.
+  // Fades only over content they are actually hiding.
   const [edges, setEdges] = useState({ above: false, below: false });
 
   const readEdges = useCallback(() => {
@@ -375,10 +302,7 @@ export function FollowList({
     setEdges((e) => (e.above === above && e.below === below ? e : { above, below }));
   }, []);
 
-  // Rows measuring, a query narrowing the list, a resize or the panel opening
-  // all change what fits without anyone scrolling. The resize is the dock's,
-  // which this list knows nothing about — so it is read off the scroller's own
-  // box rather than passed down as the panel's size.
+  // Measuring, filtering, opening or a dock resize change what fits unscrolled.
   const totalSize = virtualizer.getTotalSize();
   useEffect(() => {
     readEdges();
@@ -395,15 +319,10 @@ export function FollowList({
     readDirection();
     readEdges();
     if (nudgedRef.current) {
-      // The only way out of following: a hand-scroll that pushed the row out of
-      // frame. A nudge that leaves it visible needs no way back, so it is
-      // offered none — the pill appearing over a list you can already read is
-      // the noise this avoids.
+      // A nudge that pushed the row out of frame is the only way out of following.
       if (!rowInFrame()) onScrollAway();
     } else if (!followingRef.current && rowInFrame()) {
-      // And the same rule in reverse: scrolling the row back into view *is* the
-      // Back to live press, so it is taken as one rather than left sitting
-      // under a pill pointing at a row already on screen.
+      // Scrolling the row back into view is the Back to live press.
       softResumeRef.current = true;
       onBackToLive();
     }
@@ -415,10 +334,8 @@ export function FollowList({
     <div className={cn("relative flex-1 min-h-0", className)}>
       <div
         ref={listRef}
-        // Intent, not the `scroll` event: our own follow-scroll fires scroll
-        // events too, and telling the two apart after the fact is guesswork.
-        // A wheel, a touch drag, or a press on the scrollbar (which lands on
-        // the scroller itself, never on a row) is unambiguously the user.
+        // Intent, not `scroll`: our follow-scroll fires scroll events too. A press
+        // on the scroller itself (never a row) is the scrollbar.
         onWheel={(e) => {
           if (e.deltaY !== 0) handleUserScroll();
         }}
@@ -430,29 +347,18 @@ export function FollowList({
         className="absolute inset-0 overflow-y-auto px-1.5 py-2"
       >
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-          {/* Keyed here rather than trusting every caller to key the element
-              it returns: the key is the virtualizer's, and a row that lost it
-              would be remounted — and re-measured — on every scroll frame. */}
+          {/* Keyed with the virtualizer's key, so a row is never remounted and
+              re-measured on scroll. */}
           {items.map((item) => (
             <Fragment key={item.key}>{renderRow(item.index, item, measure)}</Fragment>
           ))}
         </div>
       </div>
 
-      {/* Scroll fades. A gradient rather than a `backdrop-filter`: a blur
-          layer over a scrolling virtualised list that sits next to a
-          decoding video is exactly the compositing the player spends its
-          effort avoiding.
-
-          Two things keep a gradient from looking like a cut. It holds
-          solid `background` for its first few pixels rather than letting
-          text through immediately — the top one butts against the opaque
-          search row, and half-visible text a pixel under solid white
-          reads as clipped, not faded — then takes the rest of its height
-          to dissolve, so the hold never thickens into a white band. And
-          it ends at `background/0`, not `transparent`: `transparent` is
-          *transparent black*, so interpolating to it drags the middle of
-          the ramp grey and leaves a dirty smear across the text. */}
+      {/* Gradients, not `backdrop-filter` (compositing beside a decoding video).
+          Solid for the first 15% so text doesn't read as clipped, and ending
+          at `background/0` — `transparent` is transparent *black* and greys
+          the ramp. */}
       <div
         aria-hidden
         className={cn(
@@ -499,9 +405,7 @@ export function FollowList({
             !showBackToLive && "pointer-events-none",
           )}
         >
-          {/* Time left before the list re-syncs on its own — the outline
-              drains over the eight seconds, so the pill going bare is the
-              warning that it is about to jump back. */}
+          {/* Drains over the idle window before the list re-syncs itself. */}
           {pill.w > 0 && (
             <svg
               aria-hidden
@@ -534,12 +438,8 @@ export function FollowList({
   );
 }
 
-/**
- * The search row over a `FollowList`: a pill input with the magnifier, and —
- * while there is a query — the match count and a clear button. Escape clears
- * and blurs. The caller decides what counts as searching (`count` is shown
- * whenever it is given), since a query of nothing but spaces is not one.
- */
+/** The search row over a `FollowList`. Escape clears and blurs; `count` shows
+ *  whenever given, so the caller decides what counts as searching. */
 export function SearchField({
   value,
   onChange,
@@ -552,10 +452,7 @@ export function SearchField({
   placeholder: string;
   /** Matches to show beside the clear button; `undefined` when not searching. */
   count?: number;
-  /** Override the row it sits in. The transcript shares its row with the
-   *  Standard/Enhanced register picker, so there the field is a flex child
-   *  and the
-   *  padding belongs to the row instead. */
+  /** Row override (beside the register picker the row owns the padding). */
   className?: string;
 }) {
   const searching = count !== undefined;
@@ -603,11 +500,7 @@ export function SearchField({
   );
 }
 
-/**
- * The matched run, marked in place. Split by hand rather than by a regular
- * expression: the needle is whatever was typed, so `.`, `(` and `?` are
- * characters a transcript contains, not syntax.
- */
+/** The matched run, marked. Split by hand, not regex: the needle is typed text. */
 export function Highlight({ text, needle }: { text: string; needle: string }) {
   if (!needle) return <>{text}</>;
   const hay = text.toLowerCase();

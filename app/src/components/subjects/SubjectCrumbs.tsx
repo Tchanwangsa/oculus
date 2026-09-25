@@ -3,8 +3,7 @@ import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { useSubjects } from "@/hooks/useSubjects";
 import { displayCode } from "@/lib/format";
 
-/** A subject tab, as a crumb: the path segment under the subject, and what
- *  the tab strip calls it. */
+/** A subject tab as a crumb: path segment under the subject, and its label. */
 export interface CrumbTab {
   to: string;
   label: string;
@@ -13,21 +12,15 @@ export interface CrumbTab {
 export const LECTURES_TAB: CrumbTab = { to: "lectures", label: "Lectures" };
 
 /**
- * Which tab lists a file of this category — the list the page was opened
- * from, and the one place a reader would go looking for its siblings.
- *
- * The categories are Rust's (`category_from_path` in
- * `app/src-tauri/src/paths.rs`) and the tabs are `SubjectLayout`'s, so this
- * map is the seam between them; a category with no entry falls back to the
- * subject alone. `home` and `syllabus` are deliberately absent: they live on
- * Overview, which is exactly where the subject crumb already points, and a
- * second crumb to the same place is not a trail.
+ * The tab that lists a file of each category — the seam between Rust's
+ * categories (`category_from_path` in `app/src-tauri/src/paths.rs`) and
+ * `SubjectLayout`'s tabs. `home`/`syllabus` are absent: they live on Overview,
+ * where the subject crumb already points. Unmapped falls back to the subject.
  */
 const FILE_TAB: Record<string, CrumbTab> = {
   page: { to: "modules", label: "Modules" },
   module: { to: "modules", label: "Modules" },
-  // The three kinds of file are sub-tabs of one Files tab, so the crumb
-  // says "Files" and the path picks the sub-tab whose list holds it.
+  // Sub-tabs of one Files tab: the crumb says "Files", the path picks the sub-tab.
   file: { to: "files/downloads", label: "Files" },
   upload: { to: "files/uploads", label: "Files" },
   document: { to: "files/documents", label: "Files" },
@@ -41,35 +34,14 @@ export const fileCrumbTab = (category: string | null): CrumbTab | null =>
   (category && FILE_TAB[category]) || null;
 
 /**
- * Where a full page sits inside its subject, as links rather than as
- * decoration — `ProjectCrumbs` for the other half of the app.
+ * The subject → tab trail for full pages outside `SubjectLayout` (a promoted
+ * file or lecture); `ProjectCrumbs` is the other half. A Fragment, so it drops
+ * into the page's own crumb row.
  *
- * A file and a lecture promoted out of the peek land *outside*
- * `SubjectLayout` on purpose: a full-page document takes the whole content
- * area, Notion-style, with no subject chrome. The cost was that the chrome
- * carried the only way back — open a lecture from Home or from the ⌘K palette
- * and the subject it belongs to was neither named nor reachable except
- * through the sidebar. This is that trail, and only that: the subject, then
- * the tab whose list holds this thing.
- *
- * A **Fragment, not a wrapper**, for the same reason as `ProjectCrumbs` — it
- * drops into the page's own crumb row, inherits its gap, and ends with the
- * separator the page's leaf follows.
- *
- * Buttons with a `data-tab-href`, not `Link`s, and the difference is not
- * cosmetic. The attribute gives ⌘-click a tab of its own
- * (`app/src/lib/newTabClicks.ts`); the plain click goes through
- * `navigateActive`. A `Link` goes straight to the pane's own router, which skips the
- * one door the app's departure rules live behind: a crumb clicked out of a
- * playing lecture stranded it off screen — still running, no player anywhere,
- * no prompt — and a crumb clicked out of a page with a peek open carried that
- * peek to a page it had nothing to do with. The shell has asked these
- * questions at `navigateActive` since tabs got their own routers; the crumb
- * row is inside a pane, which is the only reason it was ever missed.
- *
- * It resolves the subject itself rather than taking one, because its two
- * callers each have an id and no subject: they are the pages that skipped the
- * layout that would have loaded it.
+ * Buttons with `data-tab-href`, not `Link`s: the click must go through
+ * `navigateActive`, which runs the departure rules (a playing lecture, an open
+ * peek) that the pane's own router skips; ⌘-click opens a new tab
+ * (`app/src/lib/newTabClicks.ts`). Resolves the subject from the id itself.
  */
 export function SubjectCrumbs({
   subjectId,
@@ -81,8 +53,7 @@ export function SubjectCrumbs({
   const { subjects } = useSubjects();
   const subject = subjects.find((s) => s.id === subjectId) ?? null;
 
-  // Nothing rather than a placeholder: the row's leaf is already the title,
-  // and a crumb that resolves a moment later reads as the page arriving.
+  // Nothing rather than a placeholder; the leaf is already the title.
   if (!subject) return null;
 
   return (

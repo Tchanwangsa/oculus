@@ -2,12 +2,9 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { displayCode } from "@/lib/format";
 
-/**
- * Per-subject icon customisation: a Phosphor icon name and/or a colour.
- * Keyed by course code ("COMP30026"), not the full term-suffixed code, so the
- * same course keeps its icon across semesters.
- */
-export interface SubjectIconPref {
+/** Keyed by `displayCode` ("COMP30026") so a course keeps its icon across
+ *  terms. */
+interface SubjectIconPref {
   /** Name from the icon catalog. Absent → the default dot. */
   icon?: string;
   /** Hex colour. Absent → the hashed course colour. */

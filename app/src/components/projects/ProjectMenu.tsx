@@ -15,20 +15,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { DbProject } from "@/lib/projects";
 
 /**
- * The three things you can do to a project that are not editing its board:
- * rename it, put it away, and destroy it.
- *
- * Built on Popover rather than a dropdown-menu primitive because there is no
- * such component in `components/ui` and this is the second menu of this shape
- * — `StatusPill` is the first, and its row styling is copied here on purpose
- * so a menu is a menu wherever it opens.
- *
- * It owns **no** store calls: every item hands back through a callback and the
- * page decides what a rename or a delete means where it is standing. That is
- * what lets one component serve the index, a subject's tab and the project's
- * own header without any of them being the shape it was written for. It does
- * own the dialogs, though — a caller that had to mount the confirmation itself
- * would be a caller that could forget to.
+ * Rename / archive / delete. Makes no store calls — callers act through the
+ * callbacks — but owns the rename and delete-confirm dialogs so no caller can
+ * skip them. Row styling matches `StatusPill`'s picker.
  */
 export function ProjectMenu({
   project,
@@ -40,27 +29,17 @@ export function ProjectMenu({
   align = "end",
 }: {
   project: DbProject;
-  /** The new name, already trimmed and known to differ from the current one —
-   *  a no-op rename never reaches here. */
+  /** Trimmed, non-empty and changed. */
   onRename: (name: string) => void;
   onArchive: () => void;
   onUnarchive: () => void;
-  /** Takes the project's tasks with it. The confirmation has already been
-   *  given by the time this fires. */
+  /** Fires after confirmation. */
   onDelete: () => void;
   className?: string;
-  /** Passed to the popover: a row's menu hangs off its right edge, a header's
-   *  may not. */
   align?: React.ComponentProps<typeof PopoverContent>["align"];
 }) {
   const [open, setOpen] = useState(false);
-  /**
-   * Which dialog the menu is on its way to opening, if any.
-   *
-   * A single value rather than a flag each, because the menu can only ever be
-   * leaving for one of them — and because the popover's closing autofocus has
-   * to know that it is leaving for a dialog at all (see `onCloseAutoFocus`).
-   */
+  /** The dialog the menu is closing to open (read by `onCloseAutoFocus`). */
   const [pending, setPending] = useState<"rename" | "delete" | null>(null);
   const archived = project.status === "archived";
 
@@ -86,11 +65,8 @@ export function ProjectMenu({
         <PopoverContent
           align={align}
           className="w-44 p-1"
-          /* Closing a popover hands focus back to its trigger, and a dialog
-             opening in the same tick traps focus into itself: the two fight
-             and the field can end up unfocused behind the overlay. When the
-             close is *because* an item opened a dialog, the trigger does not
-             get the focus back — the dialog does. */
+          /* Don't return focus to the trigger when closing into a dialog, or
+             it fights the dialog's focus trap. */
           onCloseAutoFocus={(e) => {
             if (pending) e.preventDefault();
           }}
@@ -140,11 +116,6 @@ export function ProjectMenu({
         <DialogContent className="sm:max-w-sm" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Delete “{project.name}”?</DialogTitle>
-            {/* Said plainly, because this is the one table in the app nothing
-                upstream has a copy of: a sync can put a Canvas file back and
-                nothing can put this back. The tasks are named because the row
-                you clicked is the project, and the cascade is not visible from
-                here. */}
             <DialogDescription>
               Its tasks and subtasks go with it. This is your own planning — nothing syncs it
               back, and there is no archive to find it in afterwards. Archive it instead if you
@@ -171,8 +142,6 @@ export function ProjectMenu({
   );
 }
 
-/** A row of the menu. `StatusPill`'s picker rows, with a leading glyph and a
- *  destructive reading for the one item that cannot be undone. */
 function MenuItem({
   icon,
   destructive = false,
@@ -201,18 +170,7 @@ function MenuItem({
   );
 }
 
-/**
- * Rename, as a dialog with one field.
- *
- * A name is the one thing about a project you change from a list row, where
- * there is nothing to edit in place — the row is a link, and turning it into a
- * field would mean the whole row stops being one. A dialog also gives Escape
- * a meaning without any handler of its own.
- *
- * The draft is seeded on every *opening*, keyed off `open` rather than the
- * project, so re-opening after an abandoned edit starts from the stored name
- * again instead of resuming the text you walked away from.
- */
+/** The draft reseeds on every opening, so an abandoned edit doesn't resume. */
 function RenameDialog({
   project,
   open,
@@ -232,10 +190,8 @@ function RenameDialog({
 
   const commit = () => {
     const name = draft.trim();
-    // An empty field and an untouched one are both "never mind", not a write:
-    // a project with no name is unfindable in every list it appears in, and a
-    // rename to the name it already has would still bump `updated_at` and
-    // reorder anything sorted by it.
+    // Empty or unchanged is a cancel: a same-name write would still bump
+    // `updated_at`.
     if (name && name !== project.name) onRename(name);
     onOpenChange(false);
   };
@@ -246,8 +202,7 @@ function RenameDialog({
         <DialogHeader>
           <DialogTitle>Rename project</DialogTitle>
         </DialogHeader>
-        {/* A form, so Enter commits the way it does in every other single-field
-            box — no keydown handler, and the confirm button is its submit. */}
+        {/* A form, so Enter submits. */}
         <form
           onSubmit={(e) => {
             e.preventDefault();

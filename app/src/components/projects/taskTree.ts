@@ -1,11 +1,8 @@
 import { boardOf, type DbProject, type DbProjectTask, type ProjectColumn } from "@/lib/projects";
 
 /**
- * Shaping the flat task list the store hands out into what the three views
- * draw. Pure functions over rows that are already in memory — `getTasks`
- * returns a project's parents and subtasks in one query on purpose
- * (`app/src/lib/projects.ts`), so the grouping is the caller's job and belongs
- * in one place rather than in each view.
+ * Pure shaping of the flat task list (`getTasks` returns parents and subtasks
+ * in one query) into what the views draw.
  */
 
 /** A top-level task with its subtasks, in `position` order. */
@@ -15,12 +12,9 @@ export interface TaskNode {
 }
 
 /**
- * Parents first, each carrying its own children.
- *
- * A subtask whose parent is not in the list — which the schema cannot produce,
- * but a half-applied agent write could — is promoted to a top-level row rather
- * than dropped, on the same reasoning as `toProject`'s column fallback: a row
- * nothing draws is a row nobody can fix.
+ * Parents first, each carrying its own children. A subtask whose parent is
+ * missing (a half-applied agent write) is promoted to top level, not dropped:
+ * a row nothing draws is a row nobody can fix.
  */
 export function taskTree(tasks: DbProjectTask[]): TaskNode[] {
   const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -41,47 +35,29 @@ export function taskTree(tasks: DbProjectTask[]): TaskNode[] {
 }
 
 /** The nodes sitting in one board column, in `position` order. */
-export function nodesIn(nodes: TaskNode[], columnId: string): TaskNode[] {
+function nodesIn(nodes: TaskNode[], columnId: string): TaskNode[] {
   return nodes.filter((n) => n.task.column_id === columnId);
 }
 
-/** One card on the board: a task, how deep it is drawn, and the parent it
- *  hangs off when that parent is somewhere else. */
+/** One card on the board. */
 export interface ColumnEntry {
   task: DbProjectTask;
-  /** 0 for a top-level task, 1 for a subtask. One level is all the schema
-   *  allows (see `docs/projects.md`), so there is no deeper case to carry. */
+  /** The schema allows one level of nesting. */
   depth: 0 | 1;
-  /** The parent of a `depth: 1` entry, `null` at depth 0. Carried rather than
-   *  looked up again because the card draws its title when orphaned. */
+  /** The parent of a `depth: 1` entry, `null` at depth 0. */
   parent: DbProjectTask | null;
-  /** A subtask sitting in this column whose parent sits in another one. Normal,
-   *  not broken: a piece of work can be finished while the task it belongs to
-   *  is still in progress, which `createTask`'s doc comment says outright. The
-   *  card says whose it is, or it reads as a card with no home. */
+  /** A subtask in this column whose parent sits in another one — normal, and
+   *  the card names its parent so it doesn't read as homeless. */
   orphaned: boolean;
-  /** The task with its children, for the progress meter a parent card draws.
-   *  `null` at depth 1, which cannot have children of its own. */
+  /** For a parent card's progress meter; `null` at depth 1. */
   node: TaskNode | null;
 }
 
 /**
- * One column's cards, in the order the board draws them: each top-level task
- * in this column, immediately followed by whichever of its children are also
- * here, and then — last — the subtasks whose parent is in another column.
- *
- * **The grouping is structural, not positional, and that is the thing to hold
- * on to.** `position` orders the rows *within a column*, and a subtask's is
- * only ever compared against its own siblings': it says where among its
- * siblings the subtask goes, never where the group as a whole sits. Parentage
- * decides that. So a subtask cannot be ordered between two unrelated
- * top-level cards no matter what number it carries, and a drop that tried to
- * put it there would be undone the moment this function ran again — which is
- * exactly what {@link siblingDropSlot} exists to prevent.
- *
- * Order inside each run is the order `nodes` arrives in, which is `getTasks`'s
- * `ORDER BY position` carried through `taskTree` — the same trade
- * {@link nodesIn} makes.
+ * One column's cards in drawing order: each top-level task followed by its
+ * children that are also here, then the orphaned subtasks last. The grouping
+ * is structural: a subtask's `position` only orders it among its siblings, so
+ * it can never sit between unrelated cards (see {@link siblingDropSlot}).
  */
 export function columnEntries(nodes: TaskNode[], columnId: string): ColumnEntry[] {
   const entries: ColumnEntry[] = [];
@@ -93,9 +69,7 @@ export function columnEntries(nodes: TaskNode[], columnId: string): ColumnEntry[
       entries.push({ task: child, depth: 1, parent: node.task, orphaned: false, node: null });
     }
   }
-  // The strays, after everything that has a parent to sit under here. A second
-  // pass rather than a branch in the first, because they belong at the end of
-  // the column and the first pass is walking it in drawing order.
+  // Orphans go at the end of the column.
   for (const node of nodes) {
     if (node.task.column_id === columnId) continue;
     for (const child of node.children) {
@@ -128,13 +102,8 @@ export function boardProgress(nodes: TaskNode[]): { done: number; total: number 
 }
 
 /**
- * The column a task names, off the board it is checked against.
- *
- * `project` may be `null`: an unfiled task has no project, and its board is
- * `boardOf`'s default one — the same board `moveTask` will check its next
- * column against. A column the board no longer has still resolves to `null`,
- * which is what a glyph or a pill draws as "filed somewhere this board cannot
- * show".
+ * The column a task names. A `null` project (unfiled task) uses `boardOf`'s
+ * default board; a column the board no longer has resolves to `null`.
  */
 export function columnOf(
   project: DbProject | null,
@@ -143,30 +112,15 @@ export function columnOf(
   return boardOf(project).find((c) => c.id === columnId) ?? null;
 }
 
-/**
- * The board's columns, backlog first.
- *
- * The backlog used to have a list view of its own beside the board, with a
- * promote button per stub. It went when the board's drag started working:
- * dragging a stub out of the backlog into Todo is the gesture a kanban board
- * exists for, and a second screen for making the same move was a screen to
- * keep in step for no gain.
- *
- * Leftmost because that is the direction of travel — a card's life runs left
- * to right across the board — and because `DEFAULT_COLUMNS` already opens that
- * way; the reordering here only matters for a board whose columns have since
- * been rearranged.
- */
+/** The board's columns, backlog first (a card's life runs left to right). */
 export function boardColumns(project: DbProject): ProjectColumn[] {
   const backlog = project.columns.filter((c) => c.kind === "backlog");
   const rest = project.columns.filter((c) => c.kind !== "backlog");
   return [...backlog, ...rest];
 }
 
-/** Where a backlog stub goes when it is committed to: the first column that is
- *  work rather than a plan. Deliberately not `boardColumns(project)[0]`, which
- *  is now the backlog itself. `null` — an unfiled task — is the default board,
- *  as everywhere else ({@link columnOf}). */
+/** Where a backlog stub goes when committed to: the first active column.
+ *  Not `boardColumns(project)[0]`, which is the backlog itself. */
 export function promotionTarget(project: DbProject | null): ProjectColumn | null {
   const board = boardOf(project);
   return (
@@ -176,8 +130,7 @@ export function promotionTarget(project: DbProject | null): ProjectColumn | null
   );
 }
 
-/** The subtask row with this id, or `null` if it is a top-level task (or not
- *  in the tree at all). */
+/** The subtask row with this id, or `null` if it is top-level or absent. */
 function subtaskById(nodes: TaskNode[], id: number): DbProjectTask | null {
   for (const node of nodes) {
     const hit = node.children.find((c) => c.id === id);
@@ -187,31 +140,12 @@ function subtaskById(nodes: TaskNode[], id: number): DbProjectTask | null {
 }
 
 /**
- * The `beforeId` / `afterId` pair for dropping `taskId` into `columnId` at
- * `index` — the only two arguments `moveTask` takes besides the column, since
- * a position is a midpoint rather than an index.
- *
- * `index` is the slot in the column's **flat visual list** with the dragged
- * card taken out, which is what `useCardDrag` hands back: it hit-tests the
- * pointer against the rects it captured, and those are in DOM order. That
- * order interleaves parents and subtasks, so the neighbours either side of the
- * slot are frequently not the dragged card's own kin — and a midpoint taken
- * against a stranger is a number {@link columnEntries} will re-sort away the
- * next time it runs, leaving a drag that visibly does nothing.
- *
- * So the slot is only used to *count*: how many of the card's own siblings lie
- * above it. The pair then comes from that subset — the column's other
- * top-level cards for a top-level card, the same parent's other children here
- * for a subtask. A card with no siblings in this column has no pair to sit
- * between, so it goes after everything the column holds; its run is drawn
- * where parentage says it is either way.
- *
- * This supersedes the `dropSlot` the board used while it dropped *onto* a
- * target card, and keeps the part of it worth keeping: the dragged task is
- * taken out of the list first, because dropping a card one slot down means
- * "after the card that is currently below me", and counting it as its own
- * neighbour would take the midpoint of the gap it is already in and land it
- * back where it started.
+ * The `before`/`after` pair for `moveTask` when dropping `taskId` at `index`
+ * in the column's flat visual list (dragged card removed, as `useCardDrag`
+ * reports it). That list interleaves parents and subtasks, and a midpoint
+ * against a non-sibling would be re-sorted away by {@link columnEntries} — so
+ * the slot only counts how many of the card's own siblings lie above it, and
+ * the pair comes from the siblings. No siblings here: append to the column.
  */
 export function siblingDropSlot(
   nodes: TaskNode[],
@@ -222,10 +156,8 @@ export function siblingDropSlot(
   const rest = columnEntries(nodes, columnId).filter((e) => e.task.id !== taskId);
   const slot = Math.max(0, Math.min(index, rest.length));
 
-  // Which level the card belongs to is read off the tree rather than off
-  // `parent_id`: a subtask whose parent row is missing is promoted to top level
-  // by `taskTree`, so it is drawn — and must be dropped — as a top-level card
-  // even though it still names a parent.
+  // Level comes from the tree, not `parent_id`: `taskTree` promotes a subtask
+  // with a missing parent to top level.
   const isTop = nodes.some((n) => n.task.id === taskId);
   const parentId = isTop ? null : subtaskById(nodes, taskId)?.parent_id ?? null;
   const isSibling = (e: ColumnEntry) =>

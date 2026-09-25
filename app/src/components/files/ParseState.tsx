@@ -11,26 +11,16 @@ import { useParseStore } from "@/stores/parseStore";
 import type { DbFile } from "@/lib/db";
 
 /**
- * Where a file's parse state is *shown*. The vocabulary itself — which states
- * exist and what each one says — is `app/src/lib/parseState.ts`; these are its
- * two renderings, and they are in one file so the word on a row and the
- * sentence in a document can never drift apart.
- *
- * Only PDF-backed files have a parse, so everything here returns `null` for a
- * Canvas page or an image: a blank column is right for a file that was never
- * going to be parsed, and wrong for one that was.
+ * The two renderings of a file's parse state (vocabulary in
+ * `app/src/lib/parseState.ts`). Only PDF-backed files have one; everything
+ * here is `null` for anything else.
  */
 
 /**
- * The live state of one file, or `null` when the file has no parse at all.
- *
- * The store is the live word and `files.parse_status` is the standing one, so
- * the row falls back to the column: a file that failed in a *previous* session
- * is only that column (the discriminants are not persisted — deliberately, no
- * migration), and without the fallback it would read as "not parsed yet",
- * which is a different and gentler lie than the one this stage exists to fix.
+ * Live state from the store, falling back to `files.parse_status` — a failure
+ * from a previous session exists only in that column.
  */
-export function useFileParseState(file: DbFile | null): ParseState | null {
+function useFileParseState(file: DbFile | null): ParseState | null {
   const path = file?.relative_path ?? "";
   const live = useParseStore((s) => s.statuses[path]);
   const failure = useParseStore((s) => s.failures[path]);
@@ -39,15 +29,7 @@ export function useFileParseState(file: DbFile | null): ParseState | null {
   return parseStateOf(live ?? file.parse_status ?? undefined, failure, latch);
 }
 
-/**
- * The parse word on a file row (Downloads).
- *
- * It used to be `"parsed"`, `"failed"`, or the empty string for everything
- * else — so a file that had never been parsed, one queued behind forty others
- * and one that failed for a reason nobody would ever fix all looked exactly
- * like a file that was fine. Every state now has a word, and the reason is one
- * hover away.
- */
+/** The parse word on a file row, with the reason on hover. */
 export function ParseStateBadge({
   file,
   className,
@@ -90,24 +72,16 @@ const MISSING_ARTIFACT: ParseState = {
 };
 
 /**
- * What stands where the PDF ↔ Markdown toggle would be when there is no
- * markdown to toggle to.
- *
- * The toggle simply not rendering was the second invisible failure: the reader
- * got a PDF, no Markdown view they had seen on other files, and nothing at all
- * about why. This says which of the reasons it is — still queued, failed,
- * or parsing is down for the whole library — and, where the fix is a token,
- * offers the page that holds it. `/settings/library` is a real route
- * (`app/src/routes.tsx`); the quota case gets no button because waiting is the
- * only move.
+ * Stands in for the PDF ↔ Markdown toggle when there is no markdown: says
+ * why (queued, failed, parsing down) and links to Settings when the fix is
+ * there.
  */
 export function MarkdownUnavailable({ file }: { file: DbFile }) {
   const live = useFileParseState(file);
   const [open, setOpen] = useState(false);
 
-  // This is only rendered when the markdown is genuinely not on disk, so a
-  // state of `parsed` means the record and the disk disagree — say that
-  // rather than rendering nothing, which is the silence being fixed here.
+  // Only rendered when the markdown is missing on disk, so `parsed` here
+  // means the record and the disk disagree.
   const state: ParseState =
     !live || live.kind === "parsed" ? MISSING_ARTIFACT : live;
 
@@ -120,9 +94,7 @@ export function MarkdownUnavailable({ file }: { file: DbFile }) {
         <Button
           variant="ghost"
           size="xs"
-          /* The badge sits inside a row that leads to the file's page, and
-             this button leads nowhere — so it keeps its own ⌘-click rather
-             than the row's (`lib/newTabClicks.ts`). */
+          /* Opt out of the row's ⌘-click (`lib/newTabClicks.ts`). */
           data-tab-skip
           className={cn(
             "shrink-0 text-[11px] font-normal",

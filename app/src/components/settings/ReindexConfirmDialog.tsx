@@ -18,17 +18,9 @@ export interface ReindexPrompt {
 }
 
 /**
- * Asked before the embedding model is changed, because the change is not
- * reversible by changing it back.
- *
- * The house rule this follows: a confirmation that states the consequence in
- * plain language beats a warning icon. So there is no icon and no red — the
- * numbers do the work, and they are the real ones, read from the index a
- * moment ago rather than described in the abstract.
- *
- * It is only raised when there is something to lose. An empty index makes this
- * an ordinary setting, and a dialog over nothing teaches people to click
- * through the one that matters.
+ * Confirms an embedding model change, which discards every stored vector.
+ * States the consequence with the index's real counts rather than a warning
+ * icon; only raised when the index is non-empty.
  */
 export function ReindexConfirmDialog({
   prompt,

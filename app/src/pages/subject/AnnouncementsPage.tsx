@@ -5,11 +5,8 @@ import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
-import { dateFromSlug, humanizeSlug } from "@/lib/format";
-
-function fmtDay(d: Date): string {
-  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-}
+import { dateFromSlug, fmtShortDate, humanizeSlug } from "@/lib/format";
+import { ListCard } from "@/components/ui/PageParts";
 
 /** Every scraped announcement, newest first. Rows open in the peek. */
 export default function SubjectAnnouncementsPage() {
@@ -49,7 +46,7 @@ export default function SubjectAnnouncementsPage() {
   return (
     <div className="page-scroll">
       <div className="mx-auto max-w-5xl px-6 py-5">
-        <div className="rounded-lg border border-border divide-y divide-border-subtle overflow-hidden">
+        <ListCard>
           {announcements.map((f) => {
             const posted = dateFromSlug(f.filename);
             return (
@@ -64,14 +61,14 @@ export default function SubjectAnnouncementsPage() {
                 </span>
                 {posted && (
                   <span className="shrink-0 text-[11px] text-muted-foreground">
-                    {fmtDay(posted)}
+                    {fmtShortDate(posted)}
                   </span>
                 )}
                 <FileRecency file={f} />
               </button>
             );
           })}
-        </div>
+        </ListCard>
       </div>
     </div>
   );

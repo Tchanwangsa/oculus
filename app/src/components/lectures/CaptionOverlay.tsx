@@ -25,13 +25,9 @@ function loadPos(): Pos {
 }
 
 /**
- * The caption line over the video — draggable, because it otherwise sits on
- * whatever the slide put at the bottom of the frame.
- *
- * Position is a fraction of the *free* space inside the video box, which the
- * `left: x%` + `translateX(-x%)` pair expresses without measuring the caption:
- * at 0 it is flush left, at 1 flush right. So it survives a resize, a dock
- * change and a longer line of text without drifting off-frame.
+ * The caption line over the video, draggable off whatever the slide has at the
+ * bottom. Position is a fraction of the *free* space in the video box
+ * (`left: x%` + `translateX(-x%)`), so it survives resizes and longer lines.
  */
 export function CaptionOverlay({
   text,
@@ -82,9 +78,8 @@ export function CaptionOverlay({
       if (!g || !bounds) return;
       const freeX = bounds.width - g.w;
       const freeY = bounds.height - g.h;
-      // `pos` is the *unlifted* position; the grab offset was taken from the
-      // lifted rect, so add the lift back or the caption sits that far below
-      // the cursor for the whole drag.
+      // `pos` is unlifted but the grab offset came from the lifted rect: add the
+      // lift back.
       const top = e.clientY - g.gy - bounds.top + liftRef.current;
       setPos({
         x: freeX > 0 ? clamp((e.clientX - g.gx - bounds.left) / freeX) : 0.5,

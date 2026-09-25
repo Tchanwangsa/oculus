@@ -6,57 +6,15 @@ import { PROVIDERS, providerInfo, type HarnessModel, type Provider } from "@/lib
 import { useCatalogue } from "@/lib/opencodeCatalogue";
 
 /**
- * The model picker's providers, with each one's catalogue and whether its CLI
- * is actually on this machine.
- *
- * Every picker in the app — the chat composer, the lecture dock's composer and
- * the per-job rows in Settings → AI — used to assemble this itself, in three
- * byte-for-byte copies of a fetch-gate plus a `claude ? static : fetched` map.
- * Three copies is three places to forget when an agent is added, and the map
- * was the kind of ternary that answers "not Claude" with the wrong list rather
- * than a type error. So it is one hook, and it names no provider at all: which
- * catalogues are compiled in and which are fetched is a property of the
- * `PROVIDERS` entry (`app/src/lib/harness.ts`), so a fourth agent is an entry
- * there and nothing here.
- *
- * `needed` is which providers are worth asking a CLI about, and it is a
- * parameter because the three call sites genuinely differ: a composer wants
- * the one provider its picker is showing, while the settings page wants every
- * provider some job row is set to — a page opened on a Codex job should not
- * spawn the other CLIs to fill in lists nobody is looking at. Everything else
- * about them was identical.
- *
- * A provider nobody has asked about reports `loading`, which is what it is:
- * its list is not here, and switching the picker to it is what asks. Each is
- * asked once per mount, failures included — a missing CLI answers with an
- * empty list, and re-asking it on every render of a menu would make an absent
- * agent slow as well as absent.
- *
- * **Once per mount, plus once per catalogue edit.** opencode's list is its CLI
- * catalogue less whatever the student hid, per
- * `app/src/lib/opencodeCatalogue.ts`, so a student ticking models in Settings
- * changes what this hook should have answered — and the composer is usually
- * already mounted behind it. That is not the same as dropping the once-per-
- * mount rule: the expensive thing is the CLI call, and the catalogue's version
- * counter changes only when Settings writes, which is a handful of times in a
- * session rather than once a render. So the ask is re-armed on a version
- * change and on nothing else. The old list stays on screen until the new one
- * lands, since a tick should not blank the menu for a beat.
- *
- * **Health rides alongside the catalogue rather than replacing it.** A
- * provider whose binary was not found keeps the models it would have — a
- * compiled-in list would still be the list its CLI takes, and `modelsFor`
- * is used to resolve a selection, not to draw one — and it is the picker that
- * refuses to offer them. That keeps the gate in one place for all three, and
- * it is the same gate: before health lands, `unknown` means every provider
- * draws exactly as it drew before this existed. The one thing health does here
- * is spare a known-missing provider the fetch that could only fail.
+ * Every picker's providers, each with its catalogue and CLI health. Names no
+ * provider: everything comes off `PROVIDERS`. `needed` is which CLIs are worth
+ * asking — each is asked once per mount (failures included), re-armed only when
+ * the opencode catalogue's version changes. A known-missing CLI is not asked;
+ * the picker, not this hook, refuses to offer its models.
  */
 export function useProviderModels(needed: Provider | Provider[]): {
   providers: PickerProvider[];
-  /** One provider's models, for a caller that has to resolve a selection for a
-   *  provider that is not the one on screen — Settings switches a job's agent
-   *  and has to pick that agent's default model in the same edit. */
+  /** Models for a provider not on screen, to resolve a selection. */
   modelsFor: (p: Provider) => HarnessModel[];
 } {
   const [fetched, setFetched] = useState<Partial<Record<Provider, HarnessModel[]>>>({});
@@ -65,17 +23,14 @@ export function useProviderModels(needed: Provider | Provider[]): {
   const { version } = useCatalogue();
   const askedVersion = useRef(version);
 
-  // A stable key rather than the array itself: every call site builds its
-  // `needed` inline, so a fresh array each render would re-run the effect
-  // forever.
+  // A stable key: call sites build `needed` inline.
   const key = useMemo(
     () => (Array.isArray(needed) ? [...new Set(needed)].sort().join(" ") : needed),
     [needed],
   );
 
   useEffect(() => {
-    // Re-armed here rather than in an effect of its own, so nothing depends on
-    // which of two effects React runs first.
+    // Re-armed here, not in its own effect, so effect order cannot matter.
     if (askedVersion.current !== version) {
       askedVersion.current = version;
       asked.current.clear();
@@ -83,10 +38,7 @@ export function useProviderModels(needed: Provider | Provider[]): {
     for (const id of key.split(" ").filter(Boolean) as Provider[]) {
       const info = providerInfo(id);
       if (!info?.fetchModels || asked.current.has(id)) continue;
-      // Known missing: the fetch would spawn a CLI that is not there and come
-      // back empty, which the picker would have to tell apart from a real
-      // empty answer. `unknown` still asks — health is not waited on, so a
-      // composer's list arrives as fast as it ever did.
+      // `unknown` still asks: health is not waited on.
       if (providerHealth(health, id) === "missing") continue;
       asked.current.add(id);
       info
@@ -104,8 +56,6 @@ export function useProviderModels(needed: Provider | Provider[]): {
           id: p.id,
           label: p.label,
           models: p.staticModels ?? fetched[p.id] ?? [],
-          // A missing provider is never "loading": nothing was asked, and
-          // nothing is coming.
           loading: !p.staticModels && state !== "missing" && fetched[p.id] === undefined,
           health: state,
           emptyNote: p.emptyNote,

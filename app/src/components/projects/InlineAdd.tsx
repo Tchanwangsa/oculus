@@ -2,14 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Plus } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 
-/**
- * "Add one more of these", as a row that turns into a field.
- *
- * A project, a card, a subtask and a backlog stub are all one line of text at
- * the moment they are created — everything else about them is edited later, on
- * the thing itself — so none of them is worth a dialog. Enter commits and
- * leaves the field open for the next one, Escape and blur put it away.
- */
+/** An add row that turns into a field. Enter commits and stays open; blur
+ *  commits and closes; Escape discards. */
 export function InlineAdd({
   label,
   placeholder,
@@ -23,11 +17,9 @@ export function InlineAdd({
   label: string;
   placeholder?: string;
   onAdd: (title: string) => void | Promise<void>;
-  /** Start as the field rather than the button — for a composer opened by a
-   *  control somewhere else on the row. */
+  /** Start as the field rather than the button. */
   defaultEditing?: boolean;
   disabled?: boolean;
-  /** Why the control is dead, e.g. subtasks being one level deep. */
   disabledReason?: string;
   className?: string;
   inputClassName?: string;

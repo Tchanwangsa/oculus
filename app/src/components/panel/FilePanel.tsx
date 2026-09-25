@@ -9,12 +9,7 @@ import { filePagePath, fileTitle, openFileSmart } from "@/lib/openFile";
 import { recordRecent } from "@/lib/recents";
 import type { DbFile } from "@/lib/db";
 
-/**
- * A file open in the side panel. Expanding promotes it to a full page —
- * in this tab, or in a new one on ⌘-click. The panel owns that move (see
- * `SidePanel`) because it is the panel that animates through it; all this
- * knows is the route.
- */
+/** A file open in the side panel; `SidePanel` owns the expand-to-page move. */
 export default function FilePanel({
   file,
   paneId,
@@ -29,10 +24,7 @@ export default function FilePanel({
   const here = useActivePath();
   const close = useSidePanelStore((s) => s.close);
 
-  // A file belongs to the subject it was opened in — navigating to another
-  // subject (or out of subjects entirely) closes it. Only the tab in front is
-  // checked: it is the only one whose route the user is steering, and a
-  // background tab that comes forward is still sitting where it was left.
+  // Navigating the front tab out of the file's subject closes it.
   useEffect(() => {
     const m = /^\/subjects\/(\d+)/.exec(here);
     if (!m || m[1] !== String(file.subject_id)) close(paneId);
@@ -57,8 +49,6 @@ export default function FilePanel({
         }
         onClose={() => close(paneId)}
         actions={
-          /* Same pairing as the full page: the toggle when there is markdown,
-             the reason there is none when there is not. */
           pdf.isPdf && pdf.mdChecked ? (
             pdf.mdExists ? (
               <PdfMdToggle value={pdf.viewMode} onChange={pdf.setViewMode} />

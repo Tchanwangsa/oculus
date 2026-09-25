@@ -23,48 +23,25 @@ const PANEL = {
   storageKey: "oculus-side-panel",
 } as const;
 
-/** How long the panel takes to slide in or out. Must match the
- *  `duration-150` on the width transition below — this is the timer that
- *  decides when the contents may finally be thrown away. */
+/** Slide in/out time; must match the `duration-150` width transition below. */
 const ANIM_MS = 150;
 
-/** How long the panel takes to sweep out to the full card when its contents
- *  are promoted to a page in the same tab. Longer than the open/close slide
- *  because it crosses the whole card rather than a panel's width, and it is
- *  the only animation that has to read as *this thing became the page*. */
+/** The sweep out to the full card when the item is promoted to a page. */
 const EXPAND_MS = 260;
 
 /**
- * The side panel: files and lectures open here, docked against the right of
- * the content card rather than sliding over the page.
+ * The side panel: files and lectures dock against the right of the content
+ * card, showing whichever item the focused pane has open (`sidePanelStore`).
+ * Docked, not overlaid, so `BrowserPage` can re-place its native webview in
+ * the narrower slot. Width and collapsed state are global, not per tab.
  *
- * It is drawn once, as furniture inside the card, and shows whichever item the
- * tab in front has open (`sidePanelStore`). Docked means the page beside it is
- * genuinely narrower — which is what keeps the native browser webview honest,
- * since `BrowserPage` measures its own slot and re-places the webview when the
- * slot resizes, where an overlay could only ever hide it.
- *
- * Width and collapsed are the panel's, not any tab's: dragging it wider in one
- * tab widens it everywhere.
- *
- * Expanding is the same width transition run the other way: the frame sweeps
- * out to the full card and the page underneath is committed behind it, so the
- * peek *becomes* the page instead of vanishing and being replaced. ⌘-click
- * skips the sweep and opens a tab, where the peek is not the thing taking the
- * page over.
- *
- * The frame is always mounted, at zero width when nothing is open, so opening
- * and closing are a width transition on an element that already exists rather
- * than a mount and an unmount — which nothing can animate. What it *draws*
- * lags the store by one animation (`drawn`), so a closing panel still has
- * contents to slide out with.
+ * The frame is always mounted (zero width when empty) so open/close animate
+ * as a width transition; `drawn` lags the store by one exit so a closing
+ * panel has contents to slide out with.
  */
 export function SidePanel() {
   const item = useActivePanelItem();
-  // The panel belongs to the **pane** in front, not the tab: a split tab's two
-  // halves each peek at their own thing, and the panel shows whichever half
-  // you are working in. `tabId` is only for the context the contents render
-  // in, which still wants to know which strip tab it is inside.
+  // Keyed by the focused pane, not the tab: each split half has its own peek.
   const paneId = useActivePaneId();
   const tabId = useTabStore((s) => s.activeId);
   const addTab = useTabStore((s) => s.addTab);
@@ -72,22 +49,15 @@ export function SidePanel() {
   const panel = useResizablePanel(PANEL);
   const { setCollapsed } = panel;
 
-  // Opening something has to overrule a panel that was left folded, or the
-  // click would look like it did nothing at all. Counted rather than watched
-  // for a change: re-opening the row that is already showing leaves the item
-  // identical, and that click has to unfold the panel too — which is the one
-  // way a folded panel could swallow clicks indefinitely.
+  // Any open unfolds a folded panel. A counter, not the item, so re-opening
+  // the item already showing still unfolds it.
   const opens = useSidePanelStore((s) => s.opens);
   useEffect(() => {
     if (opens > 0) setCollapsed(false);
   }, [opens, setCollapsed]);
 
-  // What is on screen, which outlives what is in the store by one exit: a
-  // panel whose contents vanished the instant it closed would collapse on an
-  // empty frame. The tab id rides along rather than being read live, so a
-  // panel sliding out of a pane you just left still belongs to the pane that
-  // opened it — and dropping the pair at the end is what finally stops a
-  // lecture playing.
+  // What is on screen, outliving the store by one exit. The pane id rides
+  // along so a sliding-out panel keeps its owner; dropping it stops a lecture.
   const [drawn, setDrawn] = useState<{ item: PanelItem; paneId: number } | null>(
     item && paneId !== 0 ? { item, paneId } : null,
   );
@@ -100,16 +70,13 @@ export function SidePanel() {
     return () => clearTimeout(t);
   }, [item, paneId]);
 
-  // Memoised: a new object every render would re-render the panel's body — and
-  // the lecture player's would re-run its whole layout reconcile — for nothing.
+  // Memoised so the panel body (notably the lecture player) doesn't re-render.
   const panelTab = useMemo(
     () => ({ id: drawn?.paneId ?? 0, tabId, side: "main" as const, active: true }),
     [drawn?.paneId, tabId],
   );
 
-  // The width the frame is sweeping out to while an expansion runs, and null
-  // the rest of the time. Measured off the card rather than assumed, because
-  // the card is whatever the window and the sidebar have left it.
+  // The card width an expansion is sweeping out to; null otherwise.
   const frameRef = useRef<HTMLDivElement>(null);
   const [expandTo, setExpandTo] = useState<number | null>(null);
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,14 +88,9 @@ export function SidePanel() {
   );
 
   /**
-   * Promote the open item to a full page. ⌘-click takes a new tab and leaves
-   * this one where it is; a plain click is this tab becoming that page, which
-   * is what the sweep draws.
-   *
-   * The navigation is committed at the *end* of the sweep, not the start: the
-   * page mounting underneath a panel that is still sliding would re-render the
-   * whole card for every frame of it, and the panel already holds exactly what
-   * the page is about to show.
+   * Promote the open item to a full page: ⌘-click opens a new tab; a plain
+   * click sweeps the panel across the card and navigates this pane at the end
+   * of the sweep (mounting the page mid-sweep would re-render every frame).
    */
   const expand = useCallback(
     (path: string, newTab: boolean) => {
@@ -143,9 +105,7 @@ export function SidePanel() {
       const commit = () => {
         navigateInTab(paneId, path);
         close(paneId);
-        // No exit slide: the page took the panel's place at its full width, so
-        // there is nothing left to slide out — dropping `drawn` here is what
-        // skips the timer the close would otherwise start.
+        // No exit slide: the page already fills the card.
         setDrawn(null);
         setExpandTo(null);
       };
@@ -171,12 +131,7 @@ export function SidePanel() {
     return () => window.removeEventListener("keydown", handler);
   }, [item, paneId, close]);
 
-  // ⌥⌘S folds the panel away, the third of the app's fold shortcuts after ⌘B
-  // for the sidebar and ⌥⌘B for the chat's conversations column — ⌥⌘B being
-  // taken is the whole reason this one is S.
-  //
-  // `e.code`, not `e.key`: on macOS ⌥ rewrites the character the key produces,
-  // so ⌥S arrives as `ß` and a `key === "s"` test never fires.
+  // ⌥⌘S folds the panel. `e.code`, not `e.key`: on macOS ⌥S arrives as `ß`.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.altKey || !(e.metaKey || e.ctrlKey) || e.code !== "KeyS") return;
@@ -187,18 +142,13 @@ export function SidePanel() {
     return () => window.removeEventListener("keydown", handler);
   }, [panel.toggle]);
 
-  // Zero the moment the store lets go, while `drawn` lingers — that gap is
-  // the exit animation.
+  // Zero as soon as the store lets go, while `drawn` lingers for the exit.
   const width = expandTo ?? (item && paneId !== 0 ? panel.width : 0);
 
   return (
     <>
-      {/* The grip sits *on* the seam, as a sibling rather than inside the
-          panel: `w-1` with a matching negative margin either side costs no
-          layout width, and living outside the panel's `overflow-hidden` means
-          it neither gets clipped nor vanishes when the panel folds — dragging
-          it back out is the second way in, the same trade the chat's
-          conversations column makes. */}
+      {/* A sibling on the seam, outside the panel's `overflow-hidden`, so it
+          survives folding and can drag the panel back out. */}
       {drawn && expandTo == null && (
         <ResizeHandle
           onMouseDown={panel.onMouseDown}
@@ -221,33 +171,22 @@ export function SidePanel() {
           transitionDuration: expandTo != null ? `${EXPAND_MS}ms` : undefined,
         }}
       >
-        {/* Pinned to the panel's right edge at the width it unfolds back to,
-            never laid out at the animating one: the contents hold still while
-            the frame wipes across them, so opening and closing cost no reflow
-            inside — which matters most for the lecture player, whose video
-            would otherwise be re-measured every frame of the slide. */}
+        {/* Pinned right at the rest width so contents don't reflow while the
+            frame animates (the lecture video would re-measure every frame). */}
         {drawn && (
           <div
             className={cn(
               "absolute inset-y-0 right-0 flex flex-col border-l border-border bg-background",
-              // Expanding is the one time the contents *do* travel with the
-              // frame: the panel is becoming the page, so it grows rather than
-              // being wiped across.
+              // Expanding: contents grow with the frame instead.
               expandTo != null && "left-0",
             )}
             style={{ width: expandTo != null ? undefined : panel.restWidth }}
           >
-            {/* The peek belongs to the pane it was opened from, even though
-                it is drawn by the shell and sits outside every pane. Without
-                this the player inside reads the detached default — pane 0,
-                which no pane has — and a playing peek is owned by nobody:
-                closing its tab neither stops it nor asks, leaving a lecture
-                running with nothing on screen. `active` is unconditionally
-                true because only the tab in front ever has a body here. */}
+            {/* Drawn outside every pane, so give it its opener's pane id —
+                otherwise a playing lecture is owned by nobody and survives
+                closing its tab. */}
             <TabContext.Provider value={panelTab}>
-              {/* Keyed so swapping to a different file or lecture builds a
-                  fresh body instead of feeding new props through the old
-                  one. */}
+              {/* Keyed so a different item builds a fresh body. */}
               {drawn.item.kind === "file" ? (
                 <FilePanel
                   key={itemKey(drawn.item)}

@@ -8,7 +8,7 @@ export interface SyncProgress {
   label?: string;
 }
 
-export interface SyncSubjectRef {
+interface SyncSubjectRef {
   id: number;
   code: string;
 }
@@ -17,17 +17,15 @@ interface SyncState {
   /** True from sync start until scrape-complete/error. */
   scraping: boolean;
   progress: SyncProgress | null;
-  /** Active sync_runs row id, for finishSyncRun bookkeeping. */
+  /** Active `sync_runs` row id. */
   runId: number | null;
-  /** Subjects the active run targets — read at scrape-complete (e.g. for the
-   *  lecture-list refresh), cleared with the run. */
+  /** The active run's subjects, read at scrape-complete. */
   subjects: SyncSubjectRef[];
-  /** Monotonic counter bumped on each completion — UI subscribes to trigger reloads. */
+  /** Bumped on each completion; subscribe to reload. */
   completedAt: number;
   lastResult: { count: number; cancelled: boolean } | null;
   error: string | null;
 
-  // actions
   begin: (runId: number, subjects: SyncSubjectRef[]) => void;
   setProgress: (p: SyncProgress) => void;
   setRunId: (id: number | null) => void;

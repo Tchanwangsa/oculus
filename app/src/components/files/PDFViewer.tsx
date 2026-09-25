@@ -35,69 +35,50 @@ type Tool = "select" | "pan";
 const MODE_KEY = "oculus-pdf-layout";
 const TOOL_KEY = "oculus-pdf-tool";
 
-/** pdf.js's own clamps (`MIN_SCALE`/`MAX_SCALE` in `ui_utils`), which it
- *  applies inside `updateScale` whatever we ask for. Mirrored here only so the
- *  toolbar can grey its buttons out at the ends. Note the floor is genuinely
- *  low and has to be: **scale is absolute, not relative to the fit** — 1 means
- *  actual size — so a 960pt lecture slide fitted to the 360px side panel is
- *  already sitting at about 0.37. */
+/** pdf.js's own clamps (`MIN_SCALE`/`MAX_SCALE`), mirrored only to grey out
+ *  the toolbar buttons. Scale is absolute (1 = actual size), not relative to
+ *  the fit, so a slide fitted to the side panel already sits near 0.37. */
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 10;
 
-/** One toolbar press, as a ratio. pdf.js's own `steps: 1` rounds to a tenth,
- *  which walks 0.37 to 0.4 and reads as a stutter at the small end. */
+/** One toolbar press, as a ratio — pdf.js's `steps: 1` rounds to a tenth,
+ *  which stutters at small scales. */
 const ZOOM_STEP = 1.1;
 
-/** Handed to `updateScale` as `drawingDelay`: pdf.js writes the new scale to
- *  the `--scale-factor` CSS variable immediately — a compositor pass over the
- *  canvases and the text layers already on screen — and re-rasterises once,
- *  this long after the last change. It is the preview/commit split, owned by
- *  the library rather than by us, and it is the reason a pinch is smooth.
- *  Anything >= 1000 disables the postponement entirely. */
+/** `updateScale`'s `drawingDelay`: pdf.js previews via `--scale-factor` at
+ *  once and re-rasterises this long after the last change (>= 1000 disables
+ *  the postponement). */
 const DRAW_DELAY = 400;
 
-/** `deltaMode === DOM_DELTA_LINE` reports notches, not pixels; a line is
- *  roughly this many pixels on this platform. */
+/** Pixels per line when `deltaMode === DOM_DELTA_LINE`. */
 const LINE_HEIGHT = 16;
 
-/** A `gesturestart` with no matching `gestureend` would latch `gestureActive`
- *  and kill the ⌘-scroll path for the rest of the session. WebKit does drop
- *  the end event (a pinch that ends over a scrollbar, a window that loses the
- *  fingers), so the flag also releases itself once the pinch has been quiet
- *  this long — comfortably longer than the gap between two `gesturechange`
- *  events, which is one frame. */
+/** WebKit sometimes drops `gestureend`, which would latch `gestureActive` and
+ *  kill ⌘-scroll zoom; the flag releases itself after this much quiet. */
 const GESTURE_LAPSE = 400;
 
-/** The zoom presets pdf.js recomputes on a resize. A number the reader chose
- *  is theirs and survives; a fit is a promise about the container and has to
- *  be re-kept when the container changes. */
+/** Scale presets that are re-applied on a container resize; a number the
+ *  reader chose survives it. */
 const FIT_VALUES = new Set(["auto", "page-width", "page-fit", "page-actual"]);
 
-/** What the viewer opens at. `page-width` in the full-page view makes a
- *  16:9 slide bigger than the screen; `auto` is page-width capped at 125%,
- *  which is the old 900px ceiling expressed the way pdf.js expresses it. */
+/** `auto` is page-width capped at 125%; plain `page-width` blows a 16:9 slide
+ *  past the screen in the full-page view. */
 const DEFAULT_FIT = "auto";
 
 interface Props {
   src: string;
 }
 
-/** Everything pdf.js hands back at mount, kept together because nothing here
- *  is useful without the rest. */
 type Engine = {
   pdfjs: Pdfjs;
   viewer: PdfjsViewer;
-  /** Held rather than read back off `viewer.linkService`, which is typed as
-   *  the read-only interface the viewer needs and not as the concrete service
-   *  the document has to be handed to. */
+  /** Held here because `viewer.linkService` is typed as the read-only
+   *  interface, not the concrete service `setDocument` needs. */
   linkService: PDFLinkService;
 };
 
-/** Three buttons over pdf.js's two orthogonal modes. Continuous scroll is the
- *  vertical scroll mode; both paged layouts are `ScrollMode.PAGE`, which shows
- *  one unit at a time, and the spread is what makes that unit two pages. `ODD`
- *  pairs 1|2, 3|4 — the same pairing the old hand-rolled `[page, page + 1]`
- *  produced. */
+/** Maps the three layouts onto pdf.js's scroll × spread modes; both paged
+ *  layouts are `ScrollMode.PAGE`, and `SpreadMode.ODD` pairs 1|2, 3|4. */
 function applyLayout(viewer: PdfjsViewer, pdfjs: Pdfjs, mode: LayoutMode) {
   viewer.scrollMode =
     mode === "scroll" ? pdfjs.ScrollMode.VERTICAL : pdfjs.ScrollMode.PAGE;
@@ -106,31 +87,10 @@ function applyLayout(viewer: PdfjsViewer, pdfjs: Pdfjs, mode: LayoutMode) {
 }
 
 /**
- * PDF viewer: pdf.js's own viewer component under this app's toolbar.
- *
- * **The layout, the windowing, the zoom anchoring and the text layer are
- * Mozilla's**, from `pdfjs-dist/web/pdf_viewer.mjs` — the same `PDFViewer`
- * class Firefox's built-in reader is built on, minus its chrome. This file
- * used to hand-roll all of it on top of `react-pdf`: a page window driven by a
- * guessed aspect ratio, a `transform: scale()` preview folded into a real
- * raster on an idle timer, and an anchor record that measured rects and
- * centring slack across two frames to keep the pinched point still. Every one
- * of those has a counterpart in the library that is better tested than ours
- * could be — `updateScale({ origin })` for the anchor, `--scale-factor` plus
- * `drawingDelay` for the preview, its own virtualisation for the window — and
- * the hand-rolled versions each carried a visible bug: the commit yanked the
- * document toward the middle, and a pinch jittered because WebKit reports it
- * twice.
- *
- * So what is left here is the parts that are this app's rather than the PDF's:
- * the pill toolbar, the three layouts mapped onto pdf.js's scroll/spread
- * modes, the select-versus-pan tool, and the two gesture paths WebKit needs
- * (see the dedupe below, which is still ours because the library does not bind
- * desktop pinch — Firefox's `app.js` does, and we are not shipping that).
- *
- * pdf.js is loaded through `@/lib/pdfjs` rather than imported directly, for
- * ordering reasons set out there; that it also keeps ~1.7 MB out of the entry
- * chunk is the second reason.
+ * PDF viewer: pdf.js's own `PDFViewer` (layout, virtualisation, zoom anchoring,
+ * text layer) under this app's toolbar. What is ours: the toolbar, the three
+ * layouts, the select-versus-pan tool, and pinch/⌘-wheel zoom, which pdf.js
+ * does not bind itself. pdf.js loads through `@/lib/pdfjs` (see there for why).
  */
 export function PDFViewer({ src }: Props) {
   const [numPages, setNumPages] = useState(0);
@@ -140,28 +100,21 @@ export function PDFViewer({ src }: Props) {
   const [mode, setMode] = useState<LayoutMode>(
     () => (localStorage.getItem(MODE_KEY) as LayoutMode) || "scroll",
   );
-  /** Sticky like the layout: a reader who reaches for the hand generally
-   *  wants it for a document, not for one drag. */
   const [tool, setTool] = useState<Tool>(
     () => (localStorage.getItem(TOOL_KEY) as Tool) || "select",
   );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  /** The layout, readable from `pagesinit` — which fires for every document
-   *  and must not re-run the mount effect to see a change. */
+  /** Read from `pagesinit` without re-running the mount effect. */
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
-  /** The scroller. pdf.js requires it to be absolutely positioned and reads
-   *  its size for every fit, so it is the container and nothing else. */
   const containerRef = useRef<HTMLDivElement>(null);
-  /** The `.pdfViewer` element pdf.js fills with pages. Ours only in the sense
-   *  that we create the div. */
+  /** The `.pdfViewer` element pdf.js fills with pages. */
   const viewerElRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
-  /** Bumped when the engine is live, to start the effects that need it.
-   *  A ref alone cannot do this — nothing would re-run. */
+  /** Bumped when the engine is live, to re-run the effects that need it. */
   const [engineReady, setEngineReady] = useState(0);
 
   useEffect(() => {
@@ -191,23 +144,14 @@ export function PDFViewer({ src }: Props) {
           viewer: viewerEl,
           eventBus,
           linkService,
-          // pdf.js's default page border is a 9px transparent frame carrying a
-          // shadow image, drawn for its own grey viewer ground. Ours is a
-          // hairline and a soft shadow in `index.css`, on the app's tokens.
+          // The page frame is drawn in `index.css` instead.
           removePageBorders: true,
         });
         linkService.setViewer(viewer);
 
-        // **Both of these have to happen here, not at mount.**
-        // `setDocument` calls `_resetView`, which puts `_scrollMode` back to
-        // VERTICAL and `_spreadMode` to NONE — so a layout chosen before the
-        // document arrived (which is every layout, since the toggle is sticky
-        // across files) is silently thrown away. And a fit is a statement
-        // about the pages' size, so it cannot be taken before they exist.
-        //
-        // Order matters between the two: a spread halves the width each page
-        // gets, and `#pageWidthScaleFactor` reads the spread mode when it
-        // works the fit out.
+        // Both must happen on `pagesinit`: `setDocument` resets scroll/spread
+        // mode, and a fit needs the pages' size. Layout first — the fit reads
+        // the spread mode.
         eventBus.on("pagesinit", () => {
           applyLayout(viewer, pdfjs, modeRef.current);
           viewer.currentScaleValue = DEFAULT_FIT;
@@ -224,8 +168,7 @@ export function PDFViewer({ src }: Props) {
         setEngineReady((n) => n + 1);
       })
       .catch((err: Error) => {
-        // `main.tsx` paints an unhandled rejection over the whole window, so
-        // nothing in this file may leave one behind.
+        // `main.tsx` paints unhandled rejections over the window.
         if (!cancelled) setLoadError(err.message);
       });
 
@@ -273,8 +216,6 @@ export function PDFViewer({ src }: Props) {
       cancelled = true;
       viewer.setDocument(null as never);
       linkService.setDocument(null as never, null);
-      // `destroy()` rejects the loading task if it is still in flight, which
-      // is the path above's `catch`, and rejects nothing once settled.
       task.destroy().catch(() => {});
       doc?.destroy().catch(() => {});
     };
@@ -312,16 +253,9 @@ export function PDFViewer({ src }: Props) {
 
   // ── Zoom ─────────────────────────────────────────────────────────────────
 
-  /** Scale by a ratio about a point, or about the view's centre with no point.
-   *
-   *  `origin` is in the container's **offset** space, not client space:
-   *  `#setScaleUpdatePages` subtracts `containerTopLeft` — `offsetTop`/
-   *  `offsetLeft` against the nearest positioned ancestor — from it. In
-   *  Firefox's viewer the container is the page, so `clientX`/`clientY` go
-   *  straight in; here the scroller is inset in a card in a panel, so the
-   *  pointer has to be converted. The rect and the offsets cancel to "where
-   *  the pointer is inside the scroller", which is what the arithmetic wants
-   *  either way. */
+  /** Scale by a ratio about a point (or the view's centre). pdf.js wants
+   *  `origin` in the container's offset space — it subtracts `offsetTop`/
+   *  `offsetLeft` — so client coordinates are converted, not passed through. */
   const zoomBy = useCallback(
     (factor: number, clientX?: number, clientY?: number) => {
       const viewer = engineRef.current?.viewer;
@@ -353,11 +287,8 @@ export function PDFViewer({ src }: Props) {
     const el = containerRef.current;
     if (!el) return;
 
-    // WebKit reports one trackpad pinch twice — as `gesture*` events *and* as
-    // synthesized ctrlKey wheel events. Whichever path is live has to be the
-    // only one, or the two overwrite each other's result every frame. This is
-    // the one piece of the old gesture machinery worth keeping: pdf.js binds
-    // neither path itself.
+    // WebKit reports one pinch twice — as `gesture*` events and as ctrlKey
+    // wheel events — so the wheel path stands down while a gesture is live.
     const gestureActive = { current: false };
     let pinchBase = 1;
     let lapse: ReturnType<typeof setTimeout> | null = null;
@@ -377,17 +308,15 @@ export function PDFViewer({ src }: Props) {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       if (gestureActive.current) return;
-      // Exponential and clamped. A linear `1 - deltaY * 0.01` hits zero at
-      // deltaY 100 and goes negative past it, and one ⌘+wheel notch on macOS
-      // is ±120 — a single notch slammed the zoom to the floor.
+      // Exponential and clamped: a linear factor goes negative on one ±120
+      // ⌘+wheel notch.
       const raw = e.deltaY * (e.deltaMode === 1 ? LINE_HEIGHT : 1);
       const d = Math.max(-50, Math.min(50, raw));
       zoomBy(Math.exp(-d * 0.01), e.clientX, e.clientY);
     };
 
-    // WKWebView fires real gesture events for pinch, and `scale` is cumulative
-    // from the start of the gesture — hence the base, and hence the ratio
-    // against the previous frame rather than the raw scale.
+    // Gesture `scale` is cumulative from gesturestart, so zoom by the ratio
+    // to the previous frame.
     const onGestureStart = (e: Event) => {
       e.preventDefault();
       gestureActive.current = true;
@@ -426,10 +355,8 @@ export function PDFViewer({ src }: Props) {
     };
   }, [zoomBy]);
 
-  // A fit is a promise about the container, so it has to be re-kept when the
-  // container changes size — the side panel is resizable and a split tab
-  // halves it outright. pdf.js observes the container itself, but only to
-  // update its own cached geometry; re-fitting is the host viewer's job.
+  // Re-apply a fit when the container resizes; pdf.js leaves re-fitting to
+  // the host viewer.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -446,20 +373,9 @@ export function PDFViewer({ src }: Props) {
 
   // ── Drag to pan ──────────────────────────────────────────────────────────
   //
-  // Two-finger scrolling already pans; this is the drag. It moves the
-  // scroller's own offsets rather than a transform, for the reason
-  // `DiagramLightbox` sets out at length — momentum, scrollbars and keyboard
-  // scrolling stay the browser's job. Pointer events, not HTML5 drag: a
-  // `dragstart` that sets no data is cancelled outright by WebKit (root
-  // `CLAUDE.md`), and nothing here is being dragged *to* anything.
-  //
-  // **What makes a drag a selection is the glyph under it, not the tool.**
-  // pdf.js's text layer is `position: absolute; inset: 0`, so it covers the
-  // whole page — a `closest('.textLayer')` test would answer "text" over every
-  // margin and leave nothing to grab. The spans inside it are the actual
-  // words, and they are also the only thing pdf.js puts an I-beam on, so
-  // testing for the span makes the cursor and the gesture agree for free:
-  // I-beam and a selection over words, grab and a pan everywhere else.
+  // Moves the scroller's own offsets (see `ui/Lightbox.tsx`). In the select
+  // tool, a press on a `.textLayer span` (a word) selects and anywhere else
+  // pans — not `.textLayer` itself, which covers the whole page.
 
   const drag = useRef<{
     x: number;
@@ -470,23 +386,16 @@ export function PDFViewer({ src }: Props) {
   const [dragging, setDragging] = useState(false);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Leave the right button, and anything with a modifier that means
-    // something else, to be what they are.
     if (e.button !== 0) return;
     const el = containerRef.current;
     if (!el) return;
     const target = e.target as Element;
-    // A link or a form widget is neither gesture — in either tool. These are
-    // the only parts of the annotation layer that take pointer events at all
-    // (`.annotationLayer` itself is `pointer-events: none`), so a match here
-    // is always something meant to be clicked.
+    // Links and form widgets in the annotation layer stay clickable.
     if (target.closest?.(".annotationLayer section")) return;
-    // ⌥ is the override, for a page dense enough that there is no blank left
-    // to grab: it pans from the words themselves.
+    // ⌥ pans from the words themselves.
     if (tool === "select" && !e.altKey && target.closest?.(".textLayer span"))
       return;
-    // Without this WebKit starts a selection from the first `pointermove` and
-    // drags a highlight along behind the pan.
+    // Otherwise WebKit drags a text selection along behind the pan.
     e.preventDefault();
     drag.current = {
       x: e.clientX,
@@ -620,9 +529,7 @@ export function PDFViewer({ src }: Props) {
         </div>
       </div>
 
-      {/* The scroller has to be `absolute` — pdf.js throws in its constructor
-          otherwise, because every fit and every visible-page calculation reads
-          this element's own box. Hence the relative shell around it. */}
+      {/* pdf.js throws unless its container is `absolute`. */}
       <div className="relative flex-1 min-h-0">
         <div
           ref={containerRef}
@@ -632,20 +539,12 @@ export function PDFViewer({ src }: Props) {
           onPointerCancel={endDrag}
           className={cn(
             "pdf-surface absolute inset-0 overflow-auto",
-            // One cursor class at a time. Tailwind orders utilities of the
-            // same group by its own rules rather than by the order they are
-            // written in, so two of them in one string is a coin toss.
+            // One cursor class at a time: Tailwind, not source order, decides
+            // which of two wins.
             dragging ? "cursor-grabbing" : "cursor-grab",
-            // The grab above is the ground; pdf.js's own `cursor: text` on the
-            // spans cuts through it over the words, which is the whole
-            // affordance. It cuts through because `pdf_viewer.css` is imported
-            // unlayered and unlayered CSS outranks every `@layer` — the trap
-            // root `CLAUDE.md` records for `index.css`, met from the other
-            // side. It is why the hand tool and the drag both switch the layer
-            // off at the pointer rather than trying to out-specify it: a dead
-            // layer has no cursor, cannot be selected into, and stops matching
-            // the `.textLayer span` test above, which is all three answers at
-            // once.
+            // `pdf_viewer.css` is unlayered, so its `cursor: text` on words
+            // beats any utility; panning switches the text layer off instead
+            // (no cursor, no selection, no `.textLayer span` match).
             (tool === "pan" || dragging) && "[&_.textLayer]:pointer-events-none",
           )}
         >

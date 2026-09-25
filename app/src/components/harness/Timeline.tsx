@@ -1,8 +1,4 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -14,7 +10,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
-import { MATH, MD_COMPONENTS, normalizeMath } from "@/components/markdown/MdComponents";
+import { CompactMd } from "@/components/markdown/MdComponents";
 import { FileChip } from "@/components/markdown/FileChip";
 import { openLibraryPath, splitLibraryPaths, type TextPart } from "@/lib/openFile";
 import { attachmentSrc } from "@/lib/attachments";
@@ -25,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format";
-import { fmtTime } from "@/lib/lectures";
+import { fmtClockSecs } from "@/lib/lectures";
 import {
   messageAt,
   parseErrorMeta,
@@ -41,43 +37,31 @@ import { ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
 import { PermissionCard } from "./PermissionCard";
 import { SignInDialog, useSignIn } from "./SignInDialog";
 
-/** Editing a question, or one still waiting to be asked, both happen in the
- *  bubble itself rather than back in the composer: the thread is where the
- *  question is, and a box that opened somewhere else would lose its place in
- *  the conversation it is being asked about.
- *
- *  The three that truncate the thread — edit, rewind, retry — are absent for
- *  a provider that cannot take a question back out of its own context
- *  (`ProviderInfo.rewind`): offering them there would shorten the screen and
- *  leave the agent remembering what it no longer shows. */
+/** Edit, rewind and retry truncate the thread, so they are absent for a
+ *  provider that cannot take a question back out of its own context
+ *  (`ProviderInfo.rewind`). */
 export interface QuestionActions {
   /** Ask it again, differently. The thread rewinds to this row. */
   edit?: (itemId: number, text: string) => void;
   /** Take the thread back to just before this question and hand its words to
-   *  the composer. Claude Code's rewind, without the branching. */
+   *  the composer. */
   rewind?: (itemId: number) => void;
-  /** Ask the same question again, unchanged — what Retry under an answer is. */
+  /** Ask the same question again, unchanged. */
   retry?: (itemId: number, text: string) => void;
-  /** Send a new message on the open thread, on the thread's own model and
-   *  the composer's level — what an approved permission carries on with. */
+  /** Send a new message on the open thread — what an approved permission
+   *  carries on with. */
   followUp: (text: string) => Promise<void>;
 }
 
 /**
- * The thread as a list. Messages are the spine; the work between them —
- * tool calls, reasoning — is a *step*, and a finished step with more than
- * one row folds into a single summary row ("Explored 3 files, ran 2
- * commands") that opens to the rows. The step still in progress stays
- * unfolded, with its rows at full strength; finished rows are dimmed. This is
- * bb's `buildTimelineViewRows`, with one level of grouping instead of two.
+ * The thread as a list. Messages are the spine; the tool calls and reasoning
+ * between them are a *step*, and a finished step of two or more rows folds
+ * into one summary row ("Explored 3 files, ran 2 commands"). The step in
+ * progress stays unfolded; finished rows are dimmed.
  *
- * **Nothing here re-renders for the turn in flight.** A committed row is a row
- * Rust wrote and will not change again, so every one of them is memoised, and
- * the two things that do change while a turn runs subscribe to the store
- * themselves: the tail below, and the one tool row whose output is still
- * arriving. Re-parsing a thread's markdown on every streamed token was the
- * whole of the jitter — a thread's worth costs ~15ms, which is a dropped
- * frame per token when the tree above the stream is rebuilt to show it.
+ * **Nothing here re-renders for the turn in flight.** Committed rows never
+ * change, so all are memoised; only `LiveTail` and a running `Tool` subscribe
+ * to the stream.
  */
 
 type ViewRow =
@@ -101,8 +85,7 @@ function buildRows(items: HarnessItem[], running: boolean): ViewRow[] {
       out.push({ kind: "item", item, dim: false });
     }
   }
-  // The trailing step is live while the turn runs; otherwise it is as
-  // finished as the rest.
+  // The trailing step is live while the turn runs.
   close(!running);
   return out;
 }
@@ -138,37 +121,13 @@ function bundleLabel(items: HarnessItem[]): { label: string; icon: ToolKind } {
   return { label: label.charAt(0).toUpperCase() + label.slice(1), icon: dominant ?? "other" };
 }
 
-/** The two plugin lists, frozen: a reply with no maths in it keeps prop
- *  identity across renders, and `MATH` (`MdComponents`) is what decides which
- *  it gets — KaTeX is the most expensive thing in the pipeline and most
- *  replies carry no delimiter at all. */
-const PLAIN = [remarkGfm];
-const WITH_MATH = [remarkGfm, remarkMath];
-const KATEX = [rehypeKatex];
-const NO_PLUGINS: never[] = [];
-
-/** `md-compact` scales the shared markdown components down to a panel's size —
- *  see the rule in `app/src/index.css`. The components themselves are sized
- *  for a document (the file viewer), which is a size too large for a reply. */
+// Memoised: a committed reply never changes, and re-parsing it per streamed
+// token is what makes the thread jitter.
 const Assistant = memo(function Assistant({ text }: { text: string }) {
-  const math = MATH.test(text);
-  const body = math ? normalizeMath(text) : text;
-  return (
-    <div className="md-compact min-w-0 px-2 text-[13px] leading-relaxed">
-      <ReactMarkdown
-        remarkPlugins={math ? WITH_MATH : PLAIN}
-        rehypePlugins={math ? KATEX : NO_PLUGINS}
-        components={MD_COMPONENTS}
-      >
-        {body}
-      </ReactMarkdown>
-    </div>
-  );
+  return <CompactMd text={text} className="px-2 text-[13px] leading-relaxed" />;
 });
 
-/** One action under a message: an icon and the word for it, nothing else.
- *  The row they sit in is revealed by hovering the message, so at rest a
- *  thread is still only what was said. */
+/** One action under a message: an icon with a tooltip. */
 function Action({
   label,
   icon: Icon,
@@ -195,8 +154,7 @@ function Action({
   );
 }
 
-/** Copy is the one action that answers for itself: the icon becomes a tick
- *  rather than a toast, which this app does not have. */
+/** The icon becomes a tick on copy (no toasts in this app). */
 function CopyAction({ text }: { text: string }) {
   const [done, setDone] = useState(false);
   return (
@@ -214,13 +172,8 @@ function CopyAction({ text }: { text: string }) {
   );
 }
 
-/**
- * The row under a message: when it was said, then what can be done to it.
- *
- * Its height is always taken, and only its contents fade in on hover — a row
- * that appeared would push the whole thread down a line every time the
- * pointer crossed it.
- */
+/** The row under a message: its time, then its actions. Its height is always
+ *  taken and only the contents fade in on hover, so the thread never jumps. */
 function MessageActions({
   when,
   at,
@@ -228,19 +181,14 @@ function MessageActions({
   children,
 }: {
   when?: string;
-  /** The playhead second a dock question was asked at. Beside the wall clock
-   *  rather than in the bubble: it is a fact *about* the message, the same
-   *  kind of thing as when it was asked, and the bubble holds only what was
-   *  typed. */
+  /** The playhead second a dock question was asked at. */
   at?: number | null;
   side: "left" | "right";
   children: React.ReactNode;
 }) {
   return (
     <div
-      // Furniture, not the conversation: a selection dragged across several
-      // messages must not come out with a clock time between them
-      // (`selectionMarkdown`).
+      // Kept out of a copied selection (`selectionMarkdown`).
       data-copy-skip
       className={cn(
         "-mt-0.5 flex h-8 items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100",
@@ -250,7 +198,7 @@ function MessageActions({
       {when && <span className="px-1.5 tabular-nums">{when}</span>}
       {at != null && (
         <span className="-ml-1 pr-1.5 tabular-nums" title="The moment this message carried">
-          at {fmtTime(at)}
+          at {fmtClockSecs(at)}
         </span>
       )}
       {children}
@@ -258,27 +206,22 @@ function MessageActions({
   );
 }
 
-/** Grows to its content, so an edited question is never a three-line window
- *  onto a ten-line message. */
+/** The edit box grows to its content up to this. */
 const EDIT_MAX_H = 240;
 
-/** How much of a long question is left showing when it is folded. A pasted
- *  brief is routinely longer than the screen, and a thread of them reads as
- *  one wall of text with the answers lost inside it. */
+/** How much of a long question is left showing when it is folded. */
 const QUESTION_MAX_H = 208;
 /** Below this much hidden, folding would save a line and cost a click. */
 const FOLD_SLACK = 40;
 
-/** Whether a bubble is long enough to be worth folding — measured, not
- *  counted: how many lines a paste becomes is the column's decision, and the
- *  column changes width with the panel. */
+/** Whether a bubble is long enough to fold — measured, since line count
+ *  depends on the column's width. */
 function useOverflows(text: string, shown: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   const [over, setOver] = useState(false);
   useLayoutEffect(() => {
     const el = ref.current;
-    // Nothing to measure while the bubble is a box instead; the node this
-    // watches is gone, so the observer has to be re-hung when it comes back.
+    // While editing the node is gone; the observer re-hangs when it returns.
     if (!el || !shown) return;
     // `scrollHeight` is the full text even while `max-height` is clipping it.
     const measure = () => setOver(el.scrollHeight > QUESTION_MAX_H + FOLD_SLACK);
@@ -291,28 +234,15 @@ function useOverflows(text: string, shown: boolean) {
 }
 
 /**
- * The pictures a question attached, lifted out of its prose, and the prose
- * with the holes they left closed up.
- *
- * Attachments go *above* the words — the shape every chat UI has settled on,
- * and the one the composer's own strip already draws. Inline they were a
- * 240px block dropped into the middle of a sentence, and five of them turned
- * a two-line question into a column of gaps.
- *
- * Closing the hole is this function's other half. The composer writes the
- * paths on their own line under the message, so removing them leaves a
- * trailing blank line `whitespace-pre-wrap` would faithfully draw; a picture
- * quoted back *inside* a sentence leaves the two spaces that were around it.
- * Both are swept here and not in `splitLibraryPaths`, which the composer's
- * own editor shares and which must hand back the text exactly as it was.
+ * A question's attached pictures, lifted out to draw above the words, and the
+ * prose with the gaps they left closed up. Swept here, not in
+ * `splitLibraryPaths`, which the composer shares and must round-trip exactly.
  */
 function liftPictures(parts: TextPart[]): [Extract<TextPart, { kind: "image" }>[], TextPart[]] {
   const pictures = parts.filter((p) => p.kind === "image");
   if (!pictures.length) return [pictures, parts];
 
-  // Two runs of prose that were only ever separated by a picture are one run
-  // now, and the seam between them collapses: a single space inside a line,
-  // nothing at all across a break.
+  // Prose split only by a picture joins with one space, or none across a break.
   const body: TextPart[] = [];
   for (const p of parts) {
     if (p.kind === "image") continue;
@@ -327,8 +257,7 @@ function liftPictures(parts: TextPart[]): [Extract<TextPart, { kind: "image" }>[
     }
   }
 
-  // …and the ends, where the message's own last line used to be followed by
-  // a strip of paths.
+  // The composer writes attachment paths on their own trailing line.
   const first = body[0];
   if (first?.kind === "text") body[0] = { kind: "text", text: first.text.replace(/^\s+/, "") };
   const last = body[body.length - 1];
@@ -338,13 +267,8 @@ function liftPictures(parts: TextPart[]): [Extract<TextPart, { kind: "image" }>[
   return [pictures, body.filter((p) => p.kind !== "text" || p.text.length > 0)];
 }
 
-/**
- * A question: the student's own words, on the right.
- *
- * Editing happens in the bubble itself rather than back in the composer —
- * the thread is where the question is — and the box is the bubble grown to
- * the column's width, with its two buttons inside it.
- */
+/** A question, on the right. Editing (a sent or a queued one) happens in the
+ *  bubble itself, grown to the column's width. */
 function QuestionBubble({
   msgId,
   text,
@@ -355,37 +279,28 @@ function QuestionBubble({
   onRemove,
   onRewind,
 }: {
-  /** The row id, for the rail to measure. Absent on a queued message: it is
-   *  not a question yet, so it is not a landmark. */
+  /** The row id, for the rail to measure. Absent on a queued message. */
   msgId?: number;
   text: string;
   pending?: boolean;
   when?: string;
-  /** The playhead second this question carried, for a dock message. */
+  /** The playhead second, for a dock message. */
   at?: number | null;
-  /** Absent while the thread is busy — a rewind under a running turn would
-   *  delete rows it is still writing. */
+  /** Absent while the thread is busy: a rewind would delete rows mid-write. */
   onSubmit?: (text: string) => void;
   onRemove?: () => void;
   onRewind?: () => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  /** The picture being looked at, as the src the card already drew — opening
-   *  one is a viewer over the thread, not a trip out to the OS. */
+  /** The picture open in the lightbox, as the src the card drew. */
   const [shown, setShown] = useState<string | null>(null);
-  // One IPC call for the whole app, so a thread of bubbles costs nothing
-  // (`useDataDir`). Only a bubble holding a picture ever reads it.
   const dataDir = useDataDir();
   const [body, long] = useOverflows(text, editing === null);
   const box = useRef<HTMLTextAreaElement>(null);
-  // The mentions in the question, drawn as the chips they were picked as
-  // rather than as the paths the agent was sent. Split on shape, so a bubble
-  // costs no query — see `splitLibraryPaths`.
+  // Mentions draw as chips rather than the paths the agent was sent.
   const parts = useMemo(() => splitLibraryPaths(text), [text]);
-  // Attachments above, prose below — and the prose is what the fold measures
-  // and can hide, because a picture the student attached is the question's
-  // subject and never the part worth folding away.
+  // Only the prose is measured and folded; pictures always show.
   const [pictures, prose] = useMemo(() => liftPictures(parts), [parts]);
 
   useLayoutEffect(() => {
@@ -435,32 +350,18 @@ function QuestionBubble({
 
   return (
     <div className="group/msg flex w-full flex-col">
-      {/* One viewer for the message, not one per card: only one picture can
-          be open at a time, and a dialog per thumbnail would be a portal per
-          thumbnail. */}
+      {/* One viewer per message, not per thumbnail. */}
       <ImageLightbox
         src={shown ?? ""}
         alt="Attached picture"
         open={shown !== null}
         onOpenChange={(o) => !o && setShown(null)}
       />
-      {/* The landmark the rail measures is the question as drawn — its
-          pictures and its words, but not the action row under them, which
-          appears on hover and would make a tick jump. */}
+      {/* What the rail measures: pictures and words, not the action row. */}
       <div data-msg-id={msgId} className="flex w-full flex-col items-end gap-1.5">
         {pictures.length > 0 && (
-          // The pictures themselves, not chips, and **beside the bubble
-          // rather than inside it**: what was attached is what the question
-          // was about, a filename of digits says nothing about it, and every
-          // chat UI has settled on the same shape — cards of their own above
-          // the words. Clicking one opens it full size the way any other file
-          // in the library opens.
-          //
-          // One picture draws at its own size. Several become a three-across
-          // grid that wraps, each card letterboxing its picture on the
-          // bubble's own ground instead of cropping it square: what a student
-          // attaches here is a screenshot of a question, and a crop of one is
-          // unreadable, which is the whole point of drawing it at all.
+          // One picture at its own size; several in a three-across grid,
+          // letterboxed rather than cropped — they are usually screenshots.
           <div className="flex max-w-[70%] flex-wrap justify-end gap-1.5">
             {pictures.map((p, i) => (
               <button
@@ -500,9 +401,7 @@ function QuestionBubble({
           >
             <div
               ref={body}
-              // The fade is a mask rather than a gradient over the top: the
-              // bubble behind it is two different grounds (queued is
-              // transparent), and a mask does not need to know which.
+              // A mask, not a gradient: a queued bubble's ground is transparent.
               className={cn(
                 "whitespace-pre-wrap break-words",
                 long && !open && "overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-2.25rem),transparent)]",
@@ -545,10 +444,8 @@ function QuestionBubble({
   );
 }
 
-/** `data-msg-id` is what the left-hand rail measures — the questions are its
- *  landmarks (`ThreadMap.tsx`). Whether this one can be edited is read here
- *  rather than passed in: the answer changes twice a turn, and a prop would
- *  re-render every committed row with it, markdown and all. */
+/** Busy is read from the store here, not passed in: it changes twice a turn,
+ *  and a prop would re-render every committed row. */
 const User = memo(function User({
   item,
   actions,
@@ -572,16 +469,14 @@ const User = memo(function User({
   );
 });
 
-/** An answer, and under it the two things anyone ever wants from one: the
- *  text, and the same question asked again. */
+/** An answer, with Copy and Retry under it. */
 const Reply = memo(function Reply({
   item,
   asked,
   actions,
 }: {
   item: HarnessItem;
-  /** The question this answered, for Retry. Absent for an answer with no
-   *  question above it, which only a rewound thread can produce. */
+  /** The question this answered, for Retry. */
   asked?: { id: number; text: string };
   actions?: QuestionActions;
 }) {
@@ -605,19 +500,15 @@ const Reply = memo(function Reply({
   );
 });
 
-/** Where a turn was stopped. The answer above it breaks off mid-sentence,
- *  and without this the thread reads as an agent that gave up. */
+/** Where a turn was stopped. */
 const Stopped = memo(function Stopped() {
   return (
     <div className="py-1 text-center text-[11px] text-muted-foreground">You stopped the response</div>
   );
 });
 
-/** A rewind that took rows off the screen without taking them out of the
- *  agent's head — an old question with no anchor, or a session the CLI has
- *  dropped. Everywhere else the two agree, so the one case where they do not
- *  has to be visible: otherwise it surfaces as an agent referring to an
- *  answer that is not there. */
+/** A rewind that took rows off the screen but not out of the agent's context
+ *  (no anchor, or a dropped CLI session) — shown so the mismatch is visible. */
 const ContextDrift = memo(function ContextDrift({ threadId }: { threadId: number }) {
   const drifted = useHarnessStore((s) => s.contextDrift[threadId] ?? false);
   if (!drifted) return null;
@@ -628,9 +519,8 @@ const ContextDrift = memo(function ContextDrift({ threadId }: { threadId: number
   );
 });
 
-/** A tool call still running is the one committed row that changes: its
- *  output arrives after it. It takes that from the store itself, so the
- *  stream re-renders this row and nothing around it. */
+/** A running tool's output streams in; it subscribes itself so only this row
+ *  re-renders. */
 function Tool({ item, dim }: { item: HarnessItem; dim: boolean }) {
   const done = parseToolMeta(item).ok != null;
   const ref = item.ref_id;
@@ -652,16 +542,11 @@ const Item = memo(function Item({
   dim: boolean;
   /** Stable for the life of the page, so memoising these rows still works. */
   actions?: QuestionActions;
-  /** For an answer: the question above it. Memoised with `items`, so the
-   *  object identity is as stable as the rows are. */
+  /** For an answer: the question above it (identity-stable with `items`). */
   asked?: { id: number; text: string };
-  /** Opens the sign-in dialog for a signed-out agent. It is `setState` from
-   *  the `Timeline` below, so its identity is stable on the same terms
-   *  `actions` is — the dialog has to outlive this row re-rendering, and a
-   *  fresh closure per render would un-memoise every row in the thread. */
+  /** Opens the sign-in dialog; a `setState`, so stable. */
   onSignIn?: (provider: Provider) => void;
-  /** For a `permission` row: whether it is the thread's latest refusal, the
-   *  one that still carries the allow button. */
+  /** For a `permission` row: the latest refusal carries the allow button. */
   latest?: boolean;
 }) {
   switch (item.kind) {
@@ -688,7 +573,6 @@ const Bundle = memo(function Bundle({ items }: { items: HarnessItem[] }) {
   const { label, icon } = useMemo(() => bundleLabel(items), [items]);
   return (
     <RowShell icon={TOOL_ICON[icon]} title={label} expandable dim>
-      {/* The group line: rows hang off a hairline, the way nested work does in bb. */}
       <div className="relative my-0.5 pl-3 before:absolute before:bottom-1 before:left-1.5 before:top-0 before:w-px before:bg-border before:content-['']">
         <div className="flex flex-col">
           {items.map((i) => (
@@ -700,9 +584,7 @@ const Bundle = memo(function Bundle({ items }: { items: HarnessItem[] }) {
   );
 });
 
-/** The turn in flight: reasoning and text that have no row yet, and the
- *  "Working…" line for the beat when neither is arriving. The only part of
- *  the timeline subscribed to the stream. */
+/** The turn in flight: reasoning and text with no row yet, or "Working…". */
 function LiveTail({ threadId }: { threadId: number }) {
   const live = useHarnessStore((s) => s.live[threadId]);
   if (!live) return null;
@@ -721,15 +603,8 @@ function LiveTail({ threadId }: { threadId: number }) {
   );
 }
 
-/**
- * What was typed while the agent was working, waiting its turn.
- *
- * These are not rows and not history: Rust is holding them in memory and will
- * send them one at a time as the turn in front of each one ends
- * (`Queue` in `app/src-tauri/src/harness/mod.rs`). Until then they can be
- * rewritten or dropped, which is the whole reason they are drawn as bubbles
- * here rather than left invisible in the composer.
- */
+/** Messages queued while the agent works — held in memory by Rust (`Queue` in
+ *  `app/src-tauri/src/harness/mod.rs`), editable or removable until sent. */
 function Pending({ threadId, actions }: { threadId: number; actions: PendingActions }) {
   const queued = useHarnessStore((s) => s.queued[threadId]);
   if (!queued?.length) return null;
@@ -748,19 +623,8 @@ function Pending({ threadId, actions }: { threadId: number; actions: PendingActi
   );
 }
 
-/**
- * Copying out of a thread gives **markdown**, not the words as they are set.
- *
- * What the browser would put on the clipboard is the rendering: a heading
- * without its `#`, a table as a run of words, a formula as KaTeX's glyphs. The
- * Copy button under a message has the source string and hands that over; a
- * selection dragged across half an answer has no source string, so the DOM
- * inside it is read back into markdown instead (`lib/selectionMarkdown.ts`).
- *
- * Only `text/plain` is written, which is the flavour a notes app, an editor
- * and another agent all take. Plain text is a later choice — the right-click
- * menu this app does not have yet is where it belongs.
- */
+/** A selection copies as markdown, read back from the DOM
+ *  (`lib/selectionMarkdown.ts`), as `text/plain` only. */
 function markdownFor(target: EventTarget | null): string {
   // A selection inside a field belongs to the field, and it is already text.
   if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) {
@@ -777,9 +641,7 @@ function copyAsMarkdown(e: React.ClipboardEvent) {
   e.preventDefault();
 }
 
-/** The same text, dragged out instead of copied. **No `preventDefault` here**:
- *  on `dragstart` that cancels the drag outright (CLAUDE.md) — `setData` alone
- *  replaces what WebKit had already put on the transfer. */
+/** The same, dragged out. No `preventDefault` — see CLAUDE.md (WebKit drag). */
 function dragAsMarkdown(e: React.DragEvent) {
   const md = markdownFor(e.target);
   if (md) e.dataTransfer.setData("text/plain", md);
@@ -804,27 +666,14 @@ export function Timeline({
   questions?: QuestionActions;
   pending?: PendingActions;
 }) {
-  /**
-   * Which agent's sign-in dialog is open, if any.
-   *
-   * Here rather than inside the row that offers it, for the reason the install
-   * run sits in its Settings section: the dialog and the flow behind it have
-   * to survive the row re-rendering — and a thread re-renders constantly, both
-   * ends of every turn. `setSignIn` is React's own setter, so handing it
-   * straight to a memoised `Item` costs that memoisation nothing.
-   *
-   * It lives in `Timeline` rather than in `ChatPage` because the timeline is
-   * the surface that is in two places: the chat page and the lecture player's
-   * dock. A failed turn shows the same card in both, so the dialog has to be
-   * in both too.
-   */
+  // Held here, not in the row, so the dialog survives rows re-rendering; and
+  // in `Timeline`, not `ChatPage`, so the lecture dock gets it too.
   const [signIn, setSignIn] = useState<Provider | null>(null);
   const { recheck } = useSignInStatus();
   const run = useSignIn(recheck);
 
   const rows = useMemo(() => buildRows(items, running), [items, running]);
-  // Which question each answer answered — what Retry asks again. Built with
-  // the rows so the object handed to a memoised row keeps its identity.
+  // Which question each answer answered, for Retry.
   const asked = useMemo(() => {
     const map = new Map<number, { id: number; text: string }>();
     let last: { id: number; text: string } | undefined;
@@ -872,10 +721,7 @@ export function Timeline({
           onCode={(code) => run.submitCode(code)}
           onCancel={() => run.cancel()}
           onClose={() => {
-            // A finished run is cleared with the dialog, so reopening the card
-            // offers the sign-in again rather than a log of what already
-            // happened. One still in flight is kept — the browser is still
-            // open on it — and reopening resumes the same run.
+            // Clear a finished run; keep one in flight so reopening resumes it.
             if (run.run?.result) run.clear();
             setSignIn(null);
           }}

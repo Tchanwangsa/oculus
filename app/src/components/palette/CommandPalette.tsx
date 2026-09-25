@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useState } from "react";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import {
   Dialog,
@@ -11,54 +10,37 @@ import { SearchList, useSearchSelection } from "@/components/search/SearchList";
 import { navigateActive, openUrlInFocusedPane } from "@/lib/tabRouters";
 import { openSearchItem, type SearchItem } from "@/lib/search";
 import { useSearch } from "@/hooks/useSearch";
+import { useTauriEvent } from "@/hooks/useEvents";
 import { usePaletteStore } from "@/stores/paletteStore";
 import { useTabStore } from "@/stores/tabStore";
 import { useSubjects } from "@/hooks/useSubjects";
 
 /**
- * The ⌘K palette: one field over everything you can reach — subjects, files,
- * lectures, projects, tasks, the words inside your parsed documents, the app's
- * own pages, and the web when the answer is not in the library at all.
- *
- * What it searches and in what order is `app/src/lib/search.ts`, shared with
- * the new-tab page's field so the two cannot drift; this component is the
- * dialog around it.
- *
- * Enter goes there in the current tab — the focused half of it, if the tab is
- * split — and ⌘↵ in a new one, the rule the sidebar's Recent rows already
- * follow.
+ * The ⌘K palette over everything reachable (library, pages, web). What it
+ * searches is `app/src/lib/search.ts`, shared with the new-tab page. Enter
+ * opens in the current (focused) pane, ⌘↵ in a new tab.
  */
 export default function CommandPalette() {
   const open = usePaletteStore((s) => s.open);
   const setOpen = usePaletteStore((s) => s.setOpen);
   const toggle = usePaletteStore((s) => s.toggle);
 
-  // ⌘K is a menu item, not a key handler: macOS gives the menu bar every
-  // ⌘-key before a webview sees it. That is also what makes the palette reach
-  // you while a browser tab's native page holds focus — which is exactly when
-  // you most want a way out of it. See `app/src-tauri/src/menu.rs`.
-  useEffect(() => {
-    const pending = listen("menu-search", () => toggle());
-    return () => {
-      pending.then((un) => un()).catch(() => {});
-    };
-  }, [toggle]);
+  // A menu item, not a key handler: macOS gives the menu bar ⌘-keys first, which
+  // also makes it work over a native browser tab. See `app/src-tauri/src/menu.rs`.
+  useTauriEvent("menu-search", () => toggle());
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         showCloseButton={false}
-        // Palettes hang from the top of the window rather than sitting in the
-        // middle of it: the list grows downwards and the field must not move
-        // as it does.
+        // Hangs from the top so the field doesn't move as the list grows.
         className="top-[14%] translate-y-0 gap-0 overflow-hidden rounded-xl border-border bg-popover p-0 shadow-lg sm:max-w-xl"
       >
         <DialogTitle className="sr-only">Search</DialogTitle>
         <DialogDescription className="sr-only">
           Find a subject, file, lecture, project or page.
         </DialogDescription>
-        {/* Mounted with the dialog, so each open starts on an empty field and
-            a fresh read of the library. */}
+        {/* Mounted per open: empty field, fresh library read. */}
         <PaletteBody onClose={() => setOpen(false)} />
       </DialogContent>
     </Dialog>
@@ -76,9 +58,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     onClose();
     openSearchItem(item, {
       newTab,
-      // The shell's door: the focused pane of the tab in front, with all the
-      // rules that hang off it (a browser tab gets a tab of its own, a playing
-      // lecture is asked about, the peek is shut behind you).
+      // The shell's navigation, with its departure rules.
       navigate: navigateActive,
       addTab,
       openUrl: (url) => void openUrlInFocusedPane(url),

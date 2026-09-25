@@ -8,10 +8,9 @@ import {
   isPast,
   isSelfImposed,
   monthGrid,
-  sameDay,
-  startOfDay,
   type CalEvent,
 } from "@/lib/calendar";
+import { sameDay, startOfDay } from "@/lib/format";
 import {
   Popover,
   PopoverContent,
@@ -22,23 +21,11 @@ import { EventPopover } from "./EventPopover";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/**
- * A cell's fixed furniture, in pixels: the `pt-1` above the date, the date's
- * own 20px line, and the `gap-0.5` that follows it.
- */
+/** A cell's fixed furniture (px): `pt-1`, the 20px date line, and `gap-0.5`. */
 const CELL_HEADER_PX = 26;
 /** One chip: a 16px line inside `py-px`, plus the `gap-0.5` above it. */
 const CHIP_PX = 20;
-/**
- * How many chips a cell shows before the rest fold into "+N more", until the
- * grid has been measured — one paint's worth, and what a full-height window
- * fits anyway.
- *
- * It used to be the only answer, and it was wrong at every other size: four
- * chips need 106px of cell, so a window with the side panel open (or simply a
- * short one) drew the fourth sliced in half by the cell's `overflow-hidden`,
- * with no "+N more" to say anything was missing. The count is measured now.
- */
+/** Chips per cell before "+N more", until the grid has been measured. */
 const VISIBLE_FALLBACK = 4;
 
 export function MonthView({
@@ -54,10 +41,8 @@ export function MonthView({
   const today = useNow();
   const todayStart = startOfDay(today).getTime();
 
-  // How many chips a cell can actually hold, measured rather than assumed.
-  // The six rows split the grid evenly, so one height answers for all of them;
-  // the observer is what keeps it true through a window resize, a page zoom
-  // and the side panel opening.
+  // Chips a cell can hold, measured; rows are equal so one height serves all.
+  // The observer tracks resize, zoom and the side panel.
   const body = useRef<HTMLDivElement>(null);
   const [rowH, setRowH] = useState(0);
   useEffect(() => {
@@ -88,8 +73,7 @@ export function MonthView({
         ))}
       </div>
 
-      {/* Six equal rows: the grid keeps one height for every month, so paging
-          through the year never makes the page jump. */}
+      {/* Six equal rows, so paging months never jumps the page. */}
       <div ref={body} className="grid flex-1 min-h-0 grid-rows-6">
         {weeks.map((week, wi) => (
           <div key={wi} className="grid grid-cols-7 border-b border-border-subtle last:border-b-0">
@@ -97,8 +81,7 @@ export function MonthView({
               const inMonth = day.getMonth() === month.getMonth();
               const dayEvents = eventsOn(events, day);
               const isToday = sameDay(day, today);
-              // A day already behind us reads grey; today and everything after
-              // keeps the subject colours.
+              // Past days read grey.
               const dayGone = day.getTime() < todayStart;
               const visible =
                 dayEvents.length > capacity ? Math.max(1, capacity - 1) : capacity;
@@ -125,9 +108,7 @@ export function MonthView({
                     </span>
                   </div>
 
-                  {/* One chip's worth of the cell goes to "+N more" when
-                      there is a remainder — the link is shorter than a chip,
-                      so trading one for it always fits. */}
+                  {/* "+N more" takes one chip's slot; it is shorter, so it fits. */}
                   {dayEvents.slice(0, visible).map((e) => (
                     <Chip
                       key={e.id}
@@ -155,8 +136,7 @@ export function MonthView({
   );
 }
 
-/** "11a" — the coarsest useful time, since a month cell has room for one word
- *  before the title. Minutes appear only when they are not on the hour. */
+/** "11a" — minutes only when not on the hour; a month cell fits one word. */
 function chipTime(d: Date): string {
   const h = d.getHours();
   const m = d.getMinutes();
@@ -173,10 +153,8 @@ function Chip({
   color: string;
   gone: boolean;
 }) {
-  // A deadline, a note or a task is an instant with no shape of its own, so it
-  // is tinted to stand out of a column of classes; a class stays flat, or a
-  // busy day turns into stripes. What you set yourself — a note, a task — is
-  // tinted more faintly than a deadline a course set for you.
+  // Instants are tinted to stand out among flat classes; self-set ones (notes,
+  // tasks) more faintly than a course deadline.
   const instant = isInstant(event);
   const tone = gone ? "var(--color-chart-other)" : color;
   const fill = isSelfImposed(event) ? (gone ? 8 : 12) : gone ? 12 : 20;

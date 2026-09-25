@@ -2,28 +2,9 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Editing a plain number on a project row — a task's estimate, and whatever
- * comes next.
- *
- * Dates used to go through here too, as a `type="datetime-local"`. They now
- * have a control of their own (`./DateTimeField.tsx`), because the native one
- * rendered as five separately-hovering segments and opened the OS calendar;
- * what is left here is the part that was never the problem.
- */
-
-// ── The field ────────────────────────────────────────────────────────────────
-
-/**
- * A field that is only written when you leave it.
- *
- * Committing on every change cannot work here: "90" is typed through "9", so a
- * write per keystroke stores a number nobody asked for and, on a cleared
- * field, a `null` mid-edit. The draft therefore commits on blur, and follows
- * the row only when the row itself changes — which is also what keeps a
- * `PROJECTS_UPDATED_EVENT` from someone else's write (the chat agent's through
- * the CLI, another tab's) from yanking the characters out from under the
- * cursor. The dependency is the *value*, not the row object, so an unrelated
- * project write re-rendering this page does not disturb it either.
+ * A number field written only on blur ("90" is typed through "9"). The draft
+ * resyncs on `value`, not the row object, so an unrelated write doesn't yank
+ * text from under the cursor.
  */
 export function DraftField({
   value,

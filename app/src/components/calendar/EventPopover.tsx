@@ -1,7 +1,5 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   ArrowSquareOut,
   Kanban,
@@ -15,7 +13,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
+import { CompactMd } from "@/components/markdown/MdComponents";
 import {
   CALENDAR_UPDATED_EVENT,
   fmtEventTime,
@@ -33,26 +31,10 @@ const KIND_LABEL: Record<CalEvent["kind"], string> = {
   task: "Task",
 };
 
-/** Where a local row came from, in the user's words. Only `manual` is written
- *  now; `automation` is kept for rows the removed automations feature left
- *  behind, which are still real events on the user's grid. */
-const SOURCE_LABEL: Record<string, string> = {
-  automation: "Added by an automation",
-  manual: "Added by you",
-};
-
 /**
- * The detail card behind every chip in every view. Actions differ by layer: a
- * Canvas event or deadline links out to Canvas, a recording opens the in-app
- * player — nothing is shown for a link the event does not have.
- *
- * It is also where a local event is edited and deleted. Canvas rows need
- * neither control (the next sync would write them straight back), so the
- * affordances belong with the one layer that owns its own lifetime rather than
- * in a panel of its own. A task is editable nowhere near here, for a different
- * reason: the calendar only *reads* `project_tasks`, and everything you would
- * do to a task — re-date it, move its column, drop it — belongs on its board,
- * which the card links through to.
+ * The detail card behind every chip in every view. Only local events get Edit
+ * and Remove: a Canvas row would be written straight back by the next sync, and
+ * a task is edited on its board, which the card links to.
  */
 export function EventPopover({
   event,
@@ -63,20 +45,15 @@ export function EventPopover({
   color: string;
   children: ReactNode;
 }) {
-  // Controlled only so the card can dismiss itself when it hands over to the
-  // dialog: two overlapping focus traps — a popover and a modal — is a way to
-  // leave the page unclickable.
+  // Controlled so the card closes before the edit dialog opens: two stacked
+  // focus traps leave the page unclickable.
   const [open, setOpen] = useState(false);
   const localId = event.localId;
-  // A task's project, if this is one. The name travels in the href because the
-  // tab strip titles a project tab from the query alone (`projectHref`).
   const project =
     event.projectId != null && event.projectName != null
       ? { id: event.projectId, name: event.projectName }
       : null;
-  /** Nothing else ever clears a local event — no sync replaces the table — so
-   *  removing one is final and immediate, like every other Remove in the app.
-   *  The page reloads off the same signal a sync raises. */
+  /** The page reloads off the same signal a sync raises. */
   const remove = () => {
     if (localId == null) return;
     void deleteLocalEvent(localId)
@@ -84,10 +61,8 @@ export function EventPopover({
       .catch(console.error);
   };
 
-  /** The dialog is mounted once in `AppLayout`, so editing is a call into its
-   *  store rather than a second copy of the form in here. The card carries
-   *  everything the form needs — a local row's title, kind, subject, dates and
-   *  notes are all on the `CalEvent` — so no row is read back first. */
+  /** The dialog lives once in `AppLayout`; the `CalEvent` carries everything
+   *  its form needs. */
   const edit = () => {
     setOpen(false);
     editEvent(event);
@@ -134,10 +109,9 @@ export function EventPopover({
         </div>
 
         {event.description && (
-          <div className="max-h-52 overflow-y-auto border-t border-border-subtle px-3.5 py-2.5 text-xs text-muted-foreground [&_p]:my-1 [&_p]:text-xs">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-              {event.description}
-            </ReactMarkdown>
+          <div className="max-h-52 overflow-y-auto border-t border-border-subtle px-3.5 py-2.5 text-muted-foreground">
+            {/* `!` because `.md-compact` is unlayered and outranks utilities. */}
+            <CompactMd text={event.description} className="text-xs! [&_p]:my-1!" />
           </div>
         )}
 
@@ -146,7 +120,7 @@ export function EventPopover({
             {localId != null && (
               <>
                 <span className="text-[11px] text-muted-foreground/70">
-                  {SOURCE_LABEL[event.localSource ?? ""] ?? "Added in Oculus"}
+                  {event.localSource === "manual" ? "Added by you" : "Added in Oculus"}
                 </span>
                 <button
                   type="button"

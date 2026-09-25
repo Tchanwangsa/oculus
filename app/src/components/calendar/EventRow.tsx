@@ -17,11 +17,8 @@ const KIND_LABEL: Record<CalEvent["kind"], string> = {
 };
 
 /**
- * One event as a list row, shared by the calendar's Agenda view and Home's
- * Today list — which is why the two read identically.
- *
- * `now` is a prop, not a `useNow()` call in here: the caller owns the clock, so
- * a list of six rows runs one minute timer between them rather than six.
+ * One event as a list row, shared by Agenda and Home's Today list. The caller
+ * owns `now`, so a list runs one minute timer rather than one per row.
  */
 export function EventRow({
   event,
@@ -32,8 +29,7 @@ export function EventRow({
   color: string;
   now: Date;
 }) {
-  // Today's list still carries the classes you have already sat
-  // through — greyed, so "what's left today" reads at a glance.
+  // Classes already sat through are greyed, not dropped.
   const gone = isPast(event, now);
   return (
     <EventPopover event={event} color={color}>
@@ -60,9 +56,7 @@ export function EventRow({
           </span>
           <span className="block truncate text-[11px] text-muted-foreground">
             {event.subjectCode}
-            {/* A task names the project it belongs to: which
-                piece of work this is part of is what tells you
-                what to do about it. */}
+            {/* A task names its project. */}
             {event.kind === "task" && event.projectName ? (
               ` · task · ${event.projectName}`
             ) : event.kind === "due" ? (

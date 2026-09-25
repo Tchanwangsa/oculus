@@ -5,26 +5,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { boardOf, type DbProject, type ProjectColumn } from "@/lib/projects";
 
 /**
- * The tint a column's pill wears.
- *
- * Kind alone is not enough: Todo and In progress are both `kind: "active"`,
- * and the pill *is* the whole Status cell in the table, so two different
- * states read identically. So the ramp is kind plus position — how far along
- * the project's own board the column sits — and it runs from no fill at all to
- * the brand accent:
- *
- *   backlog → outline only · queued → grey fill · in flight → brand · done → success
- *
- * The last active column takes the brand because `brand` is this palette's
- * accent for work in flight (the root `CLAUDE.md`), and the columns before it
- * step down towards the neutral end rather than taking hues of their own —
- * a board is not a legend, and three saturated pills in a Status column would
- * read as three warnings.
+ * A column pill's tint, by kind plus rank among the active columns (Todo and
+ * In progress are both `active`): backlog outline → queued grey → in flight
+ * brand → done success. An unknown column is painted destructive.
  */
-export function columnPillClass(columns: ProjectColumn[], columnId: string): string {
+function columnPillClass(columns: ProjectColumn[], columnId: string): string {
   const column = columns.find((c) => c.id === columnId) ?? null;
-  // A column the project no longer has: the task still names it, and saying so
-  // is more use than drawing it as though it were filed correctly.
   if (!column) return "border-destructive/20 bg-destructive/10 text-destructive";
   if (column.kind === "done") return "border-success/20 bg-success/15 text-success";
   if (column.kind === "backlog") return "border-border bg-transparent text-muted-foreground";
@@ -38,15 +24,8 @@ export function columnPillClass(columns: ProjectColumn[], columnId: string): str
 }
 
 /**
- * The board column a task sits in, as a pill you can change in place.
- *
- * It calls `moveTask` — never `updateTask`, which cannot write `column_id` at
- * all: the column and `done_at` are one fact, and only `moveTask` reads the
- * project's board to learn whether the destination is a `kind: "done"` one.
- *
- * `project` may be `null`: an unfiled task has no project, and its columns are
- * the default board `boardOf` hands back — the same four `moveTask` will check
- * the pick against.
+ * A task's column as an editable pill. Callers write through `moveTask`, never
+ * `updateTask`: only `moveTask` keeps `done_at` in step with the column.
  */
 export function StatusPill({
   project,
@@ -54,10 +33,9 @@ export function StatusPill({
   onPick,
   className,
 }: {
-  /** `null` for a task that belongs to no project. */
+  /** `null` for an unfiled task (default board). */
   project: DbProject | null;
   columnId: string;
-  /** Given a column id from the task's own board — never an invented one. */
   onPick: (columnId: string) => void;
   className?: string;
 }) {

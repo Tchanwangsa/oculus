@@ -29,22 +29,9 @@ function TooltipTrigger({
 }
 
 /**
- * The bubble.
- *
- * `max-w-64` is the primitive's own, not a call site's: a tooltip stands in
- * for a label that did not fit, and the labels this app hangs one off — a tab
- * carrying a Canvas page title, a file's full name — are routinely long enough
- * to draw a single line most of the window wide, which is harder to read than
- * the truncation it was explaining. Width first, then `break-words` so a long
- * path or filename wraps inside it rather than pushing past it.
- *
- * No `text-balance` here, and that is the cap doing its job rather than an
- * omission: balancing runs *after* the box width is resolved, and `w-fit` is
- * `min(max-content, max-width)`, so any text long enough to wrap pins the
- * bubble at the full 256px while balance pulls the lines in short of it. The
- * result is a wide slab of background beside two stubby lines — the tooltip
- * looked unclamped precisely because the text was. Plain wrapping fills each
- * line to the cap, so the bubble's edge sits where the text ends.
+ * `max-w-64` + `break-words` are deliberate — see CLAUDE.md; don't restore
+ * stock. No `text-balance`: it pulls lines in after the width is pinned at the
+ * cap, leaving a wide bubble around short lines.
  */
 function TooltipContent({
   className,

@@ -9,23 +9,14 @@ import { useTabStore, type AppTab, type PaneSide, type PaneState } from "@/store
 import { cn } from "@/lib/utils";
 
 /**
- * One tab's page — or, when the tab is split, its two pages side by side.
- *
- * A tab used to be a stored path that the one router was told to go to, which
- * meant switching tabs unmounted the page you left — scroll position, typed
- * drafts, expanded rows and every bit of component state with it. Here each
- * *pane* gets a memory router of its own and stays mounted; switching tabs
- * only changes which pane stack is showing, and splitting a tab adds a second
- * router beside the first rather than moving anything.
+ * One tab's page, or its two pages side by side when split. Each pane owns a
+ * memory router and stays mounted, so switching tabs keeps scroll, drafts and
+ * component state.
  */
 
-/** How wide the main half is, as a fraction of the pane stack. Shared by every
- *  tab, the way the side panel's width is: what you opened is per tab, how
- *  big it is is the window's furniture. */
+/** The main half's share of the stack, shared by every tab. */
 const RATIO_KEY = "oculus-split-ratio";
 const RATIO_DEFAULT = 0.5;
-/** Neither half may be squeezed past this — a pane much narrower than a
- *  sidebar is a column of wrapped words, not a page. */
 const RATIO_MIN = 0.25;
 const RATIO_MAX = 0.75;
 
@@ -52,9 +43,7 @@ export default function TabPane({
   const [dragging, setDragging] = useState(false);
   const stackRef = useRef<HTMLDivElement>(null);
 
-  // Dragged as a fraction rather than a width, so the divider keeps its place
-  // when the window, the sidebar or the side panel changes what the stack has
-  // to divide up.
+  // A fraction, not a width, so the divider holds its place when the stack resizes.
   const onHandleDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setDragging(true);
@@ -87,15 +76,10 @@ export default function TabPane({
   }, [ratio, dragging]);
 
   return (
-    /* Hidden with `visibility`, never `display: none`. Display-none drops the
-       subtree out of layout: every rect goes to zero, scroll containers reset,
-       and the ResizeObservers in the PDF viewer, the thread map, the chat's
-       stick-to-bottom and the transcript virtualiser all fire at width 0 — so
-       coming back to a tab would mean rebuilding the very state panes exist to
-       keep. `visibility` leaves layout, rects and scroll positions exactly as
-       they were and costs only paint. The stacks are `absolute inset-0` at
-       identical size for the same reason: nothing reflows when one comes
-       forward. */
+    /* Hidden with `visibility`, never `display: none`: display-none zeroes
+       every rect, resets scroll and fires ResizeObservers at width 0, losing
+       the state panes exist to keep. Stacks are `absolute inset-0` so nothing
+       reflows when one comes forward. */
     <div
       ref={stackRef}
       className="absolute inset-0 flex"
@@ -112,14 +96,8 @@ export default function TabPane({
       />
       {split && (
         <>
-          {/* A hairline the drag lives on, and the split's focus marker: an
-              indigo edge on whichever side the shell is driving.
-
-              The marker cannot live *inside* a pane. A pane showing a browser
-              page is covered by a native WebView that the DOM cannot draw
-              over, so a ring or an inner border would vanish for exactly the
-              half a split is most often used for. The seam is outside both
-              panes and always visible. */}
+          {/* The divider carries the focus marker (indigo edge on the focused
+              side): inside a pane, a native browser WebView would cover it. */}
           <ResizeHandle
             onMouseDown={onHandleDown}
             dragging={dragging}
@@ -149,11 +127,8 @@ export default function TabPane({
 }
 
 /**
- * One pane: its router, mounted for as long as the pane exists.
- *
- * Its id is what everything below a tab is keyed by — the router registry, the
- * side panel's entry, a playing lecture, the Recent trail — so a split half is
- * a first-class pane and not a special case of the tab around it.
+ * One pane and its router, mounted for as long as the pane exists. The pane id
+ * keys the router registry, side panel, lecture playback and Recent trail.
  */
 function Pane({
   pane,
@@ -171,25 +146,16 @@ function Pane({
   style?: React.CSSProperties;
 }) {
   const id = pane.id;
-  // Built once, from the path the pane was opened (or restored) at. Re-creating
-  // it on a re-render would be exactly the unmount this arrangement exists to
-  // avoid, so it is never re-created — the pane's path afterwards is an output
-  // of this router, not an input to it.
+  // Built once and never re-created (that would unmount the page); the pane's
+  // path afterwards is an output of this router, not an input.
   const [router] = useState(() =>
     createMemoryRouter(routes, { initialEntries: [pane.path] }),
   );
-  // A pane's seed only reaches the trail from here: `subscribe` fires on
-  // changes, and a pane's first location is not one.
+  // `subscribe` doesn't fire for the first location, so it's recorded separately.
   const [seed] = useState(() => ({ path: pane.path, active: tabActive }));
 
-  /**
-   * This pane's own history: the stack of location keys, and where in it we
-   * are. The strip's arrows used to read React Router's index off
-   * `window.history.state`, which a memory router has none of — so the same
-   * bookkeeping happens here, per pane. A push truncates whatever was ahead, a
-   * pop moves the cursor to the key it landed on, and a replace swaps the key
-   * in place; `tabStore` gets the two booleans that fall out of it.
-   */
+  /** This pane's history (location keys + cursor), since a memory router has
+   *  no `window.history` index; yields `canBack`/`canForward` for `tabStore`. */
   const stack = useRef<string[]>([router.state.location.key]);
   const at = useRef(0);
 
@@ -197,8 +163,7 @@ function Pane({
     registerTabRouter(id, router);
     let seen = router.state.location.key;
     const unsubscribe = router.subscribe((state) => {
-      // `subscribe` also fires for navigation state; a key is unique to an
-      // entry, so a new one is the only thing that means we moved.
+      // `subscribe` also fires for navigation state; only a new key is a move.
       const key = state.location.key;
       if (key === seen) return;
       seen = key;
@@ -216,11 +181,7 @@ function Pane({
         canBack: at.current > 0,
         canForward: at.current < stack.current.length - 1,
       });
-      // The sidebar's Recent trail is the router's, and every router is a
-      // pane now — so each one records its own moves. Handing it this pane's
-      // id is what lets it drop a page we only passed through: the next move
-      // here cancels the one before it, while another pane's moves are its
-      // own.
+      // Keyed by pane id so a page this pane only passed through is dropped.
       recordRecentTab(id, path);
     });
     return () => {
@@ -231,8 +192,7 @@ function Pane({
   }, [id, router]);
 
   useEffect(() => {
-    // Only the pane that mounts in front: a reload brings the whole strip back
-    // at once, and the trail must not be rewritten as the strip's order.
+    // Only the front pane: a reload restores every tab at once.
     if (seed.active) recordRecentTab(id, seed.path);
   }, [id, seed]);
 
@@ -243,9 +203,7 @@ function Pane({
 
   return (
     <div
-      // Capture, so the focus lands before whatever was clicked reacts to the
-      // click — a ⌘K result opened from a row in this pane must already be
-      // navigating *this* half. `focus` as well as pointer, for the keyboard.
+      // Capture phase, so focus moves before the clicked control reacts.
       onPointerDownCapture={() => onFocus(tabId, side)}
       onFocusCapture={() => onFocus(tabId, side)}
       className="relative min-w-0 flex-1"

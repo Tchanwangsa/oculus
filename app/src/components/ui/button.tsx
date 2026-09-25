@@ -4,17 +4,14 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-// Buttons are pills. `rounded-full` is the loudest single signal of this
-// design language — a 6px-radius rectangle reads as a different app even with
-// the palette right. Call sites that need a rectangle (segmented toolbars,
-// split controls) override the radius through `className`.
+// Pills by design (see CLAUDE.md: UI conventions); a segmented toolbar
+// overrides the radius at its call site.
 const buttonVariants = cva(
   "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        // Stock shadcn fades the fill with `hover:bg-primary/90`; this palette
-        // ships hand-picked hover/active indigos, so use those instead.
+        // Hand-picked hover/active indigos rather than stock `bg-primary/90`.
         default:
           "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active",
         destructive:
@@ -27,13 +24,8 @@ const buttonVariants = cva(
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-brand underline-offset-4 hover:underline",
       },
-      // One notch below stock shadcn, whose `default` is `h-9` at 14px — a size
-      // drawn for a 16px-base web page. This app's body text is 14px and its
-      // furniture is h-6/h-8 throughout, so a 36px button was the tallest thing
-      // in most rows and read as oversized wherever it landed: a dialog's
-      // footer, a popover's Create, a page header's one action. `default` and
-      // `sm` now share a height and differ in padding, which is the optical
-      // weight the two were ever really used for.
+      // Deliberately a notch below stock shadcn (`h-8`, not `h-9`) — see
+      // CLAUDE.md; don't restore.
       size: {
         default: "h-8 px-4 py-1.5 has-[>svg]:px-3",
         xs: "h-6 gap-1 px-2.5 text-xs has-[>svg]:px-2 [&_svg:not([class*='size-'])]:size-3",

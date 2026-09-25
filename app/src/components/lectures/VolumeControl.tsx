@@ -27,18 +27,10 @@ function VolumeIcon({
 }
 
 /**
- * Volume, YouTube's shape: a speaker button that mutes, with a **horizontal**
- * slider that grows out of it on hover and collapses again when the pointer
- * leaves. It sits left of the timestamp so the widening only ever pushes the
- * time and nothing else — every button on the bar keeps its place.
- *
- * The slider stays out while it is being dragged, since a drag routinely
- * wanders off the strip it started on, and while it holds focus, so the
- * keyboard can reach it at all.
- *
- * Muting leaves the stored `volume` alone — it is the level to come back to —
- * but the slider still drops to zero while muted, because that is what the
- * ear hears; dragging it back up is itself the unmute.
+ * A mute button with a horizontal slider that grows out of it on hover, focus
+ * or drag. It sits left of the timestamp so widening moves nothing else.
+ * Muting keeps the stored `volume` as the level to return to, while the slider
+ * shows zero; dragging it up unmutes.
  */
 export function VolumeControl({
   volume,
@@ -56,9 +48,8 @@ export function VolumeControl({
 }) {
   const [dragging, setDragging] = useState(false);
 
-  // Radix captures the pointer for the drag, so the release lands on the
-  // thumb wherever it happens — but a pointer that left the bar is not
-  // coming back to fire anything else, so listen globally.
+  // A drag that left the bar fires nothing else there, so the release is
+  // heard on the window.
   useEffect(() => {
     if (!dragging) return;
     const end = () => {
@@ -96,8 +87,8 @@ export function VolumeControl({
         <TooltipContent>{muted ? "Unmute" : "Mute"}</TooltipContent>
       </Tooltip>
 
-      {/* The width animates on the wrapper; the slider inside keeps its own
-          so it slides out at full size instead of being squeezed into shape. */}
+      {/* The wrapper animates width; the slider keeps its own so it isn't
+          squeezed. */}
       <div
         className={cn(
           "overflow-hidden transition-[width,opacity] duration-150 ease-out",

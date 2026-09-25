@@ -7,9 +7,7 @@ const alertVariants = cva(
   "relative grid w-full grid-cols-[0_1fr] items-start gap-y-0.5 rounded-lg border px-4 py-3 text-sm has-[>svg]:grid-cols-[calc(var(--spacing)*4)_1fr] has-[>svg]:gap-x-3 [&>svg]:size-4 [&>svg]:translate-y-0.5 [&>svg]:text-current",
   {
     variants: {
-      // Tinted rather than shadcn's flat card fill: these alerts sit inside
-      // cards and panels that are already `bg-card`, so a card-coloured alert
-      // would be invisible.
+      // Non-default variants are tinted: alerts sit on `bg-card` already.
       variant: {
         default: "bg-card text-card-foreground",
         destructive:

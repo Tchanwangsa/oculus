@@ -2,19 +2,13 @@ import { cn } from "@/lib/utils";
 
 interface ResizeHandleProps {
   onMouseDown: (e: React.MouseEvent) => void;
-  /**
-   * Held down right now. `:active` alone is not enough: the pointer leaves the
-   * 1px grip the moment the drag starts, and the highlight has to stay lit for
-   * the whole drag, not just the frame the mouse went down on.
-   */
+  /** Keeps the highlight lit for the whole drag; `:active` is lost once the
+   *  pointer leaves the grip. */
   dragging?: boolean;
   /** Accessible name, e.g. "Resize side panel". */
   label?: string;
   className?: string;
-  /** Drawn inside the grip, positioned against it. The split's focus marker
-   *  lives here rather than inside a pane: a pane showing a browser page is
-   *  covered by a native WebView, and anything the DOM draws under that is
-   *  simply not on screen. */
+  /** Drawn inside the grip (e.g. the split's focus marker). */
   children?: React.ReactNode;
 }
 

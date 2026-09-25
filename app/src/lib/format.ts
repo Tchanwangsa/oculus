@@ -1,8 +1,5 @@
-/**
- * Turns a scraper slug back into a readable title:
- * "2026-07-14-welcome-to-comp30022-it-project" → "Welcome to COMP30022 IT Project".
- * Only for slugged .md names — real download filenames already read fine.
- */
+/** "2026-07-14-welcome-to-comp30022-it-project" → "Welcome to COMP30022 IT
+ *  Project". Only for slugged .md names. */
 export function humanizeSlug(raw: string): string {
   let s = raw.replace(/\.md$/i, "");
   s = s.replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/^\d+-/, "");
@@ -39,13 +36,9 @@ export function dateFromSlug(raw: string): Date | null {
 }
 
 export function fmtSize(bytes: number | null): string {
-  if (bytes == null) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return bytes == null ? "" : fmtBytes(bytes);
 }
 
-/** Like fmtSize but scales through GB — storage totals outgrow MB fast. */
 export function fmtBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const kb = bytes / 1024;
@@ -55,7 +48,7 @@ export function fmtBytes(bytes: number): string {
   return `${(mb / 1024).toFixed(2)} GB`;
 }
 
-export function fmtDate(iso: string | null): string {
+function fmtDate(iso: string | null): string {
   if (!iso) return "Never";
   const d = new Date(iso);
   const now = new Date();
@@ -74,7 +67,6 @@ export function fmtAgo(ms: number | undefined): string {
   return fmtDate(new Date(ms).toISOString());
 }
 
-/** Per-subject sync recency for the sync rail rows. */
 export function fmtSynced(iso: string | null): string {
   const ms = sqliteUtcToMs(iso);
   if (ms == null) return "Never synced";
@@ -95,15 +87,30 @@ export function fmtTime(ms: number | undefined): string {
   return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-/** Day heading for date-grouped lists: "Sat 16 Aug — Today",
- *  "Fri 15 Aug — Yesterday", else just "Thu 14 Aug" (with the year once it
- *  differs from the current one). */
+export function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+export function sameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/** "12 Aug". */
+export function fmtShortDate(d: Date): string {
+  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+}
+
+/** "Sat 16 Aug — Today", "Fri 15 Aug — Yesterday", else "Thu 14 Aug" (+ year). */
 export function fmtDayHeading(ms: number): string {
-  const startOfDay = (x: Date) =>
-    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const d = new Date(ms);
   const today = new Date();
-  const daysAgo = Math.round((startOfDay(today) - startOfDay(d)) / 86_400_000);
+  const daysAgo = Math.round(
+    (startOfDay(today).getTime() - startOfDay(d).getTime()) / 86_400_000,
+  );
   const opts: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
   if (d.getFullYear() !== today.getFullYear()) opts.year = "numeric";
   const date = d.toLocaleDateString([], opts);
@@ -112,18 +119,12 @@ export function fmtDayHeading(ms: number): string {
   return date;
 }
 
-/** Wall-clock time for timeline entries: "2:18 am" today, "15 Aug, 2:18 am"
- *  otherwise. Pass `withDate` to always include the date. */
+/** "2:18 am" today, else (or with `withDate`) "15 Aug, 2:18 am". */
 export function fmtClock(ms: number | undefined, withDate = false): string {
   if (!ms) return "";
   const d = new Date(ms);
   const time = fmtTime(ms);
-  const today = new Date();
-  const sameDay =
-    d.getFullYear() === today.getFullYear() &&
-    d.getMonth() === today.getMonth() &&
-    d.getDate() === today.getDate();
-  if (sameDay && !withDate) return time;
+  if (sameDay(d, new Date()) && !withDate) return time;
   return `${d.toLocaleDateString([], { day: "numeric", month: "short" })}, ${time}`;
 }
 

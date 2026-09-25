@@ -4,25 +4,20 @@ import { SidebarSimple } from "@phosphor-icons/react";
 import { Composer } from "@/components/harness/Composer";
 import { ThreadList } from "@/components/harness/ThreadList";
 import { ThreadMap } from "@/components/harness/ThreadMap";
-import { Timeline, type QuestionActions } from "@/components/harness/Timeline";
+import { Timeline } from "@/components/harness/Timeline";
+import { useThreadActions } from "@/components/harness/useThreadActions";
 import { Button } from "@/components/ui/button";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
+import { useWindowEvent } from "@/hooks/useEvents";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import {
   getHarnessRateLimits,
   harnessRefreshRateLimits,
   harnessDeleteThread,
-  harnessEditQueued,
-  harnessEditResend,
-  harnessInterrupt,
-  harnessRewind,
-  harnessSend,
-  harnessUnqueue,
   chatHref,
   chatThreadId,
   parseUsage,
-  providerInfo,
 } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
 
@@ -33,21 +28,16 @@ const SUGGESTIONS = [
   "Write a memory about how I like my notes",
 ];
 
-/** The conversations column. Narrower than ~160 and thread names are all
- *  ellipsis; wider than ~420 and it is eating the timeline it exists to open. */
+/** The conversations column's width bounds. */
 const LIST = { defaultWidth: 224, minWidth: 160, maxWidth: 420, storageKey: "oculus-chat-list-width" };
 
 /**
- * Chat is a CLI agent — Claude Code or Codex — running from the library's
- * `agents/` folder (`docs/harness.md`). This page is the thread list, the
- * timeline of what the agent said and did, and one composer that sits under
- * the hero on an empty thread and docks at the bottom once there is one.
+ * Chat with a CLI agent running from the library's `agents/` folder
+ * (`docs/harness.md`): thread list, timeline, and one composer that sits under
+ * the hero on an empty thread and docks at the bottom otherwise.
  *
- * It subscribes slice by slice rather than to the store whole: a turn in
- * flight writes to `live` many times a second, and a page that re-rendered
- * on all of it rebuilt the thread list, the composer and every committed row
- * per token. What actually changes mid-turn — the streaming tail, the running
- * tool's output — subscribes to the store where it is drawn.
+ * Subscribes slice by slice: `live` is written many times a second mid-turn,
+ * so the streaming parts subscribe where they are drawn, not here.
  */
 export default function ChatPage() {
   const store = useHarnessStore;
@@ -71,19 +61,15 @@ export default function ChatPage() {
   const subjects = useHarnessStore((s) => s.subjects);
   const subjectId = useHarnessStore((s) => s.subjectId);
   const running = useHarnessStore((s) => (activeId != null && s.live[activeId]?.running) || false);
-  // Words a stop or a rewind handed back to this tab's composer. Local, the way
-  // the lecture dock keeps its own: in the store it was one slot for every
-  // Chat tab, so a stop in one tab typed its dropped messages into all of them.
-  // The counter is what the composer watches — the same text twice is still
-  // two restores.
+  // Words a stop or a rewind handed back to this tab's composer — local, so a
+  // stop in one Chat tab doesn't type into every tab. `n` makes the same text
+  // twice two restores.
   const [restore, setRestore] = useState<{ text: string; n: number } | null>(null);
   const handBack = useCallback(
     (text: string) => setRestore((r) => ({ text, n: (r?.n ?? 0) + 1 })),
     [],
   );
-  // Which threads are busy, as a primitive: selecting the live map itself
-  // would put this page back on the token-by-token path the split above
-  // exists to leave.
+  // A primitive, so this page stays off the per-token `live` updates.
   const runningKey = useHarnessStore((s) =>
     Object.keys(s.live)
       .filter((id) => s.live[Number(id)].running)
@@ -97,8 +83,7 @@ export default function ChatPage() {
   const thread = threads.find((t) => t.id === activeId) ?? null;
   const activeProvider = thread?.provider ?? provider;
   const activeModel = thread ? thread.model : model;
-  // An open thread shows the scope it was created with; only a new one reads
-  // the composer's own selection.
+  // An open thread keeps its own scope; only a new one reads the composer's.
   const activeSubject = thread ? thread.subject_id : subjectId;
   const usage = useMemo(() => parseUsage(thread), [thread]);
 
@@ -107,10 +92,9 @@ export default function ChatPage() {
     store.getState().loadSubjects();
   }, [store]);
 
-  // Put this tab's thread on screen, and say so to the store for as long as it
-  // is here — which is what stops the lecture dock releasing a timeline this
-  // tab is reading. The thread shown a moment ago lends its rows for the beat
-  // the read takes (see `hold`), so a switch never flashes the empty hero.
+  // Hold this tab's thread while it's on screen, so the lecture dock can't
+  // release a timeline this tab is reading. The previous thread lends its rows
+  // for the read (`hold`), so a switch never flashes the empty hero.
   const shown = useRef<number | null>(null);
   useEffect(() => {
     if (activeId == null) {
@@ -122,24 +106,17 @@ export default function ChatPage() {
     return () => store.getState().unhold(activeId);
   }, [activeId, store]);
 
-  // A route naming a thread that is not in the list, once the list is known:
-  // deleted here, deleted from another tab, or a restored tab left on one that
-  // has since gone. Back to the empty composer rather than a page that shows
-  // nothing and would send into a thread Rust no longer has.
+  // A route naming a thread the loaded list doesn't have (deleted here, in
+  // another tab, or before a restore) falls back to the empty composer.
   const missing = threadsLoaded && activeId != null && thread == null;
   useEffect(() => {
     if (missing) navigate(chatHref(null), { replace: true });
   }, [missing, navigate]);
 
-  // The tab wears the conversation's name, the way a project and a lecture tab
-  // wear theirs. `tabInfo` titles a tab from its path alone and has no thread
-  // list to look one up in, so the name travels in the query beside the id
-  // (`chatHref`) and this page is what keeps it current — a thread is born
-  // titled with the first line of its first message and renamed once the
-  // first exchange is done. Nothing is written until the thread is known, or
-  // a restored tab would lose its name for the beat before the list lands.
-  // Replace, not push: the back arrow keeps pointing wherever it did, rather
-  // than at the same conversation under another name.
+  // `tabInfo` titles a tab from its path, so the thread's name travels as
+  // `?n=` (`chatHref`), updated when the title lands — but not before the
+  // thread is known, or a restored tab loses its name. Replace, not push, so
+  // the back arrow is unchanged.
   const tabName = thread?.title?.trim() || "";
   useEffect(() => {
     if (activeId != null && thread == null) return;
@@ -147,8 +124,7 @@ export default function ChatPage() {
     if (`${here.pathname}${here.search}` !== want) navigate(want, { replace: true });
   }, [activeId, thread, tabName, here.pathname, here.search, navigate]);
 
-  // Rate limits are per provider account; the stored snapshot draws the bars
-  // straight away, before anything is asked of the provider.
+  // Draw the stored snapshot straight away, per provider account.
   useEffect(() => {
     if (rateLimits[activeProvider]) return;
     getHarnessRateLimits(activeProvider).then((w) => {
@@ -156,17 +132,13 @@ export default function ChatPage() {
     });
   }, [activeProvider, rateLimits, store]);
 
-  // Then replace it with numbers from now. Codex answers a read off its
-  // running server; Claude has no equivalent, so there the snapshot stands
-  // until the next turn reports. The answer arrives as a `rate_limits` event,
-  // which lands in `rateLimits` — so this watches the provider and nothing
-  // else, or it would ask again for every answer it got.
+  // Then refresh (Codex only; Claude's arrive with the next turn). The answer
+  // lands in `rateLimits` via an event, so depend on the provider alone.
   useEffect(() => {
     void harnessRefreshRateLimits(activeProvider).catch(() => {});
   }, [activeProvider]);
 
-  // The questions asked, in order — the rail's landmarks. Derived from the
-  // committed rows, so it moves when a turn commits and not per token.
+  // The rail's landmarks: the questions asked, from committed rows.
   const markers = useMemo(
     () => items.filter((i) => i.kind === "user").map((i) => ({ id: i.id, text: i.content ?? "" })),
     [items],
@@ -176,51 +148,30 @@ export default function ChatPage() {
   const scroll = useStickToBottom(activeId, !empty);
   const list = useResizablePanel(LIST);
 
-  // ⌘⌥B folds the conversations column away, alongside the ⌘B that does the
-  // same for the app's sidebar — which is why that one now ignores ⌥.
-  //
-  // `e.code`, not `e.key`: on macOS ⌥ rewrites the character the key produces,
-  // so ⌥B arrives as `∫` and a `key === "b"` test never fires. `code` is the
-  // physical key and is the only spelling of this that works.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!e.altKey || !(e.metaKey || e.ctrlKey) || e.code !== "KeyB") return;
-      e.preventDefault();
-      list.toggle();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [list.toggle]);
+  // ⌘⌥B folds the conversations column. `e.code`, not `e.key`: on macOS ⌥B
+  // arrives as `∫`.
+  useWindowEvent("keydown", (e) => {
+    const k = e as KeyboardEvent;
+    if (!k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
+    k.preventDefault();
+    list.toggle();
+  });
 
+  const { send: sendTurn, onStop, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
+    threadId: () => activeRef.current,
+    provider: activeProvider,
+    model: activeModel,
+    onRestore: handBack,
+    // The empty composer became this conversation; replace, it isn't a page
+    // to go back to.
+    onCreated: (id) => navigate(chatHref(id), { replace: true }),
+  });
   const send = useCallback(
-    async (text: string) => {
-      const s = store.getState();
-      const id = activeRef.current;
-      try {
-        const newId = await harnessSend(id, activeProvider, text, {
-          model: activeModel,
-          reasoningEffort: s.reasoning,
-          subjectId: s.subjectId,
-        });
-        if (id == null) {
-          // The rows for this thread were written under the new id while we
-          // waited; list it, then point *this* tab at it so they show. Replace:
-          // the empty composer became this conversation, it is not a page to
-          // go back to.
-          await s.loadThreads();
-          navigate(chatHref(newId), { replace: true });
-        }
-      } catch (e) {
-        // The failure also arrives as an error row through the event path.
-        console.error("harness send failed", e);
-        if (id == null) await s.loadThreads();
-      }
-    },
-    [store, activeProvider, activeModel, navigate],
+    (text: string) => sendTurn(text, () => ({ subjectId: store.getState().subjectId })),
+    [sendTurn, store],
   );
 
-  // Opening a thread is a navigation of this tab, so it pushes: the back
-  // arrow walks back through the conversations this tab has shown.
+  // Opening a thread pushes, so back walks this tab's conversations.
   const onOpen = useCallback(
     (id: number) => {
       if (id === activeRef.current) return;
@@ -232,8 +183,7 @@ export default function ChatPage() {
   const onNew = useCallback(
     (subject?: number | null) => {
       if (activeRef.current != null) navigate(chatHref(null));
-      // A `+` on a group header means "new thread, in this subject"; the
-      // plain New thread button leaves the composer's scope alone.
+      // A group header's `+` sets the subject; plain New thread leaves it.
       if (subject !== undefined) store.getState().setSubject(subject);
     },
     [store, navigate],
@@ -242,96 +192,13 @@ export default function ChatPage() {
     (id: number) => {
       harnessDeleteThread(id)
         .then(() => store.getState().removed(id))
-        // Never silently: a delete that fails leaves the row exactly where it
-        // was, which is indistinguishable from a click that never arrived —
-        // and that is what a swallowed rejection here cost the last time
-        // deleting stopped working.
+        // Never swallow: a failed delete looks exactly like a lost click.
         .catch((e) => console.error("harness delete failed", e));
     },
     [store],
   );
   const onSubject = useCallback((id: number | null) => store.getState().setSubject(id), [store]);
-  const onProvider = useCallback((p: typeof provider) => store.getState().setProvider(p), [store]);
-  const onModel = useCallback(
-    (m: string | null) => {
-      const s = store.getState();
-      const open = s.threads.find((t) => t.id === activeRef.current);
-      if (open) store.setState({ threads: s.threads.map((t) => (t.id === open.id ? { ...t, model: m } : t)) });
-      else s.setModel(m);
-    },
-    [store],
-  );
-  const onReasoning = useCallback((r: string | null) => store.getState().setReasoning(r), [store]);
-  // Stop means nothing more goes out: the running turn is cut short and
-  // anything queued behind it is dropped. Those messages were typed and never
-  // sent, so they come back into the composer rather than disappearing.
-  const onStop = useCallback(() => {
-    const id = activeRef.current;
-    if (id == null) return;
-    harnessInterrupt(id)
-      .then((dropped) => {
-        if (dropped.length) handBack(dropped.join("\n\n"));
-      })
-      .catch(() => {});
-  }, [handBack]);
   const onRestored = useCallback(() => setRestore(null), []);
-
-  // Asking the same question differently. The thread rewinds to that row —
-  // it and everything after it stop being rows — and the new text goes as the
-  // next turn. Rust rewinds the agent's own session to match before it
-  // deletes anything (`docs/harness.md`). A provider that cannot do that half
-  // (`ProviderInfo.rewind`) is offered none of the three.
-  const rewinds = providerInfo(activeProvider)?.rewind ?? false;
-  const questions = useMemo((): QuestionActions => {
-    // The composer's own send on the open thread: its model, the session's
-    // level. What an approved Antigravity permission carries on with.
-    const followUp = async (text: string) => {
-      const s = store.getState();
-      const t = s.threads.find((x) => x.id === activeRef.current);
-      if (!t) return;
-      await harnessSend(t.id, t.provider, text, { model: t.model, reasoningEffort: s.reasoning });
-    };
-    if (!rewinds) return { followUp };
-    const resend = (itemId: number, text: string) => {
-      const s = store.getState();
-      const id = activeRef.current;
-      if (id == null) return;
-      harnessEditResend(id, itemId, text, {
-        model: s.threads.find((t) => t.id === id)?.model,
-        reasoningEffort: s.reasoning,
-      }).catch((e) => console.error("harness edit failed", e));
-    };
-    return {
-      edit: resend,
-      // Retry is the same move with the same words: the question is asked
-      // again, and the answer it got is no longer part of the thread.
-      retry: resend,
-      // Rewind sends nothing. The thread goes back to before the question and
-      // the words land in the composer, for the student to carry on from.
-      rewind: (itemId: number) => {
-        const id = activeRef.current;
-        if (id == null) return;
-        harnessRewind(id, itemId)
-          .then(handBack)
-          .catch((e) => console.error("harness rewind failed", e));
-      },
-      followUp,
-    };
-  }, [store, rewinds, handBack]);
-
-  const pending = useMemo(
-    () => ({
-      editQueued: (queueId: string, text: string) => {
-        const id = activeRef.current;
-        if (id != null) harnessEditQueued(id, queueId, text).catch(() => {});
-      },
-      unqueue: (queueId: string) => {
-        const id = activeRef.current;
-        if (id != null) harnessUnqueue(id, queueId).catch(() => {});
-      },
-    }),
-    [],
-  );
 
   const composer = (
     <Composer
@@ -373,17 +240,12 @@ export default function ChatPage() {
         onNew={onNew}
         onDelete={onDelete}
       />
-      {/* The grip sits *on* the seam rather than in it: `w-1` with a matching
-          negative margin either side costs no layout width, so dragging it does
-          not shift the timeline by its own thickness. Folded, it stays put at
-          the card's left edge — dragging it out is the second way back in. */}
+      {/* On the seam: negative margins cost no layout width. */}
       <ResizeHandle onMouseDown={list.onMouseDown} dragging={list.dragging} className="-mx-0.5" />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle px-6">
-          {/* Folded, the panel leaves nothing behind, so the way back in lives
-              here — the same trade the app's own sidebar makes with the button
-              in the tab strip. */}
+          {/* Folded, the panel leaves nothing behind, so the way back is here. */}
           {list.collapsed && (
             <Button
               variant="ghost"
@@ -428,12 +290,8 @@ export default function ChatPage() {
         ) : (
           <>
             <div className="relative min-h-0 flex-1">
-              {/* `overflow-x-hidden` is load-bearing, not tidying: `overflow-y: auto`
-                  computes the *x* axis to `auto` as well, so one row wider than
-                  the column — a long tool path, a table in a reply — would give the
-                  whole conversation a horizontal axis and let it slide sideways.
-                  The things that genuinely need to scroll across (code blocks,
-                  tables) carry their own scroller. */}
+              {/* `overflow-x-hidden` is load-bearing: `overflow-y: auto` makes x
+                  `auto` too, so one wide row would scroll the whole thread. */}
               <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 py-6">
                 <div ref={scroll.inner} className="mx-auto w-full max-w-[760px]">
                   <Timeline

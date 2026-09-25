@@ -17,12 +17,8 @@ import type { SourceNum } from "@/lib/db";
 import type { Layout } from "@/stores/playerPrefsStore";
 
 /**
- * The two controls that exist only because a capture can be two recordings:
- * which stream a frame is showing, and how the two frames share the player.
- *
- * Both float over the video, so they take the control bar's fixed
- * white-on-frame palette rather than the app's themed surfaces — see
- * `SpeedControl`, whose glass panel these match.
+ * The per-frame source switcher and the layout control for two-stream captures.
+ * Both float over the video, so they use `SpeedControl`'s fixed glass palette.
  */
 
 /** What the player knows about one stream: on disk, or on its way there. */
@@ -39,18 +35,14 @@ export type SourceStates = Record<SourceNum, SourceState>;
 
 export const SOURCES: SourceNum[] = [1, 2];
 
-/**
- * Echo360 names the streams by number, not by content, and which camera points
- * where is the theatre's business — so the label is the number, and the icon
- * only carries the *usual* meaning (Presenter screen, room camera).
- */
-export const SOURCE_LABEL: Record<SourceNum, string> = {
+/** Echo360 numbers streams rather than naming them, so the label is the
+ *  number and the icon carries only the usual meaning. */
+const SOURCE_LABEL: Record<SourceNum, string> = {
   1: "Source 1",
   2: "Source 2",
 };
 
-/** The *usual* meaning of each number, which is as much as anyone can say —
- *  the moment a dock message carries hedges it the same way. */
+/** The usual meaning of each number — a hint, not a fact. */
 export const SOURCE_HINT: Record<SourceNum, string> = {
   1: "Presenter screen",
   2: "Room camera",
@@ -77,8 +69,7 @@ function SourceRowStatus({ state, active }: { state: SourceState; active: boolea
   }
   if (!state.ready) {
     return (
-      // A span, not a button: the row itself starts the download, and a button
-      // inside a button is invalid markup that swallows its own click.
+      // A span: the row is the button, and nested buttons swallow the click.
       <span className="flex items-center gap-1 text-[10.5px] text-white/60">
         <DownloadSimple size={12} /> Download
       </span>
@@ -88,12 +79,8 @@ function SourceRowStatus({ state, active }: { state: SourceState; active: boolea
 }
 
 /**
- * Which stream this frame shows. One per frame, at its top-left, revealed on
- * hover — a two-frame layout has two of these and picking a source in one puts
- * the other stream in the other frame, so the pair always shows both.
- *
- * A source that has not been downloaded is still listed: this is where you
- * find out the camera exists, so it is also where you ask for it.
+ * Which stream this frame shows; picking one in either frame swaps the pair.
+ * Undownloaded sources are listed, since this is where the camera is found.
  */
 export function SourceSwitcher({
   active,
@@ -109,10 +96,8 @@ export function SourceSwitcher({
   /** The frame this sits on hides it on pointer-out; an open panel pins it. */
   onOpenChange?: (open: boolean) => void;
 }) {
-  // Open in state rather than left to Radix, because picking a source is the
-  // end of the errand: you came here to switch, and the panel has nothing
-  // left to say. Asking for a *download* is the one row that does — the
-  // percentage is in it — so that one leaves the panel up.
+  // Controlled so a pick closes it; a download row leaves it open to show
+  // progress.
   const [open, setOpen] = useState(false);
   const change = (next: boolean) => {
     setOpen(next);
@@ -177,21 +162,15 @@ const LAYOUTS: { value: Layout; label: string; hint: string; Icon: typeof Rectan
   { value: "stack", label: "Stacked", hint: "Both, split top and bottom", Icon: Rows },
 ];
 
-export const LAYOUT_ICON: Record<Layout, typeof Rectangle> = {
+const LAYOUT_ICON: Record<Layout, typeof Rectangle> = {
   single: Rectangle,
   pip: PictureInPicture,
   stack: Rows,
 };
 
 /**
- * How the two sources share the frame. Lives on the control bar rather than on
- * a frame, because it is about the player as a whole; the per-frame switcher
- * above is about one picture.
- *
- * Both two-frame layouts need the second stream on disk, so when it isn't the
- * options stay listed but disabled, with the download as the way through. The
- * alternative — hiding them — would mean the feature only appears once you
- * have already found the download somewhere else.
+ * How the two sources share the frame. Two-frame layouts stay listed but
+ * disabled until the second stream is on disk, with its download at the foot.
  */
 export function LayoutControl({
   layout,
@@ -209,8 +188,7 @@ export function LayoutControl({
 }) {
   const Trigger = LAYOUT_ICON[layout];
   const dual = second.ready;
-  // Closes on a pick, for the same reason as the switcher above; the download
-  // row at the foot keeps it open so its progress stays in sight.
+  // Closes on a pick, like the switcher; the download row keeps it open.
   const [open, setOpen] = useState(false);
   const change = (next: boolean) => {
     setOpen(next);

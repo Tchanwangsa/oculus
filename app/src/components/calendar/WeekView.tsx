@@ -10,19 +10,17 @@ import {
   isPast,
   isSelfImposed,
   minutesFromMidnight,
-  sameDay,
   shortLocation,
-  startOfDay,
   weekDays,
   type CalEvent,
   type CalKind,
 } from "@/lib/calendar";
+import { sameDay, startOfDay } from "@/lib/format";
 import { packLanes } from "@/lib/lanes";
 import { EventMark } from "./EventMark";
 import { EventPopover } from "./EventPopover";
 
-/** The kinds the strip above the grid can be named after. `Extract` rather
- *  than a literal union, so a renamed {@link CalKind} breaks here too. */
+/** `Extract`, so a renamed {@link CalKind} breaks here too. */
 type StripKind = Extract<CalKind, "due" | "note" | "task">;
 
 const STRIP_LABEL: Record<StripKind, string> = {
@@ -33,50 +31,32 @@ const STRIP_LABEL: Record<StripKind, string> = {
 
 const HOUR_PX = 46;
 const GUTTER = "3.25rem";
-/**
- * The narrowest the week is drawn at, in pixels: the 52px hour gutter plus
- * seven 96px columns.
- *
- * Below this the view scrolls sideways instead of compressing further. A
- * column under about 96px cannot hold even a truncated class title — and it is
- * routinely halved again by `packLanes` when two classes overlap — so with the
- * side panel open every block read as an ellipsis. Seven columns of nothing
- * legible is worse than six columns and a nudge.
- */
+/** Narrowest the week draws (gutter + 7×96px); below it the view scrolls
+ *  sideways, since a narrower column cannot hold even a truncated title. */
 const MIN_GRID_PX = 724;
 const FULL_DAY_KEY = "calendar-full-day";
-/** Height of a deadline marker, and the breathing room kept between it and
- *  the grid's own edges — see the clamp where they are positioned. */
+/** Deadline marker height, and its inset from the grid's edges. */
 const MARKER_PX = 16;
 const MARKER_INSET = 2;
 /** The shortest a class block is drawn, however little time it covers. */
 const BLOCK_MIN_PX = 16;
 
-/**
- * How much of the subject's hue an instant's pill is tinted with.
- *
- * A note or a task is washed out beside a deadline of the same colour: a
- * reminder you wrote, or a date you set yourself on a board, should not read as
- * loudly as a cutoff you will be marked against. Anything already past is
- * quieter again, like every other layer.
- */
+/** Subject-hue tint for an instant's pill: self-imposed items (notes, tasks)
+ *  and past ones are washed out beside a real deadline. */
 function tintPct(e: CalEvent, gone: boolean, full: number): number {
   const base = isSelfImposed(e) ? full * 0.6 : full;
   return Math.round(gone ? base * 0.6 : base);
 }
 
-/** A class's span in epoch milliseconds, for {@link packLanes} — the only
- *  CalEvent-specific part of laying overlapping classes side by side. */
+/** A class's span in epoch ms, for {@link packLanes}. */
 function classSpan(e: CalEvent) {
   const start = e.start.getTime();
   return { start, end: start + durationMinutes(e) * 60_000 };
 }
 
 /**
- * The timetable view: a Monday-first hour grid of classes and recordings, with
- * deadlines in a strip above it. Deadlines sit up there rather than in the grid
- * because most land at 11:59pm — inside the grid they would pin every week open
- * to midnight and read as a class that runs all evening.
+ * The timetable: a Monday-first hour grid of classes, with deadlines in a strip
+ * above it — most land at 11:59pm and would otherwise pin the grid to midnight.
  */
 export function WeekView({
   anchor,
@@ -95,11 +75,8 @@ export function WeekView({
     days.some((d) => sameDay(d, e.start)),
   );
   const timed = inWeek.filter((e) => !isInstant(e) && !e.allDay);
-  // The fitted range covers every class in the week by construction, so
-  // nothing can hide outside it — but "the grid decides which hours exist" is
-  // a claim you have to take on trust, and midnight-to-6am being absent looks
-  // like a limitation rather than a fit. The toggle makes the whole day
-  // reachable on demand, and the choice sticks.
+  // The fitted range covers every class; the toggle shows the whole day on
+  // demand, and the choice sticks.
   const [fullDay, setFullDay] = useState(
     () => localStorage.getItem(FULL_DAY_KEY) === "1",
   );
@@ -109,12 +86,8 @@ export function WeekView({
   const gridHeight = (toHour - fromHour) * HOUR_PX;
 
   /**
-   * A deadline is drawn at its hour when the grid covers that hour — a 9am
-   * submission belongs at 9am, next to the class you would be in. The ones the
-   * grid cannot place (an 11:59pm cutoff, with the grid stopping at 7pm) go to
-   * the strip above instead. Each deadline appears in exactly one of the two,
-   * so nothing is ever shown twice. A pinned note is placed the same way: it
-   * is an instant too, and has no length to draw.
+   * An instant (deadline, pinned note) sits on the grid when it covers that
+   * hour, otherwise in the strip above — never both.
    */
   const placeable = (e: CalEvent) => {
     if (!isInstant(e) || e.allDay) return false;
@@ -125,21 +98,16 @@ export function WeekView({
   const scroller = useRef<HTMLDivElement>(null);
   const stripDue = inWeek.filter((e) => (isInstant(e) || e.allDay) && !placeable(e));
   const hasDue = stripDue.length > 0;
-  // The strip is named after the loudest layer in it. A week whose unplaceable
-  // instants are all notes, or all tasks, would otherwise file them under
-  // "Due", which is a claim about a deadline that does not exist. A real
-  // deadline — or an all-day class, which has no quieter name — still wins the
-  // heading whenever one is present.
+  // Named after the loudest layer: "Due" only when a real deadline (or an
+  // all-day class) is present.
   const stripKind: StripKind = stripDue.some((e) => e.kind === "due" || !isInstant(e))
     ? "due"
     : stripDue.some((e) => e.kind === "task")
       ? "task"
       : "note";
 
-  // Open where the user actually is: "now", a couple of hours up so there is
-  // context above it, on the week containing today — otherwise the start of
-  // the teaching day. Keyed on the week rather than on `today`, or the
-  // minute tick would yank the scroll back every sixty seconds.
+  // Open two hours above "now" on the current week, else at 8am. Keyed on the
+  // week, not `today`, so the minute tick doesn't yank the scroll.
   const weekKey = days[0].toDateString();
   useEffect(() => {
     const el = scroller.current;
@@ -149,23 +117,13 @@ export function WeekView({
   }, [fromHour, weekKey, weekHasToday]);
 
   return (
-    // One scroller for the whole week, in both axes. The day headers, the
-    // deadline strip and the hour grid share a column template and have to
-    // stay aligned as it moves sideways, so they are stacked inside a single
-    // scrollport and pinned with `sticky`: the headers to the top, the hour
-    // gutter to the left. It was two nested scrollers before — horizontal
-    // outside, vertical around the hours alone — and that nesting is exactly
-    // what a sticky gutter cannot survive. Sticky resolves against the
-    // *nearest* scrollport, and the inner one never scrolled horizontally, so
-    // `left: 0` pinned the hours to the content's own left edge and they slid
-    // away with the columns.
+    // One scroller for both axes: headers stick to the top and the hour gutter
+    // to the left. Sticky resolves against the nearest scrollport, so nested
+    // scrollers would let the gutter slide away with the columns.
     <div ref={scroller} className="h-full overflow-auto">
       <div style={{ minWidth: MIN_GRID_PX }}>
-        {/* Headers and strip travel together, so the strip needs no top
-            offset of its own — and nothing has to measure a header whose
-            height moves with the font. */}
+        {/* Headers and strip stick together, so nothing measures the header. */}
         <div className="sticky top-0 z-40 bg-card">
-          {/* Day headers */}
           <div
             className="grid border-b border-border-subtle"
             style={{ gridTemplateColumns: `${GUTTER} repeat(7, minmax(0, 1fr))` }}
@@ -210,15 +168,12 @@ export function WeekView({
             })}
           </div>
 
-          {/* Deadlines strip */}
           {hasDue && (
             <div
               className="grid border-b border-border-subtle bg-surface/40"
               style={{ gridTemplateColumns: `${GUTTER} repeat(7, minmax(0, 1fr))` }}
             >
-              {/* The row's own tint, flattened onto the card: the strip's
-                  pills pass underneath this cell, and a translucent fill
-                  would show them through it. */}
+              {/* Opaque tint: the strip's pills pass underneath this cell. */}
               <div
                 className="sticky left-0 z-10 flex items-center justify-end gap-1 px-2 py-1.5 text-right text-[10px] font-medium text-muted-foreground"
                 style={{
@@ -277,13 +232,11 @@ export function WeekView({
           )}
         </div>
 
-        {/* Hour grid */}
         <div
           className="relative grid"
           style={{ gridTemplateColumns: `${GUTTER} repeat(7, minmax(0, 1fr))` }}
         >
-          {/* Hour labels, above the markers' own z-20 so a block sliding
-              past is covered rather than drawn over the times. */}
+          {/* Above the markers' z-20 so blocks slide under the times. */}
           <div className="sticky left-0 z-30 bg-card">
             {hours.map((h) => (
               <div
@@ -318,8 +271,7 @@ export function WeekView({
                       />
                     ))}
 
-                    {/* Elapsed time, washed grey. Drawn before the blocks so it
-                        sits under them — each block carries its own past styling. */}
+                    {/* Elapsed time, under the blocks. */}
                     <PastWash
                       day={day}
                       now={today}
@@ -332,13 +284,9 @@ export function WeekView({
                     )}
 
                     {laid.map(({ item: event, lane, of }) => {
-                      // Blocks are clamped into the grid the way the deadline
-                      // markers below are, and for the same reason: Canvas
-                      // publishes cutoff-shaped *classes* (an 11:59pm–11:59pm peer
-                      // review), and one drawn at its own minute with the minimum
-                      // block height hangs off the bottom edge of the card. A block
-                      // with real length is shortened to the last row instead of
-                      // moved, so 11pm–12:30am still starts at 11pm.
+                      // Clamped into the grid like the markers: Canvas publishes
+                      // 11:59pm–11:59pm "classes" that would hang off the bottom.
+                      // A block with real length is shortened, not moved.
                       const exact =
                         ((minutesFromMidnight(event.start) - fromHour * 60) / 60) * HOUR_PX;
                       const wanted = Math.max(
@@ -351,8 +299,7 @@ export function WeekView({
                       );
                       const top = Math.max(0, Math.min(exact, gridHeight - height));
                       const color = colors.get(event.subjectId) ?? "";
-                      // A finished class keeps its shape but loses its subject
-                      // colour, so the eye lands on what is still ahead.
+                      // A finished class loses its subject colour.
                       const gone = isPast(event, today);
                       const tone = gone ? "var(--color-chart-other)" : color;
                       return (
@@ -366,8 +313,6 @@ export function WeekView({
                               left: `calc(${(lane / of) * 100}% + 2px)`,
                               width: `calc(${100 / of}% - 4px)`,
                               borderLeftColor: tone,
-                              // 18% of the subject's hue: a readable tint in light
-                              // mode and a dark wash in dark mode, from one value.
                               backgroundColor: `color-mix(in srgb, ${tone} ${gone ? 12 : 18}%, var(--color-card))`,
                             }}
                           >
@@ -390,9 +335,7 @@ export function WeekView({
                       );
                     })}
 
-                    {/* Deadlines and notes land on the grid at their own time, over
-                        the classes rather than beside them — a submission is an
-                        instant, not a block competing for the hour. */}
+                    {/* Instants land at their own time, over the classes. */}
                     {eventsOn(inWeek, day)
                       .filter(placeable)
                       .map((e) => {
@@ -400,13 +343,9 @@ export function WeekView({
                         const tone = gone
                           ? "var(--color-chart-other)"
                           : (colors.get(e.subjectId) ?? "");
-                        // Centred on the exact minute, then pulled back inside
-                        // the grid. Deadlines cluster at the edges of the day —
-                        // 11:59pm is the common one — and a marker centred there
-                        // hangs half off the bottom. Nudging by at most half its
-                        // own height keeps it whole and still on the right hour,
-                        // where snapping to 11pm or to midnight would move it to a
-                        // time it is not due.
+                        // Centred on the minute, then pulled back inside the grid
+                        // (11:59pm would hang half off) — by at most half its height,
+                        // so it stays on the right hour.
                         const exact =
                           ((minutesFromMidnight(e.start) - fromHour * 60) / 60) * HOUR_PX;
                         const top = Math.min(
@@ -461,10 +400,8 @@ export function WeekView({
 }
 
 /**
- * The grey over what has already happened: a whole column for a day gone by,
- * the hours above the line on today, nothing ahead. `surface` sits only a
- * couple of percent off the page background, so the wash is mixed from the
- * muted foreground instead — the one neutral that reads in both themes.
+ * Grey over elapsed time. Mixed from muted-foreground, since `surface` is too
+ * close to the page background to read in both themes.
  */
 function PastWash({
   day,
@@ -497,9 +434,7 @@ function PastWash({
   );
 }
 
-/** The current time, drawn across today's column only — and only while "now"
- *  is inside the hours the grid actually covers, or it would float past the
- *  last row and over whatever sits below. */
+/** The current time across today's column, only while inside the grid's hours. */
 function NowLine({ fromHour, toHour }: { fromHour: number; toHour: number }) {
   const now = new Date();
   const mins = minutesFromMidnight(now);

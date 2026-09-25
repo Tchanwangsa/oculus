@@ -1,29 +1,14 @@
 import { create } from "zustand";
 
 /**
- * Per-file view of the ingest pipeline:
+ * Per-file view of the ingest pipeline: download → parse → embed. The embed
+ * stage applies only when a Voyage key is stored (`embedStage`); without one a
+ * parsed file is finished.
  *
- *   download → parse → embed
- *
- * Three stages. The fourth the table used to draw — a fast local parse tier —
- * is gone for good; the third is back, and is not the one that was removed.
- * That one was the Python sidecar's local embedder running inside the parse
- * queue. This one is a metered cloud call that a file reaches only after its
- * parse has landed, and it is **conditional**: with no Voyage key stored there
- * is no embedder to wait for, so the stage does not apply and a parsed file is
- * finished at two dots. `embedStage` is that switch, and every derived view
- * below takes it rather than assuming.
- *
- * Fed by `useBackendEvents` from four events (scrape-file-start, scrape-file,
- * parse-status, embed-status) and seeded from the database on the Sync page,
- * so files still waiting for a stage show up as backlog.
- *
- * **The wire and DB string for a finished parse is still `"quality"`**, which
- * is why the seeding switch below reads it. That name outlived the tier it was
- * named after — `files.parse_status = 'quality'` is what every already-parsed
- * row in the user's library says, and renaming it would invalidate all of
- * them. The embed stage inherited none of that: its terminal success is
- * `"done"`, because nothing was ever written down under another name.
+ * Fed by `useBackendEvents` (scrape-file-start, scrape-file, parse-status,
+ * embed-status) and seeded from the DB on the Sync page. A finished parse is
+ * `"quality"` on the wire and in `files.parse_status`; a finished embed is
+ * `"done"`.
  */
 
 export type StageState = "pending" | "queued" | "active" | "done" | "error";
@@ -40,43 +25,31 @@ export interface PipelineItem {
   /** Parse page progress. */
   pagesDone: number;
   totalPages: number;
-  /** Embed page progress — a separate pair, because the two stages count the
-   *  same document twice and a shared counter would make the second stage
-   *  start at 100%. */
+  /** Separate from parse's pair, or the embed stage would start at 100%. */
   embedPagesDone: number;
   embedTotalPages: number;
   /** While parse is "queued": place in the parse queue, when it is known. */
   parseQueuePos?: number;
-  /** Stage completion times, epoch ms. Live events stamp them as they land;
-   *  seeded rows carry the DB's scraped_at / parsed_at / embedded_at. */
+  /** Stage completion times, epoch ms (seeded from the DB's `*_at`). */
   downloadedAt?: number;
   parsedAt?: number;
   embeddedAt?: number;
-  /** Seeded with work outstanding and untouched by any live event yet: a run
-   *  from an earlier session that never finished. Resumable — any event for
-   *  the file (including a resume kicking off) clears it. */
+  /** Seeded with work outstanding from an earlier session; any live event
+   *  for the file clears it. */
   paused: boolean;
-  /** Human-readable failure text, safe to display. Whichever stage failed —
-   *  they cannot both be failing, since the second never starts until the
-   *  first is done. */
+  /** Display text for whichever stage failed (only one can). */
   error?: string;
-  /** Machine-readable discriminant for the failure, from the `parse-status`
-   *  or `embed-status` event's `kind`. Carried so the failure UI can say
-   *  *what* went wrong rather than only that something did. The two seams
-   *  speak the same vocabulary on purpose. */
+  /** The failing event's `kind`; parse and embed share the vocabulary. */
   errorKind?: string;
-  /** Could retrying **this file** ever work? `false` means it cannot —
-   *  a corrupt PDF, one past the size limit. */
+  /** `false`: retrying this file can never work. */
   errorRetryable?: boolean;
-  /** Does the failure condemn every other file too (no token, a rejected
-   *  token, exhausted quota)? See `useQualitySweep`, which stands down while
-   *  one of these is in force rather than marching the library into it. */
+  /** The cause blocks every file (see `useQualitySweep`). */
   errorLatching?: boolean;
   startedAt: number;
   updatedAt: number;
 }
 
-export type StagePatch = Partial<
+type StagePatch = Partial<
   Omit<PipelineItem, "relativePath" | "subjectId" | "code" | "filename" | "startedAt" | "updatedAt">
 >;
 
@@ -100,17 +73,13 @@ function newItem(relativePath: string, subjectId: number): PipelineItem {
   };
 }
 
-export interface SeedRow {
+interface SeedRow {
   relativePath: string;
   subjectId: number;
-  /** `files.parse_status` as stored — `"quality"` when parsed, an `error…`
-   *  string when the last attempt failed, and NULL / an in-flight word from
-   *  an interrupted session otherwise. */
+  /** `files.parse_status`: `"quality"`, `error…`, or NULL / an in-flight word. */
   parseStatus: string | null;
-  /** `files.embed_status` as stored. Read **only** for its failure: a file is
-   *  embedded when its pages are covered in the current space, which is what
-   *  the two counts below say, and this column has no memory of which space
-   *  it was set in. */
+  /** Read only for its failure: the column does not know which embedding
+   *  space it was set in, so completion comes from the page counts. */
   embedStatus: string | null;
   /** Page rows for the file, and how many carry a current-space vector. */
   pagesTotal?: number;
@@ -122,12 +91,8 @@ export interface SeedRow {
 
 interface PipelineState {
   items: Record<string, PipelineItem>;
-  /**
-   * Does the embed stage apply at all? False until a Voyage key is stored —
-   * the app will not start an embed without one, so drawing 161 rows as
-   * "waiting to embed" would be inventing a backlog for a stage that is
-   * switched off. Set from `indexStore`, which owns readiness.
-   */
+  /** False until a Voyage key is stored, so no phantom embed backlog is drawn.
+   *  Set from `indexStore`. */
   embedStage: boolean;
   setEmbedStage: (on: boolean) => void;
 
@@ -173,19 +138,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         it.downloadedAt = r.downloadedAt;
         it.parsedAt = r.parsedAt;
         const p = r.parseStatus ?? "";
-        // Two terminal statuses, and nothing else is worth a branch: an
-        // interrupted session's `queued`/`running` is simply outstanding work,
-        // which the `paused` line below already says.
+        // An interrupted `queued`/`running` is just outstanding (`paused`).
         if (p === "quality") {
           it.parse = "done";
         } else if (p.startsWith("error")) {
           it.parse = "error";
           it.error = p;
         }
-        // The embed stage is read off coverage, never off the status column:
-        // vectors from a retired model sit in the same table and would
-        // otherwise read as done. A file with no page rows has not been parsed,
-        // so there is nothing to be covered *of* and it stays pending.
+        // Coverage, not the status column: a retired model's vectors share
+        // the table and would otherwise read as done.
         const total = r.pagesTotal ?? 0;
         const current = r.pagesCurrent ?? 0;
         if (total > 0 && current >= total) {
@@ -194,22 +155,14 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           it.embedTotalPages = total;
           it.embeddedAt = r.embeddedAt;
         } else if ((r.embedStatus ?? "").startsWith("error")) {
-          // Only meaningful once the parse is done; a file that never parsed
-          // cannot have failed to embed in a way worth showing.
           if (it.parse === "done") {
             it.embed = "error";
             it.error = it.error ?? "Embedding failed";
           }
         }
-        // Outstanding work from a previous session sits paused until resumed
-        // (or until a new sync touches the file).
-        //
-        // Asked of all three stages whatever `embedStage` currently says, so
-        // that a key saved *after* the table was seeded does not leave a
-        // library of rows that were decided under the old answer. It costs
-        // nothing when the stage is off: `statusOf` checks completeness before
-        // it looks at `paused`, so a parsed file with no embedder still reads
-        // as done.
+        // Judged with the embed stage on regardless of `embedStage`, so a key
+        // saved after seeding needs no re-seed; harmless when off, since
+        // `statusOf` checks completeness before `paused`.
         it.paused = !isComplete(it, true) && !hasFailed(it);
         items[r.relativePath] = it;
       }
@@ -244,11 +197,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
 
 // ── Derived views ─────────────────────────────────────────────────────────────
 
-/**
- * `embedStage` defaults to false in every derived view, and that is the safe
- * direction: with no embedder configured a parsed file is finished, which is
- * what the table said before this stage existed.
- */
+/** `embedStage` defaults to false: with no embedder, parsed is finished. */
 export function isComplete(it: PipelineItem, embedStage = false): boolean {
   return embedStage ? it.embed === "done" : it.parse === "done";
 }
@@ -261,16 +210,15 @@ export type PipelinePhase = "active" | "waiting" | "paused" | "failed" | "done";
 
 export interface StatusView {
   phase: PipelinePhase;
-  /** Short word for the status pill, e.g. "Parsing". */
+  /** Status pill word, e.g. "Parsing". */
   short: string;
-  /** Full description for the progress column, e.g. "Parsing — 12/37 pages". */
+  /** Progress column text, e.g. "Parsing — 12/37 pages". */
   label: string;
-  /** 0–100 for the current stage, or null when the stage has no page counts. */
+  /** 0–100 for the current stage; null without page counts. */
   percent: number | null;
 }
 
-/** What the row's single progress bar should show right now. The bar tracks
- *  one stage at a time and resets as the file moves to the next stage. */
+/** The row's single progress bar, which tracks one stage at a time. */
 export function statusOf(it: PipelineItem, embedStage = false): StatusView {
   if (hasFailed(it)) {
     return { phase: "failed", short: "Failed", label: it.error || "Failed", percent: null };
@@ -283,9 +231,7 @@ export function statusOf(it: PipelineItem, embedStage = false): StatusView {
     const label = it.totalPages > 0 ? `Parsing — ${it.pagesDone}/${it.totalPages} pages` : "Parsing";
     return { phase: "active", short: "Parsing", label, percent: pct };
   }
-  // An embed in flight outranks everything below: it is the only stage that
-  // routinely runs for an hour on one file, and on the free Voyage programme
-  // (~2.8 pages a minute) the page counter is the only proof it is alive.
+  // An embed can run for an hour; its page counter is the proof it is alive.
   if (it.embed === "active") {
     const pct =
       it.embedTotalPages > 0 ? (it.embedPagesDone / it.embedTotalPages) * 100 : null;
@@ -301,13 +247,10 @@ export function statusOf(it: PipelineItem, embedStage = false): StatusView {
   if (it.embed === "queued") {
     return { phase: "waiting", short: "Queued", label: "Queued to embed", percent: null };
   }
-  // Leftovers from an earlier session: nothing is queued anywhere for these
-  // until the user resumes them (or a new sync touches the file).
   if (it.paused) {
     const stage = it.parse === "done" ? "embed" : "parse";
     return { phase: "paused", short: "Paused", label: `Paused — ${stage} pending`, percent: null };
   }
-  // Parses are submitted in batches, so there is still a real line to be in.
   if (it.parse === "queued") {
     const label = it.parseQueuePos
       ? it.parseQueuePos === 1
@@ -316,8 +259,7 @@ export function statusOf(it: PipelineItem, embedStage = false): StatusView {
       : "Queued to parse";
     return { phase: "waiting", short: "Queued", label, percent: null };
   }
-  // Below here nothing is actually queued anywhere — these are backlog rows
-  // that need the next sync (or the sweep) to pick them up.
+  // Backlog: nothing is queued; the next sync or the sweep picks these up.
   if (it.parse === "done") {
     return { phase: "waiting", short: "Waiting", label: "Waiting to embed", percent: null };
   }

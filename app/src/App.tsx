@@ -20,11 +20,8 @@ export default function App() {
   useEffect(() => {
     applyTheme(getStoredTheme());
 
-    // tauri-plugin-sql runs migrations on first load, not at app startup, so
-    // the schema only existed once you happened to open a page that queried
-    // it. The app opens on /chat, which reads the index through a Rust command
-    // and never touched the plugin — leaving `pages` missing. Load it here so
-    // the schema is up to date before any page mounts.
+    // tauri-plugin-sql migrates on first load, and a page may never query it
+    // (chat goes through Rust), so load it before any page mounts.
     getDb()
       .then(async () => {
         const n = await reconcileStaleSyncRuns();
@@ -35,8 +32,6 @@ export default function App() {
     return watchSystemTheme();
   }, []);
 
-  // The shell is no longer a route element: it is above every tab's router
-  // (`app/src/routes.tsx`), and the tabs are mounted inside it.
   return (
     <ErrorBoundary>
       <EventBridge />

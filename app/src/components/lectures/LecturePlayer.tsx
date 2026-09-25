@@ -11,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useWindowEvent } from "@/hooks/useEvents";
 import { cn } from "@/lib/utils";
 import {
   dlKey,
@@ -40,8 +41,8 @@ import { useTabActive, useTabId } from "@/components/tabs/TabContext";
 import {
   parseVtt,
   spanAt,
-  fmtDuration,
-  fmtTime,
+  fmtDurationSecs,
+  fmtClockSecs,
   fmtLectureDate,
   lectureGrabFrames,
   type Cue,
@@ -73,21 +74,11 @@ import {
   tabInFront,
 } from "@/components/lectures/TranscriptPanel";
 
-/** How much transcript the moment carries: the minute before the playhead,
- *  which is what "I zoned out, what was that" reaches for. Longer and the
- *  excerpt starts to be the conversation rather than its context. */
+/** Seconds of transcript before the playhead that a chat moment carries. */
 const MOMENT_TRANSCRIPT_S = 60;
 
-/**
- * Which way the dock button's glyph faces.
- *
- * It is `SidebarSimple`, the same fold-away mark the app sidebar and the
- * chat's conversations column wear, rather than the transcript's page icon:
- * the button stopped being about the transcript when the panel grew tabs, and
- * what it folds is a panel. Turning it to face the edge the dock is on is what
- * a page icon could never say — the glyph draws its divider on the left, so
- * left is the unrotated case.
- */
+/** Turns `SidebarSimple` to face the dock's edge; the glyph's divider is on
+ *  the left, so left is unrotated. */
 const DOCK_ICON_FACING: Record<Dock, string> = {
   left: "",
   right: "rotate-180",
@@ -95,47 +86,21 @@ const DOCK_ICON_FACING: Record<Dock, string> = {
   bottom: "-rotate-90",
 };
 
-/** What the dock button calls the tab it would show or hide. The button used
- *  to guess from what the recording had; with three tabs, and Chat on every
- *  recording, the only honest answer is the one in front. The transcript is
- *  one noun in both of its registers — enhanced or verbatim, it is still what
- *  the button would be showing you. */
+/** What the dock button calls the tab in front. */
 const DOCK_TAB_NOUN: Record<DockTab, string> = {
   chapters: "chapters",
   transcript: "transcript",
   chat: "chat",
 };
 
-/**
- * Is a panel on screen right now?
- *
- * The player is the one place in the app where a bare click on the background
- * *does* something — it plays or pauses — so it is the one place that has to
- * tell a click from a dismissal. Clicking off the source or layout panel used
- * to close it *and* toggle playback, which is one action too many.
- *
- * Radix defers its outside-dismissal to the `click` (not the pointerdown) and
- * handles it on `document`, so during the target phase — where the video's own
- * handler runs, and before the pointer even lifts for the scrub bar — the
- * panel is still up and still what the click was for. Which makes its presence
- * the whole test.
- *
- * `[data-state=open]` earns its keep: Radix keeps a closing panel mounted for
- * the length of its exit animation, and a click landing in those 150ms is a
- * real click.
- */
+/** Is a popover open? Its dismissing click must not also play/pause or seek.
+ *  Radix dismisses on `click` at `document`, so during the video's handler the
+ *  panel is still `data-state=open`. */
 const panelOnScreen = () =>
   !!document.querySelector('[data-slot="popover-content"][data-state="open"]');
 
-/**
- * Video scrub bar. Not the shadcn Slider: it mixes `clientX` with
- * `getBoundingClientRect`, which is one measurement more than this needs.
- * `offsetX / offsetWidth` stays entirely in the element's own coordinate
- * space, so a click lands exactly where the pointer is.
- *
- * It sits on the scrim over the video, so its colours are fixed rather than
- * themed: the ground is always the frame behind it, never `background`.
- */
+/** Video scrub bar. `offsetX / offsetWidth` keeps the maths in the element's
+ *  own coordinates. Colours are fixed: it sits on the video scrim. */
 function SeekBar({
   value,
   max,
@@ -153,10 +118,8 @@ function SeekBar({
 }) {
   const pct = Math.min(100, Math.max(0, (value / max) * 100));
 
-  // The preview's position is kept while it fades out, so leaving the bar
-  // doesn't make the thumbnail jump to the left edge on its way off screen.
-  // `armed` mounts the second decoder on first hover rather than with the
-  // player: an untouched scrub bar should not cost a metadata fetch.
+  // `armed` mounts the preview decoder on first hover; the position is kept
+  // while it fades out.
   const [armed, setArmed] = useState(false);
   const [hovering, setHovering] = useState(false);
   const [preview, setPreview] = useState({ x: 0, t: 0, w: 1 });
@@ -223,11 +186,8 @@ function SeekBar({
         )}
       >
         <div className="absolute h-full bg-brand" style={{ width: `${pct}%` }} />
-        {/* A notch, not a segmented bar: cutting the track into pieces costs
-            the rounded ends and the growing hover height that make this read
-            as one bar. Drawn in the scrim's own black so it shows against the
-            played fill and the unplayed track alike — the first boundary is
-            second 0, which is the left edge, so it is not drawn. */}
+        {/* Notches, not segments, so the track keeps its rounded ends and hover
+            growth. The boundary at second 0 is the left edge: not drawn. */}
         {chapters.map((t) =>
           t > 0 && t < max ? (
             <span
@@ -250,11 +210,8 @@ function SeekBar({
   );
 }
 
-/**
- * One button on the overlaid control bar. Not the shadcn `Button`: its ghost
- * variant hovers to `accent`, a near-white surface that vanishes on a video.
- * Over the scrim the whole palette is fixed white-on-frame.
- */
+/** A control-bar button. Not shadcn `Button`: its ghost hover (`accent`)
+ *  vanishes on video. */
 function ControlButton({
   label,
   onClick,
@@ -284,8 +241,7 @@ function ControlButton({
           )}
         >
           {children}
-          {/* YouTube's underline. On a frame a lit icon reads the same as an
-              unlit one, so an "on" toggle needs a mark of its own. */}
+          {/* An "on" mark: on a frame a lit icon reads the same as an unlit one. */}
           {active && (
             <span className="absolute bottom-[3px] h-[2px] w-3.5 rounded-full bg-white" />
           )}
@@ -296,16 +252,8 @@ function ControlButton({
   );
 }
 
-/**
- * One picture in the player. The `<video>` itself is not rendered here — it is
- * a long-lived element moved into `hostRef` by `lib/lecturePlayback.ts` — so
- * this is the box around it plus the control that says which stream it shows.
- *
- * The switcher hides with the control bar rather than only on pointer-out: a
- * frame the pointer is resting on still counts as idle after a couple of
- * seconds, and a lone pill floating over a lecture with no bar under it reads
- * as a stuck overlay.
- */
+/** One picture: the box a long-lived `<video>` is moved into
+ *  (`lib/lecturePlayback.ts`), plus its source switcher. */
 function VideoFrame({
   hostRef,
   source,
@@ -324,8 +272,7 @@ function VideoFrame({
   hostRef: React.RefObject<HTMLDivElement | null>;
   source: SourceNum;
   sources: SourceStates;
-  /** False for a capture with one stream — there is nothing to switch to, so
-      no pill, rather than a control whose only option is the current one. */
+  /** False for a single-stream capture: nothing to switch to. */
   showSwitcher: boolean;
   /** The control bar is showing, so frame chrome may show too. */
   chromeVisible: boolean;
@@ -419,46 +366,18 @@ interface LecturePlayerProps {
   lecture: Lecture;
   /** Fired after anything persisted changes (progress, downloads). */
   onRefresh: () => void;
-  /**
-   * Off in the peek panel. Fullscreen here is the *window's* — a peek is a
-   * panel over a page that stays mounted behind it, so taking one fullscreen
-   * would be a side panel eating the screen. Expand promotes it to its own
-   * tab first, and the button is there.
-   */
+  /** Off in the peek panel: fullscreen is the window's, and a peek is a panel
+   *  over a page. Expand promotes it to a tab first. */
   allowFullscreen?: boolean;
-  /**
-   * Off in the side panel, for the reason fullscreen is.
-   *
-   * The dock is a panel beside the video, and the side panel is already that
-   * panel: docked left or right it left the video a sliver of black, and along
-   * the bottom of a 520px column a transcript is a two-word-wide scroller over
-   * a letterboxed strip. The dock's floors are real — they are what a cue, a
-   * chapter title and an agent's reply need to be readable — so the honest
-   * answer in a box this small is not a smaller dock but no dock, and the
-   * expand control next to it is the way to the one that fits.
-   *
-   * It takes the button and the T key with it: a control that cannot do
-   * anything here is worse than no control, and the preference is untouched —
-   * the page route opens with the dock exactly as it was left.
-   */
+  /** Off in the side panel, which is too small for a readable dock: no button,
+   *  no T key. The preference is untouched for the page route. */
   allowDock?: boolean;
-  /**
-   * Which of the two players this is — the lecture page, or the peek.
-   *
-   * It is not a capability like the two above but a fact about *where* the
-   * elements are, and it is the one thing that tells a stranded lecture from a
-   * safe one: navigating a tab takes the page's player off screen, while the
-   * peek beside that page is still there afterwards. `lib/lecturePlayback.ts`
-   * holds it; `lib/tabRouters.ts` asks.
-   */
+  /** Which player this is. Navigating a tab strands the page's player but not
+   *  the peek; `lib/lecturePlayback.ts` holds it, `lib/tabRouters.ts` asks. */
   host?: PlaybackHost;
 }
 
-/**
- * The whole lecture player — video, controls bar, transcript. Self-contained:
- * loads its own transcript, tracks its own download, saves its own progress.
- * Wrapped by the lectures-tab peek and the standalone full-page view alike.
- */
+/** The whole lecture player — video, controls, dock — for the peek and the page. */
 export function LecturePlayer({
   lecture,
   onRefresh,
@@ -470,52 +389,23 @@ export function LecturePlayer({
   const [activeCueIdx, setActiveCueIdx] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  /**
-   * The playhead, for anything that must not re-render with it.
-   *
-   * `TranscriptPanel` is memoised against this component, which re-renders
-   * four times a second on `timeupdate`; the dock's chat composer needs the
-   * second the message will carry, and a prop would throw that memo away on
-   * every frame and put the virtualised transcript back beside a decoding
-   * video. The chip ticks itself off this once a second and the send reads it
-   * here (`LectureChatPanel`).
-   */
+  /** The playhead for consumers that must not re-render with it: a prop would
+   *  break `TranscriptPanel`'s memo on every `timeupdate`. */
   const atRef = useRef(0);
-  /**
-   * The file's own length, which is not always the catalogue's. Echo360 reports
-   * a lesson duration from its scheduling data, and the recording it hands over
-   * runs a little past it — enough that the clock read `1:55:00 / 1:54:46` at
-   * the end of a lecture. The element is the authority for anything about
-   * playback; `lecture.duration_seconds` stands in until metadata arrives (and
-   * for a lecture whose video has not been downloaded at all).
-   */
+  /** The file's own length — Echo360's catalogue duration can run short of the
+   *  recording. `lecture.duration_seconds` stands in until metadata arrives. */
   const [fileDuration, setFileDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** The dock's list is tracking playback (vs. the user reading ahead). One
-   *  flag for both the Transcript and the Read tab: they share `FollowList`,
-   *  and only one of the two is mounted at a time. */
+  /** The dock's list is tracking playback. Shared by Transcript and Read, which
+   *  are never mounted together. */
   const [following, setFollowing] = useState(true);
   /** Controls are over the frame, so they fade out of the way while playing. */
   const [controlsVisible, setControlsVisible] = useState(true);
 
-  // Speed, captions and the transcript's side and size are preferences, not
-  // per-lecture state: set once, they hold for every recording and survive a
-  // restart. The per-lecture bit is the playback position, and that is in the
-  // DB (`lectures.progress_seconds`).
   const speed = usePlayerPrefs((s) => s.speed);
-  /**
-   * Which tab this player is *in*, and whether that tab is the one in front.
-   *
-   * Every tab stays mounted (`app/src/components/tabs/TabPane.tsx`), so being
-   * rendered is not being looked at, and there is one `<video>` per source for
-   * the whole app — so a second lecture tab behind this one is a second player
-   * pointed at the same element. Both of them answering the space bar toggled
-   * play twice and left it exactly where it was, which is why pausing
-   * sometimes did nothing at all; both of them claiming on a tab switch left
-   * the picture in whichever pane happened to mount last. A player that is not
-   * on screen does neither.
-   */
+  /** Every tab stays mounted and there is one `<video>` per source app-wide, so
+   *  only the on-screen player answers keys or claims the elements. */
   const tabId = useTabId();
   const onScreen = useTabActive();
   const volume = usePlayerPrefs((s) => s.volume);
@@ -527,19 +417,15 @@ export function LecturePlayer({
   const mainPref = usePlayerPrefs((s) => s.mainSource);
   const setPrefs = usePlayerPrefs((s) => s.set);
 
-  // Global on purpose: a download outlives this component (close the peek,
-  // reopen it — the same download is still running in Rust).
+  // Global: a download outlives this component (it runs in Rust).
   const downloads = useLectureDownloads();
   const downloading = isDownloading(downloads, lecture.id);
   const dlProgress = downloads.progress[dlKey(lecture.id, 1)] ?? null;
 
   /** The leader element while this player has it; see lib/lecturePlayback.ts. */
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  /**
-   * The leader in state as well as in a ref: the ref is what handlers read,
-   * and the state is what makes the preference effects below re-apply speed
-   * and volume when a source switch hands the audio to a different decoder.
-   */
+  /** The leader in state too, so the pref effects re-apply when a source switch
+   *  hands the audio to another decoder. */
   const [leaderEl, setLeaderEl] = useState<HTMLVideoElement | null>(null);
   /** The boxes in the frames the elements are moved into. */
   const mainHostRef = useRef<HTMLDivElement>(null);
@@ -547,16 +433,14 @@ export function LecturePlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const videoAreaRef = useRef<HTMLDivElement>(null);
   const togglePlayRef = useRef<() => void>(() => {});
-  // The keyboard listener is registered once, so what a key does reaches it
-  // through a ref rather than through the effect's dependencies.
+  // The key handler registers once and reaches actions through refs.
   const toggleTranscriptRef = useRef<() => void>(() => {});
   const toggleCaptionsRef = useRef<() => void>(() => {});
   // `following` mirrored for pointer handlers, which must not re-subscribe.
   const followingRef = useRef(true);
   const hideControlsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Three reasons to pin the bar open, tracked apart because they end apart:
-  // the pointer resting on it, one of its panels being open (speed, layout),
-  // and a volume drag that has wandered off the bar.
+  // Three independent holds on the bar: pointer on it, a panel open, a volume
+  // drag that has left it.
   const pointerOnControlsRef = useRef(false);
   const panelOpenRef = useRef(false);
   const volumeDraggingRef = useRef(false);
@@ -565,7 +449,6 @@ export function LecturePlayer({
     panelOpenRef.current ||
     volumeDraggingRef.current;
 
-  // Where the transcript sits (any edge of the player) and how big it is.
   const {
     dock,
     height,
@@ -619,26 +502,15 @@ export function LecturePlayer({
   /** Echo360 publishes a camera stream for this capture (`docs/sync.md`). */
   const hasSecondSource = lecture.has_source2 === 1;
 
-  // A two-frame layout needs two files, so it falls back to one screen rather
-  // than half a player while the camera is still a download away.
+  // A two-frame layout needs both files; until then it is one screen.
   const layout = urls[1] && urls[2] ? layoutPref : "single";
-  /** The stream in the main frame; the other frame gets the other one. The
-   *  preference only holds while that stream is actually on disk — a camera
-   *  that has not been downloaded cannot be the one screen you are watching. */
+  /** The stream in the main frame; the pref holds only while it is on disk. */
   const mainSource: SourceNum = urls[mainPref] ? mainPref : urls[2] && !urls[1] ? 2 : 1;
   const otherSource: SourceNum = mainSource === 1 ? 2 : 1;
   const mainSrc = urls[mainSource];
 
-  /**
-   * Choosing a source in *either* frame swaps the pair, because the two frames
-   * always show the two streams — there is no state where both show the same
-   * one. So one number says everything: which stream is in the main frame.
-   *
-   * Which is why the second frame needs the other half of that swap: picking
-   * Source 2 *there* means Source 2 in that frame, so Source 1 in the main
-   * one. Handing it `selectSource` read the choice as the main frame's and
-   * inverted the panel — the row you ticked was the one you did not get.
-   */
+  // The frames always show both streams, so a pick in the second frame makes
+  // the *other* stream the main one.
   const selectSource = (n: SourceNum) => setPrefs({ mainSource: n });
   const selectSecondSource = (n: SourceNum) =>
     setPrefs({ mainSource: n === 1 ? 2 : 1 });
@@ -650,9 +522,7 @@ export function LecturePlayer({
       .catch((e) => setError(`Download failed: ${e}`));
   };
 
-  /** The PIP box keeps the inset picture's own shape, not an assumed 16:9.
-   *  Filled in by the reconcile effect below, which is where the element the
-   *  dimensions come from is known to exist. */
+  /** The inset picture's own aspect, read in the reconcile effect below. */
   const [pipAspect, setPipAspect] = useState(16 / 9);
 
   const {
@@ -670,9 +540,8 @@ export function LecturePlayer({
 
   // ── Chapters ─────────────────────────────────────────────────────────────
 
-  // Read from SQLite here rather than off the `lecture` row: in the side panel
-  // that row is a snapshot held by a store, and a run lands eight minutes after
-  // it was taken. The hook owns the refresh and the backend's own event.
+  // Read from SQLite, not the `lecture` row: in the side panel that row is a
+  // store snapshot a chaptering run outlives.
   const chapterState = useLectureChapters(lecture.id);
   const chapterStarts = useMemo(
     () => chapterState.chapters.map((c) => c.start_seconds),
@@ -681,9 +550,7 @@ export function LecturePlayer({
 
   // ── Reading copy ─────────────────────────────────────────────────────────
 
-  // The same recording as text, read the same way and for the same reason.
-  // The two jobs are independent — a lecture can have either, both or neither
-  // — so this is a second hook rather than a field on the first one's state.
+  // Independent of chapters — a lecture can have either, both or neither.
   const readingState = useLectureReading(lecture.id);
   const lineStarts = useMemo(
     () => readingState.lines.map((l) => l.start_seconds),
@@ -716,9 +583,7 @@ export function LecturePlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lecture.id, lecture.transcript_path, lecture.video_path]);
 
-  // Where playback resumes is `lib/lecturePlayback.ts`'s call, not this one:
-  // it is the only thing that knows whether a load is a fresh lecture (restore
-  // the saved second) or a source switch mid-lecture (carry the live one).
+  // Where playback resumes is `lib/lecturePlayback.ts`'s call.
   const handleLoadedMetadata = () => {
     const v = videoRef.current;
     if (!v) return;
@@ -731,10 +596,8 @@ export function LecturePlayer({
 
   // ── Controls visibility ──────────────────────────────────────────────────
 
-  // Paused, the bar stays; playing, it fades after a couple of idle seconds
-  // and any pointer movement over the frame brings it back. The timer reads
-  // the element rather than `isPlaying` so it never has to be re-armed when
-  // the state it is waiting on changes.
+  // Playing, the bar fades after idle seconds; paused, it stays. The timer reads
+  // the element, not `isPlaying`, so it never needs re-arming.
   const revealControls = useCallback(() => {
     setControlsVisible(true);
     if (hideControlsRef.current) clearTimeout(hideControlsRef.current);
@@ -761,29 +624,12 @@ export function LecturePlayer({
 
   // ── Fullscreen ───────────────────────────────────────────────────────────
 
-  // Not `requestFullscreen()`. WKWebView keeps element fullscreen behind a
-  // private preference wry only sets under Tauri's `macos-private-api`, so the
-  // call was rejected and the `.catch` swallowed it — the button did nothing.
-  // Turning that feature on would work and then break something worse: WebKit
-  // displays only the fullscreen element's subtree, and every Radix popup in
-  // here (the speed panel, every tooltip) is portalled to `document.body`,
-  // outside it. So fullscreen is the *window's*, with the player promoted to a
-  // fixed overlay over the app — the whole document stays on screen and the
-  // popups keep working.
-  //
-  // Two fullscreens, nested, not one:
-  //
-  //   * the *window's* — macOS fullscreen, the app filling the display with
-  //     the sidebar and tab strip still there;
-  //   * the *player's* — `isFullscreen` here, the fixed overlay that covers
-  //     that furniture so only the lecture is left.
-  //
-  // Entering the player's takes the window with it, because a lecture over a
-  // half-screen window is not what anyone means by fullscreen. Leaving it does
-  // *not* bring the window back: the overlay lifts and the sidebar and tabs
-  // are underneath, still filling the display. Leaving the window's, though,
-  // leaves both — there is no reading of "un-fullscreen the app" that keeps a
-  // lecture pinned over everything.
+  // Not `requestFullscreen()`: WKWebView gates element fullscreen behind
+  // Tauri's `macos-private-api`, and even then shows only the element's subtree,
+  // cutting off every Radix popup portalled to `document.body`. So the player is
+  // a fixed overlay over a window-fullscreened app. Entering takes the window
+  // fullscreen too; leaving the overlay keeps the window's; leaving the
+  // window's fullscreen leaves both.
   const isFullscreenRef = useRef(false);
   isFullscreenRef.current = isFullscreen;
 
@@ -800,9 +646,8 @@ export function LecturePlayer({
     }
   }, [allowFullscreen]);
 
-  // The green button and ⌃⌘F leave the window's fullscreen by another door;
-  // resize is how that arrives. Only the leaving matters — entering window
-  // fullscreen from the tab strip is not a request to hide the tab strip.
+  // Leaving window fullscreen another way (green button, ⌃⌘F) arrives as a
+  // resize; only the leaving matters.
   useEffect(() => {
     const win = getCurrentWindow();
     const unlisten = win.onResized(async () => {
@@ -900,18 +745,9 @@ export function LecturePlayer({
     }
   };
 
-  // What the dock button does, so T does the same three-way: parse the
-  // transcript if it is on disk but not loaded, fetch it if the transcript is
-  // the tab being asked for and this lecture has never had one, otherwise show
-  // or hide the panel.
-  //
-  // That middle branch used to read "and the dock would otherwise be empty",
-  // which no longer describes any lecture — Chat is on all of them. It is the
-  // *preference* that is tested and not the tab in front, because a recording
-  // with no transcript has that tab dropped from the strip while the
-  // preference survives (`tabInFront`): someone who reads transcripts pressing
-  // T is asking for the transcript, and this is the only place the player
-  // offers to fetch one.
+  // T does what the dock button does: parse a transcript on disk but not loaded,
+  // fetch one if the *preference* is the transcript tab (it outlives
+  // `tabInFront` dropping that tab), otherwise show or hide the dock.
   const toggleTranscript = () => {
     if (!allowDock) return;
     if (lecture.transcript_path && cues.length === 0) {
@@ -924,8 +760,7 @@ export function LecturePlayer({
   };
   toggleTranscriptRef.current = toggleTranscript;
 
-  // Captions are drawn from the same cues, so with no transcript there is
-  // nothing to turn on — the button is disabled in that state, and C is too.
+  // Captions come from the cues: no transcript, nothing to toggle.
   const toggleCaptions = () => {
     if (!lecture.transcript_path) return;
     setPrefs({ captionsEnabled: !captionsEnabled });
@@ -953,11 +788,8 @@ export function LecturePlayer({
 
   // ── Follow ───────────────────────────────────────────────────────────────
 
-  // The scrolling itself lives in `FollowList`, which owns the virtualizer and
-  // so is the only thing that knows where a row sits. The player owns just the
-  // flag and the two ways back to live — shared by the Transcript and Read
-  // tabs, since only one of their lists is mounted at a time and a hand-scroll
-  // on either means the same thing.
+  // `FollowList` does the scrolling; the player owns the flag and the ways back
+  // to live, shared by the Transcript and Read tabs.
   const handleScrollAway = useCallback(() => {
     if (!followingRef.current) return;
     followingRef.current = false;
@@ -987,15 +819,12 @@ export function LecturePlayer({
   };
   togglePlayRef.current = togglePlay;
 
-  // `playbackRate` is per-element and resets when a new source loads, so the
-  // preference is applied as an effect rather than only on change.
+  // `playbackRate` resets when a new source loads, hence an effect.
   useEffect(() => {
     if (leaderEl) leaderEl.playbackRate = speed;
   }, [speed, leaderEl]);
 
-  // Volume and mute are per-element the same way, and set together: they are
-  // independent on the element, which is what lets unmuting land back on the
-  // level rather than on full.
+  // Per-element too; mute is independent of volume, so unmuting restores it.
   useEffect(() => {
     if (!leaderEl) return;
     leaderEl.volume = volume;
@@ -1004,11 +833,8 @@ export function LecturePlayer({
 
   // ── The shared element ───────────────────────────────────────────────────
 
-  // The video element outlives this component (`lib/lecturePlayback.ts`), so
-  // it is adopted into the frame rather than rendered, and its listeners are
-  // attached by hand. They reach the current handlers through a ref: these are
-  // recreated on every render, and re-binding six listeners whenever a cue
-  // index changes is churn for no gain.
+  // The element outlives this component (`lib/lecturePlayback.ts`), so it is
+  // adopted, not rendered; listeners reach the current handlers through a ref.
   const mediaRef = useRef({
     timeUpdate: handleTimeUpdate,
     loadedMetadata: handleLoadedMetadata,
@@ -1024,18 +850,15 @@ export function LecturePlayer({
 
   useEffect(() => {
     const mainHost = mainHostRef.current;
-    // Behind another tab there is nothing to adopt into: the elements stay with
-    // whoever has them (playing, if they were — see the cleanup below), and
-    // this player picks them back up when its pane comes forward.
+    // Behind another tab the elements stay with whoever has them; this player
+    // re-adopts them when its pane comes forward.
     if (!mainHost || !mainSrc || !onScreen) {
       videoRef.current = null;
       setLeaderEl(null);
       return;
     }
 
-    // Restate the whole layout; the module works out what that means for the
-    // elements it owns. The main frame is first, and first is the leader — the
-    // picture you are watching is the audio you hear.
+    // The main frame is first, and first is the leader: its audio is what plays.
     const plan: SourcePlan[] = [{ source: mainSource, src: mainSrc, host: mainHost }];
     const secondHost = secondHostRef.current;
     const secondSrc = urls[otherSource];
@@ -1044,19 +867,14 @@ export function LecturePlayer({
     }
 
     const v = syncLectureSources(lecture, plan, { tab: tabId, host });
-    // Kept for the cleanup: parking is "put these back if they are still
-    // mine", never "put back whatever is out there". Another player may have
-    // taken them over in between — expanding the panel into a tab is exactly
-    // that — and parking those would black out a picture somebody is watching.
+    // Parking restores the elements only if still ours — another player (e.g.
+    // expand-to-tab) may have taken them since.
     const claim = playbackClaim();
     if (!v) return;
     videoRef.current = v;
     setLeaderEl(v);
 
-    // The inset's shape comes from the picture in it. Read here rather than in
-    // an effect of its own: the element only exists once the plan above has
-    // been reconciled, and an effect that ran before it would find nothing and
-    // never look again.
+    // Read here: the inset element exists only once the plan is reconciled.
     const inset = plan.length > 1 ? videoForSource(plan[1].source) : null;
     const readAspect = () => {
       if (inset?.videoWidth && inset.videoHeight) {
@@ -1066,9 +884,7 @@ export function LecturePlayer({
     readAspect();
     inset?.addEventListener("loadedmetadata", readAspect);
 
-    // A lecture that kept playing while its tab was gone is already somewhere
-    // when this mounts, and this component's state starts empty — so the state
-    // takes the element's, not the other way round.
+    // A lecture that kept playing in the background: state follows the element.
     setIsPlaying(!v.paused);
     if (Number.isFinite(v.duration) && v.duration > 0) setFileDuration(v.duration);
     mediaRef.current.timeUpdate();
@@ -1120,43 +936,27 @@ export function LecturePlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lecture.id, urls[1], urls[2], layout, mainSource, onScreen, tabId, host]);
 
-  // Progress is written by the module, including while nothing is mounted;
-  // the list this player sits in still wants to hear about it.
-  useEffect(() => {
-    const onSaved = () => onRefresh();
-    window.addEventListener(LECTURE_PROGRESS_EVENT, onSaved);
-    return () => window.removeEventListener(LECTURE_PROGRESS_EVENT, onSaved);
-  }, [onRefresh]);
+  // Progress is saved by the module, even while nothing is mounted.
+  useWindowEvent(LECTURE_PROGRESS_EVENT, () => onRefresh());
 
   // ── Render ───────────────────────────────────────────────────────────────
 
-  // The dock is always mounted and shown when the preference says so — it
-  // slides in and out, and a slide needs both ends on screen.
-  //
-  // It used to be conditional: a lecture with no transcript on disk and no
-  // chaptering run had nothing to put in the panel. Chat has no such
-  // precondition — no file, no job — so every recording has a dock now, and
-  // the tab strip is the only thing that varies with what the recording has.
+  // The dock stays mounted so it can slide in and out.
   const hasTranscript = cues.length > 0;
   const showDock = allowDock && transcriptVisible;
   /** The tab the dock is actually showing — what T shows or hides. */
   const frontTab = tabInFront(dockTab, hasTranscript);
 
-  /** The chapter the playhead is in. Its *name* still sits above the scrub bar;
-   *  how far through it we are is drawn in the dock instead, on the playing
-   *  card's own top edge (`EntryProgress`). */
+  /** The chapter the playhead is in; its name sits above the scrub bar. */
   const activeChapterIdx = spanAt(chapterStarts, currentTime);
   const activeChapter =
     activeChapterIdx >= 0 ? chapterState.chapters[activeChapterIdx] : null;
 
-  /** The line the playhead is in — the same boundary arithmetic the chapter
-   *  strip does, over a list fifty times denser. */
+  /** The reading line the playhead is in. */
   const activeLineIdx = spanAt(lineStarts, currentTime);
 
-  // One memoised bag per tab, because `TranscriptPanel` is memo'd against a
-  // player that re-renders on every `timeupdate` — see the props' own comments
-  // there. Two jobs, two tabs, two bags: they share an evidence pipeline in
-  // Rust and nothing at all on screen.
+  // One memoised bag per tab: `TranscriptPanel` is memo'd against a player that
+  // re-renders on every `timeupdate`.
   const chaptersProps: ChaptersPanelProps = useMemo(
     () => ({
       chapters: chapterState.chapters,
@@ -1187,11 +987,8 @@ export function LecturePlayer({
     ],
   );
 
-  /** The Transcript tab's Enhanced register. It is only ever mounted inside
-   *  that tab, which the strip drops when the recording has no cues — so the
-   *  transcript the job rewrites is already proven and the bag does not carry
-   *  a `hasTranscript`. The register picker is built from this bag inside
-   *  `TranscriptPanel`, since the Standard register needs it too. */
+  /** The Transcript tab's Enhanced register. That tab only exists when there
+   *  are cues, so the bag carries no `hasTranscript`. */
   const readingProps: Omit<ReadingListProps, "picker"> = useMemo(
     () => ({
       lines: readingState.lines,
@@ -1230,40 +1027,22 @@ export function LecturePlayer({
   );
 
   /**
-   * The moment a message from the dock carries, built here because this is
-   * where the playhead, the cues and the chapters already are.
-   *
-   * It goes out as `SendOptions.context` — appended to the prompt the CLI
-   * receives, never stored as the message (`docs/harness.md`) — with the
-   * second itself as `SendOptions.at`, which is what the bubble reads back.
-   * The transcript is inlined rather than pointed at: a minute of cues is a
-   * few hundred words, where the whole file is twenty thousand and the agent
-   * has the path for that in its instructions.
-   *
-   * **Every downloaded stream's frame goes, not the one on screen.** Which
-   * source carries the teaching is the theatre's business: a lecturer working
-   * at the whiteboard leaves source 1 on the room's idle splash for the hour
-   * while the derivation being asked about is only ever on source 2, so a
-   * moment built from the visible pane alone hands the agent a picture of
-   * nothing. `lecture_grab_frames` grabs each one and they go out together,
-   * numbered the way the player's own picker numbers them.
-   *
-   * **A frame that cannot be grabbed drops its line and nothing else.** A
-   * lecture whose video has never been downloaded is refused by
-   * `lecture_grab_frames`, and losing the message over a missing picture would
-   * be the wrong half to lose.
+   * The moment a dock message carries, as `SendOptions.context`
+   * (`docs/harness.md`): chapter, the last minute of cues inline, and a frame of
+   * *every* downloaded stream — the teaching may be on either source. A frame
+   * that cannot be grabbed is dropped, never the message.
    */
   const buildMoment = useCallback(
     async (at: number): Promise<string> => {
       const parts: string[] = [
-        `The student is at ${fmtTime(at, true)} of this recording (second ${at}).`,
+        `The student is at ${fmtClockSecs(at, true)} of this recording (second ${at}).`,
       ];
 
       const idx = spanAt(chapterStarts, at);
       const chapter = idx >= 0 ? chapterState.chapters[idx] : null;
       if (chapter) {
         parts.push(
-          `That is inside chapter ${idx + 1}, "${chapter.title}", which starts at ${fmtTime(chapter.start_seconds, true)}.`,
+          `That is inside chapter ${idx + 1}, "${chapter.title}", which starts at ${fmtClockSecs(chapter.start_seconds, true)}.`,
         );
       }
 
@@ -1275,7 +1054,7 @@ export function LecturePlayer({
         .trim();
       if (said) {
         parts.push(
-          `What was said between ${fmtTime(from, true)} and ${fmtTime(at, true)}:\n\n${said}`,
+          `What was said between ${fmtClockSecs(from, true)} and ${fmtClockSecs(at, true)}:\n\n${said}`,
         );
       }
 
@@ -1296,9 +1075,7 @@ export function LecturePlayer({
     [lecture.id, cues, chapterStarts, chapterState.chapters],
   );
 
-  // The Chat tab's bag, beside the other two and memoised for the same
-  // reason. Everything in it is stable across a `timeupdate`: the playhead
-  // travels by ref, not by value.
+  // Stable across `timeupdate`: the playhead travels by ref.
   const chatProps: LectureChatPanelProps = useMemo(
     () => ({ lectureId: lecture.id, atRef, buildMoment }),
     [lecture.id, buildMoment],
@@ -1319,7 +1096,6 @@ export function LecturePlayer({
         dock === "left" && "flex-row-reverse",
       )}
     >
-      {/* Video + controls stack */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
         {/* Video area — the controls live over the frame, YouTube-style */}
         <div
@@ -1339,9 +1115,8 @@ export function LecturePlayer({
         >
           {mainSrc ? (
             <>
-              {/* `flexGrow` on a zero basis, not a percentage height: the two
-                  screens divide what is left *after* the divider, so the split
-                  can never add up to more than the frame. */}
+              {/* `flexGrow` on a zero basis, so the split divides what is left
+                  after the divider. */}
               <VideoFrame
                 hostRef={mainHostRef}
                 source={mainSource}
@@ -1393,8 +1168,7 @@ export function LecturePlayer({
                   onSwitcherOpenChange={(open) =>
                     setOpenSwitcher(open ? otherSource : null)
                   }
-                  // Under the control bar (z-30) so it can never cover the
-                  // scrub bar, over the main picture so it is visible at all.
+                  // Above the main picture, under the control bar (z-30).
                   className={cn(
                     "absolute z-20 touch-none rounded-lg border border-white/20 bg-black",
                     "shadow-2xl shadow-black/60",
@@ -1403,11 +1177,7 @@ export function LecturePlayer({
                   style={pipStyle}
                   onPointerDown={startPipMove}
                 >
-                  {/* On the switcher pill's terms, not hover's alone: four
-                      white pips sitting on the inset after the bar has faded
-                      read as furniture stuck to the picture. A drag pins them,
-                      since a handle that vanishes under the pointer you are
-                      resizing with is the one moment they must not go. */}
+                  {/* Hidden with the bar like the switcher; pinned while dragging. */}
                   {PIP_CORNERS.map((corner) => (
                     <span
                       key={corner}
@@ -1433,7 +1203,7 @@ export function LecturePlayer({
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-white/60 p-6">
               <p className="text-sm font-medium text-white">{lecture.title}</p>
               <p className="text-xs">
-                {fmtLectureDate(lecture.date)} · {fmtDuration(lecture.duration_seconds)}
+                {fmtLectureDate(lecture.date)} · {fmtDurationSecs(lecture.duration_seconds)}
               </p>
               {downloading ? (
                 <div className="flex items-center gap-2 text-sm">
@@ -1460,8 +1230,7 @@ export function LecturePlayer({
             <CaptionOverlay
               text={cues[activeCueIdx]?.text ?? ""}
               boundsRef={videoAreaRef}
-              // Captions default to the bottom of the frame, which is exactly
-              // where the bar fades in. Lift them clear while it is there.
+              // Lift clear of the control bar while it shows.
               lift={controlsVisible ? 44 : 0}
             />
           )}
@@ -1484,13 +1253,7 @@ export function LecturePlayer({
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/85 via-black/45 to-transparent" />
 
             <div className="relative px-3 pb-1">
-              {/* Which chapter is playing, named over the frame — the one
-                  thing the scrub bar cannot say. The hairline that used to
-                  fill beside it is gone: how far through this chapter we are
-                  is the dock's line now (`EntryProgress`), where it is beside
-                  the same title in the list and does not fade with the
-                  controls. White on the frame, like every other mark down
-                  here, and inside the scrim so it goes when the bar does. */}
+              {/* The playing chapter's name — the one thing the scrub bar cannot say. */}
               {activeChapter && (
                 <div className="select-none truncate pb-1 text-[11.5px] font-medium text-white/90">
                   {activeChapter.title}
@@ -1536,9 +1299,9 @@ export function LecturePlayer({
                 />
 
                 <span className="ml-1 select-none whitespace-nowrap text-[11.5px] tabular-nums text-white/85">
-                  {fmtTime(Math.floor(currentTime), duration >= 3600)}{" "}
+                  {fmtClockSecs(Math.floor(currentTime), duration >= 3600)}{" "}
                   <span className="text-white/45">/</span>{" "}
-                  {fmtTime(duration)}
+                  {fmtClockSecs(duration)}
                 </span>
 
                 <div className="flex-1" />
@@ -1579,11 +1342,7 @@ export function LecturePlayer({
                   />
                 )}
 
-                {/* The dock, not only the transcript, and the label names the
-                    tab in front rather than guessing from what the recording
-                    has — with three tabs and Chat on every one of them, what
-                    the button hides is whatever you were reading. Gone
-                    entirely where there is no dock to fold (`allowDock`). */}
+                {/* Labelled by the tab in front: it folds the whole dock. */}
                 {allowDock && (
                   <ControlButton
                     label={
@@ -1635,11 +1394,8 @@ export function LecturePlayer({
         )}
       </div>
 
-      {/* The dock — the reading copy, the transcript and chat, dragged to any edge,
-          dragged wider from its divider. Not rendered at all where it is not
-          allowed: mounted-but-closed is how it *slides*, and a dock that can
-          never open has nothing to slide — while its Chat tab is a thread
-          loaded and a composer built for every lecture a panel peeks at. */}
+      {/* The dock. Not rendered where disallowed, so its Chat tab does not load
+          a thread for every peeked lecture. */}
       {allowDock && (
         <>
           {showDock && <DockResizeHandle dock={dock} onPointerDown={startResize} />}

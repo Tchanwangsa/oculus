@@ -1,15 +1,10 @@
-/**
- * Per-subject "recently visited" trail, kept in localStorage.
- *
- * Deliberately not in SQLite: it's throwaway UI state, it changes on every
- * click, and it must be readable synchronously on first paint so the row on the
- * subject home doesn't flash empty.
- */
+/** Per-subject "recently visited" trail. In localStorage, not SQLite, so the
+ *  subject home can read it synchronously on first paint. */
 
 const KEY = "oculus-recents";
 const PER_SUBJECT_LIMIT = 8;
 
-export type RecentKind = "file" | "lecture";
+type RecentKind = "file" | "lecture";
 
 export interface RecentEntry {
   kind: RecentKind;
@@ -63,7 +58,7 @@ export function recordRecent(
   return next;
 }
 
-/** "just now" / "2h ago" / "Aug 12" — the label under a recent card. */
+/** "just now" / "2h ago" / "Aug 12". */
 export function relativeTime(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
   if (secs < 60) return "just now";

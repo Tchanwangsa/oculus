@@ -11,23 +11,15 @@ import {
   type CalEvent,
 } from "@/lib/calendar";
 import type { DbProject } from "@/lib/projects";
+import { useWindowEvent } from "@/hooks/useEvents";
+import { fmtShortDate } from "@/lib/format";
 
 /**
- * The calendar event a project answers to — the Canvas deadline an assignment
- * is actually submitted against.
- *
- * `project.event_id` holds a `CalEvent.id` exactly as `app/src/lib/calendar.ts`
- * mints it, so one column addresses three tables: a Canvas row is its Canvas
- * id, a local row is `local_<n>`, a lecture is its own. It is **not** a foreign
- * key and cannot be one — a sync deletes a subject's Canvas rows and
- * re-inserts them, so a cascade would clear every pin halfway through (see
- * migration 33). The pin is therefore resolved live here, against the same
- * `loadCalendar()` the calendar page draws from.
- *
- * Which means a pin can stop resolving — the assignment was unpublished, the
- * local row deleted — and that case says so and offers to clear itself.
- * Drawing nothing would leave the user with a link they set, cannot see, and
- * cannot get rid of.
+ * The calendar event a project is pinned to. `project.event_id` is a
+ * `CalEvent.id` spanning three tables, so it is not a foreign key (a sync
+ * re-inserts Canvas rows, which would cascade the pin away) and is resolved
+ * live against `loadCalendar()`. A pin that no longer resolves says so and
+ * offers to clear itself.
  */
 export function EventLink({
   project,
@@ -40,10 +32,7 @@ export function EventLink({
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<CalEvent[] | null>(null);
 
-  // `loadCalendar` reads four tables and returns a semester's worth of rows, so
-  // it runs only when something on screen actually needs them: a pin to
-  // resolve, or an open picker. A project with no pin and a closed popover
-  // never touches the calendar at all.
+  // Load only when there is a pin to resolve or the picker is open.
   const needed = project.event_id != null || open;
   useEffect(() => {
     if (!needed || events) return;
@@ -59,20 +48,14 @@ export function EventLink({
     };
   }, [needed, events]);
 
-  // Only once a list is already held: a sync that replaced the calendar's rows
-  // has to re-resolve the pin, but it is not a reason to go and read a
-  // calendar this row had decided it did not need.
+  // Reload on calendar updates only once a list is held.
   const loaded = events != null;
-  useEffect(() => {
+  useWindowEvent(CALENDAR_UPDATED_EVENT, () => {
     if (!loaded) return;
-    const onUpdated = () => {
-      loadCalendar()
-        .then(setEvents)
-        .catch((e) => console.error("reload calendar failed", e));
-    };
-    window.addEventListener(CALENDAR_UPDATED_EVENT, onUpdated);
-    return () => window.removeEventListener(CALENDAR_UPDATED_EVENT, onUpdated);
-  }, [loaded]);
+    loadCalendar()
+      .then(setEvents)
+      .catch((e) => console.error("reload calendar failed", e));
+  });
 
   const pinned = useMemo(
     () => events?.find((e) => e.id === project.event_id) ?? null,
@@ -95,10 +78,6 @@ export function EventLink({
     }
     return (
       <span className="flex min-w-0 items-start gap-1.5">
-        {/* Through to the calendar rather than to a detail card of its own:
-            everything about the event — what else is due that week, what it
-            clashes with — is on the grid, and this row is a pointer, not a
-            copy. */}
         <Link
           to="/calendar"
           className="group/event flex min-w-0 flex-1 items-start gap-1.5"
@@ -109,7 +88,7 @@ export function EventLink({
               {pinned.title}
             </span>
             <span className="block truncate text-[11px] text-muted-foreground">
-              {pinned.subjectCode} · {fmtDay(pinned.start)} · {fmtEventTime(pinned)}
+              {pinned.subjectCode} · {fmtShortDate(pinned.start)} · {fmtEventTime(pinned)}
             </span>
           </span>
         </Link>
@@ -157,33 +136,16 @@ function UnpinButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** The day an event falls on. `fmtEventTime` is the clock alone — right on a
- *  grid whose column already says which day it is, and not enough on a row
- *  that is read entirely out of context. */
-function fmtDay(d: Date): string {
-  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
-}
-
-/**
- * Pick the event, out of everything on the calendar.
- *
- * The list opens on the case the feature exists for — this subject's next
- * deadline — and the search field reaches past it to every subject and back
- * into the past, because the default is a convenience rather than a rule: a
- * project written up after the fact is pinned to a deadline that has already
- * gone.
- *
- * `kind: "task"` rows are excluded outright. Those *are* project tasks read
- * live back onto the grid (see `docs/calendar.md`), so pinning a project to
- * one would point a project at its own work.
- */
+/** `fmtEventTime` is the clock alone; this adds the day. */
+/** Opens on this subject's upcoming events; search reaches every subject and
+ *  the past. `kind: "task"` rows are project tasks themselves, so excluded. */
 function EventPicker({
   project,
   events,
   onPick,
 }: {
   project: DbProject;
-  /** `null` while the calendar is still being read. */
+  /** `null` while loading. */
   events: CalEvent[] | null;
   onPick: (eventId: string) => void;
 }) {
@@ -197,15 +159,11 @@ function EventPicker({
     const candidates = events.filter((e) => {
       if (e.kind === "task") return false;
       if (q) return `${e.title} ${e.subjectCode}`.toLowerCase().includes(q);
-      // Unsearched, the list is the one the user came for: this project's own
-      // subject, and only what is still ahead. A personal project has no
-      // subject to narrow by, so it gets everything upcoming instead.
       if (project.subject_id != null && e.subjectId !== project.subject_id) return false;
       return (e.end ?? e.start).getTime() >= now;
     });
 
-    // Nearest first in both directions, future before past: an ascending sort
-    // over a searched set would open on last year's Assignment 1.
+    // Upcoming soonest-first, then past most-recent-first.
     const upcoming = candidates
       .filter((e) => (e.end ?? e.start).getTime() >= now)
       .sort((a, b) => a.start.getTime() - b.start.getTime());
@@ -251,7 +209,7 @@ function EventPicker({
           >
             <span className="min-w-0 truncate text-[12.5px]">{e.title}</span>
             <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-              {e.subjectCode} · {fmtDay(e.start)} · {fmtEventTime(e)}
+              {e.subjectCode} · {fmtShortDate(e.start)} · {fmtEventTime(e)}
             </span>
           </button>
         ))}
@@ -260,7 +218,4 @@ function EventPicker({
   );
 }
 
-/** A semester across a handful of subjects is hundreds of rows; the picker is
- *  a place you find one you already have in mind, so the field does the
- *  narrowing and the list stays a list. */
 const MAX_ROWS = 40;

@@ -1,10 +1,8 @@
 import Database from "@tauri-apps/plugin-sql";
 
-// `harness.ts` imports `getDb`/`getSetting` back from here, so these two are a
-// cycle. It is safe only because `isProvider` is *called* inside a function
-// body: hoist the check to module scope — the tempting
-// `new Set(PROVIDERS.map(…))` — and whichever module evaluates second reads
-// `PROVIDERS` in its TDZ and throws at import time.
+// Import cycle: `harness.ts` imports `getDb`/`getSetting` from here. Safe only
+// while `isProvider` is called inside function bodies — hoisting it to module
+// scope reads `PROVIDERS` in its TDZ and throws at import time.
 import { isProvider, type Provider } from "@/lib/harness";
 import { PDF_BACKED_SQL_LIST } from "@/lib/fileTypes";
 import { compareTermsNewestFirst, TERM_RANK_SQL } from "@/lib/terms";
@@ -23,8 +21,7 @@ export interface Subject {
   created_at: string;
 }
 
-/** `scheduled` is no longer produced — only rows from the removed automations
- *  scheduler carry it — but it must still parse out of `sync_runs`. */
+/** `scheduled` is never written now, but old `sync_runs` rows carry it. */
 export type SyncOrigin = "manual" | "scheduled";
 
 export interface SyncRun {
@@ -35,13 +32,11 @@ export interface SyncRun {
   subjects_synced: number;
   pages_scraped: number;
   error: string | null;
-  /** JSON array of course codes the run targeted; NULL on pre-tracking runs. */
+  /** JSON array of course codes the run targeted; NULL on old runs. */
   subject_codes: string | null;
-  /** What kicked the run off. Pre-tracking runs default to 'manual'. */
   origin: SyncOrigin;
 }
 
-/** What a sync run's write actually did to a file on disk. */
 export type SyncFileAction = "new" | "updated" | "unchanged";
 
 export interface SyncRunFile {
@@ -56,22 +51,12 @@ export interface SyncRunFile {
   subject_code: string | null;
 }
 
-/** A sync run plus its per-file ledger rolled up. Runs recorded before the
- *  ledger existed have all-zero counts. */
+/** A sync run plus its per-file ledger rolled up. */
 export interface SyncRunSummary extends SyncRun {
   new_count: number;
   updated_count: number;
   unchanged_count: number;
   file_count: number;
-}
-
-export interface SyncLogEntry {
-  id: number;
-  run_id: number | null;
-  subject_id: number | null;
-  timestamp: string;
-  level: "info" | "warning" | "error";
-  message: string;
 }
 
 export interface DbFile {
@@ -88,16 +73,14 @@ export interface DbFile {
   scraped_at: string;
   parse_status: string | null;
   parsed_at: string | null;
-  /** 'done' once every page has a stored embedding. See lib/retrieval.ts. */
+  /** Sticky and model-blind — see `getUnembeddedPdfs` in lib/retrieval.ts. */
   embed_status: string | null;
   embedded_at: string | null;
-  /** NULL for files scraped before recency tracking existed — those never show
-   *  as "new". Set once on first insert, untouched by re-scrapes. */
+  /** Set once on first insert; NULL rows never show as "new". */
   first_seen_at: string | null;
   last_accessed_at: string | null;
-  /** When a scrape last found the file's bytes new or changed — unlike
-   *  scraped_at, which bumps every run. Newer than last_accessed_at ⇒ the
-   *  unseen dot comes back. */
+  /** When a scrape last found the bytes new or changed (`scraped_at` bumps
+   *  every run). Newer than `last_accessed_at` ⇒ the unseen dot returns. */
   content_changed_at: string | null;
 }
 
@@ -141,8 +124,7 @@ export async function upsertSubjects(courses: CanvasCourseRaw[]): Promise<void> 
         c.term?.name ?? null,
         c._oculus_is_current ? 1 : 0,
         c.workflow_state,
-        // New subjects start selected only if current; ON CONFLICT leaves the
-        // stored (user-chosen) selection untouched.
+        // New subjects start selected only if current; ON CONFLICT keeps the user's choice.
         c._oculus_is_current ? 1 : 0,
       ]
     );
@@ -151,10 +133,7 @@ export async function upsertSubjects(courses: CanvasCourseRaw[]): Promise<void> 
 
 export async function getSubjects(): Promise<Subject[]> {
   const db = await getDb();
-  // `last_synced_at` is not stored — it is the finish time of the latest
-  // completed run that targeted the subject. sync_runs is the only clock;
-  // interrupted/failed runs never count. json_each skips NULL subject_codes
-  // (runs from before targeting was recorded).
+  // `last_synced_at` is derived: the latest completed run that targeted the subject.
   const rows = await db.select<Subject[]>(
     `SELECT s.*,
             (SELECT MAX(r.finished_at)
@@ -166,13 +145,9 @@ export async function getSubjects(): Promise<Subject[]> {
               s.name ASC`
   );
 
-  // `is_current` is derived here rather than read from the column. The stored
-  // flag is stamped at sync time by `list_courses` in `sync.rs`, which picks
-  // the newest term with `.max()` over term *names* — and "2026 Summer Term"
-  // beats "2026 Semester 2" as a string while running six months earlier. So
-  // an enrolment in a summer subject silently marks the whole real semester
-  // as past. Recomputing from `terms.ts` costs one pass and cannot go stale
-  // between syncs; the column stays for Rust's own use.
+  // `is_current` is recomputed from `terms.ts`, not read from the column: Rust
+  // stamps it with `.max()` over term *names*, where "2026 Summer Term" beats
+  // "2026 Semester 2" and would mark the real semester as past.
   const latest = rows
     .filter((r) => r.workflow_state === "available")
     .reduce<string | null>(
@@ -186,8 +161,7 @@ export async function getSubjects(): Promise<Subject[]> {
       is_current: r.workflow_state === "available" && r.term_name === latest,
       selected: !!r.selected,
     }))
-    // Current term first, then the newest-first order the query already put
-    // them in — Array.prototype.sort is stable, so the groups keep it.
+    // Current term first; sort is stable, so the query's order holds within groups.
     .sort((a, b) => Number(b.is_current) - Number(a.is_current));
 }
 
@@ -198,21 +172,18 @@ export async function setSubjectSelected(id: number, selected: boolean): Promise
 
 // ── Sync options ─────────────────────────────────────────────────────────────
 
-/** What a sync fetches. Mirrors `SyncOptions` in `app/src-tauri/src/sync.rs`;
- *  passed to `scrape_content` per run. The CLI always syncs everything. */
+/** What a sync fetches. Mirrors `SyncOptions` in `app/src-tauri/src/sync.rs`. */
 export interface SyncOptions {
   announcements: boolean;
-  /** Assignments and quizzes — one Canvas phase. */
+  /** Assignments and quizzes. */
   assignments: boolean;
-  /** The modules walk: pages and files. */
+  /** Module pages and files. */
   modules: boolean;
-  /** Ed Discussion threads. */
   ed: boolean;
-  /** Echo360 lecture *list* only — refreshed after the scrape, from the
-   *  frontend (the Rust engine ignores this field). Never downloads videos. */
+  /** Echo360 lecture list only, refreshed by the frontend after the scrape;
+   *  never downloads videos. */
   lectures: boolean;
-  /** Canvas calendar: class times and due dates. Like `lectures`, this is a
-   *  post-scrape refresh driven from the frontend, not a Rust scrape phase. */
+  /** Class times and due dates; also a frontend post-scrape refresh. */
   calendar: boolean;
 }
 
@@ -242,35 +213,15 @@ export async function setSyncOptions(options: SyncOptions): Promise<void> {
   await setSetting(SYNC_OPTIONS_KEY, JSON.stringify(options));
 }
 
-// ── Parse settings ───────────────────────────────────────────────────────────
-//
-// The `parse` settings row is **owned by Rust now** and has no reader here.
-// It used to carry `memoryCapMb` and a `local`/`cloud`/`auto` backend choice,
-// both of which described the Python sidecar: a memory cap over a process
-// tree that no longer exists, and a local parser that left with it. What
-// remains in the row is `engine`/`engineUrl`, read by `parse::parse_config`
-// in `app/src-tauri/src/parse/mod.rs`, which is where the seam belongs — the
-// thing that selects a backend and the thing that talks to it are one module.
-//
-// The stale keys are deliberately left in the blob rather than migrated out:
-// `StoredParseSettings` ignores what it does not name, so they cost nothing,
-// and a migration that rewrote every install's settings row to delete two
-// dead fields would be more risk than the tidiness is worth.
-
 // ── Per-job models ───────────────────────────────────────────────────────────
 //
-// Every model-backed job that is not a chat turn — chaptering a lecture,
-// naming a thread — names its own agent, model and reasoning level, the way
-// the composer does for a send. One JSON value here, read back in Rust by
-// `harness::jobs` since the jobs themselves run there.
+// Each non-chat model job names its own agent, model and reasoning level. One
+// JSON value, read back in Rust by `harness::jobs`, where the jobs run.
 
-/** A job's key in the stored object. Mirrors `Job` in
- *  `app/src-tauri/src/harness/jobs.rs`; adding one is a key here, a variant
- *  there, and a row in `JOBS` below. */
+/** Mirrors `Job` in `app/src-tauri/src/harness/jobs.rs`. */
 export type JobId = "lectureChapters" | "lectureReading" | "threadNaming";
 
-/** What one job runs on. `reasoningEffort` is null only for a model that
- *  takes no level — never "whatever the agent defaults to". */
+/** `reasoningEffort` is null only for a model that takes no level. */
 export interface JobSelection {
   provider: Provider;
   model: string;
@@ -301,9 +252,8 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
   },
 ];
 
-/** Mirrors `default_selection` in `app/src-tauri/src/harness/jobs.rs` — both
- *  sides have to agree on what an unconfigured job runs, because either can
- *  be the one that resolves it. */
+/** Mirrors `default_selection` in `app/src-tauri/src/harness/jobs.rs`; either
+ *  side may resolve an unconfigured job, so they must agree. */
 export const DEFAULT_JOB_MODELS: JobModels = {
   lectureChapters: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
   lectureReading: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" },
@@ -312,9 +262,7 @@ export const DEFAULT_JOB_MODELS: JobModels = {
 
 const JOB_MODELS_KEY = "job_models";
 
-/** Tolerant on read: a job whose stored row is missing, gutted or from an
- *  older build falls back to its default rather than leaving a picker with
- *  nothing selected. */
+/** A missing or malformed job row falls back to its default. */
 export async function getJobModels(): Promise<JobModels> {
   const raw = await getSetting(JOB_MODELS_KEY);
   if (!raw) return structuredClone(DEFAULT_JOB_MODELS);
@@ -324,10 +272,7 @@ export async function getJobModels(): Promise<JobModels> {
     for (const job of JOBS) {
       const row = parsed?.[job.id];
       if (!row || typeof row.model !== "string" || !row.model.trim()) continue;
-      // Off `PROVIDERS`, never a hardcoded pair: spelled out, the test was
-      // already one provider behind the union, and a job saved on the new
-      // agent would have been dropped back to its default on the next read
-      // with nothing to say it had been.
+      // Checked against `PROVIDERS`, not a hardcoded list that falls behind.
       if (!isProvider(row.provider)) continue;
       out[job.id] = {
         provider: row.provider,
@@ -347,18 +292,13 @@ export async function setJobModels(models: JobModels): Promise<void> {
 
 // ── Sync runs ────────────────────────────────────────────────────────────────
 
-export async function startSyncRun(
-  subjectCodes: string[] = [],
-  origin: SyncOrigin = "manual",
-): Promise<number> {
+export async function startSyncRun(subjectCodes: string[]): Promise<number> {
   const db = await getDb();
-  // The id must come from execute()'s own result: a follow-up
-  // `SELECT last_insert_rowid()` runs on whichever pooled connection is free
-  // and can return another statement's id — which once left a run stuck
-  // "running" forever while its finish targeted a row that never existed.
+  // The id must come from execute()'s result: `SELECT last_insert_rowid()`
+  // may run on another pooled connection and return someone else's id.
   const res = await db.execute(
     `INSERT INTO sync_runs (status, subject_codes, origin) VALUES ('running', $1, $2)`,
-    [JSON.stringify(subjectCodes), origin],
+    [JSON.stringify(subjectCodes), "manual"],
   );
   if (res.lastInsertId == null) throw new Error("sync run insert returned no id");
   return res.lastInsertId;
@@ -381,18 +321,12 @@ export async function finishSyncRun(
   );
 }
 
-/** Error stamped on runs reconciled at startup. For these, `finished_at` is
- *  the reconcile time (next app launch), NOT when the sync actually died — so
- *  a duration computed from it is meaningless and the UI must not show one. */
+/** Stamped on runs reconciled at startup. Their `finished_at` is the next
+ *  launch, not when the sync died, so the UI must not show a duration. */
 export const INTERRUPTED_SYNC_ERROR = "Interrupted — app closed or sync stalled";
 
-/**
- * Fail any sync run left `running` by a previous process.
- *
- * A run is only ever advanced by live events from the scraper, so one that
- * outlives its process can never finish — it just sits at "running" forever and
- * the UI has no way to tell that apart from a slow sync. Call once at startup.
- */
+/** Fail any run left `running` by a previous process — only live scraper
+ *  events advance a run, so it could never finish. Call once at startup. */
 export async function reconcileStaleSyncRuns(): Promise<number> {
   const db = await getDb();
   const stale = await db.select<{ id: number }[]>(
@@ -408,7 +342,6 @@ export async function reconcileStaleSyncRuns(): Promise<number> {
   return stale.length;
 }
 
-/** Record one file a sync run touched. */
 export async function addSyncRunFile(
   runId: number,
   subjectId: number,
@@ -443,17 +376,6 @@ export async function getSyncRunSummaries(limit = 50): Promise<SyncRunSummary[]>
 }
 
 /** Every file one run touched — changed files first, then unchanged. */
-/** The most recent run, finished or not — what an event-triggered graph
- *  describes when it is run by hand from the editor and has no run of its
- *  own. */
-export async function getLatestSyncRunId(): Promise<number | null> {
-  const db = await getDb();
-  const rows = await db.select<{ id: number }[]>(
-    `SELECT id FROM sync_runs ORDER BY id DESC LIMIT 1`,
-  );
-  return rows[0]?.id ?? null;
-}
-
 export async function getSyncRunFiles(runId: number): Promise<SyncRunFile[]> {
   const db = await getDb();
   return db.select<SyncRunFile[]>(
@@ -479,14 +401,6 @@ export async function addLog(
   await db.execute(
     `INSERT INTO sync_log (run_id, subject_id, level, message) VALUES ($1, $2, $3, $4)`,
     [runId ?? null, subjectId ?? null, level, message]
-  );
-}
-
-export async function getRecentLogs(limit = 50): Promise<SyncLogEntry[]> {
-  const db = await getDb();
-  return db.select<SyncLogEntry[]>(
-    `SELECT * FROM sync_log ORDER BY timestamp DESC LIMIT $1`,
-    [limit]
   );
 }
 
@@ -539,9 +453,8 @@ export async function upsertFile(
   );
 }
 
-/** Stamp that a scrape write actually changed this file's bytes ('new' or
- *  'updated' — never 'unchanged'). What brings the unseen dot back on rows,
- *  including a module item whose target page or file changed. */
+/** A scrape write changed this file's bytes ('new'/'updated', never
+ *  'unchanged') — brings the unseen dot back. */
 export async function markFileContentChanged(
   subjectId: number,
   relativePath: string,
@@ -554,15 +467,9 @@ export async function markFileContentChanged(
   );
 }
 
-/** Forget a file's parse *and embed* state after a re-scrape changed its bytes.
- *  The Rust side purges the on-disk artifacts; this clears the DB's view so
- *  both stages re-run and nothing serves stale text or ranks a vector of a
- *  page that no longer exists.
- *
- *  Clearing `embed_status` / `embedded_at` is load-bearing again now that
- *  `retrieval::ingest` writes them: new bytes mean new pages, and a page
- *  vector that outlived its page is a hit that deep-links into a document
- *  which does not say that any more. */
+/** Forget a file's parse and embed state after a re-scrape changed its bytes,
+ *  so both stages re-run and no stale page vector is ranked. Rust purges the
+ *  on-disk artifacts. */
 export async function resetFilePipeline(
   subjectId: number,
   relativePath: string,
@@ -581,17 +488,9 @@ export async function resetFilePipeline(
   );
 }
 
-/** Drop one file's row along with its indexed pages — what keeps search from
- *  ranking a page of a file that is no longer on disk.
- *
- *  `pages.file_id` is declared `ON DELETE CASCADE`, but the delete is written
- *  out anyway: SQLite enforces foreign keys only when `PRAGMA foreign_keys=ON`
- *  is set per connection, and nothing here sets it — so the constraint is
- *  documentation, not a guarantee, and orphaned embeddings would outlive the
- *  file silently.
- *
- *  Only uploads are ever deleted this way; a scraped file's row belongs to the
- *  sync that wrote it. */
+/** Drop an upload's row and its indexed pages. The pages are deleted
+ *  explicitly rather than trusting `ON DELETE CASCADE`, which only fires on a
+ *  connection with `foreign_keys` on. */
 export async function deleteFileRow(id: number): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM pages WHERE file_id = $1`, [id]);
@@ -603,17 +502,9 @@ export async function markFileAccessed(id: number): Promise<void> {
   await db.execute(`UPDATE files SET last_accessed_at = datetime('now') WHERE id = $1`, [id]);
 }
 
-/**
- * Record that a file's bytes just changed under the app's own hand — a
- * document the editor saved, or one the chat agent rewrote on disk.
- *
- * `seen` says whose hand: the student's own save stamps `last_accessed_at` in
- * the same statement, so the row's recency reads "just now" rather than
- * lighting the unseen dot on a note they are looking at. A change found on
- * disk that nobody here made leaves it alone, and the dot comes back — which
- * is exactly what "updated since last opened" means for a note the agent
- * added to.
- */
+/** Record that a file's bytes changed under the app's hand (editor save, or
+ *  the chat agent). `seen` — the student's own save — also stamps
+ *  `last_accessed_at`, so the unseen dot lights only for changes they didn't make. */
 export async function touchFileRow(
   id: number,
   sizeBytes: number,
@@ -633,9 +524,7 @@ export async function touchFileRow(
   );
 }
 
-/** Follow a file that moved on disk: same row, same id, new name and path.
- *  The `pages` rows stay attached, which is the point of not deleting and
- *  re-inserting. */
+/** Follow a file that moved on disk, keeping its id so `pages` stay attached. */
 export async function renameFileRow(
   id: number,
   filename: string,
@@ -655,34 +544,19 @@ export interface MentionFile {
   subject_id: number;
   subject_code: string;
   filename: string;
-  /** Path from the library root, e.g. `courses/COMP30026_2026_SM2/pages/x.md`
-   *  — what the composer inserts and what `oculus read` takes. */
+  /** Library-root path (`courses/<subject>/…`), as `oculus read` takes it. */
   relative_path: string;
   category: string | null;
 }
 
 /**
- * The `@` query's words as AND-ed `LIKE` predicates over `f.filename`, ready
- * to drop into a `WHERE`, plus the parameters to bind from `$from` on.
+ * The `@` query's words as AND-ed `LIKE` predicates over `f.filename` (any
+ * order), with params bound from `$from` on. Shared by the menu and its
+ * "no markdown yet" count so both agree on what matches.
  *
- * Shared by the two functions below, and shared deliberately: the menu and
- * the "N matching files have no markdown" line underneath it have to agree
- * about what *matching* means, or the line contradicts the list it is there
- * to explain.
- *
- * Every word must appear in the filename, in any order — which is what makes
- * a query with spaces in it worth allowing, since "week 3 workshop" is how a
- * student names `week-03-workshop-solutions.pdf`. Splitting and escaping are
- * the palette's own `terms` (below), so `%`, `_` and `\` in a filename are
- * literal here too. An empty query matches everything and leaves the ordering
- * to decide — and `prefix` is then `%`, which ranks every row alike for the
- * same reason.
- *
- * `from` is where the caller's own parameters leave off, and every caller has
- * to keep its numbering climbing in the order the *text* of the statement
- * mentions it: SQLite treats `$1` as a parameter *named* `$1` and hands out
- * indices by first appearance, so a placeholder used out of order silently
- * binds a neighbour's value.
+ * Callers must number placeholders in the order the statement's *text*
+ * mentions them: SQLite treats `$1` as a name and assigns indices by first
+ * appearance, so an out-of-order placeholder binds a neighbour's value.
  */
 function mentionMatch(
   query: string,
@@ -700,20 +574,9 @@ function mentionMatch(
 
 /**
  * Candidates for an `@` mention, narrowed to the chat's subject when it has
- * one.
- *
- * Only files the agent can actually read are offered: `.md` is on disk as
- * written, but a PDF or slide deck has text only once it has been parsed, and
- * `parse_status = 'quality'` is the one status that says so. (The string is
- * the finished-parse marker, not a tier — there is only one parse; see
- * `app/src/stores/parseStore.ts`.) An unparsed deck in the list would be an
- * `oculus read` that comes back empty after the student picked it, which is
- * worse than not offering it.
- *
- * Ordered by a prefix match on the **first** word, then by what they opened
- * recently: with no query typed the list is the handful of files they were
- * just working in, and with one typed a real title beats an incidental
- * substring.
+ * one. Only files the agent can read: `.md`, or a parsed document
+ * (`parse_status = 'quality'` is the finished-parse marker). Ranked by a
+ * prefix match on the first word, then recency.
  */
 export async function searchMentionFiles(
   subjectId: number | null,
@@ -738,20 +601,8 @@ export async function searchMentionFiles(
   );
 }
 
-/**
- * How many files the `@` query *would* have matched if they had markdown.
- *
- * The filter above is a capability, not a preference, so an unparsed deck is
- * simply absent — and absence in a type-ahead is indistinguishable from a
- * typo. This is what lets the menu say "two more match, they have no markdown
- * yet" instead of nothing at all — which only holds if it counts what the
- * menu searched, so it matches through `mentionMatch` too: the same words
- * against the same column, the search above with its capability filter
- * inverted rather than a second idea of what the student meant. Only
- * PDF-backed types are counted (the list `useQualitySweep` parses): a zip or
- * an image is not waiting on a parse and never will be, so counting it would
- * promise markdown that is not coming.
- */
+/** How many PDF-backed files the `@` query would match if they were parsed,
+ *  so the menu can say why they're missing rather than look like a typo. */
 export async function countUnparsedMentionMatches(
   subjectId: number | null,
   query: string,
@@ -770,15 +621,8 @@ export async function countUnparsedMentionMatches(
   return rows[0]?.n ?? 0;
 }
 
-/**
- * One file by its library path (`courses/<subject>/…`, what `relative_path`
- * holds and what the chat's `@` menu and `oculus read` both speak).
- *
- * The path carries the subject folder, so it is specific on its own — no
- * subject id is needed and none is asked for, which is what lets a path
- * lifted out of an agent's tool call resolve without knowing where it came
- * from. `LIMIT 1` guards the theoretical tie rather than expressing a choice.
- */
+/** One file by its library path (`courses/<subject>/…`), which includes the
+ *  subject folder and so needs no subject id. */
 export async function getFileByRelativePath(
   relativePath: string,
 ): Promise<DbFile | null> {
@@ -800,41 +644,28 @@ export async function getFilesForSubject(subjectId: number): Promise<DbFile[]> {
 
 // ── Palette search ───────────────────────────────────────────────────────────
 
-/**
- * What the command palette matches a typed word against.
- *
- * Slugs are the reason this is not just `filename`: an announcement is on disk
- * as `2026-07-14-welcome-to-comp30022.md` but reads as "Welcome to COMP30022"
- * (`humanizeSlug`), so the separators are flattened to spaces and each word
- * becomes matchable on its own. The subject code rides along in the same
- * string, which is what makes "comp30026 workshop" one query rather than a
- * filter plus a query.
- */
+/** What the palette matches against: the filename with slug separators
+ *  flattened to spaces, plus the subject code, so "comp30026 workshop" is one
+ *  query. */
 const FILE_HAYSTACK = `replace(replace(f.filename, '-', ' '), '_', ' ') || ' ' || s.code`;
 const LECTURE_HAYSTACK = `l.title || ' ' || s.code`;
 
-/** At most this many words are honoured; the rest are noise from a pasted line. */
+/** Words beyond this are ignored (noise from a pasted line). */
 const MAX_TERMS = 6;
 
 function likeEscape(s: string): string {
   return s.replace(/[%_\\]/g, (c) => `\\${c}`);
 }
 
-/** The typed words, escaped for LIKE. Empty when nothing has been typed — every
- *  row matches then, and the ordering alone decides what is worth showing. */
+/** The typed words, escaped for LIKE. Empty matches every row. */
 function terms(query: string): string[] {
   return query.trim().split(/\s+/).filter(Boolean).slice(0, MAX_TERMS).map(likeEscape);
 }
 
 /**
- * Builds `AND`-ed substring predicates plus the rank expression the two
- * searches share.
- *
- * Every word must appear *somewhere* in the haystack, in any order, so
- * "algorithms graph" finds `graph-algorithms.pdf`. The rank is whether some
- * word in the haystack *starts* with the first term — a leading space is
- * prepended so the first word counts as one — which floats a real title match
- * above an incidental substring.
+ * `AND`-ed substring predicates (every word, any order) plus a rank: whether
+ * some haystack word *starts* with the first term (a leading space is
+ * prepended so the first word counts).
  */
 export function matchSql(
   haystack: string,
@@ -849,12 +680,11 @@ export function matchSql(
   return { where, rank, params };
 }
 
-/** A file the palette can open, labelled with the subject it came from. */
 export interface LibraryFileHit extends DbFile {
   subject_code: string;
 }
 
-/** A lecture the palette can open. Enough of a `Lecture` to build its route. */
+/** Enough of a `Lecture` for the palette to build its route. */
 export interface LibraryLectureHit {
   id: string;
   subject_id: number;
@@ -863,15 +693,8 @@ export interface LibraryLectureHit {
   date: string;
 }
 
-/**
- * Files matching a palette query, best first.
- *
- * Unlike the chat's `@` menu this offers *every* file, parsed or not: the
- * palette opens a file for a person to read, and an unparsed PDF renders
- * perfectly well. Ties break towards this term's coursework and
- * then towards what was opened most recently, so an empty query is the handful
- * of files you were last in.
- */
+/** Files matching a palette query, best first. Unlike the `@` menu, every file
+ *  — a person can read an unparsed PDF. Ties go to this term, then recency. */
 export async function searchLibraryFiles(
   query: string,
   limit = 8,
@@ -912,12 +735,7 @@ export async function searchLibraryLectures(
   );
 }
 
-/**
- * One file whose *pages* matched, with the prose that matched under it.
- *
- * Enough of a file to open it and to draw a row, plus the page the hit was on
- * and the snippet FTS5 cut around it.
- */
+/** One file whose page text matched: the best page and FTS5's snippet. */
 export interface PageTextHit {
   file_id: number;
   subject_id: number;
@@ -931,19 +749,16 @@ export interface PageTextHit {
   snippet: string;
 }
 
-/** The fences `snippet()` wraps a hit in. Two control characters, because the
- *  markdown they are being spliced into can contain any printable delimiter
- *  you might otherwise reach for — `**`, `<mark>`, `[[`. */
+/** The fences `snippet()` wraps a hit in — control characters, because the
+ *  markdown can contain any printable delimiter. */
 export const SNIP_OPEN = "\u0001";
 export const SNIP_CLOSE = "\u0002";
 
-/** Below this a prefix term matches most of the library, and the scan is both
- *  slow and useless. Two letters is where "ml" still works. */
+/** Shorter prefix terms match most of the library. */
 const MIN_TEXT_QUERY = 2;
 
-/** A term FTS5 can tokenise — one with a letter or a digit in it. `"--"` is
- *  not one, and a phrase with no tokens in it is a syntax error, not an empty
- *  result. */
+/** Terms FTS5 can tokenise (a letter or digit): a token-less phrase like
+ *  `"--"` is a syntax error, not an empty result. */
 function ftsTerms(query: string): string[] {
   return query
     .trim()
@@ -952,15 +767,9 @@ function ftsTerms(query: string): string[] {
     .slice(0, MAX_TERMS);
 }
 
-/**
- * The FTS5 MATCH expression for what was typed: every word required, each one
- * a prefix so the last one answers while it is still being typed.
- *
- * Each term is wrapped in double quotes — as an FTS5 *string*, not as a phrase
- * the user asked for — because unquoted input is a query language: `AND`, `OR`,
- * `NOT`, `NEAR`, `^`, `-`, `(` and `:` all mean something in it, and a person
- * typing `not-for-profit` into a search box means none of them.
- */
+/** FTS5 MATCH for what was typed: every word required, each a prefix. Terms
+ *  are quoted as FTS5 strings so `AND`/`NOT`/`-`/`:` etc. in typed text are
+ *  literal, not query syntax. */
 function ftsMatch(query: string): string | null {
   const words = ftsTerms(query);
   if (words.length === 0) return null;
@@ -969,24 +778,12 @@ function ftsMatch(query: string): string | null {
 }
 
 /**
- * Files whose page text matches, best first — the lexical half of search.
+ * Files whose page text matches, best first — the lexical half of search, over
+ * `pages_fts` (parsed documents only; see docs/retrieval.md).
  *
- * This is the only way to find a phrase *inside* a document. Title search
- * cannot see into a deck, and the page-image index answers a question rather
- * than a keystroke: it is a cloud round trip per query (see
- * `docs/retrieval.md`), which is not something a field you are typing in can
- * do. The index is `pages_fts`, built by migration 35 over `pages.markdown`
- * and kept in step by triggers — so only *parsed* documents are in it, which
- * is the honest limit of this search and not a bug to work around.
- *
- * One row per file, not per page: five pages of the same deck is one answer
- * repeated, and the best page is the one worth going to. `MIN(bm25(…))` is
- * what picks it — SQLite takes the bare columns beside a single `min()` from
- * that same row, so `page_no` and `snippet` belong to the page that scored.
- *
- * The join onto `pages` is load-bearing beyond the columns it fetches: an
- * entry left behind by a cascade delete has no page to join to and drops out
- * (see `retrieval::PAGES_FTS_SQL`).
+ * One row per file: SQLite takes the bare columns beside a single `MIN()` from
+ * that row, so `page_no` and `snippet` belong to the best-scoring page. The
+ * join onto `pages` also drops stale FTS entries (see `retrieval::PAGES_FTS_SQL`).
  */
 export async function searchPageText(
   query: string,
@@ -1017,16 +814,13 @@ export async function searchPageText(
       [SNIP_OPEN, SNIP_CLOSE, match, limit],
     );
   } catch (e) {
-    // A malformed MATCH is the one error worth swallowing: it is the user
-    // still typing, not a broken index, and the rest of the search has
-    // answers for them either way.
+    // A malformed MATCH is the user still typing, not a broken index.
     console.warn("[oculus] page text search", e);
     return [];
   }
 }
 
-/** Every PDF on record, with where it got to — seeds the Sync page's pipeline
- *  table so files still awaiting a parse or embed show up as backlog. */
+/** Every PDF-backed file's stage — seeds the Sync page's pipeline table. */
 export interface PdfPipelineRow {
   subject_id: number;
   relative_path: string;
@@ -1048,9 +842,8 @@ export async function getPdfPipelineRows(): Promise<PdfPipelineRow[]> {
   );
 }
 
-/** Update a PDF's parse status. status: 'queued' | 'running' | 'quality' |
- *  'error'. `'quality'` is the one terminal success — the name outlived the
- *  tier it was named after, and the library's existing rows all speak it. */
+/** status: 'queued' | 'running' | 'quality' | 'error'; `'quality'` is the
+ *  one terminal success. */
 export async function setParseStatus(
   subjectId: number,
   relativePath: string,
@@ -1065,28 +858,15 @@ export async function setParseStatus(
   );
 }
 
-/**
- * How much of each PDF is embedded **in the space passed in**, keyed by
- * relative path — the seed for the pipeline table's third stage.
- *
- * Coverage, not `files.embed_status`, and the difference is the same one
- * `getUnembeddedPdfs` is built on. `embed_status` is a sticky flag with no
- * memory of which model wrote the vectors, so after an engine change it says
- * `'done'` over a library where nothing is searchable. Counting current-space
- * page vectors against the file's page rows makes the answer follow the space,
- * and makes partial coverage — a document a rate limit stopped halfway —
- * read as unfinished rather than silently permanent.
- *
- * `pages_total` is the file's page rows, which the parse writes. A file with
- * none has not been parsed yet and cannot be embedded, so it is not covered
- * by definition.
- */
 export interface EmbedCoverageRow {
   relative_path: string;
+  /** Page rows the parse wrote; 0 means unparsed, so never covered. */
   pages_total: number;
   pages_current: number;
 }
 
+/** How much of each PDF is embedded in the given space — page-vector
+ *  coverage, not `files.embed_status` (see `getUnembeddedPdfs`). */
 export async function getEmbedCoverage(
   model: string | null,
   dim: number | null,
@@ -1105,16 +885,9 @@ export async function getEmbedCoverage(
   );
 }
 
-/**
- * Update a PDF's embed status. status: 'queued' | 'running' | 'done' | 'error'.
- *
- * Written for the *failure*, mostly. A file that embedded is told by its page
- * vectors — which is what `getEmbedCoverage` reads and what the backlog query
- * counts — but a file that failed leaves no trace anywhere else, and a
- * pipeline row that forgot its failure on restart would silently become a row
- * that is merely waiting. Rust writes `'done'` here too, on its own, when the
- * ingest commits.
- */
+/** status: 'queued' | 'running' | 'done' | 'error'. Mostly for the failure:
+ *  success shows in page vectors, but a failure leaves no other trace across
+ *  a restart. Rust also writes `'done'` when an ingest commits. */
 export async function setEmbedStatus(
   subjectId: number,
   relativePath: string,
@@ -1129,7 +902,7 @@ export async function setEmbedStatus(
   );
 }
 
-/** Bulk-set parse status by relative_path (used by disk reconciliation). */
+/** Bulk-set parse status by relative_path, for disk reconciliation. */
 export async function setParseStatusByPath(
   entries: Array<[string, string]>,
 ): Promise<void> {
@@ -1144,22 +917,9 @@ export async function setParseStatusByPath(
   }
 }
 
-export async function clearAllFiles(): Promise<number> {
-  const db = await getDb();
-  await db.execute("DELETE FROM files");
-  // Last-synced derives from sync_runs, so the reset clears the history too —
-  // otherwise every subject would still claim a sync it no longer has.
-  await db.execute("DELETE FROM sync_run_files");
-  await db.execute("DELETE FROM sync_runs");
-  await db.execute("UPDATE sync_log SET run_id = NULL");
-  await db.execute("VACUUM");
-  const rows = await db.select<{ cnt: number }[]>("SELECT COUNT(*) AS cnt FROM files");
-  return rows[0]?.cnt ?? 0;
-}
-
 // ── Lectures ──────────────────────────────────────────────────────────────────
 
-/** Which of a capture's two streams: 1 the Presenter screen, 2 the room camera. */
+/** A capture's stream: 1 the presenter screen, 2 the room camera. */
 export type SourceNum = 1 | 2;
 
 export interface Lecture {
@@ -1176,24 +936,18 @@ export interface Lecture {
   has_source2: number;
   transcript_path: string | null;
   progress_seconds: number;
-  /** When it was last watched, `datetime('now')` (UTC, no zone marker) — the
-   *  same idiom as `files.last_accessed_at`, so the two recency stamps compare
-   *  directly. NULL is never watched; `progress_seconds` says how far in you
-   *  got and this says when, which is what Home's Continue ranks on. */
+  /** UTC `datetime('now')`, comparable with `files.last_accessed_at`; NULL
+   *  is never watched. Home's Continue ranks on it. */
   last_watched_at: string | null;
   completed: number;
   synced_at: string;
-  /** The chaptering job's state: `null` (never run), `running`, `ready`,
-   *  `error` — the same vocabulary `files.parse_status` uses. */
+  /** `null` (never run) | `running` | `ready` | `error`. */
   chapter_status: string | null;
   /** Stamped only by a terminal status. */
   chaptered_at: string | null;
-  /** Why the last run failed; cleared on success. A status column cannot
-   *  carry a message, and the player has to be able to say what went wrong. */
+  /** Why the last run failed; cleared on success. */
   chapter_error: string | null;
-  /** The reading-copy job's state, the same four values `chapter_status`
-   *  takes. The two jobs are independent: a lecture can have one, both or
-   *  neither. */
+  /** Same values as `chapter_status`; the two jobs are independent. */
   reading_status: string | null;
   reading_written_at: string | null;
   reading_error: string | null;
@@ -1209,7 +963,7 @@ export interface LectureData {
 }
 
 /** The column a source's file path is stored in. */
-export const videoPathColumn = (source: SourceNum) =>
+const videoPathColumn = (source: SourceNum) =>
   source === 1 ? "video_path" : "video2_path";
 
 /** A lecture's downloaded file for one source, or null. */
@@ -1263,13 +1017,8 @@ export async function updateLectureVideoPath(
   ]);
 }
 
-/**
- * Forget a deleted download. Watch progress, chapters and recap notes stay —
- * they describe the lecture, not the file, and a re-download restores the
- * video without re-spending an agent turn on the notes.
- *
- * `source: null` clears both streams, matching `echo360_delete_video`.
- */
+/** Forget a deleted download; progress, chapters and notes stay with the
+ *  lecture. `source: null` clears both streams, like `echo360_delete_video`. */
 export async function clearLectureVideoPath(
   id: string,
   source: SourceNum | null = null
@@ -1287,8 +1036,7 @@ export async function updateLectureTranscriptPath(id: string, path: string): Pro
   await db.execute(`UPDATE lectures SET transcript_path = $1 WHERE id = $2`, [path, id]);
 }
 
-/** Both writers stamp `last_watched_at`: saving a position *is* the record of
- *  watching, and there is no other moment to hang it off. */
+/** Saving a position is the record of watching, so it stamps `last_watched_at`. */
 export async function updateLectureProgress(id: string, seconds: number): Promise<void> {
   const db = await getDb();
   await db.execute(
@@ -1308,21 +1056,10 @@ export async function markLectureComplete(id: string): Promise<void> {
   );
 }
 
-export async function clearLectureTranscripts(): Promise<void> {
-  const db = await getDb();
-  await db.execute(`UPDATE lectures SET transcript_path = NULL`);
-}
-
 // ── Lecture chapters ──────────────────────────────────────────────────────────
 
-/**
- * One row of `lecture_chapters` (migration 29), written by the chaptering job
- * in `app/src-tauri/src/chapters.rs`.
- *
- * **There is no end.** A chapter runs until the next one starts, and the last
- * until the lecture does — one fact in one column, derived by whoever reads
- * it (`chapterSpans` in `app/src/lib/lectures.ts`).
- */
+/** A `lecture_chapters` row (`app/src-tauri/src/chapters.rs`). No end column:
+ *  a chapter runs until the next starts (`chapterSpans` in lib/lectures.ts). */
 export interface Chapter {
   lecture_id: string;
   idx: number;
@@ -1339,9 +1076,8 @@ export async function getChapters(lectureId: string): Promise<Chapter[]> {
   );
 }
 
-/** The job's state for one lecture, read on its own: the player's `lecture`
- *  prop comes from a list (or the side-panel store) that is not re-read when a
- *  run lands, so the status cannot be taken from the row it was opened with. */
+/** Read on its own: the player's `lecture` prop is a snapshot not re-read
+ *  when a run lands. */
 export async function getChapterStatus(
   lectureId: string,
 ): Promise<{ chapter_status: string | null; chapter_error: string | null } | null> {
@@ -1354,20 +1090,9 @@ export async function getChapterStatus(
 
 // ── Lecture reading copy ──────────────────────────────────────────────────────
 
-/**
- * One row of `lecture_reading` (migration 34), written by the reading-copy job
- * in `app/src-tauri/src/reading.rs`.
- *
- * The lecture as text you can read: one sentence per line, pinned to the
- * second it was said, with the spoken maths set as `$…$`. A line runs until
- * the next one starts — no end column, for the reason `Chapter` has none —
- * and a two-hour lecture has ~600 of them, which is why the Read tab renders
- * them through the transcript's virtualised `FollowList`.
- *
- * `para` is derived in Rust after validation, never asked of the model: 1 for
- * a window's first line and for the first line at or after a slide change,
- * which is where the panel breaks a paragraph.
- */
+/** A `lecture_reading` row (`app/src-tauri/src/reading.rs`): one sentence,
+ *  pinned to its second, running until the next. `para` (derived in Rust) is 1
+ *  where the panel breaks a paragraph. */
 export interface ReadingLine {
   lecture_id: string;
   idx: number;
@@ -1384,9 +1109,7 @@ export async function getReading(lectureId: string): Promise<ReadingLine[]> {
   );
 }
 
-/** The reading-copy job's state, read on its own for the reason
- *  `getChapterStatus` is: the player's `lecture` prop is a snapshot that
- *  predates the run. */
+/** Read on its own, as `getChapterStatus` is. */
 export async function getReadingStatus(
   lectureId: string,
 ): Promise<{ reading_status: string | null; reading_error: string | null } | null> {
@@ -1399,13 +1122,12 @@ export async function getReadingStatus(
 
 // ── Calendar ──────────────────────────────────────────────────────────────────
 
-/** A row of `calendar_events`, joined to the subject it belongs to. Times are
- *  Canvas's ISO8601 UTC strings — parse with `new Date(...)` to get local. */
+/** A `calendar_events` row joined to its subject. Times are ISO8601 UTC. */
 export interface DbCalendarEvent {
   id: string;
   subject_id: number;
   subject_code: string;
-  /** `class` (a scheduled event) or `due` (an assignment/quiz deadline). */
+  /** `class` or `due`. */
   kind: string;
   title: string;
   start_at: string;
@@ -1430,14 +1152,8 @@ export interface CalendarEventData {
   description: string | null;
 }
 
-/**
- * Swap a subject's calendar for the set Canvas just returned.
- *
- * Delete-then-insert rather than upsert, for the same reason as the CLI's
- * `store::replace_calendar_events`: a cancelled class has to disappear, and an
- * upsert would leave it behind forever. The fetch is always a whole course's
- * calendar, so nothing is lost by clearing first.
- */
+/** Swap a subject's calendar for the set Canvas just returned. Delete-then-
+ *  insert so a cancelled class disappears (as `store::replace_calendar_events`). */
 export async function replaceCalendarEvents(
   subjectId: number,
   events: CalendarEventData[],
@@ -1469,13 +1185,7 @@ export async function replaceCalendarEvents(
   }
 }
 
-/**
- * Every stored calendar event, newest last.
- *
- * Unwindowed on purpose: a semester of classes across a handful of subjects is
- * a few hundred rows, so the page holds the lot and moves between months
- * without touching the database again.
- */
+/** Every stored calendar event, oldest first — unwindowed; it's a few hundred rows. */
 export async function getCalendarEvents(): Promise<DbCalendarEvent[]> {
   const db = await getDb();
   return db.select<DbCalendarEvent[]>(
@@ -1487,8 +1197,7 @@ export async function getCalendarEvents(): Promise<DbCalendarEvent[]> {
   );
 }
 
-/** Lecture recordings across every subject — the calendar's third layer, and
- *  the only class-time record for a course whose Canvas calendar is empty. */
+/** Lecture recordings across every subject — the calendar's third layer. */
 export async function getAllLectures(): Promise<
   (Lecture & { subject_code: string })[]
 > {
@@ -1503,21 +1212,8 @@ export async function getAllLectures(): Promise<
 
 // ── Recency (Home's "Continue where you left off") ───────────────────────────
 
-/**
- * Lectures you are in the middle of, most recently watched first.
- *
- * Three filters make "in the middle of" mean something: not `completed`,
- * `last_watched_at` actually set (migration 32 backfilled nothing, so an old
- * row that was watched before the column existed stays out rather than
- * claiming a stamp it never had), and past the same five-second "actually
- * started" threshold `progressLabel` in `app/src/lib/lectures.ts` uses — a
- * second of a recording opened and closed again is not somewhere you left off.
- * The 5 is repeated rather than imported because it is a SQL predicate here
- * and a label's branch there; they must agree, and this comment is the link.
- *
- * Joins `subjects` for the code, the way `getAllLectures` does, so a row can be
- * labelled and routed without a second query.
- */
+/** Lectures in progress, most recently watched first. The `> 5` must match
+ *  the "started" threshold in `progressLabel` (lib/lectures.ts). */
 export async function getRecentlyWatchedLectures(
   limit = 8,
 ): Promise<(Lecture & { subject_code: string })[]> {
@@ -1535,15 +1231,7 @@ export async function getRecentlyWatchedLectures(
   );
 }
 
-/**
- * Files you opened recently, newest first — `LibraryFileHit`, the same shape
- * the palette returns, so a row opens through `openFileSmart` with nothing
- * added.
- *
- * `last_accessed_at` is stamped by `markFileAccessed` with the same
- * `datetime('now')` as a lecture's `last_watched_at`, which is what lets Home
- * rank the two against each other.
- */
+/** Recently opened files, newest first, in the palette's shape. */
 export async function getRecentlyAccessedFiles(limit = 8): Promise<LibraryFileHit[]> {
   const db = await getDb();
   return db.select<LibraryFileHit[]>(
@@ -1559,15 +1247,8 @@ export async function getRecentlyAccessedFiles(limit = 8): Promise<LibraryFileHi
 
 // ── Local calendar events ────────────────────────────────────────────────────
 
-/**
- * A calendar row Oculus wrote itself — the user pinning a reminder or a
- * deadline the calendar has no Canvas source for.
- *
- * Separate from `calendar_events` because that table is Canvas's: every sync
- * deletes a subject's rows and re-inserts them (see `replaceCalendarEvents`),
- * so anything written there is gone by the next sync. `subject_code` is NULL
- * for an event that belongs to no subject.
- */
+/** A calendar row the user wrote. Kept out of `calendar_events`, which every
+ *  sync replaces. `subject_code` is NULL for a personal event. */
 export interface DbLocalEvent {
   id: number;
   subject_id: number | null;
@@ -1578,12 +1259,11 @@ export interface DbLocalEvent {
   end_at: string | null;
   all_day: number;
   notes: string | null;
-  source: string;            // 'manual' or 'automation' — see docs/calendar.md
+  source: string;            // 'manual' (old rows may say 'automation')
   created_at: string;
 }
 
-/** Every local event, oldest first — the same unwindowed read as
- *  `getCalendarEvents`, and for the same reason. */
+/** Every local event, oldest first (unwindowed, like `getCalendarEvents`). */
 export async function getLocalEvents(): Promise<DbLocalEvent[]> {
   const db = await getDb();
   return db.select<DbLocalEvent[]>(
@@ -1595,17 +1275,11 @@ export async function getLocalEvents(): Promise<DbLocalEvent[]> {
   );
 }
 
-/**
- * A local event's fields, as the editor holds them.
- *
- * `subjectId` is `null` for a row that belongs to no subject — the "Personal"
- * key the calendar files those under. Dates are full ISO 8601 instants, the
- * shape `DateTimeField` commits, so a row written here and one an automation
- * left behind read identically.
- */
+/** A local event as the editor holds it. `subjectId` null = "Personal";
+ *  dates are ISO 8601 instants. */
 export interface LocalEventInput {
   subjectId: number | null;
-  /** `note`, `class` or `due` — the three layers a local row can join. */
+  /** `note`, `class` or `due`. */
   kind: string;
   title: string;
   startAt: string;
@@ -1614,15 +1288,8 @@ export interface LocalEventInput {
   notes: string | null;
 }
 
-/**
- * Write a local event and return its id.
- *
- * `source` is always `manual`: the only other value, `automation`, belongs to
- * rows the removed automations feature left behind, and nothing writes it any
- * more. The id comes from `execute()`'s own result rather than a follow-up
- * `SELECT last_insert_rowid()`, which runs on whichever pooled connection is
- * free and can hand back another statement's id.
- */
+/** Write a local event and return its id (from `execute()`, for the pooled-
+ *  connection reason in `startSyncRun`). */
 export async function createLocalEvent(input: LocalEventInput): Promise<number> {
   const db = await getDb();
   const res = await db.execute(
@@ -1643,14 +1310,7 @@ export async function createLocalEvent(input: LocalEventInput): Promise<number> 
   return res.lastInsertId;
 }
 
-/**
- * Rewrite a local event in place.
- *
- * Every editable column is replaced at once — the editor holds the whole row
- * anyway, and a partial update would mean building a column list at runtime for
- * no gain. `source` is deliberately not among them: editing a row an automation
- * once left behind should not relabel it as something the user typed.
- */
+/** Rewrite every editable column. `source` is left as it was. */
 export async function updateLocalEvent(
   id: number,
   input: LocalEventInput,
@@ -1674,8 +1334,6 @@ export async function updateLocalEvent(
   );
 }
 
-/** Local events are user data that nothing else ever cleans up — no sync
- *  replaces them — so removing one is always an explicit act. */
 export async function deleteLocalEvent(id: number): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM local_events WHERE id = $1`, [id]);

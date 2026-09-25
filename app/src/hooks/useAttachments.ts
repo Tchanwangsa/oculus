@@ -10,63 +10,31 @@ import {
   type PendingAttachment,
 } from "@/lib/attachments";
 
-/** What a drop of something that is not an image says. The page composer's
- *  wording, because that box has the `@` menu the sentence points at; a box
- *  without one passes its own. */
+/** Points at the `@` menu; a box without one passes its own wording. */
 const NOT_A_PICTURE = "Only images can be attached — use @ for a course file.";
 
 export interface Attachments {
-  /** Pictures waiting to go out, in the order they arrived. */
   items: PendingAttachment[];
-  /** Why one could not be attached or written. Never a reason to lose the
-   *  message — the box keeps what was typed and says this above it. */
   error: string | null;
   setError: (e: string | null) => void;
-  /** True while a send's pictures are being written. */
   writing: boolean;
-  /** True while a drag is over the box, for the caller to draw. */
   dropping: boolean;
-  /** Pictures from a paste, which arrive as `File`s the clipboard owns. */
+  /** From a paste. */
   attach: (files: File[]) => void;
   detach: (id: string) => void;
-  /**
-   * Write everything pending and answer the paths, or `null` if a write
-   * failed — in which case the error is already set and the caller must keep
-   * the box exactly as it was. An empty list is a successful `[]`, so a
-   * message with no pictures takes the same path as one with them.
-   */
+  /** Write everything pending and answer the paths; `null` if a write failed
+   *  (the error is set and the caller must keep the box as it was). */
   flush: () => Promise<string[] | null>;
 }
 
-/**
- * Pictures on their way into a message: pasted, dropped, drawn as a strip,
- * written on send.
- *
- * **Every composer gets this, and gets it the same way.** The boxes differ —
- * the page's is wide and has an `@` menu, the lecture dock's is 300px beside a
- * playing video — but a screenshot dragged onto either one is the same gesture
- * asking for the same thing, and a box that quietly ignores it reads as
- * broken. What varies is only the wording of a refusal and the size of a chip,
- * so those are arguments and the rest is here.
- *
- * Nothing touches the disk until send (`writeAttachment`,
- * `app/src/lib/attachments.ts`): a screenshot pasted and then thought better
- * of leaves nothing behind. A task *body* is the one editor that cannot work
- * this way — there is no send to defer to — which is why `TaskPage` writes on
- * arrival and keeps its own handlers rather than taking this.
- *
- * The drop half is `useFileDrop`, which is where the hard-won parts live: the
- * listener is the **webview's** and not the window's, and the position it
- * reports is in points however it is typed.
- */
+/** Pictures on their way into a message, for every composer: pasted or
+ *  dropped (`useFileDrop`), written to disk only on send. `TaskPage` writes on
+ *  arrival instead, having no send to defer to. */
 export function useAttachments(
   ref: React.RefObject<HTMLElement | null>,
   opts?: {
-    /** What a drop of a non-image says, when the default sentence points at
-     *  something this box does not have. */
     notAPicture?: string;
-    /** Refuse drops entirely — an editor that is not open, say. Paste is the
-     *  caller's own to withhold. */
+    /** Refuse drops; paste is the caller's own to withhold. */
     disabled?: boolean;
   },
 ): Attachments {
@@ -83,13 +51,7 @@ export function useAttachments(
     setItems((a) => [...a, ...files.map(pendingFromFile)]);
   }
 
-  /**
-   * …and from a drop, which arrives as paths.
-   *
-   * A drop of something that is not an image says so rather than being
-   * ignored: a dropped PDF is a reasonable thing to try, and silence would
-   * read as a broken drop target.
-   */
+  /** From a drop; a non-image says so rather than reading as a dead target. */
   function attachPaths(paths: string[]) {
     if (disabled) return;
     const pictures = imagePaths(paths);
@@ -111,9 +73,7 @@ export function useAttachments(
 
   const dropping = useFileDrop(ref, attachPaths);
 
-  // Blob URLs outlive the component unless they are let go of. The list is
-  // read through a ref so the cleanup runs once, on unmount, rather than on
-  // every change to it.
+  // Release blob URLs once, on unmount, via a ref to the latest list.
   const itemsRef = useRef(items);
   itemsRef.current = items;
   useEffect(() => () => itemsRef.current.forEach(releaseAttachment), []);

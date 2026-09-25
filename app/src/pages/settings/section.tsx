@@ -24,14 +24,8 @@ export function Section({
   );
 }
 
-/**
- * One label/value line, matching Linear's settings rows.
- *
- * `hint` is the caveat a number needs and a row has no space for — where it
- * came from, how much to trust it. It is a tooltip rather than a second line
- * because a sentence under every qualified figure is how a settings page turns
- * into an essay; the mark is there for whoever wants it and silent otherwise.
- */
+/** One label/value line. `hint` is a caveat on the value, shown as a tooltip
+ *  rather than a second line. */
 export function StatRow({
   label,
   value,

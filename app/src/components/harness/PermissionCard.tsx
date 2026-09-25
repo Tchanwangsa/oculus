@@ -12,9 +12,7 @@ import {
 import { useHarnessStore } from "@/stores/harnessStore";
 import { cn } from "@/lib/utils";
 
-/** What the student approves by pressing the button, in words. The rule
- *  itself is `agy`'s syntax and rides in the tooltip. A folder is named by its
- *  last segment — the refused path is printed in full right above. */
+/** The approval in words; the raw `agy` rule rides in the tooltip. */
 function allowLabel(rule: string): string {
   const r = splitRule(rule);
   if (!r) return "Allow";
@@ -46,21 +44,14 @@ function headline(action: string | undefined): string {
   }
 }
 
-/** What an approval sends once it is stored. Short on purpose: the agent
- *  already knows what it was refused, from its own turn. */
+/** Sent after an approval is stored; the agent already knows what was refused. */
 const CARRY_ON = "Approved — go ahead.";
 
 /**
- * Where an Antigravity turn ended on a refusal (`permission` rows, written by
- * `app/src-tauri/src/harness/antigravity.rs`). `agy`'s print mode does not ask
- * — it refuses and the turn is over — so this card is the question it could
- * not put: what it tried, and one button that stores the suggested rule and
- * sends the next message, which resumes the conversation under it.
- *
- * Drawn like the sign-in card: the timeline's `card` with the mark in `brand`,
- * because nothing broke and one press fixes it. Only the latest refusal in a
- * thread carries the button; an older one is history, and the approval it
- * would have given is idempotent anyway.
+ * An Antigravity refusal (`permission` rows from
+ * `app/src-tauri/src/harness/antigravity.rs`). `agy`'s print mode refuses and
+ * ends the turn rather than asking, so the button stores the suggested rule and
+ * sends a follow-up. Only the latest refusal (`actionable`) carries it.
  */
 export const PermissionCard = memo(function PermissionCard({
   item,
@@ -79,9 +70,7 @@ export const PermissionCard = memo(function PermissionCard({
   const [phase, setPhase] = useState<"idle" | "pending" | "allowed">("idle");
   const [error, setError] = useState<string | null>(null);
 
-  // A reload shows "Allowed" for a rule the student already gave — here or
-  // from another thread — rather than a button that would change nothing.
-  // A local settings read; nothing is spawned or spent.
+  // Show "Allowed" for a rule already stored (a local settings read).
   useEffect(() => {
     if (!rule) return;
     let stale = false;
@@ -106,8 +95,7 @@ export const PermissionCard = memo(function PermissionCard({
       setPhase("idle");
       return;
     }
-    // The rule is stored whatever happens next; a send that fails arrives as
-    // an error row of its own, so it is not said twice here.
+    // A failed send surfaces as its own error row.
     await onFollowUp?.(CARRY_ON).catch((e) => console.error("harness send failed", e));
     setPhase("allowed");
   };

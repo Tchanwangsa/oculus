@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import { ArrowSquareOut, CircleNotch, File, FileText } from "@phosphor-icons/react";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { ArrowSquareOut, File, FileText } from "@phosphor-icons/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -15,18 +15,14 @@ import { docPdfRelPath, isPdfBacked, parsedMdRelPath } from "@/lib/fileTypes";
 import { filePageHref } from "@/lib/openFile";
 import { useDataDir } from "@/hooks/useDataDir";
 import type { DbFile } from "@/lib/db";
+import { readCourseFile } from "@/lib/courseFiles";
+import { LoadingFill } from "@/components/ui/PageParts";
 
 /**
- * Shared PDF ↔ parsed-markdown toggle state, lifted out of the viewer so the
- * host (peek header, full-page header) can render the toggle in ITS header
- * instead of stacking a second toolbar.
- *
- * This is also the app's "is there markdown?" probe, which is why it reports
- * `mdChecked` as well as `mdExists`: a PDF with no markdown gets
- * `MarkdownUnavailable` in place of the toggle
- * (`app/src/components/files/ParseState.tsx`), and rendering that during the
- * one tick before the probe answers would flash "No Markdown" across every
- * parsed file that is opened. Neither control is drawn until the answer is in.
+ * PDF ↔ parsed-markdown toggle state, lifted out so the host renders the
+ * toggle in its own header. Also the "is there markdown?" probe: `mdChecked`
+ * holds both controls back until it answers, or `MarkdownUnavailable` would
+ * flash on every parsed file.
  */
 export function usePdfMd(file: DbFile | null) {
   const isPdf = file != null && isPdfBacked(file.filename);
@@ -41,7 +37,7 @@ export function usePdfMd(file: DbFile | null) {
     setMdChecked(false);
     if (!mdRelPath) return;
     let live = true;
-    invoke<string>("read_course_file", { relativePath: mdRelPath })
+    readCourseFile(mdRelPath)
       .then((t) => live && setMdExists(t.length > 0))
       .catch(() => live && setMdExists(false))
       .finally(() => live && setMdChecked(true));
@@ -64,8 +60,7 @@ export function PdfMdToggle({
     <ToggleGroup
       type="single"
       value={value}
-      /* Radix clears the value when you press the active item; this view
-         always needs one of the two. */
+      /* Radix clears the value on pressing the active item; ignore that. */
       onValueChange={(v) => v && onChange(v as "pdf" | "markdown")}
       variant="outline"
       size="sm"
@@ -149,15 +144,10 @@ export function FileViewer({
 }
 
 /**
- * `MD_COMPONENTS` as a library file needs them: links whose target we hold
- * locally open in the same peek — `../`-relative ones (rewritten at scrape
- * time) and raw Canvas `/courses/…/files/<id>` / `/pages/<slug>` URLs
- * (assignment and announcement bodies keep those) — everything else opens
- * externally with an explicit marker, and relative images resolve against the
- * file's directory.
- *
- * A hook of its own so the document editor's preview draws a note exactly as
- * the viewer will once it is saved: same link rule, same image root.
+ * `MD_COMPONENTS` for a library file: links to files we hold locally (`../`
+ * paths and raw Canvas `/files/<id>` / `/pages/<slug>` URLs) open in the same
+ * peek, others open externally, and relative images resolve against the
+ * file's directory. Shared with the document editor's preview.
  */
 export function useLibraryMdComponents(
   file: Pick<DbFile, "relative_path">,
@@ -244,7 +234,7 @@ function MdFromPath({
   useEffect(() => {
     setText(null);
     setErr(null);
-    invoke<string>("read_course_file", { relativePath: relPath })
+    readCourseFile(relPath)
       .then(setText)
       .catch((e) => setErr(String(e)));
   }, [relPath]);
@@ -261,10 +251,7 @@ function MdFromPath({
     );
   if (text === null)
     return (
-      <div className="h-full flex items-center justify-center gap-2 text-muted-foreground">
-        <CircleNotch size={16} className="animate-spin" />
-        <span className="text-sm">Loading…</span>
-      </div>
+      <LoadingFill />
     );
   return (
     <div className="flex-1 overflow-y-auto">

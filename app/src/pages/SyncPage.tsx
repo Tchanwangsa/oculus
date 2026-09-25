@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   WarningCircle,
   XCircle,
@@ -7,7 +7,6 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -37,6 +36,7 @@ import { embeddingStats } from "@/lib/retrieval";
 import { useIndexStore } from "@/stores/indexStore";
 import { fmtAgo, sqliteUtcToMs } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
+import { useTauriEvent } from "@/hooks/useEvents";
 import { useSyncStore } from "@/stores/syncStore";
 import {
   usePipelineStore,
@@ -49,6 +49,7 @@ import { PipelineTable } from "@/components/sync/PipelineTable";
 import { SyncHistoryTable } from "@/components/sync/SyncHistoryTable";
 import { SubjectPicker } from "@/components/sync/SubjectPicker";
 import { SyncSettings } from "@/components/sync/SyncSettings";
+import { parseFile, scanParsedFiles } from "@/lib/courseFiles";
 
 const PHASE_LABEL: Record<string, string> = {
   home: "overview",
@@ -59,14 +60,9 @@ const PHASE_LABEL: Record<string, string> = {
 type ActivityView = "history" | "pipeline";
 const VIEW_KEY = "oculus-sync-view";
 
-/** The page's two tables, as sibling tabs rather than a dropdown — both are
- *  always there, and which one you are looking at should be visible without
- *  opening anything. */
+/** The page's two tables, as sibling tabs. */
 const VIEWS = [
   { value: "history", label: "Sync History" },
-  // "Parse Activity" while parsing was the only stage worth watching. The
-  // table walks download → parse → embed now, and naming it after one stage
-  // would send someone looking elsewhere for the other two.
   { value: "pipeline", label: "File Activity" },
 ] as const satisfies ReadonlyArray<{ value: ActivityView; label: string }>;
 
@@ -85,22 +81,18 @@ export default function SyncPage() {
     localStorage.setItem(VIEW_KEY, view);
   }, [view]);
 
+  // In the global store, so it survives navigation.
   // Sync progress lives in the global store (survives navigation).
   const scraping = useSyncStore((s) => s.scraping);
   const progress = useSyncStore((s) => s.progress);
   const completedAt = useSyncStore((s) => s.completedAt);
   const syncError = useSyncStore((s) => s.error);
-  const scrapingRef = useRef(false);
 
   // Pipeline (per-file download → parse tracking).
   const pipelineItems = usePipelineStore((s) => s.items);
   const embedStage = usePipelineStore((s) => s.embedStage);
   const seedPipeline = usePipelineStore((s) => s.seed);
   const clearFinished = usePipelineStore((s) => s.clearFinished);
-
-  useEffect(() => {
-    scrapingRef.current = scraping;
-  }, [scraping]);
 
   // ── Boot ──────────────────────────────────────────────────────────────────
 
@@ -111,8 +103,7 @@ export default function SyncPage() {
     ]);
     setSubjects(rows);
     setRuns(runRows);
-    // Selection lives in the DB (subjects.selected), so it survives leaving
-    // the tab and app restarts.
+    // Selection lives in the DB (`subjects.selected`).
     setSelectedIds(new Set(rows.filter((s) => s.selected).map((s) => s.id)));
   }, []);
 
@@ -129,22 +120,18 @@ export default function SyncPage() {
     return () => clearInterval(t);
   }, [scraping]);
 
-  // Backfill the pipeline table with every PDF on record, so the backlog
-  // of files awaiting a parse is visible even before anything runs.
-  // The DB's parse_status lags reality for files parsed before status
-  // tracking existed (or by the CLI), so disk is consulted for anything the
-  // DB doesn't already call fully parsed — and the DB is patched to match.
+  // Backfill the pipeline table with every PDF on record. The DB's
+  // parse_status can lag disk (e.g. CLI parses), so disk is consulted for
+  // anything not fully parsed and the DB patched to match.
   useEffect(() => {
     (async () => {
       try {
         const rows = await getPdfPipelineRows();
         const byPath = new Map(rows.map((r) => [r.relative_path, r]));
 
-        // The embed stage is seeded from page coverage in the *current* space,
-        // never from `files.embed_status` — that column is a sticky flag with
-        // no memory of which model wrote the vectors, so after an engine
-        // change it claims 'done' over a library where nothing is searchable.
-        // Same question `getUnembeddedPdfs` asks, asked once for every row.
+        // Seed embed from page coverage in the *current* space, never
+        // `files.embed_status`, which doesn't know which model wrote the
+        // vectors (same question as `getUnembeddedPdfs`).
         const { model, dim } = await embeddingStats();
         const coverage = new Map(
           (await getEmbedCoverage(model, dim)).map((c) => [c.relative_path, c]),
@@ -155,9 +142,7 @@ export default function SyncPage() {
           .map((r) => r.relative_path);
         let disk: Record<string, string> = {};
         if (unsure.length > 0) {
-          const scanned = await invoke<[string, string][]>("scan_parsed_files", {
-            relativePaths: unsure,
-          });
+          const scanned = await scanParsedFiles(unsure);
           disk = Object.fromEntries(scanned);
           const fixes = scanned.filter(
             ([p, mode]) => mode !== (byPath.get(p)?.parse_status ?? ""),
@@ -202,44 +187,32 @@ export default function SyncPage() {
 
   // ── Auth events (cancelled, expired) ──────────────────────────────────────
 
-  useEffect(() => {
-    const sub = listen("canvas-auth-expired", () => {
-      if (scrapingRef.current) {
-        useSyncStore.getState().reset();
-        setSubjectsError(
-          "Canvas session expired during sync. Reconnect and try again.",
-        );
-      }
-    });
-    return () => {
-      sub.then((f) => f()).catch(() => {});
-    };
-  }, []);
+  useTauriEvent("canvas-auth-expired", () => {
+    if (useSyncStore.getState().scraping) {
+      useSyncStore.getState().reset();
+      setSubjectsError(
+        "Canvas session expired during sync. Reconnect and try again.",
+      );
+    }
+  });
 
   // ── Subjects events ───────────────────────────────────────────────────────
 
-  useEffect(() => {
-    const subs = [
-      listen<CanvasCourseRaw[]>("subjects-loaded", async (e) => {
-        setLoadingSubjects(false);
-        setSubjectsError(null);
-        try {
-          await upsertSubjects(e.payload as unknown as CanvasCourseRaw[]);
-          await addLog(`Fetched ${e.payload.length} subjects from Canvas`);
-          await loadFromDb();
-        } catch (err) {
-          console.error("DB upsert failed:", err);
-        }
-      }),
-      listen<string>("subjects-error", (e) => {
-        setSubjectsError(e.payload);
-        setLoadingSubjects(false);
-      }),
-    ];
-    return () => {
-      subs.forEach((p) => p.then((f) => f()).catch(() => {}));
-    };
-  }, [loadFromDb]);
+  useTauriEvent<CanvasCourseRaw[]>("subjects-loaded", async (e) => {
+    setLoadingSubjects(false);
+    setSubjectsError(null);
+    try {
+      await upsertSubjects(e.payload);
+      await addLog(`Fetched ${e.payload.length} subjects from Canvas`);
+      await loadFromDb();
+    } catch (err) {
+      console.error("DB upsert failed:", err);
+    }
+  });
+  useTauriEvent<string>("subjects-error", (e) => {
+    setSubjectsError(e.payload);
+    setLoadingSubjects(false);
+  });
 
   // Refresh subjects and the run table when a sync run finishes.
   useEffect(() => {
@@ -272,8 +245,7 @@ export default function SyncPage() {
   };
 
   const handleSyncClick = async () => {
-    // No live session? The click becomes the reauth: open the Canvas sign-in
-    // window instead of failing. A sync can start once it reports success.
+    // No live session: open the Canvas sign-in window instead of failing.
     if (authStatus !== "connected") {
       setSubjectsError(null);
       connect();
@@ -285,23 +257,16 @@ export default function SyncPage() {
     setView("history");
 
     try {
-      await triggerSync("manual");
+      await triggerSync();
       await getSyncRunSummaries().then(setRuns);
     } catch (err) {
       setSubjectsError(String(err));
     }
   };
 
-  /**
-   * Pick the pipeline back up for one file, at whichever stage it stopped.
-   *
-   * Both halves are idempotent on the Rust side — a file whose parse record
-   * exists is skipped, and so is one whose embedding record is already in the
-   * current space — so "resume" and "retry" are the same call either way. What
-   * the stage decides is *which* call: re-parsing a file whose parse is
-   * already done would be a no-op that left the embed it was actually waiting
-   * for exactly where it was.
-   */
+  /** Resume one file at the stage it stopped. Both calls are idempotent in
+   *  Rust, so resume = retry; the stage picks which call, since re-parsing a
+   *  parsed file would leave the pending embed untouched. */
   const resumeItem = useCallback(async (it: PipelineItem) => {
     const { touch } = usePipelineStore.getState();
     const embedding = it.parse === "done";
@@ -317,9 +282,8 @@ export default function SyncPage() {
     });
 
     if (embedding) {
-      // Into the same serial queue the Index button and auto-embed feed, so a
-      // hand-driven retry can never open a second run against the same
-      // per-minute ceiling. Rust narrates the rest over `embed-status`.
+      // The one serial embed queue, so a retry never opens a second run
+      // against the same rate limit.
       const file = await getFileByRelativePath(it.relativePath).catch(() => null);
       if (!file) {
         touch(it.relativePath, it.subjectId, {
@@ -333,11 +297,7 @@ export default function SyncPage() {
     }
 
     try {
-      await invoke("parse_file", {
-        subjectId: it.subjectId,
-        subjectCode: it.code,
-        relativePath: it.relativePath,
-      });
+      await parseFile(it.subjectId, it.code, it.relativePath);
     } catch (e) {
       touch(it.relativePath, it.subjectId, { parse: "error", error: String(e) });
     }
@@ -377,15 +337,11 @@ export default function SyncPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* ── Tabs alone on the rule the active tab underlines. Both views
-          render the same strip, so switching can't shift anything below. ── */}
       <div className="shrink-0 flex items-end border-b border-border-subtle px-5 pt-4">
         <ViewTabs tabs={VIEWS} value={view} onChange={(v) => setView(v)} />
       </div>
 
-      {/* ── Toolbar: what the view is scoped to on the left, how it's going
-          and what you can do about it on the right. Fixed height, because a
-          row that measured its contents jumped between the two views. ── */}
+      {/* Fixed height so switching views doesn't jump the toolbar. */}
       <div className="shrink-0 flex h-12 items-center gap-2 px-5">
         {view === "history" ? (
           <>
@@ -435,8 +391,7 @@ export default function SyncPage() {
               </Button>
             ) : needsAuth || selectedIds.size === 0 ? (
               <Tooltip>
-                {/* span wrapper: a disabled button swallows pointer events, so
-                    the tooltip must hang off something that still gets them. */}
+                {/* A disabled button swallows pointer events; the span doesn't. */}
                 <TooltipTrigger asChild>
                   <span className="shrink-0">
                     <Button
@@ -531,7 +486,6 @@ export default function SyncPage() {
         </div>
       )}
 
-      {/* ── Body: the table runs edge to edge, its own header and footer ─── */}
       <div className="flex-1 min-h-0">
         {view === "history" ? (
           <SyncHistoryTable runs={runs} progress={progress} />

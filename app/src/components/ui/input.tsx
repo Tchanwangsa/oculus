@@ -2,12 +2,8 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-// `text-base md:text-sm` is stock shadcn's iOS fix — mobile Safari zooms the
-// page when a focused field is under 16px — and it is a trap in a desktop app.
-// The viewport is always past the `md` breakpoint, so the field is always 14px,
-// and because Tailwind emits variant utilities *after* plain ones, `md:text-sm`
-// outranks any `text-[13px]` a call site passes: the class sits in the DOM and
-// does nothing. One unconditional size instead, so call sites can override it.
+// One unconditional `text-[13px]`, never stock `text-base md:text-sm` — see
+// CLAUDE.md.
 
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (

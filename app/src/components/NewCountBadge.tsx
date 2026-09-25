@@ -1,9 +1,6 @@
 /**
- * The notification-count pill for new (never-opened) files, used on sidebar
- * subject rows and the subject tab strip. Renders nothing at zero.
- *
- * A quiet brand chip, not a solid fill: ink is reserved for things you press,
- * and a row of solid black counters down the sidebar drowns out the nav.
+ * Count pill for never-opened files (sidebar rows, subject tabs); nothing at
+ * zero. A quiet brand chip, not a solid fill, so it doesn't drown the nav.
  */
 export function NewCountBadge({ count }: { count: number }) {
   if (count <= 0) return null;

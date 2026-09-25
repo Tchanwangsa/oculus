@@ -1,27 +1,19 @@
 /**
- * Reads the module table-of-contents markdown the scraper writes to
- * `modules/NN-slug.md` back into structure.
- *
- * Canvas's real shape is: a course has *modules* (the grey bars), each holding
- * ordered *module items* whose `type` is Page / File / Assignment / Quiz /
- * ExternalUrl / SubHeader, with a `indent` level. `sync.rs` renders that to
- * markdown — `## ` for SubHeaders, `- [label](href) _(kind)_` for items — so
- * the grouping survives on disk and can be read back here.
- *
- * This is the interim source of truth. Once modules and module items are
- * persisted as their own tables, this parser goes away and the page reads rows.
+ * Parses the module TOC markdown `sync.rs` writes to `modules/NN-slug.md`:
+ * `## ` for Canvas SubHeaders, `- [label](href) _(kind)_` for items, indented
+ * two spaces per Canvas `indent` level.
  */
 
 export interface ModuleItem {
   title: string;
   /** `../files/x.pdf` (in-app), an http(s) URL, or null when not downloaded. */
   href: string | null;
-  /** Trailing `_(quiz)_` marker: quiz | assignment | external | file. */
+  /** From the trailing `_(kind)_`: quiz | assignment | external | file. */
   kind: string | null;
   indent: number;
 }
 
-export interface ModuleSection {
+interface ModuleSection {
   /** The SubHeader this run of items sits under; null for the leading run. */
   heading: string | null;
   items: ModuleItem[];
@@ -103,10 +95,7 @@ export function parseModuleToc(md: string): ModuleToc {
   };
 }
 
-/**
- * Resolves a TOC href against the module file that contains it. TOCs live in
- * `modules/`, so their in-app links all start `../`.
- */
+/** Resolves a TOC href against the module file that contains it. */
 export function resolveTocHref(
   href: string,
   moduleRelPath: string,

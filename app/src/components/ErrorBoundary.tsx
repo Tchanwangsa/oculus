@@ -23,9 +23,8 @@ function Fallback({ error, actions }: { error: unknown; actions: ReactNode }) {
 }
 
 /**
- * The root route's `errorElement`, so a page that throws takes its own pane
- * and nothing else — the router stays mounted, and navigating clears it.
- * Without one, react-router paints its own unstyled stack trace there.
+ * The root route's `errorElement`: a throwing page takes only its own pane and
+ * the router stays mounted (else react-router paints an unstyled trace).
  */
 export function RouteError() {
   const error = useRouteError();
@@ -47,8 +46,7 @@ export function RouteError() {
   );
 }
 
-/** Around the shell, which is above every router: a throw up there unmounts
- *  the tree and leaves an empty window, so catch it and offer the reload. */
+/** Around the shell, above every router, where a throw would blank the window. */
 export class ErrorBoundary extends Component<
   { children: ReactNode },
   { error: unknown }

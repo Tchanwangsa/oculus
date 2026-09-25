@@ -6,20 +6,9 @@ import {
   setSearchEngine,
 } from "@/lib/browser";
 
-/**
- * The two things about the browser that are a preference rather than a fact:
- * which engine the address bar searches with, and whether a link should open
- * here at all.
- *
- * Both are also needed **synchronously**, from a click handler or a render —
- * `normalizeAddress` is called while you type and `openExternal` from a
- * capture-phase click — and the values live in SQLite. So this store is the
- * loader and the writer, and `lib/browser.ts` keeps the answer in a module
- * value it pushes down on every change. That is the whole reason for the
- * split: the lib may not import this store (`search.ts` imports the lib, and
- * the store imports the lib), and nothing that has to answer in the same tick
- * may await a database read.
- */
+/** Browser preferences: search engine and where links open. Loaded from
+ *  SQLite here and pushed into `lib/browser.ts` module values, since its
+ *  callers answer synchronously and it cannot import this store. */
 
 const ENGINE_KEY = "browser_search_engine";
 const OPEN_LINKS_KEY = "browser_open_links_in";

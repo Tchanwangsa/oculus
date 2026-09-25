@@ -6,23 +6,9 @@ import { type PendingAttachment } from "@/lib/attachments";
 import { cn } from "@/lib/utils";
 
 /**
- * The pictures a composer is holding, as a row of thumbnails above its text.
- *
- * Shared by every box that takes an attachment (`useAttachments`), so a
- * screenshot pasted into the dock is drawn, removed and opened exactly as one
- * pasted into the page composer. It renders nothing at all when the list is
- * empty, which is why every call site can mount it unconditionally.
- *
- * `object-cover` here and `object-contain` in the thread, and that is not an
- * inconsistency: a chip this small is an identifier, where a crop that fills
- * the square tells two screenshots apart better than a letterboxed thumbnail
- * two thirds of which is ground. The full picture is one click away — the same
- * viewer the thread's own cards open (`ImageLightbox`), because 56px of a
- * screenshot is enough to tell two apart and not enough to check one.
- *
- * `compact` is the lecture dock's: a 300px panel beside a playing video has
- * room for a smaller identifier and needs the lines above the composer more
- * than the page does.
+ * Pending picture thumbnails above a composer; renders nothing when empty.
+ * `object-cover` (unlike the thread's `object-contain`) because a thumbnail this
+ * small is an identifier; click opens the full image. `compact` is the dock's.
  */
 export function AttachmentStrip({
   items,

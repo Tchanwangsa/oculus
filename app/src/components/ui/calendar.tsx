@@ -1,8 +1,6 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
-// Phosphor, not the lucide the generator emits — the repo's one icon set.
-// Carets rather than chevrons: they are what the sidebar, the project groups
-// and every disclosure in the app already use.
+// Phosphor carets, matching every other disclosure in the app.
 import { CaretDown, CaretLeft, CaretRight } from "@phosphor-icons/react"
 import {
   DayPicker,
@@ -30,15 +28,8 @@ function Calendar({
     <DayPicker
       showOutsideDays={showOutsideDays}
       className={cn(
-        // Tuned down from the generator's `p-3` / 32px cell / 14px text: this
-        // app sits at 11–13px throughout, and a calendar at stock shadcn
-        // density read as a panel borrowed from somewhere else.
-        //
-        // **`--cell-size` is the one knob.** Every measurement below is
-        // derived from it — the day cells, the nav buttons, the caption's
-        // gutters — so resizing the whole calendar means changing this and
-        // nothing else. The literal text sizes are the only exception, and
-        // they are already at the app's floor.
+        // Denser than stock shadcn to match the app's 11–13px scale.
+        // `--cell-size` is the one knob: every measurement below derives from it.
         "group/calendar bg-background p-2 text-xs [--cell-size:--spacing(6)] [[data-slot=card-content]_&]:bg-transparent [[data-slot=popover-content]_&]:bg-transparent",
         String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
         String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,

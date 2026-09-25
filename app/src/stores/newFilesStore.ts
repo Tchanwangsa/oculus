@@ -4,19 +4,13 @@ import { getDb } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/openFile";
 
 /**
- * Counts of "new" files — scraped since recency tracking began and never
- * opened — per subject and category. Drives the notification badges on the
- * sidebar subject rows and the subject tab strip.
- *
- * Only categories that render as openable rows count: anything else (module
- * TOCs, inline images, home/syllabus docs) has no row whose opening would
- * clear it, so a badge fed by it could never be dismissed.
+ * Counts of never-opened files per subject and category, for the sidebar and
+ * subject-tab badges. Only categories with openable rows count: anything else
+ * could never be cleared.
  */
 const COUNTED_CATEGORIES = ["file", "page", "announcement", "assignment", "quiz", "ed"];
 
-/** Which categories each subject tab surfaces, keyed by the tab's path
- *  segment under the subject (`TABS` in `SubjectLayout`). Downloads is a
- *  sub-tab of Files, so its count lands on the Files tab. */
+/** Keyed by the tab's path segment (`TABS` in `SubjectLayout`). */
 export const TAB_CATEGORIES: Record<string, string[]> = {
   modules: ["page"],
   files: ["file"],
@@ -72,11 +66,7 @@ export function newCountForTab(
   return wanted.reduce((sum, c) => sum + (cats[c] ?? 0), 0);
 }
 
-/**
- * Keep the counts current: opening a file clears its dot, and a running sync
- * adds new ones. Called once from the app root (alongside useBackendEvents).
- * Scrape-file events arrive per file, so those refreshes are debounced.
- */
+/** Keeps the counts current on file opens and syncs. Called once at the root. */
 export function watchNewFiles(): () => void {
   const refresh = () => void useNewFilesStore.getState().refresh();
 
@@ -86,8 +76,7 @@ export function watchNewFiles(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const debounced = () => {
     clearTimeout(timer);
-    // The DB upsert for a scrape-file event happens in another listener;
-    // the delay lets it land before we count.
+    // Lets the other listener's DB upsert for this event land before counting.
     timer = setTimeout(refresh, 1500);
   };
   const unsubs = [listen("scrape-file", debounced), listen("scrape-complete", debounced)];

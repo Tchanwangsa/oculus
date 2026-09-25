@@ -6,7 +6,7 @@ export interface KeepaliveStatus {
   supported: boolean;
   enabled: boolean;
   interval_hours: number;
-  /** Last line the agent logged, so the UI can prove it is running. */
+  /** Last line the agent logged. */
   last_run: string | null;
 }
 

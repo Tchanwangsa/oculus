@@ -25,10 +25,8 @@ const OPTION_ROWS: Array<{ key: keyof SyncOptions; label: string; hint: string }
 ];
 
 /**
- * The control next to "Sync now": which content categories a sync fetches.
- * Persisted in settings, read by `triggerSync` at the start of every run —
- * manual and scheduled alike. The trigger carries the enabled count so the
- * toolbar says how much a sync will pull without being opened.
+ * Which content categories a sync fetches; persisted and read by `triggerSync`
+ * on every run. The trigger shows the enabled count.
  */
 export function SyncSettings() {
   const [options, setOptions] = useState<SyncOptions>(DEFAULT_SYNC_OPTIONS);
@@ -95,8 +93,7 @@ export function SyncSettings() {
           ))}
         </div>
 
-        {/* Both actions always render — hiding one would resize the popover
-            as you tick boxes. Disabled is the "nothing to do" state. */}
+        {/* Both always render so the popover doesn't resize; disabled = nothing to do. */}
         <div className="flex items-center justify-between border-t border-border-subtle px-1.5 py-1.5">
           <Button
             variant="ghost"

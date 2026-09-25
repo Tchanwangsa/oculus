@@ -14,11 +14,7 @@ import {
 } from "@/lib/harness";
 import { getSubjects, type Subject } from "@/lib/db";
 
-/**
- * What is on screen for a thread mid-turn and nowhere in the database: the
- * assistant text and reasoning still streaming, and command output still
- * arriving. Everything else the timeline shows is a row Rust wrote.
- */
+/** A thread's mid-turn streams, which are not yet rows in the database. */
 export interface LiveTurn {
   running: boolean;
   streaming: string;
@@ -28,68 +24,46 @@ export interface LiveTurn {
 
 const IDLE: LiveTurn = { running: false, streaming: "", thinking: "", toolOutput: {} };
 
-/** The answer for a thread the map does not hold. One array for every such
- *  answer, because a view selects `items[id] ?? EMPTY` and zustand compares by
- *  reference: a fresh `[]` per render re-renders the timeline — the most
- *  expensive thing the app draws — on every store write, forever. */
+/** One shared empty array: zustand compares by reference, so a fresh `[]`
+ *  would re-render the timeline on every store write. */
 const EMPTY: HarnessItem[] = [];
 
 interface HarnessState {
   threads: HarnessThread[];
-  /** Whether `threads` has been read at least once. Until it has, a thread id
-   *  a restored tab carries in its route cannot be told apart from one that
-   *  was deleted, and the page must not give up on it. */
+  /** Whether `threads` has been read once. Until then a route's thread id
+   *  can't be told from a deleted one, so the page must not give up on it. */
   threadsLoaded: boolean;
-  /** How many Chat views have each thread on screen, by thread id.
-   *
-   *  There is no single "open thread" any more. Which conversation a Chat tab
-   *  shows lives in *that tab's* route (`chatHref`), because every tab has its
-   *  own router — so two tabs can hold two threads, and the one thing the
-   *  store still has to know is which threads somebody is looking at, so the
-   *  lecture dock's `release` does not empty a timeline another view is
-   *  reading. A count rather than a set: two tabs on the same conversation is
-   *  allowed, and the first to leave must not release it from the second. */
+  /** How many Chat views show each thread. A tab's thread lives in its route
+   *  (`chatHref`); the store only counts views so the dock's `release` can't
+   *  empty a timeline another view is reading. A count, so two tabs on one
+   *  thread don't release it from each other. */
   holds: Record<number, number>;
-  /** Rows per thread, not one timeline. Any number of views hold a thread
-   *  each — Chat tabs and the lecture dock — so "the rows on screen" is not a
-   *  single answer. */
+  /** Rows per thread: any number of Chat tabs and the lecture dock hold one. */
   items: Record<number, HarnessItem[]>;
   live: Record<number, LiveTurn>;
   rateLimits: Partial<Record<Provider, RateWindow[]>>;
   /** Composer selection for the *next* thread; an open thread keeps its own. */
   provider: Provider;
   model: string | null;
-  /** Reasoning effort sent with each turn. Unlike the model it is not stored
-   *  on the thread — it is a per-turn dial, so it stays session state and
-   *  applies to whichever thread is open, the way bb treats it. */
+  /** A per-turn dial, not stored on the thread. */
   reasoning: string | null;
-  /** Subject scope for the *next* thread; null is the general one. An open
-   *  thread shows its own `subject_id` and cannot be re-scoped. */
+  /** Subject scope for the *next* thread; null is the general one. */
   subjectId: number | null;
-  /** Every subject, for the composer's picker and its `@` menu. */
   subjects: Subject[];
-  /** Messages typed while a turn was running, per thread, in the order they
-   *  will go out. Rust holds the real queue; these are folded from its
-   *  `queued`/`unqueued` events, and nothing here decides when one is sent. */
+  /** A mirror of Rust's queue, folded from `queued`/`unqueued` events. */
   queued: Record<number, QueuedMessage[]>;
-  /** Threads where a rewind could not reach the agent — a question older than
-   *  the anchor, or a provider session that is gone. The agent still holds the
-   *  exchange that left the screen, which is worth saying once, so this stays
-   *  set for the life of the thread rather than being cleared on the next
-   *  turn: the context does not forget later either. */
+  /** Threads where a rewind could not reach the agent. Never cleared: the
+   *  agent's context still holds what left the screen. */
   contextDrift: Record<number, boolean>;
 
   loadThreads: () => Promise<void>;
-  /** A Chat view has put this thread on screen: count it, and read its rows
-   *  if nobody else already was. `borrowFrom` is the thread the view showed a
-   *  moment ago — see the note in the body. */
+  /** A view put this thread on screen: count it, and read its rows if nobody
+   *  else was. `borrowFrom` is the thread the view showed a moment ago. */
   hold: (id: number, borrowFrom?: number | null) => Promise<void>;
-  /** The view has moved off it. The rows stay in the map — that is what makes
-   *  switching back instant — but the thread stops being protected from a
-   *  dock's `release`. */
+  /** The view moved off it. Rows stay cached for an instant switch back, but
+   *  the thread is no longer protected from `release`. */
   unhold: (id: number) => void;
-  /** Read a thread's rows and its queue into the map. What `hold` does on the
-   *  first hold, and what the lecture dock calls directly. */
+  /** Read a thread's rows and queue into the map (the lecture dock calls it). */
   load: (id: number) => Promise<void>;
   setProvider: (p: Provider) => void;
   setModel: (m: string | null) => void;
@@ -97,26 +71,16 @@ interface HarnessState {
   setSubject: (id: number | null) => void;
   loadSubjects: () => Promise<void>;
   apply: (env: HarnessEnvelope) => void;
-  /** Fold the buffered deltas below into `live` now. Exposed for the tests
-   *  and for anything that needs the stream settled before it reads. */
+  /** Fold the buffered deltas into `live` now. */
   flushLive: () => void;
   removed: (id: number) => void;
-  /** Forget one thread's rows. The map holds every thread opened this session,
-   *  which is what makes switching back to one instant; `removed` and this are
-   *  the only things that shrink it. A view that leaves a thread has to say
-   *  so — a single thread can carry 300KB of tool output, and a dock walked
-   *  through twenty lectures would otherwise keep twenty timelines. */
+  /** Forget one thread's rows; with `removed`, the only way the map shrinks,
+   *  so a view leaving a thread must call it. */
   release: (id: number) => void;
 }
 
-/**
- * Deltas arrive per token — tens a second — and each one used to be a
- * `set`, so every keystroke of the model's re-rendered the whole timeline.
- * They are buffered here instead and folded in on a timer, which caps the
- * page at one render per tick however fast the provider talks. Only the three
- * delta events buffer; every other event flushes first, so nothing can
- * overtake the row it belongs to.
- */
+/** Deltas arrive per token; buffering caps renders at one per tick. Every
+ *  non-delta event flushes first, so no row overtakes its text. */
 const FLUSH_MS = 48;
 
 interface PendingDeltas {
@@ -138,8 +102,7 @@ function buffer(threadId: number): PendingDeltas {
   return p;
 }
 
-/** A synthetic row from a live event, keyed on the Rust row id when there is
- *  one so a reload lines up with what was shown. */
+/** A row from a live event, keyed on the Rust row id when there is one. */
 function rowFrom(env: HarnessEnvelope, kind: HarnessItem["kind"], content: string, meta?: unknown): HarnessItem {
   return {
     id: env.itemId ?? -Date.now() - Math.floor(Math.random() * 1000),
@@ -164,17 +127,12 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   provider: "claude",
   subjectId: null,
   subjects: [],
-  // A provider whose catalogue is compiled in would let the composer open
-  // already pointing at a real model. None is any more — every CLI reports
-  // its own — so this opens on nothing and is filled the moment the list
-  // lands (`useProviderModels`).
+  // Empty until `useProviderModels` lands the list.
   ...defaultSelectionFor("claude"),
 
   loadThreads: async () => {
     const threads = await getHarnessThreads();
     set((s) => {
-      // A thread the DB says is running is one we heard start; the store's
-      // live map is authoritative for the spinner once mounted.
       const live = { ...s.live };
       for (const t of threads) {
         if (t.status === "running" && !live[t.id]) live[t.id] = { ...IDLE, running: true };
@@ -187,20 +145,14 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     const first = !get().holds[id];
     set((s) => ({
       holds: { ...s.holds, [id]: (s.holds[id] ?? 0) + 1 },
-      // The rows of the thread being left carry the one arriving for the beat
-      // the read takes. No rows under a selected thread is the empty
-      // composer's own state (`ChatPage`) — which under a map is what a thread
-      // with no key yet looks like — so every switch flashed the hero and
-      // re-mounted the composer under it before the rows landed. A stale row
-      // for a few milliseconds is invisible; that was not. A thread the map
-      // already holds draws its own rows at once and borrows nothing.
+      // Borrow the outgoing thread's rows while reading: no rows is the empty
+      // composer's state, so a switch would flash it.
       items:
         id in s.items || borrowFrom == null || !s.items[borrowFrom]
           ? s.items
           : { ...s.items, [id]: s.items[borrowFrom] },
     }));
-    // A second view arriving on a thread another is already showing reads
-    // nothing: the rows are live in the map and `apply` is keeping them so.
+    // A second view on a held thread reads nothing: `apply` keeps it live.
     if (first) await get().load(id);
   },
 
@@ -214,28 +166,17 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     }),
 
   load: async (id) => {
-    // Claim the key before reading. "Is this a thread we hold" is the test the
-    // guards below and `apply` both make, and `load` has no active id to ask
-    // about instead — the dock's thread is never the active one.
+    // Claim the key first: "held" is the test the guards below and `apply` make.
     if (!(id in get().items)) set((s) => ({ items: { ...s.items, [id]: EMPTY } }));
-    // Guard both answers against the thread being let go while the query was
-    // in flight. A read that fails still writes its empty answer: what is on
-    // screen may be the rows borrowed above, and they would otherwise sit
-    // under this thread's name for good.
+    // Guard against a release mid-read. A failed read still writes `[]` to
+    // replace any borrowed rows.
     const rows = await getHarnessItems(id).catch(() => [] as HarnessItem[]);
     if (id in get().items) set((s) => ({ items: { ...s.items, [id]: rows } }));
-    // The queue is in Rust's memory, not the database, so a page that has
-    // just loaded — or a thread opened in another window — has to ask.
     const waiting = await harnessQueued(id).catch(() => [] as QueuedMessage[]);
     if (id in get().items) set((s) => ({ queued: { ...s.queued, [id]: waiting } }));
   },
 
-  // No two agents share model ids or a level vocabulary, so switching agent
-  // replaces both rather than carrying a selection that cannot apply. What
-  // decides whether there is a new selection to give is whether that
-  // provider's catalogue is compiled in or fetched — not which provider it is
-  // (`defaultSelectionFor`). A fetched one is empty for the beat before its
-  // CLI answers, and the picker fills it in.
+  // Agents share no model ids or levels, so a switch replaces both.
   setProvider: (provider) => set({ provider, ...defaultSelectionFor(provider) }),
   setModel: (model) => set({ model }),
   setReasoning: (reasoning) => set({ reasoning }),
@@ -244,12 +185,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
 
   release: (id) =>
     set((s) => {
-      // Never one a Chat view is holding. Two views can hold the same thread —
-      // the dock and a Chat tab sitting on the same conversation — and a dock
-      // that let go of it on unmount would empty the tab's timeline under it
-      // and stop `apply` writing to it, which reads as a thread that died
-      // mid-turn. Only the dock releases, so the Chat tabs' threads are the
-      // ones to protect; the cost is one map entry held after both have left.
+      // Never one a Chat view holds, or the dock unmounting would empty a tab
+      // showing the same thread mid-turn.
       if (s.holds[id] || !(id in s.items)) return s;
       const items = { ...s.items };
       delete items[id];
@@ -304,8 +241,6 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   apply: (env) => {
     const { threadId, event } = env;
 
-    // The three streaming events buffer; everything else is a row, and a row
-    // has to land after the text that preceded it.
     switch (event.type) {
       case "assistant_delta":
         buffer(threadId).streaming += event.text;
@@ -324,9 +259,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
 
     set((s) => {
       const prev = s.live[threadId] ?? IDLE;
-      // Rows land for any thread whose timeline someone is holding, not only
-      // the open one: gating on the active id dropped every row of the
-      // lecture dock's thread whenever the Chat page had another one up.
+      // Any held thread, not just the active one (the dock's is never active).
       const held = threadId in s.items;
       let live: LiveTurn | null = null;
       let rows = s.items[threadId] ?? EMPTY;
@@ -345,10 +278,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
 
       switch (event.type) {
         case "user_message":
-          // The same `meta` Rust writes for the row (`store::apply`), so the
-          // bubble says "at 3:40" from the moment it appears rather than only
-          // after a reload. `undefined` leaves `meta` null, which is every
-          // message not sent from the lecture dock.
+          // Live rows carry the same `meta` Rust stores (`store::apply`).
           push(rowFrom(env, "user", event.text, event.at == null ? undefined : { at: event.at }));
           live = { ...prev, running: true };
           touchThread({ status: "running" });
@@ -375,8 +305,6 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
               output: null,
             }),
           );
-          // Text streamed before the call belongs to the call's message; the
-          // committed row already carries it.
           live = { ...prev, streaming: "", thinking: "" };
           break;
         case "tool_finished": {
@@ -387,9 +315,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
                 rows = [...rows];
                 rows[i] = {
                   ...rows[i],
-                  // A title the bridge only learned on completion replaces the
-                  // row's own, the same way Rust replaces it on the stored row
-                  // — see `ToolFinished` in `app/src-tauri/src/harness/event.rs`.
+                  // As Rust does for `ToolFinished` (`harness/event.rs`).
                   content: event.title?.trim() ? event.title : rows[i].content,
                   meta: JSON.stringify({ ...meta, ok: event.ok, output: event.output }),
                 };
@@ -403,14 +329,8 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           break;
         }
         case "error":
-          // Rust persists the same fact on the row it just wrote
-          // (`meta` is `{"auth":"claude"}` for a credentials failure), so the
-          // live row has to carry it too — otherwise the sign-in card the
-          // student needs right now would only appear after a reload.
           push(rowFrom(env, "error", event.message, event.auth ? { auth: event.auth } : undefined));
           break;
-        // The same row Rust wrote (`store::apply`), so a reload finds what
-        // the live timeline had.
         case "permission_needed":
           push(
             rowFrom(env, "permission", event.target ?? "", {
@@ -421,8 +341,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
             }),
           );
           break;
-        // The queue is Rust's; this only draws it. `queued` is both "new" and
-        // "edited" — the id is the key either way.
+        // `queued` is both "new" and "edited".
         case "queued": {
           const list = s.queued[threadId] ?? [];
           const msg = { id: event.id, text: event.text };
@@ -435,10 +354,6 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           return {
             queued: { ...s.queued, [threadId]: (s.queued[threadId] ?? []).filter((q) => q.id !== event.id) },
           };
-        // A question was edited or taken back: it and everything after it are
-        // gone. The rows Rust has already deleted; this is the copy on screen.
-        // `context` is whether the agent went back with them — recorded even
-        // for a thread that is not open, since it is a fact about the thread.
         case "rewound": {
           const drift = event.context
             ? s.contextDrift
@@ -466,23 +381,12 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           touchThread({ usage: JSON.stringify(usage) });
           break;
         }
-        // The windows are the account's, not the thread's: Codex reports them
-        // off the shared server with no thread attached at all.
+        // Account-scoped, not per thread.
         case "rate_limits":
           return { rateLimits: { ...s.rateLimits, [env.provider]: event.windows } };
         case "turn_finished": {
-          // Whatever was still streaming has just been committed as a row by
-          // the bridge — including the half-written answer of a turn that was
-          // stopped — so clearing the live tail here loses nothing.
-          //
-          // The thread is only *idle* if nothing is waiting behind this turn.
-          // Rust sends the next queued message the moment this event lands,
-          // and a spinner that stopped for those few milliseconds — with the
-          // composer swapping stop for send and back — read as the answer
-          // having finished when it had not started.
-          // The stop leaves a row behind (`store.rs`), and it has to land
-          // now rather than on the next reload — it is the line that says
-          // why the answer above it stops mid-sentence.
+          // The bridge has committed the live tail. Stay running if a queued
+          // message is about to go out, so the spinner does not blink.
           if (event.status === "interrupted") push(rowFrom(env, "interrupted", ""));
           const more = (s.queued[threadId]?.length ?? 0) > 0;
           live = { ...IDLE, running: more };
@@ -490,8 +394,6 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           break;
         }
         case "thread_titled":
-          // The name arrives a beat after the first turn ends, from a naming
-          // turn of its own; the row is already written.
           touchThread({ title: event.title });
           break;
         case "session_started":
@@ -513,9 +415,6 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
     });
   },
 }));
-
-export const liveFor = (id: number | null, live: Record<number, LiveTurn>): LiveTurn =>
-  (id != null && live[id]) || IDLE;
 
 export const itemsFor = (id: number | null, items: Record<number, HarnessItem[]>): HarnessItem[] =>
   (id != null && items[id]) || EMPTY;

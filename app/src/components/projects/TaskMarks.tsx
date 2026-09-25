@@ -5,11 +5,7 @@ import { fmtClock, sqliteUtcToMs } from "@/lib/format";
 import type { ColumnKind, ProjectTaskCounts } from "@/lib/projects";
 import type { SubtaskProgress } from "./taskTree";
 
-/**
- * What a task is, at a glance: the glyph reads the *kind* of the column it
- * sits in rather than the column's name, which is the user's to change — the
- * same rule `moveTask` applies when it decides whether the task is done.
- */
+/** Reads the column's *kind*, never its user-editable name. */
 export function TaskGlyph({
   kind,
   size = 13,
@@ -36,8 +32,7 @@ export function TaskGlyph({
   return <Circle size={size} className={cn("shrink-0 text-muted-foreground/70", className)} />;
 }
 
-/** Quiet marker for anything the chat agent wrote, so what you planned and
- *  what it planned for you stay tellable apart. */
+/** Marks rows the chat agent wrote. */
 export function AgentMark({ source, className }: { source: string; className?: string }) {
   if (source !== "agent") return null;
   return (
@@ -50,15 +45,8 @@ export function AgentMark({ source, className }: { source: string; className?: s
   );
 }
 
-/**
- * A due date, reddened once it is behind you. Unset dates render nothing so the
- * caller can decide what an empty cell looks like.
- *
- * No `tabular-nums`: a date is not a column of digits — "15 Sep" and
- * "3 Oct" cannot align whatever the figures do, because the month names are
- * different widths — so all the tabular set buys here is the faintly
- * mechanical look of even digits in running text.
- */
+/** A due date, red once past; renders nothing when unset. No `tabular-nums`:
+ *  month names are different widths, so dates can't align anyway. */
 export function DueChip({ dueAt, className }: { dueAt: string | null; className?: string }) {
   const ms = sqliteUtcToMs(dueAt);
   if (ms == null) return null;
@@ -76,16 +64,8 @@ export function DueChip({ dueAt, className }: { dueAt: string | null; className?
   );
 }
 
-/**
- * `3/12` and a thin bar — the shared half of every progress readout here.
- *
- * A task row and a project row want the same meter at different weights: the
- * table has a column of its own to fill and can afford the percentage, while a
- * project row is already carrying a name, a brief and a due date and the
- * fraction says enough. So the percentage is a flag rather than a second
- * component. Callers handle `total === 0` themselves — what "nothing yet"
- * should say differs by row, and it is never a 0% bar.
- */
+/** `3/12` and a thin bar. Callers handle `total === 0` themselves — it is
+ *  never a 0% bar. */
 export function ProgressMeter({
   done,
   total,
@@ -117,9 +97,6 @@ export function ProgressMeter({
   );
 }
 
-/** A task's subtasks. Nothing at all when it has none — a 0% bar reads as
- *  "none done" rather than "none exist", and this sits in a table column where
- *  a dash is the established empty. */
 export function SubtaskProgressBar({
   progress,
   className,
@@ -135,15 +112,7 @@ export function SubtaskProgressBar({
   );
 }
 
-/**
- * A whole project's tasks, on a list row.
- *
- * An empty project says so in words rather than drawing `0/0` behind an empty
- * bar: a bar at zero is what a stalled project looks like, and one you have
- * not broken down yet is not stalled. Counts come from `getTaskCounts`, which
- * includes subtasks — a project taken apart properly should not read as barely
- * started.
- */
+/** A project's tasks (subtasks included, via `getTaskCounts`) on a list row. */
 export function ProjectProgress({
   counts,
   className,

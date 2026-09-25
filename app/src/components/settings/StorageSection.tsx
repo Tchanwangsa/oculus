@@ -47,8 +47,7 @@ const GB = 1024 ** 3;
 const SLOTS = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5"];
 const OTHER_COLOR = "bg-chart-other";
 
-/** File-type entities keep a fixed color regardless of their current rank —
- *  color follows the entity, never its size. */
+/** Colour follows the file type, never its current rank. */
 const TYPE_COLOR: Record<string, string> = {
   PDFs: "bg-chart-1",
   Videos: "bg-chart-2",
@@ -68,8 +67,7 @@ function typeOf(path: string): string {
   return "Other";
 }
 
-/** Mirror of Rust's `paths::safe_dir` — how a subject code becomes its
- *  `courses/<dir>` folder name. */
+/** Mirror of Rust's `paths::safe_dir` (subject code → `courses/<dir>`). */
 function safeDir(s: string): string {
   return [...s].map((c) => (/[\p{L}\p{N}_-]/u.test(c) ? c : "_")).join("");
 }
@@ -104,8 +102,7 @@ export function StorageSection() {
       }
       setSubjectByDir(byDir);
 
-      // Attribution nicety only — a missing lectures table shouldn't take
-      // the whole storage view down with it.
+      // Optional attribution; a missing lectures table must not fail the view.
       try {
         const db = await getDb();
         const lectures = await db.select<{ id: string; subject_id: number }[]>(
@@ -135,8 +132,6 @@ export function StorageSection() {
     if (gb == null) localStorage.removeItem(LIMIT_KEY);
     else localStorage.setItem(LIMIT_KEY, String(gb));
   };
-
-  // ── Grouping ──────────────────────────────────────────────────────────────
 
   const groups: Group[] = useMemo(() => {
     if (!report) return [];
@@ -170,9 +165,8 @@ export function StorageSection() {
       }));
     }
 
-    // Subjects: at most 5 colored series, tail folded into a gray "Other".
-    // Slots are handed out alphabetically among the kept entities so a
-    // subject keeps its color as sizes drift between visits.
+    // At most 5 coloured subjects, the rest folded into "Other"; slots go
+    // alphabetically so a subject keeps its colour as sizes drift.
     const kept = ranked.slice(0, SLOTS.length);
     const tail = ranked.slice(SLOTS.length);
     const slotByLabel = new Map(
@@ -198,14 +192,11 @@ export function StorageSection() {
 
   const largest = useMemo(() => report?.files.slice(0, 6) ?? [], [report]);
 
-  // ── Meter geometry ────────────────────────────────────────────────────────
-
   const used = report?.total_bytes ?? 0;
   const limitBytes = limitGb != null ? limitGb * GB : null;
   const overLimit = limitBytes != null && used > limitBytes;
-  // 100% of the bar = the limit when one is set (used vs capacity); with no
-  // limit the bar shows pure composition of what's used. When over the limit
-  // the scale grows to fit and a marker shows where the limit sits.
+  // With a limit the bar is capacity (growing past it when over); without one
+  // it is pure composition of what's used.
   const scale = limitBytes != null ? Math.max(used, limitBytes) : used;
 
   if (error) {
@@ -218,7 +209,6 @@ export function StorageSection() {
 
   return (
     <div>
-      {/* Headline + grouping toggle */}
       <div className="flex items-end justify-between mb-3">
         <div>
           <p className="text-sm font-semibold text-foreground tabular-nums leading-none">
@@ -279,7 +269,6 @@ export function StorageSection() {
         </div>
       </div>
 
-      {/* Meter — stacked usage bar on a capacity track */}
       <div className="relative h-2.5 rounded-full bg-surface overflow-hidden">
         <div className="absolute inset-0 flex gap-[2px]">
           {groups
@@ -318,7 +307,6 @@ export function StorageSection() {
         </p>
       )}
 
-      {/* Breakdown */}
       <div className="mt-3">
         {groups.map((g) => (
           <div key={g.label} className="flex items-center gap-2.5 py-1.5">
@@ -336,7 +324,6 @@ export function StorageSection() {
         ))}
       </div>
 
-      {/* Largest files */}
       {largest.length > 0 && (
         <div className="mt-5">
           <p className="font-display text-[13px] font-semibold text-foreground mb-1.5">
@@ -373,7 +360,6 @@ export function StorageSection() {
         </div>
       )}
 
-      {/* Limit setting */}
       <div className="flex items-center justify-between gap-4 mt-6">
         <div>
           <p className="text-xs font-medium text-foreground">Storage limit</p>

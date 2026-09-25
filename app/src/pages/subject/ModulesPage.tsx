@@ -223,8 +223,8 @@ function ItemRow({
     );
   }
 
-  // No target: Canvas listed it, but the scraper couldn't download it (locked
-  // file, unsupported type). Shown so the module isn't silently incomplete.
+  // Listed by Canvas but not downloadable; shown so the module isn't silently
+  // incomplete.
   return (
     <div className={cn(rowClass, "text-muted-foreground/70 cursor-default")}>
       {inner}

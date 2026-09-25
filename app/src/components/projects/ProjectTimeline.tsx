@@ -7,41 +7,27 @@ import {
   addDays,
   addMonths,
   fmtMonth,
-  startOfDay,
   startOfWeek,
 } from "@/lib/calendar";
 import { packLanes } from "@/lib/lanes";
-import { fmtClock, sqliteUtcToMs } from "@/lib/format";
+import { fmtClock, sqliteUtcToMs, startOfDay } from "@/lib/format";
 import type { DbProject, DbProjectTask } from "@/lib/projects";
 import { TaskGlyph } from "./TaskMarks";
 import { columnOf, type TaskNode } from "./taskTree";
 
 /**
- * The roadmap: one row per top-level task, laid along a horizontal time axis.
- *
- * This view **reads**. Tasks are edited on the board and in the table, which
- * own the one door `moveTask` provides for where a task sits; a bar you could
- * drag here would be a second one. Nothing in this file writes, and nothing
- * here reads the database either — the rows arrive as props from
- * `ProjectPage`, which is what listens for `PROJECTS_UPDATED_EVENT`.
- *
- * The shape borrows from `app/src/components/calendar/WeekView.tsx` wherever
- * the two are answering the same question: a span is a bar and a single date
- * is a marker (`isInstant`), overlapping bars are packed into lanes
- * (`app/src/lib/lanes.ts`), elapsed time carries a grey wash mixed from
- * `muted-foreground`, a finished item drops its colour for the neutral
- * `chart-other`, and the drawn range is fitted to its contents rather than
- * guessed.
+ * The roadmap: one row per top-level task on a horizontal time axis.
+ * Read-only by design — tasks move on the board and table, through `moveTask`.
+ * Follows `WeekView`'s conventions: span = bar, single date = marker, overlaps
+ * packed into lanes, elapsed time washed grey, range fitted to contents.
  */
 
 // ── Zoom ─────────────────────────────────────────────────────────────────────
 
 export type TimelineZoom = "day" | "week" | "month";
 
-/** The column the axis is ruled in. Not a CSS `zoom` on anything — this only
- *  changes how many pixels a day is worth, so pointer coordinates and element
- *  rects stay in the same space (see the root `CLAUDE.md`). */
-export const TIMELINE_ZOOMS = [
+/** Pixels per day, not a CSS `zoom` (see CLAUDE.md). */
+const TIMELINE_ZOOMS = [
   { id: "day", label: "Days" },
   { id: "week", label: "Weeks" },
   { id: "month", label: "Months" },
@@ -53,10 +39,8 @@ export function isTimelineZoom(v: string | null): v is TimelineZoom {
   return v === "day" || v === "week" || v === "month";
 }
 
-/** The segmented control for the axis, in the page's toolbar rather than in
- *  this component — it scales the view, so it belongs with the other chrome.
- *  Rectangular on purpose: a segmented toolbar is the one exception to the
- *  pill rule, and this is the same control `CalendarPage` uses. */
+/** Rendered in the page toolbar. Rectangular: segmented toolbars are the
+ *  exception to the pill rule (same control as `CalendarPage`). */
 export function TimelineZoomControl({
   value,
   onChange,
@@ -87,17 +71,11 @@ export function TimelineZoomControl({
 
 // ── Geometry ─────────────────────────────────────────────────────────────────
 
-/** Pixels a single day is worth at each zoom. Everything else — bar widths,
- *  tick spacing, where "now" falls — is this times a number of days. */
 const PX_PER_DAY: Record<TimelineZoom, number> = { day: 52, week: 22, month: 5 };
 
-/** Breathing room either side of the dated work, so the first bar does not
- *  start flush against the left edge. */
 const PAD_DAYS: Record<TimelineZoom, number> = { day: 2, week: 7, month: 20 };
 
-/** A floor on the drawn span, the way `hourRange` never goes narrower than
- *  8am–6pm: a project with one dated task should still read as a calendar
- *  rather than as a single column. */
+/** Floor on the drawn span, like `hourRange`'s. */
 const MIN_SPAN_DAYS: Record<TimelineZoom, number> = { day: 14, week: 56, month: 180 };
 
 const NAME_PX = 208;
@@ -105,20 +83,12 @@ const ROW_PX = 30;
 const SUB_ROW_PX = 22;
 const BAR_PX = 13;
 const SUB_BAR_PX = 9;
-/** Width of a single-date marker, and the shortest a bar is ever drawn. Both
- *  feed the lane packing, which runs on drawn pixels rather than on times —
- *  lanes exist to stop things overlapping on screen, and a one-hour task and a
- *  deadline both occupy more screen than their duration. */
+/** Lane packing runs on these drawn pixels, not on times. */
 const MARKER_PX = 12;
 const MIN_BAR_PX = 10;
 
-/**
- * The span the axis covers: everything dated, padded either side, never
- * narrower than the zoom's floor, and always containing "now".
- *
- * The last clause is `hourRange`'s `includeHour` argument by another name — a
- * today marker the range has cropped off is worse than no marker at all.
- */
+/** Everything dated, padded, at least the zoom's floor, and always including
+ *  now. */
 function timelineRange(points: number[], now: Date, zoom: TimelineZoom): [Date, Date] {
   let lo = now.getTime();
   let hi = now.getTime();
@@ -136,8 +106,7 @@ function timelineRange(points: number[], now: Date, zoom: TimelineZoom): [Date, 
     end = addDays(end, Math.ceil(short / 2));
   }
 
-  // Snap to the unit the axis is ruled in, so the first tick is a whole week
-  // or a whole month rather than a stub.
+  // Snap to whole weeks/months so the first tick isn't a stub.
   if (zoom === "week") {
     start = startOfWeek(start);
     end = addDays(startOfWeek(end), 7);
@@ -150,10 +119,9 @@ function timelineRange(points: number[], now: Date, zoom: TimelineZoom): [Date, 
 
 interface Tick {
   at: Date;
-  /** Where the next tick starts — the column's right edge. */
   end: Date;
   label: string;
-  /** Ruled a little harder: a month boundary inside a day or week axis. */
+  /** A month boundary inside a day or week axis. */
   major: boolean;
   today: boolean;
 }
@@ -199,8 +167,7 @@ interface Band {
   label: string;
 }
 
-/** The row above the ticks: months over a day or week axis, years over a
- *  month one — whichever unit the ticks are not already naming. */
+/** The row above the ticks: months, or years over a month axis. */
 function bandsFor(zoom: TimelineZoom, start: Date, end: Date): Band[] {
   const out: Band[] = [];
   if (zoom === "month") {
@@ -225,35 +192,28 @@ function bandsFor(zoom: TimelineZoom, start: Date, end: Date): Band[] {
 
 // ── Placing tasks ────────────────────────────────────────────────────────────
 
-/** A task drawn on a row: a bar between two dates, or a marker at one. */
 interface Placed {
   task: DbProjectTask;
-  /** One date to go on, so there is no span to draw — the distinction
-   *  `isInstant` makes on the calendar, for the same reason: a deadline is a
-   *  moment, not a stretch of time you are booked for. */
+  /** Only one date, drawn as a marker. */
   instant: boolean;
-  /** True on the `due_at` side of that, false when the only date is a start. */
+  /** The one date is `due_at`, not `starts_at`. */
   deadline: boolean;
   left: number;
   width: number;
-  /** A subtask borrowed onto its collapsed parent's row, so folding a parent
-   *  up never hides its children's dates. Drawn quieter than the parent's own. */
+  /** A subtask drawn on its collapsed parent's row. */
   rollup: boolean;
 }
 
 interface Row {
   node: TaskNode;
-  /** The row's own task — the parent, or the subtask on an expanded child row. */
   task: DbProjectTask;
   depth: 0 | 1;
   items: Placed[];
   expandable: boolean;
 }
 
-/** Both dates and the task is a span; one date and it is a marker; neither and
- *  it belongs in the Unscheduled rail instead. A `due_at` at or before
- *  `starts_at` is bad data rather than a zero-length span, so it falls back to
- *  the deadline — the date that means something. */
+/** Null means undated (the Unscheduled rail). `due_at <= starts_at` is bad
+ *  data and falls back to a deadline marker. */
 function place(
   task: DbProjectTask,
   x: (ms: number) => number,
@@ -290,7 +250,6 @@ function place(
 }
 
 function laneSpan(p: Placed) {
-  // Two pixels of air, so bars that merely touch do not read as one.
   return { start: p.left, end: p.left + p.width + 2 };
 }
 
@@ -316,13 +275,7 @@ export function ProjectTimeline({
       return next;
     });
 
-  /**
-   * Backlog-kind columns are left off the axis entirely. A stub you have not
-   * committed to has no place on a schedule — it is a plan to make a plan, and
-   * drawing it beside real work would say you had booked time for it. The
-   * Backlog view is where that pile is read. A whole node goes with its
-   * parent: the pieces of a stub are part of the stub.
-   */
+  // Backlog tasks (and their subtasks) are uncommitted, so not scheduled.
   const onBoard = useMemo(
     () => nodes.filter((n) => columnOf(project, n.task.column_id)?.kind !== "backlog"),
     [nodes, project],
@@ -356,7 +309,6 @@ export function ProjectTimeline({
   );
   const bands = useMemo(() => bandsFor(zoom, rangeStart, rangeEnd), [zoom, rangeStart, rangeEnd]);
 
-  /** The rows, plus everything that has no date to be drawn at. */
   const { rows, unscheduled } = useMemo(() => {
     const rows: Row[] = [];
     const unscheduled: DbProjectTask[] = [];
@@ -367,8 +319,6 @@ export function ProjectTimeline({
       const dated = kids.filter((k) => k.at != null);
       const undated = kids.filter((k) => k.at == null).map((k) => k.task);
 
-      // A parent with nothing dated anywhere in its subtree has no row to take;
-      // it and its pieces go to the rail together, parent first.
       if (!own && dated.length === 0) {
         unscheduled.push(node.task, ...undated);
         continue;
@@ -403,9 +353,8 @@ export function ProjectTimeline({
     return { rows, unscheduled };
   }, [onBoard, expanded, x, total]);
 
-  // Open on today rather than on the start of the range, which for a semester
-  // plan is weeks behind. Keyed on the range and the zoom, never on `now`, or
-  // the minute tick would drag the scroll back every sixty seconds.
+  // Open on today. Not keyed on `now`, or each minute tick would reset the
+  // scroll.
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -428,9 +377,6 @@ export function ProjectTimeline({
     <div className="flex h-full flex-col">
       <div ref={scroller} className="min-h-0 flex-1 overflow-auto">
         <div style={{ width: NAME_PX + total, minWidth: "100%" }}>
-          {/* Axis. Sticky vertically so the dates stay readable down a long
-              project; its name cell is sticky both ways, the corner of the
-              two. */}
           <div className="sticky top-0 z-30 flex bg-card">
             <div
               className="sticky left-0 z-10 shrink-0 border-b border-border-subtle bg-card"
@@ -485,8 +431,7 @@ export function ProjectTimeline({
             </div>
           </div>
 
-          {/* Rows, over one shared layer of gridlines, past wash and now line —
-              one overlay rather than the same three things per row. */}
+          {/* One shared overlay of gridlines, past wash and now line. */}
           <div className="relative">
             <div
               className="pointer-events-none absolute inset-y-0"
@@ -502,10 +447,7 @@ export function ProjectTimeline({
                   style={{ left: x(t.at.getTime()) }}
                 />
               ))}
-              {/* Elapsed time, washed grey. `surface` sits within a couple of
-                  percent of the page background and is invisible as a wash, so
-                  this is mixed from the muted foreground — WeekView's PastWash,
-                  turned on its side. */}
+              {/* Mixed from muted-foreground: `surface` is invisible as a wash. */}
               {nowX > 0 && (
                 <div
                   className="absolute inset-y-0 left-0"
@@ -548,9 +490,6 @@ export function ProjectTimeline({
 
 // ── Rows ─────────────────────────────────────────────────────────────────────
 
-/** Done drops the colour for the neutral `chart-other`, overdue takes the same
- *  red `DueChip` already uses, and everything else is the brand indigo as an
- *  accent rather than a fill. */
 function toneOf(task: DbProjectTask, now: Date): string {
   if (task.done_at != null) return "var(--color-chart-other)";
   const due = sqliteUtcToMs(task.due_at);
@@ -655,8 +594,6 @@ function TimelineRow({
                 {item.deadline ? (
                   <Flag size={size} weight="fill" className="shrink-0" style={{ color: tone }} />
                 ) : (
-                  // No cutoff to draw to, so it is the dot the calendar uses
-                  // for anything that merely occupies time — see EventMark.
                   <span
                     className="shrink-0 rounded-full"
                     style={{
@@ -706,16 +643,8 @@ function TimelineRow({
 
 // ── The rail ─────────────────────────────────────────────────────────────────
 
-/**
- * What has no date to be drawn at.
- *
- * The calendar's rule: nothing may hide outside the drawn range. A deadline
- * the week grid cannot place goes to the labelled "Due" strip rather than
- * being dropped, and a task with no dates is the same problem one step
- * further — there is no axis position to give it at all. It is listed, so a
- * plan with half its dates missing looks like a plan with half its dates
- * missing.
- */
+/** Undated tasks are listed rather than hidden, like the calendar's "Due"
+ *  strip. */
 function UnscheduledRail({
   project,
   tasks,

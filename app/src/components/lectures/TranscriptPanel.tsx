@@ -19,7 +19,7 @@ import {
   type DockTab,
   type TranscriptMode,
 } from "@/stores/playerPrefsStore";
-import { fmtTime, type Cue } from "@/lib/lectures";
+import { fmtClockSecs, type Cue } from "@/lib/lectures";
 import { FollowList, Highlight, SearchField } from "@/components/lectures/FollowList";
 import { ChaptersPanel, type ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
 import { ReadingList, type ReadingListProps } from "@/components/lectures/ReadingList";
@@ -40,49 +40,23 @@ const INNER_BORDER: Record<Dock, string> = {
   right: "border-l",
 };
 
-/** The dock's three readings of the recording. No "In this video" label over
- *  them: the panel is narrow and its subject is never in doubt.
- *
- *  Chapters sits first because it is the shape of the hour — twelve rows you
- *  can take in at once, which is the one thing a six-hundred-row list cannot
- *  do. Transcript is the words, in either register (see
- *  `TranscriptModePicker`). Chat is what you reach for when neither is the
- *  question.
- *
- *  These two were briefly one tab called *Read*, with the chapters drawn as
- *  headings over the reading copy. It cost the table of contents — twelve
- *  headings scattered through six hundred lines are not an outline — and the
- *  enhanced text is a register of the transcript rather than a fourth thing,
- *  so it moved into that tab and the chapter list came back whole. */
+/** The dock's tabs. Enhanced text is a register of the transcript (see
+ *  `TranscriptModePicker`), not a tab of its own. */
 const TABS: ReadonlyArray<ViewTab<DockTab>> = [
   { value: "chapters", label: "Chapters" },
   { value: "transcript", label: "Transcript" },
   { value: "chat", label: "Chat" },
 ];
 
-/**
- * Which tab is really in front. The stored preference, unless it is the
- * transcript on a recording that has none on disk — the strip drops that tab
- * rather than offering one that could only ever be empty, and the preference
- * survives so it comes back the moment a transcript does. Exported because the
- * control bar's dock button names the same tab, and two copies of this would
- * be two answers to one question.
- */
+/** The tab really in front: the preference, unless it is a transcript the
+ *  recording lacks (the strip drops that tab; the preference survives). */
 export function tabInFront(tab: DockTab, hasTranscript: boolean): DockTab {
   return !hasTranscript && tab === "transcript" ? "chapters" : tab;
 }
 
-/**
- * Which register is really in front, by the same argument one level down.
- *
- * `transcriptMode` is a habit carried between lectures, and most lectures have
- * no enhanced copy — so a stored `enhanced` on a recording that has none would
- * open on an empty panel with a button in it. It falls back to the cues
- * instead, and the picker is where the copy gets asked for. A run already in
- * flight keeps the enhanced view, because its lines land into it window by
- * window and watching that arrive is the point.
- */
-export function modeInFront(
+/** The register really in front: `enhanced` falls back to the cues when there
+ *  is no enhanced copy, unless a run is filling it now. */
+function modeInFront(
   mode: TranscriptMode,
   hasLines: boolean,
   running: boolean,
@@ -96,25 +70,14 @@ interface TranscriptPanelProps {
   /** Which tab is in front — a player preference, not a per-lecture state. */
   tab: DockTab;
   onTabChange: (tab: DockTab) => void;
-  /**
-   * Everything the Chapters tab draws, as one memoised bag.
-   *
-   * A bag rather than a dozen loose props, and a value rather than a rendered
-   * node: this component is `memo`'d against a player that re-renders four
-   * times a second on `timeupdate`, and a fresh element on every one of those
-   * would throw the memo away — which is the whole reason the virtualised list
-   * is not re-rendering constantly next to a decoding video.
-   */
+  /** The Chapters tab's props as one memoised bag, not a rendered node: this
+   *  component is `memo`'d against a player that re-renders on every
+   *  `timeupdate`, which keeps the virtualised list from re-rendering. */
   chapters: ChaptersPanelProps;
-  /** Everything the Transcript tab's Enhanced register draws, as a second bag
-   *  beside `chapters` and for the same reason. The register itself is a
-   *  stored preference this panel reads, so the bag does not carry it — and
-   *  nor does it carry the picker, which this panel builds from the rest. */
+  /** The Enhanced register's bag, memoised likewise. The mode and the picker
+   *  are built here, not carried. */
   reading: Omit<ReadingListProps, "picker">;
-  /** Everything the Chat tab draws, as a third memoised bag beside the other
-   *  two and for the same reason — read their comment. Nothing
-   *  time-varying is in it: the playhead arrives as a ref the chip ticks
-   *  itself off. */
+  /** The Chat tab's bag, memoised likewise; the playhead arrives as a ref. */
   chat: LectureChatPanelProps;
   dock: Dock;
   size: number;
@@ -123,14 +86,8 @@ interface TranscriptPanelProps {
   /** Mid resize-drag: the size is following a pointer, so it must not ease. */
   resizing: boolean;
   onSeek: (seconds: number) => void;
-  /**
-   * Fold the dock away — the header's own way out.
-   *
-   * The same thing the control bar's dock button and T do, offered here as
-   * well because the bar is over the video and fades with it: a dock docked
-   * left, on a paused lecture, is a panel whose only close control is on the
-   * other side of the player.
-   */
+  /** Fold the dock away. The control bar fades with the video, so the header
+   *  needs its own close. */
   onClose: () => void;
   /** Header press — begins the drag-to-dock gesture. */
   onHeaderPointerDown: (e: React.PointerEvent) => void;
@@ -143,14 +100,8 @@ interface TranscriptPanelProps {
 }
 
 /**
- * The dock: its box and slide, the header that is both drag handle and tab
- * strip, and the tab in front. The Transcript tab is a search row over a
- * `FollowList` — of cue buttons in its Standard register, and of the reading
- * copy's lines in Enhanced (`ReadingList`), which is a register and not a tab
- * because it is the same recording, the same order and the same seek on
- * click. The virtualizer, the follow-scroll and the Back-to-live pill all
- * live in `FollowList`, which both registers share; what is left here is the
- * mapping from cue space to row space.
+ * The dock: its box and slide, the header (drag handle and tab strip), and the
+ * tab in front. The Transcript tab maps cue space to `FollowList` row space.
  */
 export const TranscriptPanel = memo(function TranscriptPanel({
   cues,
@@ -171,10 +122,8 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   onScrollAway,
   onBackToLive,
 }: TranscriptPanelProps) {
-  // The sidebar's shape: the outer box animates its one dimension to zero
-  // while the inner keeps its full size, so the content is clipped rather than
-  // reflowed — a transcript re-wrapping every line on the way out is what a
-  // width transition looks like without it.
+  // The outer box animates one dimension to zero while the inner keeps its size,
+  // so content is clipped rather than reflowed.
   const outer: CSSProperties = isVertical(dock)
     ? { height: open ? size : 0, minHeight: open ? size : 0, maxHeight: open ? size : 0 }
     : { width: open ? size : 0, minWidth: open ? size : 0, maxWidth: open ? size : 0 };
@@ -182,25 +131,14 @@ export const TranscriptPanel = memo(function TranscriptPanel({
     ? { height: size, minHeight: size }
     : { width: size, minWidth: size };
 
-  // The transition is on except mid-drag. It cannot be *armed* by an effect
-  // when `open` flips: the effect runs after the paint that already moved the
-  // box to its new size, so the class arrives with nothing left to animate and
-  // the panel snaps. Only rapid toggling made it look like it worked — the
-  // second toggle inherited the class the first one turned on.
+  // Not armed by an effect when `open` flips: that runs after the paint that
+  // already resized the box, so the panel would snap.
   const sliding = !resizing;
 
-  // A lecture can have chapters and no transcript on disk, and a tab that
-  // could only ever be empty is not a tab — so the strip shows what this
-  // recording actually has. The preference survives it: the tab comes back the
-  // moment a transcript does. Chat is never filtered out: it needs neither a
-  // transcript nor a job that has been run, so it is the one tab every
-  // recording always has — which is also what makes the dock itself
-  // unconditional (`hasDock` in `LecturePlayer`).
+  // The Transcript tab is dropped when there are no cues; Chat never is.
   const hasTranscript = cues.length > 0;
-  // `TABS` is the vocabulary; the order is the reader's, dragged in the header
-  // and stored with the dock's side and size. A tab missing from the stored
-  // order still appears — `orderDockTabs` appends it — so shipping a fourth one
-  // does not need a migration.
+  // `TABS` is the vocabulary; the order is the reader's. `orderDockTabs` appends
+  // any tab missing from the stored order.
   const order = usePlayerPrefs((p) => p.dockTabOrder);
   const setPrefs = usePlayerPrefs((p) => p.set);
   const tabs = useMemo(() => {
@@ -214,10 +152,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   );
   const activeTab: DockTab = tabInFront(tab, hasTranscript);
 
-  // Which register the Transcript tab is in. A preference like the tab itself
-  // and read from the store here rather than threaded down from the player:
-  // nothing above this panel needs to know, and the player's memoised bags
-  // would have to be rebuilt to carry it.
+  // Read from the store here so the player's memoised bags need not carry it.
   const storedMode = usePlayerPrefs((p) => p.transcriptMode);
   const setMode = useCallback(
     (transcriptMode: TranscriptMode) => setPrefs({ transcriptMode }),
@@ -225,9 +160,8 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   );
   const mode = modeInFront(storedMode, reading.lines.length > 0, reading.status === "running");
 
-  // The picker is the register switch *and* the enhanced copy's only Write
-  // button, so it needs the job's state as well as the mode. Memoised because
-  // both registers take it as a prop and `ReadingList` is memoised against it.
+  // The picker is also the enhanced copy's only Write button, so it carries the
+  // job's state. Memoised: `ReadingList` is memoised against it.
   const picker: TranscriptModePickerProps = useMemo(
     () => ({
       value: mode,
@@ -255,10 +189,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
 
   // ── The strip's own overflow ─────────────────────────────────────────────
 
-  // Three tabs are a squeeze in a 220px dock, so the strip scrolls sideways —
-  // and a scroller with no visible bar has to say so some other way. Same shape as
-  // the transcript's vertical fades below: only shown over content they are
-  // actually hiding.
+  // The strip scrolls sideways with no visible bar; fades show the overflow.
   const stripRef = useRef<HTMLDivElement>(null);
   const [stripEdges, setStripEdges] = useState({ left: false, right: false });
 
@@ -270,10 +201,8 @@ export const TranscriptPanel = memo(function TranscriptPanel({
     setStripEdges((e) => (e.left === left && e.right === right ? e : { left, right }));
   }, []);
 
-  // The dock being resized, docked to another edge, or losing its Transcript
-  // tab all change what fits without anyone scrolling — and the header is laid
-  // out after the first paint, so the initial read has to come from the
-  // observer rather than from an effect that runs once.
+  // Resizing, re-docking or losing a tab changes what fits; the header lays out
+  // after first paint, so the initial read comes from the observer.
   useEffect(() => {
     const el = stripRef.current;
     if (!el) return;
@@ -288,10 +217,8 @@ export const TranscriptPanel = memo(function TranscriptPanel({
 
   // ── Search ───────────────────────────────────────────────────────────────
 
-  // The list is a window onto `rows`, not onto `cues`: searching narrows it to
-  // the matches, so a row index and a cue index stop being the same number.
-  // Everything the virtualizer is told is in row space; everything about
-  // playback is in cue space, and `rows[i]` is the only bridge.
+  // The list is a window onto `rows`, not `cues`: searching makes row and cue
+  // indexes differ, and `rows[i]` is the only bridge.
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
   const searching = needle.length > 0;
@@ -305,9 +232,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
     return out;
   }, [cues, needle]);
 
-  // Following is about the playing cue's row, and while searching it may not
-  // have one — so search suspends the follow-scroll and the pill rather than
-  // fighting a list the query is choosing the contents of.
+  // Search suspends the follow-scroll and the pill.
   const followIdx = searching ? -1 : activeCueIdx;
 
   return (
@@ -325,31 +250,23 @@ export const TranscriptPanel = memo(function TranscriptPanel({
       )}
     >
       <div style={inner} className="flex h-full flex-col min-h-0 min-w-0">
-        {/* The header is the drag handle *and* the tab strip, so the tabs have
-            to keep the pointerdown to themselves: `startDockDrag` captures the
-            pointer on the element it fires from, which retargets the pointerup
-            onto the header — and a click needs both to share a target, so the
-            tab would never register one. Everything around them still drags,
-            and the dots is the handle that says so. */}
+        {/* The tabs and close button stop pointerdown: the header's dock drag
+            captures the pointer, retargeting pointerup so a click never lands. */}
         <div
           onPointerDown={onHeaderPointerDown}
           className="px-2 h-9 flex items-center gap-1.5 border-b border-border shrink-0 cursor-grab active:cursor-grabbing select-none"
         >
           <Tooltip>
             <TooltipTrigger asChild>
-              {/* Lifted onto the tabs' text, which sits above their own centre
-                  by half of the underline's padding. */}
+              {/* Lifted to the tabs' text, which sits above centre by half the
+                  underline's padding. */}
               <span className="mb-2 flex items-center text-muted-foreground hover:text-foreground transition-colors">
                 <DotsSixVertical size={12} className="opacity-50" />
               </span>
             </TooltipTrigger>
             <TooltipContent>Drag to dock left, right, top or bottom</TooltipContent>
           </Tooltip>
-          {/* Three tabs are a squeeze in a 220px dock, so the strip scrolls
-              sideways rather than pushing the close button off the header. No
-              visible scrollbar: these are classic scrollbars on this machine,
-              and a bar under three words is furniture the header has no room
-              for — the fades either side carry the affordance instead. */}
+          {/* No visible scrollbar (classic scrollbars here); the fades carry it. */}
           <div className="relative min-w-0">
             <div
               ref={stripRef}
@@ -368,10 +285,6 @@ export const TranscriptPanel = memo(function TranscriptPanel({
             <StripFade side="left" show={stripEdges.left} />
             <StripFade side="right" show={stripEdges.right} />
           </div>
-          {/* Lifted onto the tabs' text like the drag handle is, and it keeps
-              its own pointerdown for the same reason they do: the header's
-              press starts a dock drag, which captures the pointer and would
-              carry this button's click away with it. */}
           <button
             type="button"
             onPointerDown={(e) => e.stopPropagation()}
@@ -391,9 +304,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
           <ReadingList {...reading} picker={picker} />
         ) : (
           <>
-            {/* The picker shares the search row rather than taking one of its
-                own: the dock is 220px at its narrowest and a second row here
-                is a row of the transcript. The field takes what is left. */}
+            {/* The picker shares the search row: the dock can be 220px wide. */}
             <div className="flex shrink-0 items-center gap-1.5 px-1.5 pt-1.5">
               <SearchField
                 value={query}
@@ -407,8 +318,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
             <FollowList
               count={rows.length}
               followIdx={followIdx}
-              // Keyed by *cue* index, not row: a row's measured height then
-              // survives the query that moved it to a different row.
+              // Keyed by cue index so measured heights survive filtering.
               getItemKey={(i) => rows[i]}
               open={open}
               active={activeTab === "transcript"}
@@ -441,7 +351,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
                     )}
                   >
                     <span className="tabular-nums text-[10px] shrink-0 pt-px w-10 opacity-60">
-                      {fmtTime(Math.floor(cue.start))}
+                      {fmtClockSecs(Math.floor(cue.start))}
                     </span>
                     <span className="flex-1">
                       <Highlight text={cue.text} needle={needle} />
@@ -457,10 +367,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   );
 });
 
-/**
- * The band the panel would land in, previewed under the pointer mid-drag —
- * brand-tinted rather than the usual grey, so it reads as the one accent.
- */
+/** The band the panel would land in, previewed mid-drag in the brand tint. */
 export function DockDropPreview({
   dock,
   height,
@@ -517,23 +424,8 @@ export function DockResizeHandle({
   );
 }
 
-/**
- * Fade over one end of the header's tab strip, shown only while there is more
- * of it that way.
- *
- * A gradient and not a `backdrop-filter`, for the reason the transcript's own
- * fades give at length further up: a blur layer inside a panel that clips its
- * overflow and transitions its width is the compositing this player spends its
- * effort avoiding, and over the header's flat `background` the two are
- * indistinguishable anyway. It ends at `background/0` rather than
- * `transparent` for the same reason as well — `transparent` is transparent
- * *black*, and interpolating to it drags the middle of the ramp grey and
- * smears the tab label underneath.
- *
- * Narrower than the list's fades (24px against 40) because it is covering a
- * word, not a paragraph: any more and the first tab is half-dissolved before
- * the strip has been scrolled at all.
- */
+/** Fade over one end of the header's tab strip while there is more that way;
+ *  same gradient as `FollowList`'s, narrower because it covers a word. */
 function StripFade({ side, show }: { side: "left" | "right"; show: boolean }) {
   return (
     <div

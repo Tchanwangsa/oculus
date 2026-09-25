@@ -29,30 +29,16 @@ interface SidebarProps {
 const WIDTH = 212;
 
 /**
- * Collapsed means gone: the sidebar animates to zero width (no icon rail), and
- * the title bar's sidebar button is the only handle on that state — in *both*
- * directions. This header used to carry a second one that faded in on hover,
- * which meant the control for a persistent setting was itself not persistent;
- * the header's slot goes to search instead, which is an action and can afford
- * to sit in chrome.
- *
- * It carries no fill or divider of its own — it sits directly on the window's
- * warm ground, and the content card's border is what separates the two.
- *
- * Only the subject list scrolls. The logo, the top-level nav and the footer are
- * pinned, and inset hairlines mark where the scrolling middle begins and ends.
+ * Collapsed animates to zero width (no icon rail); the title bar's button is
+ * the only toggle. No fill or divider of its own — see CLAUDE.md (UI
+ * conventions). Only the subject list scrolls; logo, nav and footer are pinned.
  */
 export default function Sidebar({ collapsed }: SidebarProps) {
   const width = collapsed ? 0 : WIDTH;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ top: false, bottom: false });
-  // An agent at work is the one background job that shows here, bb's way:
-  // a spinner on the row, nothing else.
+  // Background jobs surface only in the sidebar (see CLAUDE.md): a spinner.
   const agentBusy = useHarnessStore((s) => anyRunning(s.live));
-  // An index run is measured in hours, not seconds, and it is started from a
-  // settings page nobody stays on. The house rule is that a background job
-  // surfaces in the sidebar and nowhere else, so this is the whole of its
-  // presence once you navigate away.
   const indexing = useIndexStore((s) => s.running);
 
   const measure = useCallback(() => {
@@ -83,18 +69,15 @@ export default function Sidebar({ collapsed }: SidebarProps) {
 
   return (
     <aside
-      /* width/min/max are pinned together so flexbox can never clamp the box to
-         its min-content size mid-transition. */
+      /* Pinned together so flexbox can't clamp to min-content mid-transition. */
       style={{ width, minWidth: width, maxWidth: width }}
       className={cn(
         "flex flex-col h-full shrink-0 grow-0 overflow-hidden",
         "transition-[width,min-width,max-width] duration-200 ease-out",
       )}
     >
-      {/* Inner keeps its full width during the slide so content doesn't reflow,
-          it just gets clipped. */}
+      {/* Full width during the slide, so content clips rather than reflows. */}
       <div className="flex flex-col h-full" style={{ width: WIDTH, minWidth: WIDTH }}>
-        {/* Header: logo + search */}
         <div className="relative flex items-center h-10 pl-3 pr-2 shrink-0">
           <img src="/oculus-mark.svg" alt="" className="w-[18px] h-[18px] shrink-0" />
           <span className="ml-2 flex-1 min-w-0 overflow-hidden whitespace-nowrap font-display font-semibold text-foreground tracking-tight text-[13px]">
@@ -103,7 +86,6 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           <SearchButton />
         </div>
 
-        {/* Pinned top-level nav — outside the scroller, so it never slides away. */}
         <div className="px-2 pb-1.5 shrink-0">
           <NavItem to="/" icon={House} label="Home" />
           <NavItem
@@ -113,11 +95,8 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             badge={agentBusy ? <CircleNotch size={12} className="shrink-0 animate-spin text-muted-foreground" /> : null}
           />
           <NavItem to="/calendar" icon={CalendarBlank} label="Calendar" />
-          {/* One row for one section: Projects and Tasks were the same rows
-              read two ways, and the split was noise. It lands on `/projects`,
-              the section's landing view, while being labelled for the work —
-              and lights on both tabs and on a task's own page. The strip
-              between them is `components/projects/SectionHeader.tsx`. */}
+          {/* One row for Projects and Tasks: lands on `/projects`, lights on
+              `/tasks` too. */}
           <NavItem
             to="/projects"
             match={["/tasks"]}
@@ -128,16 +107,14 @@ export default function Sidebar({ collapsed }: SidebarProps) {
 
         <Rule />
 
-        {/* The one scrolling region. Its scrollbar is hidden: a bar that appears
-            on overflow takes its gutter out of the width and jogs every row
-            sideways, so the fades below carry the affordance instead. */}
+        {/* Scrollbar hidden: an overflow bar would jog every row sideways, so
+            the fades carry the affordance. */}
         <div className="relative flex-1 min-h-0">
           <div
             ref={scrollRef}
             className="h-full overflow-y-auto overflow-x-hidden px-2 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
-            {/* One wrapper, not two children: the ResizeObserver below watches
-                the scroller's first child to catch the list growing. */}
+            {/* One wrapper: the ResizeObserver watches the first child. */}
             <div className="space-y-3">
               <RecentNavGroup />
               <SubjectsNavGroup />
@@ -149,7 +126,6 @@ export default function Sidebar({ collapsed }: SidebarProps) {
 
         <Rule />
 
-        {/* Bottom nav */}
         <div className="pt-1.5 pb-2 px-2 shrink-0">
           <NavItem to="/settings" icon={GearSix} label="Settings" />
           <NavItem
@@ -168,16 +144,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
   );
 }
 
-/**
- * The ⌘K palette's visible handle. It was a nav row under the logo and is now
- * the icon in the header, because search is the one thing in that list that is
- * not a place — up here it stops pretending to be one, and the nav below reads
- * as five destinations rather than four and an action.
- *
- * Unlike the collapse button it replaces, it does not fade in on hover: a
- * handle you have to find by sweeping the mouse is no handle at all, and the
- * shortcut it teaches now lives in the tooltip.
- */
+/** The ⌘K palette's handle, always visible in the header. */
 function SearchButton() {
   const setOpen = usePaletteStore((s) => s.setOpen);
   return (
@@ -204,20 +171,15 @@ function SearchButton() {
   );
 }
 
-/** Inset hairline: it stops short of both edges so it reads as a seam in the
- *  list rather than a panel border. */
+/** Inset hairline, short of both edges so it reads as a seam. */
 function Rule() {
   return <div aria-hidden className="mx-3 h-px shrink-0 bg-sidebar-border/70" />;
 }
 
 /**
- * Fade over a scroll edge, shown only while there is more content that way.
- *
- * Deliberately a plain gradient and not `backdrop-filter`: a backdrop layer
- * inside this aside — which clips its overflow and transitions its width —
- * makes WebKit drop the whole compositing layer when the layer is torn down,
- * blanking the entire sidebar until it remounts. Over a flat ground the
- * gradient is indistinguishable from a blur anyway.
+ * Fade over a scroll edge while there is more content that way. A plain
+ * gradient, not `backdrop-filter`: in this clipped, width-transitioning aside
+ * WebKit drops the whole compositing layer on teardown, blanking the sidebar.
  */
 function ScrollFade({ side, show }: { side: "top" | "bottom"; show: boolean }) {
   return (

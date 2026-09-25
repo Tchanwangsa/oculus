@@ -3,14 +3,7 @@ import { CircleNotch, NotePencil, Trash, Warning } from "@phosphor-icons/react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileRecency } from "@/components/files/FileRecency";
 import { useSubject } from "@/layouts/SubjectLayout";
@@ -20,16 +13,13 @@ import { createDocument, deleteDocument, reconcileDocuments } from "@/lib/docume
 import { fmtSize, sqliteUtcToMs } from "@/lib/format";
 import { filePagePath, fileTitle } from "@/lib/openFile";
 import { navigateActive } from "@/lib/tabRouters";
+import { EmptyState, ListCard } from "@/components/ui/PageParts";
 
 /**
- * The student's own notes for a subject — markdown written here, kept as
- * files under `courses/<code>/documents/`, and from there ordinary library
- * files that ⌘K finds and the chat agent reads.
- *
- * The list is thin for the same reason Uploads is: the editor is the file
- * page (`DocumentEditor` hosted by `FilePage`), and a row is only the way
- * into it. What is this page's own is the reconcile on mount — the folder is
- * plain markdown on disk, and a note written there by hand deserves a row.
+ * The student's own markdown notes for a subject, kept under
+ * `courses/<code>/documents/` as ordinary library files. The editor is the
+ * file page (`DocumentEditor` in `FilePage`); a row is only the way into it.
+ * On mount the folder is reconciled so a note written there by hand gets a row.
  */
 export default function SubjectDocumentsPage() {
   const subject = useSubject();
@@ -44,8 +34,7 @@ export default function SubjectDocumentsPage() {
   const [pendingDelete, setPendingDelete] = useState<DbFile | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Rows for what is on disk. The reconcile announces when it changed
-  // anything, and `useSubjectFiles` reloads on that announcement.
+  // The reconcile announces any change, and `useSubjectFiles` reloads on it.
   const { id: subjectId, code: subjectCode } = subject;
   useEffect(() => {
     let live = true;
@@ -108,60 +97,50 @@ export default function SubjectDocumentsPage() {
               ))}
             </div>
           ) : empty ? (
-            <EmptyState onCreate={create} creating={creating} />
+            <EmptyState
+              icon={<NotePencil size={24} className="text-muted-foreground/40" aria-hidden />}
+              title="No notes yet"
+              body="Write in markdown. Each note is a file the subject's search and chat can see."
+            >
+              <Button variant="outline" size="sm" onClick={create} disabled={creating}>
+                New document
+              </Button>
+            </EmptyState>
           ) : (
-            <div className="divide-y divide-border-subtle overflow-hidden rounded-lg border border-border">
+            <ListCard>
               {documents.map((f) => (
                 <DocumentRow key={f.id} file={f} onDelete={() => setPendingDelete(f)} />
               ))}
-            </div>
+            </ListCard>
           )}
         </div>
       </div>
 
-      <Dialog
+      <ConfirmDialog
         open={!!pendingDelete}
-        onOpenChange={(open) => !open && !deleting && setPendingDelete(null)}
-      >
-        <DialogContent className="sm:max-w-sm" showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>Delete this document?</DialogTitle>
-            <DialogDescription>
-              {pendingDelete
-                ? `“${fileTitle(pendingDelete)}” is deleted from your library. There is no trash to get it back from.`
-                : ""}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={deleting}
-              onClick={() => setPendingDelete(null)}
-            >
-              Keep it
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={deleting}
-              onClick={async () => {
-                if (!pendingDelete) return;
-                setDeleting(true);
-                try {
-                  await deleteDocument(pendingDelete);
-                } catch (e) {
-                  setProblem(String(e));
-                } finally {
-                  setPendingDelete(null);
-                  setDeleting(false);
-                }
-              }}
-            >
-              {deleting && <CircleNotch className="animate-spin" aria-hidden />}
-              {deleting ? "Deleting…" : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onCancel={() => setPendingDelete(null)}
+        title="Delete this document?"
+        description={
+          pendingDelete
+            ? `“${fileTitle(pendingDelete)}” is deleted from your library. There is no trash to get it back from.`
+            : ""
+        }
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={deleting}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          setDeleting(true);
+          try {
+            await deleteDocument(pendingDelete);
+          } catch (e) {
+            setProblem(String(e));
+          } finally {
+            setPendingDelete(null);
+            setDeleting(false);
+          }
+        }}
+      />
     </>
   );
 }
@@ -172,29 +151,11 @@ function byLastEdit(a: DbFile, b: DbFile): number {
   return at(b) - at(a) || fileTitle(a).localeCompare(fileTitle(b));
 }
 
-function EmptyState({ onCreate, creating }: { onCreate: () => void; creating: boolean }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border px-6 py-14 text-center">
-      <NotePencil size={24} className="text-muted-foreground/40" aria-hidden />
-      <div className="space-y-1">
-        <p className="text-sm text-foreground">No notes yet</p>
-        <p className="text-[12px] text-muted-foreground">
-          Write in markdown. Each note is a file the subject's search and chat can see.
-        </p>
-      </div>
-      <Button variant="outline" size="sm" onClick={onCreate} disabled={creating}>
-        New document
-      </Button>
-    </div>
-  );
-}
-
 function DocumentRow({ file, onDelete }: { file: DbFile; onDelete: () => void }) {
   const path = filePagePath(file.subject_id, file.relative_path);
   return (
     <div className="group flex items-center gap-3 px-3 py-2 transition-colors hover:bg-surface">
-      {/* The page, not the peek: a note opens to be written in. `data-tab-href`
-          gives ⌘-click a tab of its own (`lib/newTabClicks.ts`). */}
+      {/* The page, not the peek: a note opens to be written in. */}
       <button
         data-tab-href={path}
         onClick={() => navigateActive(path)}
@@ -202,7 +163,6 @@ function DocumentRow({ file, onDelete }: { file: DbFile; onDelete: () => void })
       >
         <NotePencil size={14} className="shrink-0 opacity-60" aria-hidden />
         <span className="flex-1 truncate text-[12px] text-foreground">{fileTitle(file)}</span>
-        {/* Fixed-width, right-aligned columns so every row lines up. */}
         <span className="w-17 shrink-0 text-right text-[11px] text-muted-foreground tabular-nums">
           {fmtSize(file.size_bytes)}
         </span>
