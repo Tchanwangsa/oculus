@@ -21,12 +21,15 @@ Rust MSVC toolchain. Logs under `artifacts/` are local and ignored.
 
 | Check | Result |
 | --- | --- |
-| Frontend | 44 tests, 234 assertions; TypeScript and Vite production build pass. `artifacts/unified-frontend-tests.log`. |
+| Frontend | 47 tests, 253 assertions; TypeScript and Vite production build pass. `artifacts/unified-frontend-tests.log`. |
 | Rust release suite | 494 passed, four ignored: 477 library, 14 CLI, one isolated credential test, two database-upgrade tests. `artifacts/unified-rust-tests.log`. |
+| Native shortcut regression | Three menu tests passed after adding native conversation-panel shortcut dispatch, including every modifier combination for B. `artifacts/unified-shortcut-tests.log`. |
 | WSL2 bridge | 22 tests passed, including model-catalogue lifecycle and initialization without a model turn. |
 | Installed Linux Claude | The initialization-only model query returned five catalogue entries without sending a prompt. |
 | Documentation and packaging scripts | No broken source citations; all JavaScript build scripts pass syntax checks. |
-| Windows release | NSIS packaging passed. Installer: 42,850,594 bytes; SHA-256 `9df2da75aa8ba207d36bc6e9737c282d8954d414a69bbeed1e305658a4e4abfa`. `artifacts/unified-release-build.log`. |
+| Fresh Windows dependency setup | PDFium downloads and extracts with both Git Bash GNU tar and the Windows system tar; the extracted DLLs have identical hashes. |
+| Windows release | NSIS packaging passed after shortcut fixes. Installer: 42,853,895 bytes; SHA-256 `0c249adf77282f43cefa82ac8bf98dbfd87f1a7a5a015d45584ec95a3ebab3bb`. `artifacts/unified-shortcut-release-build.log`. |
+| Native Windows UI | Synthetic conversations stay independent across tabs; Ctrl+1 switches correctly. The rebuilt Ctrl+Alt+B opens and closes the conversation panel once per press. A loopback browser page loads, Ctrl+F finds text, and Ctrl+L selects the address. |
 
 The suites use synthetic libraries and protocol fixtures. No coursework was
 sent to MinerU or Voyage and no billed model turn was requested. Current

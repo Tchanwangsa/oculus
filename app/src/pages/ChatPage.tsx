@@ -27,7 +27,7 @@ import {
 import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
 import { shortcut } from "@/lib/platform";
 import { useTabId } from "@/components/tabs/TabContext";
-import { activePane } from "@/stores/tabStore";
+import { listenConversationToggle } from "@/lib/chatShortcuts";
 
 const SUGGESTIONS = [
   "What's due this week?",
@@ -180,24 +180,10 @@ export default function ChatPage() {
   const scroll = useStickToBottom(activeId, !empty);
   const list = useResizablePanel(LIST);
 
-  // ⌘⌥B folds the conversations column away, alongside the ⌘B that does the
-  // same for the app's sidebar — which is why that one now ignores ⌥.
-  //
-  // `e.code`, not `e.key`: on macOS ⌥ rewrites the character the key produces,
-  // so ⌥B arrives as `∫` and a `key === "b"` test never fires. `code` is the
-  // physical key and is the only spelling of this that works.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Background Chat tabs and the other half of a split stay mounted.
-      // A window key must only fold the conversation list being worked in.
-      if (activePane()?.id !== paneId) return;
-      if (!e.altKey || !(e.metaKey || e.ctrlKey) || e.code !== "KeyB") return;
-      e.preventDefault();
-      list.toggle();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [list.toggle, paneId]);
+  // Native menu delivery also reaches Windows Ctrl+Alt+B, which WebView2 can
+  // consume before a DOM keydown. There is no parallel DOM listener: one
+  // physical press must fold the focused pane exactly once on either OS.
+  useEffect(() => listenConversationToggle(paneId, list.toggle), [list.toggle, paneId]);
 
   const send = useCallback(
     async (text: string) => {

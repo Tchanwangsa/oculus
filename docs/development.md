@@ -128,6 +128,10 @@ production signing and notarization are separate setup. The workflow follows
 [Tauri's native build guidance](https://v2.tauri.app/distribute/pipelines/github/).
 It needs no Canvas, MinerU, Voyage or model-provider credentials.
 
+PDFium extraction runs from its staging directory with a relative archive
+name. This works with both the system BSD tar and Git Bash's GNU tar, which
+otherwise interprets an absolute Windows drive-letter path as a remote host.
+
 Use `andre` for shared integration and test on both platforms before merging
 to `master`. macOS development no longer needs a separate Windows import.
 Native UI, real account sign-in and the WSL2 sandbox still require platform

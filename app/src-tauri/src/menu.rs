@@ -24,6 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 const SEARCH: &str = "search";
 const NEW_TAB: &str = "new-tab";
 const SPLIT: &str = "split";
+const TOGGLE_CONVERSATIONS: &str = "toggle-conversations";
 const CLOSE_TAB: &str = "close-tab";
 const REOPEN_TAB: &str = "reopen-tab";
 const LAST_TAB: &str = "last-tab";
@@ -54,6 +55,7 @@ const TAB_SLOTS: usize = 8;
 pub const SEARCH_EVENT: &str = "menu-search";
 pub const NEW_TAB_EVENT: &str = "menu-new-tab";
 pub const SPLIT_EVENT: &str = "menu-split";
+pub const TOGGLE_CONVERSATIONS_EVENT: &str = "menu-toggle-conversations";
 pub const CLOSE_TAB_EVENT: &str = "menu-close-tab";
 pub const REOPEN_TAB_EVENT: &str = "menu-reopen-tab";
 pub const LAST_TAB_EVENT: &str = "menu-last-tab";
@@ -181,6 +183,16 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         "View",
         true,
         &[
+            // Native menu dispatch reaches this from a composer or a child
+            // browser alike. The frontend only toggles the focused Chat pane.
+            &MenuItem::with_id(
+                app,
+                TOGGLE_CONVERSATIONS,
+                "Toggle Conversations",
+                true,
+                Some("Alt+CmdOrCtrl+B"),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, RELOAD, "Reload Page", true, Some("CmdOrCtrl+R"))?,
             // `location.reload()` obeys the cache; this one does not. See
             // `browser_reload` for the twenty minutes that bought.
@@ -302,6 +314,9 @@ fn dispatch<R: Runtime>(app: &AppHandle<R>, id: &str) {
         }
         SPLIT => {
             app.emit(SPLIT_EVENT, ()).ok();
+        }
+        TOGGLE_CONVERSATIONS => {
+            app.emit(TOGGLE_CONVERSATIONS_EVENT, ()).ok();
         }
         CLOSE_TAB => {
             app.emit(CLOSE_TAB_EVENT, ()).ok();
@@ -437,7 +452,13 @@ pub fn attach_windows_accelerators(webview: &tauri::Webview<tauri::Wry>) {
 #[cfg(any(target_os = "windows", test))]
 fn windows_accelerator(key: u32, ctrl: bool, shift: bool, alt: bool, win: bool) -> Option<&'static str> {
     if win { return None; }
-    if alt { return (key == 0x54 && ctrl && !shift).then_some(SPLIT); }
+    if alt {
+        return match (key, ctrl, shift) {
+            (0x54, true, false) => Some(SPLIT),
+            (0x42, true, false) => Some(TOGGLE_CONVERSATIONS),
+            _ => None,
+        };
+    }
     match (key, ctrl, shift) {
         (0x7A, false, false) => Some(FULLSCREEN), // F11
         (0x4B, true, false) => Some(SEARCH),
@@ -508,5 +529,18 @@ mod tests {
         }
         assert_eq!(windows_accelerator(0x54, true, false, true, false), Some(SPLIT));
         assert_eq!(windows_accelerator(0x54, true, true, true, false), None);
+    }
+
+    #[test]
+    fn conversation_shortcut_requires_ctrl_alt_without_stealing_bold_or_text() {
+        for modifiers in 0..16 {
+            let ctrl = modifiers & 1 != 0;
+            let shift = modifiers & 2 != 0;
+            let alt = modifiers & 4 != 0;
+            let win = modifiers & 8 != 0;
+            let expected = (ctrl && alt && !shift && !win).then_some(TOGGLE_CONVERSATIONS);
+            assert_eq!(windows_accelerator(0x42, ctrl, shift, alt, win), expected,
+                "B with modifiers {modifiers:04b}");
+        }
     }
 }

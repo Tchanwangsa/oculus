@@ -191,11 +191,13 @@ off its own route and keeps `?n=` current as the model's name for the thread
 lands (`docs/harness.md`). A bare `/chat` is the empty composer, and the tab is
 plainly *Chat*.
 
-The conversations-column shortcut uses the physical B key with Command/Option
-on macOS or Ctrl/Alt on Windows. It checks the focused pane when the key arrives,
+The conversations-column shortcut is a native menu item: Command/Option/B
+on macOS or Ctrl/Alt/B on Windows, emitted as `menu-toggle-conversations`.
+`app/src/lib/chatShortcuts.ts` checks the focused pane when the event arrives,
 because other Chat tabs and both halves of a split stay mounted. Only the column
 being worked in folds; the independent conversation routes and held timelines
-remain intact.
+remain intact. No DOM key listener duplicates it: WebView2 can consume this Alt
+combination before DOM delivery, and listening on both paths could toggle twice.
 
 ## How it connects
 

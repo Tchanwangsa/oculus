@@ -83,8 +83,10 @@ async function fetchOne(triple, force) {
   const archive = join(staging, asset);
   writeFileSync(archive, buf);
   try {
-    // `tar` ships with macOS, Linux and Windows 10+; node has no unpacker.
-    execFileSync("tar", ["-xzf", archive, "-C", staging, inner], { stdio: "inherit", windowsHide: true });
+    // Git Bash can put GNU tar before Windows' BSD tar. GNU tar interprets a
+    // drive letter in -f as a remote host ("Cannot connect to D:"). Extract
+    // from the staging cwd so every tar receives only portable relative names.
+    execFileSync("tar", ["-xzf", asset, inner], { cwd: staging, stdio: "inherit", windowsHide: true });
     const tmp = `${dest}.part`;
     rmSync(tmp, { force: true });
     renameSync(join(staging, inner), tmp);

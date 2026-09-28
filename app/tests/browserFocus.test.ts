@@ -9,6 +9,7 @@ Object.assign(globalThis, { window: new EventTarget(), document: new EventTarget
 const { activePane, browserPageMayHide, useTabStore } = await import("../src/stores/tabStore");
 const { openUrlInFocusedPane, registerTabRouter, unregisterTabRouter } = await import("../src/lib/tabRouters");
 const { focusBrowserInput } = await import("../src/lib/browser");
+const { listenConversationToggle } = await import("../src/lib/chatShortcuts");
 Object.assign(globalThis, { window: previousWindow, document: previousDocument });
 
 const initial = useTabStore.getState();
@@ -20,6 +21,83 @@ const tabs: AppTab[] = [
 
 beforeEach(() => useTabStore.setState({ tabs, activeId: 1, closed: [] }));
 afterAll(() => useTabStore.setState(initial));
+
+describe("native conversations shortcut", () => {
+  async function withMenu(run: (emit: () => void, finish: () => void, removed: number[]) => Promise<void>) {
+    const savedWindow = globalThis.window;
+    const callbacks = new Map<number, () => void>();
+    const removed: number[] = [];
+    let next = 0;
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    Object.assign(globalThis, { window: {
+      __TAURI_INTERNALS__: {
+        transformCallback: (callback: () => void) => { callbacks.set(++next, callback); return next; },
+        invoke: async (command: string, args: { event: string; handler: number; eventId: number }) => {
+          expect(args.event).toBe("menu-toggle-conversations");
+          if (command === "plugin:event|listen") { await pending; return args.handler; }
+          expect(command).toBe("plugin:event|unlisten");
+          removed.push(args.eventId);
+        },
+      },
+      __TAURI_EVENT_PLUGIN_INTERNALS__: {
+        unregisterListener: (_event: string, id: number) => callbacks.delete(id),
+      },
+    } });
+    try {
+      await run(() => { for (const callback of callbacks.values()) callback(); }, finish, removed);
+    } finally {
+      finish();
+      await Bun.sleep(0);
+      Object.assign(globalThis, { window: savedWindow });
+    }
+  }
+
+  test("one menu event toggles only the focused Chat pane, including after a split focus change", async () => {
+    await withMenu(async (emit, finish) => {
+      useTabStore.setState({ tabs: [
+        { ...tabs[0], path: "/chat?t=7", split: { ...tabs[0].split!, path: "/chat?t=9" } },
+        { ...tabs[1], path: "/chat?t=11" },
+      ] });
+      const toggled: number[] = [];
+      const stops = [1, 2, 3].map((id) => listenConversationToggle(id, () => toggled.push(id)));
+      finish();
+      emit();
+      useTabStore.getState().focusPane(1, "split");
+      emit();
+      useTabStore.getState().setActive(3);
+      emit();
+      expect(toggled).toEqual([1, 2, 3]);
+      stops.forEach((stop) => stop());
+    });
+  });
+
+  test("a menu event cannot toggle a hidden Chat while a native browser owns focus", async () => {
+    await withMenu(async (emit, finish) => {
+      const toggled: number[] = [];
+      const stop = listenConversationToggle(1, () => toggled.push(1));
+      finish();
+      useTabStore.getState().focusBrowserPane(11);
+      emit();
+      expect(toggled).toEqual([]);
+      stop();
+    });
+  });
+
+  test("unmount before listener registration finishes ignores late events and unregisters", async () => {
+    await withMenu(async (emit, finish, removed) => {
+      const toggled: number[] = [];
+      const stop = listenConversationToggle(1, () => toggled.push(1));
+      stop();
+      emit();
+      finish();
+      await Bun.sleep(0);
+      emit();
+      expect(toggled).toEqual([]);
+      expect(removed).toEqual([1]);
+    });
+  });
+});
 
 describe("native browser focus in split tabs", () => {
   test("a browser body click immediately routes shell actions to its pane", () => {
