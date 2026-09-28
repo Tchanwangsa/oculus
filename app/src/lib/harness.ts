@@ -233,6 +233,34 @@ export function providerLabel(provider: Provider): string {
   return providerInfo(provider)?.label ?? provider;
 }
 
+/**
+ * The route for a Chat tab showing one conversation — or, with no id, the
+ * empty composer that starts a new one.
+ *
+ * **Which thread a tab shows lives in its route, and only there.** Every tab
+ * has its own router (`app/src/components/tabs/TabPane.tsx`), so an id in the
+ * path is an id per tab: two tabs hold two conversations, a restored tab comes
+ * back on the one it was left on, and the back arrow walks between threads.
+ * It used to be one `activeId` in the store, which every Chat tab read — so
+ * opening a thread in one tab opened it in all of them.
+ *
+ * `n` is the name, for the tab strip's sake: `tabInfo` titles a tab from its
+ * path alone and has no thread list to look one up in, which is the trade
+ * `projectHref` makes with the same letter.
+ */
+export function chatHref(threadId?: number | null, title?: string | null): string {
+  if (threadId == null) return "/chat";
+  const name = title?.trim();
+  return name ? `/chat?t=${threadId}&n=${encodeURIComponent(name)}` : `/chat?t=${threadId}`;
+}
+
+/** The thread id a Chat route names, or null for the empty composer. */
+export function chatThreadId(search: string): number | null {
+  const raw = new URLSearchParams(search).get("t");
+  const id = raw == null ? NaN : Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 /** Which sign-in shape this agent has, or null for one that has none here.
  *  Read off `PROVIDERS` rather than tested on an id, so a fourth agent costs
  *  the dialog nothing. */

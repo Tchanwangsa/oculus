@@ -547,9 +547,9 @@ and Space handled by hand, since there is no click handler left to synthesise
 them into) the way the ✕ beside it already did, and `ChatPage` no longer
 swallows the rejection if the command itself fails.
 
-**Switching does not blank the timeline.** `open` in `harnessStore` hands the
+**Switching does not blank the timeline.** `hold` in `harnessStore` hands the
 rows of the thread being left to the one arriving, for the few milliseconds the
-read takes, and returns early rather than re-reading the thread already open.
+read takes, and a thread another view is already holding is not re-read.
 Arriving with no rows put the page in the state that *is* the empty composer
 — no rows and nothing running — so every switch flashed the "Ask Oculus
 anything" hero and re-mounted the composer under it before the rows landed.
@@ -621,17 +621,31 @@ in a bare `WKWebView`: `CSS.supports` returns true and the property computes to
 overflow is the one that reserves; nothing is drawn in the gutter while the
 list fits.
 
-**The tab wears the conversation's name.** A project and a lecture tab are
-titled by the thing they hold, and a chat tab is no different — except that
-nothing links to a thread, so the page is what puts the name in its own route.
-`ChatPage` replaces `/chat` with `/chat?n=<title>` as the open thread changes
-and again when the naming turn below lands, and `tabInfo`
-(`app/src/components/tabs/tabInfo.tsx`) reads the query the way it reads a
-project's. Nothing open means no query, and the tab is plainly *Chat*. One
-thing to know before leaning on it: `activeId` lives in `harnessStore` and
-there is one of it, so two chat tabs are two views of the same open thread and
-will carry the same name. Making them independent means the page owning its
-thread id the way the lecture dock already does, not another query parameter.
+**Each Chat tab owns its conversation, in its route.** The thread a tab shows
+is `/chat?t=<id>&n=<title>` (`chatHref` in `app/src/lib/harness.ts`), and
+`ChatPage` reads the id off *its own* route rather than off the store. Every
+tab has its own router, so that is an id per tab: two tabs hold two
+conversations, a restored tab comes back on the one it was left on, a Recent
+row reopens it, and the back arrow walks through the threads this tab has
+shown — opening one from the list pushes, while a rename and the empty composer
+becoming a new thread replace. It used to be one `activeId` in `harnessStore`,
+which every Chat tab read, so opening a thread in one tab opened it in all of
+them. The store keeps what it still has to know as a count per thread
+(`holds`): which threads some Chat tab is looking at, so the lecture dock's
+`release` cannot empty a timeline another view is reading. A route naming a
+thread that is no longer in the list — deleted here or from another tab, or a
+restored tab left on one that has since gone — walks itself back to the empty
+composer once the list has loaded, and not before, or a restored tab would give
+up on its thread in the beat before the list lands.
+
+`n` is the name, for the tab strip: `tabInfo`
+(`app/src/components/tabs/tabInfo.tsx`) titles a tab from its path alone and
+has no thread list to look one up in, the trade `projectHref` makes with the
+same letter. `ChatPage` keeps it current — a thread is born titled with the
+first line of its first message and renamed once the naming turn below lands —
+and writes nothing until the thread is known. A bare `/chat` is the empty
+composer, which is also where the sidebar's Chat row, Home's composer before it
+sends, and the new-tab page's conversation door land.
 
 **The name is the model's own, and it costs a turn.** Neither CLI names a
 conversation over its protocol — Claude's `stream-json` carries no title
@@ -1006,8 +1020,10 @@ fail.
 Stop means nothing more goes out. The running turn is interrupted *and*
 whatever was queued behind it is dropped — and handed back to the composer,
 since the student typed those words and never saw them sent
-(`harness_interrupt` returns them; `restore` in
-`app/src/stores/harnessStore.ts` carries them to the box).
+(`harness_interrupt` returns them; `restore` in `app/src/pages/ChatPage.tsx`
+carries them to the box). It is the page's own state, as the dock's is, not
+the store's: one slot in the store was one slot for every Chat tab, and a stop
+in one would have typed its dropped messages into all of them.
 
 What the turn leaves behind took a recording of each CLI to get right; both
 are in `fixtures/harness/`, and the two tests replay them.
@@ -2064,7 +2080,7 @@ does not draw is the question rail — it hides itself below a 760px column
 anyway — and the usage wheel, which is a number for the page's composer to
 carry.
 
-**The panel owns its thread id; the store's `activeId` stays the Chat page's.**
+**The panel owns its thread id, as each Chat tab owns its own.**
 That is what the per-thread `items` map above is for. `load` puts the dock's
 rows in it and `release` takes them out when the tab or the lecture changes,
 because a dock walked through twenty lectures would otherwise hold twenty

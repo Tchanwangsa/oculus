@@ -10,7 +10,7 @@ import { useSubjects } from "@/hooks/useSubjects";
 import { searchEngine, searchHome } from "@/lib/browser";
 import { openSearchItem, type SearchItem } from "@/lib/search";
 import { openUrlInFocusedPane } from "@/lib/tabRouters";
-import { useHarnessStore } from "@/stores/harnessStore";
+import { chatHref } from "@/lib/harness";
 import { useRecentTabsStore } from "@/stores/recentTabsStore";
 import { useTabStore } from "@/stores/tabStore";
 
@@ -72,10 +72,9 @@ export default function NewTabPage() {
     if (side === "main") useTabStore.getState().closeTab(paneId);
   };
 
-  const newChat = () => {
-    void useHarnessStore.getState().open(null);
-    navigate("/chat");
-  };
+  // A bare `/chat` is the empty composer: which thread a Chat tab shows is
+  // in its route, so there is nothing in the store to clear first.
+  const newChat = () => navigate(chatHref(null));
 
   function pick(item: SearchItem, newTab: boolean) {
     openSearchItem(item, {

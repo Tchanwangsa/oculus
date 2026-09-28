@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { SidebarSimple } from "@phosphor-icons/react";
 import { Composer } from "@/components/harness/Composer";
@@ -19,6 +19,8 @@ import {
   harnessRewind,
   harnessSend,
   harnessUnqueue,
+  chatHref,
+  chatThreadId,
   parseUsage,
   providerInfo,
 } from "@/lib/harness";
@@ -49,17 +51,36 @@ const LIST = { defaultWidth: 224, minWidth: 160, maxWidth: 420, storageKey: "ocu
  */
 export default function ChatPage() {
   const store = useHarnessStore;
+  const navigate = useNavigate();
+  const here = useLocation();
+  // The conversation this tab is showing, read off this tab's own route —
+  // not off the store, which every Chat tab shares (`chatHref`).
+  const activeId = chatThreadId(here.search);
+  // The same id for callbacks that must not be rebuilt every time it changes:
+  // the composer, the timeline's question actions and the queue's edits all
+  // ask "which thread" at the moment they fire.
+  const activeRef = useRef(activeId);
+  activeRef.current = activeId;
   const threads = useHarnessStore((s) => s.threads);
-  const activeId = useHarnessStore((s) => s.activeId);
-  const items = useHarnessStore((s) => itemsFor(s.activeId, s.items));
+  const threadsLoaded = useHarnessStore((s) => s.threadsLoaded);
+  const items = useHarnessStore((s) => itemsFor(activeId, s.items));
   const rateLimits = useHarnessStore((s) => s.rateLimits);
   const provider = useHarnessStore((s) => s.provider);
   const model = useHarnessStore((s) => s.model);
   const reasoning = useHarnessStore((s) => s.reasoning);
   const subjects = useHarnessStore((s) => s.subjects);
   const subjectId = useHarnessStore((s) => s.subjectId);
-  const running = useHarnessStore((s) => (s.activeId != null && s.live[s.activeId]?.running) || false);
-  const restore = useHarnessStore((s) => s.restore);
+  const running = useHarnessStore((s) => (activeId != null && s.live[activeId]?.running) || false);
+  // Words a stop or a rewind handed back to this tab's composer. Local, the way
+  // the lecture dock keeps its own: in the store it was one slot for every
+  // Chat tab, so a stop in one tab typed its dropped messages into all of them.
+  // The counter is what the composer watches — the same text twice is still
+  // two restores.
+  const [restore, setRestore] = useState<{ text: string; n: number } | null>(null);
+  const handBack = useCallback(
+    (text: string) => setRestore((r) => ({ text, n: (r?.n ?? 0) + 1 })),
+    [],
+  );
   // Which threads are busy, as a primitive: selecting the live map itself
   // would put this page back on the token-by-token path the split above
   // exists to leave.
@@ -86,22 +107,45 @@ export default function ChatPage() {
     store.getState().loadSubjects();
   }, [store]);
 
+  // Put this tab's thread on screen, and say so to the store for as long as it
+  // is here — which is what stops the lecture dock releasing a timeline this
+  // tab is reading. The thread shown a moment ago lends its rows for the beat
+  // the read takes (see `hold`), so a switch never flashes the empty hero.
+  const shown = useRef<number | null>(null);
+  useEffect(() => {
+    if (activeId == null) {
+      shown.current = null;
+      return;
+    }
+    void store.getState().hold(activeId, shown.current);
+    shown.current = activeId;
+    return () => store.getState().unhold(activeId);
+  }, [activeId, store]);
+
+  // A route naming a thread that is not in the list, once the list is known:
+  // deleted here, deleted from another tab, or a restored tab left on one that
+  // has since gone. Back to the empty composer rather than a page that shows
+  // nothing and would send into a thread Rust no longer has.
+  const missing = threadsLoaded && activeId != null && thread == null;
+  useEffect(() => {
+    if (missing) navigate(chatHref(null), { replace: true });
+  }, [missing, navigate]);
+
   // The tab wears the conversation's name, the way a project and a lecture tab
   // wear theirs. `tabInfo` titles a tab from its path alone and has no thread
-  // list to look one up in, so the name travels in the query (`?n=`, the same
-  // spelling `projectHref` uses) and this page is what puts it there — on
-  // opening a thread, and again when the model's own name for it lands, since
-  // a thread is born titled with the first line of its first message and
-  // renamed once the first exchange is done. With nothing open the query goes
-  // and the tab is plainly "Chat". Replace, not push: the back arrow keeps
-  // pointing wherever it did, rather than at the same page under another name.
-  const navigate = useNavigate();
-  const here = useLocation();
+  // list to look one up in, so the name travels in the query beside the id
+  // (`chatHref`) and this page is what keeps it current — a thread is born
+  // titled with the first line of its first message and renamed once the
+  // first exchange is done. Nothing is written until the thread is known, or
+  // a restored tab would lose its name for the beat before the list lands.
+  // Replace, not push: the back arrow keeps pointing wherever it did, rather
+  // than at the same conversation under another name.
   const tabName = thread?.title?.trim() || "";
   useEffect(() => {
-    const want = tabName ? `/chat?n=${encodeURIComponent(tabName)}` : "/chat";
+    if (activeId != null && thread == null) return;
+    const want = chatHref(activeId, tabName);
     if (`${here.pathname}${here.search}` !== want) navigate(want, { replace: true });
-  }, [tabName, here.pathname, here.search, navigate]);
+  }, [activeId, thread, tabName, here.pathname, here.search, navigate]);
 
   // Rate limits are per provider account; the stored snapshot draws the bars
   // straight away, before anything is asked of the provider.
@@ -151,7 +195,7 @@ export default function ChatPage() {
   const send = useCallback(
     async (text: string) => {
       const s = store.getState();
-      const id = s.activeId;
+      const id = activeRef.current;
       try {
         const newId = await harnessSend(id, activeProvider, text, {
           model: activeModel,
@@ -160,9 +204,11 @@ export default function ChatPage() {
         });
         if (id == null) {
           // The rows for this thread were written under the new id while we
-          // waited; open it so they show, then keep listening live.
+          // waited; list it, then point *this* tab at it so they show. Replace:
+          // the empty composer became this conversation, it is not a page to
+          // go back to.
           await s.loadThreads();
-          await store.getState().open(newId);
+          navigate(chatHref(newId), { replace: true });
         }
       } catch (e) {
         // The failure also arrives as an error row through the event path.
@@ -170,19 +216,27 @@ export default function ChatPage() {
         if (id == null) await s.loadThreads();
       }
     },
-    [store, activeProvider, activeModel],
+    [store, activeProvider, activeModel, navigate],
   );
 
-  const onOpen = useCallback((id: number) => store.getState().open(id), [store]);
+  // Opening a thread is a navigation of this tab, so it pushes: the back
+  // arrow walks back through the conversations this tab has shown.
+  const onOpen = useCallback(
+    (id: number) => {
+      if (id === activeRef.current) return;
+      const t = store.getState().threads.find((x) => x.id === id);
+      navigate(chatHref(id, t?.title));
+    },
+    [store, navigate],
+  );
   const onNew = useCallback(
     (subject?: number | null) => {
-      const s = store.getState();
-      s.open(null);
+      if (activeRef.current != null) navigate(chatHref(null));
       // A `+` on a group header means "new thread, in this subject"; the
       // plain New thread button leaves the composer's scope alone.
-      if (subject !== undefined) s.setSubject(subject);
+      if (subject !== undefined) store.getState().setSubject(subject);
     },
-    [store],
+    [store, navigate],
   );
   const onDelete = useCallback(
     (id: number) => {
@@ -201,7 +255,7 @@ export default function ChatPage() {
   const onModel = useCallback(
     (m: string | null) => {
       const s = store.getState();
-      const open = s.threads.find((t) => t.id === s.activeId);
+      const open = s.threads.find((t) => t.id === activeRef.current);
       if (open) store.setState({ threads: s.threads.map((t) => (t.id === open.id ? { ...t, model: m } : t)) });
       else s.setModel(m);
     },
@@ -212,18 +266,15 @@ export default function ChatPage() {
   // anything queued behind it is dropped. Those messages were typed and never
   // sent, so they come back into the composer rather than disappearing.
   const onStop = useCallback(() => {
-    const id = store.getState().activeId;
+    const id = activeRef.current;
     if (id == null) return;
     harnessInterrupt(id)
       .then((dropped) => {
-        if (!dropped.length) return;
-        store.setState((s) => ({
-          restore: { text: dropped.join("\n\n"), n: (s.restore?.n ?? 0) + 1 },
-        }));
+        if (dropped.length) handBack(dropped.join("\n\n"));
       })
       .catch(() => {});
-  }, [store]);
-  const onRestored = useCallback(() => store.getState().restored(), [store]);
+  }, [handBack]);
+  const onRestored = useCallback(() => setRestore(null), []);
 
   // Asking the same question differently. The thread rewinds to that row —
   // it and everything after it stop being rows — and the new text goes as the
@@ -236,16 +287,17 @@ export default function ChatPage() {
     // level. What an approved Antigravity permission carries on with.
     const followUp = async (text: string) => {
       const s = store.getState();
-      const t = s.threads.find((x) => x.id === s.activeId);
+      const t = s.threads.find((x) => x.id === activeRef.current);
       if (!t) return;
       await harnessSend(t.id, t.provider, text, { model: t.model, reasoningEffort: s.reasoning });
     };
     if (!rewinds) return { followUp };
     const resend = (itemId: number, text: string) => {
       const s = store.getState();
-      if (s.activeId == null) return;
-      harnessEditResend(s.activeId, itemId, text, {
-        model: s.threads.find((t) => t.id === s.activeId)?.model,
+      const id = activeRef.current;
+      if (id == null) return;
+      harnessEditResend(id, itemId, text, {
+        model: s.threads.find((t) => t.id === id)?.model,
         reasoningEffort: s.reasoning,
       }).catch((e) => console.error("harness edit failed", e));
     };
@@ -257,30 +309,28 @@ export default function ChatPage() {
       // Rewind sends nothing. The thread goes back to before the question and
       // the words land in the composer, for the student to carry on from.
       rewind: (itemId: number) => {
-        const id = store.getState().activeId;
+        const id = activeRef.current;
         if (id == null) return;
         harnessRewind(id, itemId)
-          .then((text) =>
-            store.setState((s) => ({ restore: { text, n: (s.restore?.n ?? 0) + 1 } })),
-          )
+          .then(handBack)
           .catch((e) => console.error("harness rewind failed", e));
       },
       followUp,
     };
-  }, [store, rewinds]);
+  }, [store, rewinds, handBack]);
 
   const pending = useMemo(
     () => ({
       editQueued: (queueId: string, text: string) => {
-        const id = store.getState().activeId;
+        const id = activeRef.current;
         if (id != null) harnessEditQueued(id, queueId, text).catch(() => {});
       },
       unqueue: (queueId: string) => {
-        const id = store.getState().activeId;
+        const id = activeRef.current;
         if (id != null) harnessUnqueue(id, queueId).catch(() => {});
       },
     }),
-    [store],
+    [],
   );
 
   const composer = (

@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Composer } from "@/components/harness/Composer";
-import { harnessSend, type Provider } from "@/lib/harness";
+import { chatHref, harnessSend, type Provider } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/harnessStore";
 
 /**
@@ -50,12 +50,13 @@ export function HomeComposer() {
           reasoningEffort: s.reasoning,
           subjectId: s.subjectId,
         });
-        // The rows went in under the new id while we waited; list it, open it,
-        // and only then leave — arriving at /chat before the thread exists
-        // would land on the empty hero for a beat.
+        // The rows went in under the new id while we waited; list it, and
+        // only then leave — arriving before the thread is listed would land
+        // on a route naming a thread the page does not know yet. The id rides
+        // in the route (`chatHref`), so the conversation opens in this tab and
+        // no other.
         await s.loadThreads();
-        await store.getState().open(newId);
-        navigate("/chat");
+        navigate(chatHref(newId));
       } catch (e) {
         // The failure also arrives as an error row through the event path, so
         // there is nothing to say here beyond re-reading the list: the thread

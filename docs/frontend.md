@@ -111,12 +111,13 @@ on Todo — on the right, so switching view cannot jolt the work below. The
 `All tasks · Unfiled` scope strip that used to sit above the toolbar is gone:
 Unfiled is a value of the project filter now.
 
-**`/chat` carries `?n=` on the same terms**, and it is the one page that writes
-its own query rather than being linked with it: the conversation is picked
-inside the page, not by the link that opened it, so `ChatPage` replaces its
-route as the open thread changes and again when the model's name for the
-thread lands (`docs/harness.md`). With nothing open there is no `?n=` and the
-tab is plainly *Chat*.
+**`/chat` carries the thread itself, not just its name**: `?t=<id>&n=<title>`
+(`chatHref`). The id is what makes a Chat tab's conversation *that tab's* —
+every tab has its own router, so two tabs hold two threads, and a restored tab
+or a Recent row comes back on the one it was left on. `ChatPage` reads the id
+off its own route and keeps `?n=` current as the model's name for the thread
+lands (`docs/harness.md`). A bare `/chat` is the empty composer, and the tab is
+plainly *Chat*.
 
 ## How it connects
 

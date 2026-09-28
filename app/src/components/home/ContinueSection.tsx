@@ -16,6 +16,7 @@ import {
   openFileSmart,
 } from "@/lib/openFile";
 import { useHarnessStore } from "@/stores/harnessStore";
+import { chatHref } from "@/lib/harness";
 import { useSidePanelStore } from "@/stores/sidePanelStore";
 import { ROW, Section } from "./Section";
 import { useHomeSection } from "./useHomeSection";
@@ -82,10 +83,7 @@ export function ContinueSection() {
           key={rowKey(item)}
           item={item}
           subjectCode={threadSubjectCode(item, subjects)}
-          onOpenThread={(id) => {
-            void useHarnessStore.getState().open(id);
-            navigate("/chat");
-          }}
+          onOpenThread={(id) => navigate(chatHref(id, item.kind === "thread" ? item.thread.title : null))}
         />
       ))}
     </Section>
