@@ -437,7 +437,7 @@ pub fn stream_to_file(
 // ── ffmpeg ───────────────────────────────────────────────────────────────────
 
 fn is_runnable(path: &Path) -> bool {
-    std::process::Command::new(path)
+    crate::platform::command(path)
         .arg("-version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -484,14 +484,19 @@ pub fn find_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
         "/usr/local/bin/ffmpeg",
         "/usr/bin/ffmpeg",
     ];
-    candidates.extend(SYSTEM.iter().map(PathBuf::from));
+    // The WSL agent broker must never resolve a native program from its
+    // writable agents/ working directory. A missing bundled helper is an
+    // error there, not an opportunity to execute a model-created ffmpeg.exe.
+    if std::env::var("OCULUS_BROKER_QUERY_ONLY").as_deref() != Ok("1") {
+        candidates.extend(SYSTEM.iter().map(PathBuf::from));
+    }
 
     candidates.into_iter().find(|p| is_runnable(p))
 }
 
 /// Drop the lead-in with a stream copy — no re-encode, so it costs seconds.
 pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path) -> bool {
-    std::process::Command::new(ffmpeg)
+    crate::platform::command(ffmpeg)
         .args([
             "-y",
             "-ss",

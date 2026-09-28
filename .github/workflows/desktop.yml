@@ -1,0 +1,86 @@
+name: Desktop checks
+
+on:
+  push:
+    branches: [andre, master]
+  pull_request:
+    branches: [andre, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            bundle: nsis
+          - name: macOS
+            os: macos-latest
+            bundle: app
+    defaults:
+      run:
+        shell: bash
+        working-directory: app
+    env:
+      CARGO_TERM_COLOR: always
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      # Test artifacts use ad-hoc signing; release signing is configured separately.
+      APPLE_SIGNING_IDENTITY: "-"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.11
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+          cache-on-failure: true
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+      - name: Frontend tests and production build
+        run: |
+          bun test tests
+          bun run build
+      - name: Prepare native resources and CLI
+        run: bun run cli
+      - name: Rust tests
+        working-directory: app/src-tauri
+        run: cargo test --release --locked
+      - name: Package desktop app
+        run: bun run tauri build --bundles ${{ matrix.bundle }}
+      - name: Preserve macOS app permissions in archive
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p ../artifacts
+          ditto -c -k --sequesterRsrc --keepParent src-tauri/target/release/bundle/macos/Oculus.app ../artifacts/Oculus-macOS.zip
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: Oculus-Windows-${{ runner.arch }}
+          path: app/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload macOS app
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7
+        with:
+          name: Oculus-macOS-${{ runner.arch }}
+          path: artifacts/Oculus-macOS.zip
+          if-no-files-found: error
+          retention-days: 14

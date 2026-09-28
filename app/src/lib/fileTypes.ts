@@ -79,7 +79,7 @@ export function parsedMdRelPath(file: { filename: string; relative_path: string 
 /**
  * The icon a file wears in a list that mixes categories, matching the glyph its
  * own subject tab uses — a page is a `FileText`, an announcement a `Megaphone`,
- * a downloaded artefact whatever its extension says. Only downloads carry a
+ * a downloaded artefact whatever its extension says. Downloads and uploads carry a
  * meaningful extension, which is why `fileIconFor` is the fallback and not the
  * rule.
  */
@@ -94,6 +94,7 @@ export function categoryIconFor(file: {
     case "ed": return ChatsCircle;
     case "module": return Stack;
     case "file":
+    case "upload":
     case "image": return fileIconFor(file.filename);
     default: return FileText;
   }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useFileDrop } from "@/hooks/useFileDrop";
 import { invoke } from "@tauri-apps/api/core";
 import { CircleNotch, Trash, UploadSimple, Warning } from "@phosphor-icons/react";
 
@@ -24,7 +24,6 @@ import { fileIconFor, isPdfBacked } from "@/lib/fileTypes";
 import { fmtSize } from "@/lib/format";
 import { openFileSmart } from "@/lib/openFile";
 import {
-  UPLOADS_CHANGED_EVENT,
   addUploads,
   pickUploads,
   removeUpload,
@@ -42,27 +41,23 @@ import {
 export default function SubjectUploadsPage() {
   const subject = useSubject();
   const tabActive = useTabActive();
-  const { byCategory, loading, reload } = useSubjectFiles(subject.id);
+  const { byCategory, loading, error, reload } = useSubjectFiles(subject.id);
   const uploads = byCategory.upload;
 
   /** Names currently being copied and converted. LibreOffice takes a couple of
    *  seconds per document, and a picker that closes onto an unchanged list
    *  reads as a click that did nothing. */
   const [importing, setImporting] = useState<string[]>([]);
+  const importingRef = useRef(false);
+  const dropRef = useRef<HTMLDivElement>(null);
   /** Per-file problems from the last add, kept until the next one. */
   const [problems, setProblems] = useState<string[]>([]);
   const [pendingDelete, setPendingDelete] = useState<DbFile | null>(null);
   const [deleting, setDeleting] = useState(false);
-  /** True while the pointer is over the window holding files from Finder. */
-  const [dropping, setDropping] = useState(false);
 
   const liveStatuses = useParseStore((s) => s.statuses);
   const mergeParseStatuses = useParseStore((s) => s.merge);
 
-  useEffect(() => {
-    window.addEventListener(UPLOADS_CHANGED_EVENT, reload);
-    return () => window.removeEventListener(UPLOADS_CHANGED_EVENT, reload);
-  }, [reload]);
 
   // Same reconciliation Downloads does: a file parsed in an earlier session has
   // its artifacts on disk and nothing in this session's store.
@@ -81,8 +76,13 @@ export default function SubjectUploadsPage() {
   const add = useCallback(
     async (paths: string[]) => {
       if (paths.length === 0) return;
+      if (importingRef.current) {
+        setProblems(["Files are still being added. Please wait before adding more."]);
+        return;
+      }
+      importingRef.current = true;
       setProblems([]);
-      setImporting(paths.map((p) => p.split("/").pop() ?? p));
+      setImporting(paths.map((p) => p.split(/[\\/]/).pop() ?? p));
       try {
         const outcomes = await addUploads(subject, paths);
         setProblems(
@@ -93,6 +93,7 @@ export default function SubjectUploadsPage() {
       } catch (e) {
         setProblems([String(e)]);
       } finally {
+        importingRef.current = false;
         setImporting([]);
       }
     },
@@ -107,37 +108,18 @@ export default function SubjectUploadsPage() {
     }
   }, [add]);
 
-  // Files dragged from Finder arrive as a native window event carrying paths,
-  // not as an HTML drop — WebKit never sees them. The event is the *window's*,
-  // so a backgrounded copy of this page would claim a drop meant for whatever
-  // is in front: `tabActive` is what scopes it to the tab being looked at.
-  const addRef = useRef(add);
-  addRef.current = add;
-  useEffect(() => {
-    if (!tabActive) return;
-    let cancelled = false;
-    const un = getCurrentWebview().onDragDropEvent((event) => {
-      if (cancelled) return;
-      if (event.payload.type === "over") setDropping(true);
-      else if (event.payload.type === "leave") setDropping(false);
-      else if (event.payload.type === "drop") {
-        setDropping(false);
-        addRef.current(event.payload.paths);
-      }
-    });
-    return () => {
-      cancelled = true;
-      setDropping(false);
-      un.then((f) => f()).catch(() => {});
-    };
-  }, [tabActive]);
+  // Hit testing is pane-scoped: a native drop must not reach both visible
+  // Uploads panes or a composer elsewhere in a split tab.
+  const dropping = useFileDrop(dropRef, (paths) => {
+    if (tabActive && !pendingDelete) void add(paths);
+  });
 
   const busy = importing.length > 0;
-  const empty = !loading && uploads.length === 0 && !busy;
+  const empty = !loading && !error && uploads.length === 0 && !busy;
 
   return (
     <>
-      <div className="relative h-full">
+      <div ref={dropRef} className="relative h-full">
         <div className="page-scroll">
           <div className="mx-auto max-w-5xl px-6 py-5">
             <header className="mb-4 flex items-start justify-between gap-4">
@@ -172,6 +154,14 @@ export default function SubjectUploadsPage() {
               </Alert>
             )}
 
+            {error && (
+              <Alert variant="destructive" className="mb-3">
+                <AlertDescription>
+                  Could not load your files: {error}
+                  <Button variant="link" size="sm" onClick={reload}>Try again</Button>
+                </AlertDescription>
+              </Alert>
+            )}
             {loading && uploads.length === 0 && !busy ? (
               <div className="space-y-2">
                 {Array.from({ length: 4 }).map((_, i) => (
@@ -182,8 +172,8 @@ export default function SubjectUploadsPage() {
               <EmptyState onChoose={choose} />
             ) : (
               <div className="divide-y divide-border-subtle overflow-hidden rounded-lg border border-border">
-                {importing.map((name) => (
-                  <ImportingRow key={`importing:${name}`} name={name} />
+                {importing.map((name, index) => (
+                  <ImportingRow key={`importing:${index}`} name={name} />
                 ))}
                 {uploads.map((f) => (
                   <UploadRow

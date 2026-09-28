@@ -8,6 +8,8 @@
 //! Schema ownership stays with the plugin's migrations. If the database does
 //! not exist yet, we do not invent one; the caller reports that and keeps
 //! scraping to disk.
+//! `store::pool` resolves the database file before SQLite opens it, so a
+//! CLI with a physical Windows AppData path shares the app's WAL and locks.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -30,8 +32,9 @@ use crate::sync::Course;
 /// second reader is harmless, and our writes are occasional (once per file
 /// parsed), so a busy timeout is enough to stay out of the plugin's way.
 pub async fn pool(path: &Path) -> Result<SqlitePool, String> {
+    let path = crate::database::resolve_path(path)?;
     let opts = SqliteConnectOptions::new()
-        .filename(path)
+        .filename(&path)
         .create_if_missing(false)
         .busy_timeout(Duration::from_secs(15));
     SqlitePoolOptions::new()

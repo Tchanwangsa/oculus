@@ -41,6 +41,51 @@ struct Cli {
 mod cli_tests {
     use super::*;
 
+    #[test]
+    fn broker_subject_queries_never_refresh_the_library() {
+        for empty in [false, true] {
+            assert_eq!(should_refresh_subjects(false, empty, true), Ok(false));
+            assert!(should_refresh_subjects(true, empty, true)
+                .unwrap_err().contains("agent queries use the local library"));
+        }
+    }
+
+    #[test]
+    fn native_subject_listing_keeps_explicit_and_first_run_refresh() {
+        assert_eq!(should_refresh_subjects(false, false, false), Ok(false));
+        assert_eq!(should_refresh_subjects(false, true, false), Ok(true));
+        assert_eq!(should_refresh_subjects(true, false, false), Ok(true));
+        assert_eq!(should_refresh_subjects(true, true, false), Ok(true));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn login_resolves_the_desktop_without_relaunching_its_case_insensitive_cli_name() {
+        let mut random = [0; 8];
+        getrandom::fill(&mut random).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "oculus-login-test-{:016x}", u64::from_ne_bytes(random)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                // This unique fixture owns these two files and nothing else.
+                let _ = std::fs::remove_file(self.0.join("app.exe"));
+                let _ = std::fs::remove_file(self.0.join("oculus.exe"));
+                let _ = std::fs::remove_dir(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        let cli = root.join("oculus.exe");
+        std::fs::write(&cli, b"CLI fixture").unwrap();
+        assert!(root.join("Oculus.exe").is_file(), "exercise Windows case folding");
+        assert_eq!(windows_desktop_path(&cli), None, "never launch the CLI itself");
+        let desktop = root.join("app.exe");
+        std::fs::write(&desktop, b"desktop fixture").unwrap();
+        assert_eq!(windows_desktop_path(&cli), Some(desktop));
+    }
+
     /// The reference is only trustworthy if it covers everything, so a new
     /// subcommand that nobody remembers to document still fails this.
     #[test]
@@ -161,7 +206,9 @@ struct AgentArgs {
     #[arg(value_name = "PROMPT")]
     prompt: String,
     /// Which CLI to drive
-    #[arg(short, long, value_parser = ["claude", "codex", "opencode", "antigravity"], default_value = "claude")]
+    #[arg(short, long, value_parser = ["claude", "codex", "opencode", "antigravity"])]
+    #[cfg_attr(windows, arg(default_value = "codex"))]
+    #[cfg_attr(not(windows), arg(default_value = "claude"))]
     provider: String,
     /// Model to request (provider-specific name or alias)
     #[arg(short, long)]
@@ -233,6 +280,24 @@ struct ListArgs {
     /// Subject codes to filter by
     #[arg(value_name = "SUBJECT_CODE")]
     codes: Vec<String>,
+}
+
+/// A bridge query must remain local even on an empty first-run library.
+/// Native CLI users retain the existing explicit and automatic refreshes.
+fn should_refresh_subjects(refresh: bool, empty: bool, local_query: bool) -> Result<bool, String> {
+    if local_query && refresh {
+        return Err("Refresh subjects from Oculus; agent queries use the local library.".into());
+    }
+    Ok(!local_query && (refresh || empty))
+}
+
+/// The Windows desktop binary is `app.exe`. `Oculus.exe` is not another
+/// candidate: on Windows it names this CLI's own `oculus.exe`.
+#[cfg(windows)]
+fn windows_desktop_path(cli: &std::path::Path) -> Option<PathBuf> {
+    let dir = cli.parent()?;
+    [dir.join("app.exe"), dir.join("../debug/app.exe")]
+        .into_iter().find(|path| path.is_file())
 }
 
 #[derive(Args)]
@@ -928,22 +993,9 @@ fn read_line(prompt: &str) -> Result<String, String> {
     Ok(line.trim().to_string())
 }
 
-/// Prompt without echoing. `stty` rather than a crate — this is the only
-/// place in the CLI that needs it, and echo is restored even if the read
-/// fails, so a stray Ctrl-C cannot leave the terminal mute.
+/// Prompt without echoing on either the Windows console or a Unix terminal.
 fn read_secret(prompt: &str) -> Result<String, String> {
-    use std::io::Write;
-    print!("{prompt}");
-    std::io::stdout().flush().ok();
-
-    let hidden = std::process::Command::new("stty").arg("-echo").status().is_ok();
-    let mut line = String::new();
-    let read = std::io::stdin().read_line(&mut line);
-    if hidden {
-        std::process::Command::new("stty").arg("echo").status().ok();
-        println!();
-    }
-    read.map_err(|e| e.to_string())?;
+    let line = rpassword::prompt_password(prompt).map_err(|e| e.to_string())?;
 
     let value = line.trim().to_string();
     if value.is_empty() {
@@ -1359,7 +1411,10 @@ impl Ctx {
         println!("opening Oculus for Canvas sign-in…");
         #[cfg(target_os = "macos")]
         let launched = std::process::Command::new("open").args(["-a", "Oculus"]).status().is_ok_and(|s| s.success());
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        let launched = std::env::current_exe().ok().and_then(|p| windows_desktop_path(&p))
+            .is_some_and(|p| app_lib::platform::command(p).spawn().is_ok());
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let launched = false;
 
         if !launched {
@@ -1409,14 +1464,15 @@ impl Ctx {
 
     fn list_subjects(&self, refresh: bool) -> Result<(), String> {
         let pool = self.db();
+        let local_query = std::env::var("OCULUS_BROKER_QUERY_ONLY").as_deref() == Ok("1");
 
         // Fetch live when asked, and also when the database has nothing to show
-        // — a first run should not print an empty table.
+        // — except broker queries, which must not write or contact Canvas.
         let mut rows = match &pool {
             Some(p) => self.rt.block_on(store::subjects(p))?,
             None => Vec::new(),
         };
-        if refresh || rows.is_empty() {
+        if should_refresh_subjects(refresh, rows.is_empty(), local_query)? {
             let engine = self.engine(false);
             if !engine.canvas.has_session() {
                 return Err("not connected — run `oculus auth login`".to_string());
@@ -1669,7 +1725,14 @@ impl Ctx {
         }
         let who = engine.canvas.whoami()?;
 
-        let pool = self.db();
+        // A genuinely absent database still permits a disk-only first sync.
+        // An existing database that cannot open must fail, not silently turn
+        // a broken metadata write into an apparently successful disk-only run.
+        let pool = if app_lib::paths::db_path(&self.data_dir).exists() {
+            Some(self.rt.block_on(store::open(&self.data_dir))?)
+        } else {
+            self.db()
+        };
 
         // Refresh the course list first: a subject added this week would
         // otherwise be invisible to a code filter.
@@ -1713,9 +1776,10 @@ impl Ctx {
         println!();
 
         let target_codes: Vec<String> = targets.iter().map(|s| s.code.clone()).collect();
-        let run_id = pool
-            .as_ref()
-            .and_then(|p| self.rt.block_on(store::start_run(p, &target_codes)).ok());
+        let run_id = match &pool {
+            Some(p) => Some(self.rt.block_on(start_subject_run(p, &target_codes))?),
+            None => None,
+        };
 
         // The engine reports through a plain trait; here that means printing a
         // line per artifact and, when there is a database, upserting the same
@@ -1731,18 +1795,8 @@ impl Ctx {
         let done = engine.scrape(&targets);
 
         let written = sink.lock().unwrap().clone();
-        if let Some(p) = &pool {
-            self.rt.block_on(async {
-                for f in &written {
-                    if let Err(e) = store::upsert_file(p, f.subject_id, &f.relative_path, f.size_bytes, &f.category, f.canvas_id, f.source_url.as_deref(), f.action != "unchanged").await {
-                        eprintln!("{} {e}", paint("db:", YELLOW));
-                    }
-                }
-                if let Some(id) = run_id {
-                    store::finish_run(p, id, "completed", done, None).await.ok();
-                    store::add_log(p, "info", &format!("CLI synced {done} subject(s)"), Some(id)).await.ok();
-                }
-            });
+        if let (Some(p), Some(id)) = (&pool, run_id) {
+            self.rt.block_on(persist_subject_run(p, id, &written, done))?;
         }
 
         println!();
@@ -1784,7 +1838,7 @@ impl Ctx {
 
         let pdfs: Vec<(i64, String)> = written
             .iter()
-            .filter(|f| f.relative_path.to_lowercase().ends_with(".pdf"))
+            .filter(|f| app_lib::paths::doc_pdf_rel(&f.relative_path).is_some())
             .map(|f| (f.subject_id, f.relative_path.clone()))
             .collect();
         self.index_pdfs(p, &pdfs, !args.no_embed)
@@ -4296,6 +4350,94 @@ fn print_task_line(task: &projects::Task, depth: usize) {
 }
 
 // ── Terminal reporter ────────────────────────────────────────────────────────
+
+async fn start_subject_run(pool: &SqlitePool, codes: &[String]) -> Result<i64, String> {
+    match store::start_run(pool, codes).await {
+        Ok(id) => Ok(id),
+        Err(error) => {
+            let error = format!("could not start sync history: {error}");
+            // The insert failed, so there is no run id to finish. Preserve the
+            // error in the log if that table is still writable.
+            let _ = store::add_log(pool, "error", &error, None).await;
+            Err(error)
+        }
+    }
+}
+
+async fn persist_subject_run(
+    pool: &SqlitePool,
+    run_id: i64,
+    written: &[FileEvent],
+    done: usize,
+) -> Result<(), String> {
+    let result = async {
+        for file in written {
+            store::upsert_file(pool, file.subject_id, &file.relative_path, file.size_bytes,
+                &file.category, file.canvas_id, file.source_url.as_deref(), file.action != "unchanged")
+                .await.map_err(|error| format!("could not save {}: {error}", file.relative_path))?;
+        }
+        store::finish_run(pool, run_id, "completed", done, None).await?;
+        store::add_log(pool, "info", &format!("CLI synced {done} subject(s)"), Some(run_id)).await?;
+        Ok::<(), String>(())
+    }.await;
+    if let Err(error) = &result {
+        // Keep the original write error even if the same database fault also
+        // prevents recording the failed status. Never print success for it.
+        let _ = store::finish_run(pool, run_id, "failed", done, Some(error)).await;
+        let _ = store::add_log(pool, "error", error, Some(run_id)).await;
+    }
+    result
+}
+
+#[cfg(test)]
+mod sync_persistence_tests {
+    use super::*;
+
+    async fn pool() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1)
+            .connect("sqlite::memory:").await.unwrap();
+        sqlx::raw_sql("CREATE TABLE sync_runs (id INTEGER PRIMARY KEY, status TEXT,
+            subject_codes TEXT, finished_at TEXT, subjects_synced INTEGER,
+            pages_scraped INTEGER, error TEXT);
+            CREATE TABLE sync_log (run_id INTEGER, level TEXT, message TEXT);")
+            .execute(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn a_failed_file_write_marks_the_run_failed_and_returns_the_error() {
+        let pool = pool().await;
+        let id = start_subject_run(&pool, &["SUBJECT".into()]).await.unwrap();
+        let file = FileEvent { subject_id: 1, code: "SUBJECT".into(),
+            relative_path: "courses/SUBJECT/files/lecture.xlsx".into(), size_bytes: 8,
+            category: "file".into(), canvas_id: None, source_url: None, action: "new" };
+        // Missing files table models a real persistence failure after bytes
+        // downloaded. History and logs remain available to record the failure.
+        let error = persist_subject_run(&pool, id, &[file], 1).await.unwrap_err();
+        assert!(error.contains("lecture.xlsx"));
+        let (status, recorded): (String, String) = sqlx::query_as(
+            "SELECT status, error FROM sync_runs WHERE id = ?1")
+            .bind(id).fetch_one(&pool).await.unwrap();
+        assert_eq!(status, "failed");
+        assert_eq!(recorded, error);
+        let complete: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sync_runs WHERE status = 'completed'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(complete, 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_history_insert_propagates_before_scraping_can_start() {
+        let pool = pool().await;
+        sqlx::query("CREATE TRIGGER reject_sync BEFORE INSERT ON sync_runs
+            BEGIN SELECT RAISE(FAIL, 'history unavailable'); END")
+            .execute(&pool).await.unwrap();
+        let error = start_subject_run(&pool, &["SUBJECT".into()]).await.unwrap_err();
+        assert!(error.contains("history unavailable"));
+        let logged: String = sqlx::query_scalar("SELECT message FROM sync_log WHERE level = 'error'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(logged, error);
+    }
+}
 
 /// Prints one line per artifact and remembers them so the caller can write the
 /// database in one pass at the end.

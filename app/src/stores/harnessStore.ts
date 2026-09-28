@@ -13,6 +13,7 @@ import {
   type ThreadUsage,
 } from "@/lib/harness";
 import { getSubjects, type Subject } from "@/lib/db";
+import { isWindows } from "@/lib/platform";
 
 /**
  * What is on screen for a thread mid-turn and nowhere in the database: the
@@ -161,14 +162,14 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
   rateLimits: {},
   queued: {},
   contextDrift: {},
-  provider: "claude",
+  provider: isWindows ? "codex" : "claude",
   subjectId: null,
   subjects: [],
   // A provider whose catalogue is compiled in would let the composer open
   // already pointing at a real model. None is any more — every CLI reports
   // its own — so this opens on nothing and is filled the moment the list
   // lands (`useProviderModels`).
-  ...defaultSelectionFor("claude"),
+  ...defaultSelectionFor(isWindows ? "codex" : "claude"),
 
   loadThreads: async () => {
     const threads = await getHarnessThreads();

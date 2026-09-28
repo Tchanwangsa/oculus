@@ -165,7 +165,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -449,6 +449,8 @@ struct SessionState {
 
 pub struct OpencodeServer {
     child: Mutex<Child>,
+    #[cfg(windows)]
+    job: Mutex<Option<crate::platform::ProcessJob>>,
     base: String,
     directory: PathBuf,
     /// Ordinary calls, with a timeout. The event stream gets its own agent
@@ -464,11 +466,12 @@ pub struct OpencodeServer {
 
 impl OpencodeServer {
     pub fn spawn(cfg: OpencodeSpawn) -> Result<Arc<Self>, String> {
-        let mut child = Command::new(&cfg.bin)
+        let mut child = super::discover::provider_command(&cfg.bin)?
             .arg("serve")
             .args(["--port", "0"])
             .args(["--hostname", "127.0.0.1"])
             .arg("--print-logs")
+            .current_dir(&cfg.directory)
             .env_clear()
             .envs(cfg.env.iter().map(|(k, v)| (k, v)))
             // Neither belongs in a server the app owns: an autoupdate would
@@ -481,6 +484,12 @@ impl OpencodeServer {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("cannot start {}: {e}", cfg.bin.display()))?;
+        #[cfg(windows)]
+        let job = crate::platform::ProcessJob::assign(&child).map_err(|e| {
+            let _ = child.kill();
+            let _ = child.wait();
+            format!("cannot supervise opencode process tree: {e}")
+        })?;
         let stdout = child.stdout.take().ok_or("no stdout on opencode child")?;
         let stderr = child.stderr.take().ok_or("no stderr on opencode child")?;
 
@@ -538,6 +547,8 @@ impl OpencodeServer {
 
         let server = Arc::new(OpencodeServer {
             child: Mutex::new(child),
+            #[cfg(windows)]
+            job: Mutex::new(Some(job)),
             base: format!("http://127.0.0.1:{port}"),
             directory: cfg.directory.clone(),
             api: ureq::AgentBuilder::new()
@@ -1109,6 +1120,8 @@ impl OpencodeServer {
     ///
     pub fn kill(&self) {
         self.alive.store(false, Ordering::SeqCst);
+        #[cfg(windows)]
+        self.job.lock().unwrap().take();
         let mut child = self.child.lock().unwrap();
         let _ = child.kill();
         let _ = child.wait();
@@ -1261,6 +1274,8 @@ impl OpencodeServer {
 
 impl Drop for OpencodeServer {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        if let Ok(mut job) = self.job.lock() { job.take(); }
         if let Ok(mut c) = self.child.lock() {
             let _ = c.kill();
         }
@@ -1294,8 +1309,11 @@ pub fn write_config(directory: &Path, library: &Path, prompt: &str, naming_promp
 /// or failing to compile. The test below parses the *output* to prove it is
 /// valid JSON; nothing in the write path may.
 fn render_config(library: &Path, prompt: &str, naming_prompt: &str) -> String {
+    let logical = crate::paths::db_path(library);
+    let database = crate::database::resolve_path(&logical).unwrap_or(logical);
     CONFIG_TEMPLATE
-        .replace("{{LIBRARY}}", &json_fragment(&library.display().to_string()))
+        .replace("{{LIBRARY}}", &json_fragment(&library.display().to_string().replace('\\', "/")))
+        .replace("{{DATABASE}}", &json_fragment(&database.display().to_string().replace('\\', "/")))
         .replace("\"{{PROMPT}}\"", &json_string(prompt))
         .replace("\"{{NAMING_PROMPT}}\"", &json_string(naming_prompt))
 }
@@ -2897,6 +2915,17 @@ mod tests {
             .unwrap()
             .contains("\"quoted\" \\ backslash"));
         assert_eq!(v["agent"][NAMING_AGENT]["hidden"], true);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_permission_paths_keep_slashes_and_unicode() {
+        let config = render_config(Path::new(r"C:\Users\学生\Course Library"), "brief", "name");
+        let value: Value = serde_json::from_str(&config).unwrap();
+        let edit = &value["permission"]["edit"];
+        assert_eq!(edit["C:/Users/学生/Course Library/courses/**"], "deny");
+        assert_eq!(edit["C:/Users/学生/Course Library/oculus.db*"], "deny");
+        assert!(!config.contains("{{DATABASE}}"));
     }
 
     // ── Provider credentials ─────────────────────────────────────────────

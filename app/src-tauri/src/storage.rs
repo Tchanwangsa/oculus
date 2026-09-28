@@ -62,7 +62,20 @@ fn disk_space(path: &Path) -> (u64, u64) {
     (s.f_bavail as u64 * frsize, s.f_blocks as u64 * frsize)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn disk_space(path: &Path) -> (u64, u64) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let (mut available, mut total, mut free) = (0, 0, 0);
+    // The path is NUL-terminated; all output pointers refer to live u64s.
+    if unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut available, &mut total, &mut free) } == 0 {
+        return (0, 0);
+    }
+    (available, total)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn disk_space(_path: &Path) -> (u64, u64) {
     (0, 0)
 }
@@ -86,4 +99,14 @@ pub async fn storage_report() -> Result<StorageReport, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    #[test]
+    fn native_volume_capacity_is_not_a_placeholder() {
+        let (available, total) = super::disk_space(&std::env::temp_dir());
+        assert!(total > 0);
+        assert!(available <= total);
+    }
 }

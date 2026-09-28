@@ -1,0 +1,3 @@
+# Keep verified third-party source bytes intact and exclude vendor code from
+# GitHub language statistics and first-party whitespace checks.
+app/src-tauri/vendor/** -text -whitespace linguist-vendored=true

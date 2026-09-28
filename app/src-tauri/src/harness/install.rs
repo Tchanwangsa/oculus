@@ -24,12 +24,10 @@
 //!   that reached the webview, in the one app that also holds the student's
 //!   Canvas session.
 //!
-//! **macOS only.** The routes here are macOS ones and detection itself is
-//! macOS-shaped (see `discover.rs`'s module docs: `binary_name` has no
-//! `.cmd`/`.exe`, and npm on Windows installs `claude.cmd` resolved through
-//! `PATHEXT`), as is the rest of the app. `scoop` and `winget` are real and
-//! are not here; offering them would mean a button that installs something
-//! discovery then cannot find.
+//! Routes are platform-specific. Windows offers native Codex and opencode
+//! packages, Antigravity's PowerShell installer, and a copy-only WSL setup
+//! command for Claude. The latter can need elevation/restart and therefore
+//! must run from the repository in a visible terminal, outside this runner.
 //!
 //! The commands run through `$SHELL -lc` for the same reason discovery asks a
 //! login shell: a Dock-launched app has launchd's PATH, and `brew` is not on
@@ -45,7 +43,9 @@
 //! the exit event, through the one path that invalidates both.
 
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+#[cfg(not(windows))]
+use std::process::Command;
+use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,8 @@ pub enum Manager {
     Brew,
     Npm,
     Bun,
+    Powershell,
+    Wsl,
 }
 
 impl Manager {
@@ -73,6 +75,8 @@ impl Manager {
             Manager::Brew => "brew",
             Manager::Npm => "npm",
             Manager::Bun => "bun",
+            Manager::Powershell => "powershell",
+            Manager::Wsl => "wsl",
         }
     }
 
@@ -82,6 +86,8 @@ impl Manager {
             Manager::Brew => "Homebrew",
             Manager::Npm => "npm",
             Manager::Bun => "bun",
+            Manager::Powershell => "PowerShell installer",
+            Manager::Wsl => "WSL2 setup (repository root)",
         }
     }
 }
@@ -118,6 +124,7 @@ struct Route {
 /// binary in through a per-platform optional dependency plus a postinstall
 /// link step — bun does not run postinstall scripts for untrusted packages, so
 /// a bun route would look like it worked and leave nothing to run.
+#[cfg(not(windows))]
 const CLAUDE: &[Route] = &[
     Route {
         manager: Manager::Curl,
@@ -144,6 +151,7 @@ const CLAUDE: &[Route] = &[
 /// - brew / npm: <https://github.com/openai/codex> README, install section.
 ///
 /// No bun route, for the same reason as Claude's.
+#[cfg(not(windows))]
 const CODEX: &[Route] = &[
     Route {
         manager: Manager::Curl,
@@ -171,6 +179,7 @@ const CODEX: &[Route] = &[
 /// - npm / bun: same README (`npm i -g opencode-ai@latest`, "or bun/pnpm/
 ///   yarn"). This is the one vendor that documents bun, which is why it is the
 ///   one provider with a bun route.
+#[cfg(not(windows))]
 const OPENCODE: &[Route] = &[
     Route {
         manager: Manager::Curl,
@@ -198,10 +207,42 @@ const OPENCODE: &[Route] = &[
 /// omission here: `agy` is a Go binary its own installer places, with no
 /// Homebrew formula and no npm package to stand in for one — the npm route
 /// every other agent has does not exist for this one.
+#[cfg(not(windows))]
 const ANTIGRAVITY: &[Route] = &[Route {
     manager: Manager::Curl,
     command: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
     lands_in: "~/.local/bin",
+}];
+
+#[cfg(windows)]
+const CLAUDE: &[Route] = &[Route {
+    manager: Manager::Wsl,
+    command: "powershell -NoProfile -File .\\app\\scripts\\setup-claude-wsl.ps1",
+    lands_in: "the dedicated Oculus WSL2 distribution; run from the repository root",
+}];
+
+#[cfg(windows)]
+const CODEX: &[Route] = &[Route {
+    manager: Manager::Npm,
+    command: "npm.cmd install -g @openai/codex",
+    lands_in: "%APPDATA%\\npm",
+}];
+
+// https://opencode.ai/docs/#windows explicitly lists npm for Windows and
+// says Windows Bun installation is still in progress (checked 2026-09-24).
+#[cfg(windows)]
+const OPENCODE: &[Route] = &[Route {
+    manager: Manager::Npm,
+    command: "npm.cmd install -g opencode-ai@latest",
+    lands_in: "%APPDATA%\\npm",
+}];
+
+// https://antigravity.google/docs/cli/install/
+#[cfg(windows)]
+const ANTIGRAVITY: &[Route] = &[Route {
+    manager: Manager::Powershell,
+    command: "irm https://antigravity.google/cli/install.ps1 | iex",
+    lands_in: "%LOCALAPPDATA%\\agy\\bin",
 }];
 
 fn routes(provider: Provider) -> &'static [Route] {
@@ -221,6 +262,7 @@ pub struct Managers {
     pub brew: bool,
     pub npm: bool,
     pub bun: bool,
+    pub powershell: bool,
 }
 
 impl Managers {
@@ -230,6 +272,8 @@ impl Managers {
             Manager::Brew => self.brew,
             Manager::Npm => self.npm,
             Manager::Bun => self.bun,
+            Manager::Powershell => self.powershell,
+            Manager::Wsl => false,
         }
     }
 }
@@ -244,6 +288,7 @@ pub fn detect() -> Managers {
         brew: has(Manager::Brew),
         npm: has(Manager::Npm),
         bun: has(Manager::Bun),
+        powershell: has(Manager::Powershell),
     }
 }
 
@@ -345,6 +390,9 @@ where
             provider.label()
         )
     })?;
+    if manager == Manager::Wsl {
+        return Err("Run the displayed WSL2 setup command from the repository root in PowerShell; setup can require administrator approval or a Windows restart.".into());
+    }
 
     {
         let mut r = running().lock().unwrap();
@@ -409,18 +457,42 @@ where
         return Err("that command needs sudo, which this app cannot ask for".into());
     }
 
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let mut child = Command::new(&shell)
-        .args(["-lc", command])
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let mut cmd = Command::new(shell);
+        cmd.args(["-lc", command]);
+        cmd
+    };
+    #[cfg(windows)]
+    let mut cmd = {
+        let shell = discover::tool("powershell").ok_or("Windows PowerShell is unavailable")?;
+        let mut cmd = crate::platform::command(shell);
+        // Windows PowerShell does not propagate a native npm exit code by
+        // itself; report that failure, and stop immediately on script errors.
+        let script = format!("$ErrorActionPreference='Stop'; {command}; if ($LASTEXITCODE) {{ exit $LASTEXITCODE }}");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .env_clear().envs(discover::child_env());
+        cmd
+    };
+    let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("cannot run {shell}: {e}"))?;
+        .map_err(|e| format!("cannot run the installer: {e}"))?;
+    #[cfg(windows)]
+    let job = crate::platform::ProcessJob::assign(&child).map_err(|e| {
+        let _ = child.kill();
+        let _ = child.wait();
+        format!("cannot supervise the installer: {e}")
+    })?;
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     std::thread::spawn(move || {
+        #[cfg(windows)]
+        let _job = job;
         let (tx, rx) = std::sync::mpsc::channel::<String>();
         let mut readers = Vec::new();
         for pipe in [
@@ -490,7 +562,10 @@ mod tests {
     /// not by oversight: `agy` is a Go binary its own script places, with no
     /// formula and no npm package, so the manager-shaped tests below have
     /// nothing to assert about it. [`antigravity_is_curl_only`] is its half.
+    #[cfg(not(windows))]
     const PACKAGED: [Provider; 3] = [Provider::Claude, Provider::Codex, Provider::Opencode];
+    #[cfg(windows)]
+    const PACKAGED: [Provider; 2] = [Provider::Codex, Provider::Opencode];
 
     /// A machine with Homebrew and nothing else runs the brew route, and is
     /// offered the others as text. `curl` is the interesting half: it is on
@@ -498,6 +573,7 @@ mod tests {
     /// sees — but "nearly always" is not "assume", and it is gated like the
     /// rest.
     #[test]
+    #[cfg(not(windows))]
     fn brew_only_machine_runs_the_brew_route() {
         let have = Managers {
             brew: true,
@@ -538,7 +614,7 @@ mod tests {
             bun: true,
             ..Default::default()
         };
-        assert!(offer(Provider::Opencode, bun).runnable);
+        assert_eq!(offer(Provider::Opencode, bun).runnable, !cfg!(windows));
         assert!(!offer(Provider::Claude, bun).runnable);
         assert!(!offer(Provider::Codex, bun).runnable);
     }
@@ -548,6 +624,7 @@ mod tests {
     /// three each have a package manager to fall back on; this one does not,
     /// which makes `curl` load-bearing rather than merely first.
     #[test]
+    #[cfg(not(windows))]
     fn antigravity_is_curl_only() {
         let managers: Vec<Manager> = routes(Provider::Antigravity)
             .iter()
@@ -623,7 +700,10 @@ mod tests {
     #[test]
     fn runner_streams_then_reports_the_exit() {
         let (tx, rx) = mpsc::channel::<Line>();
-        run_command("echo hello; echo trouble 1>&2; exit 3", move |l| {
+        let command = if cfg!(windows) {
+            "[Console]::Out.WriteLine('hello'); [Console]::Error.WriteLine('trouble'); exit 3"
+        } else { "echo hello; echo trouble 1>&2; exit 3" };
+        run_command(command, move |l| {
             let _ = tx.send(l);
         })
         .unwrap();
@@ -641,5 +721,24 @@ mod tests {
     #[test]
     fn runner_refuses_sudo() {
         assert!(run_command("sudo make me a sandwich", |_| {}).is_err());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_routes_never_install_native_claude_or_run_wsl_setup() {
+        let all = Managers { curl: true, brew: true, npm: true, bun: true, powershell: true };
+        let claude = offer(Provider::Claude, all);
+        assert!(!claude.runnable);
+        assert_eq!(claude.routes[0].manager, Manager::Wsl);
+        assert!(start(Provider::Claude, Manager::Wsl, |_| {}).is_err());
+        for provider in [Provider::Codex, Provider::Opencode] {
+            let offered = offer(provider, all);
+            assert_eq!(offered.routes.len(), 1);
+            assert_eq!(offered.routes[0].manager, Manager::Npm);
+            assert!(!offered.routes[0].command.contains("bash"));
+        }
+        let agy = offer(Provider::Antigravity, all);
+        assert_eq!(agy.routes[0].manager, Manager::Powershell);
+        assert!(agy.runnable);
     }
 }

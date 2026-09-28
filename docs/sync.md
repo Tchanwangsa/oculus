@@ -4,6 +4,13 @@ One Rust engine scrapes three services. It runs identically inside the app
 (on a plain thread, reporting through Tauri events) and in the `oculus` CLI
 (reporting to stdout).
 
+Windows uses the same engine and `/`-separated library paths. Native filesystem
+paths are constructed only when opening an artifact. Office conversion in
+`app/src-tauri/src/sync.rs` discovers LibreOffice from `OCULUS_SOFFICE`, PATH,
+or the standard Program Files locations and launches it without a console
+window. LibreOffice is an optional external installation; a missing converter
+is reported by the existing conversion error path.
+
 ## Where
 
 | Piece | Location |
@@ -18,6 +25,7 @@ One Rust engine scrapes three services. It runs identically inside the app
 | Headless DB writes | `app/src-tauri/src/store.rs` |
 | Subject list state | `app/src-tauri/src/subjects.rs` |
 | Chronological term ranking | `app/src-tauri/src/terms.rs` |
+| Personal subject file import and deletion | `app/src-tauri/src/files.rs` |
 | Agent docs written into the library | `app/src-tauri/src/agents.rs` |
 | Canvas calendar (class times, due dates) | `app/src-tauri/src/calendar.rs` |
 | Frontend sync page / runner | `app/src/pages/SyncPage.tsx`, `app/src/lib/syncRunner.ts` |
@@ -99,22 +107,52 @@ One Rust engine scrapes three services. It runs identically inside the app
   only the first band carried the ID and name columns — the rest were bare
   grids of numbers, which is both a meaningless page image and the markdown a
   citation would hydrate from. `SinglePageSheets` keeps every row with its
-  headers; `MAX_RENDER_PIXELS` in `sidecar/embedder.py` is what stops the
-  resulting page being rendered at its full size.
+  headers; `dpi_for_page` in `app/src-tauri/src/embed/raster.rs` bounds
+  oversized page renders before they reach the embedding backend.
 - **An untyped upload is judged by its extension.** Canvas reports whatever
   content type the uploading browser claimed, so the same deck arrives typed
   on one course and `application/octet-stream` on another. A generic type
   falls back to the filename (`office_ext_of`), which is still an allowlist —
   only the extensions the converter handles, plus `.pdf`.
 - **Changed bytes invalidate the parse.** An `updated` write purges the
-  parse/embed artifacts (`.md`, `.pages.json`, `.emb.json` — see
+  parse/embed artifacts (`.md`, `.pages.json`, `.emb.json` and the page-image folder — see
   `paths::purge_parse_artifacts`), and the app clears the file's stored
-  pages and parse status, so the parse re-runs instead of the existence
-  check pinning stale markdown.
+  pages and parse/embed statuses, so the pipeline re-runs instead of the
+  pipeline's artifact checks pinning stale markdown and vectors.
+- **Personal files live in a subject's `uploads/` folder.** `import_uploads`
+  copies picked files into `courses/<code>/uploads/` and returns a result for
+  each pick, so one failure does not discard the other imports. Office files
+  use the same converter as a sync; if conversion fails, the original still
+  gets a library row and a visible warning. Parsing, search and chat then use
+  the same library paths as downloaded course material.
+  Imports preserve identical files and rename different files that share a
+  name. Allocation also reserves converted PDFs, markdown, embedding records
+  and image-folder names, so `notes.md` cannot be overwritten by parsing a
+  later `notes.pdf`. Concurrent imports are serialized and new files are
+  created without overwrite. Names retain the Windows port's device-name and
+  Unicode-length handling.
+- **Only personal uploads can be deleted.** `delete_upload` removes the
+  original, its converted PDF and parse artifacts. Its lexical check accepts
+  only flat, portable upload paths; filesystem checks reject symbolic links
+  and Windows junctions in the subject/upload folders or derived artifacts.
+  Recursive image cleanup resolves its target inside the library first.
+  Deleted names remain reserved by zero-byte markers in the internal
+  `.oculus-upload-reservations/` folder: a parser already running may finish
+  after deletion, and its late output must never become another file's parse.
+  Deletion is safe to retry after the original is gone, so a failed database
+  row deletion does not strand the entry. Every retry repeats the same path
+  checks and removes any parse artifacts that arrived late.
+  A downloaded Canvas file is never eligible for this command.
 - **Progress leaves through a `Reporter` trait**, not a channel to the UI.
   `app/src-tauri/src/scrape.rs` implements it by emitting the same Tauri
   events the frontend already listened for; the CLI implements it by
   printing. The UI contract did not change when the scraper left the WebView.
+- **CLI success requires metadata persistence.** A failed history insert stops
+  the run before scraping. A failed file-row or completion write returns an
+  error and records failed history where the database still permits it; bytes
+  downloaded to disk are retained for the next sync. The CLI's following index
+  phase includes Office originals whose converted siblings are available, as
+  well as native PDFs.
 - `app/src-tauri/src/canvas.rs` is the **entire** Canvas HTTP surface — the
   session cookie, retry policy, and Link-header pagination live only there.
   Both scraping and auth probing go through it.

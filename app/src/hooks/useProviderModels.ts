@@ -3,7 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PickerProvider } from "@/components/harness/ModelPicker";
 import { providerHealth, useBridgeHealth } from "@/hooks/useBridgeHealth";
 import { PROVIDERS, providerInfo, type HarnessModel, type Provider } from "@/lib/harness";
+import { shouldDiscoverModels, type ModelDiscoveryAttempt } from "@/lib/modelDiscovery";
 import { useCatalogue } from "@/lib/opencodeCatalogue";
+import { isWindows } from "@/lib/platform";
+import { claudeWslUnavailableReason } from "@/stores/harnessHealthStore";
 
 /**
  * The model picker's providers, with each one's catalogue and whether its CLI
@@ -28,9 +31,9 @@ import { useCatalogue } from "@/lib/opencodeCatalogue";
  *
  * A provider nobody has asked about reports `loading`, which is what it is:
  * its list is not here, and switching the picker to it is what asks. Each is
- * asked once per mount, failures included — a missing CLI answers with an
- * empty list, and re-asking it on every render of a menu would make an absent
- * agent slow as well as absent.
+ * asked once per mount. Empty or failed requests get one more attempt after
+ * each successful shared health recheck, so installing or signing into an
+ * agent enables an already mounted composer without retrying on every render.
  *
  * **Once per mount, plus once per catalogue edit.** opencode's list is its CLI
  * catalogue less whatever the student hid, per
@@ -40,7 +43,7 @@ import { useCatalogue } from "@/lib/opencodeCatalogue";
  * mount rule: the expensive thing is the CLI call, and the catalogue's version
  * counter changes only when Settings writes, which is a handful of times in a
  * session rather than once a render. So the ask is re-armed on a version
- * change and on nothing else. The old list stays on screen until the new one
+ * change. The old list stays on screen until the new one
  * lands, since a tick should not blank the menu for a beat.
  *
  * **Health rides alongside the catalogue rather than replacing it.** A
@@ -60,10 +63,9 @@ export function useProviderModels(needed: Provider | Provider[]): {
   modelsFor: (p: Provider) => HarnessModel[];
 } {
   const [fetched, setFetched] = useState<Partial<Record<Provider, HarnessModel[]>>>({});
-  const asked = useRef(new Set<Provider>());
-  const { health } = useBridgeHealth();
+  const attempts = useRef(new Map<Provider, ModelDiscoveryAttempt>());
+  const { health, error } = useBridgeHealth();
   const { version } = useCatalogue();
-  const askedVersion = useRef(version);
 
   // A stable key rather than the array itself: every call site builds its
   // `needed` inline, so a fresh array each render would re-run the effect
@@ -74,27 +76,27 @@ export function useProviderModels(needed: Provider | Provider[]): {
   );
 
   useEffect(() => {
-    // Re-armed here rather than in an effect of its own, so nothing depends on
-    // which of two effects React runs first.
-    if (askedVersion.current !== version) {
-      askedVersion.current = version;
-      asked.current.clear();
-    }
     for (const id of key.split(" ").filter(Boolean) as Provider[]) {
       const info = providerInfo(id);
-      if (!info?.fetchModels || asked.current.has(id)) continue;
+      if (!info?.fetchModels || !shouldDiscoverModels(attempts.current.get(id), health, version)) continue;
       // Known missing: the fetch would spawn a CLI that is not there and come
       // back empty, which the picker would have to tell apart from a real
       // empty answer. `unknown` still asks — health is not waited on, so a
       // composer's list arrives as fast as it ever did.
       if (providerHealth(health, id) === "missing") continue;
-      asked.current.add(id);
+      const attempt: ModelDiscoveryAttempt = { health, version, status: "pending" };
+      attempts.current.set(id, attempt);
       info
         .fetchModels()
-        .then((models) => setFetched((f) => ({ ...f, [id]: models })))
-        .catch(() => setFetched((f) => ({ ...f, [id]: [] })));
+        .catch((): HarnessModel[] => [])
+        .then((models) => {
+          attempt.status = models.length ? "ready" : "empty";
+          setFetched((f) => ({ ...f, [id]: models }));
+        });
     }
-  }, [key, health, version]);
+    // A recheck may finish while discovery is pending. Its completion revisits
+    // the gate using the latest health/version, without overlapping requests.
+  }, [key, health, version, fetched]);
 
   const providers = useMemo<PickerProvider[]>(
     () =>
@@ -108,10 +110,13 @@ export function useProviderModels(needed: Provider | Provider[]): {
           // nothing is coming.
           loading: !p.staticModels && state !== "missing" && fetched[p.id] === undefined,
           health: state,
+          unavailableReason: isWindows && p.id === "claude"
+            ? claudeWslUnavailableReason(health, error)
+            : undefined,
           emptyNote: p.emptyNote,
         };
       }),
-    [fetched, health],
+    [fetched, health, error],
   );
 
   const modelsFor = useCallback(

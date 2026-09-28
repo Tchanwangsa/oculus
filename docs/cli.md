@@ -5,6 +5,17 @@ app, with no window involved. Useful for terminal syncs, cron jobs, and
 debugging. `app/README.md` carries the full command reference; this page is
 how it fits the architecture.
 
+On Windows the binary is `oculus.exe`, its library is under
+`%APPDATA%\com.tchan.oculus`, and the app and CLI use the same path resolver.
+Secret prompts use native console echo control through `rpassword`.
+`auth login` locates the adjacent `app.exe` desktop executable (the CLI is
+`oculus.exe`, which Windows also matches as `Oculus.exe`), while `auth tick`
+also serves the per-user Windows scheduled task described in [auth.md](./auth.md).
+Generated course instructions are copied on Windows rather than requiring
+symlink privileges. Artifact names avoid Windows device names and trailing
+periods and shorten oversized components with a stable suffix, using the
+same names on every platform.
+
 Three kinds of command, and the difference between two of them matters.
 `run`, `index` and `auth` **write the library**: they are the app's engine
 without the window, and everything they write is a copy of something the

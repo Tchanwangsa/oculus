@@ -2,6 +2,11 @@
 
 Tauri 2 + React 19 + Vite + Tailwind v4.
 
+One source tree builds the macOS and Windows apps. Shared integration happens
+on `andre` before merging to `master`; see the root README and
+[Windows setup](../docs/windows.md) for platform prerequisites. The desktop
+workflow builds and tests both platforms.
+
 ## Package manager: bun
 
 **This project uses [bun](https://bun.sh). Do not use npm, yarn, or pnpm.**
@@ -26,8 +31,9 @@ with no window involved. Useful for running a sync from a terminal, in a cron
 job, or while debugging.
 
 ```sh
-bun run cli          # build src-tauri/target/release/oculus
-bun run cli:install  # build + symlink into ~/.local/bin
+bun run cli          # build src-tauri/target/release/oculus(.exe)
+bun run cli:dev      # debug CLI, also built by the dev preflight
+bun run cli:install  # build + copy on Windows / symlink on Unix to ~/.local/bin
 bun run docs:cli     # regenerate ../docs/cli-reference.md from the binary's help
 ```
 
@@ -36,7 +42,7 @@ staged — so a release bundle can never ship a CLI that the checked-in
 reference does not describe.
 
 ```sh
-oculus                          # session, sidecar and library status
+oculus                          # session, parser and library status
 oculus auth login               # opens the app's Canvas sign-in, waits for the session
 oculus auth logout              # forget the session and the SSO profile
 
@@ -47,8 +53,7 @@ oculus list -l MULT20015        # lectures for a subject
 oculus run -s                   # scrape every selected current subject
 oculus run -s MULT20015 COMP30026
 oculus run -s --all             # include past terms
-oculus run -s --no-embed        # parse PDFs but skip the retrieval index
-oculus run -s --no-parse        # skip the sidecar entirely
+oculus run -s --no-parse        # download without parsing PDFs
 
 oculus index                    # re-parse + re-embed PDFs already on record
 oculus index MULT20015
@@ -83,10 +88,9 @@ oculus calendar COMP30026 --due                    # due dates only
 oculus docs                                        # regenerate the agent CLI reference
 ```
 
-`search` ranks page *images* through the sidecar's embedding model, so it
-needs the sidecar running — in practice, the app open. When it is not, the
-command fails with exit 1 and points at `grep`, which needs nothing and
-searches the same text literally.
+`search` ranks page *images* with Voyage and needs the matching index and a
+configured API key. `grep` searches existing text literally without a model
+request. Neither command requires a Python sidecar or the desktop to be open.
 
 `grep` is not interchangeable with ripgrep over the library folder: markdown
 is on disk, but PDF page text lives only in `oculus.db`, so ripgrep misses
@@ -109,16 +113,12 @@ Its `--pages` numbers are the ones `search` reports.
 assignment due dates — into the database, which is what the app's Calendar
 page reads.
 
-`run -s` scrapes, then parses every PDF it wrote and folds it into the
-retrieval index — one file at a time. Local model work shares one queue;
-opt-in MinerU cloud quality is batched separately. Both halves are
-idempotent, so re-running costs almost nothing.
-
-The sidecar returns as soon as its *fast* pass has produced markdown and
-continues with the slower, better parse in the background. That improved text
-is not in the database yet when the command exits; `oculus index` picks it up
-without re-downloading anything. If the sidecar is not running, the scrape
-still completes and says so.
+`run -s` downloads and parses PDFs through the chosen MinerU engine. Parsing
+is a single pass and errors are reported explicitly. Semantic indexing is a
+Voyage operation; the settings page estimates bulk indexing before it starts,
+and newly parsed files can also be indexed when a Voyage key is configured.
+See [the CLI reference](../docs/cli-reference.md)
+for the current flags and [retrieval](../docs/retrieval.md) for the data flow.
 
 Settings → Library owns the parser choice: MinerU's cloud service, or a
 MinerU server you install and run yourself, reached over loopback. Neither is

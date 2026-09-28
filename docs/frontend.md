@@ -1,8 +1,75 @@
 # Frontend
 
-React 19 + Vite + Tailwind v4, hash-routed, Notion-style layout. UI
+React 19 + Vite + Tailwind v4, with one memory router per pane, Notion-style layout. UI
 conventions (palette, shadcn, icons, no-toasts) are in the root `CLAUDE.md` —
 this page is the structure.
+
+## Platform integration
+
+The Windows build preserves the same pages, stores, typography and floating
+document layout. It uses the native decorated Windows title bar for moving,
+minimizing, maximizing and closing the window. The tab strip sits below it
+with the ordinary left inset; only macOS reserves the traffic-light gap.
+`app/src/lib/platform.ts` supplies the platform decision and shortcut labels,
+so Windows shows Ctrl/Alt hints while Mac retains Command/Option glyphs.
+The handlers already accept either platform's modifier keys.
+
+On Windows, F11 is a native menu accelerator emitting
+`menu-toggle-fullscreen`, handled by `app/src/layouts/AppLayout.tsx`; it works
+even while the native browser page holds focus. Escape in the app's webview
+leaves window fullscreen after any open dialog or popover has been dismissed.
+Leaving the lecture player's fullscreen overlay also leaves window fullscreen
+on Windows, returning its native caption controls. Mac retains its nested
+window/player fullscreen behavior.
+
+`app/src/lib/libraryPath.ts` normalizes Windows separators from agent tool
+arguments to the slash-delimited paths stored in the database. It accepts
+library-relative paths, paths from the adjacent `agents/` folder, and absolute
+paths under the `com.tchan.oculus` data directory. Encoded spaces and line
+citations are normalized; unrelated absolute paths and traversal stay text.
+Filesystem roots still come from Tauri's `appDataDir`, and local PDFs/images
+still go through `convertFileSrc`; video continues through the Rust localhost
+media server. Windows uses the same native-browser slot measurement, popup
+occlusion handling and persistent lecture elements as the Mac frontend.
+
+Settings → Library uses the Rust parser and embedding settings. Parsing can
+use MinerU cloud or a separately managed local MinerU server; embedding uses
+Voyage. There is no bundled Python sidecar or dependency installation screen.
+
+Fresh Windows chats start with Codex, and the unconfigured thread-naming job
+uses Codex too. macOS keeps Claude for both, with Haiku's concrete model id
+and no reasoning level for thread names. Explicit saved choices take precedence
+on either platform. Claude Code runs through WSL2 on Windows and the shared model picker
+enables it only after `harness_health` reports a ready bridge. Settings → AI
+shows the selected Linux binary, version and actionable setup errors even
+when no binary has been found. Both platforms discover Claude's actual catalogue
+from its CLI, including each model's supported reasoning levels; the Windows
+label and launch route do not restore the old compiled-in model list.
+
+`app/src/stores/harnessHealthStore.ts` shares health between Settings, the
+main/Home composer and the lecture dock through
+`app/src/hooks/useBridgeHealth.ts` and `app/src/hooks/useProviderModels.ts`.
+Recheck in Settings publishes recovery
+to every picker, including the per-job rows; returning focus to the app also
+rechecks, with a 30-second throttle and a single in-flight request. A failed
+WSL probe blocks Windows Claude until a later success. Completing an in-app
+sign-in also rechecks health, so an empty catalogue and unavailable bridge can
+recover in already mounted composers. Existing threads, drafts and
+explicit saved job choices keep their provider and model through those
+changes; health never silently reassigns them to another agent.
+
+The Uploads tab accepts Explorer paths through Tauri's native file dialog and
+drag/drop events. Loading names strip either Windows or Unix separators; the
+backend keeps canonical library-relative paths in the database. Only the active
+Uploads pane accepts drops, concurrent batches are guarded, and copy/conversion
+or database failures appear beside the file list. Non-PDF-backed uploads use the
+same system-app handoff from the command palette as from their row.
+
+`app/src/hooks/useFileDrop.ts` hit-tests the actual pane or composer, so a drop
+cannot be handled by a different half of a split tab. Its coordinate conversion
+in `app/src/lib/fileDrop.ts` uses physical pixels on Windows and logical points
+on macOS, accounting for display scaling and the app's zoom. Attachments accept
+Explorer filenames and backslash paths in the same way as uploads.
 
 ## Where
 
@@ -65,6 +132,11 @@ panel promoted to a full Notion-style page, outside SubjectLayout on purpose),
 `/sync`, and `/settings/*`. Legacy routes (`/lectures`, a subject's `files`
 tab) redirect.
 
+The initial strip currently starts at `/chat`; the + button and new-tab
+shortcut start at `/new` (`app/src/stores/tabStore.ts`,
+`app/src/components/tabs/TopTabBar.tsx`). These are separate from the `/` Home
+route and are preserved in the Windows build.
+
 A project lives at the top level rather than under its subject even when it has
 one, because it can have none: the subject's Projects tab and the index are two
 filtered views of one list, and both link to the same `/projects/:projectId`.
@@ -119,11 +191,17 @@ off its own route and keeps `?n=` current as the model's name for the thread
 lands (`docs/harness.md`). A bare `/chat` is the empty composer, and the tab is
 plainly *Chat*.
 
+The conversations-column shortcut uses the physical B key with Command/Option
+on macOS or Ctrl/Alt on Windows. It checks the focused pane when the key arrives,
+because other Chat tabs and both halves of a split stay mounted. Only the column
+being worked in folds; the independent conversation routes and held timelines
+remain intact.
+
 ## How it connects
 
 - **Settings → Library offers the parser, and switching it costs nothing**
   (`ParserSection`). Two engines: MinerU's cloud service, or a MinerU server
-  the user runs on their own Mac. Unlike the embedding control directly below
+  the user runs on their own computer. Unlike the embedding control directly below
   it, the change is **not destructive** — both engines write the same artifacts
   at the same `PARSER_VERSION`, nothing is re-parsed and nothing is thrown
   away — so the select is a plain `onValueChange` with **no confirmation
@@ -268,16 +346,14 @@ plainly *Chat*.
   ranks as the term it runs inside — winter — rather than as unknown, which
   sorts after every real term. `TERM_RANK_SQL` inlines the same ranking as a
   `CASE` for the query in `getSubjects`.
-- **`getSubjects` derives `is_current`; it does not read the column.** The
-  stored flag is stamped at sync time by `list_courses` in
-  `app/src-tauri/src/sync.rs`, which takes the newest term with `.max()` over
-  term *names* — so a single summer enrolment outranks the semester actually
-  being studied and marks every real subject past. Recomputing at read time
-  costs one pass, cannot go stale between syncs, and keeps the current/past
-  split, the chat subject picker and the project pickers honest. The column
-  itself is written correctly too — `app/src-tauri/src/terms.rs` is the same
-  ranking, and the CLI reads the column — but deriving here means a database
-  stamped by an older build is not believed.
+- **`getSubjects` derives and repairs `is_current`.** Both Rust and the UI
+  rank terms academically, including month intensives and abbreviated codes.
+  Read-time repair also fixes a database stamped by an older app. A selection
+  that exactly matches its obsolete current flags migrates with them; explicit
+  checkbox choices, including selecting nothing, survive. Concurrent checkbox
+  writes use `app/src/lib/subjectSelection.ts`: pending choices overlay older
+  reads until committed, every mounted Sync pane receives the change, and a
+  sync waits for persistence before reading its subjects.
 - **Backend events are the write path.** `app/src/hooks/useBackendEvents.ts`
   (mounted once in `App.tsx`) listens for scrape/parse/auth Tauri events,
   upserts SQLite through `app/src/lib/db.ts`, and updates the stores. Pages
@@ -287,6 +363,21 @@ plainly *Chat*.
   text and patches tool rows — see [harness.md](./harness.md). It is
   app-level rather than page-level because a thread keeps running on
   another page and the sidebar's Chat row spins while one does.
+- **Sync completion waits for the library's writes.** Tauri does not await
+  asynchronous event handlers, so `app/src/lib/syncWrites.ts` serializes file
+  metadata, parse-state and ledger writes and drains them before finishing the
+  run. A file's success ledger row comes after its metadata commit; a failed
+  write fails the run visibly even if recording the failure also fails.
+  `app/src/lib/parseEvents.ts` applies the database commit, parse badge and
+  pipeline transition together inside that queue. A late running heartbeat
+  checks the already committed parse stage there, so a busy write queue
+  cannot make a finished file look active again.
+  Downloads observes committed-file events instead of writing the same rows a
+  second time. New-file badges also refresh from these committed events, so a
+  slow metadata queue cannot leave their final count behind. `useSubjects` and
+  `useSubjectFiles` reload on the completion
+  counter, so a subject left mounted before sync receives the new metadata and
+  files. Upload change events also refresh every mounted subject file list.
 - **`app/src/lib/tauriEvents.ts` is imported for its side effect only, before
   `./App` in `app/src/main.tsx`, and is not dead code.** Tauri's injected
   `unlisten` reads `listeners[eventId].handlerId` after checking only that the
@@ -1091,7 +1182,8 @@ plainly *Chat*.
   WebView that Rust owns (`app/src-tauri/src/browser.rs` — an iframe cannot
   work, Canvas refuses to be framed). `app/src/pages/BrowserPage.tsx` draws
   the toolbar across the top of the content card and leaves an empty
-  slot under it; the page is a WKWebView parked over that slot. Rust owns
+  slot under it; the page is a WKWebView on macOS or a WebView2 child on Windows
+  parked over that slot. Rust owns
   the tab list and pushes a `browser-state` snapshot on every change;
   `useBrowserTabs` (mounted once in `AppLayout`) mirrors it into
   `browserStore` and reconciles it with `tabStore` — **per pane**, not per
@@ -1112,7 +1204,8 @@ plainly *Chat*.
 - **What a page knows about itself, only the page can say.** Whether the back
   list has anywhere to go, whether a find matched, what the zoom is: none of it
   follows from the URL, and Tauri exposes an API for only the last. So
-  `browser.rs` reads and drives them on the WKWebView through `with_webview` —
+  `browser.rs` reads and drives them through the host's native browser API
+  (WKWebView or WebView2) using `with_webview` —
   which hands nothing back, since it dispatches to the main thread and returns.
   Every one of them is therefore a *push*: the answer is written into the tab
   and broadcast (or, for a find, emitted as `browser-find`), never returned to
@@ -1131,8 +1224,14 @@ plainly *Chat*.
   browser tab rather than a menu entry that greys itself out (which would mean
   telling Rust which tab is in front — a second copy of a truth the frontend
   already owns).
+  Address, find and command-palette inputs use `focusBrowserInput` in
+  `app/src/lib/browser.ts`: reveal the DOM field, hand native keyboard focus
+  back through `browser_focus_main`, then restore the caret if that field is
+  still active. DOM focus alone cannot leave the native child view on Windows;
+  the main-thread handoff targets the app's own webview on either platform.
   **⌘= / ⌘− / ⌘0 have two scopes and one pair of keys**: on a browser tab they
-  zoom the *page* (`pageZoom` on the WKWebView), everywhere else the window,
+  zoom the *page* (`pageZoom` on WKWebView, the controller zoom on WebView2),
+  everywhere else the window,
   and `AppLayout` picks between them because it is the side that knows what is
   in front. ⌘+ is ⇧⌘= and muda binds the physical key, so the shifted one
   never reaches the menu — `AppLayout` keeps a `keydown` for that one alone and
@@ -1160,7 +1259,8 @@ plainly *Chat*.
   itself is not possible — the DOM renders beneath a native view — and simply
   hiding the page while the list is up blanked the card the moment you typed a
   character. So focusing the address bar asks Rust for a PNG of the page as it
-  stands (`browser_snapshot`, `takeSnapshotWithConfiguration:`), the slot paints
+  stands (`browser_snapshot`: `takeSnapshotWithConfiguration:` on macOS,
+  `CapturePreview` on Windows), the slot paints
   that image, the live page steps aside behind it, and the dropdown is drawn
   over the image like any other popover. The page is frozen while you type and
   identical to what was there; if no still arrives the list opens anyway and the
@@ -1175,8 +1275,8 @@ plainly *Chat*.
   `browser_favicons` keeps what was found so the next run has icons before any
   page loads, which is also what lets the history list in Settings show them
   for sites no tab is on.
-- **A page webview has to say it is Safari.** `PAGE_USER_AGENT` in
-  `app/src-tauri/src/browser.rs` is set on every page, because WKWebView's
+- **A macOS page webview has to say it is Safari.** `PAGE_USER_AGENT` in
+  `app/src-tauri/src/browser.rs` is set on macOS pages, because WKWebView's
   default UA stops at `AppleWebKit/605.1.15 (KHTML, like Gecko)` — nothing sets
   `applicationNameForUserAgent`, so there is no `Version/… Safari/…` suffix and
   UA-sniffing sites read it as an engine they do not know. Measured: google.com
@@ -1185,8 +1285,9 @@ plainly *Chat*.
   the version number is a claim; keep it roughly current, because a stale one
   starts reading as an old browser again. The scraper's HTTP client keeps its
   own string (`app/src-tauri/src/okta.rs`) so that bumping this cannot disturb
-  a working SSO flow.
-- **A page webview also has to claim a window size.** A page is a *child*
+  a working SSO flow. Windows keeps WebView2's native Chromium user agent;
+  a Safari identity there would describe the wrong engine to sites.
+- **A macOS page webview also has to claim a window size.** A page is a *child*
   view inside the main window, so it has no window of its own and WebKit
   reports `outerWidth`/`outerHeight` as `0`. That zero is not cosmetic:
   `outerWidth / innerWidth` is how a page detects browser zoom, and the
@@ -1607,8 +1708,8 @@ plainly *Chat*.
   DB value until it arrives or when there is no downloaded video. The lecture's own
   metadata line keeps the catalogue figure, which is what the lectures list
   shows too.
-- **Fullscreen is the window's, not the element's.** `requestFullscreen()`
-  silently did nothing: WKWebView keeps element fullscreen behind a private
+- **Fullscreen is the window's, not the element's.** On macOS,
+  `requestFullscreen()` silently did nothing: WKWebView keeps element fullscreen behind a private
   preference wry only sets under Tauri's `macos-private-api` feature, and the
   rejected promise was swallowed. Enabling that feature would have worked and
   broken something worse — WebKit displays only the fullscreen element's
@@ -1618,12 +1719,14 @@ plainly *Chat*.
   `core:window:allow-set-fullscreen` in
   `app/src-tauri/capabilities/default.json`) and the player promotes itself to
   a `fixed inset-0 z-50` overlay over the shell: the document is intact, so
-  the popups still work. The two fullscreens nest rather than being one
+  the popups still work. On macOS the two fullscreens nest rather than being one
   switch: the *window's* is macOS fullscreen with the sidebar and tab strip
   still there, the *player's* is the overlay that covers them. Entering the
   player's takes the window with it; leaving the player's lifts only the
   overlay, so the furniture comes back on a still-fullscreen window; leaving
   the window's (green button, ⌃⌘F — heard through `onResized`) leaves both.
+  Windows exits window fullscreen when the player's overlay is closed, restoring
+  the native caption controls; F11 can also toggle the window independently.
   Entering the window's on its own does *not* raise the overlay. It is
   **off in the side panel**
   (`allowFullscreen={false}`) — the panel is furniture beside a page that

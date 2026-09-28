@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -103,6 +103,8 @@ struct ThreadState {
 
 pub struct CodexServer {
     child: Mutex<Child>,
+    #[cfg(windows)]
+    job: Mutex<Option<crate::platform::ProcessJob>>,
     stdin: Mutex<ChildStdin>,
     next_id: AtomicI64,
     pending: Mutex<HashMap<i64, mpsc::Sender<Result<Value, String>>>>,
@@ -115,7 +117,7 @@ pub struct CodexServer {
 
 impl CodexServer {
     pub fn spawn(cfg: CodexSpawn) -> Result<Arc<Self>, String> {
-        let mut child = Command::new(&cfg.bin)
+        let mut child = super::discover::provider_command(&cfg.bin)?
             .arg("app-server")
             .env_clear()
             .envs(cfg.env.iter().map(|(k, v)| (k, v)))
@@ -124,6 +126,12 @@ impl CodexServer {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("cannot start {}: {e}", cfg.bin.display()))?;
+        #[cfg(windows)]
+        let job = crate::platform::ProcessJob::assign(&child).map_err(|e| {
+            let _ = child.kill();
+            let _ = child.wait();
+            format!("cannot supervise Codex process tree: {e}")
+        })?;
         let stdin = child.stdin.take().ok_or("no stdin on codex child")?;
         let stdout = child.stdout.take().ok_or("no stdout on codex child")?;
         let stderr = child.stderr.take().ok_or("no stderr on codex child")?;
@@ -131,6 +139,8 @@ impl CodexServer {
         let alive = Arc::new(AtomicBool::new(true));
         let server = Arc::new(CodexServer {
             child: Mutex::new(child),
+            #[cfg(windows)]
+            job: Mutex::new(Some(job)),
             stdin: Mutex::new(stdin),
             next_id: AtomicI64::new(1),
             pending: Mutex::new(HashMap::new()),
@@ -472,6 +482,8 @@ impl CodexServer {
     }
 
     pub fn kill(&self) {
+        #[cfg(windows)]
+        self.job.lock().unwrap().take();
         let mut child = self.child.lock().unwrap();
         let _ = child.kill();
         let _ = child.wait();
@@ -556,6 +568,8 @@ impl CodexServer {
 
 impl Drop for CodexServer {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        if let Ok(mut job) = self.job.lock() { job.take(); }
         if let Ok(mut c) = self.child.lock() {
             let _ = c.kill();
         }
@@ -940,6 +954,7 @@ mod tests {
     /// takes a sandbox *mode* and no policy, so the same set has to go in as
     /// config overrides as well as on the turn.
     #[test]
+    #[cfg(not(windows))]
     fn a_thread_may_write_the_database_and_nothing_else_outside_its_cwd() {
         let library = std::path::Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
         let opts = CodexThreadOpts {
@@ -964,6 +979,33 @@ mod tests {
         assert_eq!(turn["sandboxPolicy"]["writableRoots"], want);
         assert_eq!(turn["sandboxPolicy"]["type"], "workspaceWrite");
         assert_eq!(turn["approvalPolicy"], "never", "a prompt has nowhere to go");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_codex_grants_only_the_resolved_database_files() {
+        let library = std::env::temp_dir().join(format!("oculus-codex-grants-{}", std::process::id()));
+        std::fs::create_dir_all(library.join("agents")).unwrap();
+        std::fs::write(library.join("oculus.db"), b"").unwrap();
+        let physical = dunce::canonicalize(library.join("oculus.db")).unwrap();
+        let opts = CodexThreadOpts {
+            cwd: library.join("agents"),
+            writable_files: crate::paths::db_write_paths(&library),
+            model: None, reasoning_effort: None, instructions: String::new(),
+        };
+        let want = serde_json::json!([
+            physical,
+            format!("{}-wal", physical.display()),
+            format!("{}-shm", physical.display()),
+        ]);
+        let thread = CodexServer::thread_params(&opts);
+        let turn = CodexServer::turn_params("test", "hello", &opts);
+        assert_eq!(thread["sandbox"], "workspace-write");
+        assert_eq!(thread["config"]["sandbox_workspace_write.writable_roots"], want);
+        assert_eq!(turn["sandboxPolicy"]["writableRoots"], want);
+        assert_eq!(turn["approvalPolicy"], "never");
+        assert!(!opts.writable_files.contains(&library));
+        std::fs::remove_dir_all(library).unwrap();
     }
 
     /// A real web search, recorded from a thread that ran two of them

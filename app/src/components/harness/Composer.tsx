@@ -175,7 +175,7 @@ export function Composer({
   // list exists.
   const active = pickerProviders.find((p) => p.id === provider);
   useEffect(() => {
-    if (model || !active || active.loading || active.models.length === 0) return;
+    if (model || !active || active.unavailableReason || active.loading || active.models.length === 0) return;
     const pick = defaultSelection(active.models);
     if (!pick.model) return;
     onModel(pick.model);
@@ -195,7 +195,7 @@ export function Composer({
    */
   const send = async () => {
     const t = text.trim();
-    if ((!t && !att.items.length) || att.writing) return;
+    if ((!t && !att.items.length) || att.writing || active?.unavailableReason) return;
 
     const paths = await att.flush();
     if (!paths) return;
@@ -314,7 +314,7 @@ export function Composer({
           {(!running || ready) && (
             <Button
               size="icon-xs"
-              disabled={!ready || att.writing}
+              disabled={!ready || att.writing || !!active?.unavailableReason}
               onClick={() => void send()}
               className="shrink-0"
               aria-label={running ? "Queue" : "Send"}
@@ -323,6 +323,9 @@ export function Composer({
             </Button>
           )}
         </div>
+        {active?.unavailableReason && (
+          <p className="text-[11px] text-muted-foreground">{active.unavailableReason}</p>
+        )}
       </div>
     </div>
   );

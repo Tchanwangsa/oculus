@@ -173,11 +173,22 @@ export async function openUrlInFocusedPane(url: string): Promise<void> {
   // The main half: the tab the reconcile makes *is* the answer, already in
   // front. Nothing more to do.
   if (!tab || !pane || pane.id === tab.id) return;
+  // The native open is async: if its destination was closed meanwhile, leave
+  // the page in the ordinary strip tab rather than removing its only owner.
+  const destination = useTabStore.getState().tabs.find((t) => t.id === tab.id);
+  if (destination?.split?.id !== pane.id) return;
   navigateInTab(pane.id, browsePath(pageId));
-  const stray = useTabStore
-    .getState()
-    .tabs.find((t) => t.id !== tab.id && browseId(t.path) === pageId);
+  const state = useTabStore.getState();
+  const stray = state.tabs.find((t) => t.id !== tab.id && browseId(t.path) === pageId);
   // `closeTab`, not `browser.close`: the page is not going anywhere, only the
   // strip tab that was standing in for it.
-  if (stray) useTabStore.getState().closeTab(stray.id);
+  if (stray) {
+    const adoptingForeground = state.activeId === stray.id;
+    state.closeTab(stray.id);
+    // Closing the temporary tab normally chooses its neighbour, which need
+    // not be the tab whose split requested this page. Restore that destination
+    // only when the temporary tab was still in front; keep a deliberate switch
+    // to some other tab while the native open was pending.
+    if (adoptingForeground) useTabStore.getState().setActive(tab.id);
+  }
 }

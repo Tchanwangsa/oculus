@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
 
 // `harness.ts` imports `getDb`/`getSetting` back from here, so these two are a
 // cycle. It is safe only because `isProvider` is *called* inside a function
@@ -7,7 +8,8 @@ import Database from "@tauri-apps/plugin-sql";
 // `PROVIDERS` in its TDZ and throws at import time.
 import { isProvider, type Provider } from "@/lib/harness";
 import { PDF_BACKED_SQL_LIST } from "@/lib/fileTypes";
-import { compareTermsNewestFirst, TERM_RANK_SQL } from "@/lib/terms";
+import { currentSubjectIds, hasLegacyDefaultSelection, TERM_RANK_SQL } from "@/lib/terms";
+import { isWindows } from "@/lib/platform";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,11 +105,13 @@ export interface DbFile {
 
 // ── Singleton ────────────────────────────────────────────────────────────────
 
-let _db: Database | null = null;
+let _db: Promise<Database> | null = null;
 
 export async function getDb(): Promise<Database> {
   if (!_db) {
-    _db = await Database.load("sqlite:oculus.db");
+    _db = (isWindows ? invoke<string>("library_database_url") : Promise.resolve("sqlite:oculus.db"))
+      .then((url) => Database.load(url))
+      .catch((error) => { _db = null; throw error; });
   }
   return _db;
 }
@@ -125,6 +129,14 @@ export interface CanvasCourseRaw {
 
 export async function upsertSubjects(courses: CanvasCourseRaw[]): Promise<void> {
   const db = await getDb();
+  // Repair obsolete defaults before fresh metadata replaces the evidence in
+  // is_current. Explicit selections survive both this repair and the upsert.
+  await getSubjects();
+  const currentIds = currentSubjectIds(courses.map((c) => ({
+    id: c.id,
+    term_name: c.term?.name ?? null,
+    workflow_state: c.workflow_state,
+  })));
   for (const c of courses) {
     await db.execute(
       `INSERT INTO subjects (id, code, name, term_name, is_current, workflow_state, selected)
@@ -139,11 +151,11 @@ export async function upsertSubjects(courses: CanvasCourseRaw[]): Promise<void> 
         c.course_code,
         c.name,
         c.term?.name ?? null,
-        c._oculus_is_current ? 1 : 0,
+        currentIds.has(c.id) ? 1 : 0,
         c.workflow_state,
         // New subjects start selected only if current; ON CONFLICT leaves the
         // stored (user-chosen) selection untouched.
-        c._oculus_is_current ? 1 : 0,
+        currentIds.has(c.id) ? 1 : 0,
       ]
     );
   }
@@ -166,24 +178,34 @@ export async function getSubjects(): Promise<Subject[]> {
               s.name ASC`
   );
 
-  // `is_current` is derived here rather than read from the column. The stored
-  // flag is stamped at sync time by `list_courses` in `sync.rs`, which picks
-  // the newest term with `.max()` over term *names* — and "2026 Summer Term"
-  // beats "2026 Semester 2" as a string while running six months earlier. So
-  // an enrolment in a summer subject silently marks the whole real semester
-  // as past. Recomputing from `terms.ts` costs one pass and cannot go stale
-  // between syncs; the column stays for Rust's own use.
-  const latest = rows
-    .filter((r) => r.workflow_state === "available")
-    .reduce<string | null>(
-      (best, r) => (compareTermsNewestFirst(r.term_name, best) < 0 ? r.term_name : best),
-      null,
-    );
+  const currentIds = currentSubjectIds(rows);
+  const repairSelection = hasLegacyDefaultSelection(rows, currentIds);
+  if (rows.some((r) => !!r.is_current !== currentIds.has(r.id))) {
+    const ids = [...currentIds];
+    const currentSql = ids.length > 0
+      ? `CASE WHEN id IN (${ids.map((_, i) => `$${i + 1}`).join(", ")}) THEN 1 ELSE 0 END`
+      : "0";
+    if (repairSelection) {
+      // One statement, guarded against a checkbox write after the read above.
+      // SQLite evaluates this uncorrelated subquery once for the statement.
+      await db.execute(
+        `UPDATE subjects SET selected = ${currentSql}
+         WHERE NOT EXISTS (SELECT 1 FROM subjects WHERE selected != is_current)`,
+        ids,
+      );
+    }
+    await db.execute(`UPDATE subjects SET is_current = ${currentSql}`, ids);
+    if (repairSelection) {
+      const saved = await db.select<{ id: number; selected: number }[]>(`SELECT id, selected FROM subjects`);
+      const selection = new Map(saved.map((r) => [r.id, !!r.selected]));
+      rows.forEach((r) => { r.selected = selection.get(r.id) ?? r.selected; });
+    }
+  }
 
   return rows
     .map((r) => ({
       ...r,
-      is_current: r.workflow_state === "available" && r.term_name === latest,
+      is_current: currentIds.has(r.id),
       selected: !!r.selected,
     }))
     // Current term first, then the newest-first order the query already put
@@ -307,7 +329,9 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
 export const DEFAULT_JOB_MODELS: JobModels = {
   lectureChapters: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
   lectureReading: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" },
-  threadNaming: { provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null },
+  threadNaming: isWindows
+    ? { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "low" }
+    : { provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null },
 };
 
 const JOB_MODELS_KEY = "job_models";
@@ -594,8 +618,8 @@ export async function resetFilePipeline(
  *  sync that wrote it. */
 export async function deleteFileRow(id: number): Promise<void> {
   const db = await getDb();
-  await db.execute(`DELETE FROM pages WHERE file_id = $1`, [id]);
-  await db.execute(`DELETE FROM files WHERE id = $1`, [id]);
+  await db.execute(`DELETE FROM pages WHERE file_id IN (SELECT id FROM files WHERE id = $1 AND category = 'upload')`, [id]);
+  await db.execute(`DELETE FROM files WHERE id = $1 AND category = 'upload'`, [id]);
 }
 
 export async function markFileAccessed(id: number): Promise<void> {
@@ -934,9 +958,10 @@ function ftsMatch(query: string): string | null {
  * is the honest limit of this search and not a bug to work around.
  *
  * One row per file, not per page: five pages of the same deck is one answer
- * repeated, and the best page is the one worth going to. `MIN(bm25(…))` is
- * what picks it — SQLite takes the bare columns beside a single `min()` from
- * that same row, so `page_no` and `snippet` belong to the page that scored.
+ * repeated, and the best page is the one worth going to. FTS5's auxiliary
+ * functions must run while the matching cursor is live, before aggregation
+ * or windowing. Materialise each page's score and snippet together, then
+ * rank those rows per file; tied pages consistently pick the earliest page.
  *
  * The join onto `pages` is load-bearing beyond the columns it fetches: an
  * entry left behind by a cascade delete has no page to join to and drops out
@@ -951,22 +976,35 @@ export async function searchPageText(
   const db = await getDb();
   try {
     return await db.select<PageTextHit[]>(
-      `SELECT p.file_id        AS file_id,
+      `WITH hits AS MATERIALIZED (
+       SELECT p.id             AS page_id,
+              p.file_id        AS file_id,
               f.subject_id     AS subject_id,
               s.code           AS subject_code,
               f.relative_path  AS relative_path,
               f.filename       AS filename,
               f.category       AS category,
+              s.is_current     AS is_current,
               p.page_no        AS page_no,
               snippet(pages_fts, 0, $1, $2, '…', 14) AS snippet,
-              MIN(bm25(pages_fts)) AS score
+              bm25(pages_fts)   AS score
          FROM pages_fts
          JOIN pages p    ON p.id = pages_fts.rowid
          JOIN files f    ON f.id = p.file_id
          JOIN subjects s ON s.id = f.subject_id
         WHERE pages_fts MATCH $3
-        GROUP BY p.file_id
-        ORDER BY score ASC, s.is_current DESC
+       ), ranked AS (
+         SELECT hits.*,
+                ROW_NUMBER() OVER (
+                  PARTITION BY file_id ORDER BY score ASC, page_no ASC, page_id ASC
+                ) AS file_rank
+           FROM hits
+       )
+       SELECT file_id, subject_id, subject_code, relative_path,
+              filename, category, page_no, snippet
+         FROM ranked
+        WHERE file_rank = 1
+        ORDER BY score ASC, is_current DESC, file_id ASC
         LIMIT $4`,
       [SNIP_OPEN, SNIP_CLOSE, match, limit],
     );

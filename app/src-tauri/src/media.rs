@@ -101,7 +101,8 @@ fn handle(request: tiny_http::Request, data_dir: &PathBuf, token: &str) {
     };
     let in_scope = ["lectures", "courses"]
         .iter()
-        .any(|dir| path.starts_with(data_dir.join(dir)));
+        .filter_map(|dir| data_dir.join(dir).canonicalize().ok())
+        .any(|root| path.starts_with(root));
     if !in_scope {
         return respond_status(request, 403);
     }
@@ -195,22 +196,39 @@ fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
     (start <= end).then_some((start, end))
 }
 
-/// Per-launch bearer token. /dev/urandom is always present on macOS; the
-/// fallback only exists so a broken read degrades to "still unguessable in
-/// practice" instead of a panic.
+/// Per-launch bearer token from the platform's cryptographic random source.
 fn random_token() -> String {
     let mut buf = [0u8; 16];
-    if let Ok(mut f) = File::open("/dev/urandom") {
-        if f.read_exact(&mut buf).is_ok() {
-            return buf.iter().map(|b| format!("{b:02x}")).collect();
+    getrandom::fill(&mut buf).expect("OS random source unavailable");
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serves_unicode_paths_and_ranges_but_rejects_outside_files() {
+        let dir = std::env::temp_dir().join(format!("oculus media 雪 {}", random_token()));
+        std::fs::create_dir_all(dir.join("lectures")).unwrap();
+        let video = dir.join("lectures").join("sample ü.mp4");
+        let outside = dir.join("private.txt");
+        std::fs::write(&video, b"0123456789").unwrap();
+        std::fs::write(&outside, b"private").unwrap();
+        let server = start_media_server(dir.clone());
+        let make_url = |path: &std::path::Path, token: &str| {
+            let mut url = url::Url::parse(&format!("http://127.0.0.1:{}/{}", server.port, token)).unwrap();
+            url.query_pairs_mut().append_pair("path", &path.to_string_lossy());
+            url.to_string()
+        };
+        let response = ureq::get(&make_url(&video, &server.token))
+            .set("Range", "bytes=2-5").call().unwrap();
+        assert_eq!(response.status(), 206);
+        assert_eq!(response.header("Content-Range"), Some("bytes 2-5/10"));
+        assert_eq!(response.into_string().unwrap(), "2345");
+        for url in [make_url(&outside, &server.token), make_url(&video, "wrong")] {
+            assert!(matches!(ureq::get(&url).call(), Err(ureq::Error::Status(403, _))));
         }
+        std::fs::remove_dir_all(dir).unwrap();
     }
-    format!(
-        "{:x}{:x}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    )
 }

@@ -1,3 +1,4 @@
+import { isMac, shortcut } from "@/lib/platform";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -54,9 +55,9 @@ interface TopTabBarProps {
 }
 
 /**
- * The window's title bar, Notion-style: macOS traffic lights (native,
- * overlaid — hence the left inset), the sidebar toggle, history back/forward,
- * then the tab strip. The whole bar is a drag region.
+ * The tab strip: sidebar toggle, history back/forward, then tabs. macOS
+ * overlays its native traffic lights here; Windows keeps its caption bar
+ * above, so needs only the ordinary inset. Empty space is a drag region.
  */
 export default function TopTabBar({
   sidebarCollapsed,
@@ -315,7 +316,7 @@ export default function TopTabBar({
          ground as the sidebar, and the active one is a scrap of the card
          lifted up here. */
       className="h-11 shrink-0 flex items-center gap-1 pr-2"
-      /* Native traffic lights overlay this strip on macOS. They sit at a
+      /* Only macOS overlays native traffic lights on this strip. They sit at a
          fixed device-pixel position, so the gap they need is measured in
          device pixels too — divide out the window's page zoom. Fullscreen
          hides them, and the gap with them: the bar then starts at the same
@@ -328,7 +329,7 @@ export default function TopTabBar({
          holds that centre minus 2. Change the bar height or the default
          zoom and the lights need retuning — nothing here can do it. */
       style={{
-        paddingLeft: fullscreen ? "0.5rem" : "calc(84px / var(--app-zoom, 1))",
+        paddingLeft: isMac && !fullscreen ? "calc(84px / var(--app-zoom, 1))" : "0.5rem",
       }}
     >
       {/* Sidebar toggle — before the arrows, like Notion. */}
@@ -347,7 +348,7 @@ export default function TopTabBar({
           className="flex flex-col items-start gap-0.5"
         >
           {sidebarCollapsed ? "Open sidebar" : "Close sidebar"}
-          <span className="text-[11px] text-background/60">⌘B</span>
+          <span className="text-[11px] text-background/60">{shortcut("B")}</span>
         </TooltipContent>
       </Tooltip>
 
@@ -564,7 +565,7 @@ export default function TopTabBar({
           className="flex flex-col items-start gap-0.5"
         >
           {splitOpen ? "Close sidepanel" : "Open sidepanel"}
-          <span className="text-[11px] text-background/60">⌥⌘T</span>
+          <span className="text-[11px] text-background/60">{shortcut("T", true)}</span>
         </TooltipContent>
       </Tooltip>
     </div>

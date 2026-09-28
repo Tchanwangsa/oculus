@@ -18,6 +18,8 @@ export interface PickerProvider {
   models: HarnessModel[];
   /** The list is still being fetched — Codex asks its own CLI for one. */
   loading?: boolean;
+  /** Keep a saved selection visible while its WSL bridge is unavailable. */
+  unavailableReason?: string;
   /** Whether this agent's CLI was found on this machine
    *  (`app/src/hooks/useBridgeHealth.ts`). Optional, and absent reads as
    *  `unknown`: a picker given no health draws the way it always did. */
@@ -88,7 +90,7 @@ export function ModelPicker({
   const searchRef = useRef<HTMLInputElement>(null);
 
   const active = providers.find((p) => p.id === provider) ?? providers[0];
-  const models = active?.models ?? [];
+  const models = active?.unavailableReason ? [] : active?.models ?? [];
   const selected = models.find((m) => m.id === model) ?? null;
 
   // A stale search would silently hide rows the next time the menu opens.
@@ -124,6 +126,7 @@ export function ModelPicker({
     selected?.id ?? model,
     levelText && `${levelText} reasoning`,
     missing && "not installed",
+    active?.unavailableReason,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -216,7 +219,12 @@ export function ModelPicker({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-1">
-          {missing ? (
+          {active?.unavailableReason ? (
+            <EmptyNote note={active.unavailableReason} onSettings={() => {
+              setOpen(false);
+              navigateActive("/settings/ai");
+            }} />
+          ) : missing ? (
             <NotInstalled
               label={active?.label ?? ""}
               onSettings={() => {

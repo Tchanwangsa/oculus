@@ -404,7 +404,7 @@ export function EmbeddingSection() {
             <div>
               <p className="text-xs text-foreground">Voyage API key</p>
               <p className="text-[11px] text-muted-foreground">
-                Stored in your Mac keychain, never in the library database.
+                Stored in your device's credential store, never in the library database.
               </p>
             </div>
             {settings?.credentials_ready ? (

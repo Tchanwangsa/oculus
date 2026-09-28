@@ -138,6 +138,7 @@ export function LectureChatComposer({
   onStop: () => void;
 }) {
   const [text, setText] = useState("");
+  const unavailableReason = providers.find((p) => p.id === provider)?.unavailableReason;
   const ref = useRef<HTMLTextAreaElement>(null);
   /** The box and its strip of attachments: what a drag is aimed at, which is
    *  the surface rather than the field's text. */
@@ -175,7 +176,7 @@ export function LectureChatComposer({
   // why.
   const send = async () => {
     const t = text.trim();
-    if ((!t && !att.items.length) || att.writing) return;
+    if ((!t && !att.items.length) || att.writing || unavailableReason) return;
 
     const paths = await att.flush();
     if (!paths) return;
@@ -250,7 +251,7 @@ export function LectureChatComposer({
           {(!running || ready) && (
             <Button
               size="icon-xs"
-              disabled={!ready || att.writing}
+              disabled={!ready || att.writing || !!unavailableReason}
               onClick={() => void send()}
               className="shrink-0"
               aria-label={running ? "Queue" : "Send"}
@@ -260,6 +261,9 @@ export function LectureChatComposer({
           )}
         </div>
       </div>
+      {unavailableReason && (
+        <p className="text-[11px] text-muted-foreground">{unavailableReason}</p>
+      )}
     </div>
   );
 }

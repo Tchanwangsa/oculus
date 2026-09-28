@@ -76,6 +76,13 @@ cropped figures and never page rasters.
 
 ### One pdfium session at a time (measured 2026-09-17)
 
+Windows packages `pdfium.dll` beside both the desktop executable and the CLI.
+The loader resolves that location relative to the executable, then checks
+development `binaries/` directories, so launching from another working
+directory does not change which packaged library is found. The fetch script
+pins the PDFium release to the ABI selected in Cargo. `OCULUS_PDFIUM_LIB` can
+point at a library file or directory for isolated testing.
+
 `raster.rs` holds a process-wide lock across every document it opens, and
 `pdfium-render`'s `thread_safe` feature — which is enabled — is **not** a
 substitute. It serialises individual FFI calls; the unit that has to be atomic
@@ -371,7 +378,7 @@ write; do not add one.
   page count against the parse record's before it bills a single pixel, for
   exactly this reason — pdfium and `lopdf` can genuinely disagree on a damaged
   xref.
-- The key lives in the macOS keychain and nowhere else — not SQLite, not the
+- The key lives in the OS credential store (Windows Credential Manager or macOS Keychain) — not SQLite, not the
   WebView, not a health response, not a progress event. No `EmbedError` variant
   carries server response text, because an error body can echo the request,
   which for this API means an echo of the base64 page image.

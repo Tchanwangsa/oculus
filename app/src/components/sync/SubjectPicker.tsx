@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/popover";
 import { SubjectRow } from "@/components/subjects/SubjectRow";
 import type { Subject } from "@/lib/db";
+import { compareTermsNewestFirst } from "@/lib/terms";
 
 interface SubjectPickerProps {
   subjects: Subject[];
@@ -139,7 +140,7 @@ export function SubjectPicker({
                   </CollapsibleTrigger>
                   <CollapsibleContent className="space-y-2 pt-1">
                     {Object.entries(pastBySemester)
-                      .sort(([a], [b]) => b.localeCompare(a))
+                      .sort(([a], [b]) => compareTermsNewestFirst(a, b))
                       .map(([term, courses]) => (
                         <div key={term}>
                           <p className="text-[11px] text-muted-foreground mb-1 px-1">

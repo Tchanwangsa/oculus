@@ -236,6 +236,9 @@ interface TabState {
   /** Which half the shell drives. Called on the way into a pane — a pointer
    *  down or a focus landing inside it. */
   focusPane: (tabId: number, side: PaneSide) => void;
+  /** A native browser gained focus outside the app DOM. Never activates a
+   *  background tab for a delayed event from a hidden or closing WebView. */
+  focusBrowserPane: (browserId: number) => void;
 }
 
 /** Both halves of a tab, in a list — what anything sweeping panes walks. */
@@ -334,6 +337,14 @@ export const useTabStore = create<TabState>((set, get) => ({
       return { tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, focus: side } : t)) };
     }),
 
+  focusBrowserPane: (browserId) => {
+    const { tabs, activeId, focusPane } = get();
+    const tab = tabs.find((t) => t.id === activeId);
+    if (!tab) return;
+    if (browseId(tab.path) === browserId) focusPane(tab.id, "main");
+    else if (browseId(tab.split?.path) === browserId) focusPane(tab.id, "split");
+  },
+
   remember: (entry) =>
     set((s) => ({ closed: [...s.closed, entry].slice(-CLOSED_LIMIT) })),
 
@@ -422,6 +433,16 @@ export function activeTab(): AppTab | undefined {
 export function activePane(): PaneState | undefined {
   const tab = activeTab();
   return tab && focusedPane(tab);
+}
+
+/** A browser can briefly have two mounted pages while its temporary strip
+ * tab is adopted into a split. Background/unmount cleanup must not hide the
+ * active owner. Only that owner's own overlay may hide a visible browser. */
+export function browserPageMayHide(browserId: number, overlayOwnerId?: number): boolean {
+  const tab = activeTab();
+  return !tab || !panesOf(tab).some(
+    (p) => browseId(p.path) === browserId && p.id !== overlayOwnerId,
+  );
 }
 
 /** The pane a peek, a Recent entry or a playing lecture belongs to right now.

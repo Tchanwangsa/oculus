@@ -3,6 +3,35 @@
 Three services, three credentials — but everything derives from one Canvas
 session cookie.
 
+## Windows integration
+
+`app/src-tauri/src/auth.rs` and `app/src-tauri/src/browser.rs` put the sign-in
+window and remote browser tabs in the same WebView2 profile under
+`%APPDATA%\com.tchan.oculus\canvas-session`. The privileged app webview keeps
+its own profile. A new browser tab starts blank, restores the saved Canvas
+cookie through Tauri's native `set_cookie` API, then navigates. Cookie reads
+run away from WebView2's event-loop thread to avoid deadlocks. Disconnect
+clears the browser profile through the native API and closes its tabs;
+Windows keeps live profile files locked, so disconnect does not delete that
+directory while WebView2 owns it.
+
+Passwords, TOTP seeds, MinerU tokens and provider keys use Windows Credential
+Manager through keyring's Windows backend. The Canvas cookie remains the
+existing local snapshot; no credential is copied from a macOS installation.
+
+The closed-app keep-alive in `app/src-tauri/src/keepalive.rs` uses Windows
+Task Scheduler. Each Windows user gets a task named with their SID, running
+with limited privileges while that user is logged in. It invokes the bundled
+`oculus.exe auth tick` through hidden PowerShell every selected number of
+hours, including on battery, and catches up after a missed run. No Windows
+password or elevation is needed. Installation still follows a successful
+headless Canvas sign-in or the explicit Settings switch; disabling it saves
+the same opt-out marker as macOS. Startup repairs a moved executable path.
+The scheduler's action receives an encoded, literal-path invocation so spaces,
+apostrophes and other punctuation in an installation path remain data.
+
+The launchd details below describe the retained macOS implementation.
+
 ## Where
 
 | Piece | Location |
@@ -12,7 +41,7 @@ session cookie.
 | Auth flag, keep-alive log | `app/src-tauri/src/paths.rs` |
 | Headless Okta sign-in, TOTP, stored credentials | `app/src-tauri/src/okta.rs` |
 | Cookie/flag file locations | `app/src-tauri/src/paths.rs` |
-| LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
+| launchd / Task Scheduler keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus.rs` |
 | In-app keep-alive loop + startup probe | `app/src-tauri/src/lib.rs` |
 | Ed token minting via LTI | `app/src-tauri/src/ed.rs` |
@@ -41,14 +70,15 @@ session cookie.
 ### The in-app browser gets the same session
 
 External links open inside Oculus (see [frontend.md](./frontend.md)), and a
-Canvas page there has to be signed in — but the snapshot on disk is not
-something WebKit will read.
+Canvas page there has to be signed in — but neither native browser reads the
+snapshot file on disk. The Windows profile and cookie API are described above;
+macOS retains its shared WebKit store:
 
 - **The cookie has to be put back by hand.** `canvas_session` is HttpOnly
   *and* session-scoped, so WebKit keeps it in memory only: it dies with the
   process, and the plaintext snapshot is the sole surviving copy.
   `browser::seed_canvas_session` writes the snapshot into WebKit's shared jar
-  through `WKHTTPCookieStore` (Tauri exposes no cookie setter) at startup and
+  through `WKHTTPCookieStore` at startup and
   before each Canvas page. The snapshot carries no domains — it is a bare
   `name=value` header — so every pair is re-scoped to the Canvas host, which
   is exactly what the scraper sends over the wire anyway.
@@ -71,9 +101,9 @@ something WebKit will read.
 - **App open**: a thread in `app/src-tauri/src/lib.rs` re-probes the saved
   session every 6 hours and emits `canvas-auth-expired` if it is rejected.
 - **App closed**: `app/src-tauri/src/keepalive.rs` installs a macOS
-  LaunchAgent that runs `oculus auth tick` on a schedule via launchd. The
+  LaunchAgent or a Windows scheduled task that runs `oculus auth tick`. The
   tick probes, re-signs-in on rejection, and reports into
-  `session-keepalive.log` in the data dir — launchd has no console, and a
+  `session-keepalive.log` in the data dir — the scheduled job has no console, and a
   non-zero exit would only read as a crashed job, so every outcome is a log
   line and exit 0.
 
@@ -136,7 +166,7 @@ The loop is written against remediation **names**, not a fixed script, because
 the order Okta asks for factors in is a policy setting that can change without
 notice. It answers two factors:
 
-- **password** — from the macOS keychain.
+- **password** — from macOS Keychain or Windows Credential Manager.
 - **TOTP** (Google Authenticator) — generated locally from a stored seed.
 
 **Answer the challenge before reading the chooser.** OIE offers
@@ -195,7 +225,7 @@ replay a wrong password every six hours until Okta locks the account.
 machine, so against anything already running as this user the second factor is
 no longer a second factor — the same posture as a password manager that stores
 TOTP beside the password. It does not weaken the account against anyone who is
-not already on this Mac.
+not already running as this user on this computer.
 
 ### Startup probe
 

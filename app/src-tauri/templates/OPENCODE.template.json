@@ -23,6 +23,7 @@
       "{{LIBRARY}}/lectures/**": "deny",
       "{{LIBRARY}}/canvas-session/**": "deny",
       "{{LIBRARY}}/oculus.db*": "deny",
+      "{{DATABASE}}*": "deny",
       "{{LIBRARY}}/*.cookie": "deny",
       "{{LIBRARY}}/*.token": "deny",
       "{{LIBRARY}}/*.json": "deny",

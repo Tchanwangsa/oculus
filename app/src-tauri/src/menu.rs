@@ -9,13 +9,16 @@
 //! Close Window, which a tabbed window wants for the tab — so the whole menu is
 //! built here instead, with Close Window moved to ⇧⌘W.
 //!
+//! Windows WebView2 consumes accelerator keys before the window menu sees
+//! them. Each webview forwards the app's shortcuts to the same dispatcher.
+//!
 //! The items only emit; the frontend owns what they mean — the strip owns what
 //! a tab is (`app/src/components/tabs/TopTabBar.tsx`), the palette owns what
 //! search is (`app/src/components/palette/CommandPalette.tsx`).
 
-use tauri::menu::{
-    AboutMetadata, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
-};
+#[cfg(target_os = "macos")]
+use tauri::menu::AboutMetadata;
+use tauri::menu::{IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const SEARCH: &str = "search";
@@ -25,6 +28,7 @@ const CLOSE_TAB: &str = "close-tab";
 const REOPEN_TAB: &str = "reopen-tab";
 const LAST_TAB: &str = "last-tab";
 const CLOSE_WINDOW: &str = "close-window";
+const FULLSCREEN: &str = "toggle-fullscreen";
 const FIND: &str = "find";
 const FIND_NEXT: &str = "find-next";
 const FIND_PREV: &str = "find-prev";
@@ -46,7 +50,7 @@ const TAB_SLOT: &str = "tab-slot-";
 /// you no longer know a tab's number without looking at the strip.
 const TAB_SLOTS: usize = 8;
 
-/// Events the frontend listens for; the menu is their only source.
+/// Events shared by menu clicks and native WebView2 accelerators.
 pub const SEARCH_EVENT: &str = "menu-search";
 pub const NEW_TAB_EVENT: &str = "menu-new-tab";
 pub const SPLIT_EVENT: &str = "menu-split";
@@ -68,7 +72,9 @@ pub const FORWARD_EVENT: &str = "menu-forward";
 pub const ADDRESS_EVENT: &str = "menu-address";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    #[cfg(target_os = "macos")]
     let pkg = app.package_info();
+    #[cfg(target_os = "macos")]
     let about = AboutMetadata {
         name: Some(pkg.name.clone()),
         version: Some(pkg.version.to_string()),
@@ -236,10 +242,14 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let fullscreen_separator = PredefinedMenuItem::separator(app)?;
     #[cfg(target_os = "macos")]
     let fullscreen = PredefinedMenuItem::fullscreen(app, None)?;
+    #[cfg(target_os = "windows")]
+    let fullscreen = MenuItem::with_id(app, FULLSCREEN, "Toggle Full Screen", true, Some("F11"))?;
 
     let mut window_items: Vec<&dyn IsMenuItem<R>> = vec![&minimize, &maximize];
     #[cfg(target_os = "macos")]
     window_items.extend([&fullscreen_separator as &dyn IsMenuItem<R>, &fullscreen]);
+    #[cfg(target_os = "windows")]
+    window_items.push(&fullscreen);
     window_items.push(&slots_separator);
     window_items.extend(slots.iter().map(|i| i as &dyn IsMenuItem<R>));
     window_items.push(&last);
@@ -275,7 +285,15 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 }
 
 pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
-    match event.id().as_ref() {
+    #[cfg(target_os = "windows")]
+    if std::env::var_os("OCULUS_TRACE_SHORTCUTS").is_some() {
+        eprintln!("[oculus] menu action={}", event.id().as_ref());
+    }
+    dispatch(app, event.id().as_ref());
+}
+
+fn dispatch<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    match id {
         SEARCH => {
             app.emit(SEARCH_EVENT, ()).ok();
         }
@@ -332,6 +350,9 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
                 window.close().ok();
             }
         }
+        FULLSCREEN => {
+            app.emit("menu-toggle-fullscreen", ()).ok();
+        }
         // The eight numbered slots, which carry their position rather than
         // having eight events of their own. Zero-based on the way out: the
         // frontend indexes a list, it does not count on its fingers.
@@ -344,5 +365,148 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
                 app.emit(SELECT_TAB_EVENT, n - 1).ok();
             }
         }
+    }
+}
+
+/// WebView2 owns the keyboard while either the main UI or a remote page has
+/// focus, so Windows menu accelerators alone never reach the application.
+/// Install once per controller; WebView2 releases the callback on close.
+#[cfg(target_os = "windows")]
+pub fn attach_windows_accelerators(webview: &tauri::Webview<tauri::Wry>) {
+    use webview2_com::AcceleratorKeyPressedEventHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
+        COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+    };
+
+    let app = webview.app_handle().clone();
+    if let Err(error) = webview.with_webview(move |platform| unsafe {
+        let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()); };
+            let mut kind = Default::default();
+            args.KeyEventKind(&mut kind)?;
+            if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+            {
+                return Ok(());
+            }
+            let mut key = 0;
+            args.VirtualKey(&mut key)?;
+            let pressed = |key: u16| GetKeyState(key as i32) < 0;
+            let ctrl = pressed(VK_CONTROL);
+            let shift = pressed(VK_SHIFT);
+            let alt = pressed(VK_MENU);
+            let win = pressed(VK_LWIN) || pressed(VK_RWIN);
+            let Some(action) = windows_accelerator(
+                key,
+                ctrl,
+                shift,
+                alt,
+                win,
+            ) else { return Ok(()); };
+            // Release the browser's synchronous input callback before any
+            // app action. Repeated presses are consumed but not dispatched.
+            args.SetHandled(true)?;
+            let mut status = Default::default();
+            args.PhysicalKeyStatus(&mut status)?;
+            // Diagnostic opt-in logs only app shortcuts, never typed text.
+            if std::env::var_os("OCULUS_TRACE_SHORTCUTS").is_some() {
+                eprintln!(
+                    "[oculus] webview shortcut={action} kind={} ctrl={ctrl} shift={shift} alt={alt} win={win} physical_alt={} repeat={}",
+                    kind.0, status.IsMenuKeyDown.as_bool(), status.WasKeyDown.as_bool(),
+                );
+            }
+            if !status.WasKeyDown.as_bool() {
+                let app = app.clone();
+                std::thread::spawn(move || dispatch(&app, action));
+            }
+            Ok(())
+        }));
+        let mut token = 0;
+        if let Err(error) = platform.controller().add_AcceleratorKeyPressed(&handler, &mut token) {
+            eprintln!("[oculus] cannot register WebView2 shortcuts: {error}");
+        }
+    }) {
+        eprintln!("[oculus] cannot access WebView2 shortcuts: {error}");
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_accelerator(key: u32, ctrl: bool, shift: bool, alt: bool, win: bool) -> Option<&'static str> {
+    if win { return None; }
+    if alt { return (key == 0x54 && ctrl && !shift).then_some(SPLIT); }
+    match (key, ctrl, shift) {
+        (0x7A, false, false) => Some(FULLSCREEN), // F11
+        (0x4B, true, false) => Some(SEARCH),
+        (0x54, true, false) => Some(NEW_TAB),
+        (0x54, true, true) => Some(REOPEN_TAB),
+        (0x57, true, false) => Some(CLOSE_TAB),
+        (0x57, true, true) => Some(CLOSE_WINDOW),
+        (0x4C, true, false) => Some(ADDRESS),
+        (0x46, true, false) => Some(FIND),
+        (0x47, true, false) => Some(FIND_NEXT),
+        (0x47, true, true) => Some(FIND_PREV),
+        (0x52, true, false) => Some(RELOAD),
+        (0x52, true, true) => Some(HARD_RELOAD),
+        (0xDB, true, false) => Some(BACK),
+        (0xDD, true, false) => Some(FORWARD),
+        (0xBB, true, _) => Some(ZOOM_IN),
+        (0xBD, true, false) => Some(ZOOM_OUT),
+        (0x30, true, false) => Some(ZOOM_RESET),
+        (0x31, true, false) => Some("tab-slot-1"),
+        (0x32, true, false) => Some("tab-slot-2"),
+        (0x33, true, false) => Some("tab-slot-3"),
+        (0x34, true, false) => Some("tab-slot-4"),
+        (0x35, true, false) => Some("tab-slot-5"),
+        (0x36, true, false) => Some("tab-slot-6"),
+        (0x37, true, false) => Some("tab-slot-7"),
+        (0x38, true, false) => Some("tab-slot-8"),
+        (0x39, true, false) => Some(LAST_TAB),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_shortcuts_match_menu_and_leave_other_keys_to_the_page() {
+        assert_eq!(windows_accelerator(0x7A, false, false, false, false), Some(FULLSCREEN));
+        assert_eq!(windows_accelerator(0x4B, true, false, false, false), Some(SEARCH));
+        assert_eq!(windows_accelerator(0x54, true, false, false, false), Some(NEW_TAB));
+        assert_eq!(windows_accelerator(0x57, true, false, false, false), Some(CLOSE_TAB));
+        assert_eq!(windows_accelerator(0x57, true, true, false, false), Some(CLOSE_WINDOW));
+        for (key, ctrl, shift, alt, win) in [
+            (0x4B, false, false, false, false),
+            (0x4B, true, true, false, false),
+            (0x4B, true, false, true, false),
+            (0x4B, true, false, false, true),
+            (0x7A, true, false, false, false),
+            (0x43, true, false, false, false), // Copy remains native.
+            (0x1B, false, false, false, false), // Escape remains page/dialog owned.
+        ] {
+            assert_eq!(windows_accelerator(key, ctrl, shift, alt, win), None);
+        }
+    }
+
+    #[test]
+    fn windows_browser_and_tab_shortcuts_reach_the_application() {
+        for (key, shift, action) in [
+            (0x54, true, REOPEN_TAB), (0x4C, false, ADDRESS),
+            (0x46, false, FIND), (0x47, false, FIND_NEXT), (0x47, true, FIND_PREV),
+            (0x52, false, RELOAD), (0x52, true, HARD_RELOAD),
+            (0xDB, false, BACK), (0xDD, false, FORWARD),
+            (0xBB, false, ZOOM_IN), (0xBB, true, ZOOM_IN),
+            (0xBD, false, ZOOM_OUT), (0x30, false, ZOOM_RESET),
+            (0x31, false, "tab-slot-1"), (0x38, false, "tab-slot-8"), (0x39, false, LAST_TAB),
+        ] {
+            assert_eq!(windows_accelerator(key, true, shift, false, false), Some(action));
+        }
+        assert_eq!(windows_accelerator(0x54, true, false, true, false), Some(SPLIT));
+        assert_eq!(windows_accelerator(0x54, true, true, true, false), None);
     }
 }

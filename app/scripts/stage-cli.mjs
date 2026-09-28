@@ -46,7 +46,8 @@ function hostTriple() {
 
 const triple = hostTriple();
 const exe = process.platform === "win32" ? ".exe" : "";
-const built = join(root, "src-tauri", "target", "release", `oculus${exe}`);
+const debug = process.argv.includes("--debug");
+const built = join(root, "src-tauri", "target", debug ? "debug" : "release", `oculus${exe}`);
 const dest = join(outDir, `oculus-${triple}${exe}`);
 
 mkdirSync(outDir, { recursive: true });
@@ -65,12 +66,15 @@ if (!existsSync(dest)) {
 }
 
 try {
+  // Force cargo to uplift the current executable rather than leaving a stale
+  // sibling for agent discovery. A running Windows CLI must finish first.
+  rmSync(built, { force: true });
   // Cheap when already current: this is the same crate the app build compiles,
   // so the library is shared and only the CLI binary links.
   execFileSync(
     "cargo",
-    ["build", "--release", "--manifest-path", manifest, "--bin", "oculus"],
-    { stdio: "inherit" },
+    ["build", "--locked", ...(debug ? [] : ["--release"]), "--manifest-path", manifest, "--bin", "oculus"],
+    { stdio: "inherit", cwd: dirname(manifest), windowsHide: true },
   );
 } catch (e) {
   // Never leave an empty file behind claiming to be the CLI — the next bundle

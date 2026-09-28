@@ -35,7 +35,7 @@ if (!existsSync(binary)) {
   execFileSync(
     "cargo",
     ["build", "--release", "--manifest-path", manifest, "--bin", "oculus"],
-    { stdio: "inherit" },
+    { stdio: "inherit", cwd: dirname(manifest), windowsHide: true },
   );
 }
 

@@ -1,4 +1,4 @@
-//! Background session keep-alive via a macOS LaunchAgent.
+//! Background session keep-alive via launchd or Windows Task Scheduler.
 //!
 //! The Canvas session has no cookie-side expiry — the server tracks it and
 //! extends it on use — so a periodic ping keeps it alive, but only while
@@ -22,6 +22,7 @@
 
 use tauri::{AppHandle, Manager};
 
+#[cfg(any(not(target_os = "windows"), test))]
 pub const LABEL: &str = "com.tchan.oculus.session-keepalive";
 const DEFAULT_INTERVAL_HOURS: u32 = 6;
 
@@ -49,7 +50,8 @@ fn cli_path() -> Result<std::path::PathBuf, String> {
         .parent()
         .ok_or("the app binary has no parent directory")?;
 
-    for candidate in [dir.join("oculus"), dir.join("../release/oculus")] {
+    let name = format!("oculus{}", std::env::consts::EXE_SUFFIX);
+    for candidate in [dir.join(&name), dir.join("../release").join(&name)] {
         if candidate.is_file() {
             return candidate
                 .canonicalize()
@@ -71,6 +73,7 @@ fn opt_out_path(app: &AppHandle) -> std::path::PathBuf {
         .join("keepalive-disabled")
 }
 
+#[cfg(not(target_os = "windows"))]
 fn plist_path() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME")?;
     Some(
@@ -80,6 +83,7 @@ fn plist_path() -> Option<std::path::PathBuf> {
     )
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn plist_body(cli: &str, interval_secs: u32) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -140,6 +144,7 @@ fn last_log_line(app: &AppHandle) -> Option<String> {
 /// The binary an installed agent is pointing at — the first `<string>` inside
 /// `ProgramArguments`. Small enough to scan rather than pull in a plist parser,
 /// the same way the interval is read back.
+#[cfg(any(target_os = "macos", test))]
 fn program_from_plist(path: &std::path::Path) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;
     let after = text.split("<key>ProgramArguments</key>").nth(1)?;
@@ -149,6 +154,7 @@ fn program_from_plist(path: &std::path::Path) -> Option<String> {
     Some(rest[..close].trim().to_string())
 }
 
+#[cfg(any(not(target_os = "windows"), test))]
 fn interval_from_plist(path: &std::path::Path) -> u32 {
     let Ok(text) = std::fs::read_to_string(path) else {
         return DEFAULT_INTERVAL_HOURS;
@@ -174,7 +180,20 @@ fn interval_from_plist(path: &std::path::Path) -> u32 {
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn keepalive_status(app: AppHandle) -> KeepaliveStatus {
+pub async fn keepalive_status(app: AppHandle) -> KeepaliveStatus {
+    #[cfg(target_os = "windows")]
+    {
+        let state = windows_schedule::query().ok().flatten();
+        let enabled = state.as_ref().is_some_and(|s| s.enabled);
+        return KeepaliveStatus {
+            supported: true,
+            enabled,
+            interval_hours: state.map(|s| s.hours).unwrap_or(DEFAULT_INTERVAL_HOURS),
+            last_run: if enabled { last_log_line(&app) } else { None },
+        };
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let supported = cfg!(target_os = "macos");
     let plist = plist_path();
     let enabled = supported && plist.as_ref().is_some_and(|p| p.exists());
@@ -189,15 +208,25 @@ pub fn keepalive_status(app: AppHandle) -> KeepaliveStatus {
         interval_hours,
         last_run: if enabled { last_log_line(&app) } else { None },
     }
+    }
 }
 
 /// Install (or re-install, to change the interval) the LaunchAgent.
 #[tauri::command]
 pub async fn keepalive_enable(app: AppHandle, interval_hours: u32) -> Result<(), String> {
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        if crate::auth::saved_cookie_header(&app).is_empty() {
+            return Err("No saved session to keep alive — connect to Canvas first.".into());
+        }
+        windows_schedule::install(&cli_path()?, interval_hours.clamp(1, 24))?;
+        std::fs::remove_file(opt_out_path(&app)).ok();
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (app, interval_hours);
-        Err("Background keep-alive is macOS-only.".to_string())
+        Err("Background keep-alive is available on Windows and macOS.".to_string())
     }
 
     #[cfg(target_os = "macos")]
@@ -248,7 +277,15 @@ pub async fn keepalive_enable(app: AppHandle, interval_hours: u32) -> Result<(),
 
 #[tauri::command]
 pub async fn keepalive_disable(app: AppHandle) -> Result<(), String> {
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        windows_schedule::remove()?;
+        let marker = opt_out_path(&app);
+        if let Some(dir) = marker.parent() { std::fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
+        std::fs::write(marker, b"1").map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app;
         Ok(())
@@ -285,9 +322,21 @@ pub async fn keepalive_disable(app: AppHandle) -> Result<(), String> {
 /// the session dies. Runs on startup; never installs an agent that is not
 /// already there, so it cannot override the user's choice either way.
 pub fn repair_path(app: &AppHandle) {
-    if !cfg!(target_os = "macos") {
-        return;
+    #[cfg(target_os = "windows")]
+    {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let Ok(Some(state)) = windows_schedule::query() else { return };
+            if !state.enabled || opt_out_path(&app).exists() { return; }
+            let Ok(cli) = cli_path() else { return };
+            if state.cli == cli.to_string_lossy() { return; }
+            if let Err(e) = windows_schedule::install(&cli, state.hours) {
+                eprintln!("[oculus] could not repair keep-alive task: {e}");
+            }
+        });
     }
+    #[cfg(target_os = "macos")]
+    {
     let Some(plist) = plist_path().filter(|p| p.exists()) else {
         return;
     };
@@ -309,6 +358,9 @@ pub fn repair_path(app: &AppHandle) {
             Err(e) => eprintln!("[oculus] could not re-point keep-alive agent: {e}"),
         }
     });
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = app;
 }
 
 /// Install the agent after a headless sign-in has actually worked.
@@ -323,9 +375,24 @@ pub fn repair_path(app: &AppHandle) {
 /// Silent by design in every early return: this runs behind a sign-in the user
 /// asked for, and none of these cases are errors in *that* operation.
 pub fn ensure_installed(app: &AppHandle) {
-    if !cfg!(target_os = "macos") {
-        return;
+    #[cfg(target_os = "windows")]
+    {
+        if opt_out_path(app).exists() { return; }
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            match windows_schedule::query() {
+                Ok(None) => {
+                    if let Err(e) = tauri::async_runtime::block_on(keepalive_enable(handle, DEFAULT_INTERVAL_HOURS)) {
+                        eprintln!("[oculus] could not install keep-alive task: {e}");
+                    }
+                }
+                Ok(Some(_)) => {},
+                Err(e) => eprintln!("[oculus] could not inspect keep-alive task: {e}"),
+            }
+        });
     }
+    #[cfg(target_os = "macos")]
+    {
     if opt_out_path(app).exists() {
         return;
     }
@@ -345,6 +412,133 @@ pub fn ensure_installed(app: &AppHandle) {
             Err(e) => eprintln!("[oculus] could not install keep-alive agent: {e}"),
         }
     });
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = app;
+}
+
+/// Scheduler commands are fixed scripts; paths and intervals travel as
+/// environment values, never source interpolation. Each Windows account owns
+/// its own limited, interactive-logon task, with no stored Windows password.
+#[cfg(target_os = "windows")]
+mod windows_schedule {
+    use std::path::Path;
+
+    #[derive(serde::Deserialize)]
+    pub struct Installed {
+        pub enabled: bool,
+        pub cli: String,
+        pub hours: u32,
+    }
+
+    const PREAMBLE: &str = r#"
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$taskName = 'com.tchan.oculus.session-keepalive-' + $identity.User.Value
+if ($env:OCULUS_SCHEDULER_TEST_NAME) { $taskName = $env:OCULUS_SCHEDULER_TEST_NAME }
+"#;
+
+    fn run(script: &str, cli: Option<&Path>, hours: u32, test_name: Option<&str>) -> Result<String, String> {
+        let system = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let powershell = std::path::PathBuf::from(system).join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let mut command = crate::platform::command(powershell);
+        command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command"])
+            .arg(format!("{PREAMBLE}\n{script}"))
+            .env("OCULUS_TASK_HOURS", hours.to_string())
+            // Always overwrite inherited values: production can never be
+            // redirected to a test task by the launching shell.
+            .env("OCULUS_SCHEDULER_TEST_NAME", test_name.unwrap_or(""));
+        if let Some(cli) = cli { command.env("OCULUS_TASK_CLI", cli); }
+        let output = command.output().map_err(|e| format!("Windows Task Scheduler: {e}"))?;
+        if !output.status.success() {
+            return Err(format!("Windows Task Scheduler: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().trim_start_matches('\u{feff}').to_string())
+    }
+
+    pub fn query() -> Result<Option<Installed>, String> {
+        query_named(None)
+    }
+
+    fn query_named(test_name: Option<&str>) -> Result<Option<Installed>, String> {
+        let json = run(r#"
+$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($null -eq $task) { exit 0 }
+$meta = $task.Description | ConvertFrom-Json
+[ordered]@{ enabled = ($task.State -ne 'Disabled'); cli = $meta.cli; hours = [int]$meta.hours } | ConvertTo-Json -Compress
+"#, None, 0, test_name)?;
+        if json.is_empty() { return Ok(None); }
+        serde_json::from_str(&json).map(Some).map_err(|e| format!("Invalid keep-alive task metadata: {e}"))
+    }
+
+    pub fn install(cli: &Path, hours: u32) -> Result<(), String> {
+        install_named(cli, hours, None)
+    }
+
+    fn install_named(cli: &Path, hours: u32, test_name: Option<&str>) -> Result<(), String> {
+        run(r#"
+$cli = $env:OCULUS_TASK_CLI
+$hours = [int]$env:OCULUS_TASK_HOURS
+$quoted = "'" + $cli.Replace("'", "''") + "'"
+$invoke = '& ' + $quoted + ' auth tick'
+if ($env:OCULUS_SCHEDULER_TEST_NAME) { $invoke = 'exit 0' }
+$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($invoke))
+$action = New-ScheduledTaskAction -Execute (Join-Path $PSHOME 'powershell.exe') -Argument ('-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ' + $encoded)
+$trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(1)) -RepetitionInterval ([TimeSpan]::FromHours($hours))
+if ($env:OCULUS_SCHEDULER_TEST_NAME) { $trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddDays(30)) -RepetitionInterval ([TimeSpan]::FromHours($hours)) }
+$principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::FromMinutes(10)) -MultipleInstances IgnoreNew
+$description = @{cli = $cli; hours = $hours} | ConvertTo-Json -Compress
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description $description -Force | Out-Null
+"#, Some(cli), hours, test_name)?;
+        Ok(())
+    }
+
+    pub fn remove() -> Result<(), String> {
+        remove_named(None)
+    }
+
+    fn remove_named(test_name: Option<&str>) -> Result<(), String> {
+        run(r#"
+if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+}
+exit 0
+"#, None, 0, test_name)?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        struct Cleanup(String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = remove_named(Some(&self.0)); }
+        }
+
+        #[test]
+        fn windows_scheduler_registers_reads_updates_and_removes_an_isolated_task() {
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let name = format!("com.tchan.oculus.test-{}-{stamp}", std::process::id());
+            // Cleanup runs even if an assertion panics. The test action is
+            // `exit 0`, scheduled 30 days away; it never runs auth tick.
+            let _cleanup = Cleanup(name.clone());
+            let cli = Path::new(r"C:\Oculus test & apostrophe's\oculus.exe");
+            assert!(query_named(Some(&name)).unwrap().is_none());
+            install_named(cli, 6, Some(&name)).unwrap();
+            let state = query_named(Some(&name)).unwrap().expect("registered task");
+            assert!(state.enabled);
+            assert_eq!(state.hours, 6);
+            assert_eq!(state.cli, cli.to_string_lossy());
+            install_named(cli, 12, Some(&name)).unwrap();
+            assert_eq!(query_named(Some(&name)).unwrap().unwrap().hours, 12);
+            remove_named(Some(&name)).unwrap();
+            assert!(query_named(Some(&name)).unwrap().is_none());
+        }
+    }
 }
 
 #[cfg(test)]

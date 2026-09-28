@@ -33,14 +33,23 @@ export const TERM_RANK: ReadonlyArray<readonly [string, number]> = [
   ["july", 2],
 ];
 
+const TERM_TOKENS: ReadonlyArray<readonly [number, readonly string[]]> = [
+  [0, ["summer", "sum"]],
+  [1, ["semester 1", "sm1"]],
+  [2, ["winter", "win"]],
+  [3, ["semester 2", "sm2"]],
+  [0, ["january", "jan", "february", "feb"]],
+  [2, ["june", "jun", "july", "jul"]],
+];
+
 const UNKNOWN_RANK = 9;
 
 /** `"2026 Summer Term"` → `0`. Anything unrecognised ranks after real terms. */
 export function termRank(termName: string | null): number {
   if (!termName) return UNKNOWN_RANK;
-  const haystack = termName.toLowerCase();
-  for (const [needle, rank] of TERM_RANK) {
-    if (haystack.includes(needle)) return rank;
+  const haystack = ` ${termName.toLowerCase().split(/[\s_()-]+/).join(" ")} `;
+  for (const [rank, tokens] of TERM_TOKENS) {
+    if (tokens.some((token) => haystack.includes(` ${token} `))) return rank;
   }
   return UNKNOWN_RANK;
 }
@@ -56,6 +65,38 @@ export function compareTermsNewestFirst(a: string | null, b: string | null): num
   return termYear(b) - termYear(a) || termRank(b) - termRank(a);
 }
 
+interface TermSubject {
+  id: number;
+  term_name: string | null;
+  workflow_state: string;
+}
+
+/** Current means the newest available term, using academic order even if an
+ *  older app or a Canvas event supplied incorrect current flags. */
+export function currentSubjectIds(subjects: readonly TermSubject[]): Set<number> {
+  const latest = subjects
+    .filter((s) => s.workflow_state === "available")
+    .reduce<string | null>(
+      (best, s) => compareTermsNewestFirst(s.term_name, best) < 0 ? s.term_name : best,
+      null,
+    );
+  return new Set(subjects
+    .filter((s) => s.workflow_state === "available" && compareTermsNewestFirst(s.term_name, latest) === 0)
+    .map((s) => s.id));
+}
+
+/** Recognize only the obsolete automatic selection. A custom set, including
+ *  selecting nothing, stays untouched. The stored flags are repaired with it,
+ *  so later reads cannot repeatedly reset a person's choices. */
+export function hasLegacyDefaultSelection(
+  subjects: readonly (TermSubject & { is_current: boolean | number; selected: boolean | number })[],
+  currentIds: ReadonlySet<number>,
+): boolean {
+  return subjects.some((s) => !!s.is_current)
+    && subjects.every((s) => !!s.selected === !!s.is_current)
+    && subjects.some((s) => !!s.is_current !== currentIds.has(s.id));
+}
+
 /**
  * The same ranking as a SQLite expression, so ordering can stay in the query
  * that fetches subjects rather than becoming a second sort in JS. Inlined as a
@@ -64,8 +105,11 @@ export function compareTermsNewestFirst(a: string | null, b: string | null): num
  * `termRank` would.
  */
 export function TERM_RANK_SQL(column: string): string {
-  const whens = TERM_RANK.map(
-    ([needle, rank]) => `WHEN lower(${column}) LIKE '%${needle}%' THEN ${rank}`
-  ).join(" ");
+  let normalized = `replace(replace(replace(replace(replace(replace(replace(lower(${column}), '_', ' '), '-', ' '), '(', ' '), ')', ' '), char(9), ' '), char(10), ' '), char(13), ' ')`;
+  for (let i = 0; i < 4; i++) normalized = `replace(${normalized}, '  ', ' ')`;
+  normalized = `(' ' || ${normalized} || ' ')`;
+  const whens = TERM_TOKENS
+    .map(([rank, tokens]) => `WHEN ${tokens.map((token) => `${normalized} LIKE '% ${token} %'`).join(" OR ")} THEN ${rank}`)
+    .join(" ");
   return `CASE ${whens} ELSE ${UNKNOWN_RANK} END`;
 }

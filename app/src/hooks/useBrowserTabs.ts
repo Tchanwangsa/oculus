@@ -127,6 +127,11 @@ export function useBrowserTabs() {
     const unlisten = listen<BrowserSnapshot>("browser-state", (e) => {
       if (!cancelled) reconcile(e.payload);
     });
+    // Native child WebViews are outside React's pointer/focus capture tree.
+    // Mirror their actual focus, without asking any WebView to focus again.
+    const unlistenFocus = listen<{ id: number }>("browser-focus", (e) => {
+      if (!cancelled) useTabStore.getState().focusBrowserPane(e.payload.id);
+    });
 
     // Icons found beside a page load. Kept in the store for this session and
     // in the database for the next one; Rust asks the network once per host
@@ -149,6 +154,7 @@ export function useBrowserTabs() {
     return () => {
       cancelled = true;
       unlisten.then((off) => off()).catch(() => {});
+      unlistenFocus.then((off) => off()).catch(() => {});
       unlistenIcon.then((off) => off()).catch(() => {});
     };
   }, []);

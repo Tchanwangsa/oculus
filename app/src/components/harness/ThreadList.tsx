@@ -6,6 +6,7 @@ import type { HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
 import { displayCode, displayName } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { shortcut } from "@/lib/platform";
 
 const COLLAPSED_KEY = "oculus-chat-groups-collapsed";
 const ORDER_KEY = "oculus-chat-groups-order";
@@ -301,7 +302,7 @@ export const ThreadList = memo(function ThreadList({
             variant="ghost"
             size="icon-xs"
             aria-label="Hide conversations"
-            title="Hide conversations (⌘⌥B)"
+            title={`Hide conversations (${shortcut("B", true)})`}
             className="shrink-0 text-muted-foreground"
             onClick={onToggle}
           >

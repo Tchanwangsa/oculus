@@ -27,6 +27,8 @@ pub mod antigravity;
 pub mod antigravity_rules;
 pub mod attach;
 pub mod claude;
+#[cfg(windows)]
+pub mod wsl_cli;
 pub mod codex;
 pub mod discover;
 pub mod event;
@@ -35,6 +37,8 @@ pub mod jobs;
 pub mod opencode;
 pub mod signin;
 pub mod store;
+#[cfg(windows)]
+pub mod wsl;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -59,6 +63,61 @@ const INSTRUCTIONS_TEMPLATE: &str = include_str!("../../templates/HARNESS.templa
 /// module docs for why this and not the root.
 pub fn thread_cwd(data_dir: &Path) -> PathBuf {
     crate::agents::agents_dir(data_dir)
+}
+
+/// Resolve directories before handing them to a provider. An Oculus process
+/// launched by a packaged Windows app can see a virtualized AppData path that
+/// the provider's sandbox user cannot see. Resolve the actual directories after
+/// creating them, and keep the writable cwd strictly inside that library.
+fn prepare_thread_paths(data_dir: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let cwd = thread_cwd(data_dir);
+    std::fs::create_dir_all(&cwd).map_err(|e| format!("cannot create {}: {e}", cwd.display()))?;
+    #[cfg(windows)]
+    {
+        let library = dunce::canonicalize(data_dir)
+            .map_err(|e| format!("cannot resolve library {}: {e}", data_dir.display()))?;
+        let cwd = dunce::canonicalize(&cwd)
+            .map_err(|e| format!("cannot resolve agent directory {}: {e}", cwd.display()))?;
+        if cwd.parent() != Some(library.as_path()) {
+            return Err("The agent directory must resolve directly inside the Oculus library.".into());
+        }
+        // Refresh an upgraded library before its next sync, only after
+        // validating the writable directory's real location.
+        crate::agents::ensure_library_docs(&library)?;
+        Ok((library, cwd))
+    }
+    #[cfg(not(windows))]
+    {
+        crate::agents::ensure_library_docs(data_dir)?;
+        Ok((data_dir.to_path_buf(), cwd))
+    }
+}
+
+fn child_env_for_library(library: &Path) -> Vec<(String, String)> {
+    let env = discover::child_env();
+    #[cfg(windows)]
+    {
+        windows_library_env(env, library)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = library;
+        env
+    }
+}
+
+#[cfg(windows)]
+fn windows_library_env(mut env: Vec<(String, String)>, library: &Path) -> Vec<(String, String)> {
+    // The nested `oculus` CLI computes APPDATA/com.tchan.oculus. Give only
+    // provider children the physical parent, so that CLI and the sandbox agree
+    // with the app without changing Tauri's own data-directory semantics.
+    if library.file_name() == Some(std::ffi::OsStr::new(crate::paths::IDENTIFIER)) {
+        if let Some(parent) = library.parent() {
+            env.retain(|(key, _)| !key.eq_ignore_ascii_case("APPDATA"));
+            env.push(("APPDATA".into(), parent.to_string_lossy().into_owned()));
+        }
+    }
+    env
 }
 
 /// The instructions appended to the provider's own system prompt, with the
@@ -626,9 +685,10 @@ impl Harness {
             return Ok(s.clone());
         }
         let bin = discover::binary(Provider::Codex)?;
+        let (library, _) = prepare_thread_paths(&self.data_dir)?;
         let server = CodexServer::spawn(CodexSpawn {
             bin,
-            env: discover::child_env(),
+            env: child_env_for_library(&library),
             raw_log: RawLog::open(&self.data_dir, 0),
             account_sink: self.codex_account_sink.lock().unwrap().clone(),
         })?;
@@ -684,6 +744,9 @@ impl Harness {
     /// kept; a failure is asked again next time.
     pub fn claude_models(&self) -> Result<Vec<claude::ModelInfo>, String> {
         let bin = discover::binary(Provider::Claude)?;
+        #[cfg(windows)]
+        let resolved = wsl::bridge()?.executable_path();
+        #[cfg(not(windows))]
         let resolved = std::fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
         let modified = std::fs::metadata(&resolved).and_then(|m| m.modified()).ok();
         let mut slot = self.claude_models.lock().unwrap();
@@ -716,17 +779,17 @@ impl Harness {
             return Ok(s.clone());
         }
         let bin = discover::binary(Provider::Opencode)?;
-        let directory = thread_cwd(&self.data_dir);
+        let (library, directory) = prepare_thread_paths(&self.data_dir)?;
         opencode::write_config(
             &directory,
-            &self.data_dir,
-            &instructions(&self.data_dir, None, None),
+            &library,
+            &instructions(&library, None, None),
             NAMING_INSTRUCTIONS,
         )?;
         let server = OpencodeServer::spawn(OpencodeSpawn {
             bin,
             directory,
-            env: discover::child_env(),
+            env: child_env_for_library(&library),
             raw_log: RawLog::open(&self.data_dir, 0),
             default_sink: self.opencode_default_sink.lock().unwrap().clone(),
         })?;
@@ -907,10 +970,18 @@ impl Harness {
         {
             return Ok(());
         }
-        live.remove(&thread_id);
+        if let Some(previous) = live.remove(&thread_id) {
+            // Reader threads own Arcs too. Retiring a session must stop its
+            // process or detach its route, including the new providers.
+            match previous {
+                Live::Claude { session, .. } => session.kill(),
+                Live::Antigravity { session, .. } => session.kill(),
+                Live::Codex { server, thread_id, .. } => server.detach(&thread_id),
+                Live::Opencode { server, session, .. } => server.detach(&session),
+            }
+        }
 
-        let cwd = thread_cwd(&self.data_dir);
-        std::fs::create_dir_all(&cwd).map_err(|e| format!("cannot create {}: {e}", cwd.display()))?;
+        let (library, cwd) = prepare_thread_paths(&self.data_dir)?;
         let raw_log = RawLog::open(&self.data_dir, thread_id);
         let session = match provider {
             Provider::Claude => {
@@ -918,14 +989,14 @@ impl Harness {
                     ClaudeSpawn {
                         bin: discover::binary(provider)?,
                         cwd,
-                        library: self.data_dir.clone(),
+                        library: library.clone(),
                         oculus: discover::oculus_cli(),
                         resume: resume.map(String::from),
                         model: opts.model.clone(),
                         effort: opts.reasoning_effort.clone(),
                         permission_mode: "acceptEdits".into(),
-                        system_append: instructions(&self.data_dir, opts.scope.as_deref(), opts.lecture.as_ref()),
-                        env: discover::child_env(),
+                        system_append: instructions(&library, opts.scope.as_deref(), opts.lecture.as_ref()),
+                        env: child_env_for_library(&library),
                         raw_log,
                     },
                     sink,
@@ -953,7 +1024,7 @@ impl Harness {
                         .collect(),
                     model: opts.model.clone(),
                     reasoning_effort: opts.reasoning_effort.clone(),
-                    instructions: instructions(&self.data_dir, opts.scope.as_deref(), opts.lecture.as_ref()),
+                    instructions: instructions(&library, opts.scope.as_deref(), opts.lecture.as_ref()),
                 };
                 let tid = match resume {
                     Some(id) => {
@@ -1002,7 +1073,7 @@ impl Harness {
                     AntigravitySpawn {
                         bin: discover::binary(provider)?,
                         cwd,
-                        library: self.data_dir.clone(),
+                        library: library.clone(),
                         resume: resume.map(String::from),
                         model: opts.model.clone(),
                         effort: opts.reasoning_effort.clone(),
@@ -1012,7 +1083,7 @@ impl Harness {
                         // same free ride Codex gets, and the reason there is
                         // no `--append-system-prompt` to miss.
                         brief: thread_sections(opts.scope.as_deref(), opts.lecture.as_ref()),
-                        env: discover::child_env(),
+                        env: child_env_for_library(&library),
                         raw_log,
                         approved: opts.antigravity_rules.clone(),
                     },
@@ -1055,7 +1126,7 @@ impl Harness {
         let sink: Sink = Arc::new(move |ev| {
             let _ = tx.send(ev);
         });
-        let cwd = thread_cwd(&self.data_dir);
+        let (library, cwd) = prepare_thread_paths(&self.data_dir)?;
 
         // Held so the session outlives the collect loop, and dropped after it.
         let claude;
@@ -1068,7 +1139,7 @@ impl Harness {
                     ClaudeSpawn {
                         bin: discover::binary(provider)?,
                         cwd,
-                        library: self.data_dir.clone(),
+                        library: library.clone(),
                         oculus: discover::oculus_cli(),
                         resume: None,
                         model: Some(sel.model.clone()),
@@ -1078,7 +1149,7 @@ impl Harness {
                         // refused rather than hanging the turn.
                         permission_mode: "default".into(),
                         system_append: String::new(),
-                        env: discover::child_env(),
+                        env: child_env_for_library(&library),
                         raw_log: None,
                     },
                     sink,
@@ -1135,12 +1206,12 @@ impl Harness {
                     AntigravitySpawn {
                         bin: discover::binary(provider)?,
                         cwd,
-                        library: self.data_dir.clone(),
+                        library: library.clone(),
                         resume: None,
                         model: Some(sel.model.clone()),
                         effort: sel.reasoning_effort.clone(),
                         brief: String::new(),
-                        env: discover::child_env(),
+                        env: child_env_for_library(&library),
                         raw_log: None,
                         // No database here: the same approvals the last
                         // thread's spawn wrote, so the global file is left as
@@ -1513,14 +1584,10 @@ pub mod app {
         }
         if opts.model.is_some() && opts.model != row.model {
             store::set_model(&pool, thread_id, opts.model.as_deref()).await?;
-            // A different model means a different process for the two CLIs
-            // that fix `--model` at spawn — Claude, and Antigravity, whose
-            // live `agy` keeps the model it started with. Safe here and not
-            // at the moment the student picked it: the thread is between
-            // turns, so nothing is killed mid-answer.
-            if matches!(provider, Provider::Claude | Provider::Antigravity) {
-                harness.close(thread_id);
-            }
+            // Every live route holds its original model (and Claude/agy
+            // bind it to a process). Resume under the selected model between
+            // turns, after the current answer has finished.
+            harness.close(thread_id);
         }
         // The row, not the payload, decides all three: an open thread keeps
         // the model it was last set to, the subject it was created with, and
@@ -1572,15 +1639,17 @@ pub mod app {
     /// `discover::health`'s cache, so opening a composer costs nothing after
     /// the first read of the session.
     #[tauri::command]
-    pub async fn harness_health(recheck: bool) -> Vec<discover::BridgeHealth> {
+    pub async fn harness_health(state: State<'_, HarnessState>, recheck: bool) -> Result<Vec<discover::BridgeHealth>, String> {
+        let harness = state.harness.clone();
         tokio::task::spawn_blocking(move || {
             if recheck {
                 discover::forget();
+                harness.forget_claude_models();
             }
             discover::PROVIDERS.iter().map(|p| discover::health(*p)).collect()
         })
         .await
-        .unwrap_or_default()
+        .map_err(|error| error.to_string())
     }
 
     /// The four ways this machine could install one of the CLIs, and which of
@@ -2220,6 +2289,50 @@ pub mod app {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_bridge_uses_the_created_physical_agents_directory() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir()
+            .join(format!("oculus-harness-paths-{}-{nonce}", std::process::id()));
+        let logical = root.join(crate::paths::IDENTIFIER);
+        let (library, cwd) = prepare_thread_paths(&logical).unwrap();
+        assert!(library.is_absolute());
+        assert_eq!(library, dunce::canonicalize(&logical).unwrap());
+        assert_eq!(cwd, library.join("agents"));
+        assert!(cwd.is_dir());
+        assert!(cwd.join("skills/oculus-plan/SKILL.md").is_file());
+        assert!(cwd.join(".claude/skills/oculus-plan/SKILL.md").is_file());
+        assert!(cwd.join(".agents/skills/oculus-plan/SKILL.md").is_file());
+        assert!(instructions(&library, None, None).contains(&library.display().to_string()));
+        // Preparing a library also writes the shipped brief and skills. Only
+        // recursively remove this test's resolved, uniquely named temp root.
+        let resolved_root = dunce::canonicalize(&root).unwrap();
+        assert_eq!(resolved_root.parent(), Some(dunce::canonicalize(std::env::temp_dir()).unwrap().as_path()));
+        assert!(library.starts_with(&resolved_root));
+        std::fs::remove_dir_all(&resolved_root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_bridge_cli_receives_the_same_library_without_changing_other_environment() {
+        let env = windows_library_env(
+            vec![
+                ("AppData".into(), "C:\\logical\\Roaming".into()),
+                ("APPDATA".into(), "C:\\another\\Roaming".into()),
+                ("HOME".into(), "C:\\Users\\student".into()),
+            ],
+            Path::new(r"C:\physical\Roaming\com.tchan.oculus"),
+        );
+        assert_eq!(env, vec![
+            ("HOME".into(), "C:\\Users\\student".into()),
+            ("APPDATA".into(), "C:\\physical\\Roaming".into()),
+        ]);
+        let unrelated = vec![("APPDATA".into(), "original".into())];
+        assert_eq!(windows_library_env(unrelated.clone(), Path::new(r"C:\custom-library")), unrelated);
+    }
 
     /// A model asked for a name alone mostly gives one, and sometimes dresses
     /// it up. What it dresses it in is stripped; a whole sentence is refused,

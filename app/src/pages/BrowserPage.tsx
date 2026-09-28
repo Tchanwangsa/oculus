@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import {
   addressKind,
   browser,
+  focusBrowserInput,
   hostOf,
   normalizeAddress,
   searchEngine,
@@ -25,7 +26,7 @@ import {
 import { suggestHistory, type HistoryEntry } from "@/lib/browserHistory";
 import { faviconFor } from "@/hooks/useBrowserTabs";
 import { useBrowserStore } from "@/stores/browserStore";
-import { useActivePaneId } from "@/stores/tabStore";
+import { activePane, browserPageMayHide } from "@/stores/tabStore";
 import { useTabActive, useTabId } from "@/components/tabs/TabContext";
 
 /**
@@ -136,8 +137,6 @@ export default function BrowserPage() {
   // front" — so the find bar asks the narrower question the shell already
   // answers for navigation: which half am I working in.
   const paneId = useTabId();
-  const focusedPaneId = useActivePaneId();
-  const focused = active && paneId === focusedPaneId;
   const tab = useBrowserStore((s) => s.tabs.find((t) => t.id === id));
   const favicons = useBrowserStore((s) => s.favicons);
   const slotRef = useRef<HTMLDivElement>(null);
@@ -214,7 +213,11 @@ export default function BrowserPage() {
     const slot = slotRef.current;
     if (!slot || !Number.isInteger(id)) return;
     if (hidden) {
-      browser.hideTab(id).catch(() => {});
+      // A temporary strip page can unmount or become inactive after the same
+      // browser has been placed in its destination split. Only our own active
+      // overlay may hide that visible owner, never the stale duplicate.
+      const overlayOwner = active && (covered || listOpen) ? paneId : undefined;
+      if (browserPageMayHide(id, overlayOwner)) browser.hideTab(id).catch(() => {});
       return;
     }
     // The still is dropped when Rust says the live page is up again, not when
@@ -227,12 +230,14 @@ export default function BrowserPage() {
         setStanding(false);
         setStill(undefined);
       });
-  }, [id, hidden]);
+  }, [id, hidden, active, covered, listOpen, paneId]);
 
   // Leaving the slot takes the page with it — on unmount for an app tab, and
   // on an id change, which is the same slot handed to another tab. Keyed on
   // the id it put there, so it is the outgoing page that goes down.
-  useEffect(() => () => void browser.hideTab(id).catch(() => {}), [id]);
+  useEffect(() => () => {
+    if (browserPageMayHide(id)) void browser.hideTab(id).catch(() => {});
+  }, [id]);
 
   // The slot moves when the sidebar toggles or the zoom changes (page zoom
   // reflows the viewport, so this fires for it too); the window's own
@@ -432,33 +437,44 @@ export default function BrowserPage() {
   // work from outside the page it is meant to search
   // (`app/src-tauri/src/menu.rs`).
   const findActions = useRef({ open: () => {}, step: (_: boolean) => {} });
+  const focusFind = (afterOpen?: () => void) => {
+    void focusBrowserInput(
+      () => activePane()?.id === paneId,
+      () => {
+        setFind((f) => ({ ...f, open: true }));
+        afterOpen?.();
+      },
+      () => findRef.current,
+    ).catch((error) => console.error("[oculus] focus browser find", error));
+  };
   findActions.current = {
-    open: () => {
-      setFind((f) => ({ ...f, open: true }));
-      // After the bar has mounted, and selecting so ⌘F twice replaces rather
-      // than appends.
-      requestAnimationFrame(() => findRef.current?.select());
-    },
+    open: () => focusFind(),
     step: (backwards: boolean) => {
       if (!find.open) {
         findActions.current.open();
         return;
       }
-      if (find.query) runFind(find.query, backwards, false);
+      focusFind(() => {
+        if (find.query) runFind(find.query, backwards, false);
+      });
     },
   };
 
   useEffect(() => {
-    if (!focused) return;
+    // Read focus when the shortcut arrives: a native browser-focus event may
+    // precede it before React has rendered the new focused half.
+    const whenFocused = (action: () => void) => () => {
+      if (activePane()?.id === paneId) action();
+    };
     const pending = [
-      listen("menu-find", () => findActions.current.open()),
-      listen("menu-find-next", () => findActions.current.step(false)),
-      listen("menu-find-prev", () => findActions.current.step(true)),
+      listen("menu-find", whenFocused(() => findActions.current.open())),
+      listen("menu-find-next", whenFocused(() => findActions.current.step(false))),
+      listen("menu-find-prev", whenFocused(() => findActions.current.step(true))),
     ];
     return () => {
       for (const p of pending) p.then((off) => off()).catch(() => {});
     };
-  }, [focused]);
+  }, [paneId]);
 
   // ⌘L. **Every browser shortcut here is a menu item**, none of them a
   // `keydown` listener: `browser_place` calls `set_focus()` on the page, so
@@ -470,10 +486,15 @@ export default function BrowserPage() {
   // mean on a page that is not a browser tab; ⌘L means nothing there at all,
   // so it ends here.
   useEffect(() => {
-    if (!focused) return;
-    const unlisten = listen("menu-address", () => addressRef.current?.focus());
+    const unlisten = listen("menu-address", () => {
+      void focusBrowserInput(
+        () => activePane()?.id === paneId,
+        () => {},
+        () => addressRef.current,
+      ).catch((error) => console.error("[oculus] focus browser address", error));
+    });
     return () => void unlisten.then((off) => off()).catch(() => {});
-  }, [focused]);
+  }, [paneId]);
 
   const barButton =
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent transition-colors";

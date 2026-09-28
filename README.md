@@ -1,6 +1,6 @@
 # Oculus
 
-A macOS desktop app that turns a UniMelb student's coursework into a
+A macOS and Windows desktop app that turns a UniMelb student's coursework into a
 searchable knowledge base — and then lets a coding agent answer questions
 against it.
 
@@ -10,6 +10,11 @@ recordings, parses every PDF to markdown, embeds each page as an *image*, and
 retrieves the right pages on demand. Chat is not a chatbot bolted on: it is
 Claude Code, Codex, opencode or Antigravity, run as a subprocess inside your
 library, with the `oculus` CLI as its tool surface.
+
+Both platforms are maintained in this repository. The former
+[`oculus_window`](https://github.com/Tung-Phan-Dinh/oculus_window) port is
+retired; its Windows support and history are integrated here. The `andre`
+branch is the shared testing branch before changes are merged into `master`.
 
 There's no Oculus server and no Oculus account. Sync talks only to the
 university's own systems, over the session cookie you're already signed in
@@ -31,9 +36,9 @@ to the same subjects. Incremental: unchanged files cost one metadata call, not
 a download. → [docs/sync.md](docs/sync.md)
 
 **Sign-in that stays signed in.** Canvas SSO runs through Okta. With your
-password and a TOTP seed in the keychain, Oculus rebuilds a dead session
-headlessly, and a LaunchAgent keeps it warm every six hours while the app is
-closed. → [docs/auth.md](docs/auth.md)
+password and a TOTP seed in the system credential store, Oculus rebuilds a
+dead session headlessly. A macOS LaunchAgent or Windows scheduled task keeps
+it warm while the app is closed. → [docs/auth.md](docs/auth.md)
 
 **PDF parsing, no fallback.** Every PDF is read by MinerU — its cloud service,
 or a MinerU server you install and run yourself, reached over loopback —
@@ -118,22 +123,29 @@ freezes. → [docs/architecture.md](docs/architecture.md)
 - **[bun](https://bun.sh)** — never npm/yarn/pnpm. `app/bun.lock` is the only
   lockfile, and Tauri itself shells out to `bun run`.
 - **Rust** (stable, via [rustup](https://rustup.rs))
-- **[sccache](https://github.com/mozilla/sccache)** —
-  `brew install sccache`. Not optional: `app/src-tauri/.cargo/config.toml` sets
+- **[sccache](https://github.com/mozilla/sccache)** — `brew install sccache`
+  on macOS or `cargo install sccache --locked` on Windows.
+  `app/src-tauri/.cargo/config.toml` sets
   `rustc-wrapper = "sccache"`, and cargo fails outright if the wrapper is
   missing (`could not execute process sccache ... (never executed)`).
-- **macOS.** The keep-alive LaunchAgent, the window chrome and the WebView
-  behaviour notes are all macOS-specific.
+- **macOS:** Xcode Command Line Tools. The app uses the system WebKit.
+- **Windows x64:** Visual Studio C++ Build Tools with the Windows SDK,
+  the Rust MSVC toolchain, and Microsoft Edge WebView2.
+- **Optional:** LibreOffice for Word, PowerPoint and Excel imports. Claude
+  uses its native CLI on macOS and [WSL2 on Windows](docs/claude-wsl-setup.md).
 
-There is no Python step, no `uv`, and no `sidecar/` directory. If you have an
-orphaned `sidecar/.venv` from an older checkout, it's 1.2 GB of nothing —
-delete it.
+There is no bundled Python runtime or local model. Parsing uses MinerU Cloud
+or an external local MinerU server, selected in Settings → Library. Windows
+defaults to Local to preserve its earlier processing policy; macOS retains
+its Cloud default. Existing explicit choices are retained. Semantic indexing
+uses Voyage. See [parsing](docs/parsing.md) and [retrieval](docs/retrieval.md)
+before enabling remote processing.
 
 ### First run
 
 ```sh
 cd app
-bun install
+bun install --frozen-lockfile
 bun run predev      # ffmpeg, libpdfium and the debug `oculus` CLI, in one step
 ```
 
@@ -146,9 +158,9 @@ hand. `OCULUS_SKIP_PREDEV=1` skips it when you only want vite.
 ```sh
 cd app
 bun run tauri dev       # the app
-bun run tauri build     # release build → .app bundle
+bun run tauri build     # macOS .app/.dmg or Windows NSIS installer
 bun run cli             # the headless `oculus` binary, release profile
-bun run cli:install     # + symlink into ~/.local/bin
+bun run cli:install     # install CLI into ~/.local/bin
 ```
 
 The first Rust build is cold and slow — several hundred crates. After that
@@ -167,12 +179,28 @@ nothing, and exits 0. For daily use, `bun run tauri build`, copy the `.app` to
 `/Applications`, and sign in once from there so the agent points inside the
 bundle.
 
+On Windows, run the installer under
+`app/src-tauri/target/release/bundle/nsis/`. It includes the desktop app,
+CLI, FFmpeg and PDFium. Existing Windows library paths and the app identifier
+are unchanged by consolidation. See [Windows setup](docs/windows.md).
+
+### Testing both platforms
+
+Work on `andre`, then merge to `master` after testing. The
+`Desktop checks` GitHub Actions workflow runs frontend tests, Rust tests,
+and native packaging on Windows and macOS. Successful builds are downloadable
+as workflow artifacts for testing; they are not public releases. Native
+sign-in and WebView interactions still need checks on each system.
+
 ---
 
 ## Where your data lives
 
+The library lives at `~/Library/Application Support/com.tchan.oculus` on
+macOS and `%APPDATA%\com.tchan.oculus` on Windows:
+
 ```
-~/Library/Application Support/com.tchan.oculus/
+com.tchan.oculus/
 ├── oculus.db                  # subjects, files, pages + embeddings, projects, chat threads
 ├── courses/<CODE>/            # files/, pages/, modules/, ed/, assignments/, images/, uploads/
 ├── agents/                    # the CLI agent's workspace
@@ -185,9 +213,10 @@ bundle.
 
 Deleting that directory is a full reset, auth included. Canvas-derived content
 re-syncs; a subject's own uploads, chats, projects and settings do not.
-Credentials live in the macOS keychain (Canvas SSO, the MinerU token, the
-Voyage API key) separately from all of the above — no model weights sit on
-disk anywhere, since neither cloud client downloads one.
+Credentials live in macOS Keychain or Windows Credential Manager (Canvas
+SSO, the MinerU token, the Voyage API key), separately from the library.
+The current app downloads no model weights. Old Python runtimes and model
+caches from earlier versions are not started or automatically removed.
 
 ---
 

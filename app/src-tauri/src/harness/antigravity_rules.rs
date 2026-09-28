@@ -131,8 +131,18 @@ struct State {
 /// `~/.gemini/antigravity-cli/settings.json` — the one place `agy` reads
 /// rules from.
 pub fn settings_path() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("HOME is not set, so agy's settings cannot be found")?;
-    Ok(PathBuf::from(home).join(".gemini/antigravity-cli/settings.json"))
+    let home = super::discover::home().ok_or("The user home directory is unavailable, so agy's settings cannot be found")?;
+    Ok(home.join(".gemini/antigravity-cli/settings.json"))
+}
+
+/// Windows canonical paths may carry an extended-length prefix that provider
+/// rule parsers do not understand. Forward slashes name the same Windows file
+/// and keep mixed separators out of generated rules; Unix paths stay literal.
+pub(super) fn rule_path(path: &Path) -> String {
+    #[cfg(windows)]
+    { dunce::simplified(path).to_string_lossy().replace('\\', "/") }
+    #[cfg(not(windows))]
+    { path.display().to_string() }
 }
 
 /// Where the record of Oculus's own entries lives: the library root, beside
@@ -166,8 +176,8 @@ impl OculusCli {
     pub fn discover() -> Option<OculusCli> {
         let found = super::discover::oculus_cli()?;
         let bin = found.canonicalize().unwrap_or(found);
-        let launcher = std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join(".local/bin/oculus"))
+        let launcher = super::discover::home()
+            .map(|h| h.join(format!(".local/bin/oculus{}", std::env::consts::EXE_SUFFIX)))
             .filter(|p| std::fs::symlink_metadata(p).is_ok());
         Some(OculusCli { bin, launcher })
     }
@@ -193,22 +203,22 @@ impl OculusCli {
 ///   been measured.
 /// - **The CLI**: see [`OculusCli`].
 pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]) -> Rules {
-    let at = |rel: &str| library.join(rel).display().to_string();
+    let at = |rel: &str| rule_path(&library.join(rel));
     let mut allow: Vec<String> = crate::paths::db_write_paths(library)
         .iter()
-        .map(|p| format!("write_file({})", p.display()))
+        .map(|p| format!("write_file({})", rule_path(p)))
         .collect();
     if let Some(cli) = oculus {
         if let Some(dir) = cli.bin.parent() {
-            allow.push(format!("read_file({})", dir.display()));
+            allow.push(format!("read_file({})", rule_path(dir)));
         }
         if let Some(dir) = cli.launcher.as_deref().and_then(Path::parent) {
-            allow.push(format!("read_file({})", dir.display()));
+            allow.push(format!("read_file({})", rule_path(dir)));
         }
         allow.push("command(oculus)".into());
-        allow.push(format!("command({})", cli.bin.display()));
+        allow.push(format!("command({})", rule_path(&cli.bin)));
         if let Some(l) = &cli.launcher {
-            allow.push(format!("command({})", l.display()));
+            allow.push(format!("command({})", rule_path(l)));
         }
     }
     allow.extend(READ_ONLY_COMMANDS.iter().map(|c| format!("command({c})")));
@@ -228,10 +238,10 @@ pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]
     .iter()
     .map(|p| format!("write_file({})", at(p)))
     .collect();
-    deny.push(format!("write_file({})", crate::paths::cookie_path(library).display()));
+    deny.push(format!("write_file({})", rule_path(&crate::paths::cookie_path(library))));
     deny.push(format!("write_file({})", at("ed-session.token")));
-    deny.push(format!("write_file({})", crate::paths::keepalive_log_path(library).display()));
-    deny.push(format!("write_file({})", state_path(library).display()));
+    deny.push(format!("write_file({})", rule_path(&crate::paths::keepalive_log_path(library))));
+    deny.push(format!("write_file({})", rule_path(&state_path(library))));
     // `sqlite3` pointed at *this* database, not `sqlite3` at large: the rules
     // are global, and a blanket `command(sqlite3)` — re-added on every spawn —
     // would ban the tool from every one of the student's own `agy` sessions.
@@ -262,11 +272,11 @@ pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]
 /// deny, and a spelling that never matches costs nothing.
 fn sqlite_paths(library: &Path) -> Vec<String> {
     let db = crate::paths::db_path(library);
-    let mut plain = vec![db.display().to_string()];
+    let mut plain = vec![rule_path(&db)];
     if let Ok(real) = db.canonicalize().or_else(|_| {
         library.canonicalize().map(|l| crate::paths::db_path(&l))
     }) {
-        plain.push(real.display().to_string());
+        plain.push(rule_path(&real));
     }
     let mut out = Vec::new();
     for p in dedupe(plain) {
@@ -710,6 +720,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn the_rule_set_mirrors_claudes() {
         let lib = Path::new("/lib");
         let cli = OculusCli {
@@ -756,7 +767,7 @@ mod tests {
         let lib = scratch("spellings");
         let real = lib.canonicalize().unwrap();
         let r = rules_for(&lib, None, &[]);
-        let want = |l: &Path| format!("command(sqlite3 {})", l.join("oculus.db").display());
+        let want = |l: &Path| format!("command(sqlite3 {})", rule_path(&l.join("oculus.db")));
         assert!(r.deny.contains(&want(&lib)), "{:?}", r.deny);
         assert!(r.deny.contains(&want(&real)), "{:?}", r.deny);
     }
@@ -793,5 +804,30 @@ mod tests {
         assert!(denied_by(lib, "command(sqlite3)").is_none());
         assert!(denied_by(lib, "write_file(/lib/agents/notes)").is_none());
         assert!(denied_by(lib, "command(python3)").is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_rules_use_native_user_home_and_normalized_paths() {
+        let home = std::env::var_os("USERPROFILE").unwrap();
+        assert_eq!(settings_path().unwrap(), PathBuf::from(home).join(".gemini/antigravity-cli/settings.json"));
+        assert_eq!(rule_path(Path::new(r"\\?\C:\Users\Student\Oculus\agents")),
+                   "C:/Users/Student/Oculus/agents");
+        let lib = Path::new(r"C:\Users\Student\Oculus");
+        let rules = rules_for(lib, None, &[]);
+        assert!(!rules.allow.iter().any(|rule| rule.starts_with("write_file(")), "an unresolved DB never grants writes");
+        assert!(rules.deny.contains(&"write_file(C:/Users/Student/Oculus/agents/skills)".into()));
+        assert!(denied_by(lib, r"write_file(C:\Users\Student\Oculus\courses\COMP30026)").is_some());
+
+        let real = scratch("windows-db");
+        std::fs::write(real.join("oculus.db"), b"").unwrap();
+        let rules = rules_for(&real, None, &[]);
+        let db = dunce::canonicalize(real.join("oculus.db")).unwrap();
+        let grants: Vec<_> = rules.allow.iter().filter(|rule| rule.starts_with("write_file(")).collect();
+        assert_eq!(grants.len(), 3);
+        for suffix in ["", "-wal", "-shm"] {
+            assert!(rules.allow.contains(&format!("write_file({}{suffix})", rule_path(&db))));
+        }
+        assert!(!rules.allow.contains(&format!("write_file({})", rule_path(&real))));
     }
 }

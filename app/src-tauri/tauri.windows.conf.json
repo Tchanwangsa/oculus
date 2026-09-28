@@ -1,0 +1,26 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Oculus",
+        "width": 1480,
+        "height": 920,
+        "minWidth": 900,
+        "minHeight": 560,
+        "decorations": true
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["nsis"],
+    "resources": {
+      "binaries/pdfium.dll": "pdfium.dll"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

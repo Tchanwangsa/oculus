@@ -19,9 +19,8 @@
 // tauri.conf.json, which copies it to Contents/Frameworks/.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Keep in lockstep with the `pdfium_*` feature on pdfium-render in Cargo.toml.
@@ -78,18 +77,25 @@ async function fetchOne(triple, force) {
   if (buf.length < 1_000_000) throw new Error(`suspiciously small download (${buf.length} bytes)`);
 
   mkdirSync(outDir, { recursive: true });
-  const archive = join(tmpdir(), `oculus-${asset}`);
+  // Stage on the destination volume: Windows TEMP may be on C: while the
+  // checkout is on another drive, and rename cannot cross volumes.
+  const staging = mkdtempSync(join(outDir, ".pdfium-"));
+  const archive = join(staging, asset);
   writeFileSync(archive, buf);
   try {
     // `tar` ships with macOS, Linux and Windows 10+; node has no unpacker.
-    execFileSync("tar", ["-xzf", archive, "-C", tmpdir(), inner], { stdio: "inherit" });
+    execFileSync("tar", ["-xzf", archive, "-C", staging, inner], { stdio: "inherit", windowsHide: true });
     const tmp = `${dest}.part`;
     rmSync(tmp, { force: true });
-    renameSync(join(tmpdir(), inner), tmp);
+    renameSync(join(staging, inner), tmp);
     rmSync(dest, { force: true });
     renameSync(tmp, dest);
   } finally {
-    rmSync(archive, { force: true });
+    const resolvedStaging = resolve(staging);
+    if (!resolvedStaging.startsWith(resolve(outDir) + sep + ".pdfium-")) {
+      throw new Error("refusing to remove a staging directory outside binaries");
+    }
+    rmSync(resolvedStaging, { recursive: true, force: true });
   }
 
   console.log(`[pdfium] ${(statSync(dest).size / 1e6).toFixed(1)} MB ready (${RELEASE})`);

@@ -1,11 +1,15 @@
 # Development
 
+This repository builds both the macOS and Windows desktop apps. Tauri merges
+the platform configuration automatically; shared code and dependencies stay
+in one tree. Windows-specific setup is in [windows.md](./windows.md).
+
 ## Prerequisites
 
 - **bun** (never npm/yarn/pnpm — see root `CLAUDE.md`)
 - Rust toolchain (stable, via rustup)
-- macOS is the primary target (keep-alive, screenshots, and the WebView
-  behaviour notes are macOS-specific)
+- macOS: Xcode Command Line Tools. Windows: Visual Studio C++ Build Tools,
+  the Windows SDK and WebView2. Both use sccache through the Cargo config.
 
 ## First-time setup
 
@@ -18,13 +22,14 @@ bun run predev        # deps, ffmpeg, libpdfium and the `oculus` CLI
 `predev` is the whole preflight and it is idempotent — run it any time. It is
 also bun's lifecycle name for `dev`, so `bun run dev` runs it first and so does
 `bun run tauri dev`, whose `beforeDevCommand` is now just
-`OCULUS_CLI_WATCH=1 bun run dev`. `OCULUS_SKIP_PREDEV=1` skips it when you only
-want vite.
+`node scripts/dev.mjs`. That wrapper sets `OCULUS_CLI_WATCH=1` through the
+child environment on both Windows and Unix. `OCULUS_SKIP_PREDEV=1` skips the
+preflight when you only want vite.
 
 **There is no Python step any more**, and no `sidecar/` directory: it left the
 tree in `f875bb1`, which is the commit the separate local-server repo forks
 from. If you have an orphaned `sidecar/.venv` from an older checkout it is
-1.2 GB of nothing — delete it.
+an unused environment retained on disk; it is not packaged or started.
 
 The two fetch steps (`bun run ffmpeg`, `bun run pdfium`) are still there to run
 on their own, and `beforeBuildCommand` calls them directly; they are worth
@@ -38,7 +43,8 @@ pinned to the Chromium revision `pdfium-render`'s feature flag binds against: a
 lib from another revision fails at *bind* time, not at compile time, so the two
 move together. Neither binary is committed — `app/src-tauri/binaries/` is
 gitignored. At runtime the library is found relative to the executable
-(`Contents/Frameworks/` in the bundled `.app`, an ancestor `binaries/` in dev),
+(`pdfium.dll` beside the Windows executable, `Contents/Frameworks/` in a
+macOS bundle, an ancestor `binaries/` in dev),
 and `OCULUS_PDFIUM_LIB` overrides that with an explicit path.
 
 ## Running
@@ -51,7 +57,7 @@ bun run tauri build   # release build
 bun run predev        # the dev preflight, by hand
 bun run cli           # build the headless `oculus` binary (release)
 bun run cli:dev       # the same binary in the debug profile
-bun run cli:install   # release build + symlink into ~/.local/bin
+bun run cli:install   # release build + copy on Windows / symlink on Unix to ~/.local/bin
 bun run stage-cli     # build it and stage it as a sidecar for the bundle
 bun run docs:cli      # regenerate docs/cli-reference.md from the binary's help
 ```
@@ -113,6 +119,19 @@ when the help actually changed — so the reference moves in the same commit as
 the CLI rather than waiting for the next bundle.
 
 ## Checks
+
+`.github/workflows/desktop.yml` runs the frontend tests and production build,
+Rust release tests, and native packaging on Windows and macOS for `andre`,
+`master` and pull requests. The workflow retains test installers/app archives
+for 14 days, without publishing a release. macOS test apps are ad-hoc signed;
+production signing and notarization are separate setup. The workflow follows
+[Tauri's native build guidance](https://v2.tauri.app/distribute/pipelines/github/).
+It needs no Canvas, MinerU, Voyage or model-provider credentials.
+
+Use `andre` for shared integration and test on both platforms before merging
+to `master`. macOS development no longer needs a separate Windows import.
+Native UI, real account sign-in and the WSL2 sandbox still require platform
+smoke checks beyond the hosted build jobs.
 
 - Frontend type-check + bundle: `cd app && bun run build` (runs `tsc`).
 - Rust: `cargo check` in `app/src-tauri` (or just let `tauri dev` rebuild).

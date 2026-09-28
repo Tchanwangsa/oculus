@@ -198,7 +198,8 @@ pub struct IndexStats {
 // The pool helpers this module used to own now live in `store.rs`, which the
 // parse path needs too; re-exported here only so the call sites below read
 // unchanged.
-use crate::store::{db_path, pool};
+use crate::store::db_path;
+pub use crate::store::pool;
 
 /// The space this app searches in.
 ///

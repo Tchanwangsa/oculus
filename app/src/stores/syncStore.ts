@@ -47,7 +47,7 @@ export const useSyncStore = create<SyncState>((set) => ({
 
   begin: (runId, subjects) =>
     set({ scraping: true, runId, subjects, progress: { done: 0, total: subjects.length }, error: null }),
-  setProgress: (p) => set({ progress: p, scraping: true, error: null }),
+  setProgress: (p) => set({ progress: p, scraping: true }),
   setRunId: (id) => set({ runId: id }),
   complete: (count, cancelled) =>
     set((s) => ({

@@ -5,7 +5,7 @@
 //! Canvas, Ed and Echo360 pages stay inside Oculus and — the part that costs
 //! something — stay signed in. Three decisions shape this module:
 //!
-//! - **Pages are real WKWebViews, not iframes.** Canvas (and every other
+//! - **Pages are native WebViews, not iframes.** Canvas (and every other
 //!   site worth opening) sends `X-Frame-Options`/`frame-ancestors`, which
 //!   WebKit enforces — an iframe would render a blank box. `Window::add_child`
 //!   makes each page a sibling of the app's own webview instead, stacked
@@ -90,6 +90,7 @@ pub const CANVAS_HOST: &str = "canvas.lms.unimelb.edu.au";
 /// client has a string of its own for the same reason (`okta.rs`) — they are
 /// deliberately not shared, since bumping this one must not disturb a working
 /// SSO flow.
+#[cfg(target_os = "macos")]
 const PAGE_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3 Safari/605.1.15";
 
 fn label(id: u32) -> String {
@@ -278,7 +279,34 @@ pub fn seed_canvas_session(app: &AppHandle) {
     .ok();
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn seed_windows_cookies(page: &Webview<tauri::Wry>, header: &str) -> Result<(), String> {
+    for part in header.split(';') {
+        let Some((name, value)) = part.trim().split_once('=') else { continue };
+        if name.is_empty() { continue; }
+        let cookie = tauri::webview::Cookie::build((name.to_owned(), value.to_owned()))
+            .domain(CANVAS_HOST).path("/").secure(true)
+            .http_only(name == "canvas_session").build();
+        page.set_cookie(cookie).map_err(|e| format!("restore Canvas browser session: {e}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+pub fn seed_canvas_session(app: &AppHandle) {
+    let header = crate::auth::saved_cookie_header(app);
+    let page = app.webviews().into_iter()
+        .find(|(label, _)| label.starts_with(LABEL_PREFIX) || label == "canvas-auth")
+        .map(|(_, page)| page);
+    if let Some(page) = page {
+        // WebView2 cookie operations must stay off its event-loop thread.
+        std::thread::spawn(move || {
+            if let Err(e) = seed_windows_cookies(&page, &header) { eprintln!("[oculus] {e}"); }
+        });
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn seed_canvas_session(_app: &AppHandle) {}
 
 // ── Layout ──────────────────────────────────────────────────────────────
@@ -287,6 +315,10 @@ pub fn seed_canvas_session(_app: &AppHandle) {}
 /// the window without a round trip through JavaScript. From `setup`, once
 /// the config windows exist.
 pub fn init(app: &AppHandle) {
+    #[cfg(target_os = "windows")]
+    if let Some(main) = app.get_webview(MAIN) {
+        crate::menu::attach_windows_accelerators(&main);
+    }
     seed_canvas_session(app);
     let Some(window) = app.get_window(MAIN) else {
         eprintln!("[oculus] browser: no main window at setup; pages will not follow resizes");
@@ -438,8 +470,17 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     let load_app = app.clone();
     let title_app = app.clone();
     let popup_app = app.clone();
-    let builder = WebviewBuilder::new(label(id), WebviewUrl::External(url))
-        .user_agent(PAGE_USER_AGENT)
+    #[cfg(target_os = "windows")]
+    let start_url = url::Url::parse("about:blank").expect("static URL");
+    #[cfg(not(target_os = "windows"))]
+    let start_url = url.clone();
+    let builder = WebviewBuilder::new(label(id), WebviewUrl::External(start_url));
+    // WKWebView needs the complete Safari identity described above. WebView2
+    // already supplies its Chromium identity, which must follow its installed
+    // runtime rather than claim it is a different engine on another OS.
+    #[cfg(target_os = "macos")]
+    let builder = builder.user_agent(PAGE_USER_AGENT);
+    let builder = builder
         // A page webview is a *child* view inside the main window, so it has
         // no window of its own and WebKit reports `outerWidth`/`outerHeight`
         // as 0. That zero is load-bearing for anyone who renders to a canvas:
@@ -460,6 +501,7 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
         // postMessage shim seconds after landing on the page you asked for.
         // These come from WebKit's navigation delegate, main frame only.
         .on_page_load(move |webview, payload| {
+            if payload.url().scheme() == "about" { return; }
             let started = matches!(payload.event(), PageLoadEvent::Started);
             let url = payload.url().to_string();
             with_state(&load_app, |s| {
@@ -481,7 +523,8 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
                 // A Canvas page load rolls the session forward; the cookie the
                 // scraper replays is a snapshot, so take a fresh one.
                 if payload.url().host_str() == Some(CANVAS_HOST) {
-                    crate::auth::save_session_cookie(webview.app_handle());
+                    let app = webview.app_handle().clone();
+                    std::thread::spawn(move || crate::auth::save_session_cookie(&app));
                 }
                 ensure_favicon(&load_app, payload.url());
             }
@@ -501,6 +544,9 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
         .on_new_window(move |url, _| {
             let app = popup_app.clone();
             std::thread::spawn(move || {
+                #[cfg(target_os = "windows")]
+                open_tab(&app, url).ok();
+                #[cfg(not(target_os = "windows"))]
                 app.clone()
                     .run_on_main_thread(move || {
                         open_tab(&app, url).ok();
@@ -510,15 +556,40 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
             NewWindowResponse::Deny
         });
 
+    // WebView2 honors data_directory (WKWebView does not). Login and all
+    // browser tabs must share one profile, isolated from the privileged UI.
+    #[cfg(target_os = "windows")]
+    let builder = builder.data_directory(crate::auth::canvas_session_dir(app));
+
     let viewport = with_state(app, |s| s.viewports.get(&id).copied());
     let (position, size, radius) = rect(content_size(&window), viewport);
     let webview = window
         .add_child(builder, position, size)
         .map_err(|e| format!("failed to open page webview: {e}"))?;
-    // Commands run on the main thread, so nothing paints between the view
-    // appearing and this: it is hidden before its first frame.
+    #[cfg(target_os = "windows")]
+    {
+        crate::menu::attach_windows_accelerators(&webview);
+        attach_windows_focus(&webview, id);
+    }
+    // Keep the page out of the shell until the frontend has placed its slot.
+    // macOS creates and hides the child in one main-thread turn; Windows
+    // starts blank while its cookies are restored off the event thread.
     webview.hide().ok();
     round_corners(&webview, radius);
+    #[cfg(target_os = "windows")]
+    {
+        let header = crate::auth::saved_cookie_header(app);
+        std::thread::spawn(move || {
+            // Restore HttpOnly session cookies before the first request,
+            // including after a cold launch or headless Okta recovery.
+            if let Err(e) = seed_windows_cookies(&webview, &header) {
+                eprintln!("[oculus] {e}");
+            }
+            if let Err(e) = webview.navigate(url) {
+                eprintln!("[oculus] browser navigation failed: {e}");
+            }
+        });
+    }
     Ok(())
 }
 
@@ -551,7 +622,7 @@ pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
 // Three things about a page live in the page and nowhere else: whether its
 // back/forward list has anywhere to go, what the zoom is, and what a find
 // matched. Tauri has an API for the zoom and none for the other two, so they
-// go through the WKWebView.
+// go through WKWebView on macOS and WebView2 on Windows.
 //
 // `with_webview` is the only way in and it hands nothing back — it dispatches
 // a closure to the main thread and returns immediately. So every one of these
@@ -599,10 +670,52 @@ fn refresh_nav(app: &AppHandle, id: u32) {
     .ok();
 }
 
-/// Elsewhere there is nothing to ask, so the arrows stay live rather than
-/// greying out on a guess — the pre-toolbar behaviour, kept where it is still
-/// the only honest one.
-#[cfg(not(target_os = "macos"))]
+/// Read Windows navigation state directly from the page's WebView2 controller.
+#[cfg(target_os = "windows")]
+fn refresh_nav(app: &AppHandle, id: u32) {
+    let Some(page) = page(app, id) else { return };
+    let app = app.clone();
+    page.with_webview(move |platform| unsafe {
+        let Ok(view) = platform.controller().CoreWebView2() else { return };
+        let (mut back, mut forward) = (Default::default(), Default::default());
+        if view.CanGoBack(&mut back).is_err() || view.CanGoForward(&mut forward).is_err() { return; }
+        let changed = with_state(&app, |s| {
+            let Some(tab) = s.tabs.iter_mut().find(|tab| tab.id == id) else { return false };
+            let changed = tab.can_back != back.as_bool() || tab.can_forward != forward.as_bool();
+            tab.can_back = back.as_bool();
+            tab.can_forward = forward.as_bool();
+            changed
+        });
+        if changed { broadcast(&app); }
+    }).ok();
+}
+
+/// Native child views sit above the app DOM, so their clicks never reach the
+/// pane's pointer/focus capture. Report real controller focus to the shell;
+/// the frontend maps the page id to the currently visible pane.
+#[cfg(target_os = "windows")]
+fn attach_windows_focus(page: &Webview<tauri::Wry>, id: u32) {
+    let app = page.app_handle().clone();
+    if let Err(error) = page.with_webview(move |platform| unsafe {
+        let handler = webview2_com::FocusChangedEventHandler::create(Box::new(move |controller, _| {
+            let Some(controller) = controller else { return Ok(()) };
+            let mut visible = Default::default();
+            controller.IsVisible(&mut visible)?;
+            if visible.as_bool() {
+                app.emit_to(EventTarget::webview(MAIN), "browser-focus", serde_json::json!({ "id": id })).ok();
+            }
+            Ok(())
+        }));
+        let mut token = 0;
+        if let Err(error) = platform.controller().add_GotFocus(&handler, &mut token) {
+            eprintln!("[oculus] cannot register browser focus: {error}");
+        }
+    }) {
+        eprintln!("[oculus] cannot access browser focus: {error}");
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn refresh_nav(app: &AppHandle, id: u32) {
     let changed = with_state(app, |s| {
         let Some(tab) = s.tabs.iter_mut().find(|t| t.id == id) else {
@@ -651,7 +764,18 @@ fn go_history(app: &AppHandle, id: u32, delta: i32) {
     .ok();
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn go_history(app: &AppHandle, id: u32, delta: i32) {
+    let Some(page) = page(app, id) else { return };
+    page.with_webview(move |platform| unsafe {
+        let Ok(view) = platform.controller().CoreWebView2() else { return };
+        for _ in 0..delta.unsigned_abs().min(100) {
+            if delta < 0 { view.GoBack().ok(); } else { view.GoForward().ok(); }
+        }
+    }).ok();
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn go_history(app: &AppHandle, id: u32, delta: i32) {
     if let Some(webview) = page(app, id) {
         webview.eval(&format!("history.go({delta})")).ok();
@@ -684,7 +808,23 @@ fn reload_page(app: &AppHandle, id: u32, hard: bool) {
 
 /// Elsewhere there is only the script API, which has no cache-ignoring form —
 /// so a hard reload is an ordinary one, and says so by doing nothing extra.
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn reload_page(app: &AppHandle, id: u32, hard: bool) {
+    let Some(page) = page(app, id) else { return };
+    page.with_webview(move |platform| unsafe {
+        let Ok(view) = platform.controller().CoreWebView2() else { return };
+        if hard {
+            let method = webview2_com::CoTaskMemPWSTR::from("Page.reload");
+            let parameters = webview2_com::CoTaskMemPWSTR::from(r#"{"ignoreCache":true}"#);
+            let done = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_, _| Ok(())));
+            view.CallDevToolsProtocolMethod(*method.as_ref().as_pcwstr(), *parameters.as_ref().as_pcwstr(), &done).ok();
+        } else {
+            view.Reload().ok();
+        }
+    }).ok();
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn reload_page(app: &AppHandle, id: u32, _hard: bool) {
     if let Some(webview) = page(app, id) {
         webview.eval("location.reload()").ok();
@@ -758,10 +898,28 @@ fn find_string(app: &AppHandle, id: u32, query: String, backwards: bool) {
     .ok();
 }
 
-/// Elsewhere: `window.find`, which highlights and scrolls the same way but
-/// tells us nothing, so the bar is told the search happened and left to say
-/// no more than that.
-#[cfg(not(target_os = "macos"))]
+/// WebView2 returns the actual `window.find` result for the matching query.
+#[cfg(target_os = "windows")]
+fn find_string(app: &AppHandle, id: u32, query: String, backwards: bool) {
+    let Some(page) = page(app, id) else { return };
+    let app = app.clone();
+    let escaped = serde_json::to_string(&query).expect("string serializes");
+    // ExecuteScript's result belongs to this invocation, so rapidly changing
+    // queries retain their own match answer instead of reporting fake success.
+    page.with_webview(move |platform| unsafe {
+        let Ok(view) = platform.controller().CoreWebView2() else { return };
+        let script = webview2_com::CoTaskMemPWSTR::from(
+            format!("window.find({escaped}, false, {backwards}, true)").as_str());
+        let done = webview2_com::ExecuteScriptCompletedHandler::create(Box::new(move |result, value| {
+            let found = result.is_ok() && serde_json::from_str::<bool>(&value).unwrap_or(false);
+            app.emit_to(EventTarget::webview(MAIN), "browser-find", FindResult { id, query, found }).ok();
+            Ok(())
+        }));
+        view.ExecuteScript(*script.as_ref().as_pcwstr(), &done).ok();
+    }).ok();
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn find_string(app: &AppHandle, id: u32, query: String, backwards: bool) {
     if let Some(webview) = page(app, id) {
         let escaped = serde_json::to_string(&query).unwrap_or_else(|_| "\"\"".into());
@@ -807,7 +965,7 @@ fn find_string(app: &AppHandle, id: u32, query: String, backwards: bool) {
 /// Hands the waiting command its answer, once. WebKit calls a completion
 /// handler exactly once, but the block it lives in is an `Fn` and the send
 /// consumes the sender, so the sender sits behind a lock either way.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn deliver(
     cell: &Mutex<Option<tokio::sync::oneshot::Sender<Option<Vec<u8>>>>>,
     png: Option<Vec<u8>>,
@@ -896,7 +1054,31 @@ fn snapshot_page(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn snapshot_page(app: &AppHandle, id: u32, reply: tokio::sync::oneshot::Sender<Option<Vec<u8>>>) {
+    use base64::Engine;
+    let cell = std::sync::Arc::new(Mutex::new(Some(reply)));
+    let Some(page) = page(app, id) else { deliver(&cell, None); return };
+    let outer = cell.clone();
+    let queued = page.with_webview(move |platform| unsafe {
+        let Ok(view) = platform.controller().CoreWebView2() else { deliver(&outer, None); return };
+        let method = webview2_com::CoTaskMemPWSTR::from("Page.captureScreenshot");
+        let parameters = webview2_com::CoTaskMemPWSTR::from(r#"{"format":"png","captureBeyondViewport":false}"#);
+        let inner = outer.clone();
+        let done = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, value| {
+            let png = result.ok().and_then(|()| serde_json::from_str::<serde_json::Value>(&value).ok())
+                .and_then(|value| value["data"].as_str().and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok()));
+            deliver(&inner, png);
+            Ok(())
+        }));
+        if view.CallDevToolsProtocolMethod(*method.as_ref().as_pcwstr(), *parameters.as_ref().as_pcwstr(), &done).is_err() {
+            deliver(&outer, None);
+        }
+    });
+    if queued.is_err() { deliver(&cell, None); }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn snapshot_page(
     _app: &AppHandle,
     _id: u32,
@@ -929,12 +1111,14 @@ const FAVICON_MAX: usize = 256 * 1024;
 const FAVICON_HTML_MAX: u64 = 512 * 1024;
 
 fn favicon_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(8))
-        // Claim to be the page's own browser: a site that serves a different
-        // icon to a bot is a site whose icon we would rather not show.
-        .user_agent(PAGE_USER_AGENT)
-        .build()
+    let builder = ureq::AgentBuilder::new().timeout(Duration::from_secs(8));
+    #[cfg(target_os = "macos")]
+    let builder = builder.user_agent(PAGE_USER_AGENT);
+    // This independent HTTP client has no WebView2 runtime version to report.
+    // Identify the app instead of impersonating macOS Safari on Windows.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.user_agent(concat!("Oculus/", env!("CARGO_PKG_VERSION")));
+    builder.build()
 }
 
 /// Looks for `url`'s site icon in the background, unless this host has been
@@ -1084,8 +1268,22 @@ fn declared_icon(html: &str) -> Option<String> {
 
 /// Open an external link. Returns the new tab's id.
 #[tauri::command]
-pub fn browser_open_url(app: AppHandle, url: String) -> Result<u32, String> {
-    open_tab(&app, parse(&url)?)
+pub async fn browser_open_url(app: AppHandle, url: String) -> Result<u32, String> {
+    let url = parse(&url)?;
+    #[cfg(target_os = "macos")]
+    {
+        // Preserve macOS's original synchronous command ordering: creating,
+        // hiding and rounding the WKWebView all happen before its first paint.
+        // Windows must create its WebView2 from outside the event-loop thread.
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let target = app.clone();
+        app.run_on_main_thread(move || {
+            let _ = tx.send(open_tab(&target, url));
+        }).map_err(|error| error.to_string())?;
+        rx.await.map_err(|_| "browser open request was cancelled".to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    open_tab(&app, url)
 }
 
 /// What the frontend asks for on mount — it may have missed every event
@@ -1093,6 +1291,21 @@ pub fn browser_open_url(app: AppHandle, url: String) -> Result<u32, String> {
 #[tauri::command]
 pub fn browser_state(app: AppHandle) -> Snapshot {
     snapshot(&app)
+}
+
+/// Give keyboard focus back to the trusted app UI before it focuses its
+/// address or find input. DOM focus alone cannot leave a native child view.
+/// The target is fixed; callers cannot select another window or webview.
+#[tauri::command]
+pub async fn browser_focus_main(app: AppHandle) -> Result<(), String> {
+    let main = app.get_webview(MAIN).ok_or("no main webview")?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    // Tauri dispatches set_focus inline on its event thread. Acknowledge only
+    // after that runs so the subsequent DOM focus cannot race the handoff.
+    app.run_on_main_thread(move || {
+        let _ = tx.send(main.set_focus().map_err(|error| error.to_string()));
+    }).map_err(|error| error.to_string())?;
+    rx.await.map_err(|_| "main focus request was cancelled".to_string())?
 }
 
 /// A slot for tab `id` has mounted: this is where its page goes, put it
@@ -1157,11 +1370,14 @@ pub fn browser_hide(app: AppHandle) {
 /// The address bar. Always navigates, even to the same URL — typing an
 /// address and hitting return should reload it.
 #[tauri::command]
-pub fn browser_navigate(app: AppHandle, id: u32, url: String) -> Result<(), String> {
+pub async fn browser_navigate(app: AppHandle, id: u32, url: String) -> Result<(), String> {
     let target = parse(&url)?;
     let webview = page(&app, id).ok_or("no such tab")?;
     if target.host_str() == Some(CANVAS_HOST) {
+        #[cfg(not(target_os = "windows"))]
         seed_canvas_session(&app);
+        #[cfg(target_os = "windows")]
+        seed_windows_cookies(&webview, &crate::auth::saved_cookie_header(&app))?;
     }
     webview.navigate(target).map_err(|e| e.to_string())
 }

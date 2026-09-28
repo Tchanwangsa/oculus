@@ -114,7 +114,7 @@ fn engines() -> Vec<EngineOption> {
         EngineOption {
             id: Engine::Local.as_str(),
             label: "Local server",
-            detail: "PDFs are parsed by a MinerU server running on this Mac. Nothing leaves it.",
+            detail: "PDFs are parsed by a MinerU server running on this computer. Nothing leaves it.",
             available: true,
             unavailable_reason: None,
         },

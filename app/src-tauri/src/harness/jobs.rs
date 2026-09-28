@@ -81,6 +81,13 @@ pub fn default_selection(job: Job) -> JobSelection {
             model: "gpt-5.6-luna".into(),
             reasoning_effort: Some("medium".into()),
         },
+        #[cfg(windows)]
+        Job::ThreadNaming => JobSelection {
+            provider: Provider::Codex,
+            model: "gpt-5.6-luna".into(),
+            reasoning_effort: Some("low".into()),
+        },
+        #[cfg(not(windows))]
         Job::ThreadNaming => JobSelection {
             provider: Provider::Claude,
             // The id the CLI's own catalogue lists for Haiku, which declares
@@ -192,8 +199,17 @@ mod tests {
         let c = default_selection(Job::LectureChapters);
         assert_eq!((c.provider, c.model.as_str(), c.effort()), (Provider::Codex, "gpt-5.6-luna", Some("xhigh")));
         let n = default_selection(Job::ThreadNaming);
+        #[cfg(not(windows))]
+        {
         assert_eq!(n.provider, Provider::Claude);
         assert_eq!((n.model.as_str(), n.effort()), ("claude-haiku-4-5-20251001", None));
+        }
+        #[cfg(windows)]
+        {
+            assert_eq!(n.provider, Provider::Codex);
+            assert_eq!(n.model, "gpt-5.6-luna");
+            assert_eq!(n.effort(), Some("low"));
+        }
         let r = default_selection(Job::LectureReading);
         assert_eq!(
             (r.provider, r.model.as_str(), r.effort()),

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { primaryModifier } from "@/lib/platform";
 
 /**
  * Something flat, opened out: the whole window, zoomable and pannable.
@@ -145,7 +146,7 @@ export function Lightbox({
       >
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <DialogDescription className="sr-only">
-          Scroll or drag to pan, ⌘-scroll or pinch to zoom, Escape to close.
+          Scroll or drag to pan, {primaryModifier}-scroll or pinch to zoom, Escape to close.
         </DialogDescription>
         <Viewer
           size={size}

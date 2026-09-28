@@ -288,6 +288,3 @@ mod tests {
         assert!(pixels < ledger::FREE_PIXELS / 10, "the grant is not the constraint here");
     }
 }
-
-
-

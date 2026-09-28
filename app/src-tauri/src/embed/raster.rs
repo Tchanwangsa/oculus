@@ -488,7 +488,8 @@ fn bind() -> Result<Pdfium, String> {
 /// from an unusual cwd, `cargo test` under a different target dir). In the
 /// bundled `.app` the executable is `Contents/MacOS/Oculus` and Tauri's
 /// `bundle.macOS.frameworks` has put the dylib in `Contents/Frameworks/`, one
-/// hop sideways.
+/// hop sideways. Windows installs `pdfium.dll` beside both `app.exe` and
+/// `oculus.exe`; this flat packaged location precedes every development path.
 ///
 /// Everything is resolved relative to `current_exe()` rather than the working
 /// directory: the app is launched by Finder with a cwd of `/`, and the CLI is
@@ -512,12 +513,7 @@ fn library_candidates() -> Vec<PathBuf> {
 
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            // Bundled .app: Contents/MacOS/Oculus -> Contents/Frameworks/.
-            candidates.push(dir.join("../Frameworks").join(&file_name));
-            // Beside the executable, for a flat install layout.
-            candidates.push(dir.join(&file_name));
-            // Dev: target/debug/app, target/debug/deps/<test> -> src-tauri/binaries.
-            push_ancestor_binaries(&mut candidates, dir, &file_name);
+            push_executable_libraries(&mut candidates, dir, &file_name);
         }
     }
 
@@ -526,6 +522,13 @@ fn library_candidates() -> Vec<PathBuf> {
     candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries").join(&file_name));
 
     candidates
+}
+
+fn push_executable_libraries(candidates: &mut Vec<PathBuf>, dir: &Path, file_name: &OsString) {
+    #[cfg(target_os = "macos")]
+    candidates.push(dir.join("../Frameworks").join(file_name));
+    candidates.push(dir.join(file_name));
+    push_ancestor_binaries(candidates, dir, file_name);
 }
 
 fn push_ancestor_binaries(candidates: &mut Vec<PathBuf>, from: &Path, file_name: &OsString) {
@@ -537,6 +540,19 @@ fn push_ancestor_binaries(candidates: &mut Vec<PathBuf>, from: &Path, file_name:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_packaged_pdfium_precedes_development_locations() {
+        let dir = Path::new(r"C:\Student's 学生\Oculus");
+        let name = Pdfium::pdfium_platform_library_name();
+        assert_eq!(name, "pdfium.dll");
+        let mut candidates = Vec::new();
+        push_executable_libraries(&mut candidates, dir, &name);
+        assert_eq!(candidates[0], dir.join("pdfium.dll"));
+        assert!(candidates.contains(&dir.join("binaries/pdfium.dll")));
+        assert!(!candidates.iter().any(|path| path.to_string_lossy().contains("Frameworks")));
+    }
 
     /// A one-page PDF built in memory, so the render tests do not reach
     /// outside the repo. Same trick `parse/mineru/client.rs`'s tests use:

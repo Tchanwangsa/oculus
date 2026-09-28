@@ -4,6 +4,8 @@ import { useTabStore } from "@/stores/tabStore";
 import { humanizeSlug } from "@/lib/format";
 import { isPdfBacked, parsedMdSource } from "@/lib/fileTypes";
 import { getFileByRelativePath, markFileAccessed, type DbFile } from "@/lib/db";
+import { libraryPath } from "@/lib/libraryPath";
+export { libraryPath } from "@/lib/libraryPath";
 import { attachmentPath } from "@/lib/attachments";
 
 /** What the panel header shows: real filenames stay, slugs get prettified.
@@ -18,6 +20,12 @@ export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
   return REAL_FILENAME.has(file.category ?? "")
     ? file.filename
     : humanizeSlug(file.filename);
+}
+
+/** Binaries without an in-app viewer open in the system's associated app. */
+export function usesSystemViewer(file: Pick<DbFile, "category" | "filename">): boolean {
+  return (file.category === "file" || file.category === "upload")
+    && !isPdfBacked(file.filename);
 }
 
 /** Fired after a file's last_accessed_at is stamped, so open lists refresh. */
@@ -65,59 +73,8 @@ export function filePagePath(subjectId: number, relativePath: string): string {
  * the page you are on, and only the ⌘-click is a navigation at all.
  */
 export function filePageHref(file: DbFile): string | null {
-  if (file.category === "file" && !isPdfBacked(file.filename)) return null;
+  if (usesSystemViewer(file)) return null;
   return filePagePath(file.subject_id, file.relative_path);
-}
-
-/**
- * The shape of a path the agent can be talking about: the library paths it is
- * given (`courses/<subject>/…`) and the ones it actually uses, which carry a
- * `../` because every thread runs from `agents/` beside `courses/`.
- *
- * Matched on shape rather than resolved, so a timeline of a hundred tool rows
- * costs no queries — the lookup happens when one is clicked.
- */
-const LIBRARY_PATH = /^(?:\.\.\/)?(courses\/[^\s]+)$/;
-
-/**
- * The same path written from the filesystem root, which is the form a CLI
- * agent's own tools hand it and therefore the form it writes into a markdown
- * link: `/…/com.tchan.oculus/courses/<subject>/…`. Left to the anchor, such a
- * link is resolved against the dev server's origin and 404s.
- *
- * Anchored on a leading `/` so that a command which merely *contains* a
- * library path (`cat ../courses/…`) stays a command, and lazy up to the first
- * `courses/` so the capture is the library path and not a suffix of it. The
- * root itself is not checked: an absolute path with `courses/` inside it, in a
- * thread that can only reach the library, is that library's.
- */
-const ABSOLUTE_PATH = /^\/.*?\/(courses\/.+)$/;
-
-/** A `:97` or `:97-120` tail — how an agent cites the line it read. Nothing
- *  downstream has a line anchor to honour, so it is trimmed rather than left
- *  to make the path unmatchable. */
-const LINE_SUFFIX = /:\d+(?:-\d+)?$/;
-
-/** micromark percent-encodes a link destination on its way to `href`, so the
- *  data directory's "Application Support" arrives as "Application%20Support".
- *  `decodeURI` and not `decodeURIComponent`: a literal `/` that was written
- *  `%2F` is not a separator. */
-function decodePath(raw: string): string {
-  if (!raw.includes("%")) return raw;
-  try {
-    return decodeURI(raw);
-  } catch {
-    return raw;
-  }
-}
-
-/** The library path inside an agent's tool argument or link, if that is what
- *  it is. */
-export function libraryPath(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const path = decodePath(raw.trim()).replace(LINE_SUFFIX, "");
-  const m = ABSOLUTE_PATH.exec(path) ?? LIBRARY_PATH.exec(path);
-  return m ? m[1] : null;
 }
 
 /** Folder under `courses/<CODE>/` to category. Mirrors `category_from_path`

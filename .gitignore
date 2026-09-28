@@ -23,6 +23,11 @@ data/
 # ffmpeg sidecar (fetched by app/scripts/fetch-ffmpeg.mjs)
 app/src-tauri/binaries/
 
+# Windows build/runtime staging and local test artifacts
+.local-tools/
+artifacts/
+app/src-tauri/resources/
+
 # A local MinerU's spill. `mineru-api` writes one folder per request — markdown,
 # both content lists, every extracted image — under ./output, relative to
 # wherever it was started. It sweeps its own after 24h, but only while it keeps

@@ -592,14 +592,12 @@ pub fn check_size(pdf: &Path, limit_bytes: u64) -> Result<u64, ParseError> {
 /// took `local | cloud | auto`, and all three named a *fallback policy* over
 /// the Python sidecar: "auto" meant "cloud, dropping to the local MinerU when
 /// the cloud is unavailable", and "local" meant that Python parser specifically.
-/// There is no fallback and no Python any more, so those values cannot be
-/// reinterpreted — "local" now means a completely different program, and
-/// silently promoting a stale "local" would point the app at a parse server
-/// that is not installed.
-///
-/// So the two live under different keys and a stale `backend` value — `"auto"`
-/// included — is **ignored entirely**: only `engine` selects a parser, and its
-/// absence (which is every install today) means `Cloud`. See `parse_config`.
+/// There is no fallback and no bundled Python any more. The new `engine` key
+/// always wins. On Windows, the previous local default is preserved when
+/// upgrading: an absent engine stays Local, as does legacy backend=local;
+/// explicit backend=cloud/auto remains Cloud. The user must run an external
+/// local server or explicitly select Cloud. Other platforms retain the
+/// upstream Cloud default and ignore the obsolete backend field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Engine {
@@ -639,7 +637,7 @@ impl Engine {
 /// Where a backend's token comes from, if it needs one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CredentialSource {
-    /// The macOS keychain, via `crate::mineru`. The token never enters SQLite
+    /// The OS credential store, via `crate::mineru`. The token never enters SQLite
     /// or the WebView, so it is named here rather than carried here.
     Keychain,
     /// Loopback to a server on this machine: nothing to authenticate.
@@ -682,8 +680,8 @@ pub const LOCAL_BASE_URL: &str = "http://127.0.0.1:8000";
 /// The `parse` row, as far as this seam cares about it. Every field is
 /// optional: the blob still carries two dead keys from the Python sidecar
 /// (`memoryCapMb` and the legacy `backend`), left there deliberately rather
-/// than migrated out, and they must survive being read here. See the note in
-/// `app/src/lib/db.ts`.
+/// than migrated out. Windows reads the old backend only for upgrade privacy.
+/// See the note in `app/src/lib/db.ts`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct StoredParseSettings {
@@ -691,15 +689,27 @@ struct StoredParseSettings {
     /// this one field, not the whole row.
     engine: Option<String>,
     engine_url: Option<String>,
+    #[cfg(windows)]
+    backend: Option<String>,
 }
 
 /// Read the backend selection out of the `settings` table's `parse` row.
 ///
-/// Unreadable, missing or nonsense settings all resolve to the cloud default —
-/// a user whose database is in an odd state should still get their PDFs parsed.
+/// Missing Windows settings retain local processing: installing an update must
+/// not start uploading an existing local library, even if a cloud key is saved.
 pub fn parse_config() -> ParseConfig {
-    let stored = stored_settings().unwrap_or_default();
-    let engine = stored.engine.as_deref().and_then(Engine::parse).unwrap_or(Engine::Cloud);
+    config_from_stored(stored_settings().unwrap_or_default())
+}
+
+fn config_from_stored(stored: StoredParseSettings) -> ParseConfig {
+    #[cfg(windows)]
+    let default_engine = match stored.backend.as_deref().map(str::trim) {
+        Some("cloud" | "auto") => Engine::Cloud,
+        _ => Engine::Local,
+    };
+    #[cfg(not(windows))]
+    let default_engine = Engine::Cloud;
+    let engine = stored.engine.as_deref().and_then(Engine::parse).unwrap_or(default_engine);
     let base_url = stored
         .engine_url
         .filter(|u| !u.trim().is_empty())
@@ -741,6 +751,48 @@ fn stored_settings() -> Option<StoredParseSettings> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_upgrade_keeps_local_processing_until_cloud_was_selected() {
+        for json in ["{}", r#"{"backend":"local"}"#, r#"{"backend":"unknown"}"#,
+            r#"{"engine":"unknown"}"#, r#"{"memoryCapMb":8192}"#] {
+            let config = config_from_stored(serde_json::from_str(json).unwrap());
+            assert_eq!(config.engine, Engine::Local, "{json}");
+            assert_eq!(config.credentials, CredentialSource::None, "{json}");
+            assert_eq!(config.base_url, LOCAL_BASE_URL, "{json}");
+        }
+        for legacy in ["cloud", "auto"] {
+            let config = config_from_stored(serde_json::from_value(serde_json::json!({"backend":legacy})).unwrap());
+            assert_eq!(config.engine, Engine::Cloud);
+            assert_eq!(config.credentials, CredentialSource::Keychain);
+            assert_eq!(config.base_url, CLOUD_BASE_URL);
+        }
+    }
+
+    #[test]
+    fn explicit_engine_overrides_legacy_backend() {
+        for (json, engine) in [
+            (r#"{"backend":"cloud","engine":"local","engineUrl":"http://127.0.0.1:8001"}"#, Engine::Local),
+            (r#"{"backend":"local","engine":"cloud","engineUrl":"https://example.test/api"}"#, Engine::Cloud),
+        ] {
+            let config = config_from_stored(serde_json::from_str(json).unwrap());
+            assert_eq!(config.engine, engine);
+            assert_ne!(config.base_url, engine.default_base_url());
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn macos_upgrade_retains_the_existing_cloud_default() {
+        for json in ["{}", r#"{"backend":"local"}"#, r#"{"backend":"auto"}"#,
+            r#"{"engine":"unknown"}"#, r#"{"memoryCapMb":8192}"#] {
+            let config = config_from_stored(serde_json::from_str(json).unwrap());
+            assert_eq!(config.engine, Engine::Cloud, "{json}");
+            assert_eq!(config.credentials, CredentialSource::Keychain, "{json}");
+            assert_eq!(config.base_url, CLOUD_BASE_URL, "{json}");
+        }
+    }
 
     /// The bug this reader exists to prevent, pinned in the context that hit
     /// it: `embed_settings` is an `async` Tauri command, so it runs on a

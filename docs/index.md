@@ -13,6 +13,10 @@ live in the root `CLAUDE.md`, not here.
 
 ## Reading order
 
+Both desktop platforms share this repository and its `andre` testing branch.
+Windows setup, packaging and platform boundaries are in [windows.md](./windows.md);
+the shared build workflow is in [development.md](./development.md).
+
 | Page | What it covers |
 | --- | --- |
 | [architecture.md](./architecture.md) | The two processes, how they talk, the data directory, `oculus.db` |

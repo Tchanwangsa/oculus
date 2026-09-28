@@ -9,6 +9,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getDb, getSetting } from "@/lib/db";
+import { isWindows } from "@/lib/platform";
 import { filterOffered, loadCatalogue } from "@/lib/opencodeCatalogue";
 
 export type Provider = "claude" | "codex" | "opencode" | "antigravity";
@@ -137,9 +138,9 @@ export interface ProviderInfo {
    *  rather than a fact, because there is something the student can do about
    *  it.
    *
-   *  opencode's list is filtered by the catalogue below, so an installed,
-   *  connected opencode with nothing probed yet legitimately has zero rows,
-   *  and the sentence has to point at where the probing happens. Claude and
+   *  opencode's list is filtered by the catalogue below, so an installed
+   *  opencode with no connected provider can legitimately have zero rows,
+   *  and the sentence points at its provider settings. Claude and
    *  Codex leave this unset: an empty catalogue from either of them is an
    *  answer their CLI gave, not a step that was skipped.
    *
@@ -171,7 +172,7 @@ export interface ProviderInfo {
 export const PROVIDERS: ProviderInfo[] = [
   {
     id: "claude",
-    label: "Claude Code",
+    label: isWindows ? "Claude Code via WSL2" : "Claude Code",
     staticModels: null,
     fetchModels: () => harnessClaudeModels().then(claudeAsModels),
     signIn: "code",
@@ -988,4 +989,3 @@ export function harnessCodexModels(): Promise<CodexModel[]> {
 export function harnessOpencodeModels(): Promise<OpencodeModel[]> {
   return invoke<OpencodeModel[]>("harness_opencode_models");
 }
-

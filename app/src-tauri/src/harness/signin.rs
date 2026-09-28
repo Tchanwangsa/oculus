@@ -134,8 +134,8 @@ pub fn status(provider: Provider) -> SignInStatus {
         return antigravity_status();
     }
 
-    let bin = match discover::binary(provider) {
-        Ok(p) => p,
+    let mut command = match auth_command(provider, false) {
+        Ok(command) => command,
         Err(e) => {
             return SignInStatus {
                 error: Some(e),
@@ -144,16 +144,7 @@ pub fn status(provider: Provider) -> SignInStatus {
         }
     };
 
-    let args: &[&str] = match provider {
-        Provider::Claude => &["auth", "status", "--json"],
-        Provider::Codex => &["login", "status"],
-        Provider::Opencode | Provider::Antigravity => unreachable!("returned above"),
-    };
-
-    let out = Command::new(&bin)
-        .args(args)
-        .env_clear()
-        .envs(discover::child_env())
+    let out = command
         .stdin(Stdio::null())
         .output();
 
@@ -161,7 +152,7 @@ pub fn status(provider: Provider) -> SignInStatus {
         Ok(o) => o,
         Err(e) => {
             return SignInStatus {
-                error: Some(format!("cannot run {}: {e}", bin.display())),
+                error: Some(format!("cannot check {} sign-in: {e}", provider.label())),
                 ..SignInStatus::unknown(provider)
             }
         }
@@ -439,6 +430,8 @@ struct Run {
     /// reported as abandoned rather than as "stopped by a signal" — the same
     /// exit, two different stories.
     cancelled: Arc<AtomicBool>,
+    #[cfg(windows)]
+    job: Option<crate::platform::ProcessJob>,
 }
 
 /// One login at a time per provider. A second `codex login` would find port
@@ -474,6 +467,27 @@ fn login_args(provider: Provider) -> Result<&'static [&'static str], String> {
     }
 }
 
+/// Preserve the provider's own credential location: Windows Claude is the
+/// Linux executable in the selected distribution, never wsl.exe with Claude
+/// arguments accidentally passed as WSL options or a native fallback.
+fn auth_command(provider: Provider, login: bool) -> Result<Command, String> {
+    #[cfg(windows)]
+    if provider == Provider::Claude {
+        return Ok(super::wsl::bridge()?.auth_command(login));
+    }
+    let args: &[&str] = if login { login_args(provider)? } else {
+        match provider {
+            Provider::Claude => &["auth", "status", "--json"],
+            Provider::Codex => &["login", "status"],
+            _ => return Err("This provider owns its own sign-in flow".into()),
+        }
+    };
+    let bin = discover::binary(provider)?;
+    let mut command = discover::provider_command(&bin)?;
+    command.args(args).env_clear().envs(discover::child_env());
+    Ok(command)
+}
+
 /// Start the provider's login flow, streaming its output to `emit`.
 ///
 /// Returns once the child is spawned; everything after that happens on the
@@ -488,8 +502,8 @@ pub fn start<F>(provider: Provider, emit: F) -> Result<(), String>
 where
     F: Fn(SignInLine) + Send + 'static,
 {
-    let args = login_args(provider)?;
-    let bin = discover::binary(provider)?;
+    login_args(provider)?;
+    let mut command = auth_command(provider, true)?;
 
     // The spawn happens **under** the map's lock, not between a check and an
     // insert. Two invokes land on the blocking pool as two threads, and a
@@ -503,15 +517,18 @@ where
             return Err(format!("{} is already signing in", provider.label()));
         }
 
-        let mut child = Command::new(&bin)
-            .args(args)
-            .env_clear()
-            .envs(discover::child_env())
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("cannot run {}: {e}", bin.display()))?;
+            .map_err(|e| format!("cannot start {} sign-in: {e}", provider.label()))?;
+        #[cfg(windows)]
+        let job = crate::platform::ProcessJob::assign(&child).map_err(|e| {
+            let _ = child.kill();
+            let _ = child.wait();
+            format!("cannot supervise sign-in: {e}")
+        })?;
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -525,6 +542,8 @@ where
                 child: child.clone(),
                 stdin: stdin.clone(),
                 cancelled: cancelled.clone(),
+                #[cfg(windows)]
+                job: Some(job),
             },
         );
         (stdout, stderr, stdin, cancelled, child)
@@ -600,6 +619,7 @@ where
         // would keep a dead write target reachable from `submit_code`.
         drop(stdin.lock().unwrap().take());
         running().lock().unwrap().remove(&provider);
+        discover::forget();
         emit(SignInLine {
             provider,
             line: None,
@@ -642,11 +662,14 @@ pub fn submit_code(provider: Provider, code: &str) -> Result<(), String> {
 /// the child is actually reaped, and removing it here would let a second
 /// `start` spawn a child while the first was still dying on port 1455.
 pub fn cancel(provider: Provider) -> Result<(), String> {
-    let r = running().lock().unwrap();
+    let mut r = running().lock().unwrap();
     let run = r
-        .get(&provider)
+        .get_mut(&provider)
         .ok_or_else(|| format!("{} is not signing in", provider.label()))?;
     run.cancelled.store(true, Ordering::SeqCst);
+    drop(run.stdin.lock().unwrap().take());
+    #[cfg(windows)]
+    run.job.take();
     let mut child = run.child.lock().unwrap();
     // An already-exited child is not a failure to cancel: the supervisor is
     // simply a few milliseconds ahead.

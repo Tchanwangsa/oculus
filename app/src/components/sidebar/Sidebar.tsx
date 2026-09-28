@@ -13,6 +13,7 @@ import { anyRunning, useHarnessStore } from "@/stores/harnessStore";
 import { useIndexStore } from "@/stores/indexStore";
 import { usePaletteStore } from "@/stores/paletteStore";
 import { cn } from "@/lib/utils";
+import { shortcut } from "@/lib/platform";
 import NavItem from "./NavItem";
 import SubjectsNavGroup from "./SubjectsNavGroup";
 import RecentNavGroup from "./RecentNavGroup";
@@ -198,7 +199,7 @@ function SearchButton() {
       </TooltipTrigger>
       <TooltipContent side="bottom" align="end" className="flex flex-col items-start gap-0.5">
         Search
-        <span className="text-[11px] text-background/60">⌘K</span>
+        <span className="text-[11px] text-background/60">{shortcut("K")}</span>
       </TooltipContent>
     </Tooltip>
   );

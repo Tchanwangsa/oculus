@@ -2,13 +2,12 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  setParseStatus, setEmbedStatus, upsertFile, finishSyncRun, addLog,
+  setEmbedStatus, upsertFile, finishSyncRun, addLog,
   addSyncRunFile, getSyncOptions, markFileContentChanged, resetFilePipeline,
   upsertLectures, replaceCalendarEvents, getFileByRelativePath,
   type CalendarEventData, type LectureData, type SyncFileAction,
 } from "@/lib/db";
 import { useSyncStore } from "@/stores/syncStore";
-import { useParseStore } from "@/stores/parseStore";
 import { usePipelineStore } from "@/stores/pipelineStore";
 import { reportEmbedPages, useIndexStore } from "@/stores/indexStore";
 import { embedReady } from "@/lib/retrieval";
@@ -19,14 +18,9 @@ import { CALENDAR_UPDATED_EVENT } from "@/lib/calendar";
 import { notifyProjectsUpdated } from "@/lib/projects";
 import { useHarnessStore } from "@/stores/harnessStore";
 import type { HarnessEnvelope } from "@/lib/harness";
+import { SCRAPED_FILE_FAILED_EVENT, SCRAPED_FILE_SAVED_EVENT, SyncWriteQueue } from "@/lib/syncWrites";
 
-/**
- * The whole `parse-status` vocabulary Rust emits, and the whole vocabulary
- * `files.parse_status` stores. `"quality"` is the terminal success — the name
- * outlived the tier it was named after (see `parseStore`), and renaming it
- * would invalidate every already-parsed row in the library.
- */
-const PARSE_STATUSES = new Set(["queued", "running", "quality", "error"]);
+import { queueParseEvent } from "@/lib/parseEvents";
 
 /**
  * The `embed-status` vocabulary, which is the parse one with the historical
@@ -60,6 +54,20 @@ export function useBackendEvents() {
   useEffect(() => {
     const unsubs: Array<Promise<() => void>> = [];
     const pipeline = () => usePipelineStore.getState();
+    const writes = new SyncWriteQueue();
+    const reportWriteFailure = (message: string) => {
+      console.error(message);
+      useSyncStore.setState({ error: message });
+    };
+    const failRun = async (runId: number | null, message: string) => {
+      try {
+        if (runId != null) await finishSyncRun(runId, "failed", 0, 0, message);
+      } catch (reason) {
+        message += ` Could not save the failed run either: ${String(reason)}`;
+      }
+      useSyncStore.getState().fail(message);
+      pipeline().failStalledDownloads();
+    };
 
     // Is there an embedder behind the third stage? Asked once here, at the one
     // place that is mounted for the life of the app, and re-asked by Settings
@@ -129,17 +137,12 @@ export function useBackendEvents() {
     unsubs.push(
       listen<{ subject_id: number; relative_path: string; size_bytes: number; category: string | null; canvas_id: number | null; source_url: string | null; action: SyncFileAction }>(
         "scrape-file",
-        async (e) => {
+        (e) => {
           const { subject_id, relative_path, size_bytes, category, canvas_id, source_url, action } = e.payload;
-          if (isPipelinePdf(relative_path)) {
-            pipeline().touch(relative_path, subject_id, {
-              download: "done",
-              downloadedAt: Date.now(),
-            });
-          }
+          const runId = useSyncStore.getState().runId;
           const filename = relative_path.split("/").pop() ?? relative_path;
           const ext = filename.includes(".") ? filename.split(".").pop()! : "md";
-          try {
+          void writes.enqueue(runId, `Saving ${relative_path}`, async () => {
             await upsertFile(subject_id, filename, relative_path, ext, size_bytes, category ?? undefined, canvas_id ?? undefined, source_url ?? undefined);
             if (action === "new" || action === "updated") {
               await markFileContentChanged(subject_id, relative_path);
@@ -150,13 +153,21 @@ export function useBackendEvents() {
             if (action === "updated" && isPdfBacked(relative_path)) {
               await resetFilePipeline(subject_id, relative_path);
             }
-          } catch { /* ignore */ }
-          // Per-run ledger, feeds the Sync History table. Only recorded while
-          // a run started from this app instance is live.
-          const runId = useSyncStore.getState().runId;
-          if (runId != null) {
-            addSyncRunFile(runId, subject_id, relative_path, action ?? "new", size_bytes).catch(() => {});
-          }
+            // The ledger is committed only after the file it claims exists.
+            if (runId != null) {
+              await addSyncRunFile(runId, subject_id, relative_path, action ?? "new", size_bytes);
+            }
+            if (isPipelinePdf(relative_path)) {
+              pipeline().touch(relative_path, subject_id, { download: "done", downloadedAt: Date.now() });
+            }
+            window.dispatchEvent(new CustomEvent(SCRAPED_FILE_SAVED_EVENT, { detail: e.payload }));
+          }, (message) => {
+            reportWriteFailure(message);
+            window.dispatchEvent(new CustomEvent(SCRAPED_FILE_FAILED_EVENT, { detail: { ...e.payload, error: message } }));
+            if (isPipelinePdf(relative_path)) {
+              pipeline().touch(relative_path, subject_id, { download: "error", error: message });
+            }
+          });
         },
       ),
     );
@@ -170,9 +181,21 @@ export function useBackendEvents() {
     unsubs.push(
       listen<{ count: number; cancelled?: boolean }>("scrape-complete", async (e) => {
         const { runId, subjects } = useSyncStore.getState();
-        if (runId != null) {
-          await finishSyncRun(runId, "completed", e.payload.count, e.payload.count);
-          await addLog(`Synced ${e.payload.count} subject(s)`);
+        await writes.drain();
+        const failure = writes.takeFailure(runId);
+        if (failure) {
+          await failRun(runId, failure);
+          return;
+        }
+        try {
+          if (runId != null) {
+            await finishSyncRun(runId, e.payload.cancelled ? "failed" : "completed", e.payload.count, e.payload.count,
+              e.payload.cancelled ? "Sync cancelled" : undefined);
+            await addLog(e.payload.cancelled ? "Sync cancelled" : `Synced ${e.payload.count} subject(s)`);
+          }
+        } catch (reason) {
+          await failRun(runId, `Could not save sync completion: ${String(reason)}`);
+          return;
         }
         useSyncStore.getState().complete(e.payload.count, !!e.payload.cancelled);
         // Anything still "downloading" now will never finish — the run is over.
@@ -216,99 +239,24 @@ export function useBackendEvents() {
     unsubs.push(
       listen<string>("scrape-error", async (e) => {
         const runId = useSyncStore.getState().runId;
-        if (runId != null) await finishSyncRun(runId, "failed", 0, 0, e.payload);
-        useSyncStore.getState().fail(typeof e.payload === "string" ? e.payload : "Sync error");
-        pipeline().failStalledDownloads();
+        await writes.drain();
+        const failure = writes.takeFailure(runId);
+        await failRun(runId, [typeof e.payload === "string" ? e.payload : "Sync error", failure].filter(Boolean).join(" "));
       }),
     );
 
     // ── PDF parse stage events ──────────────────────────────────────────────
     // One stage, emitted by Rust directly (there is no loopback IPC server and
     // no sidecar any more). `"quality"` is the terminal success; see
-    // `PARSE_STATUSES` above for why that name stayed.
+    // `parseEvents.ts` for the persisted vocabulary.
     unsubs.push(
-      listen<ParseJob>("parse-status", async (e) => {
-        const ev = e.payload;
-        const path = ev.relative_path;
-        if (!path) return;
-
-        // A progress heartbeat can race the completion notify by a tick; a
-        // "running" arriving after the parse finished must not undo it.
-        const staleRunning =
-          ev.status === "running" &&
-          usePipelineStore.getState().items[path]?.parse === "done";
-        if (staleRunning) return;
-
-        if (PARSE_STATUSES.has(ev.status)) {
-          // `update` also records the failure's discriminants and raises or
-          // lifts the latch the background sweep reads.
-          useParseStore.getState().update(ev);
-          try {
-            await setParseStatus(ev.subject_id, path, ev.status);
-          } catch { /* ignore */ }
-        }
-
-        // Pipeline table: every status advances the one parse stage.
-        const touch = pipeline().touch;
-        switch (ev.status) {
-          case "queued":
-            touch(path, ev.subject_id, {
-              download: "done",
-              parse: "queued",
-              parseQueuePos: ev.position,
-            });
-            break;
-          case "running":
-            touch(path, ev.subject_id, {
-              download: "done",
-              parse: "active",
-              pagesDone: ev.pages_done ?? 0,
-              totalPages: ev.total_pages ?? 0,
-              parseQueuePos: undefined,
-            });
-            break;
-          case "quality":
-            touch(path, ev.subject_id, {
-              download: "done",
-              parse: "done",
-              parsedAt: Date.now(),
-              error: undefined,
-              errorKind: undefined,
-              errorRetryable: undefined,
-              errorLatching: undefined,
-            });
-            // The third stage, and the one hop that makes the pipeline
-            // continuous: a file that has just become parseable text is also a
-            // file that can be embedded, and the queue is serial, so appending
-            // here costs nothing but a place in line. Gated on a stored Voyage
-            // key — with none there is no backend to queue against, and the
-            // stage is not drawn at all.
-            //
-            // The file row is read rather than assumed because the queue needs
-            // its `id`: `pages` is keyed on `file_id`, and this event carries
-            // a path. `scrape-file` has already upserted it by the time a
-            // parse can have finished.
-            if (useIndexStore.getState().ready) {
-              getFileByRelativePath(path)
-                .then((file) => {
-                  if (file) useIndexStore.getState().enqueueFile(file);
-                })
-                .catch(() => {});
-            }
-            break;
-          case "error":
-            // The discriminants ride into the row rather than being dropped:
-            // the failure UI has to be able to say whether a retry is worth
-            // offering at all, and that is not knowable from the message.
-            touch(path, ev.subject_id, {
-              parse: "error",
-              error: ev.error ?? "Parse failed",
-              errorKind: ev.kind,
-              errorRetryable: ev.retryable,
-              errorLatching: ev.latching,
-            });
-            break;
-        }
+      listen<ParseJob>("parse-status", (e) => {
+        void queueParseEvent(writes, useSyncStore.getState().runId, e.payload, (_, path) => {
+          if (!useIndexStore.getState().ready) return;
+          void getFileByRelativePath(path).then((file) => {
+            if (file) useIndexStore.getState().enqueueFile(file);
+          }).catch((reason) => reportWriteFailure(`Could not queue ${path} for indexing: ${String(reason)}`));
+        }, reportWriteFailure);
       }),
     );
 
@@ -322,61 +270,60 @@ export function useBackendEvents() {
         const path = ev.relative_path;
         if (!path || !EMBED_STATUSES.has(ev.status)) return;
 
-        // A progress heartbeat can race the completion notify by a tick; a
-        // "running" arriving after the file finished must not undo it.
-        if (ev.status === "running" && pipeline().items[path]?.embed === "done") return;
+        void writes.enqueue(useSyncStore.getState().runId, `Saving embed status for ${path}`, async () => {
+          // A progress heartbeat can race the completion notify by a tick; a
+          // "running" arriving after the file finished must not undo it.
+          if (ev.status === "running" && pipeline().items[path]?.embed === "done") return;
 
-        const touch = pipeline().touch;
-        switch (ev.status) {
-          case "queued":
-            touch(path, ev.subject_id, { parse: "done", embed: "queued" });
-            break;
-          case "running":
-            touch(path, ev.subject_id, {
-              parse: "done",
-              embed: "active",
-              embedPagesDone: ev.pages_done ?? 0,
-              embedTotalPages: ev.total_pages ?? 0,
-            });
-            // The settings page's bar is drawn from the run, and this is the
-            // only place the page inside the current document is known.
-            reportEmbedPages(path, ev.pages_done ?? 0, ev.total_pages ?? 0);
-            break;
-          case "done":
-            touch(path, ev.subject_id, {
-              parse: "done",
-              embed: "done",
-              embedPagesDone: ev.pages_done ?? 0,
-              embedTotalPages: ev.total_pages ?? 0,
-              embeddedAt: Date.now(),
-              error: undefined,
-              errorKind: undefined,
-              errorRetryable: undefined,
-              errorLatching: undefined,
-            });
-            break;
-          case "error":
-            touch(path, ev.subject_id, {
-              embed: "error",
-              error: ev.error ?? "Embedding failed",
-              errorKind: ev.kind,
-              errorRetryable: ev.retryable,
-              errorLatching: ev.latching,
-            });
-            break;
-        }
-
-        // Rust writes `'done'` itself when the ingest commits. What it cannot
-        // write is a failure — the transaction never ran — and a row that
-        // forgot its failure on restart would come back as merely waiting.
-        if (ev.status === "done" || ev.status === "error") {
-          try {
+          if (ev.status === "done" || ev.status === "error") {
             await setEmbedStatus(ev.subject_id, path, ev.status);
-          } catch { /* ignore */ }
-        }
+          }
+          const touch = pipeline().touch;
+          switch (ev.status) {
+            case "queued":
+              touch(path, ev.subject_id, { parse: "done", embed: "queued" });
+              break;
+            case "running":
+              touch(path, ev.subject_id, {
+                parse: "done",
+                embed: "active",
+                embedPagesDone: ev.pages_done ?? 0,
+                embedTotalPages: ev.total_pages ?? 0,
+              });
+              // The settings page's bar is drawn from the run, and this is the
+              // only place the page inside the current document is known.
+              reportEmbedPages(path, ev.pages_done ?? 0, ev.total_pages ?? 0);
+              break;
+            case "done":
+              touch(path, ev.subject_id, {
+                parse: "done",
+                embed: "done",
+                embedPagesDone: ev.pages_done ?? 0,
+                embedTotalPages: ev.total_pages ?? 0,
+                embeddedAt: Date.now(),
+                error: undefined,
+                errorKind: undefined,
+                errorRetryable: undefined,
+                errorLatching: undefined,
+              });
+              break;
+            case "error":
+              touch(path, ev.subject_id, {
+                embed: "error",
+                error: ev.error ?? "Embedding failed",
+                errorKind: ev.kind,
+                errorRetryable: ev.retryable,
+                errorLatching: ev.latching,
+              });
+              break;
+          }
+
+        }, (message) => {
+          pipeline().touch(path, ev.subject_id, { embed: "error", error: message });
+          reportWriteFailure(message);
+        });
       }),
     );
-
     return () => {
       unsubs.forEach((u) => u.then((f) => f()).catch(() => {}));
     };

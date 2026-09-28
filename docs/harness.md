@@ -16,6 +16,98 @@ its chat page and store were deleted once nothing routed to them. Migrations
 16 and 17 stay, so `llm_usage`, `chats` and `chat_messages` are still there
 and still empty of readers (see `app/src-tauri/src/lib.rs`).
 
+## Windows bridge boundary
+
+Native Windows chat uses **Codex** with the same `workspace-write` policy and
+`agents/` working directory as the macOS bridge. A working Codex CLI with its
+Windows sandbox configured is required; Oculus never replaces a failed
+sandbox with unrestricted execution. Windows thread naming defaults to Codex
+on `gpt-5.6-luna` at `low`, matching the frontend job registry.
+
+Native Codex receives only the resolved physical `oculus.db`, `oculus.db-wal`
+and `oculus.db-shm` as extra writable paths for planning commands. The parent
+directory is never granted; an unresolved database grants no extra paths.
+
+**opencode and Antigravity also run natively on Windows.** opencode retains
+its permission rules (not an OS sandbox), with Windows paths normalized in
+the generated configuration. Antigravity retains `--sandbox` and surfaces
+sandbox startup failures without retrying unrestricted. Its managed permission
+rules use `%USERPROFILE%/.gemini/antigravity-cli/settings.json`, normal Windows
+paths and the same ownership-preserving merge as macOS. Both are hidden
+console processes owned by Windows Job Objects, so stopping or closing the
+app also stops their descendant processes. Neither provider is substituted
+for a saved Claude or Codex choice.
+
+Claude Code runs through **WSL2** on Windows; its native Windows executable
+does not supply the required filesystem sandbox
+([provider documentation](https://code.claude.com/docs/en/sandboxing)).
+`app/src-tauri/src/harness/wsl.rs` selects the dedicated `Oculus` distribution,
+then an eligible user WSL2 distribution; `OCULUS_CLAUDE_WSL_DISTRO` selects one
+explicitly. Docker's internal distributions and WSL1 are excluded. Discovery
+checks a non-root Linux user, the native Linux Claude executable, sandbox
+dependencies, and Claude's Linux sign-in. Settings reports actionable errors;
+Recheck refreshes provider availability throughout the app. Existing Claude
+threads and drafts retain their provider, and failures never switch providers.
+See [WSL2 setup](./claude-wsl-setup.md) for the setup script and sign-in command.
+
+The embedded `app/src-tauri/src/harness/wsl_bridge.py` supervisor receives
+configuration and messages as JSON over pipes. Windows library paths are
+translated with `wslpath`; prompts do not become shell commands. An outer
+bubblewrap namespace makes the library read-only except for `agents/`, hides
+other Windows mounts and interoperability endpoints, and restricts host socket
+access with seccomp. This applies to Claude's built-in file tools as well as
+shells. Claude's own inner sandbox also runs with fail-if-unavailable and no
+unsandboxed retry, and protects its writable Linux authentication/session state.
+
+The Linux `oculus` command uses four private FIFO channel pairs and the existing pipes
+to call `app/src-tauri/src/harness/wsl_cli.rs` in Windows. This broker launches
+the bundled CLI with argv, fixed library ownership, bounded input/output,
+four-command concurrency and a 90-second deadline. It permits library queries,
+project/task planning and lecture candidate detection; authentication, syncing,
+recursive agent jobs stay with the application. The task routes include
+unfiled tasks and `task refile`; lecture reading/chaptering model jobs remain
+application actions rather than recursive agent calls.
+FIFO slots use file locks and request identifiers, so concurrent tools and
+cancelled requests cannot mix replies. A turn generation captured before a
+command queues is checked on both sides of the bridge, preventing an interrupted
+turn's queued commands from running during the next turn. Unix sockets stay blocked inside
+Claude's Linux sandbox; its path-specific socket allowlist is macOS-only.
+Task-batch files are opened inside Linux and passed through stdin. Queries
+never auto-refresh an empty subject list. Planning writes and generated lecture
+frames are explicit native CLI capabilities, not direct agent filesystem writes.
+
+Interrupting a turn cancels its native broker requests. Closing a session kills
+its Windows Job Object and Linux process namespace. Pipe EOF and a 15-second
+heartbeat deadline also terminate detached Linux descendants after an app crash.
+Resume and rewind use Claude's Linux transcript, accessed through the selected
+distribution's `\\wsl.localhost` share.
+
+`app/src-tauri/src/harness/discover.rs` searches native `.exe` files before
+Windows npm shims, checks the usual user/AppData/Node locations, and retains
+the explicit `OCULUS_CODEX_BIN` override. `OCULUS_CLAUDE_BIN` remains the
+native-platform override outside Windows; Windows Claude uses the distribution
+selection above. Standard
+`codex.cmd`, `opencode.cmd` and `claude.cmd` npm installations are resolved to their package
+JavaScript and launched with Node directly, so prompt text never passes
+through `cmd.exe`. Custom batch wrappers require an override pointing to a
+native executable. Console helpers launch without a terminal window.
+
+Windows sign-in uses the same selected WSL2 distribution as chat. The fixed
+`auth-login` supervisor mode forwards the code entered in the app and stops
+the Linux login process on pipe EOF; `auth-status` reads fresh Linux login
+state. Neither mode starts an agent turn or accesses the coursework library.
+The install dialog offers the WSL setup script as a copy-only command to run
+from the repository root, because it can require elevation or a restart.
+
+The model picker also asks the selected Linux Claude installation. Its fixed
+`models` supervisor mode accepts only the free `initialize` control request;
+hooks, MCP servers and session persistence are disabled, and user turns are
+rejected before Claude starts. Completion, owner EOF or an 18-second Linux
+deadline kills the catalogue process group. The returned model names and effort
+levels use the same adapter as macOS. The cache identifies the Linux executable
+and distribution rather than `wsl.exe`; Settings' Recheck and Claude sign-in
+invalidate it, so a Linux CLI update or account change can refresh the list.
+
 ## Where
 
 | Piece | Location |
@@ -100,7 +192,7 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   rules, reads in the library and edits in `agents/` work (`--mode
   accept-edits`), and every `run_command`, `ls` included, is refused. `agy`
   reads rules from **one place only** — the student's global
-  `~/.gemini/antigravity-cli/settings.json`; a workspace `.agents/hooks.json`,
+  `~/.gemini/antigravity-cli/settings.json`; a workspace hooks file under `.agents`,
   a project file, environment variables and a `HOME` override were each tried
   and none loads — so `app/src-tauri/src/harness/antigravity_rules.rs` keeps a
   block of Oculus's own there, written before every spawn. It is Claude's
@@ -277,6 +369,10 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   scans `<cwd>/.agents/skills`, both walking up from the working directory —
   and the cwd of every thread and every headless job is `agents/` — so each
   gets a *relative* link beside the one copy and the library stays movable.
+  Windows uses generated copies without requiring symlink privileges. A
+  saved copy marker lets upgrades refresh an unchanged generated skill while
+  preserving a user-edited or user-created skill. Chat startup refreshes these
+  documents as well as sync, so an app upgrade does not require a re-sync.
   opencode is the odd one: it takes a top-level `skills.paths`, so
   `OPENCODE.template.json` names `skills` and nothing is linked for it at all.
   **Nothing is written outside the library.** Codex also reads
@@ -291,7 +387,9 @@ and still empty of readers (see `app/src-tauri/src/lib.rs`).
   (relative, per the rule above) in opencode's — because `agents/` is the one
   place a thread may write, and
   without them the agent can rewrite the procedure it is halfway through
-  following. **And the set is kept small on purpose:** every CLI reads its
+  following. Windows Claude's outer WSL sandbox binds existing skill folders
+  read-only, including both provider routes; it rejects a route that resolves
+  outside `agents/`. **And the set is kept small on purpose:** every CLI reads its
   skill index into the first prompt of every turn, and the headless jobs
   (`oculus lecture chapters`, `lecture reading`) run from this same cwd, so a
   skill nobody loads is still paid for on every job.
@@ -1621,13 +1719,15 @@ event is always last. The dialog is the only listener and the only surface:
 this app has no toasts, and an install is a foreground thing the student is
 watching rather than a background job for the sidebar.
 
-**macOS only, and said so in the code.** The routes are macOS ones, and
-discovery itself is macOS-shaped — `binary_name` answers a bare `claude` with
-no `.cmd`/`.exe`, the non-unix `is_executable` is only "is it a file", and npm
-on Windows installs `claude.cmd` resolved through `PATHEXT` — so `scoop` and
-`winget` would be buttons that install something this app then cannot find.
-The rest of the app leans the same way (launchd's PATH, `/opt/homebrew`, the
-keep-alive LaunchAgent).
+**Windows offers Windows routes.** Codex and opencode use their documented
+native npm packages; Antigravity uses its official PowerShell installer and
+is discovered in `%LOCALAPPDATA%/agy/bin`. opencode's Windows Bun install is
+not offered while its vendor documents it as unfinished. Windows runs fixed
+commands through noninteractive PowerShell and preserves native exit codes.
+Claude offers the repository's dedicated WSL2 setup command for copying only;
+installing native Windows Claude would not satisfy this app's sandbox.
+Sources checked on 24 September 2026: [opencode installation](https://opencode.ai/docs/#windows)
+and [Antigravity installation](https://antigravity.google/docs/cli/install/).
 
 ## Per-job models
 

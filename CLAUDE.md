@@ -179,8 +179,8 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   selection, `dragstart` never fired, and the card lifted only when the grab
   landed on dead space. Reach for HTML5 DnD only for something that must leave
   the window; otherwise extend that hook.
-- **A native file drop reports its position in *points*, and Tauri types it
-  `PhysicalPosition`.** wry reads macOS's `draggingLocation` and subtracts it
+- **On macOS a native file drop reports its position in *points*, and Tauri
+  types it `PhysicalPosition`.** wry reads macOS's `draggingLocation` and subtracts it
   from the view's frame height without ever multiplying by the backing scale
   factor, so the number that arrives is the window's own logical coordinates.
   Doing what the type asks — dividing by `devicePixelRatio` — halves every
@@ -189,7 +189,9 @@ Do not create per-directory `CLAUDE.md` files. This file holds conventions;
   middle of the thread, hits nothing, and is swallowed with every handler
   correctly attached and no error anywhere. `useFileDrop`
   (`app/src/hooks/useFileDrop.ts`) *measures* the scale instead — the
-  viewport's width over the window's own logical width.
+  viewport's width over the window's own logical width. Windows WebView2
+  reports physical pixels, so only its coordinates first divide by the
+  device pixel ratio. Keep both branches when changing native drop handling.
 
 - **A drop here is a *webview* event, and a window listener for it is never
   called.** Tauri delivers a drop as a window event only when the runtime
@@ -330,7 +332,11 @@ docked side panel for files and lectures, top tab strip).
 
 # Git
 
-- Single branch: `master`. Commit messages follow the existing
+- One shared codebase for macOS and Windows. `andre` is the integration and
+  testing branch; merge to `master` after both platforms are verified. Keep
+  platform differences behind Rust cfgs, frontend platform helpers and Tauri
+  platform configuration files. Do not resume a separate Windows mirror.
+  Commit messages follow the existing
   `feat:`/`fix:`/`refactor(scope):` style — read `git log --oneline` and match.
 - `data/`, `*.db`, and `app/src-tauri/binaries/` are
   gitignored user-state or fetched artifacts — never commit them.

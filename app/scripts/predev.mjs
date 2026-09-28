@@ -27,7 +27,7 @@
 // session does not use.
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, rmSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -71,10 +71,10 @@ for (const script of ["fetch-ffmpeg.mjs", "fetch-pdfium.mjs"]) {
 //    target/debug/deps is unnecessary, which is the exact failure this script
 //    exists to prevent.
 const started = Date.now();
-rmSync(cli, { force: true });
 try {
-  execFileSync("cargo", ["build", "--manifest-path", manifest, "--bin", "oculus"], {
+  execFileSync(process.execPath, [join(app, "scripts", "stage-cli.mjs"), "--debug"], {
     stdio: "inherit",
+    windowsHide: true,
   });
 } catch {
   console.error("[predev] the oculus CLI did not build — fix the error above");
@@ -118,6 +118,7 @@ if (watch) {
   const child = spawn(process.execPath, [join(app, "scripts", "watch-cli.mjs")], {
     cwd: app,
     detached: true,
+    windowsHide: true,
     stdio: ["ignore", "inherit", "inherit"],
   });
   child.unref();

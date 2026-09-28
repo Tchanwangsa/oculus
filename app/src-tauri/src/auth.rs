@@ -17,9 +17,9 @@ pub fn auth_flag_path(app: &AppHandle) -> std::path::PathBuf {
 
 /// Persisted Canvas session cookie header. WebView2 keeps the real session
 /// cookie in RAM only (it's HttpOnly + session-scoped, so Chromium never
-/// writes it to disk and it can't be injected back into a WebView). We snapshot
+/// writes it to disk). We snapshot
 /// it here while the login window is alive, then replay it ourselves via ureq
-/// for every Canvas request — that's what survives a restart.
+/// for every Canvas request. Browser tabs restore it with the native cookie API.
 fn cookie_file_path(app: &AppHandle) -> std::path::PathBuf {
     app.path()
         .app_data_dir()
@@ -250,13 +250,32 @@ pub async fn disconnect_canvas(
 ) -> Result<(), String> {
     *state.0.lock().unwrap() = false;
 
+    #[cfg(target_os = "windows")]
+    {
+        // Windows locks a live WebView2 profile directory. Clear its native
+        // storage before closing views, rather than recursively removing it.
+        for (label, webview) in app.webviews() {
+            if label == "canvas-auth" || label.starts_with(crate::browser::LABEL_PREFIX) {
+                webview.clear_all_browsing_data().map_err(|e| e.to_string())?;
+            }
+        }
+        let tabs = crate::browser::browser_state(app.clone());
+        for tab in tabs.tabs { crate::browser::browser_close_tab(app.clone(), tab.id); }
+    }
+
     if let Some(win) = app.get_webview_window("canvas-auth") {
         win.close().map_err(|e| e.to_string())?;
     }
 
     let session_dir = canvas_session_dir(&app);
+    #[cfg(not(target_os = "windows"))]
     if session_dir.exists() {
         std::fs::remove_dir_all(&session_dir).map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let flag = session_dir.join("authenticated");
+        if flag.exists() { std::fs::remove_file(flag).map_err(|e| e.to_string())?; }
     }
     let cookie = cookie_file_path(&app);
     if cookie.exists() {

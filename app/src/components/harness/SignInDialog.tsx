@@ -19,6 +19,7 @@ import {
   type SignInLine,
 } from "@/lib/harness";
 import { signInAccount, useSignInStatus } from "@/hooks/useSignInStatus";
+import { useHarnessHealthStore } from "@/stores/harnessHealthStore";
 import { navigateActive } from "@/lib/tabRouters";
 import { copyText, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -103,6 +104,10 @@ export function useSignIn(onFinished: () => void): {
       if (ev.done && active.current === ev.provider) {
         active.current = null;
         finished.current();
+        // A signed-out CLI can have returned an empty model catalogue, and
+        // Windows Claude also needs a fresh WSL readiness probe. Publish the
+        // recovery to every mounted picker after any in-app sign-in flow.
+        void useHarnessHealthStore.getState().refresh(true);
       }
     });
     return () => {

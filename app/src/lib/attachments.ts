@@ -56,7 +56,7 @@ export function pendingFromFile(file: File): PendingAttachment {
 export function pendingFromPath(path: string): PendingAttachment {
   return {
     id: nextId(),
-    name: path.slice(path.lastIndexOf("/") + 1),
+    name: path.split(/[\\/]/).pop() ?? path,
     preview: convertFileSrc(path),
     source: { kind: "path", path },
   };
@@ -106,7 +106,7 @@ const ATTACHMENT_PATH = /^(?:\.\/)?(?:\.\.\/)?(?:agents\/)?attachments\/([A-Za-z
 
 /** The data-directory-relative path a fenced attachment stands for, or null. */
 export function attachmentPath(raw: string): string | null {
-  const m = ATTACHMENT_PATH.exec(raw.trim());
+  const m = ATTACHMENT_PATH.exec(raw.trim().replace(/\\/g, "/"));
   return m ? `agents/attachments/${m[1]}` : null;
 }
 

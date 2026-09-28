@@ -55,7 +55,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -93,6 +93,14 @@ pub struct ClaudeSpawn {
 
 pub struct ClaudeSession {
     child: Mutex<Child>,
+    #[cfg(windows)]
+    job: Mutex<Option<crate::platform::ProcessJob>>,
+    #[cfg(windows)]
+    paths: (String, String),
+    #[cfg(windows)]
+    cli_requests: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    #[cfg(windows)]
+    generation: AtomicU64,
     stdin: Mutex<ChildStdin>,
     alive: Arc<AtomicBool>,
     request_ids: AtomicU64,
@@ -116,7 +124,14 @@ pub struct ClaudeSession {
 
 impl ClaudeSession {
     pub fn spawn(cfg: ClaudeSpawn, sink: Sink) -> Result<Arc<Self>, String> {
-        let mut cmd = Command::new(&cfg.bin);
+        #[cfg(windows)]
+        let launch = super::wsl::prepare(&cfg)?;
+        #[cfg(windows)]
+        let mut cmd = launch.command;
+        #[cfg(not(windows))]
+        let mut cmd = super::discover::provider_command(&cfg.bin)?;
+        #[cfg(not(windows))]
+        {
         cmd.arg("-p")
             .args(["--input-format", "stream-json"])
             .args(["--output-format", "stream-json"])
@@ -147,11 +162,24 @@ impl ClaudeSession {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        }
 
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("cannot start {}: {e}", cfg.bin.display()))?;
-        let stdin = child.stdin.take().ok_or("no stdin on claude child")?;
+        #[cfg(windows)]
+        let job = crate::platform::ProcessJob::assign(&child).map_err(|e| {
+            let _ = child.kill();
+            let _ = child.wait();
+            format!("cannot supervise Claude process tree: {e}")
+        })?;
+        let mut stdin = child.stdin.take().ok_or("no stdin on claude child")?;
+        #[cfg(windows)]
+        if let Err(error) = super::wsl::write_config(&mut stdin, &launch.config) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
         let stdout = child.stdout.take().ok_or("no stdout on claude child")?;
         let stderr = child.stderr.take().ok_or("no stderr on claude child")?;
 
@@ -160,6 +188,14 @@ impl ClaudeSession {
         let expecting = Arc::new(AtomicBool::new(false));
         let session = Arc::new(ClaudeSession {
             child: Mutex::new(child),
+            #[cfg(windows)]
+            job: Mutex::new(Some(job)),
+            #[cfg(windows)]
+            paths: (launch.windows_library, launch.linux_library),
+            #[cfg(windows)]
+            cli_requests: Mutex::new(HashMap::new()),
+            #[cfg(windows)]
+            generation: AtomicU64::new(0),
             stdin: Mutex::new(stdin),
             alive: alive.clone(),
             request_ids: AtomicU64::new(1),
@@ -167,6 +203,20 @@ impl ClaudeSession {
             interrupting: interrupting.clone(),
             expecting: expecting.clone(),
         });
+
+        // A Windows Job Object does not own Linux descendants. The Linux
+        // supervisor requires this heartbeat as well as an open stdin pipe;
+        // an app crash therefore tears down its entire PID namespace even if
+        // WSL briefly retains a duplicated pipe handle.
+        #[cfg(windows)]
+        {
+            let weak = Arc::downgrade(&session);
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(2));
+                let Some(session) = weak.upgrade() else { break; };
+                if !session.is_alive() || session.write_line(&serde_json::json!({"type":"oculus_ping"})).is_err() { break; }
+            });
+        }
 
         // stderr is the CLI's own log. Keep a tail so a process that dies
         // before saying anything on stdout can still explain itself.
@@ -190,15 +240,47 @@ impl ClaudeSession {
             let mut state = Translator {
                 interrupting,
                 expecting: expecting.clone(),
+                #[cfg(windows)]
+                transcript_root: Some(launch.transcript_root),
                 ..Default::default()
             };
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(log) = &raw_log {
-                    log.write(&line);
-                }
                 let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                    if let Some(log) = &raw_log { log.write(&line); }
                     continue;
                 };
+                #[cfg(windows)]
+                if v.get("type").and_then(Value::as_str) == Some("oculus_cli_request") {
+                    let Some(id) = v.get("id").and_then(Value::as_str).filter(|s| s.len() <= 128).map(str::to_string) else { continue; };
+                    let session = reader_session.clone();
+                    let library = cfg.library.clone();
+                    let running = Arc::new(AtomicBool::new(true));
+                    {
+                        let mut requests = session.cli_requests.lock().unwrap();
+                        if requests.len() >= 4 || requests.contains_key(&id) || session.interrupting.load(Ordering::SeqCst) || !session.expecting.load(Ordering::SeqCst)
+                            || v.get("generation").and_then(Value::as_u64) != Some(session.generation.load(Ordering::SeqCst)) {
+                            let _ = session.write_line(&serde_json::json!({"type":"oculus_cli_response","id":id,"code":1,"stdout":"","stderr":"Oculus CLI request was cancelled or exceeded the concurrency limit."}));
+                            continue;
+                        }
+                        requests.insert(id.clone(), running.clone());
+                    }
+                    std::thread::spawn(move || {
+                        let args = v.get("argv").and_then(Value::as_array).filter(|a| a.len() <= 256)
+                            .and_then(|a| a.iter().map(|v| v.as_str().map(str::to_string)).collect::<Option<Vec<_>>>());
+                        let input = v.get("stdin").and_then(Value::as_str);
+                        let result = if input.is_some_and(|s| s.len() > 1024 * 1024) {
+                            Err("Oculus CLI input is too large".into())
+                        } else { args.ok_or_else(|| "Invalid Oculus CLI arguments".to_string())
+                            .and_then(|args| super::wsl_cli::invoke_with_input(&library, &args, input, &running)) };
+                        let mut response = result.unwrap_or_else(|error| serde_json::json!({"code":1,"stdout":"","stderr":error}));
+                        response["type"] = Value::String("oculus_cli_response".into());
+                        response["id"] = Value::String(id.clone());
+                        session.cli_requests.lock().unwrap().remove(&id);
+                        let _ = session.write_line(&response);
+                    });
+                    continue;
+                }
+                if let Some(log) = &raw_log { log.write(&line); }
                 if v.get("type").and_then(|t| t.as_str()) == Some("control_response") {
                     reader_session.settle(&v);
                     continue;
@@ -209,6 +291,8 @@ impl ClaudeSession {
             }
             // EOF: the process is gone or going. Reap it for the code.
             alive.store(false, Ordering::SeqCst);
+            #[cfg(windows)]
+            reader_session.cancel_cli_requests();
             let code = reader_session
                 .child
                 .lock()
@@ -253,13 +337,26 @@ impl ClaudeSession {
     /// itself and running it the instant the current turn ends, which is why
     /// the manager holds messages back rather than letting them through.
     pub fn send(&self, text: &str) -> Result<(), String> {
-        self.expecting.store(true, Ordering::SeqCst);
-        self.write_line(&serde_json::json!({
+        #[cfg(windows)]
+        let translated = super::wsl::translate_text(text, &self.paths.0, &self.paths.1);
+        #[cfg(windows)]
+        let text = translated.as_str();
+        let mut message = serde_json::json!({
             "type": "user",
             "message": { "role": "user", "content": text },
             "parent_tool_use_id": null,
             "session_id": "",
-        }))
+        });
+        #[cfg(windows)]
+        {
+            let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+            self.cancel_cli_requests();
+            message["oculus_generation"] = generation.into();
+        }
+        // Do not admit broker calls until the old generation is invalidated
+        // and all of its already-running requests have been cancelled.
+        self.expecting.store(true, Ordering::SeqCst);
+        self.write_line(&message)
     }
 
     /// Stop the current turn without ending the session. The CLI answers
@@ -269,12 +366,21 @@ impl ClaudeSession {
     /// apart from a real failure.
     pub fn interrupt(&self) -> Result<(), String> {
         self.interrupting.store(true, Ordering::SeqCst);
+        #[cfg(windows)]
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        #[cfg(windows)]
+        self.cancel_cli_requests();
         let id = self.request_ids.fetch_add(1, Ordering::SeqCst);
-        self.write_line(&serde_json::json!({
+        let mut request = serde_json::json!({
             "type": "control_request",
             "request_id": format!("oculus-{id}"),
             "request": { "subtype": "interrupt" },
-        }))
+        });
+        #[cfg(windows)]
+        {
+            request["oculus_generation"] = generation.into();
+        }
+        self.write_line(&request)
     }
 
     /// Hand a `control_response` to whoever is waiting on it. A response
@@ -337,15 +443,32 @@ impl ClaudeSession {
     }
 
     pub fn kill(&self) {
+        self.alive.store(false, Ordering::SeqCst);
+        #[cfg(windows)]
+        self.cancel_cli_requests();
+        #[cfg(windows)]
+        self.job.lock().unwrap().take();
         let mut child = self.child.lock().unwrap();
         let _ = child.kill();
         let _ = child.wait();
         self.alive.store(false, Ordering::SeqCst);
     }
+
+    #[cfg(windows)]
+    fn cancel_cli_requests(&self) {
+        for running in self.cli_requests.lock().unwrap().values() {
+            running.store(false, Ordering::SeqCst);
+        }
+    }
 }
 
 impl Drop for ClaudeSession {
     fn drop(&mut self) {
+        self.alive.store(false, Ordering::SeqCst);
+        #[cfg(windows)]
+        self.cancel_cli_requests();
+        #[cfg(windows)]
+        if let Ok(mut job) = self.job.lock() { job.take(); }
         if let Ok(mut c) = self.child.lock() {
             let _ = c.kill();
         }
@@ -395,8 +518,18 @@ pub fn list_models(
     env: &[(String, String)],
 ) -> Result<Vec<ModelInfo>, String> {
     const REQUEST_ID: &str = "oculus-models";
-    let mut child = Command::new(bin)
-        .arg("-p")
+    #[cfg(windows)]
+    let mut cmd = {
+        // Discovery returns wsl.exe on Windows, not a native Claude CLI.
+        // The Linux supervisor permits only this inert initialize exchange;
+        // it never forwards a user turn and owns the Linux child's deadline.
+        let _ = (bin, env);
+        super::wsl::bridge()?.models_command(cwd)?
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut cmd = super::discover::provider_command(bin)?;
+        cmd.arg("-p")
         .args(["--input-format", "stream-json"])
         .args(["--output-format", "stream-json"])
         .arg("--verbose")
@@ -407,7 +540,10 @@ pub fn list_models(
         .env_clear()
         .envs(env.iter().map(|(k, v)| (k, v)))
         // As the bridge does, so the catalogue is the one a thread gets.
-        .env("CLAUDE_CODE_ENTRYPOINT", "cli")
+        .env("CLAUDE_CODE_ENTRYPOINT", "cli");
+        cmd
+    };
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -530,7 +666,7 @@ fn settings_json(
     cwd: &std::path::Path,
     oculus: Option<&std::path::Path>,
 ) -> String {
-    let root = library.display().to_string();
+    let root = library.display().to_string().replace('\\', "/");
     let abs = root.trim_start_matches('/');
     let mut deny: Vec<String> = [
         "courses/**",
@@ -600,6 +736,7 @@ fn settings_json(
     // The cwd — `agents/` — plus the database's three files. Nothing else in
     // the library is writable from a thread; see `paths::db_write_paths` for
     // why it is the files and not the folder they are in.
+    #[cfg(not(windows))]
     let write: Vec<String> = std::iter::once(cwd.display().to_string())
         .chain(
             crate::paths::db_write_paths(library)
@@ -607,11 +744,15 @@ fn settings_json(
                 .map(|p| p.display().to_string()),
         )
         .collect();
+    // Windows Claude runs in WSL and reaches DB writes only through the
+    // native broker, so no Windows SQLite filename belongs in this document.
+    #[cfg(windows)]
+    let write = vec![cwd.display().to_string()];
     serde_json::json!({
         "permissions": { "allow": allow, "deny": deny },
         "sandbox": {
             "enabled": true,
-            "failIfUnavailable": false,
+            "failIfUnavailable": true,
             "autoAllowBashIfSandboxed": true,
             "allowUnsandboxedCommands": false,
             "network": { "allowLocalBinding": true },
@@ -622,6 +763,33 @@ fn settings_json(
     .to_string()
 }
 
+/// The outer WSL sandbox enforces read-only library siblings for every tool,
+/// including built-in Write/Edit. The inner sandbox must still constrain
+/// Bash, protect Claude's writable session/auth state, and permit the one
+/// controlled CLI FIFO pipes. No Windows executable is reachable through it.
+#[cfg(windows)]
+pub(super) fn wsl_settings_json(library: &str, cwd: &str, home: &str, config: &str) -> String {
+    // This is a Linux path, not a Windows database path: resolve no native
+    // SQLite aliases here. Only the native broker may write the database.
+    let mut settings: Value = serde_json::from_str(&settings_json(Path::new(library), Path::new(cwd), None)).unwrap();
+    settings["sandbox"]["filesystem"]["allowWrite"] = serde_json::json!([cwd]);
+    // The outer namespace already makes every sibling read-only, for built-in
+    // tools as well as Bash. Repeating the macOS glob deny list makes Claude's
+    // Linux sandbox try to materialize missing directories (e.g. lectures in
+    // a fresh library), which the outer read-only mount correctly refuses.
+    settings["permissions"]["deny"] = serde_json::json!(["Bash(sqlite3:*)"]);
+    let deny = settings["permissions"]["deny"].as_array_mut().unwrap();
+    for target in [format!("{config}/**"), format!("{home}/.claude.json") ] {
+        for tool in ["Edit", "Read"] { deny.push(Value::String(format!("{tool}(/{target})"))); }
+    }
+    settings["sandbox"]["filesystem"]["denyWrite"] = serde_json::json!([config, format!("{home}/.claude.json")]);
+    settings["sandbox"]["filesystem"]["denyRead"] = serde_json::json!([config, format!("{home}/.claude.json")]);
+    // Linux does not support path-scoped allowUnixSockets. The controlled CLI
+    // uses immutable FIFO endpoints, so AF_UNIX stays blocked entirely.
+    settings["sandbox"]["network"]["allowAllUnixSockets"] = Value::Bool(false);
+    settings.to_string()
+}
+
 // ── Translation ──────────────────────────────────────────────────────────────
 
 /// Per-process translation state. Small on purpose: the stream is almost
@@ -629,6 +797,7 @@ fn settings_json(
 /// can appear in more than one `assistant` line of the same message.
 #[derive(Default)]
 struct Translator {
+    transcript_root: Option<PathBuf>,
     started_tools: std::collections::HashSet<String>,
     /// Between the first stream event of a turn and its `result`.
     turn_open: bool,
@@ -654,6 +823,8 @@ struct Translator {
     /// transcript names the question that started the turn — see
     /// [`anchor_for`].
     turn_first_assistant: Option<String>,
+    /// Its final answer must also be persisted before an immediate resume.
+    turn_last_assistant: Option<String>,
 }
 
 impl Translator {
@@ -745,6 +916,7 @@ impl Translator {
                 if self.turn_first_assistant.is_none() {
                     self.turn_first_assistant = v.get("uuid").and_then(|u| u.as_str()).map(String::from);
                 }
+                self.turn_last_assistant = v.get("uuid").and_then(|u| u.as_str()).map(String::from);
                 self.open_turn(&mut out);
                 if let Some(u) = v.pointer("/message/usage") {
                     let n = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
@@ -885,10 +1057,20 @@ impl Translator {
                 // the transcript is walked back from this turn's first
                 // answer, and the next turn would move that landmark.
                 let first = self.turn_first_assistant.take();
-                if let Some(path) = transcript_path(&self.cwd, &self.session_id) {
-                    if let Some(anchor) = anchor_for(&path, first.as_deref()) {
-                        out.push(HarnessEvent::TurnAnchor { anchor });
-                    }
+                let last = self.turn_last_assistant.take();
+                let anchor = if self.transcript_root.is_some() && first.is_some() {
+                    // Linux Claude can emit result before its buffered JSONL
+                    // tail reaches the Windows UNC view. Hold TurnFinished
+                    // briefly until this exact answer's ancestry is durable;
+                    // otherwise an immediate close/resume loses that answer.
+                    anchor_after_flush(|| transcript_path_at(self.transcript_root.as_deref(), &self.cwd, &self.session_id),
+                        first.as_deref(), last.as_deref(), Duration::from_secs(3))
+                } else {
+                    transcript_path_at(self.transcript_root.as_deref(), &self.cwd, &self.session_id)
+                        .and_then(|path| anchor_for(&path, first.as_deref()))
+                };
+                if let Some(anchor) = anchor {
+                    out.push(HarnessEvent::TurnAnchor { anchor });
                 }
                 self.turn_open = false;
                 self.expecting.store(false, Ordering::SeqCst);
@@ -933,13 +1115,22 @@ impl Translator {
 /// A slug that does not resolve falls back to finding the file by name, since
 /// the session id is unique across projects and the rule is the CLI's to
 /// change.
+#[cfg(test)]
 fn transcript_path(cwd: &str, session_id: &str) -> Option<PathBuf> {
+    transcript_path_at(None, cwd, session_id)
+}
+
+fn transcript_path_at(root: Option<&Path>, cwd: &str, session_id: &str) -> Option<PathBuf> {
     if cwd.is_empty() || session_id.is_empty() {
         return None;
     }
-    let root = std::env::var_os("CLAUDE_CONFIG_DIR")
+    // The provider controls this value; never allow it to traverse a UNC
+    // share or a local transcript directory.
+    if !session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { return None; }
+    let root = root.map(Path::to_path_buf).or_else(|| std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude")))?;
+        .or_else(|| std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))
+            .map(|h| PathBuf::from(h).join(".claude"))))?;
     let projects = root.join("projects");
     let slug: String = cwd
         .chars()
@@ -1010,6 +1201,21 @@ fn anchor_for(path: &Path, first_assistant: Option<&str>) -> Option<String> {
     None
 }
 
+fn anchor_after_flush(path: impl Fn() -> Option<PathBuf>, assistant: Option<&str>, last: Option<&str>, timeout: Duration) -> Option<String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(anchor) = path().and_then(|path| {
+            // The first answer anchors the user question without mistaking a
+            // later tool-result row for it; the last answer proves the whole
+            // turn's tail is durable before close/resume can begin.
+            if last.is_some() && anchor_for(&path, last).is_none() { return None; }
+            anchor_for(&path, assistant)
+        }) { return Some(anchor); }
+        if std::time::Instant::now() >= deadline { return None; }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
 fn str_of(v: &Value, key: &str) -> String {
     v.get(key).and_then(|s| s.as_str()).unwrap_or("").to_string()
 }
@@ -1050,6 +1256,28 @@ mod tests {
     use super::*;
     use crate::harness::event::ToolKind;
 
+    #[test]
+    fn a_buffered_transcript_tail_is_waited_for_without_using_the_previous_question() {
+        let dir = std::env::temp_dir().join(format!("oculus-anchor-flush-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("buffered.jsonl");
+        std::fs::write(&path, concat!(
+            "{\"type\":\"user\",\"uuid\":\"old-question\"}\n",
+            "{\"type\":\"user\",\"uuid\":\"new-question\"}\n",
+            "{\"type\":\"assistant\",\"uuid\":\"early-answer\",\"parentUuid\":\"new-question\"}\n"
+        )).unwrap();
+        let writer_path = path.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            let mut file = std::fs::OpenOptions::new().append(true).open(writer_path).unwrap();
+            file.write_all(b"{\"type\":\"assistant\",\"uuid\":\"new-answer\",\"parentUuid\":\"early-answer\"}\n").unwrap();
+        });
+        assert_eq!(anchor_after_flush(|| Some(path.clone()), Some("early-answer"), Some("new-answer"), Duration::from_secs(1)).as_deref(), Some("new-question"));
+        assert!(std::fs::read_to_string(&path).unwrap().contains("new-answer"), "the final answer must be durable before the turn closes");
+        writer.join().unwrap();
+        assert_eq!(anchor_after_flush(|| Some(path.clone()), Some("missing-answer"), Some("missing-answer"), Duration::from_millis(1)), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     /// The containment, as the CLI will read it — the counterpart of
     /// opencode's `the_rendered_config_denies_the_right_things`.
     ///
@@ -1059,6 +1287,7 @@ mod tests {
     /// way a row reaches the board is the `oculus` CLI. `sqlite3` is named
     /// because the sandbox can no longer stop it.
     #[test]
+    #[cfg(not(windows))]
     fn the_settings_document_opens_the_database_and_nothing_else() {
         let library = Path::new("/Users/x/Library/Application Support/com.tchan.oculus");
         let cwd = library.join("agents");
@@ -1140,6 +1369,23 @@ mod tests {
             .filter_map(|r| r.as_str())
             .collect();
         assert_eq!(allow2, ["Bash(oculus:*)", "Bash(/opt/oculus/bin/oculus:*)"]);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn wsl_settings_keep_database_writes_behind_the_broker() {
+        let v: Value = serde_json::from_str(&wsl_settings_json(
+            "/mnt/c/Users/学生/Oculus", "/mnt/c/Users/学生/Oculus/agents",
+            "/home/oculus", "/home/oculus/.claude",
+        )).unwrap();
+        assert_eq!(v["sandbox"]["filesystem"]["allowWrite"], serde_json::json!([
+            "/mnt/c/Users/学生/Oculus/agents"
+        ]));
+        assert_eq!(v["sandbox"]["failIfUnavailable"], true);
+        assert_eq!(v["sandbox"]["allowUnsandboxedCommands"], false);
+        assert_eq!(v["sandbox"]["network"]["allowAllUnixSockets"], false);
+        assert!(v["permissions"]["deny"].as_array().unwrap().contains(&serde_json::json!("Bash(sqlite3:*)")));
+        assert!(v["sandbox"]["filesystem"]["denyRead"].as_array().unwrap().contains(&serde_json::json!("/home/oculus/.claude")));
     }
 
     /// Replays a recorded `claude -p` session and checks the folded shape.

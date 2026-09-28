@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { listen } from "@tauri-apps/api/event";
 import { getDb } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/openFile";
+import { SCRAPED_FILE_SAVED_EVENT } from "@/lib/syncWrites";
 
 /**
  * Counts of "new" files — scraped since recency tracking began and never
@@ -73,7 +73,7 @@ export function newCountForTab(
 /**
  * Keep the counts current: opening a file clears its dot, and a running sync
  * adds new ones. Called once from the app root (alongside useBackendEvents).
- * Scrape-file events arrive per file, so those refreshes are debounced.
+ * Committed file events arrive per file, so those refreshes are debounced.
  */
 export function watchNewFiles(): () => void {
   const refresh = () => void useNewFilesStore.getState().refresh();
@@ -84,15 +84,15 @@ export function watchNewFiles(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const debounced = () => {
     clearTimeout(timer);
-    // The DB upsert for a scrape-file event happens in another listener;
-    // the delay lets it land before we count.
+    // This event is emitted after the metadata commit. Debouncing coalesces
+    // large batches; it no longer guesses how long the write queue will take.
     timer = setTimeout(refresh, 1500);
   };
-  const unsubs = [listen("scrape-file", debounced), listen("scrape-complete", debounced)];
+  window.addEventListener(SCRAPED_FILE_SAVED_EVENT, debounced);
 
   return () => {
     window.removeEventListener(FILE_ACCESSED_EVENT, refresh);
     clearTimeout(timer);
-    unsubs.forEach((u) => u.then((f) => f()).catch(() => {}));
+    window.removeEventListener(SCRAPED_FILE_SAVED_EVENT, debounced);
   };
 }

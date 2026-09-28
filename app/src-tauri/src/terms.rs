@@ -21,23 +21,25 @@
 
 /// Chronological position within one academic year. UniMelb runs Summer Term
 /// in January–February, ahead of Semester 1, with Winter Term between the two
-/// semesters. A term named after its month takes the rank of the term it falls
-/// inside; the semesters are tested first, so a `"Semester 2 (July)"` is still
-/// a semester. An unrecognised term sorts after every real one rather than
+/// semesters. An unrecognised term sorts after every real one rather than
 /// silently taking a real term's place.
 pub fn term_rank(name: &str) -> u8 {
     let lower = name.to_lowercase();
-    if lower.contains("summer") {
+    let words: Vec<&str> = lower.split(|c: char| c.is_whitespace() || c == '_' || c == '-')
+        .filter(|word| !word.is_empty()).collect();
+    let has = |tokens: &[&str]| words.iter().any(|word| tokens.contains(word));
+    let semester = |number: &str| words.windows(2).any(|pair| pair == ["semester", number]);
+    if has(&["sum", "summer"]) {
         0
-    } else if lower.contains("semester 1") {
+    } else if semester("1") || has(&["sm1"]) {
         1
-    } else if lower.contains("winter") {
+    } else if has(&["win", "winter"]) {
         2
-    } else if lower.contains("semester 2") {
+    } else if semester("2") || has(&["sm2"]) {
         3
-    } else if lower.contains("january") || lower.contains("february") {
+    } else if has(&["january", "february"]) {
         0
-    } else if lower.contains("june") || lower.contains("july") {
+    } else if has(&["june", "july"]) {
         2
     } else {
         9
@@ -121,5 +123,17 @@ mod tests {
     fn an_unknown_term_does_not_impersonate_a_real_one() {
         assert_eq!(term_rank("2026 Intensive Block"), 9);
         assert_eq!(term_year("Default Term"), 0);
+    }
+
+    #[test]
+    fn codes_and_labels_share_the_same_academic_order() {
+        for (code, label) in [("SUM", "Summer Term"), ("SM1", "Semester 1"),
+            ("WIN", "Winter Term"), ("SM2", "Semester 2")] {
+            assert_eq!(term_key(&format!("2026_{code}")), term_key(&format!("2026 {label}")));
+        }
+        assert_eq!(term_rank("2026-semester-2"), 3);
+        assert_eq!(term_rank("2026 WINTER"), 2);
+        assert_eq!(term_rank("2026 SEMESTER  1"), 1);
+        assert_eq!(term_rank("2026 Semester 10"), 9);
     }
 }

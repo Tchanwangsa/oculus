@@ -52,7 +52,7 @@ const LOCAL_READY: bool = false;
 /// One sentence, naming the reason rather than a ticket, and written so it
 /// reads on its own line under the control.
 const LOCAL_UNAVAILABLE: &str =
-    "The local embedder is a separate program that runs on this Mac, and Oculus does not ship \
+    "The local embedder is a separate program that runs on this computer, and Oculus does not ship \
      one yet.";
 
 // ── The view ─────────────────────────────────────────────────────────────────
@@ -176,7 +176,7 @@ fn engines() -> Vec<EngineOption> {
         EngineOption {
             id: Engine::Local.as_str(),
             label: "Local server",
-            detail: "Pages are embedded by a server running on this Mac. Nothing leaves it.",
+            detail: "Pages are embedded by a server running on this computer. Nothing leaves it.",
             available: LOCAL_READY,
             unavailable_reason: (!LOCAL_READY).then_some(LOCAL_UNAVAILABLE),
         },

@@ -1,7 +1,7 @@
 # Parsing — PDFs into per-page markdown
 
 Every PDF in the library is read by **MinerU** — either its cloud service or a
-MinerU server the user runs on their own Mac, chosen in Settings → Library.
+MinerU server the user runs on their own computer, chosen in Settings → Library.
 Both are HTTP calls made in-process from Rust; neither is a process Oculus
 starts or supervises. There is no fast tier and **no fallback between the
 two**: one engine is selected, and a PDF either has markdown or it does not.
@@ -17,7 +17,7 @@ remaining processes are.
 | --- | --- |
 | The seam: trait, artifact contract, error vocabulary, version | `app/src-tauri/src/parse/mod.rs` |
 | MinerU cloud protocol + the `Parser` impl | `app/src-tauri/src/parse/mineru/client.rs` |
-| MinerU-on-this-Mac: the `Parser` impl and the probe | `app/src-tauri/src/parse/mineru/local.rs` |
+| Local MinerU: the `Parser` impl and the probe | `app/src-tauri/src/parse/mineru/local.rs` |
 | Content list → page records (what the markdown *says*) | `app/src-tauri/src/parse/mineru/render.rs` |
 | Submission queue (batching window, in-flight cap) | `app/src-tauri/src/parse/mineru/batch.rs` |
 | Daily allowance + the two rate limiters | `app/src-tauri/src/parse/mineru/ledger.rs` |
@@ -58,13 +58,17 @@ that is not answering fails the handshake as `NotReady`, which is retryable, so
 a stopped server never marks a file permanently broken.
 
 `parse_config()` reads the `settings` row `parse`, key `engine` (`cloud` |
-`local`) with an optional `engineUrl` override. Absence means `Cloud`.
+`local`) with an optional `engineUrl` override. On Windows, an absent engine
+retains **Local**, the previous Windows default. Legacy `backend: local` also
+stays Local; an explicit legacy `cloud` or `auto` selects Cloud. A valid new
+`engine` always takes precedence. This prevents an update from uploading an
+existing local library merely because a cloud credential was saved earlier.
 
-**The old `backend` key is ignored entirely**, `"auto"` included. It named a
-*fallback policy* over the Python sidecar — "local" meant that Python parser
-specifically — so those values cannot be reinterpreted; promoting a stale
-`"local"` would aim the app at a parse server nobody installed. The stale
-`memoryCapMb` and `backend` keys are left in the blob rather than migrated out.
+Local now requires an externally installed MinerU server. If it is stopped,
+the readiness handshake returns `NotReady`; there is no fallback to Cloud.
+Choose Cloud explicitly in Settings → Library to upload documents there.
+Other platforms retain the upstream Cloud default and ignore the obsolete
+`backend` field. Both legacy keys remain in the settings blob.
 
 ## Choosing an engine
 
@@ -142,7 +146,7 @@ not settings**; changing either of the first two is a re-parse of everything.
   that one number in a firewall rule beats two — which does not survive contact
   with a server this project does not build. A default nobody's server answers
   on is a setting every user must change before the engine works at all.
-- **Measured against MinerU 3.4.5 on this Mac**, not inferred. The ignored test
+- **Upstream measurements used MinerU 3.4.5 on macOS.** The ignored test
   `a_real_mineru_answers_the_way_this_client_expects` in `mineru/local.rs` is
   the only thing in this repo that can tell you the form fields are spelled the
   way *that* server reads them; everything else proves the client against a

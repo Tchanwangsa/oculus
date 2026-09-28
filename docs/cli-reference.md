@@ -1044,7 +1044,7 @@ Options:
   -p, --provider <PROVIDER>
           Which CLI to drive
 
-          [default: claude]
+          [default: codex]
           [possible values: claude, codex, opencode, antigravity]
 
   -m, --model <MODEL>

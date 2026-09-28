@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.2",
   "scripts": {
     "dev": "vite",
     "predev": "node scripts/predev.mjs",
@@ -12,9 +12,9 @@
     "ffmpeg": "node scripts/fetch-ffmpeg.mjs",
     "pdfium": "node scripts/fetch-pdfium.mjs",
     "tauri": "tauri",
-    "cli": "rm -f src-tauri/target/release/oculus && cargo build --release --manifest-path src-tauri/Cargo.toml --bin oculus",
-    "cli:dev": "rm -f src-tauri/target/debug/oculus && cargo build --manifest-path src-tauri/Cargo.toml --bin oculus",
-    "cli:install": "bun run cli && mkdir -p \"$HOME/.local/bin\" && ln -sf \"$PWD/src-tauri/target/release/oculus\" \"$HOME/.local/bin/oculus\" && \"$PWD/src-tauri/target/release/oculus\" docs",
+    "cli": "node scripts/build-cli.mjs",
+    "cli:dev": "node scripts/build-cli.mjs --debug",
+    "cli:install": "node scripts/build-cli.mjs --install",
     "stage-cli": "node scripts/stage-cli.mjs",
     "docs:cli": "node scripts/gen-cli-docs.mjs"
   },

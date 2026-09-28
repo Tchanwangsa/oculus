@@ -125,7 +125,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -166,6 +166,8 @@ pub struct AntigravitySpawn {
 
 pub struct AntigravitySession {
     child: Mutex<Child>,
+    #[cfg(windows)]
+    job: Mutex<Option<crate::platform::ProcessJob>>,
     stdin: Mutex<ChildStdin>,
     alive: Arc<AtomicBool>,
     /// Prepended to the first message and then gone, like opencode's.
@@ -187,7 +189,7 @@ impl AntigravitySession {
         // would run with whatever the file held before — or nothing.
         super::antigravity_rules::install(&cfg.library, cfg.approved.clone())
             .map_err(|e| format!("Antigravity was not started: {e}"))?;
-        let mut cmd = Command::new(&cfg.bin);
+        let mut cmd = super::discover::provider_command(&cfg.bin)?;
         // `--print=` with an **empty attached value**, and the `=` is the whole
         // point. `-p` here is not Claude's bare flag: it is
         // `--print <prompt>`, so `-p --input-format …` hands the CLI
@@ -235,6 +237,12 @@ impl AntigravitySession {
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("cannot start {}: {e}", cfg.bin.display()))?;
+        #[cfg(windows)]
+        let job = crate::platform::ProcessJob::assign(&child).map_err(|e| {
+            let _ = child.kill();
+            let _ = child.wait();
+            format!("cannot supervise Antigravity process tree: {e}")
+        })?;
         let stdin = child.stdin.take().ok_or("no stdin on agy child")?;
         let stdout = child.stdout.take().ok_or("no stdout on agy child")?;
         let stderr = child.stderr.take().ok_or("no stderr on agy child")?;
@@ -244,6 +252,8 @@ impl AntigravitySession {
         let expecting = Arc::new(AtomicBool::new(false));
         let session = Arc::new(AntigravitySession {
             child: Mutex::new(child),
+            #[cfg(windows)]
+            job: Mutex::new(Some(job)),
             stdin: Mutex::new(stdin),
             alive: alive.clone(),
             pending_brief: Mutex::new(
@@ -378,6 +388,8 @@ impl AntigravitySession {
     }
 
     pub fn kill(&self) {
+        #[cfg(windows)]
+        self.job.lock().unwrap().take();
         let mut child = self.child.lock().unwrap();
         let _ = child.kill();
         let _ = child.wait();
@@ -387,6 +399,8 @@ impl AntigravitySession {
 
 impl Drop for AntigravitySession {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        if let Ok(mut job) = self.job.lock() { job.take(); }
         if let Ok(mut c) = self.child.lock() {
             let _ = c.kill();
         }
@@ -711,7 +725,7 @@ fn refusal(tool: &str, params: &Value, message: &str) -> (String, Option<String>
             let p = std::path::Path::new(t);
             let dir = if tool == "list_dir" || p.is_dir() { Some(p) } else { p.parent() };
             dir.filter(|d| d.is_absolute() && d.parent().is_some())
-                .map(|d| format!("{action}({})", d.display()))
+                .map(|d| format!("{action}({})", super::antigravity_rules::rule_path(d)))
         }
         "read_url" => url::Url::parse(t)
             .ok()
@@ -810,7 +824,7 @@ const MODELS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// is an error that says so.
 pub fn run_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<ModelsRun, String> {
     use std::io::Read;
-    let mut child = Command::new(bin)
+    let mut child = super::discover::provider_command(bin)?
         .arg("models")
         .env_clear()
         .envs(env.iter().map(|(k, v)| (k, v)))
@@ -819,6 +833,12 @@ pub fn run_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<Mod
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cannot run {}: {e}", bin.display()))?;
+    #[cfg(windows)]
+    let job = crate::platform::ProcessJob::assign(&child).map_err(|e| {
+        let _ = child.kill();
+        let _ = child.wait();
+        format!("cannot supervise Antigravity model discovery: {e}")
+    })?;
     // Each pipe drained on a thread of its own: a child that fills the unread
     // one blocks, and would then look like exactly the hang this bounds.
     fn drain(r: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<String> {
@@ -853,6 +873,8 @@ pub fn run_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<Mod
             }
         }
     };
+    #[cfg(windows)]
+    drop(job);
     Ok(ModelsRun {
         success: status.success(),
         stdout: stdout.join().unwrap_or_default(),
@@ -1358,14 +1380,28 @@ gpt-oss-120b-medium
 
     #[test]
     fn a_refused_file_write_suggests_its_folder() {
+        let (path, expected) = if cfg!(windows) {
+            (r"C:\Users\s\elsewhere\notes.md", "write_file(C:/Users/s/elsewhere)")
+        } else {
+            ("/Users/s/elsewhere/notes.md", "write_file(/Users/s/elsewhere)")
+        };
         let (action, target, rule) = refusal(
             "write_to_file",
-            &serde_json::json!({ "TargetFile": "/Users/s/elsewhere/notes.md" }),
-            "permission check failed for write_file \"/Users/s/elsewhere/notes.md\": user denied permission",
+            &serde_json::json!({ "TargetFile": path }),
+            &format!("permission check failed for write_file \"{path}\": user denied permission"),
         );
         assert_eq!(action, "write_file");
-        assert_eq!(target.as_deref(), Some("/Users/s/elsewhere/notes.md"));
-        assert_eq!(rule.as_deref(), Some("write_file(/Users/s/elsewhere)"));
+        assert_eq!(target.as_deref(), Some(path));
+        assert_eq!(rule.as_deref(), Some(expected));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_file_refusal_never_suggests_a_drive_or_relative_root() {
+        for path in [r"C:\notes.md", r"C:relative\notes.md", r"\Users\s\notes.md", r"relative\notes.md"] {
+            let (_, _, rule) = refusal("write_to_file", &serde_json::json!({ "TargetFile": path }), "");
+            assert_eq!(rule, None, "a refusal must not widen to this folder: {path}");
+        }
     }
 
     #[test]

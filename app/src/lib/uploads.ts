@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { deleteFileRow, upsertFile, type DbFile } from "@/lib/db";
+import { useSidePanelStore } from "@/stores/sidePanelStore";
+import { useParseStore } from "@/stores/parseStore";
 import { isPdfBacked } from "@/lib/fileTypes";
 
 /**
@@ -74,16 +76,21 @@ export async function addUploads(
   for (const outcome of outcomes) {
     const file = outcome.file;
     if (!file) continue;
-    await upsertFile(
-      subject.id,
-      file.filename,
-      file.relative_path,
-      file.file_type,
-      file.size_bytes,
-      "upload",
-    );
-    // Fire-and-forget, like every other parse request: the sidecar may be
-    // warming up or absent, and the quality sweep re-requests what it missed.
+    try {
+      await upsertFile(
+        subject.id,
+        file.filename,
+        file.relative_path,
+        file.file_type,
+        file.size_bytes,
+        "upload",
+      );
+    } catch (reason) {
+      outcome.error = [outcome.error, `Copied the file but could not save its library entry: ${String(reason)}`]
+        .filter(Boolean).join(" ");
+      continue;
+    }
+    // Rust owns the parse queue and reports failures through parse-status.
     if (!outcome.error && isPdfBacked(file.filename)) {
       invoke("parse_file", {
         subjectId: subject.id,
@@ -102,5 +109,18 @@ export async function addUploads(
 export async function removeUpload(file: DbFile): Promise<void> {
   await invoke("delete_upload", { relativePath: file.relative_path });
   await deleteFileRow(file.id);
+  const panels = useSidePanelStore.getState();
+  for (const [pane, item] of Object.entries(panels.items)) {
+    if (item?.kind === "file" && item.file.id === file.id) panels.close(Number(pane));
+  }
+  useParseStore.setState((state) => {
+    const statuses = { ...state.statuses };
+    const jobs = { ...state.jobs };
+    const failures = { ...state.failures };
+    delete statuses[file.relative_path];
+    delete jobs[file.relative_path];
+    delete failures[file.relative_path];
+    return { statuses, jobs, failures };
+  });
   announce();
 }

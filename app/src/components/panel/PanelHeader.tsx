@@ -1,5 +1,6 @@
 import { ArrowsOutSimple, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { primaryModifier } from "@/lib/platform";
 import {
   Tooltip,
   TooltipContent,
@@ -45,7 +46,7 @@ export function PanelHeader({ title, onExpand, onClose, actions }: PanelHeaderPr
           </TooltipTrigger>
           <TooltipContent className="flex flex-col items-start gap-0.5">
             Open as full page
-            <span className="text-[11px] text-background/60">⌘-click for a new tab</span>
+            <span className="text-[11px] text-background/60">{primaryModifier}-click for a new tab</span>
           </TooltipContent>
         </Tooltip>
       )}

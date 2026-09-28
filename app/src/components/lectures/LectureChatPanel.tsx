@@ -181,7 +181,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   // list exists.
   const active = pickerProviders.find((p) => p.id === activeProvider);
   useEffect(() => {
-    if (model || !active || active.loading || active.models.length === 0) return;
+    if (model || !active || active.unavailableReason || active.loading || active.models.length === 0) return;
     const pick = defaultSelection(active.models);
     if (!pick.model) return;
     const s = store.getState();

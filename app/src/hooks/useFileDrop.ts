@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { isMac } from "@/lib/platform";
+import { fileDropRatio } from "@/lib/fileDrop";
 
 /** A few pixels of slack around the target. A drag is aimed by hand at a
  *  strip of furniture, and a drop one pixel outside it reads as the app
@@ -30,8 +32,8 @@ const SLACK = 8;
  * holds. A window listener subscribes without error, reports success, and is
  * then never called once — nothing to see but a drag that does nothing.
  *
- * **The position is in points, whatever its type says.** Tauri hands it over
- * as a `PhysicalPosition`, and it is not one: wry reads macOS's
+ * **On macOS the position is in points, whatever its type says.** Tauri hands
+ * it over as a `PhysicalPosition`, but wry reads macOS's
  * `draggingLocation` and subtracts it from the view's frame height without
  * ever multiplying by the backing scale factor, so what arrives is the
  * window's own logical coordinates. Dividing those by `devicePixelRatio` — the
@@ -40,7 +42,8 @@ const SLACK = 8;
  * instead of assumed: points to CSS pixels is the viewport's width over the
  * window's own logical width, which is `1` until the page is zoomed and stays
  * right when it is. It is re-read on a resize and again as each drag enters,
- * because page zoom changes both numbers under us.
+ * because page zoom changes both numbers under us. Windows reports actual
+ * physical pixels, so its ratio uses the physical window width instead.
  *
  * `over` is true while a drag is inside the element, for whatever the caller
  * wants to draw.
@@ -75,13 +78,12 @@ export function useFileDrop(
     }
 
     const remeasure = () => {
-      // `innerSize` is genuinely physical and `scaleFactor` is the screen's,
-      // so their quotient is the window in the same points the drag reports.
+      // Windows reports physical pixels; macOS reports logical points. The
+      // viewport ratio also accounts for the app's own zoom in either case.
       Promise.all([view.window.innerSize(), view.window.scaleFactor()])
         .then(([size, scale]) => {
-          const points = size.width / (scale || 1);
-          if (dead || points <= 0 || window.innerWidth <= 0) return;
-          ratio.current = window.innerWidth / points;
+          if (dead) return;
+          ratio.current = fileDropRatio(window.innerWidth, size.width, scale, isMac);
         })
         .catch(() => {});
     };

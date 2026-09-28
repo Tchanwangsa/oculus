@@ -1510,7 +1510,7 @@ pub(crate) fn office_ext_of(name: &str) -> Option<&'static str> {
 /// unambiguous; the directory is removed whatever the outcome.
 pub(crate) fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> {
     let soffice = find_soffice().ok_or_else(|| {
-        "LibreOffice not installed — `brew install --cask libreoffice` enables Office → PDF conversion"
+        "LibreOffice not installed — install LibreOffice or set OCULUS_SOFFICE to enable Office → PDF conversion"
             .to_string()
     })?;
 
@@ -1558,7 +1558,7 @@ fn convert_in(soffice: &Path, dir: &Path, bytes: &[u8], ext: &str) -> Result<Vec
     // open — soffice otherwise refuses to start a second instance.
     let profile = url::Url::from_file_path(dir.join("profile"))
         .map_err(|_| "profile path not absolute".to_string())?;
-    let mut child = std::process::Command::new(soffice)
+    let mut child = crate::platform::command(soffice)
         .arg(format!("-env:UserInstallation={profile}"))
         .args(["--headless", "--norestore", "--convert-to"])
         .arg(convert_target(ext))
@@ -1596,15 +1596,27 @@ fn find_soffice() -> Option<PathBuf> {
             return Some(p);
         }
     }
-    [
+    let mut candidates = Vec::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            candidates.push(dir.join(format!("soffice{}", std::env::consts::EXE_SUFFIX)));
+        }
+    }
+    #[cfg(windows)]
+    for key in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+        if let Some(root) = std::env::var_os(key) {
+            candidates.push(PathBuf::from(root).join("LibreOffice/program/soffice.exe"));
+        }
+    }
+    candidates.extend([
         "/Applications/LibreOffice.app/Contents/MacOS/soffice",
         "/opt/homebrew/bin/soffice",
         "/usr/local/bin/soffice",
         "/usr/bin/soffice",
     ]
     .iter()
-    .map(PathBuf::from)
-    .find(|p| p.exists())
+    .map(PathBuf::from));
+    candidates.into_iter().find(|p| p.is_file())
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

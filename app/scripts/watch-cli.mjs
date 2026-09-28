@@ -21,7 +21,7 @@
 // in tauri.conf.json stops answering, the session is over.
 
 import { execFile } from "node:child_process";
-import { readFileSync, rmSync, unlinkSync, watch, writeFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,20 +56,43 @@ const devPort = (() => {
   }
 })();
 
-// One watcher per checkout: a previous session that outlived its dev server
-// would otherwise keep compiling against the same target directory.
-try {
-  const prev = Number(readFileSync(pidFile, "utf8").trim());
-  if (prev && prev !== process.pid) process.kill(prev, "SIGTERM");
-} catch {
-  // No pid file, or the process is already gone.
+// One watcher per checkout. Never kill a process based only on a saved PID:
+// after a crash Windows can reuse that number for an unrelated application.
+let lockOwned = false;
+for (let attempt = 0; attempt < 2 && !lockOwned; attempt++) {
+  try {
+    const fd = openSync(pidFile, "wx");
+    try { writeFileSync(fd, String(process.pid)); } finally { closeSync(fd); }
+    lockOwned = true;
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    let previous = 0;
+    try { previous = Number(readFileSync(pidFile, "utf8").trim()); } catch {}
+    if (previous > 0) {
+      try {
+        process.kill(previous, 0);
+        log("a watcher is already active for this checkout");
+        process.exit(0);
+      } catch (probeError) {
+        if (probeError.code !== "ESRCH") {
+          log("cannot verify the existing watcher; leaving it alone");
+          process.exit(0);
+        }
+      }
+    } else {
+      // Another preflight may still be writing the lock it just acquired.
+      log("another watcher is starting for this checkout");
+      process.exit(0);
+    }
+    try { unlinkSync(pidFile); } catch {}
+  }
 }
-writeFileSync(pidFile, String(process.pid));
+if (!lockOwned) process.exit(0);
 
 function bye(reason) {
   log(reason);
   try {
-    unlinkSync(pidFile);
+    if (readFileSync(pidFile, "utf8").trim() === String(process.pid)) unlinkSync(pidFile);
   } catch {
     // Already replaced by a newer watcher.
   }
@@ -90,13 +113,12 @@ function build() {
   }
   building = true;
   const started = Date.now();
-  // Same reason as predev: cargo will report success and leave the old binary
-  // in place rather than uplifting the new one.
-  rmSync(cli, { force: true });
+  // stage-cli owns stale-binary removal. Run it in the child so a running
+  // Windows CLI holding its .exe open cannot crash this watcher permanently.
   execFile(
-    "cargo",
-    ["build", "--manifest-path", manifest, "--bin", "oculus"],
-    { maxBuffer: 32 * 1024 * 1024 },
+    process.execPath,
+    [join(app, "scripts", "stage-cli.mjs"), "--debug"],
+    { maxBuffer: 32 * 1024 * 1024, windowsHide: true },
     (err, _out, stderr) => {
       building = false;
       if (err) {
@@ -104,6 +126,12 @@ function build() {
         // and the session should keep running while they fix it.
         log("build failed:");
         process.stderr.write(stderr);
+        if (process.platform === "win32" && /EPERM|EBUSY|EACCES/.test(stderr)
+            && /oculus\.exe/i.test(stderr)) {
+          log("the CLI is still in use; retrying after it releases the executable");
+          clearTimeout(timer);
+          timer = setTimeout(build, DEBOUNCE_MS);
+        }
       } else {
         log(`oculus rebuilt in ${((Date.now() - started) / 1000).toFixed(1)}s`);
       }

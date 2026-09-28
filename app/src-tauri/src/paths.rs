@@ -132,6 +132,14 @@ pub fn db_path(data_dir: &std::path::Path) -> PathBuf {
 /// what makes the two sidecars exist — for as long as the agent lives.
 pub fn db_write_paths(data_dir: &std::path::Path) -> Vec<PathBuf> {
     let db = db_path(data_dir);
+    // MSIX can redirect only the database file. Match store::pool's physical
+    // filename before granting individual files to a native agent sandbox.
+    // A missing or conflicting journal must not expand the writable scope.
+    #[cfg(windows)]
+    let db = match crate::database::resolve_path(&db) {
+        Ok(db) => db,
+        Err(_) => return Vec::new(),
+    };
     let sidecar = |suffix: &str| {
         let mut p = db.clone().into_os_string();
         p.push(suffix);
@@ -146,16 +154,42 @@ pub fn db_write_paths(data_dir: &std::path::Path) -> Vec<PathBuf> {
 // with slashes, colons and the occasional "..".
 
 pub fn safe_dir(s: &str) -> String {
-    s.chars()
+    portable_component(s.chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect()
+        .collect())
 }
 
 pub fn safe_filename(s: &str) -> String {
-    s.chars()
+    portable_component(s.chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
         .collect::<String>()
-        .replace("..", "_")
+        .replace("..", "_"))
+}
+
+/// Every machine uses the same portable names, including Windows device-name
+/// rules. Bound individual components and retain a stable suffix when shortened
+/// so two long Canvas titles do not overwrite one another.
+fn portable_component(mut name: String) -> String {
+    name = name.trim_end_matches('.').to_string();
+    let base = name.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| base.strip_prefix(prefix)
+            .is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")));
+    if reserved { name.insert(0, '_'); }
+    if name.len() > 180 || name.encode_utf16().count() > 180 {
+        let hash = name.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+        let extension = name.rsplit_once('.').map(|(_, ext)| ext)
+            .filter(|ext| ext.len() <= 16).map(|ext| format!(".{ext}")).unwrap_or_default();
+        let mut prefix = String::new();
+        let mut units = 0;
+        for c in name.chars() {
+            if units + c.len_utf16() > 140 || prefix.len() + c.len_utf8() > 140 { break; }
+            prefix.push(c);
+            units += c.len_utf16();
+        }
+        name = format!("{prefix}_{hash:016x}{extension}");
+    }
+    name
 }
 
 pub fn safe_rel_path(rel: &str) -> Option<String> {
@@ -240,6 +274,12 @@ pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
     else {
         return;
     };
+    // The image cleanup is recursive, so verify the resolved absolute parent
+    // remains in this library before touching any artifacts.
+    let (Ok(root), Ok(resolved_parent)) = (std::fs::canonicalize(data_dir), std::fs::canonicalize(parent)) else {
+        return;
+    };
+    if !resolved_parent.starts_with(&root) { return; }
     for name in [
         format!("{stem}.md"),
         format!("{stem}.pages.json"),
@@ -247,7 +287,20 @@ pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
     ] {
         let _ = std::fs::remove_file(parent.join(name));
     }
-    let _ = std::fs::remove_dir_all(parent.join(format!("{stem}_images")));
+    let images = parent.join(format!("{stem}_images"));
+    if let Ok(meta) = std::fs::symlink_metadata(&images) {
+        #[cfg(windows)]
+        let reparse = {
+            use std::os::windows::fs::MetadataExt;
+            meta.file_attributes() & 0x400 != 0
+        };
+        #[cfg(not(windows))]
+        let reparse = false;
+        if meta.is_dir() && !meta.file_type().is_symlink() && !reparse
+            && std::fs::canonicalize(&images).is_ok_and(|path| path.starts_with(&root)) {
+            let _ = std::fs::remove_dir_all(images);
+        }
+    }
 }
 
 /// Extensions LibreOffice converts to PDF at download time. The original is
@@ -279,13 +332,20 @@ pub const UPLOADS_DIR: &str = "uploads";
 
 /// True for a data-dir-relative path inside some subject's uploads folder.
 ///
-/// This is the delete command's entire guard. Nothing else under `courses/` is
-/// the user's to throw away — a scraped file deleted from disk comes back on
-/// the next sync, minus its parse — so deletion is scoped here by construction
-/// rather than by asking the caller to be careful.
+/// Imports are flat and use portable components. Reject Windows separators,
+/// drive prefixes, alternate data streams, empty parts and reserved names as
+/// well as traversal. The delete command also verifies the on-disk parents;
+/// a lexical check alone cannot contain a junction or a symlink.
 pub fn is_upload_rel(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').collect();
-    !rel.contains("..") && parts.len() > 3 && parts[0] == "courses" && parts[2] == UPLOADS_DIR
+    parts.len() == 4
+        && parts[0] == "courses"
+        && !parts[1].is_empty()
+        && safe_dir(parts[1]) == parts[1]
+        && parts[2] == UPLOADS_DIR
+        && !parts[3].is_empty()
+        && parts[3] != "."
+        && safe_filename(parts[3]) == parts[3]
 }
 
 /// Every category `category_from_path` can return, in the order a reader
@@ -330,6 +390,25 @@ pub fn category_from_path(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn database_write_grants_use_the_resolved_file_and_fail_closed() {
+        let mut random = [0; 8];
+        getrandom::fill(&mut random).unwrap();
+        let root = std::env::temp_dir().join(format!("oculus-db-grants-{:016x}", u64::from_ne_bytes(random)));
+        std::fs::create_dir(&root).unwrap();
+        assert!(db_write_paths(&root).is_empty());
+        std::fs::write(root.join("oculus.db"), b"fixture").unwrap();
+        let physical = crate::database::resolve_path(&root.join("oculus.db")).unwrap();
+        let grants = db_write_paths(&root.join("."));
+        assert_eq!(grants[0], physical);
+        assert_eq!(grants[1], PathBuf::from(format!("{}-wal", physical.display())));
+        assert_eq!(grants[2], PathBuf::from(format!("{}-shm", physical.display())));
+        assert!(!grants.contains(&root));
+        std::fs::remove_file(root.join("oculus.db")).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
 
     #[test]
     fn timestamps_match_the_shell_agent_they_replaced() {
@@ -393,6 +472,20 @@ mod tests {
     }
 
     #[test]
+    fn windows_names_are_portable_and_long_names_remain_distinct() {
+        assert_eq!(safe_filename("CON.pdf"), "_CON.pdf");
+        assert_eq!(safe_filename("lpt1.txt"), "_lpt1.txt");
+        assert_eq!(safe_filename("COM².md"), "_COM².md");
+        assert_eq!(safe_filename("lecture."), "lecture");
+        let a = safe_filename(&format!("{}A.pdf", "講".repeat(220)));
+        let b = safe_filename(&format!("{}B.pdf", "講".repeat(220)));
+        assert_ne!(a, b);
+        assert!(a.encode_utf16().count() <= 180);
+        assert!(a.ends_with(".pdf"));
+        assert_eq!(safe_filename(&a), a);
+    }
+
+    #[test]
     fn categories_follow_the_directory() {
         assert_eq!(category_from_path("home.md"), "home");
         assert_eq!(category_from_path("pages/x.md"), "page");
@@ -413,5 +506,18 @@ mod tests {
         assert!(!is_upload_rel("lectures/abc/source1.mp4"));
         assert!(!is_upload_rel("courses/../oculus.db"));
         assert!(!is_upload_rel("courses/X/uploads/../../../oculus.db"));
+        for rel in [
+            "courses/X/uploads/..\\..\\oculus.db",
+            "courses/X/uploads/C:\\outside.pdf",
+            "courses/X/uploads/notes.pdf:stream",
+            "courses//uploads/notes.pdf",
+            "courses/X/uploads/",
+            "courses/X/uploads/subdir/notes.pdf",
+            "courses/X/uploads/NUL.pdf",
+            "courses/X/uploads/notes.pdf.",
+        ] {
+            assert!(!is_upload_rel(rel), "accepted {rel}");
+        }
+        assert!(is_upload_rel("courses/私の授業/uploads/講義.pdf"));
     }
 }

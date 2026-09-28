@@ -19,7 +19,7 @@ import {
 /** The tool a route needs. It is also the route's id: one route per manager
  *  per provider, so Rust looks the command up from this alone — the webview
  *  never names a command, which is why an invoke cannot become a shell. */
-export type InstallManager = "curl" | "brew" | "npm" | "bun";
+export type InstallManager = "curl" | "brew" | "npm" | "bun" | "powershell" | "wsl";
 
 export interface InstallRoute {
   manager: InstallManager;

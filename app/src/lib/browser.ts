@@ -198,6 +198,8 @@ export function hostOf(url: string): string {
 }
 
 export const browser = {
+  /** Hand keyboard focus back from a native page to the app's controls. */
+  focusMain: () => invoke<void>("browser_focus_main"),
   /** Opens `url` in a new tab. The tab reaches the strip via `browser-state`. */
   open: (url: string) => invoke<number>("browser_open_url", { url }),
   /** The escape hatch: hand the URL to the real browser. */
@@ -242,6 +244,29 @@ export const browser = {
   findClear: (id: number) => invoke("browser_find_clear", { id }),
   close: (id: number) => invoke("browser_close_tab", { id }),
 };
+
+/** DOM focus alone cannot leave a native child WebView. Prime the mounted
+ * input before the native handoff so Windows restores that control instead
+ * of an old one in another pane; focus it again once the handoff completes.
+ * A late reply must never reclaim an input the user has already left. */
+export async function focusBrowserInput(
+  isActive: () => boolean,
+  reveal: () => void,
+  input: () => Pick<HTMLInputElement, "focus" | "select"> | null,
+): Promise<void> {
+  if (!isActive()) return;
+  reveal();
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  if (!isActive()) return;
+  const field = input();
+  if (!field) return;
+  field.focus();
+  field.select();
+  await browser.focusMain();
+  if (!isActive()) return;
+  input()?.focus();
+  input()?.select();
+}
 
 /** One step along `ZOOM_STEPS` from wherever the page is now. */
 export function stepZoom(current: number, direction: 1 | -1): number {

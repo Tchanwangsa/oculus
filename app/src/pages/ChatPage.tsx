@@ -25,6 +25,9 @@ import {
   providerInfo,
 } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
+import { shortcut } from "@/lib/platform";
+import { useTabId } from "@/components/tabs/TabContext";
+import { activePane } from "@/stores/tabStore";
 
 const SUGGESTIONS = [
   "What's due this week?",
@@ -53,6 +56,7 @@ export default function ChatPage() {
   const store = useHarnessStore;
   const navigate = useNavigate();
   const here = useLocation();
+  const paneId = useTabId();
   // The conversation this tab is showing, read off this tab's own route —
   // not off the store, which every Chat tab shares (`chatHref`).
   const activeId = chatThreadId(here.search);
@@ -184,13 +188,16 @@ export default function ChatPage() {
   // physical key and is the only spelling of this that works.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Background Chat tabs and the other half of a split stay mounted.
+      // A window key must only fold the conversation list being worked in.
+      if (activePane()?.id !== paneId) return;
       if (!e.altKey || !(e.metaKey || e.ctrlKey) || e.code !== "KeyB") return;
       e.preventDefault();
       list.toggle();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [list.toggle]);
+  }, [list.toggle, paneId]);
 
   const send = useCallback(
     async (text: string) => {
@@ -389,7 +396,7 @@ export default function ChatPage() {
               variant="ghost"
               size="icon-xs"
               aria-label="Show conversations"
-              title="Show conversations (⌘⌥B)"
+              title={`Show conversations (${shortcut("B", true)})`}
               className="-ml-2 shrink-0 text-muted-foreground"
               onClick={list.toggle}
             >

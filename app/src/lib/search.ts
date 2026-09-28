@@ -27,10 +27,10 @@ import {
 } from "@/lib/db";
 import { searchProjects, searchTasks } from "@/lib/projects";
 import { addressKind, hostOf, normalizeAddress } from "@/lib/browser";
-import { categoryIconFor, isPdfBacked } from "@/lib/fileTypes";
+import { categoryIconFor } from "@/lib/fileTypes";
 import { displayCode, displayName } from "@/lib/format";
 import { fmtLectureDate, lecturePagePath } from "@/lib/lectures";
-import { filePagePath, fileTitle, openFileSmart } from "@/lib/openFile";
+import { filePagePath, fileTitle, openFileSmart, usesSystemViewer } from "@/lib/openFile";
 
 /**
  * One search, two fields.
@@ -197,7 +197,7 @@ function fileItem(f: LibraryFileHit): SearchItem {
     meta: displayCode(f.subject_code),
     // A binary we cannot render — a .zip, a .mp3 — has no page to go to.
     target:
-      f.category === "file" && !isPdfBacked(f.filename)
+      usesSystemViewer(f)
         ? { kind: "file", file: f }
         : { kind: "route", path: filePagePath(f.subject_id, f.relative_path) },
   };

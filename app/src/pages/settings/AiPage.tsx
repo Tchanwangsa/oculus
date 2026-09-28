@@ -28,6 +28,7 @@ import {
   useAgentInstall,
 } from "@/components/settings/InstallAgentDialog";
 import { Section } from "./section";
+import { isWindows } from "@/lib/platform";
 
 /**
  * The CLI agents behind Chat: where each binary was found and which version,
@@ -62,7 +63,7 @@ import { Section } from "./section";
  * answers `signedIn: null` and the providers strip below is the answer.
  */
 function CliAgentsSection() {
-  const { health, recheck, checking } = useBridgeHealth();
+  const { health, recheck, checking, error } = useBridgeHealth();
   const { statuses, recheck: recheckSignIn, checking: checkingSignIn } = useSignInStatus();
   /** One button, both questions — a row that said "installed" and went on
    *  saying "signed out" a minute after signing in would be the row that
@@ -82,7 +83,9 @@ function CliAgentsSection() {
   return (
     <Section
       title="CLI agents"
-      description="Chat runs Claude Code, Codex, opencode or Antigravity from your own machine, signed in as you — no API key, no per-token billing."
+      description={isWindows
+        ? "Chat runs Codex, opencode and Antigravity on Windows, or Claude Code through WSL2. Sign in to your chosen agent; opencode's API providers use their own billing."
+        : "Chat runs your installed CLI agents. Sign in to your chosen agent; opencode's API providers use their own billing."}
     >
       <div className="divide-y divide-border-subtle">
         {(health ?? []).map((h) => {
@@ -107,11 +110,11 @@ function CliAgentsSection() {
                     {state === "in" ? (account ? `Signed in — ${account}` : "Signed in") : "Signed out"}
                   </div>
                 )}
-                {h.error && h.path && <div className="mt-0.5 text-xs text-destructive">{h.error}</div>}
+                {h.error && <div className="mt-0.5 text-xs text-destructive">{h.error}</div>}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-xs tabular-nums text-muted-foreground">
-                  {h.version ? `v${h.version}` : h.path ? "—" : "missing"}
+                  {h.error ? "unavailable" : h.version ? `v${h.version}` : h.path ? "—" : "missing"}
                 </span>
                 {state === "out" && (
                   <Button variant="outline" size="xs" onClick={() => setSignInFor(h.provider)}>
@@ -145,10 +148,11 @@ function CliAgentsSection() {
             </div>
           );
         })}
-        {health === null && (
+        {health === null && !error && (
           <div className="py-2.5 text-xs text-muted-foreground">Checking…</div>
         )}
       </div>
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
       <Button
         variant="ghost"
         size="xs"

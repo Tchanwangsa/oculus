@@ -12,6 +12,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { cn } from "@/lib/utils";
+import { isWindows } from "@/lib/platform";
 import {
   dlKey,
   downloadLecture,
@@ -783,7 +784,9 @@ export function LecturePlayer({
   // *not* bring the window back: the overlay lifts and the sidebar and tabs
   // are underneath, still filling the display. Leaving the window's, though,
   // leaves both — there is no reading of "un-fullscreen the app" that keeps a
-  // lecture pinned over everything.
+  // lecture pinned over everything. Windows has no Mac fullscreen title-bar
+  // affordance, so leaving the player also returns the window to normal;
+  // F11 in the native menu remains available even in a browser tab.
   const isFullscreenRef = useRef(false);
   isFullscreenRef.current = isFullscreen;
 
@@ -791,10 +794,10 @@ export function LecturePlayer({
     if (!allowFullscreen) return;
     const next = !isFullscreenRef.current;
     setIsFullscreen(next);
-    if (!next) return;
+    if (!next && !isWindows) return;
     try {
       const win = getCurrentWindow();
-      if (!(await win.isFullscreen())) await win.setFullscreen(true);
+      if ((await win.isFullscreen()) !== next) await win.setFullscreen(next);
     } catch {
       /* not fatal — the overlay just covers a windowed app */
     }

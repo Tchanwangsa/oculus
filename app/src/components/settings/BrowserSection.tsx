@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { primaryModifier, shortcut } from "@/lib/platform";
 import {
   Select,
   SelectContent,
@@ -67,7 +68,7 @@ export function BrowserSection() {
       <div>
         <SettingRow
           label="Search engine"
-          hint="Where a typed query goes, from the address bar and from ⌘K."
+          hint={`Where a typed query goes, from the address bar and from ${shortcut("K")}.`}
         >
           <Select value={engine} onValueChange={(id) => void setEngine(id)}>
             <SelectTrigger aria-label="Search engine" size="sm" className="h-7 w-48 text-xs">
@@ -85,7 +86,7 @@ export function BrowserSection() {
 
         <SettingRow
           label="Open links in"
-          hint="Oculus keeps you signed in to Canvas, Ed and Echo360; your default browser does not. ⌘-click always leaves for the default browser."
+          hint={`Oculus keeps you signed in to Canvas, Ed and Echo360; your default browser does not. ${primaryModifier}-click always leaves for the default browser.`}
         >
           <Select
             value={openLinksIn}

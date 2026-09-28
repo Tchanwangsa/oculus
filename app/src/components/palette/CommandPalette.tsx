@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { shortcut } from "@/lib/platform";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import {
@@ -9,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { SearchList, useSearchSelection } from "@/components/search/SearchList";
 import { navigateActive, openUrlInFocusedPane } from "@/lib/tabRouters";
+import { focusBrowserInput } from "@/lib/browser";
 import { openSearchItem, type SearchItem } from "@/lib/search";
 import { useSearch } from "@/hooks/useSearch";
 import { usePaletteStore } from "@/stores/paletteStore";
@@ -66,11 +68,22 @@ export default function CommandPalette() {
 }
 
 function PaletteBody({ onClose }: { onClose: () => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const addTab = useTabStore((s) => s.addTab);
   const { subjects, current } = useSubjects();
 
   const [query, setQuery] = useState("");
   const sections = useSearch(query, { subjects, current });
+
+  useEffect(() => {
+    let cancelled = false;
+    void focusBrowserInput(
+      () => !cancelled && usePaletteStore.getState().open,
+      () => {},
+      () => inputRef.current,
+    ).catch((error) => console.error("[oculus] focus search palette", error));
+    return () => { cancelled = true; };
+  }, []);
 
   function pick(item: SearchItem, newTab: boolean) {
     onClose();
@@ -92,6 +105,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       <div className="flex items-center gap-2.5 border-b border-border-subtle px-4">
         <MagnifyingGlass size={15} className="shrink-0 text-muted-foreground" />
         <input
+          ref={inputRef}
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -110,7 +124,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
 
       <div className="flex items-center gap-3 border-t border-border-subtle px-4 py-2 text-[11px] text-muted-foreground">
         <Hint keys="↵" label="Open" />
-        <Hint keys="⌘ ↵" label="Open in new tab" />
+        <Hint keys={shortcut("Enter")} label="Open in new tab" />
         <Hint keys="esc" label="Close" />
       </div>
     </div>

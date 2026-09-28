@@ -1,27 +1,33 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { getFilesForSubject, type DbFile } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/openFile";
+import { UPLOADS_CHANGED_EVENT } from "@/lib/uploads";
+import { useSyncStore } from "@/stores/syncStore";
 
 export function useSubjectFiles(subjectId: number | null) {
   const [files, setFiles] = useState<DbFile[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(subjectId != null);
+  const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
-
-  const load = useCallback(async (id: number) => {
-    setLoading(true);
-    try {
-      const rows = await getFilesForSubject(id);
-      setFiles(rows);
-      return rows;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const completedAt = useSyncStore((s) => s.completedAt);
 
   useEffect(() => {
-    if (subjectId == null) return;
-    load(subjectId);
-  }, [subjectId, refresh, load]);
+    if (subjectId == null) {
+      setFiles([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    let cancelled = false;
+    setFiles((previous) => previous.filter((file) => file.subject_id === subjectId));
+    setLoading(true);
+    setError(null);
+    getFilesForSubject(subjectId)
+      .then((rows) => { if (!cancelled) setFiles(rows); })
+      .catch((reason) => { if (!cancelled) setError(String(reason)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [subjectId, refresh, completedAt]);
 
   const reload = useCallback(() => setRefresh((r) => r + 1), []);
 
@@ -29,7 +35,11 @@ export function useSubjectFiles(subjectId: number | null) {
   // and the accessed time updates in place.
   useEffect(() => {
     window.addEventListener(FILE_ACCESSED_EVENT, reload);
-    return () => window.removeEventListener(FILE_ACCESSED_EVENT, reload);
+    window.addEventListener(UPLOADS_CHANGED_EVENT, reload);
+    return () => {
+      window.removeEventListener(FILE_ACCESSED_EVENT, reload);
+      window.removeEventListener(UPLOADS_CHANGED_EVENT, reload);
+    };
   }, [reload]);
 
   const byCategory = useMemo(
@@ -49,5 +59,5 @@ export function useSubjectFiles(subjectId: number | null) {
     [files],
   );
 
-  return { files, loading, byCategory, reload };
+  return { files, loading, error, byCategory, reload };
 }

@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isWindows } from "@/lib/platform";
 import { listen } from "@tauri-apps/api/event";
 import Sidebar from "@/components/sidebar/Sidebar";
 import TopTabBar from "@/components/tabs/TopTabBar";
@@ -66,6 +68,31 @@ export default function AppLayout() {
   }, [zoom]);
 
   const toggle = useCallback(() => setCollapsed((c) => !c), []);
+
+  // Windows keeps its native caption buttons above the tab strip. F11 comes
+  // through the native menu so it also reaches us when a browser page has
+  // focus. Escape leaves fullscreen unless a dialog/popover owns that key.
+  useEffect(() => {
+    if (!isWindows) return;
+    const win = getCurrentWindow();
+    const pending = listen("menu-toggle-fullscreen", () => {
+      void win.isFullscreen().then((full) => win.setFullscreen(!full)).catch(console.error);
+    });
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector(
+        '[role="dialog"][data-state="open"], [role="menu"][data-state="open"], [data-slot="popover-content"][data-state="open"]',
+      )) return;
+      void win.isFullscreen().then((full) => {
+        if (full) return win.setFullscreen(false);
+      }).catch(console.error);
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      pending.then((unlisten) => unlisten()).catch(() => {});
+      window.removeEventListener("keydown", onEscape);
+    };
+  }, []);
 
   // Browser tabs opened in Rust arrive in the tab strip through this.
   useBrowserTabs();
@@ -200,7 +227,7 @@ export default function AppLayout() {
        app whose controls are mostly icon-only. */
     <TooltipProvider delayDuration={500}>
       <div className="flex flex-col h-full w-full overflow-hidden bg-background">
-        {/* Window title bar: traffic lights + back/forward + tabs, full width. */}
+        {/* Tabs share the Mac title bar; Windows keeps its native caption above. */}
         <TopTabBar sidebarCollapsed={collapsed} onToggleSidebar={toggle} />
         {/* `gap-2` survives the sidebar collapsing to zero width, so the card
             keeps its left inset either way. */}

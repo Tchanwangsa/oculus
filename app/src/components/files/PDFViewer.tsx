@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isMac } from "@/lib/platform";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type {
   PDFLinkService,
@@ -554,7 +555,7 @@ export function PDFViewer({ src }: Props) {
           <ModeItem value="select" label="Select text — drag the margins to pan">
             <CursorText size={12} />
           </ModeItem>
-          <ModeItem value="pan" label="Pan — or hold ⌥ while dragging">
+          <ModeItem value="pan" label={`Pan — or hold ${isMac ? "⌥" : "Alt"} while dragging`}>
             <Hand size={12} />
           </ModeItem>
         </ToggleGroup>

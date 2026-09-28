@@ -191,6 +191,21 @@ fn link_agent_skills(data_dir: &Path) -> Result<(), String> {
 }
 
 fn link_skill(link: &Path, target: &str, name: &str, body: &str) -> Result<Link, String> {
+    #[cfg(windows)]
+    if link.is_dir() && !link.is_symlink() {
+        let previous = link.join(".oculus-generated-skill");
+        let skill = link.join(SKILL_DOC_NAME);
+        // Copies replace symlinks on Windows. Only refresh our own untouched
+        // copy; a user-authored skill on the same path still belongs to them.
+        if let (Ok(old), Ok(current)) = (std::fs::read(&previous), std::fs::read(&skill)) {
+            if old == current {
+                std::fs::write(&skill, body)
+                    .and_then(|_| std::fs::write(&previous, body))
+                    .map_err(|e| format!("cannot refresh {name}: {e}"))?;
+                return Ok(Link::Current);
+            }
+        }
+    }
     match std::fs::symlink_metadata(link) {
         Ok(meta) if meta.file_type().is_symlink() => {
             if std::fs::read_link(link).is_ok_and(|t| t == Path::new(target)) {
@@ -407,11 +422,43 @@ fn link_skill_dir(target: &str, link: &Path, _body: &str) -> std::io::Result<()>
 #[cfg(not(unix))]
 fn link_skill_dir(_target: &str, link: &Path, body: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(link)?;
-    std::fs::write(link.join(SKILL_DOC_NAME), body)
+    std::fs::write(link.join(SKILL_DOC_NAME), body)?;
+    std::fs::write(link.join(".oculus-generated-skill"), body)
 }
 
-#[cfg(test)]
-#[cfg(unix)]
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn copied_skills_refresh_but_user_edits_survive() {
+        let root = std::env::temp_dir().join(format!("oculus-skill-copy-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let link = root.join("oculus-plan");
+        assert_eq!(link_skill(&link, "../../skills/oculus-plan", "oculus-plan", "version one").unwrap(), Link::Linked);
+        assert_eq!(link_skill(&link, "../../skills/oculus-plan", "oculus-plan", "version two").unwrap(), Link::Current);
+        assert_eq!(std::fs::read_to_string(link.join(SKILL_DOC_NAME)).unwrap(), "version two");
+        std::fs::write(link.join(SKILL_DOC_NAME), "my own skill").unwrap();
+        assert_eq!(link_skill(&link, "../../skills/oculus-plan", "oculus-plan", "version three").unwrap(), Link::Skipped);
+        assert_eq!(std::fs::read_to_string(link.join(SKILL_DOC_NAME)).unwrap(), "my own skill");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn all_scanning_providers_receive_skills_without_symlink_privileges() {
+        let root = std::env::temp_dir().join(format!("oculus-windows-skills-{}", std::process::id()));
+        ensure_library_docs(&root).unwrap();
+        for scanned in SCANNED_SKILL_DIRS {
+            for (name, body) in SKILLS {
+                let path = agents_dir(&root).join(scanned).join(SKILLS_DIR).join(name).join(SKILL_DOC_NAME);
+                assert_eq!(std::fs::read_to_string(path).unwrap(), *body);
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

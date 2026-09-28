@@ -35,9 +35,10 @@ ephemeral port, and both ends of that are deleted.
 | --- | --- |
 | App entry / migrations / startup | `app/src-tauri/src/lib.rs` |
 | Data-dir + path resolution (no Tauri handle needed) | `app/src-tauri/src/paths.rs` |
+| Shared SQLite filename and journal validation on Windows | `app/src-tauri/src/database.rs` |
 | PDF parse seam (trait, artifacts, errors, config) | `app/src-tauri/src/parse/mod.rs` |
 | MinerU cloud client (in-process, batched) | `app/src-tauri/src/parse/mineru/client.rs` |
-| MinerU-on-this-Mac client (in-process, one POST over loopback) | `app/src-tauri/src/parse/mineru/local.rs` |
+| Local MinerU client (in-process, one POST over loopback) | `app/src-tauri/src/parse/mineru/local.rs` |
 | `parse-status` events | `app/src-tauri/src/parse/events.rs` |
 | Page embed seam (trait, artifacts, errors, config) | `app/src-tauri/src/embed/mod.rs` |
 | Voyage cloud client + page rasterizer | `app/src-tauri/src/embed/voyage/client.rs`, `app/src-tauri/src/embed/raster.rs` |
@@ -59,7 +60,8 @@ ephemeral port, and both ends of that are deleted.
   `app/src/hooks/useBackendEvents.ts`.
 - **Rust → the two clouds**: MinerU for parsing and Voyage for page
   embeddings, both over plain HTTPS from inside this process, both with their
-  credential read from the macOS keychain and handed straight to the client.
+  credential read from the OS credential store (Windows Credential Manager or
+  macOS Keychain) and handed straight to the client.
   Neither key enters SQLite, the WebView, a health response or a progress
   event, and neither crosses a socket on this machine. Parsing has a second
   destination — MinerU's own server on loopback — which needs no credential at
@@ -83,7 +85,8 @@ ephemeral port, and both ends of that are deleted.
 ## The data directory
 
 `app/src-tauri/src/paths.rs` computes the same directory Tauri would
-(`~/Library/Application Support/com.tchan.oculus` on macOS) **without** an
+(`%APPDATA%\com.tchan.oculus` on Windows,
+`~/Library/Application Support/com.tchan.oculus` on macOS) **without** an
 `AppHandle`, so the CLI and the app can never disagree about where things
 live. Inside it:
 
@@ -132,8 +135,25 @@ Schema lives in the tauri-plugin-sql migrations in `app/src-tauri/src/lib.rs`
 — append-only and numbered, so the highest `version` in that list is the
 current schema. Ownership is split deliberately:
 
+Both platforms use the same append-only migrations and the same bundled SQLite
+engine (see `app/src-tauri/vendor/libsqlite3-sys/OCULUS-PROVENANCE.md`). The
+integration upgrade test applies the registered migrations to a populated
+legacy library and checks the user's tasks, conversations and document text.
+macOS retains its existing `sqlite:oculus.db` plugin location.
+
+On Windows, `app/src-tauri/src/database.rs` resolves the database file to its
+physical filename before either the SQL plugin or a native/CLI pool opens it.
+The frontend obtains that same URL through `library_database_url`, and
+`getDb()` shares one pending connection promise. This matters under MSIX
+AppData virtualization: aliases can refer to one database while putting its
+WAL and locks in different directories. A legacy journal in another location
+stops the open with a recovery error. Only the database file is resolved;
+coursework still uses the logical library directory's merged view.
+
 - **In the app**, the *frontend* writes the scrape tables: it listens for
-  scrape events and upserts through `app/src/lib/db.ts`.
+  scrape events and upserts through `app/src/lib/db.ts`. Writes and their
+  history records are serialized; sync completion waits for them, surfaces
+  database failures, and refreshes already-open subject views.
 - **Headless (CLI)**, `app/src-tauri/src/store.rs` writes the same rows with
   the same SQL, so a CLI sync shows up in the app as if the app had done it.
   It never creates the database — schema stays with the plugin's migrations,
@@ -171,9 +191,12 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   the chosen engine's API root. **Changing it invalidates nothing** — both
   engines write the same artifacts at the same `PARSER_VERSION` — which is the
   opposite of the embed row beside it; see [parsing.md](./parsing.md).
-  Two dead keys from the sidecar — `memoryCapMb` and a `local|cloud|auto`
-  `backend` — still sit in the same blob and are deliberately ignored rather
-  than migrated out; only `engine` selects a parser. Embed settings
+  The retired `memoryCapMb` setting remains in the blob and is ignored.
+  On Windows, an absent `engine` preserves the old local default; legacy
+  `backend: local` stays Local and explicit `backend: cloud|auto` stays Cloud.
+  An explicit new `engine` takes precedence. This keeps an upgrade from
+  silently uploading an existing local library. Other platforms ignore
+  `backend` and default to Cloud. Embed settings
   are the row beside it, under `embed` (`embed_config` in
   `app/src-tauri/src/embed/mod.rs`) — same shape, one field over. Neither
   cloud's credential joins them: keychain → in-process client, and neither
@@ -195,8 +218,8 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   `oculus grep` searches — used to be a side effect of the embed path, which
   would have taken it down with the embedding layer.
 - The startup sequence in `app/src-tauri/src/lib.rs` is: bind parse events →
-  start the media server → clean partial lecture downloads → seed WebKit's cookie jar
-  with the Canvas session → verify the persisted session in a background
+  start the media server → clean partial lecture downloads → initialize the
+  native browser's Canvas cookie restoration → verify the persisted session in a background
   thread (optimistic until proven rejected) → start the in-app keep-alive
   loop.
 - **The main window holds more than one WebView.** External links open in
@@ -215,10 +238,15 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   Three things about a page live in the page and nowhere else — whether its
   back list has anywhere to go, what a find matched, what the zoom is — and
   Tauri has an API for only the zoom, so `browser.rs` reads and drives them on
-  the WKWebView through `with_webview`. That call dispatches to the main
+  WKWebView on macOS and WebView2 on Windows through `with_webview`. That call dispatches to the main
   thread and hands nothing back, so each of them is a *push*: the answer is
   written into the tab and broadcast, or emitted on its own event, rather than
   returned to the command that asked.
+  Windows keeps WebView2's native Chromium user agent; macOS supplies the
+  complete Safari user agent WebKit omits by default. Native Windows focus
+  notifications identify the active split pane. Both platforms hand focus
+  back to the fixed `main` webview before the address, find or command input
+  takes keyboard input; no remote page gains an app command capability.
 - **Rust fetches favicons; the frontend keeps them.** WebKit has no public
   icon API, so `browser.rs` fetches one over plain HTTP beside each page load
   (`/favicon.ico`, then the document's `<link rel~="icon">`) and pushes it as
@@ -233,8 +261,8 @@ writers as the scrape tables — `app/src/lib/projects.ts` in the app,
   `scraper.js` mid-run with nothing to catch. The scrape engine is Rust
   (`app/src-tauri/src/sync.rs`); do not move background work back into a
   WebView.
-- **Nothing local can leave a PDF unindexed any more** — there is no venv to
-  be missing and no model to fail to load. What can is a missing cloud
-  credential, a spent allowance or no network, in which case `oculus index`
-  picks the file up on a later run and the file row says why in the meantime
-  (see [parsing.md](./parsing.md)).
+- **Failures keep their cause.** There is no bundled Python runtime or model
+  to initialize, but a stopped local MinerU server, missing cloud credential,
+  spent allowance, network failure or unavailable PDFium library still blocks
+  its own stage. The file row says why; a later explicit run can retry after
+  that cause is fixed (see [parsing.md](./parsing.md)).

@@ -94,7 +94,7 @@ export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
             </TooltipTrigger>
             <TooltipContent className="max-w-[260px]">
               Answers the university's password and authenticator prompts from
-              the macOS keychain, so an expired session is rebuilt in the
+              your device's credential store, so an expired session is rebuilt in the
               background instead of interrupting you. Needs Google
               Authenticator enrolled — push notifications cannot be automated.
             </TooltipContent>

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { ArrowsClockwise, CircleNotch, Paperclip } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -15,8 +14,8 @@ import { FileRecency } from "@/components/files/FileRecency";
 import { ParseStateBadge } from "@/components/files/ParseState";
 import { fileIconFor, isPdfBacked } from "@/lib/fileTypes";
 import { fmtSize } from "@/lib/format";
+import { SCRAPED_FILE_FAILED_EVENT, SCRAPED_FILE_SAVED_EVENT } from "@/lib/syncWrites";
 import {
-  upsertFile,
   setParseStatusByPath,
   type DbFile,
 } from "@/lib/db";
@@ -52,21 +51,15 @@ export default function SubjectDownloadsPage() {
       .catch(() => {});
   }, [downloads, mergeParseStatuses]);
 
-  // Rescrape completions arrive as scrape-file events.
+  // Refresh only after the app-level event bridge commits the file. A second
+  // scrape-file writer here used to race it and silently discard DB errors.
   useEffect(() => {
-    const unsub = listen<{
+    const saved = (event: Event) => {
+      const { subject_id, canvas_id } = (event as CustomEvent<{
       subject_id: number;
-      relative_path: string;
-      size_bytes: number;
-      category: string | null;
       canvas_id: number | null;
-    }>("scrape-file", async (e) => {
-      const { subject_id, relative_path, size_bytes, category, canvas_id } = e.payload;
-      const filename = relative_path.split("/").pop() ?? relative_path;
-      const ext = filename.includes(".") ? filename.split(".").pop()! : "md";
-      try {
-        await upsertFile(subject_id, filename, relative_path, ext, size_bytes, category ?? undefined, canvas_id ?? undefined);
-      } catch { /* ignore */ }
+      error?: string;
+      }>).detail;
       if (canvas_id != null) {
         setRescraping((prev) => {
           const s = new Set(prev);
@@ -74,10 +67,17 @@ export default function SubjectDownloadsPage() {
           return s;
         });
       }
-      if (subject_id === subject.id) reload();
-    });
+      if (subject_id === subject.id) {
+        if (event.type === SCRAPED_FILE_FAILED_EVENT) {
+          setRescrapeError((event as CustomEvent<{ error: string }>).detail.error);
+        } else reload();
+      }
+    };
+    window.addEventListener(SCRAPED_FILE_SAVED_EVENT, saved);
+    window.addEventListener(SCRAPED_FILE_FAILED_EVENT, saved);
     return () => {
-      unsub.then((f) => f()).catch(() => {});
+      window.removeEventListener(SCRAPED_FILE_SAVED_EVENT, saved);
+      window.removeEventListener(SCRAPED_FILE_FAILED_EVENT, saved);
     };
   }, [subject.id, reload]);
 

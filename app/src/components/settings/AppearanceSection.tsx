@@ -28,7 +28,7 @@ export function AppearanceSection() {
       <div>
         <p className="text-xs text-foreground">Theme</p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          System follows macOS and changes with it while Oculus is open.
+          System follows your device's theme and changes with it while Oculus is open.
         </p>
       </div>
 
