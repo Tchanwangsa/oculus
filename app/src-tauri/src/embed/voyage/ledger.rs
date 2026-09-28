@@ -1191,7 +1191,17 @@ mod tests {
     fn a_calm_stretch_raises_the_ceiling_back_so_a_new_card_is_noticed() {
         let dir = scratch("raise");
         let ledger = ledger_at(&dir);
-        let gate = RateGate::with_calm(ledger.clone(), Duration::from_millis(40));
+        // Keep the real calm period. A 40ms test period can elapse while the
+        // learned tier is written to disk on a busy runner, so "too soon"
+        // becomes false before the assertion even runs. Advance this isolated
+        // gate's history explicitly instead of relying on sleeps or I/O speed.
+        let gate = RateGate::new(ledger.clone());
+        let mark_calm = || {
+            let mut state = hold(&gate.inner);
+            let elapsed = Instant::now() - gate.calm;
+            state.last_throttle = elapsed;
+            state.last_raise = elapsed;
+        };
         gate.throttled(Some(1.0), "rate limit of 3 RPM and 10000 TPM");
         assert_eq!(gate.tier().tpm, FREE_TPM);
 
@@ -1199,16 +1209,21 @@ mod tests {
         gate.succeeded(100, Some(100));
         assert_eq!(gate.tier().tpm, FREE_TPM);
 
-        std::thread::sleep(Duration::from_millis(60));
+        mark_calm();
         gate.succeeded(100, Some(100));
         assert_eq!(gate.tier().tpm, FREE_TPM * 2.0);
         assert_eq!(gate.tier().source, TierSource::Observed);
         // Persisted upwards as well as downwards.
         assert_eq!(ledger.tier().tpm, FREE_TPM * 2.0);
 
+        // A success at the new ceiling starts its own calm period. The older
+        // throttle timestamp alone must not allow a second immediate raise.
+        gate.succeeded(100, None);
+        assert_eq!(gate.tier().tpm, FREE_TPM * 2.0);
+
         // And it climbs all the way to tier 1 if the calm holds, never past it.
         for _ in 0..20 {
-            std::thread::sleep(Duration::from_millis(60));
+            mark_calm();
             gate.succeeded(100, None);
         }
         assert_eq!(gate.tier().tpm, TIER1_TPM);
