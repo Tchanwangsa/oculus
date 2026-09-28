@@ -588,6 +588,20 @@ lift starts and nothing changes height during the drag, so the maths stays
 true. The click that ends a drag is suppressed, or finishing a move would fold
 the group you had just finished moving.
 
+**The pointer is captured only once a press has become a drag**, and that is
+the difference between a header you can click and one you cannot. The reorder
+first shipped capturing on `pointerdown`, so every press on a header — a plain
+click included — was a capture on the header row. A captured pointer's
+`pointerup` goes to the capturing element, and the `click` that follows goes to
+the nearest common ancestor of where the press and the release landed: the
+row, not the caret button inside it. So the caret's `onClick` never ran and
+neither did the `+` — no group could be folded or unfolded, and the column kept
+whatever state it had when the reorder landed. `ThreadList` now captures when
+the press passes the 4px threshold, and listens on `window` until then so a
+press drifting off a 24px row still hears its own moves. The tab strip never
+met this because it acts on `pointerdown` and its close button stops the press
+reaching the capture.
+
 **A group shows five threads and offers the rest.** A subject accumulates
 dozens of conversations, and listing every one of them buries the groups under
 it, so each group draws a page at a time with a *Show N more* row at its tail

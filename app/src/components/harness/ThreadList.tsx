@@ -190,6 +190,22 @@ export const ThreadList = memo(function ThreadList({
    * group would land in, which is Notion's own answer to the same problem and
    * survives a list whose boxes are all different heights. Positions are all
    * read once, when the lift starts, so nothing reflows mid-drag.
+   *
+   * **The pointer is captured only once the press has become a drag**, and
+   * that is what keeps the header clickable. Captured on pointerdown — the way
+   * this first shipped — every press on a header was a capture on this `div`,
+   * and a captured pointer's `pointerup` is dispatched to the capturing
+   * element; the `click` that follows goes to the nearest common ancestor of
+   * where the press and the release landed, which is then this `div` rather
+   * than the button inside it. So the caret's `onClick` never ran and neither
+   * did the `+`: no group could be folded or unfolded, and whatever state the
+   * column had before the reorder landed was the state it kept. The tab strip
+   * never hit this because it acts on pointerdown and its close button stops
+   * the press from reaching the capture (`TopTabBar.tsx`).
+   *
+   * The listeners are on `window` rather than the header for the same reason:
+   * until the capture, a press that drifts off a 24px row would stop hearing
+   * its own moves.
    */
   const onHeaderPointerDown = (e: React.PointerEvent<HTMLDivElement>, key: string) => {
     if (e.button !== 0 || groups.length < 2) return;
@@ -201,9 +217,13 @@ export const ThreadList = memo(function ThreadList({
     dragged.current = false;
 
     const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
       if (!dragged.current) {
         if (Math.abs(ev.clientY - startY) < 4) return;
         dragged.current = true;
+        // A drag from here on: take the pointer, so the move keeps arriving
+        // wherever it wanders and the release lands here too.
+        el.setPointerCapture(pointerId);
         // The gaps a group can land in: the top of the first box, then the
         // bottom of each. One more edge than there are groups.
         const rects = groups.map((g) => boxes.current.get(g.key)!.getBoundingClientRect());
@@ -218,10 +238,11 @@ export const ThreadList = memo(function ThreadList({
       latest = at;
       setDrag({ key, at });
     };
-    const end = () => {
-      el.removeEventListener("pointermove", onMove);
-      el.removeEventListener("pointerup", end);
-      el.removeEventListener("pointercancel", end);
+    const end = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
       if (el.hasPointerCapture(pointerId)) el.releasePointerCapture(pointerId);
       if (latest != null) {
         const from = groups.findIndex((g) => g.key === key);
@@ -236,10 +257,9 @@ export const ThreadList = memo(function ThreadList({
       }
       setDrag(null);
     };
-    el.setPointerCapture(pointerId);
-    el.addEventListener("pointermove", onMove);
-    el.addEventListener("pointerup", end);
-    el.addEventListener("pointercancel", end);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   };
 
   const setGroupOpen = (key: string, open: boolean) =>
