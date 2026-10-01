@@ -1,245 +1,148 @@
 # Architecture
 
-**Two processes, one data directory.** PDF parsing and page embedding both run
-in Rust, behind the seams in `app/src-tauri/src/parse/` and
-`app/src-tauri/src/embed/`, reaching two clouds over HTTPS — or, for parsing, a
-MinerU the user runs themselves.
-
-```
-┌───────────────────────────── Tauri app ─────────────────────────────┐
-│  React frontend (WebView)  ⇄  Rust core (commands + events)         │
-│        app/src/                  app/src-tauri/src/                 │
-│                                     │                               │
-│                                  parse/  ── MinerU cloud, or a      │
-│                                            MinerU on loopback       │
-│                             (in-process, emits parse-status)        │
-│                                     │                               │
-│                                  embed/  ── Voyage HTTPS API        │
-│                        (in-process; pdfium rasterises the page)     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-**Oculus starts no child process on either path**, and that is the invariant
-worth holding onto. It is not the same as "no loopback": the parse seam has a
-second engine, and with it selected a parse is an HTTP call to
-`127.0.0.1:8000` — a MinerU server the *user* installed and runs, which Oculus
-neither launches, supervises nor ships. Same boundary as MinerU cloud, with a
-different hostname. Nothing calls back *into* the app in either case.
+Two processes — a React frontend in a WebView and a Rust core — sharing one
+data directory. PDF parsing and page embedding are HTTP calls made in-process
+from Rust, behind the seams in `app/src-tauri/src/parse/` and
+`app/src-tauri/src/embed/`.
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
-| App entry / startup | `app/src-tauri/src/lib.rs` |
+| App entry, startup, command registry | `app/src-tauri/src/lib.rs` |
 | Schema migrations | `app/src-tauri/src/migrations.rs` |
-| Data-dir + path resolution (no Tauri handle needed) | `app/src-tauri/src/paths.rs` |
-| PDF parse seam (trait, artifacts, errors, config) | `app/src-tauri/src/parse/mod.rs` |
-| MinerU cloud client (in-process, batched) | `app/src-tauri/src/parse/mineru/client.rs` |
-| MinerU-on-this-Mac client (in-process, one POST over loopback) | `app/src-tauri/src/parse/mineru/local.rs` |
-| `parse-status` events | `app/src-tauri/src/parse/events.rs` |
-| Page embed seam (trait, artifacts, errors, config) | `app/src-tauri/src/embed/mod.rs` |
-| Voyage cloud client + page rasterizer | `app/src-tauri/src/embed/voyage/client.rs`, `app/src-tauri/src/embed/raster.rs` |
-| Ingest + brute-force search over `pages` | `app/src-tauri/src/retrieval.rs` |
-| Media HTTP server (lecture video streaming) | `app/src-tauri/src/media.rs` |
-| In-app browser (one page WebView per tab, in the main window) | `app/src-tauri/src/browser.rs` |
-| CLI-agent harness (Claude Code / Codex / opencode / Antigravity bridges) | `app/src-tauri/src/harness/mod.rs` |
-| Projects and tasks, written headlessly | `app/src-tauri/src/projects.rs` |
-| Lecture chapters: boundary detection and the naming job | `app/src-tauri/src/chapters.rs` |
-| Token bucket, concurrency cap and retry ladder both cloud clients share | `app/src-tauri/src/ratelimit.rs` |
-| Crash-safe file replace (the usage ledgers, parse artifacts) | `app/src-tauri/src/atomic_write.rs` |
-| Wall clock and civil-date maths, without a date crate | `app/src-tauri/src/clock.rs` |
-| Shared unit-test scaffolding (scratch dirs, sample PDFs, fake HTTP server) | `app/src-tauri/src/test_support.rs` |
-| MinerU token (keychain only) | `app/src-tauri/src/mineru.rs` |
-| Voyage API key (keychain only) | `app/src-tauri/src/voyage.rs` |
-| Frontend DB access | `app/src/lib/db.ts` |
-| CLI over the same engine | `app/src-tauri/src/bin/oculus/` |
+| Data-dir and library path rules | `app/src-tauri/src/paths.rs` |
+| Parse seam and its two MinerU clients | `app/src-tauri/src/parse/mod.rs`, `app/src-tauri/src/parse/mineru/` |
+| Embed seam, Voyage client, page rasterizer | `app/src-tauri/src/embed/mod.rs`, `app/src-tauri/src/embed/voyage/`, `app/src-tauri/src/embed/raster.rs` |
+| Ingest and search over `pages` | `app/src-tauri/src/retrieval.rs` |
+| Rate limiting both cloud clients share | `app/src-tauri/src/ratelimit.rs` |
+| Crash-safe file replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
+| Cloud credentials (keychain only) | `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs` |
+| Lecture video server | `app/src-tauri/src/media.rs` |
+| In-app browser | `app/src-tauri/src/browser.rs`, `app/src-tauri/capabilities/default.json` |
+| CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
+| Headless DB writes | `app/src-tauri/src/store.rs`, `app/src-tauri/src/projects.rs` |
+| Frontend DB access and event folding | `app/src/lib/db.ts`, `app/src/hooks/useBackendEvents.ts` |
+| The CLI over the same engine | `app/src-tauri/src/bin/oculus/` |
 
-## How the processes talk
+## Oculus starts no child process for parsing or embedding
 
-- **Frontend ⇄ Rust**: Tauri commands in, Tauri events out. Scrape/parse
-  progress arrives as events the frontend folds into zustand stores via
-  `app/src/hooks/useBackendEvents.ts`.
-- **Rust → the two clouds**: MinerU for parsing and Voyage for page
-  embeddings, both over plain HTTPS from inside this process, both with their
-  credential read from the macOS keychain and handed straight to the client.
-  Neither key enters SQLite, the WebView, a health response or a progress
-  event, and neither crosses a socket on this machine. Parsing has a second
-  destination — MinerU's own server on loopback — which needs no credential at
-  all, so a local parse touches the keychain not at all.
-- **Anything → Rust**: nothing listens. Parsing is in-process, so
-  `app/src-tauri/src/parse/events.rs` emits `parse-status` straight to the
-  frontend. The handle it emits through is bound once at startup rather than
-  threaded through the call path, which is also what lets the CLI run the same
-  parse code with nothing to emit to.
-- **Media playback**: WebKit's media pipeline refuses `<video>` sources on
-  custom URL schemes — an `asset://` URL fetches fine but the media element
-  fails instantly with error code 4 (observed on macOS 26). So lecture video
-  streams from a localhost HTTP server in `app/src-tauri/src/media.rs`
-  (ephemeral port, per-launch token, Range support, scoped to the data dir's
-  `lectures/` and `courses/`). The frontend gets URLs from `mediaSrc()` in
-  `app/src/lib/media.ts`. Don't move video back to `convertFileSrc`.
+Both are HTTPS calls from inside the Rust process: MinerU for parsing, Voyage
+for embeddings. Parsing has a second engine, a MinerU server on
+`127.0.0.1:8000` — but that is a program the user installed and started, which
+Oculus never launches, supervises or ships. Same boundary as the cloud, different
+hostname. Nothing listens for calls back into the app. The engine choice and
+its failure rules are in [parsing.md](./parsing.md).
 
-## The data directory
+## The frontend and Rust talk only through commands and events
 
-`paths::data_dir()` in `app/src-tauri/src/paths.rs` computes the same
-directory Tauri would (`~/Library/Application Support/com.tchan.oculus` on
-macOS) **without** an `AppHandle`, and is the only way the Rust side reaches
-it — commands included — so the CLI and the app can never disagree about where
-things live. Inside it:
+- Tauri commands go in; events come out. Scrape, parse and embed progress
+  arrive as events that `app/src/hooks/useBackendEvents.ts` folds into zustand
+  stores.
+- `parse::events` and `embed::events` bind the app handle once, first thing in
+  `setup`, instead of threading it through the call path. The CLI never binds,
+  so the same parse and embed code runs headless and its emits are no-ops.
+- Credentials go keychain → in-process client. Neither key enters SQLite, the
+  WebView, a health response or a progress event. The local engine needs none.
 
-- `oculus.db` — SQLite, everything structured
-- `courses/<code>/…` — scraped files, mirrored to Canvas layout, plus `.md`,
-  `.pages.json`, and `<stem>_images/` siblings the parser writes, and the
-  `.emb.json` sibling the embedder writes beside them. One subdirectory is not
-  the scraper's: `courses/<code>/uploads/` holds the student's own files,
-  copied in by hand (`import_uploads` in `app/src-tauri/src/files.rs`). They
-  are ordinary library files from there on — same conversion, parse,
-  embeddings and agent access — and being the one place a sync never writes is
-  what makes them the one place deleting is safe. `courses/<code>/documents/`
-  is its sibling for the student's own notes, markdown written inside the app
-  (`create_document` in `app/src-tauri/src/files.rs`): the same ordinary
-  library files, except that the app rewrites them in place and renames them
-  when their title changes, so the write, rename and delete commands are
-  scoped to that folder's shape (`is_document_rel` in
-  `app/src-tauri/src/paths.rs`) the way deleting an upload is. Pictures pasted
-  into a note sit under it in `documents/assets/`, which is what an
-  `![](assets/…)` in a note resolves against — beside the note rather than in
-  `agents/attachments/`, so the folder carries its own figures
-- `lectures/<uuid>/` — downloaded Echo360 media: `source1.mp4` and
-  `source2.mp4` (the second when the capture has one and it has been asked
-  for), plus `transcript.vtt`. Usually source 1 is the Presenter screen and
-  source 2 the room camera, but not always — which one a job reads is measured
-  rather than assumed (see [chapters.md](./chapters.md)). A `frames/`
-  subfolder and an `outline.md` appear only when `oculus lecture
-  candidates --frames` or `oculus lecture chapters` is run over it — a JPEG per
-  detected topic boundary and the transcript merged with the slide changes,
-  both regenerable in seconds and neither anything's source of truth. Each job
-  owns its own folder of grabs (`frames/`, `frames/reading/`, `frames/live/`) and
-  sweeps the ones a re-run will not overwrite
-- `agents/` — the docs a coding agent reads, the `AGENTS.md` every course
-  folder symlinks, and the memory layer it writes back (`TASTE.md`,
-  `memories/` across subjects and `memories/<CODE>/` for one, which each
-  course folder's `agents/memories` is a symlink to — both buckets are in here
-  because this is the only folder a thread may write); written by
-  `oculus docs` and, for everything but the CLI
-  reference, by every sync (see [cli.md](./cli.md)). Also the working
-  directory — and only writable root — of every chat thread, and
-  `agents/threads/<id>.ndjson`, the raw provider output per thread (see
-  [harness.md](./harness.md))
-- `mineru-usage.json` — persistent daily cloud reservations and quota latch
-- `voyage-usage.json` — the same, for embeddings: pixel and token
-  reservations, the quota latch, the rate-limit tier the client learned, and
-  the spend guard Settings → Library sets (a percentage of Voyage's free pixel
-  grant). The guard lives here rather than in the `settings` table because the
-  reservation that enforces it already reads this file on every request; see
-  [retrieval.md](./retrieval.md)
-- the session cookie and auth-flag files (see [auth.md](./auth.md))
+## Scraping lives in Rust because hidden WebViews freeze
 
-## The database
+macOS suspends an off-screen WKWebView's content process, which freezes
+anything running in it mid-run with nothing to catch. So the scrape engine is
+`app/src-tauri/src/sync.rs`, and the headless Okta sign-in
+(`app/src-tauri/src/okta.rs`) runs in Rust too. Never move background work into
+a WebView.
 
-Schema lives in the tauri-plugin-sql migrations in `app/src-tauri/src/migrations.rs`
-— append-only and numbered, so the highest `version` in that list is the
-current schema. Ownership is split deliberately:
+## Lecture video streams over localhost HTTP
 
-- **In the app**, the *frontend* writes the scrape tables: it listens for
-  scrape events and upserts through `app/src/lib/db.ts`.
-- **Headless (CLI)**, `app/src-tauri/src/store.rs` writes the same rows with
-  the same SQL, so a CLI sync shows up in the app as if the app had done it.
-  It never creates the database — schema stays with the plugin's migrations,
-  which is why a fresh machine must open the app once before the CLI works.
+WebKit refuses `<video>` sources on custom URL schemes: an `asset://` URL
+fetches but the media element fails with error code 4 (macOS 26). So
+`app/src-tauri/src/media.rs` serves lecture video on an ephemeral localhost
+port with a per-launch token and Range support, scoped to `lectures/` and
+`courses/`. The frontend gets URLs from `mediaSrc()` in `app/src/lib/media.ts`.
 
-The `pages` table (markdown + embedding blob per PDF page) is the retrieval
-substrate — see [retrieval.md](./retrieval.md). `pages_fts` (migration 35) is
-an FTS5 index over its markdown and the *other* search over the same rows: the
-embeddings answer a question and cost a cloud round trip, the index answers a
-keystroke and is local, and neither falls back to the other. Its `embed_model` /
-`embed_dim` columns are load-bearing rather than bookkeeping: every scan
-filters on them, because a dot product between vectors from two models is not
-a worse score but a meaningless one that still sorts. `lecture_chapters` (migration
-29) is the other derived table: a recording's named topic spans, written by
-the agent job in [chapters.md](./chapters.md) and regenerable from the file on
-disk, with the job's own status on `lectures` beside it. `calendar_events` is the one
-table a sync *replaces* rather than upserts into, so a cancelled class can
-disappear — see [calendar.md](./calendar.md).
+## One data directory, resolved without a Tauri handle
 
-Not everything in here is scraped. `harness_threads` / `harness_items` are the
-chat timeline ([harness.md](./harness.md)), and `projects` / `project_tasks`
-(migration 27) are the student's own planning — boards, tasks and one level of
-subtask ([projects.md](./projects.md)). Those two, plus `local_events`, hold
-rows nothing upstream has a copy of, which is why each of them scopes a subject
-with a **nullable** `subject_id` that clears rather than cascades: dropping a
-course must not take the user's own work with it. They have the same two
-writers as the scrape tables — `app/src/lib/projects.ts` in the app,
-`app/src-tauri/src/projects.rs` headless.
+`paths::data_dir()` computes the directory Tauri would
+(`~/Library/Application Support/com.tchan.oculus`) with no `AppHandle`, and is
+the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
 
-## How it connects
+- `oculus.db` — SQLite, everything structured.
+- `courses/<code>/…` — scraped files in Canvas's layout, with the parser's
+  `.md`, `.pages.json` and `<stem>_images/` siblings and the embedder's
+  `.emb.json`. Two subfolders are the student's own, never written by a sync:
+  `uploads/` (copied in by `import_uploads`) and `documents/` (notes written in
+  the app by `create_document`, with pasted images in `documents/assets/`),
+  both in `app/src-tauri/src/files.rs`. Rename and delete commands are scoped
+  to those shapes (`is_document_rel` in `app/src-tauri/src/paths.rs`), which is
+  what makes deleting there safe.
+- `lectures/<uuid>/` — Echo360 media (`source1.mp4`, optionally
+  `source2.mp4`) and `transcript.vtt`, plus regenerable `frames/` and
+  `outline.md` from the chapter jobs. Which source is the slides is measured,
+  not assumed — see [chapters.md](./chapters.md).
+- `agents/` — the docs, skills and memory layer a coding agent reads and
+  writes ([cli.md](./cli.md#oculus-docs-writes-the-agents-folder)); the
+  working directory and only writable root of every chat thread, with raw
+  provider output in `agents/threads/<id>.ndjson` ([harness.md](./harness.md)).
+- `mineru-usage.json`, `voyage-usage.json` — each cloud's daily reservations
+  and quota latch. Voyage's also holds the learned rate-limit tier and the
+  spend guard from Settings → Library, kept here rather than in `settings`
+  because the reservation that enforces it already reads this file
+  ([retrieval.md](./retrieval.md)).
+- The session cookie, auth flag and `session-keepalive.log` ([auth.md](./auth.md)).
 
-- Parse settings are in SQLite under `parse`; the seam reads which backend to
-  use out of that row (`parse_config` in `app/src-tauri/src/parse/mod.rs`),
-  where `engine` is `cloud` or `local` and an optional `engineUrl` overrides
-  the chosen engine's API root. **Changing it invalidates nothing** — both
-  engines write the same artifacts at the same `PARSER_VERSION` — which is the
-  opposite of the embed row beside it; see [parsing.md](./parsing.md).
-  Unknown keys in the blob are ignored rather than migrated out; only
-  `engine` selects a parser. Embed settings
-  are the row beside it, under `embed` (`embed_config` in
-  `app/src-tauri/src/embed/mod.rs`) — same shape, one field over. Neither
-  cloud's credential joins them: keychain → in-process client, and neither
-  crosses a socket at all. Neither is in SQLite, in health, or in a progress
-  event.
-- **Parsing blocks for minutes, and every caller is built around that.** There
-  is one tier, so a parse spans the whole round trip. Concurrency
-  belongs to the batcher (`app/src-tauri/src/parse/mineru/batch.rs`: a
-  five-second/twenty-file window, eight batches in flight), so a scrape hands
-  each PDF to a detached thread and reports itself finished.
-- **Embedding blocks for longer still**, and on an account with no payment
-  method on file it is the slowest thing the app does: Voyage allows 10K tokens
-  a minute there, which is under three pages a minute. Neither the CLI nor the
-  commands impose a timeout — the client paces itself against the tier it
-  detected and a 429 is routine, so a deadline from above could only abandon
-  work that was still progressing.
-- **A finished parse writes its own page records.** `pages.markdown` — what
-  `oculus grep` searches — does not depend on the embed path, so a file with no
-  embeddings is still searchable by keyword.
-- The startup sequence in `app/src-tauri/src/lib.rs` is: bind parse events →
-  start the media server → clean partial lecture downloads → seed WebKit's cookie jar
-  with the Canvas session → verify the persisted session in a background
-  thread (optimistic until proven rejected) → start the in-app keep-alive
-  loop.
-- **The main window holds more than one WebView.** External links open in
-  in-app browser tabs (`app/src-tauri/src/browser.rs`, needs tauri's
-  `unstable` feature for `Window::add_child`): one webview of remote content
-  per tab, a child of the main window stacked above the app's own webview,
-  shown over the slot the `/browse/:id` route leaves in the content card.
-  The frontend reports that slot as insets from the window edges; Rust lays
-  pages out from those and the window size, so a resize never waits on
-  JavaScript. That makes the scope of
-  `app/src-tauri/capabilities/default.json` load-bearing: it names
-  `webviews` (`main`), not `windows`, because the two match by **OR** — a
-  window-scoped capability would hand every Tauri command to whatever page
-  the user browsed to. See [frontend.md](./frontend.md) for the tab strip
-  and slot, and [auth.md](./auth.md) for why those pages are signed in.
-  Three things about a page live in the page and nowhere else — whether its
-  back list has anywhere to go, what a find matched, what the zoom is — and
-  Tauri has an API for only the zoom, so `browser.rs` reads and drives them on
-  the WKWebView through `with_webview`. That call dispatches to the main
-  thread and hands nothing back, so each of them is a *push*: the answer is
-  written into the tab and broadcast, or emitted on its own event, rather than
-  returned to the command that asked.
-- **Rust fetches favicons; the frontend keeps them.** WebKit has no public
-  icon API, so `browser.rs` fetches one over plain HTTP beside each page load
-  (`/favicon.ico`, then the document's `<link rel~="icon">`) and pushes it as
-  `browser-favicon`, keyed by host and once per host per run. The frontend
-  stores it in `browser_favicons`, which is the shape every other table has
-  here: Rust sees the events, the frontend owns the rows. Browsing history is
-  written the same way, from the `browser-state` snapshot — see
-  [frontend.md](./frontend.md) for what is deliberately *not* written into
-  it.
-- Everything Canvas-shaped **stays out of hidden WebViews**: macOS suspends
-  off-screen WKWebView content processes, which freezes a scrape mid-run with
-  nothing to catch. The scrape engine is Rust (`app/src-tauri/src/sync.rs`);
-  do not move background work back into a WebView.
-- **What leaves a PDF unindexed** is a missing cloud credential, a spent
-  allowance, no network, or a local server that is not running, in which case `oculus index`
-  picks the file up on a later run and the file row says why in the meantime
-  (see [parsing.md](./parsing.md)).
+## The database has one schema owner and two writers
+
+Schema is the append-only, numbered migration list in
+`app/src-tauri/src/migrations.rs`; the highest `version` is the current schema.
+In the app the *frontend* writes the scrape tables, upserting through
+`app/src/lib/db.ts` as scrape events arrive. Headless, `store.rs` writes the
+same rows with the same SQL, so a CLI sync looks like an app sync. The CLI
+never creates the database, so a fresh machine opens the app once first.
+
+- `pages` (markdown + embedding per PDF page) is the retrieval substrate. Its
+  `embed_model`/`embed_dim` columns filter every scan, because a dot product
+  across two models is meaningless but still sorts. `pages_fts` is a local FTS5
+  index over the same markdown; neither search falls back to the other
+  ([retrieval.md](./retrieval.md)).
+- A parse writes `pages.markdown` without waiting on the embed, so a file with
+  no embeddings is still found by keyword.
+- `lecture_chapters` is derived and regenerable ([chapters.md](./chapters.md)).
+- `calendar_events` is the one table a sync replaces rather than upserts, so a
+  cancelled class disappears ([calendar.md](./calendar.md)).
+- `projects`, `project_tasks` and `local_events` hold the student's own rows,
+  which nothing upstream has a copy of. Their `subject_id` is nullable and
+  `ON DELETE SET NULL`, so dropping a course never takes the user's work with
+  it. Written by `app/src/lib/projects.ts` in the app and
+  `app/src-tauri/src/projects.rs` headless ([projects.md](./projects.md)).
+- `harness_threads`/`harness_items` are the chat timeline
+  ([harness.md](./harness.md)).
+- Parse and embed settings are the `parse` and `embed` rows of `settings`, read
+  by `parse_config` and `embed_config`. Unknown keys are ignored, not migrated.
+
+## The main window holds one webview per browser tab
+
+External links open as in-app browser tabs: each is a child webview of remote
+content stacked over the slot the `/browse/:id` route leaves in the content
+card ([frontend.md](./frontend.md)). The frontend reports that slot as window
+insets and Rust lays pages out from them, so a resize never waits on
+JavaScript.
+
+- `app/src-tauri/capabilities/default.json` is scoped to the `main` *webview*,
+  not the window: window and webview scopes match by OR, so a window scope
+  would hand every Tauri command to whatever page the user browsed to.
+- Back-list state, find matches and zoom live only in the page, and
+  `with_webview` dispatches to the main thread and returns nothing. So
+  `browser.rs` *pushes* each answer as an event rather than returning it.
+- WebKit has no public favicon API, so Rust fetches the icon beside each page
+  load and emits `browser-favicon`; the frontend owns the `browser_favicons`
+  rows. Rust sees events, the frontend owns rows — the same split as history.
+
+## Gotchas
+
+- Background work in a hidden WebView freezes silently — keep it in Rust ([above](#scraping-lives-in-rust-because-hidden-webviews-freeze)).
+- Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
+- A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
+- Reaching the data dir any way but `paths::data_dir()` lets the CLI and app diverge.
+- Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
+- A `subject_id` that cascades on user-owned tables deletes the student's work with a course.

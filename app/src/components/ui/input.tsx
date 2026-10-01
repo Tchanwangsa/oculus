@@ -3,7 +3,7 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 
 // One unconditional `text-[13px]`, never stock `text-base md:text-sm` — see
-// CLAUDE.md.
+// docs/frontend.md.
 
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (

@@ -12,7 +12,7 @@ import { parseFile } from "@/lib/courseFiles";
  * already exists.
  *
  * A parse is never free — a metered cloud call, or minutes of this machine's
- * CPU on a local MinerU — and nothing catches a failure (CLAUDE.md), so two
+ * CPU on a local MinerU — and nothing catches a failure (docs/parsing.md), so two
  * gates read the `parse-status` error's discriminants (`parseStore`):
  * 1. `retryable === false` is never re-kicked. Unknown retryability (a
  *    failure from a previous session) stays eligible, so a bad file costs at

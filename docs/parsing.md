@@ -1,378 +1,38 @@
 # Parsing — PDFs into per-page markdown
 
-Every PDF in the library is read by **MinerU** — either its cloud service or a
-MinerU server the user runs on their own Mac, chosen in Settings → Library.
-Both are HTTP calls made in-process from Rust; neither is a process Oculus
-starts or supervises. There is no fast tier and **no fallback between the
-two**: one engine is selected, and a PDF either has markdown or it does not.
-When it does not, the UI says so (see *The failure story* below).
+Every PDF is read by **MinerU** — its cloud service, or a MinerU server the
+user runs on their own Mac over loopback — chosen in Settings → Library. Both
+are HTTP calls made in-process from Rust; Oculus never starts or supervises
+either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
+18% KaTeX render failures on the benchmark deck.
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
-| The seam: trait, artifact contract, error vocabulary, version | `app/src-tauri/src/parse/mod.rs` |
-| MinerU cloud protocol + the `Parser` impl | `app/src-tauri/src/parse/mineru/client.rs` |
-| MinerU-on-this-Mac: the `Parser` impl and the probe | `app/src-tauri/src/parse/mineru/local.rs` |
-| Content list → page records (what the markdown *says*) | `app/src-tauri/src/parse/mineru/render.rs` |
-| Submission queue (batching window, in-flight cap) | `app/src-tauri/src/parse/mineru/batch.rs` |
-| Daily allowance + the two rate limiters | `app/src-tauri/src/parse/mineru/ledger.rs` |
+| The seam: trait, artifact contract, `ParseError`, `PARSER_VERSION` | `app/src-tauri/src/parse/mod.rs` |
+| MinerU cloud protocol + its `Parser` | `app/src-tauri/src/parse/mineru/client.rs` |
+| Local MinerU server: its `Parser` and the probe | `app/src-tauri/src/parse/mineru/local.rs` |
+| Content list → page records (shared by both engines) | `app/src-tauri/src/parse/mineru/render.rs` |
+| Cloud submission queue (window, in-flight cap) | `app/src-tauri/src/parse/mineru/batch.rs` |
+| Cloud daily allowance + the two rate limiters | `app/src-tauri/src/parse/mineru/ledger.rs` |
 | Token bucket, semaphore, retry ladder (shared with Voyage) | `app/src-tauri/src/ratelimit.rs` |
 | The `parse-status` event | `app/src-tauri/src/parse/events.rs` |
-| Call site, and the thread each parse parks on | `app/src-tauri/src/sync.rs` |
-| Artifact paths and purging | `app/src-tauri/src/paths.rs` |
+| Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync.rs` |
+| Artifact purging | `app/src-tauri/src/paths.rs` |
 | MinerU keychain commands + the pre-store token probe | `app/src-tauri/src/mineru.rs` |
-| Engine selection, endpoint override, the probe command | `app/src-tauri/src/parse/commands.rs` |
+| Engine selection, endpoint override, local probe | `app/src-tauri/src/parse/commands.rs` |
 | Failure vocabulary, rendered | `app/src/lib/parseState.ts` |
 | Live job state, per-file failures, the app-wide latch | `app/src/stores/parseStore.ts` |
 | Background recovery sweep | `app/src/hooks/useQualitySweep.ts` |
 | Settings UI (engine, token, endpoint, server status) | `app/src/components/settings/ParserSection.tsx` |
-| The page that composes it | `app/src/pages/settings/LibraryPage.tsx` |
 
-## The seam
+## Nothing falls back, so a failed parse must surface
 
-`parse::Parser` is a trait, not a URL. Both implementations live in this
-process: the cloud client speaks MinerU's public API over HTTPS, and
-`mineru/local.rs` speaks MinerU's *own* server over loopback. Nothing in
-`parse/mod.rs` may assume the cloud: an API root, a token, an upload ceiling
-all arrive as configuration or as parameters.
-
-What the seam owns is the **contract**, not the parsing:
-
-- the on-disk artifact layout,
-- `PARSER_VERSION`, which decides whether a file is already done,
-- `ParseError`, the vocabulary the failure UI branches on,
-- and the order the artifacts hit the disk.
-
-`Health { backend, parser_version, ready }` is the version handshake. A backend
-whose `parser_version` differs is **refused, naming both versions** — not
-warned about and used anyway. The cloud client cannot disagree with itself, and
-neither can the local one: both hand the content list to the same `render`, in
-this process, so the record shape is ours by construction. What the local side
-*can* disagree about is the **API**, which no version negotiation could
-reconcile — see *The version pin* below. `ready` is where that lands: a server
-that is not answering fails the handshake as `NotReady`, which is retryable, so
-a stopped server never marks a file permanently broken.
-
-`parse_config()` reads the `settings` row `parse`, key `engine` (`cloud` |
-`local`) with an optional `engineUrl` override. Absence means `Cloud`.
-
-**A `backend` key in the blob is ignored**, whatever it says: it named a
-fallback policy between parsers, so promoting a stale `"local"` would aim the
-app at a parse server nobody installed. Only `engine` selects.
-
-## Choosing an engine
-
-Settings → Library owns the choice, over four commands in
-`app/src-tauri/src/parse/commands.rs` — `parse_settings`, `parse_set_engine`,
-`parse_set_engine_url`, `parse_probe_local`. They are deliberately the same
-shape as `app/src-tauri/src/embed/commands.rs`, one field over: two adjacent
-settings sections that behaved differently would be worse than either behaviour
-alone.
-
-**Switching is not destructive, and that is the whole difference from the
-embedding control beside it.** Markdown from a local MinerU and markdown from
-MinerU's cloud are the same artifact — same `PARSER_VERSION`, same `mode`,
-rendered by the same shared `render`. Nothing already parsed is re-parsed,
-nothing on disk is invalidated and no index is thrown away, so the engine
-select has **no confirmation in front of it, and none should be added for
-symmetry** with the embedding one. `embed_set_engine` destroys an index because
-vectors from two models share a table, a width and a dot product and share no
-geometry at all; nothing of the sort is true of markdown. A dialog raised over
-a change that costs nothing is how people learn to click through the one that
-matters. If a future backend ever does change the artifacts, `PARSER_VERSION`
-is the thing that moves, and it moves for every backend at once.
-
-Two smaller shapes:
-
-- **Both engines are always offered.** Availability here is not a reachability
-  question, and making it one would be a trap: someone has to be able to select
-  Local and *then* go start their server, and a server that is merely stopped
-  must not read as an engine that was never chosen. What is actually listening
-  is a live status line beside the endpoint field, not a gate in front of the
-  choice.
-- **An `engineUrl` override belongs to one engine, so a switch drops it.**
-  Carried across it would silently aim the new engine at the old one's address.
-  *Emptying* the field is the revert-to-default gesture; typing the default in
-  would store a literal copy of a constant and pin it across a release that
-  moved it.
-
-The MinerU token row renders **only under Cloud**. A key field standing under a
-backend that cannot use it is the kind of thing people paste secrets into.
-
-## The local server
-
-`app/src-tauri/src/parse/mineru/local.rs` is ~190 lines of non-comment code
-against the cloud client's 1,800, and the ratio is the design rather than an
-omission.
-
-MinerU's *public* API has no per-file endpoint — the batching, the signed
-uploads, the poll loop, the daily ledger, the two token buckets and the
-keychain all exist to serve that one fact. MinerU's *own* server offers `POST
-/file_parse`: one multipart request in, one result ZIP out. None of that
-machinery has anything to do here, and three things are absent by construction
-rather than by omission — no quota to exhaust, no token to be rejected, no
-batch for one document to condemn.
-
-What is **not** duplicated is the part that matters. `render.rs` is shared
-unchanged: it turns a content list into page records and does not know which
-side produced the list. The local client's form fields are set to match the
-cloud client's hardcoded parameters under this endpoint's names — `pipeline`
-for the model, `ch` for the language, `return_content_list=true` — so the same
-PDF renders the same markdown whichever engine a user picked. **They are pins,
-not settings**; changing either of the first two is a re-parse of everything.
-
-- **Progress is a page count and then a finish, with nothing in between.**
-  `/file_parse` blocks until the whole document is done and offers nothing to
-  subscribe to. No estimate fills that silence: a counter that sits still is
-  true; a bar that moves while nothing is known is not.
-- **A connect timeout and no read timeout.** A parse on this machine's CPU is
-  minutes of silence and that is not a hang, which is the rule the cloud path
-  lives by for the same reason. Connecting either happens at once or the server
-  is not running, so "unreachable" stays a useful word.
-- **The default is `http://127.0.0.1:8000`, because that is where MinerU binds
-  itself.** A default nobody's server answers on is a setting every user must
-  change before the engine works at all.
-- **Measured against MinerU 3.4.5 on this Mac**, not inferred. The ignored test
-  `a_real_mineru_answers_the_way_this_client_expects` in `mineru/local.rs` is
-  the only thing in this repo that can tell you the form fields are spelled the
-  way *that* server reads them; everything else proves the client against a
-  fixture of our own assumptions.
-
-  | Document | Pages, all with markdown | Wall clock | Images |
-  | --- | --- | --- | --- |
-  | 36-page slide deck | 36 | ~53 s | 86 |
-  | 18-page paper | 18 | ~54 s | 4 |
-
-  The server settles around **4.5 GB resident**. Headings survive as headings
-  and formulas come back delimited `$…$` — which is what `normalizeMath` on the
-  frontend expects — and those are what `return_content_list=true` and
-  `formula_enable=true` buy. Run it yourself with:
-
-  ```bash
-  OCULUS_MINERU_PDF=/path/to/deck.pdf OCULUS_MINERU_DUMP=/tmp/out \
-    cargo test --lib parse::mineru::local::tests::a_real_mineru -- --ignored --nocapture
-  ```
-
-  **Point `MINERU_API_OUTPUT_ROOT` somewhere disposable before starting it.**
-  `mineru-api` writes every parse it serves into a folder per request — a task
-  UUID holding the markdown, both content lists and every extracted image —
-  under `./output`, resolved against *its own working directory*. Started from
-  a checkout, that is 11 MB of stray files after two documents.
-
-  **Oculus cannot redirect it**, which is why this lives in a start line rather
-  than in the client: `/file_parse` accepts no `output_dir` field, so the only
-  lever is the environment of whoever runs the server. `output/` is gitignored
-  here, unanchored, so a server started in the wrong place cannot get its spill
-  committed — but that protects this repo, not a user's home directory.
-
-  It is also not quite a leak. A completed task's folder is swept after
-  `MINERU_API_TASK_RETENTION_SECONDS` (default 24 h, checked every 5 min), so a
-  server left running tidies up after itself. That ledger is a dict in memory,
-  though: stop the server before the retention window closes and whatever is
-  still on disk is orphaned for good, because the next server has no idea those
-  folders were ever tasks. Oculus reads the ZIP off the response and never
-  looks at the folder either way.
-
-## The version pin
-
-`POST /file_parse` is a **MinerU 3.x** endpoint. **MinerU 4.0.0, released
-2026-09-16, removes it**, rebuilding the HTTP service around `/v1/health`,
-`/v1/tiers`, `/v1/uploads`, `/v1/parse/jobs` and `/v1/files` — verified against
-its release notes and its own 4.x migration guide, not inferred. So the install
-Oculus documents pins below 4:
-
-```bash
-uv tool install -U "mineru[core]>=3.4,<4"
-MINERU_API_OUTPUT_ROOT="$HOME/.cache/mineru-api" \
-  mineru-api --host 127.0.0.1 --port 8000
-```
-
-That environment variable is not decoration — see the bullet on it above.
-
-`uv` is assumed to be present already — Oculus does not install a package
-manager on someone's machine. Installing directly rather than in a container is
-the Apple Silicon path and not a preference: MinerU's own docs say **not** to
-use Docker on macOS, where the container cannot reach MPS or MLX, and three of
-its four Docker profiles reserve an NVIDIA GPU.
-
-**Drop the `<4` and every parse 404s** — which is the first reason the range is
-written out rather than left open. The second outlives a future V1 client: 4.0
-still emits Content List V1, so `render.rs` would survive being pointed at one,
-but 4.0 also replaced the `pipeline` backend with quality tiers
-(`flash`/`basic`/`standard`/`advanced`), so a 4.x parse would **not** match the
-cloud's markdown. The pin holds the two engines to one artifact, not merely to
-one URL.
-
-**The client detects that case by name rather than reporting silence.**
-`local::probe` asks `/health`; on a 404 it asks `/v1/health`, and an answer
-there means a MinerU that is running perfectly and simply speaks the other API.
-Three states come back:
-
-| State | What it means |
-| --- | --- |
-| `reachable` | `/health` answered `healthy` |
-| `unreachable` | nothing answered — **or** a server answered and is not taking work yet, which is MinerU loading its models |
-| `version_mismatch` | `/v1/health` answered: a MinerU 4 service, which has no `/file_parse` at all |
-
-The settings page prints Rust's sentence rather than composing one from the
-state, because Rust can tell those two `unreachable` causes apart and the page
-cannot. `parse_probe_local` takes an **optional** URL so the endpoint field is
-testable before it is saved; otherwise the only way to learn an address is
-wrong is to commit to it first. On a cloud install it probes the local default
-rather than MinerU's public root, which would be nonsense about a service
-nobody runs here.
-
-## The on-disk contract
-
-Beside each PDF:
-
-- `<stem>.md` — full-document markdown
-- `<stem>.pages.json` — `{pdf, mode, parser_version, page_count, pages:
-  [{page_no, markdown}]}`, keyed by 1-based `page_no`. **This is the join key
-  retrieval rests on**, and the only evidence a parse finished.
-- `<stem>_images/` — extracted images; the directory's *name* is the link
-  prefix written into the markdown, which is why both are computed in
-  `parse/mod.rs` rather than by each backend.
-
-`PARSER_VERSION` is **2** and stays there. It is the only thing standing
-between an already-parsed library and a full re-parse, and it moves when the
-artifacts change shape — not when a backend changes and not on a release.
-`mode` is always `"quality"`; the field survives because records on disk have
-it, not because there is another tier.
-
-**`.pages.json` is written last, via temp+rename**, so an interrupted parse
-cannot leave markdown that reads as evidence of a finished one. `parse_mode`
-reads the record and nothing else: `mode == "quality"` at this version means
-done, and **anything else — missing, unreadable, any other mode — means parse
-it**. The `.md` is derived from the record, not evidence about it.
-
-A result that comes back with no content list writes **nothing**, as an
-outright error. That *prevents* the bad state; `parse_mode` *recovers* from one
-that exists anyway (a restored backup, a hand-copied file). Both, not either.
-
-Changed bytes purge the artifacts (`paths::purge_parse_artifacts`) before the
-re-parse is triggered — the skip checks read records, so a stale record would
-keep serving the old markdown forever.
-
-## How a cloud parse actually runs
-
-Everything from here to *The token* is the cloud engine. The API's shape
-dictates it. A **batch** of documents is submitted as a list of
-names, MinerU returns one signed upload URL per name, each file is `PUT` to its
-URL, and one endpoint is polled until every task in the batch reports `done`
-with a result ZIP. There is no per-file endpoint and no callback, so a batch is
-one long blocking conversation.
-
-- **Batching is not an optimisation, it is the API.** One submit carries up to
-  50 tasks against a budget of 50 requests/minute; fifty files sent singly cost
-  fifty submits and fifty poll loops. The window is **5 seconds or 20 files,
-  whichever comes first**, with at most **8 batches in flight**. The window
-  opens when the dispatcher wakes and finds work, so a lone file waits five
-  seconds and goes.
-- **Pages come from `content_list.json`, never the flat `.md`** in the ZIP —
-  that file has no page boundaries and drops `header` items, which on slides
-  are the titles. `chart_footnote` items carry the figure-explaining prose.
-- **Progress is counted, never inferred.** Per-task page counts are summed;
-  nothing is derived from page offsets or from how many tasks finished.
-- **Errors carry a code, never the server's text.** MinerU's error bodies can
-  quote the signed URLs it issued; those must not reach the UI, a log, or a
-  pasted bug report.
-- **Failures are scoped.** A malformed result, a `failed` task or a refused
-  upload condemns *that document*. Only credentials, quota and a dead poll
-  channel condemn the batch.
-- Images are staged into a scratch directory whose name deliberately differs
-  from the link prefix, so a parse that dies halfway cannot have overwritten
-  prior artifacts.
-- The renderer groups boilerplate over a 64-page window: a header or footer repeated across enough of a window is template furniture,
-  measured per document rather than hardcoded.
-
-**Concurrency belongs to the backend, not to a worker pool.** `sync.rs` spawns
-one detached thread per PDF, and each engine answers for its own limit. The cloud client
-parks its threads on the batcher's condvar until their window closes — no
-socket, no request in flight. The local client holds a single permit
-(`PARSE_GATE` in `mineru/local.rs`), so only one multipart POST is ever open
-against the user's server. That number is measured, not chosen: `mineru-api`
-reports `max_concurrent_requests: 1`, so a second request buys nothing — it
-queues inside that server while a socket of ours sits on it for minutes, with
-no read timeout above it. The permit averts a hundred parked sockets waiting
-on a queue of one. A gate in `sync.rs` would serve neither
-engine: it would only keep cloud files out of the window they are meant to
-share.
-
-**`parse_pdf` blocks for the whole round trip — minutes, not seconds.** Every
-caller has to be somewhere that can wait that long.
-
-## Progress
-
-`parse-status` is emitted directly from Rust (`parse/events.rs`). It carries
-`queued | running | quality | error`, and on `error` also `kind`, `retryable`
-and `latching`.
-
-The `AppHandle` is set once at startup rather than passed down, because the
-alternative puts a Tauri type in the middle of code the CLI runs — and **a headless run leaves it unbound and
-every emit is a no-op**, which is the honest shape of it.
-
-`"quality"` is the terminal success. The name outlived the tier: there is one
-parse now, but it is what every already-parsed row says and what the "already
-done" check reads, so the string is frozen.
-
-## MinerU's limits, and the ledger
-
-From the [live API docs](https://mineru.net/apiManage/docs) (checked
-2026-09-03): 200 MB and 200 pages per file, 50 signed-upload entries per
-request, 1000 highest-priority pages/day (after which service is slower, not
-refused). The public page does not confirm account submission or file-day
-quotas, so Oculus keeps **50 submits/min, 1000 polls/min and 5000 files/day**
-as its own conservative application budgets rather than claiming larger ones.
-
-Oversized files are **refused before upload**, with the number in the message,
-rather than sliced — a >200 MB coursework PDF is hypothetical.
-
-`mineru-usage.json`, beside the database, is the local guess at what is left,
-because MinerU exposes no endpoint that says. Two rules give it its shape:
-
-- **Reservations are taken before the network call and never given back.** A
-  failed POST, a dead upload, a `SIGKILL` halfway — all keep the files they
-  reserved. The server may well have counted the work and we cannot ask, so an
-  uncertain failure counts against us. A rollback would drift the count
-  optimistic, which is the direction that becomes a wall of server-side
-  rejections.
-- **Server errors beat the local guess.** MinerU's own `-60018` latches the
-  ledger, and nothing goes near the network until the day rolls over. The day
-  boundary is assumed to be Beijing midnight; the provider's actual reset
-  timezone is still unconfirmed.
-
-## The token
-
-Rust alone touches the keychain entry. It never enters SQLite, the WebView, a
-progress payload or a log — the client reads the keychain at construction.
-
-A token is checked **before** it is stored: `mineru_set_api_key` GETs a
-non-existent task id, which costs nothing and creates nothing, and treats
-401/403 as MinerU refusing it (`A0202` invalid, `A0211` expired). Anything else
-— including the expected "task not found" — means it passed the gateway. An
-unreachable MinerU stores the token and reports `unverified` rather than
-blocking someone offline.
-
-**The client keeps no rejection latch**, so the very next parse uses whatever
-token is stored now. What latches is the app-wide
-`ParseLatch` in `parseStore`, which is session-scoped — saving a token lifts it
-explicitly from the settings page.
-
-Settings states the privacy boundary under whichever engine is selected, as a
-fact rather than an offer. Under Cloud: every PDF goes to MinerU and its
-PRC-hosted OSS storage, and MinerU's documented 15-minute cache tolerance is
-not a deletion guarantee. Under Local: nothing leaves the machine. That
-difference is the one thing the two labels must never leave to be inferred.
-
-## The failure story
-
-Nothing catches a failed parse. The engine setting chooses *which* MinerU runs,
-it does not stack them: a parse that fails on the selected engine is not
-re-tried on the other one, ever. So a failure means that file has no markdown —
-and with it no search, no `@`-mention and no Markdown view — until something
-changes. `ParseError` exists to keep three answers distinguishable:
+The engine setting chooses *which* MinerU runs; it does not stack them, and a
+parse that fails is never re-tried on the other engine. A failure means that
+file has no markdown — no search, no `@`-mention, no Markdown view — and the UI
+must say so. `ParseError` keeps the answers distinguishable:
 
 | Variant | `kind()` | Retryable | Latching |
 | --- | --- | --- | --- |
@@ -386,56 +46,155 @@ changes. `ParseError` exists to keep three answers distinguishable:
 | `NotReady` | `not_ready` | yes | no |
 | `Io` | `io` | yes | no |
 
-`kind()` is a **frozen vocabulary** — `Display`'s prose is for a student and
-may be reworded at any time, but the UI branches on `kind`. Both credential
-variants keep that word in their name because `parseState.ts` matches
-`/credential|token/i` against it to decide whether a failure is worth pointing
-at Settings. A spent quota heals on a clock and a version mismatch is an
-update, so neither gets that button.
+- **`kind()` is a frozen vocabulary**; `Display` is prose and may change.
+  `parseState.ts` matches `/credential|token/i` on `kind` to decide whether to
+  point at Settings, which is why both credential variants carry that word.
+- **`latching` separates "this file is broken" from "parsing is down for
+  everything"**. Both discriminants are optional — a failure from a previous
+  session is only `error` in the DB — and unknown is never coerced into either.
+- **The sweep reads the same discriminants**: `retryable === false` is never
+  re-kicked, and a latch stands it down (one probe file after
+  `LATCH_PROBE_AFTER_MS`).
+- **`NotReady` is retryable and non-latching on purpose**: a local server that
+  is stopped or still loading must not mark any file permanently broken.
 
-`latching` is the distinction the UI must never fudge: "this file is broken"
-and "parsing is down for everything" call for different words and different
-fixes. Both discriminants are **optional** — a failure inherited from a
-previous session is only the word `error` in the DB — so unknown is its own
-case and is never coerced into either extreme.
+## A parse takes minutes, and only the engine bounds it
 
-The background sweep reads the same discriminants. Every parse is one whole
-trip to whichever engine is selected — metered, on the cloud — so
-`retryable === false` is never re-kicked and the sweep stands down
-entirely under a latch, rather than marching the library through the same error
-one batch at a time.
+`parse_pdf` blocks for the whole round trip; every caller must be able to wait.
+Nothing above the client imposes a deadline — it could only abandon work that
+was still progressing.
 
-`NotReady` earns its row on the local engine: a server that is stopped, or
-still loading its models, fails the handshake **retryable and non-latching**.
-That pairing is deliberate. The sweep comes back once the server is up, and no
-file is marked permanently broken for an engine that simply was not running
-yet.
+- **Cloud**: `POLL_DEADLINE` (60 min) in `mineru/client.rs` is the only one.
+- **Local**: a connect timeout and no read timeout. `/file_parse` is minutes of
+  silence on this machine's CPU, not a hang; connecting is instant or the
+  server is not running.
+- **Progress is counted, never inferred**: cloud sums per-task page counts;
+  local reports a page count and then a finish, with no estimated bar between.
 
-## Measured facts the design rests on
+**Concurrency belongs to each engine.** `sync.rs` spawns one detached thread
+per PDF. Cloud threads park on the batcher's condvar until their window
+closes. The local client holds one permit (`PARSE_GATE`) because `mineru-api`
+reports `max_concurrent_requests: 1` — a second request would only queue
+inside that server on a socket of ours. A gate in `sync.rs` would keep cloud
+files out of the window they are meant to share.
 
-- **Why MinerU**: it is ~100× faster than docling-with-formula-enrichment and
-  more correct (1% vs 18% KaTeX render failures on the benchmark deck).
-- **Why there is no fast tier**: no file in the library ever rested in `fast`
-  (checked 2026-09-16), so a second, cheaper parse bought nothing that lasted.
-- **No memory governor in this process**: a local parse is MinerU's own server,
-  so its models and memory are that server's problem. The bundled parser's
-  measurements are at `f875bb1`.
-- **Office-derived PDFs (`*.pptx.pdf`) have never been parsed in this
-  library**, so that path has no fixture and is unproven in practice.
-  LibreOffice conversion is in `app/src-tauri/src/sync.rs`.
+## `.pages.json` is the only evidence a parse finished
 
-## Debugging
+The seam owns the contract, not the parsing: nothing in `parse/mod.rs` may
+assume the cloud. Beside each PDF:
 
-Golden fixtures with their source PDFs live in `data/parse-fixtures/`
-(gitignored) — five shapes, with `MANIFEST.sha256` over every `.md` and
-`.pages.json`:
+- `<stem>.md` — full-document markdown, derived from the record.
+- `<stem>.pages.json` — `{pdf, mode, parser_version, page_count, pages:
+  [{page_no, markdown}]}`, keyed by 1-based `page_no`: **the join key
+  retrieval rests on** ([retrieval.md](./retrieval.md)).
+- `<stem>_images/` — its *name* is the link prefix written into the markdown,
+  so both are computed in `parse/mod.rs`, never by a backend.
+
+**The record is written last, via temp+rename**, so an interrupted parse
+cannot look finished. `parse_mode` reads only `mode`: `"quality"` means done,
+anything else (missing, unreadable, another mode) means parse it. The string
+is frozen, and there is one tier.
+
+`PARSER_VERSION` moves only when the artifacts change shape. `parse_mode` does
+**not** check it, so a bump never re-parses the library; it is enforced by the
+`Health` handshake, which refuses a backend with another version, naming both.
+
+A result with no content list writes **nothing**. Changed bytes purge the
+artifacts (`paths::purge_parse_artifacts`) before re-parsing, or a stale
+record would serve old markdown forever.
+
+## Both engines produce the same artifact, so switching costs nothing
+
+`render.rs` is shared: both engines hand it a MinerU content list. The local
+client's form fields (`backend=pipeline`, `lang_list=ch`, `formula_enable`,
+`return_content_list`) match the cloud client's hardcoded parameters — **pins,
+not settings**; changing the first two is a re-parse of everything.
+
+So the engine select has **no confirmation, and none should be added** for
+symmetry with the embedding select, whose engines are different vector spaces
+([retrieval.md](./retrieval.md#one-space-or-the-ranking-is-noise)).
+`parse_config()` reads the `parse` settings row — `engine` (`cloud` | `local`)
+and an optional `engineUrl` — and anything missing means `Cloud`.
+
+- **Both engines are always offered**: someone must be able to select Local and
+  *then* start their server. Reachability is a status line, not a gate.
+- **Switching engine drops the `engineUrl` override**, which would otherwise
+  aim the new engine at the old one's address. Empty means the default.
+- **The token row renders only under Cloud** — a key field under a backend that
+  cannot use it invites pasted secrets.
+- **Settings states the privacy boundary for the selected engine**: Cloud sends
+  every PDF to MinerU's PRC-hosted storage (its 15-minute cache is not a
+  deletion guarantee); Local sends nothing off the machine.
+
+## The local engine is one request per PDF to a server the user runs
+
+MinerU's own server offers `POST /file_parse`: one multipart request in, one
+result ZIP out — no batching, quota, token or keychain. The default origin is
+`http://127.0.0.1:8000` (`LOCAL_BASE_URL`), where MinerU binds. Users install
+and start it themselves:
 
 ```bash
-cd data/parse-fixtures && shasum -a 256 -c MANIFEST.sha256
+uv tool install -U "mineru[core]>=3.4,<4"
+MINERU_API_OUTPUT_ROOT="$HOME/.cache/mineru-api" \
+  mineru-api --host 127.0.0.1 --port 8000
 ```
 
-They are a local harness deliberately: neither the fixtures nor tests over them
-belong in the repo. The differential tests that pin `render.rs` to the
-behaviour it was ported from **are** in the repo
-(`app/src-tauri/src/parse/mineru/render.rs`); the original is at `f875bb1`,
-which every `sidecar/*.py` citation in Rust refers to.
+- **The `<4` pin is load-bearing.** MinerU 4 removes `/file_parse` for a
+  `/v1/...` API, so every parse would 404, and replaces `pipeline` with
+  quality tiers whose markdown would not match the cloud's.
+- **`MINERU_API_OUTPUT_ROOT` keeps parses out of the user's folders.**
+  `mineru-api` writes each parse under `./output` in its working directory and
+  `/file_parse` takes no `output_dir`; the server sweeps them only while it
+  keeps running.
+- **Install directly, not in Docker**: a macOS container cannot reach MPS/MLX.
+
+`local::probe` returns `reachable` (`/health` said `healthy`), `unreachable`
+(nothing answered, or it is still loading models) or `version_mismatch`
+(`/health` 404s but `/v1/health` answers: a MinerU 4); Settings prints Rust's
+sentence, which alone tells the `unreachable` causes apart.
+`parse_probe_local`'s optional URL tests the endpoint field before it is saved.
+
+The ignored test `a_real_mineru_answers_the_way_this_client_expects` in
+`mineru/local.rs` is the only check that the form fields match a real server.
+
+## The cloud engine batches because the API has no per-file endpoint
+
+A batch is a list of names; MinerU returns one signed upload URL each, every
+file is `PUT`, and one endpoint is polled until each task has a result ZIP.
+The window is **5 s or 20 files**, with **8 batches in flight**.
+
+- **Pages come from `content_list.json`, never the ZIP's flat `.md`**, which
+  has no page boundaries and drops `header` items (slide titles).
+- **Failures are scoped**: a malformed result, a `failed` task or a refused
+  upload condemns that document; only credentials, quota and a dead poll
+  channel condemn the batch.
+- **Errors carry a code, never the server's text** — MinerU's error bodies can
+  quote the signed URLs it issued.
+- Images stage in a scratch directory named unlike the link prefix, so a parse
+  that dies halfway cannot overwrite prior artifacts.
+
+**The ledger (`mineru-usage.json`) guesses what is left**, because MinerU has no
+endpoint that says. Files over 200 MB or 200 pages are refused before upload;
+Oculus's own budgets are 50 submits/min, 1000 polls/min and 5000 files/day.
+Reservations are taken before the network call and **never given back** — a
+rollback drifts the count optimistic, toward server-side rejections. MinerU's
+`-60018` latches the ledger until the day rolls over (assumed UTC+8).
+
+**The token lives only in the keychain** — never SQLite, the WebView, a payload
+or a log. `mineru_set_api_key` checks it first by GETting a non-existent task:
+401/403 is a refusal (`A0202` invalid, `A0211` expired), anything else passed,
+and an unreachable MinerU stores it as `unverified`. The client keeps no
+rejection latch; `parseStore`'s session-scoped `ParseLatch` does, and saving a
+token lifts it.
+
+## Gotchas
+
+- Never add a fallback between engines or let a failure look like success — a PDF silently loses its markdown.
+- Never wrap a parse in a timeout — it abandons parses that were progressing.
+- Don't add a confirmation to the parse engine select — switching invalidates nothing.
+- Don't drop the `<4` from the install line — every local parse 404s.
+- Don't write `.pages.json` before the other artifacts — a crash then reads as a finished parse.
+- Don't remove `PARSE_GATE` — sockets park for minutes in a single-request server's queue.
+- `*.pptx.pdf` (LibreOffice-converted) has never been parsed in this library and has no fixture.
+- Golden fixtures live in gitignored `data/parse-fixtures/` (`shasum -a 256 -c MANIFEST.sha256`) and stay out of the repo; `render.rs`'s differential tests are in it.
+- Rust comments citing `sidecar/*.py` refer to commit `f875bb1`, where `render.rs`'s original lives.

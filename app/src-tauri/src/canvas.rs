@@ -1,6 +1,6 @@
 //! Canvas HTTP access for the app and the `oculus` CLI: session cookie,
-//! retries, Link-header pagination. In Rust, not a WebView — see CLAUDE.md
-//! ("No work in hidden WebViews").
+//! retries, Link-header pagination. In Rust, not a WebView — see
+//! `docs/architecture.md`.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};

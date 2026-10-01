@@ -20,7 +20,7 @@ const MENU_MIN_H = 96;
 /**
  * `fixed` placement from the `@`'s rect, clamped into the window on both axes;
  * `maxHeight` is the room on the chosen side. Plain CSS pixels are safe because
- * zoom is the webview's page zoom (see CLAUDE.md: zoom).
+ * zoom is the webview's page zoom (see docs/frontend.md#gotchas).
  */
 function place(anchor: MentionAnchor, drop: "up" | "down"): CSSProperties {
   const width = Math.min(MENU_WIDTH, window.innerWidth - MENU_GAP * 2);

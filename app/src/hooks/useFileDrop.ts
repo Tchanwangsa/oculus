@@ -37,7 +37,7 @@ export function useFileDrop(
     }
 
     // The drop position is in points despite its `PhysicalPosition` type, so
-    // the scale is measured, never `devicePixelRatio` (see CLAUDE.md).
+    // the scale is measured, never `devicePixelRatio` (see docs/harness.md).
     // Re-read on resize and on each drag enter, since page zoom changes it.
     const remeasure = () => {
       // `innerSize` is genuinely physical, so this is the window in points.
@@ -70,7 +70,7 @@ export function useFileDrop(
     };
 
     // Listen on the webview, not the window: a window listener is never
-    // called in this app (see CLAUDE.md).
+    // called in this app (see docs/harness.md).
     view
       .onDragDropEvent((e) => {
         const p = e.payload;

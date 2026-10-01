@@ -47,7 +47,7 @@ export default function AppLayout() {
     localStorage.setItem(SIDEBAR_KEY, String(collapsed));
   }, [collapsed]);
 
-  // Page zoom, never CSS `zoom` (see CLAUDE.md: Zoom). The var is only for
+  // Page zoom, never CSS `zoom` (see docs/frontend.md). The var is only for
   // chrome that must stay at device size.
   useEffect(() => {
     localStorage.setItem(ZOOM_KEY, String(zoom));
@@ -155,7 +155,7 @@ export default function AppLayout() {
         {/* `gap-2` keeps the card's left inset when the sidebar collapses. */}
         <div className="flex flex-1 overflow-hidden gap-2 pb-2 pr-2">
           <Sidebar collapsed={collapsed} />
-          {/* The floating card (see CLAUDE.md: UI conventions). `relative` is
+          {/* The floating card (see docs/frontend.md: UI system). `relative` is
               on the pane stack: every tab is mounted and fills it. */}
           <main className="flex-1 overflow-hidden min-w-0 flex rounded-xl border border-border bg-card shadow-panel">
             <div className="relative flex-1 min-w-0">

@@ -2,20 +2,13 @@
 /**
  * Deterministic half of the `check-doc-drift` skill.
  *
- * Two independent signals, reported separately because they carry very
- * different confidence:
+ *   BROKEN   a cited path, page link or anchor that doesn't resolve.
+ *   HISTORY  a line narrating the past instead of describing the code.
+ *   CHURN    source under a cited path changed since the checkpoint and the
+ *            page didn't — a reading list, not a verdict.
  *
- *   BROKEN   a page cites a path that no longer exists. The page is provably
- *            wrong — no judgement needed.
- *   CHURN    source under a path a page cites changed since the checkpoint,
- *            and the page itself did not. The page may still be correct; an
- *            agent has to read it to know.
- *
- * Usage:
- *   node check-drift.mjs [--since <ref>] [--json]
- *
- * --since defaults to the checkpoint recorded in HISTORY.md, or to the repo's
- * first commit when there is no checkpoint yet.
+ * Usage: node check-drift.mjs [--since <ref>] [--json]
+ * --since defaults to the SHA in CHECKPOINT, else the repo's first commit.
  */
 
 import { execSync } from "node:child_process";
@@ -26,7 +19,9 @@ import { fileURLToPath } from "node:url";
 const SKILL_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(SKILL_DIR, "../../..");
 const DOCS = "docs";
-const HISTORY = `${SKILL_DIR}/HISTORY.md`;
+const CHECKPOINT = `${SKILL_DIR}/CHECKPOINT`;
+// Generated from the binary's help, so it is never hand-edited.
+const GENERATED = new Set(["docs/cli-reference.md"]);
 
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
@@ -36,9 +31,7 @@ const sinceArg = sinceIdx === -1 ? undefined : args[sinceIdx + 1];
 const git = (cmd) =>
   execSync(`git ${cmd}`, { cwd: REPO, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 
-// Source trees a doc page is expected to describe. `sidecar/` was dropped when
-// the Python process left the app: nothing there ships any more, so a change in
-// it is not a doc obligation.
+// Source trees a doc page is expected to describe.
 const WATCHED = /^app\//;
 
 // All citations in docs/ are written repo-relative. A backticked span is
@@ -90,11 +83,50 @@ for (const doc of docFiles) {
   citations.set(doc, resolved);
 }
 
+// GitHub's heading anchors: lowercase, punctuation dropped, spaces to hyphens.
+const slug = (h) =>
+  h.toLowerCase().replace(/`/g, "").replace(/[^\p{L}\p{N}_ -]/gu, "").replace(/ /g, "-");
+const anchorsOf = new Map();
+function anchors(doc) {
+  if (!anchorsOf.has(doc)) {
+    const seen = new Map();
+    const set = new Set();
+    for (const m of readFileSync(`${REPO}/${doc}`, "utf8").matchAll(/^#{1,6} +(.+?) *$/gm)) {
+      const base = slug(m[1]);
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      set.add(n ? `${base}-${n}` : base);
+    }
+    anchorsOf.set(doc, set);
+  }
+  return anchorsOf.get(doc);
+}
+
+const HISTORY_RE =
+  /\b(used to|no longer|was (removed|deleted|replaced|dropped|renamed)|previously|formerly|an earlier (version|build)|until this existed)\b/i;
+const history = [];
+
+for (const doc of docFiles) {
+  const lines = readFileSync(`${REPO}/${doc}`, "utf8").split("\n");
+  let fenced = false;
+  lines.forEach((text, i) => {
+    if (/^\s*```/.test(text)) fenced = !fenced;
+    if (fenced) return;
+    for (const m of text.matchAll(/\]\((\.{1,2}\/[^)#\s]*\.md)?(#[^)\s]+)?\)/g)) {
+      if (!m[1] && !m[2]) continue;
+      const target = m[1] ? resolve(dirname(`${REPO}/${doc}`), m[1]).slice(REPO.length + 1) : doc;
+      if (!existsSync(`${REPO}/${target}`)) broken.push({ doc, line: i + 1, cited: m[1] });
+      else if (m[2] && !anchors(target).has(m[2].slice(1)))
+        broken.push({ doc, line: i + 1, cited: `${m[1] ?? ""}${m[2]}` });
+    }
+    if (!GENERATED.has(doc) && HISTORY_RE.test(text))
+      history.push({ doc, line: i + 1, text: text.trim() });
+  });
+}
+
 // ── Signal 2: source churn under paths the docs claim to describe ───────────
 let since = sinceArg;
-if (!since && existsSync(HISTORY)) {
-  since = readFileSync(HISTORY, "utf8").match(/<!--\s*checkpoint:\s*(\S+)\s*-->/)?.[1];
-}
+if (!since && existsSync(CHECKPOINT)) since = readFileSync(CHECKPOINT, "utf8").trim();
 if (!since || since === "none") {
   since = git("rev-list --max-parents=0 HEAD").trim().split("\n").pop();
 }
@@ -169,6 +201,7 @@ const report = {
   commits,
   docsTouchedInRange: docsTouched,
   broken,
+  history,
   churn,
 };
 
@@ -184,9 +217,13 @@ console.log(`range      : ${range ?? "(checkpoint not in history — churn skipp
 if (range) console.log(`commits    : ${commits}`);
 console.log(`docs pages : ${docFiles.length}`);
 
-console.log(`\n── BROKEN path citations (${broken.length}) ─────────────────────`);
-if (!broken.length) console.log("none — every cited path exists.");
+console.log(`\n── BROKEN paths and links (${broken.length}) ─────────────────────`);
+if (!broken.length) console.log("none — every cited path and link resolves.");
 for (const b of broken) console.log(`  ${rel(b.doc)}:${b.line}  →  ${b.cited}`);
+
+console.log(`\n── HISTORY phrasing (${history.length}) ─────────────────────────`);
+if (!history.length) console.log("none.");
+for (const h of history) console.log(`  ${rel(h.doc)}:${h.line}  ${h.text.slice(0, 100)}`);
 
 console.log(`\n── CHURN under cited paths (${churn.length} pages) ──────────────`);
 if (!churn.length) console.log("none — no source moved under a path these pages cite.");

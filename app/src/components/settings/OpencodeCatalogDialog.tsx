@@ -496,8 +496,8 @@ function ProvidersView({
 }
 
 /** A provider row's actions, shared by search results and the groups so both
- *  offer the same thing. No per-model check — see CLAUDE.md: no billed calls
- *  from Settings. */
+ *  offer the same thing. No per-model check — see docs/harness.md: no billed
+ *  calls from Settings. */
 function ProviderActions({
   provider,
   removing,

@@ -135,7 +135,7 @@ export const ThreadList = memo(function ThreadList({
     [threads, subjects, order],
   );
 
-  // Header reorder on pointer events (see CLAUDE.md: no HTML5 drag). Groups
+  // Header reorder on pointer events (see docs/frontend.md). Groups
   // differ in height, so a drop line marks the gap instead of sliding boxes;
   // edges are measured once at lift.
   const onHeaderPointerDown = (e: React.PointerEvent<HTMLDivElement>, key: string) => {

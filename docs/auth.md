@@ -1,7 +1,7 @@
 # Auth & sessions
 
-Three services, three credentials — but everything derives from one Canvas
-session cookie.
+Three services, three credentials — all derived from one Canvas session
+cookie.
 
 ## Where
 
@@ -9,214 +9,115 @@ session cookie.
 | --- | --- |
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
 | Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
-| Auth flag, keep-alive log | `app/src-tauri/src/paths.rs` |
+| Cookie, auth-flag and keep-alive log paths | `app/src-tauri/src/paths.rs` |
 | Headless Okta sign-in, TOTP, stored credentials | `app/src-tauri/src/okta.rs` |
-| Cookie/flag file locations | `app/src-tauri/src/paths.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
+| Staging the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | In-app keep-alive loop + startup probe | `app/src-tauri/src/lib.rs` |
 | Ed token minting via LTI | `app/src-tauri/src/ed.rs` |
-| Echo360 session via LTI | `app/src-tauri/src/echo360.rs` |
+| Echo360 session via LTI, per-course cache | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
 | Frontend auth state | `app/src/hooks/useAuth.ts`, `app/src/hooks/useKeepalive.ts` |
 | Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
 | Credential entry UI | `app/src/components/settings/AutoSignIn.tsx` |
 
-## Canvas
+## Canvas authenticates by session cookie only
 
-- **API tokens are not an option.** UniMelb Canvas has disabled self-service
-  access tokens (the "New Access Token" button renders `disabled`; only an
-  admin can issue one). The app therefore authenticates every request with a
-  snapshotted `canvas_session` cookie. Do not re-propose `Bearer` auth
-  without re-verifying that admin setting — and note the button's *string*
-  is present either way; only the `disabled` attribute tells you.
-- **Sign-in genuinely needs a browser**: Canvas authenticates through the
-  university's SAML IdP, so login happens in a real (visible) app WebView.
-  The captured cookie is persisted to the data dir in plaintext, alongside
-  an auth-flag file whose presence means "we believe we have a session".
-- **The session has no cookie-side expiry.** The server tracks lifetime and
-  extends it on use, so periodic requests are what keep it alive. There is
-  no remember-me cookie; once dead, the session must be rebuilt from
-  scratch — either by [automated sign-in](#automated-sign-in) or by hand.
+UniMelb Canvas has disabled self-service access tokens — only an admin can
+issue one — so every request carries a snapshotted `canvas_session` cookie.
+Do not propose `Authorization: Bearer`. (The "New Access Token" button's text
+is on the page either way; only its `disabled` attribute tells you.)
 
-### The in-app browser gets the same session
+- Sign-in goes through the university's SAML IdP, so the first login happens
+  in a visible app WebView. The cookie is persisted to the data dir in
+  plaintext beside an auth-flag file meaning "we believe we have a session".
+- The session has no cookie-side expiry: the server extends it on use, so
+  periodic requests keep it alive. There is no remember-me cookie — once dead,
+  it is rebuilt by [automated sign-in](#okta-sign-in-runs-headless-in-rust)
+  or by hand.
+- On launch with the flag present, the app starts connected while a thread
+  probes the cookie: `Valid` confirms, `Rejected` clears the flag (keeping the
+  SSO profile) and emits `canvas-auth-expired`, `Unreachable` stays connected.
 
-External links open inside Oculus (see [frontend.md](./frontend.md)), and a
-Canvas page there has to be signed in — but the snapshot on disk is not
-something WebKit will read.
+## The in-app browser is seeded with the same cookie
 
-- **The cookie has to be put back by hand.** `canvas_session` is HttpOnly
-  *and* session-scoped, so WebKit keeps it in memory only: it dies with the
-  process, and the plaintext snapshot is the sole surviving copy.
-  `browser::seed_canvas_session` writes the snapshot into WebKit's shared jar
-  through `WKHTTPCookieStore` (Tauri exposes no cookie setter) at startup and
-  before each Canvas page. The snapshot carries no domains — it is a bare
-  `name=value` header — so every pair is re-scoped to the Canvas host, which
-  is exactly what the scraper sends over the wire anyway.
-- **Pass a completion handler.** `setCookies:completionHandler:` invokes
-  whatever it was handed once the network process replies; a nil block
-  segfaults the app *seconds later*, from a stack that names only WebKit.
-- **`/login/session_token` is not the shortcut it looks like.** Canvas's own
-  "log a browser in from an authenticated backend" endpoint answers 403 to a
-  session-cookie request — it wants an access token, and those are disabled
-  here. Same wall as above, one layer down.
-- Browsing Canvas in-app rolls the session forward like any other request, so
-  a page load there re-snapshots the cookie and the scraper inherits the
-  fresher one. The snapshot is deduplicated by name on the way out: UniMelb
-  sets a few cookies on the parent domain, and they come back from WebKit
-  next to the seeded copies scoped to the Canvas host — without the dedupe,
-  every Canvas page load grew the file by three cookies.
+`canvas_session` is HttpOnly and session-scoped, so WebKit keeps it in memory
+only and the on-disk snapshot is the sole surviving copy.
+`browser::seed_canvas_session` writes it into WebKit's shared jar through
+`WKHTTPCookieStore` (Tauri has no cookie setter) at startup and before each
+Canvas page, re-scoping every bare `name=value` pair to the Canvas host.
+Browsing Canvas in-app rolls the session forward and re-snapshots it, deduped
+by name, so the scraper inherits the fresher cookie.
 
-### Keep-alive, two layers
+## Keep-alive runs in two layers
 
-- **App open**: a thread in `app/src-tauri/src/lib.rs` re-probes the saved
-  session every 6 hours and emits `canvas-auth-expired` if it is rejected.
-- **App closed**: `app/src-tauri/src/keepalive.rs` installs a macOS
-  LaunchAgent that runs `oculus auth tick` on a schedule via launchd. The
-  tick probes, re-signs-in on rejection, and reports into
-  `session-keepalive.log` in the data dir — launchd has no console, and a
-  non-zero exit would only read as a crashed job, so every outcome is a log
-  line and exit 0.
+- **App open** — a thread in `app/src-tauri/src/lib.rs` re-probes every 6
+  hours and emits `canvas-auth-expired` on rejection.
+- **App closed** — `app/src-tauri/src/keepalive.rs` installs a LaunchAgent
+  that runs `oculus auth tick`, which shares the app's probe, cookie merge and
+  sign-in. Every outcome is a line in `session-keepalive.log` and exit 0,
+  because launchd has no console and a non-zero exit reads as a crashed job.
+- The tick re-authenticates only on `Rejected`; on `Unreachable` it logs and
+  waits rather than spending an Okta attempt on a dead network.
+- The agent installs itself only after a headless sign-in has succeeded
+  (`keepalive::ensure_installed`), not when credentials are stored: an org
+  that offers only push or WebAuthn would fail every six hours forever.
+  Turning it off writes a `keepalive-disabled` marker so the next sign-in
+  does not reinstall it.
+- The CLI ships as a Tauri `externalBin`, staged by
+  `app/scripts/stage-cli.mjs`: the bundler copies some cargo bins into
+  `Contents/MacOS/` on its own, but not `oculus`. `tauri-build` validates
+  every `externalBin` path even while building `oculus` itself, so the script
+  writes an empty placeholder for that build and removes it on failure.
+- The plist stores the CLI path absolutely; `keepalive::repair_path` re-points
+  it on startup when the bundle has moved.
+- Neither layer beats an absolute session cap or a forced IdP re-auth.
 
-  The agent runs the CLI rather than a script of its own so that it shares one
-  probe, one cookie merge, and one sign-in with the app: a keep-alive that can
-  only *ping* has nowhere to go on a 401 but a log line.
+## Okta sign-in runs headless in Rust
 
-  **The CLI ships as a Tauri sidecar**, declared in `externalBin` alongside
-  ffmpeg and staged by `app/scripts/stage-cli.mjs` from `beforeBuildCommand`.
-  The bundler does copy *some* sibling cargo binaries into `Contents/MacOS/`
-  — `retrieval_smoke` lands there unasked — but not `oculus`; the selection is
-  undocumented and appears to key off the name, which is no basis for the one
-  binary the keep-alive depends on. Staging it explicitly costs a build step
-  and is deterministic.
+`app/src-tauri/src/okta.rs` rebuilds a dead session without a browser. The
+IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
+`/idp/idx/*`: introspect the login page's state token, answer each
+*remediation*, then replay the SAML app URL and POST the assertion to Canvas.
 
-  That build step has a chicken-and-egg: `tauri-build` validates every
-  `externalBin` path, and it runs for *every* bin in the crate, `oculus`
-  included — so building the CLI requires the staged CLI. `stage-cli.mjs`
-  writes an empty placeholder for that one build and replaces it with the real
-  binary, removing it again if the build fails, so a zero-byte sidecar can
-  never reach a bundle.
+- The loop dispatches on remediation **names**, not a fixed order, because
+  factor order is an Okta policy setting.
+- It answers **password** (macOS keychain) and **TOTP** (generated in-tree
+  from a stored seed, pinned by the RFC 4226/6238 vectors). Okta Verify push
+  and WebAuthn need a human; `LoginError::UnsupportedFactor` names the factors
+  Okta did offer.
+- Both probe sites in `lib.rs` call `okta::try_auto_recover` before declaring
+  a session expired, and `useAuth().connect()` tries it before opening the
+  login window. Credentials come from Settings → Canvas or `oculus auth setup`.
+- Password and TOTP seed share one keychain, so against code already running
+  as this user the second factor is not a second factor — the same posture as
+  a password manager that stores TOTP.
 
-  `cli_path()` then resolves the CLI as a sibling of `current_exe`
-  (`Contents/MacOS/oculus`), falling back to `target/release/oculus` under
-  `tauri dev`. The plist stores that path absolutely, so
-  `keepalive::repair_path` re-points an installed agent on startup when the
-  bundle has moved — an agent calling a binary that is gone still "runs" every
-  six hours and is indistinguishable from a working one until the session
-  dies.
-
-  **A rejected probe is not the same as an unreachable one.** The tick
-  re-authenticates only on `Rejected` — on `Unreachable` it logs and waits,
-  rather than spending an Okta sign-in attempt to discover the wifi is down.
-
-  Neither layer can beat an absolute session cap or a forced IdP re-auth; when
-  those fire, the user signs in by hand.
-
-  **The agent installs itself only once a headless sign-in has actually
-  succeeded** (`keepalive::ensure_installed`, called from the success path of
-  `run_sign_in`). The gate is deliberately not "credentials are stored":
-  recovery needs the TOTP factor, and an org that answers only with Okta
-  Verify push or WebAuthn cannot be driven from launchd — there the agent
-  would wake every six hours, fail, and log noise forever. Turning the
-  Settings switch off writes a `keepalive-disabled` marker, so the next
-  automated sign-in does not put it straight back.
-
-### Automated sign-in
-
-`app/src-tauri/src/okta.rs` rebuilds a dead session without a browser. The IdP
-is Okta at `sso.unimelb.edu.au`, running **Identity Engine** — its sign-in
-widget is a thin client over a JSON state machine at `/idp/idx/*`, so the
-whole exchange can run in Rust: introspect the login page's state token,
-answer each *remediation* Okta offers, then replay the SAML app URL to get an
-assertion to POST to Canvas.
-
-The loop is written against remediation **names**, not a fixed script, because
-the order Okta asks for factors in is a policy setting that can change without
-notice. It answers two factors:
-
-- **password** — from the macOS keychain.
-- **TOTP** (Google Authenticator) — generated locally from a stored seed.
-
-**Answer the challenge before reading the chooser.** OIE offers
-`select-authenticator-authenticate` alongside *every* `challenge-authenticator`
-as the "verify with something else" escape hatch, so taking the chooser as the
-next step re-picks the same authenticator forever without ever answering it.
-The loop therefore answers whatever `currentAuthenticator` says is being
-challenged, and falls through to the chooser only when that is a factor it
-cannot answer.
-
-It cannot answer Okta Verify push or WebAuthn; those need a human, which is
-the point of them. When Okta offers only those, `LoginError::UnsupportedFactor`
-carries the labels it *did* offer, so a failure names its own cause instead of
-needing a packet capture.
-
-The state token bootstrapped from the login page is a ~5 KB JWE, and the page
-names `stateToken` several times — in inline script logic as well as in the
-widget config. Taking the *first* mention yields a fragment that introspect
-rejects as "The session has expired", which reads like an expiry problem and
-is not one; `state_token_candidates` therefore takes every quoted value of
-plausible shape. Note also that `/idp/idx/introspect` is the one call whose
-field is named `stateToken` — every later call echoes back `stateHandle`.
-
-**A TOTP secret cannot be recovered by observing codes.** A code is
-`HMAC-SHA1(seed, unix_time / 30)` truncated to six digits — a one-way function
-of a 160-bit seed. The seed is shown once, at enrolment, as the QR code and
-the "setup key" beside it; getting it means re-enrolling the factor. TOTP is
-implemented in-tree (SHA-1, HMAC, RFC 6238) rather than pulled from a crate,
-and pinned by the RFC 4226/6238 test vectors.
-
-**Canvas issues an anonymous `canvas_session` to the first visitor**, before
-any authentication — the SAML start collects one on its way to Okta. So
-"do we hold a `canvas_session`?" is not a success condition; `complete_saml`
-only accepts one after it has actually posted an assertion, and `sign_in`
-then proves the cookie against `/api/v1/users/self` before persisting it. A
-session is never written to disk unverified, so a failed automated attempt
-cannot clobber a working one.
-
-Both probe sites in `app/src-tauri/src/lib.rs` call
-`okta::try_auto_recover` before declaring a session expired, so a lapsed
-session is normally rebuilt silently. `useAuth().connect()` tries the same
-path before opening the login window. Credentials are entered in Settings →
-Canvas (`app/src/components/settings/AutoSignIn.tsx`) or via
-`oculus auth setup`.
-
-**Every path that establishes a session must write the auth flag.** The
-startup probe reads it before it reads anything else — no flag means "fresh
-session" and the cookie beside it is never even looked at. `paths::
-mark_authenticated` is the one writer; a path that skips it leaves a valid
-cookie on disk and the app still opening disconnected.
-
-A rejected password clears the stored one rather than letting the keep-alive
-replay a wrong password every six hours until Okta locks the account.
-
-**Security shape.** Password and TOTP seed live in the same keychain on one
-machine, so against anything already running as this user the second factor is
-no longer a second factor — the same posture as a password manager that stores
-TOTP beside the password. It does not weaken the account against anyone who is
-not already on this Mac.
-
-### Startup probe
-
-On launch, if the auth flag exists, the app is *optimistic* (state =
-connected) while a background thread replays the cookie server-side:
-`Valid` confirms, `Rejected` clears the flag (the SSO profile is kept so
-re-login is one tap) and emits `canvas-auth-expired`, `Unreachable` stays
-optimistic — an offline start is not an expired session.
-
-## Ed Discussion
+## Ed mints its `x-token` from Canvas
 
 Ed has no third-party OAuth; every API call carries the web app's `x-token`
-JWT. `app/src-tauri/src/ed.rs` mints it automatically by walking the Canvas →
-Ed LTI 1.3 launch (course tabs → tool page → `oidc_login` → Canvas
-`/api/lti/authorize` → `launch` → one-shot `?_logintoken=` →
-`POST /api/login_token`). Tokens live ~2 weeks, are renewed via
-`POST /api/renew_token` on each sync, and a dead one is simply re-minted from
-Canvas. `oculus auth ed <TOKEN>` remains as a manual override. The redirect
-walk must keep cookies **per-host** — the Canvas cookie must never be sent to
-edstem.org.
+JWT. `app/src-tauri/src/ed.rs` mints it by walking the Canvas → Ed LTI 1.3
+launch (tool page → `oidc_login` → Canvas `/api/lti/authorize` → `launch` →
+one-shot `?_logintoken=` → `POST /api/login_token`). Tokens last about two
+weeks, are renewed with `POST /api/renew_token` on each sync, and a dead one
+is re-minted. `oculus auth ed <TOKEN>` is a manual override.
 
-## Echo360
+## Echo360 has no stored credential
 
-No stored credential at all: each session is minted on demand from the Canvas
-cookie via the course's LTI external-tool form (see
-[sync.md](./sync.md)). The app caches the resulting session per course in
-`app/src-tauri/src/lectures.rs`.
+Each session is minted on demand from the Canvas cookie by POSTing the
+course's LTI external-tool form (see
+[sync.md](./sync.md#echo360-is-an-lti-launch-with-up-to-two-streams)), and
+`app/src-tauri/src/lectures.rs` caches it per course.
+
+## Gotchas
+
+- Every path that establishes a session must call `paths::mark_authenticated` — the startup probe reads the flag first, and without it a valid cookie opens disconnected.
+- Holding a `canvas_session` is not success: Canvas issues an anonymous one before auth, so `complete_saml` accepts one only after posting an assertion and `sign_in` verifies it against `/api/v1/users/self` before writing it.
+- Answer `currentAuthenticator`'s challenge before reading the chooser — OIE offers `select-authenticator-authenticate` beside every challenge, and taking it loops forever.
+- The login page names `stateToken` several times; the first is a fragment introspect rejects as "session has expired", so `state_token_candidates` tries every plausible one.
+- Only `/idp/idx/introspect` takes `stateToken`; every later call sends `stateHandle`.
+- A rejected password is cleared, or the keep-alive replays it every six hours until Okta locks the account.
+- A TOTP seed cannot be recovered from codes; getting it means re-enrolling the factor.
+- `setCookies:completionHandler:` must get a real block — nil segfaults the app seconds later from a WebKit-only stack.
+- `/login/session_token` answers 403 to a cookie session; it wants an access token, which is disabled here.
+- Ed's LTI redirect walk jars cookies per host; the Canvas cookie must never reach edstem.org.

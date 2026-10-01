@@ -2,7 +2,7 @@ import type { ParseFailure, ParseLatch } from "@/stores/parseStore";
 
 /**
  * A file's markdown situation in one vocabulary. Nothing catches a failed
- * parse (CLAUDE.md), so a file without markdown must say so, from the three
+ * parse (docs/parsing.md), so a file without markdown must say so, from the three
  * things the `parse-status` error carries (`parseStore`): moving or done;
  * whether a retry could work (`retryable`); and whether the cause is the whole
  * library's (`latching`), which the UI must never blur with "this file is

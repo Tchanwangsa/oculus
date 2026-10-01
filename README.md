@@ -101,10 +101,6 @@ to drive any of the four bridges from a terminal.
 | **Frontend** | `app/src/` | React 19, Vite, Tailwind v4, shadcn/ui |
 | **Rust core** | `app/src-tauri/` | Tauri commands, the scrape engine, PDF parsing and page embedding (both in-process, over HTTPS to MinerU and Voyage), retrieval, the CLI-agent bridges, the `oculus` CLI |
 
-There used to be a third: a Python sidecar ran parsing and embedding locally.
-It's gone — code and directory both, at `f875bb1` — and nothing in this repo
-starts, supervises or ships a child process for either job any more.
-
 All scraping lives in Rust for a specific reason: macOS suspends an off-screen
 WKWebView's content process, so background work in a hidden WebView silently
 freezes. → [docs/architecture.md](docs/architecture.md)
@@ -124,10 +120,6 @@ freezes. → [docs/architecture.md](docs/architecture.md)
   missing (`could not execute process sccache ... (never executed)`).
 - **macOS.** The keep-alive LaunchAgent, the window chrome and the WebView
   behaviour notes are all macOS-specific.
-
-There is no Python step, no `uv`, and no `sidecar/` directory. If you have an
-orphaned `sidecar/.venv` from an older checkout, it's 1.2 GB of nothing —
-delete it.
 
 ### First run
 
@@ -199,11 +191,11 @@ disk anywhere, since neither cloud client downloads one.
 | `app/src-tauri/src/` | Rust — commands, `sync.rs`, `okta.rs`, `retrieval.rs`, and the `parse/`/`embed/`/`harness/` seams |
 | `app/src-tauri/src/bin/oculus.rs` | The headless CLI over the same engine |
 | `docs/` | The map: where things live, how they connect, why |
-| `CLAUDE.md` | Conventions — toolchain, UI rules, hard-won constraints |
+| `CLAUDE.md` | The short list of rules for coding agents |
 
 Start at [docs/index.md](docs/index.md). The pages are written to be read
-*before* exploring source, and they record measured facts and dead ends rather
-than restating the code.
+*before* exploring source, and they record what the code alone won't tell you
+rather than restating it.
 
 ---
 
@@ -215,12 +207,6 @@ local lexical index, chat as a CLI agent over four bridges (Claude Code,
 Codex, opencode, Antigravity), your own files alongside the scraped ones,
 lecture chapters and the transcript's reading copy, projects with a universal
 tasks view, the calendar, a home launcher, and an in-app browser.
-
-**Removed:** the **Python sidecar** — PDF parsing and page embedding run in
-Rust now, against MinerU and Voyage; the supervisor, the loopback callback
-server and the whole-tree memory governor went with it. The last commit
-holding `sidecar/` is `f875bb1`, which is where a separate local-MinerU-server
-repo forks from.
 
 **Removed:** the **BYOK API layer** — provider config, keychain keys, an
 OpenAI-compatible streaming client, spend limits. Deleted rather than woken

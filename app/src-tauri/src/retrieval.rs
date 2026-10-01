@@ -1,5 +1,4 @@
-//! Semantic page retrieval over page *images* (see CLAUDE.md and
-//! `docs/retrieval.md`).
+//! Semantic page retrieval over page *images* (see `docs/retrieval.md`).
 //!
 //! `embed::backend` embeds each page -> blobs land in `pages` beside the
 //! page's markdown -> a query is embedded by the same backend and ranked by
@@ -168,7 +167,7 @@ pub async fn ingest(
 }
 
 /// `ingest`, plus a progress callback. **Blocks for the whole cloud round
-/// trip, with no timeout** — the client owns its pacing (see CLAUDE.md).
+/// trip, with no timeout** — the client owns its pacing (see `docs/retrieval.md`).
 pub async fn ingest_reporting(
     db_file: &Path,
     file_id: i64,

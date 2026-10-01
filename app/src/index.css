@@ -68,7 +68,7 @@
   --color-primary-foreground:#ffffff;
 
   /* The indigo as an accent, not a fill (links, selection, progress) — see
-     CLAUDE.md "UI conventions". */
+     docs/frontend.md "UI system". */
   --color-brand:             #5e6ad2;
   --color-brand-hover:       #505bbd;
   --color-brand-muted:       #eef0fb;
@@ -234,7 +234,7 @@
 
 /* ─── Base resets ───────────────────────────────────────────────── */
 /* Every reset stays inside @layer base, or it outranks all utilities — see
-   CLAUDE.md "UI conventions". Unlayered blocks below are overrides. */
+   docs/frontend.md "Gotchas". Unlayered blocks below are overrides. */
 @layer base {
   *,
   *::before,

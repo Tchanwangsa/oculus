@@ -699,7 +699,7 @@ CREATE TABLE IF NOT EXISTS browser_favicons (
             version: 37,
             description: "project tasks: a task can belong to no project at all",
             // `project_id` becomes nullable (NULL = unfiled) via a table rebuild. See
-            // `projects::UNFILED_TASKS_SQL` and CLAUDE.md for the self-referencing FK trap.
+            // `projects::UNFILED_TASKS_SQL` and `docs/projects.md` for the self-referencing FK trap.
             sql: crate::projects::UNFILED_TASKS_SQL,
             kind: MigrationKind::Up,
         },
