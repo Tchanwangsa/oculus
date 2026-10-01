@@ -27,7 +27,7 @@ function clockValue(d: Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** Picked in a popover — see CLAUDE.md (no native date inputs). */
+/** Picked in a popover — see docs/frontend.md (no native date inputs). */
 export function DateTimeField({
   value,
   onCommit,

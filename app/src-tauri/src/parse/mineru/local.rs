@@ -35,7 +35,7 @@ const HEALTH_PATH: &str = "/health";
 const V1_HEALTH_PATH: &str = "/v1/health";
 
 /// **A connect timeout and no read timeout**: a local parse is minutes of
-/// silence, not a hang (see CLAUDE.md).
+/// silence, not a hang (see `docs/parsing.md`).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The health check is a status line, so it does time out.

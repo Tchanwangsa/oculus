@@ -1,6 +1,6 @@
 //! The Canvas scrape engine. Modules drive the walk, and pages and files are
 //! fetched through them, so nothing is downloaded twice. Lives in Rust, not a
-//! WebView — see CLAUDE.md ("No work in hidden WebViews").
+//! WebView — see `docs/architecture.md`.
 //!
 //! Progress leaves through [`Reporter`]: the app forwards it as Tauri events,
 //! the CLI prints it.
@@ -1197,7 +1197,7 @@ impl std::fmt::Display for ParseSummary {
 
 /// Parse a PDF, blocking (for minutes) until the artifacts are on disk.
 /// Deliberately no timeout here — the client's `POLL_DEADLINE` is the only
-/// one (see CLAUDE.md). Idempotent.
+/// one (see `docs/parsing.md`). Idempotent.
 ///
 /// `rel_path` is the library file; for Office documents the bytes parsed are
 /// its derived sibling PDF.

@@ -1,170 +1,120 @@
 # Development
 
-## Prerequisites
+How to build, run and check the app and the `oculus` CLI. macOS is the primary
+target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 
-- **bun** (never npm/yarn/pnpm — see root `CLAUDE.md`)
-- Rust toolchain (stable, via rustup)
-- macOS is the primary target (keep-alive, screenshots, and the WebView
-  behaviour notes are macOS-specific)
+## Where
 
-## First-time setup
+| Piece | Location |
+| --- | --- |
+| Scripts (`predev`, `cli`, `cli:dev`, `cli:install`, `stage-cli`, `docs:cli`, …) | `app/package.json` |
+| `beforeDevCommand`, `beforeBuildCommand`, `externalBin` | `app/src-tauri/tauri.conf.json` |
+| The dev preflight | `app/scripts/predev.mjs` |
+| Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
+| Native binary fetchers | `app/scripts/fetch-pdfium.mjs`, `app/scripts/fetch-ffmpeg.mjs` |
+| Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
+| Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
+| How an agent thread finds `oculus` | `app/src-tauri/src/harness/discover.rs` |
+
+## Commands
 
 ```sh
 cd app
 bun install
-bun run predev        # deps, ffmpeg, libpdfium, the `oculus` CLI, the agent docs
-```
-
-`predev` is the whole preflight and it is idempotent — run it any time. It is
-also bun's lifecycle name for `dev`, so `bun run dev` runs it first and so does
-`bun run tauri dev`, whose `beforeDevCommand` is now just
-`OCULUS_CLI_WATCH=1 bun run dev`. `OCULUS_SKIP_PREDEV=1` skips it when you only
-want vite.
-
-**There is no Python step** and no `sidecar/` directory (see
-[index.md](./index.md)). An orphaned `sidecar/.venv` left in a checkout is
-1.2 GB of nothing — delete it.
-
-The two fetch steps (`bun run ffmpeg`, `bun run pdfium`) are still there to run
-on their own, and `beforeBuildCommand` calls them directly; they are worth
-knowing about because a `cargo test` or a `bun run cli` on a fresh checkout
-does not go through Tauri or through `predev`.
-
-`libpdfium` is the page rasterizer behind `app/src-tauri/src/embed/raster.rs` —
-a native C++ library with no crates.io source, so `app/scripts/fetch-pdfium.mjs`
-downloads a prebuilt one from bblanchon/pdfium-binaries. Its release tag is
-pinned to the Chromium revision `pdfium-render`'s feature flag binds against: a
-lib from another revision fails at *bind* time, not at compile time, so the two
-move together. Neither binary is committed — `app/src-tauri/binaries/` is
-gitignored. At runtime the library is found relative to the executable
-(`Contents/Frameworks/` in the bundled `.app`, an ancestor `binaries/` in dev),
-and `OCULUS_PDFIUM_LIB` overrides that with an explicit path.
-
-## Running
-
-```sh
-cd app
-bun run tauri dev     # full desktop app
-bun run dev           # vite only, browser — no Tauri APIs, limited use
-bun run tauri build   # release build
+bun run tauri dev     # the desktop app (runs the preflight first)
+bun run dev           # vite only, in a browser — no Tauri APIs
+bun run tauri build   # release bundle
 bun run predev        # the dev preflight, by hand
-bun run cli           # build the headless `oculus` binary (release)
-bun run cli:dev       # the same binary in the debug profile
-bun run cli:install   # release build + symlink into ~/.local/bin
-bun run stage-cli     # build it and stage it as a sidecar for the bundle
+bun run cli           # release `oculus`
+bun run cli:dev       # debug `oculus` — the one the dev app's agents run
+bun run cli:install   # release build, symlink into ~/.local/bin, then `oculus docs`
 bun run docs:cli      # regenerate docs/cli-reference.md from the binary's help
+bun run pdfium        # fetch libpdfium into app/src-tauri/binaries/
+bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
 ```
 
-### The dev CLI
+## `predev` is the whole preflight, and it is idempotent
 
-The `oculus` CLI is a second binary in the same crate, and for a long time
-nothing in the dev path built it. `tauri dev` issues a bare `cargo run`, which
-builds `app` and no other bin target; `bun run cli` builds the *release* one by
-hand. So `target/debug/oculus` was whatever a stray `cargo test` last left
-there — measured once at ten days and several subcommands out of date — while
-being the sibling of the running app and therefore the first `oculus` on a
-coding agent's PATH (`child_env` in
-`app/src-tauri/src/harness/discover.rs`). The agent ran `oculus project create`
-and got `unrecognized subcommand` from a binary that looked entirely
-legitimate.
+It is bun's lifecycle hook for `dev`, and `beforeDevCommand` is
+`OCULUS_CLI_WATCH=1 bun run dev`, so every `tauri dev` runs it. In order it
+runs `bun install`, fetches ffmpeg and pdfium, builds the debug `oculus`,
+regenerates [cli-reference.md](./cli-reference.md) (written only when the help
+changed), and runs `oculus docs` to refresh the library's agent docs. The last
+two are non-fatal: a machine whose app has never run has no library to fill.
+`OCULUS_SKIP_PREDEV=1` skips it all for a vite-only session.
 
-Three things close that, and they are worth knowing separately because they
-cover different windows:
+`cargo test` and `bun run cli` go through neither Tauri nor `predev`, so on a
+fresh checkout run `bun run pdfium` and `bun run ffmpeg` yourself.
 
-- **`app/scripts/predev.mjs`** builds it at the start of every dev session.
-  Debug, not release: the dev app runs out of `target/debug`, so those
-  artifacts are already warm and the build is ~25s after a Rust change and ~3s
-  when nothing moved. A release CLI in front of every dev start would be a
-  minute spent optimising a binary the session does not use.
-- **`app/scripts/watch-cli.mjs`** keeps it current *through* a session.
-  `tauri dev` re-runs cargo and relaunches the app on a Rust change but never
-  re-runs `beforeDevCommand`, so without this the CLI drifts back to the
-  vintage of whenever the session began. It deliberately loses the race: its
-  debounce is longer than tauri's, so the app's build takes cargo's package
-  lock first and the dev loop keeps the latency it had. Started detached by
-  `predev` when `OCULUS_CLI_WATCH=1`, and it ends itself when the vite port
-  stops answering.
-- **`discover::warn_if_stale`** says so in the dev terminal if a CLI under
-  `target/` is older than the `.rs` files beside it. It should never fire; it
-  exists because the failure is invisible from the agent's end, where a stale
-  binary runs, answers `--version`, and rejects a subcommand it has never heard
-  of. A binary from anywhere else — the bundle's `externalBin`, `~/.local/bin`, the
-  PATH — has no sources to be behind, so it is silent by construction.
+## The dev CLI is built by the preflight, not by `tauri dev`
 
-Both `predev` and the watcher delete the binary before building. Cargo reports
-"Finished" while leaving the previous one in place when it decides the uplift
-from `target/debug/deps` is unnecessary, which is the exact failure the
-preflight exists to prevent. The cost is a few seconds after each edit with no
-`oculus` at that path at all — which is the right way round, and is why
-`oculus_cli` ranks the candidates it finds instead of trusting one.
+`tauri dev` issues a bare `cargo run`, which builds the `app` bin and no other.
+Yet `target/debug/oculus` sits beside the running app, so `child_env` in
+`app/src-tauri/src/harness/discover.rs` puts it first on every agent thread's
+PATH. Three pieces keep it current:
 
-`tauri build` runs `stage-cli` for you (it is in `beforeBuildCommand`): the
-`oculus` CLI ships inside the app because the macOS keep-alive LaunchAgent runs
-it. `bun run cli` is the plain build for working on the CLI itself; the two
-share the same compiled binary. See [auth.md](./auth.md) for why the staging
-step writes a placeholder on a cold build.
+- `app/scripts/predev.mjs` builds it at each dev start, in the debug profile
+  because those artifacts are already warm from the app build.
+- `app/scripts/watch-cli.mjs` rebuilds it on Rust changes through the session,
+  since `tauri dev` never re-runs `beforeDevCommand`. Its debounce is longer
+  than tauri's, so the app build takes cargo's lock first. It exits when the
+  vite port stops answering.
+- `discover::warn_if_stale` logs in the dev terminal when a CLI under
+  `target/` is older than the sources beside it.
 
-`docs:cli` follows `stage-cli` in the same hook, which is the only reason it is
-cheap: the release binary is already built and current, so regenerating
-[cli-reference.md](./cli-reference.md) is one process launch. `predev` runs it
-too, against the debug binary it has just built, and the generator only writes
-when the help actually changed — so the reference moves in the same commit as
-the CLI rather than waiting for the next bundle.
+Both scripts, and `bun run cli`/`cli:dev`, **delete the binary before
+building**: cargo can report "Finished" while leaving the previous binary in
+place. `oculus_cli` ranks every candidate it finds by mtime rather than
+trusting one, which covers the seconds when the dev path has no binary at all.
 
-### The library's copy of the prompts
+`tauri build` runs `stage-cli` then `docs:cli` from `beforeBuildCommand`: the
+CLI ships inside the bundle because the keep-alive LaunchAgent runs it
+([auth.md](./auth.md)), and the reference is regenerated at the one moment a
+current release binary is guaranteed to exist.
 
-`predev` then runs `oculus docs`, which is the same step `cli:install` and
-every sync perform: the agent-facing layer — `AGENTS.md`, the skills,
-`OCULUS-CLI.md`, `TASTE.md`'s guidance, the `MEMORY.md` indexes — lives in the
-**data directory**, not in this repo, and the templates in
-`app/src-tauri/templates/` only get there when something writes them out. Until
-this step existed, editing a template and starting the app left every thread
-reading the previous wording with nothing on screen to say so, until the next
-sync happened to fix it.
+## Template edits reach the library only through `oculus docs`
 
-The one prompt this does *not* move is `HARNESS.template.md`, which is
-`include_str!`'d into the app and arrives with the app's own rebuild — so a
-brief edit needs the Rust rebuild `tauri dev` already does, and everything
-else needs this. Non-fatal by design: a machine whose app has never run has no
-library to fill, which is not a reason to refuse to start. See
-[cli.md](./cli.md) for which of those files are overwritten, which are merged,
-and which are never touched twice.
+The agent-facing files — `AGENTS.md`, the skills, `OCULUS-CLI.md`, `TASTE.md`'s
+guidance, the `MEMORY.md` indexes — live in the data directory, written from
+`app/src-tauri/templates/` by `oculus docs` (and by every sync). `predev` runs
+it, so a template edit lands at the next dev start. `HARNESS.template.md` is the
+exception: it is `include_str!`'d into the app, so it changes with the Rust
+rebuild. Which files are overwritten versus merged is in
+[cli.md](./cli.md#oculus-docs-writes-the-agents-folder).
 
-## Checks
+## `libpdfium` is pinned to `pdfium-render`'s Chromium revision
 
-- Frontend type-check + bundle: `cd app && bun run build` (runs `tsc`).
-- Rust: `cargo check` in `app/src-tauri` (or just let `tauri dev` rebuild).
+It rasterizes pages for embedding (`app/src-tauri/src/embed/raster.rs`) and has
+no crates.io source, so `app/scripts/fetch-pdfium.mjs` downloads a prebuilt one.
+Its release tag must match the revision `pdfium-render`'s feature flag binds
+against: a mismatch fails at *bind* time, not compile time, so bump both
+together. At runtime it is found beside the executable (`Contents/Frameworks/`
+in the bundle, an ancestor `binaries/` in dev); `OCULUS_PDFIUM_LIB` overrides
+the path.
+
+## A UI change is verified by screenshot, not by `tsc`
+
+- Frontend type-check and bundle: `cd app && bun run build`.
+- Rust: `cargo check` / `cargo test` in `app/src-tauri`. None of the tests
+  touch the network: the cloud clients run against a fake server, and the
+  renderer tests in `app/src-tauri/src/parse/mineru/render.rs` pin output
+  against the renderer it was ported from.
+- Real parse regressions: the gitignored golden fixtures in
+  `data/parse-fixtures/` ([parsing.md](./parsing.md)).
 - Retrieval smoke test: `app/src-tauri/src/bin/retrieval_smoke.rs`.
-- Parse regressions: `cargo test` in `app/src-tauri`. The differential tests in
-  `parse/mineru/render.rs` pin the output of the renderer it was ported from
-  (at `f875bb1`); none of them touch the network.
-- Real parse regression: the golden fixtures in `data/parse-fixtures/`
-  (gitignored) — see [parsing.md](./parsing.md#debugging).
-- After UI changes, screenshot the running app (root `CLAUDE.md` has the
-  incantation) — the WebView is where layout bugs actually show.
+- After UI changes, screenshot the running app — layout bugs show only in the
+  WebView: `screencapture -x -o -l<windowid>`, where the dev window's owner is
+  "app".
 
-## Environment overrides
-
-| Variable | Meaning |
-| --- | --- |
-| `OCULUS_PDFIUM_LIB` | Explicit path to `libpdfium`, instead of the search relative to the executable |
-
-Which parser and which embedder run is a **setting, not an environment
-variable** — the `parse` and `embed` rows in SQLite, written from Settings →
-Library. Neither cloud's credential is an environment variable either: both
-come from the keychain and are handed straight to an in-process client, so
-neither crosses a socket on this machine. Working on either protocol needs no
-real key — the client tests run against a fake server. See
-[parsing.md](./parsing.md) and [retrieval.md](./retrieval.md) for privacy and
-API limits.
+The parser and embedder are settings (Settings → Library) and their keys live
+in the keychain — neither is an environment variable.
 
 ## Gotchas
 
-- `tauri dev` rebuilds SIGTERM the app in a way that bypasses Tauri's Exit
-  event, so a CLI-agent subprocess can outlive it — a turn mid-flight, or an
-  `opencode serve` that the next start sweeps (see [harness.md](./harness.md)).
-- User data lives in `~/Library/Application Support/com.tchan.oculus`
-  (cookie, `oculus.db`, `courses/`, `lectures/`). Deleting it is a full
-  reset, including auth.
-- `data/`, `*.db` and `app/src-tauri/binaries/` are gitignored; never commit
-  them.
+- A cargo build can leave a stale `oculus` and say "Finished" — delete the binary first.
+- `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
+- Anything under `app/src-tauri/` changing, templates included, rebuilds and relaunches the dev app.
+- A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).
+- A pdfium from the wrong Chromium revision builds fine and fails at bind time.
+- Deleting `~/Library/Application Support/com.tchan.oculus` is a full reset, sign-in included.
+- `data/`, `*.db` and `app/src-tauri/binaries/` are gitignored — never commit them.

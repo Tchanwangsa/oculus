@@ -13,7 +13,7 @@ import { OpencodeCatalogDialog } from "./OpencodeCatalogDialog";
  * `OpencodeCatalogDialog`, which holds the work. Opening Settings must not
  * start a CLI: `opencode serve` starts on the dialog's first read, and this
  * summary reads only the stored catalogue. Nothing here makes a billed call
- * (see CLAUDE.md; free-model filters live in `lib/opencodeCatalogue.ts`).
+ * (see docs/harness.md; free-model filters live in `lib/opencodeCatalogue.ts`).
  */
 export function OpencodeProvidersSection() {
   const { health } = useBridgeHealth();

@@ -129,7 +129,7 @@ function timelineSteps(item: PipelineItem, embedStage: boolean): TimelineStep[] 
           : undefined;
 
   // Embed shows a page fraction — the only thing that moves during one long
-  // blocking call (see CLAUDE.md: parse/embed block for minutes).
+  // blocking call (see docs/retrieval.md: an embed blocks for minutes).
   const embedDetail =
     item.embed === "active"
       ? item.embedTotalPages > 0

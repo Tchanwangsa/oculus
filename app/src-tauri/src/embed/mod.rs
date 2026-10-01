@@ -7,7 +7,7 @@
 //! error vocabulary that mirrors `parse/mod.rs` so one failure UI reads both.
 //!
 //! What gets embedded is the rendered page image, never extracted text (see
-//! CLAUDE.md and `docs/retrieval.md`), which is why `embed` takes a PDF and a
+//! `docs/retrieval.md`), which is why `embed` takes a PDF and a
 //! page count rather than a string.
 
 use std::fmt;

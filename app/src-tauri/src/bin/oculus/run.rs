@@ -383,7 +383,7 @@ impl Ctx {
     ///
     /// Serial, so the log stays readable; both halves are idempotent. Each file
     /// blocks for minutes and there is deliberately no deadline here — see
-    /// CLAUDE.md "A parse or an embed blocks for minutes". The two callbacks below
+    /// `docs/parsing.md`. The two callbacks below
     /// keep a live counter instead.
     fn index_pdfs(&self, pool: &SqlitePool, pdfs: &[(i64, String)], embed: bool) -> Result<(), String> {
         if pdfs.is_empty() {

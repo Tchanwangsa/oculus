@@ -1,262 +1,119 @@
 # Calendar
 
-Class times, deadlines and lecture recordings on one grid. Most rows come from
-Canvas's calendar API during a sync; the page only reads them, so it works
-offline and pages between months without touching Canvas. Two further layers
-are Oculus's own: a `note` table it writes, edits and deletes itself, and the
-tasks on a project's board, which it reads live and never copies — see the
-notes under "The five layers".
+Class times, deadlines, lecture recordings, your own notes and dated tasks on
+one grid. Canvas rows are fetched during a sync; the page only reads the
+database, so it works offline.
 
 ## Where
 
 | Piece | Location |
 | --- | --- |
 | Canvas calendar fetch + Tauri command | `app/src-tauri/src/calendar.rs` |
-| `calendar_events` table (migration 19) | `app/src-tauri/src/migrations.rs` |
-| `local_events` table (migration 22) | `app/src-tauri/src/migrations.rs` |
+| `calendar_events` (migration 19), `local_events` (22), `projects.event_id` (33) | `app/src-tauri/src/migrations.rs` |
 | Headless writes (CLI) | `app/src-tauri/src/store.rs` |
 | Frontend reads + writes | `app/src/lib/db.ts` |
-| The new/edit event dialog | `app/src/components/calendar/EventDialog.tsx`, `app/src/stores/eventEditorStore.ts` |
+| Event model, `loadCalendar`, colours, date maths | `app/src/lib/calendar.ts` |
 | The task layer's read | `getAllOpenTasks` in `app/src/lib/projects.ts` |
-| The event a project is pinned to | `projects.event_id` (migration 33), `app/src/components/projects/EventLink.tsx` |
-| Event model, colours, date maths | `app/src/lib/calendar.ts` |
-| Minute clock for "now" markers | `app/src/hooks/useNow.ts` |
-| Page + views | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/` |
+| New/edit event dialog | `app/src/components/calendar/EventDialog.tsx`, `app/src/stores/eventEditorStore.ts` |
+| Pinning a project to an event | `app/src/components/projects/EventLink.tsx` |
+| Page + views (week, month, agenda, card, mark, row) | `app/src/pages/CalendarPage.tsx`, `app/src/components/calendar/` |
+| Minute clock for "now" | `app/src/hooks/useNow.ts` |
 | Post-sync refresh (`CALENDAR_UPDATED_EVENT`) | `app/src/hooks/useBackendEvents.ts` |
-| Refresh after any project write (`PROJECTS_UPDATED_EVENT`) | `app/src/lib/projects.ts`, `app/src/pages/CalendarPage.tsx` |
 
-## The five layers
+## Five layers, three owners
 
 | Layer | Source | Why it exists |
 | --- | --- | --- |
 | `class` | Canvas `calendar_events?type=event` | The published timetable, when staff publish one |
 | `due` | Canvas `calendar_events?type=assignment` | Deadlines, including quizzes (a quiz has an assignment shell) |
-| `lecture` | The `lectures` table already synced from Echo360 | The fallback timetable for a subject Canvas is silent about |
-| `note` | The `local_events` table | Anything Oculus wrote itself, rather than read from Canvas or Echo360 |
-| `task` | The `project_tasks` table, read live | A deadline you set yourself: a dated, unfinished task, on a project's board or on none at all ([projects.md](./projects.md)) |
+| `lecture` | The `lectures` table synced from Echo360 | The fallback timetable for a subject Canvas is silent about |
+| `note` | `local_events` | Rows the user writes in Oculus |
+| `task` | `project_tasks`, read live | A dated, unfinished task, on a board or unfiled ([projects.md](./projects.md)) |
 
-**The `note` layer is the one the user writes.** `EventDialog` writes it,
-through `createLocalEvent` / `updateLocalEvent` in `app/src/lib/db.ts`, with
-`source` always `manual`. Rows may also carry `automation`, left by a removed
-feature (see [index.md](./index.md)), and the card says which; an edit leaves
-the column alone, so fixing a typo on such a row does not relabel it as
-something the user typed.
+- **Canvas rows are neither editable nor deletable** — a sync writes them
+  straight back. **Notes are both**, because nothing else will clean them up.
+  **Tasks are neither** here: the calendar only reads `project_tasks`, so the
+  card links to the task's project, and an unfiled task links nowhere.
+- `EventDialog` writes notes with `source = 'manual'`; older rows may say
+  `automation`, and the card shows which. An edit leaves `source` alone.
+- The dialog is mounted once in `app/src/layouts/AppLayout.tsx` and raised
+  through `eventEditorStore`, because its two openers — the page header and
+  `EventPopover`, which Home's Today list also renders — share no subtree.
 
-**The dialog is mounted once, in `app/src/layouts/AppLayout.tsx`, and raised
-through a store.** Two things open it and they are not in one subtree: the
-Calendar header's New event button, and the Edit on an event's own card — which
-is `EventPopover`, rendered by all three calendar views *and* by Home's Today
-list. That is the shape `leaveLectureStore` already uses for the same reason.
-Nothing is read back first: a local row's kind, subject, dates and notes are all
-on the `CalEvent` the card is holding. The popover is controlled only so it can
-dismiss itself as it hands over — a popover and a modal trapping focus at once
-is a way to leave the page unclickable.
+## Canvas rows are replaced per subject after a sync
 
-## How it connects
+- Not a scrape phase: nothing is written under `courses/`. After
+  `scrape-complete` the frontend calls `calendar_sync_events` per subject
+  (`syncCalendar`), gated by the `calendar` sync option; the CLI calls
+  `calendar::fetch` then `store::replace_calendar_events` and always runs.
+- Both writers delete the subject's rows and re-insert, so a moved or
+  cancelled class disappears. That is safe only because the fetch is always a
+  whole course's calendar (`all_events=true`) — never add a date window.
+- Canvas materialises repeating classes server-side; no recurrence rule is
+  stored or interpreted.
+- A sectioned class comes back as a parent with `child_events`. Children
+  replace the parent, filtered to the user's own sections
+  (`include[]=sections` returns the caller's); when none match, every child is
+  kept. The query asks for the course and its sections, then dedupes by id,
+  because Canvas nests section occurrences inconsistently.
+- A subject with any `class` rows suppresses its `lecture` layer, or a class
+  and its recording draw twice. Most UniMelb subjects publish nothing, so the
+  recordings are the timetable.
 
-- **Not a scrape phase.** Calendar rows land in the database only — nothing is
-  written under `courses/`, so there is no artifact to report and no
-  file-manifest skip to honour. Like the Echo360 lecture list, it runs *after*
-  a scrape completes: the frontend calls `calendar_sync_events` per subject and
-  writes the rows (`syncCalendar` in `app/src/lib/calendar.ts`, called from
-  `app/src/hooks/useBackendEvents.ts`), and the CLI calls
-  `calendar::fetch` then `store::replace_calendar_events` itself. Both are
-  gated by the `calendar` sync option (`app/src/components/sync/SyncSettings.tsx`);
-  the CLI always runs it.
-- **What Oculus writes lives in its own table, and that is the whole point.**
-  The Canvas write below deletes a subject's rows and re-inserts them, so a
-  deadline Oculus derived and put on the grid would survive exactly until the
-  next sync. `local_events` (migration 22) is therefore separate, never touched by a
-  sync, and merged in by `loadCalendar` after the Canvas rows and the lecture
-  layer — after, so a locally written `class` cannot suppress a subject's
-  Echo360 recordings. Its `subject_id` is nullable (`ON DELETE SET NULL`): a
-  personal reminder need not belong to a subject, and dropping a course must not
-  take your own rows with it. Subject-less rows file under a "Personal" key that
-  is kept out of the subject colour palette, or one note would recolour
-  everything. Because nothing else will ever clean these up, every local row is
-  editable and deletable from `EventPopover`.
-- **A task is deliberately *not* copied into that table.** It would be the
-  obvious move — a task has a date and a subject, and `local_events` is the
-  table for rows Oculus owns — and it is wrong, for the reason the paragraph
-  above ends on: nothing cleans `local_events` up. A task re-dated, ticked off
-  or deleted on its board would leave a copy on the grid that no sync and no
-  sweep would ever come back for. So `loadCalendar` reads `project_tasks`
-  live, through `getAllOpenTasks` in `app/src/lib/projects.ts`, which drops the
-  undated and the finished in SQL — the grid then cannot show a task that is
-  not still a task. The cost is a refresh signal rather than a table: the page
-  listens for `PROJECTS_UPDATED_EVENT` as well as `CALENDAR_UPDATED_EVENT`, and
-  every project write fires it (see [projects.md](./projects.md)).
-- **A project can be pinned to an event, and the pointer goes the other way.**
-  An assignment's project answers to a deadline Canvas already put on the grid,
-  so `projects.event_id` (migration 33) holds a `CalEvent.id` —
-  `app/src/lib/calendar.ts`'s own id, so one column addresses all three
-  tables: a Canvas row is its Canvas id, a local one is `local_<n>`. What is
-  pinned is the thing on the grid rather than a row in any one table, which is
-  the only way to spell it once. It is **deliberately not a foreign key**: the
-  Canvas write below deletes a subject's rows and re-inserts them, so a
-  `REFERENCES … ON DELETE SET NULL` would drop every link on the floor halfway
-  through a sync, even though the ids come back identical. So the pin is
-  resolved live against `loadCalendar()`, the mirror of what the task layer
-  does in the other direction — and a pin that no longer resolves says so and
-  offers to clear itself, rather than drawing nothing and leaving the user with
-  a link they set and cannot see. `task` rows are excluded from the picker: a
-  task event *is* a project's own row read back onto the grid, so pinning a
-  project to one would be a loop. See [projects.md](./projects.md).
-- **Editability and deletability have the same three answers.** A local row is
-  both, because nothing else will ever clean it up and no sync will ever
-  overwrite it. A Canvas row is neither, since a sync would only write it
-  straight back. And a **task** is neither either, for a third reason: the
-  calendar only *reads* `project_tasks`, and everything you
-  would do to a task — re-date it, finish it, delete it with its subtasks — is
-  on its board. So the card links through to the project instead, carrying the
-  project's name because a bare task title on a grid is not enough to act on.
-- **A task with no project labels itself by the task alone.** Since migration
-  37 a task can belong to no project at all ([projects.md](./projects.md)), so
-  `getAllOpenTasks` joins the project **LEFT** and `projectId`, `projectName`
-  and the subject all come back `null` for such a row. Nothing on the grid has
-  to special-case it: the card is the title and the date, `EventPopover` and
-  `EventRow` already draw the project line only when there is one, and a NULL
-  subject falls to the same "Personal" key a subject-less project does, which
-  keeps it out of the subject colour palette. It links nowhere, because there
-  is no board it came from — the one thing an unfiled task on the grid cannot
-  offer.
-- **A note is an instant, and so is a task** — the same rule deadlines follow,
-  and the same machinery (`isInstant` in `app/src/lib/calendar.ts`). What the
-  two of them share beyond that is `isSelfImposed`, the other predicate in that
-  file: an instant *you* set rather than one a course set for you, drawn in a
-  quieter register — a lighter tint, a lighter mark — everywhere it appears.
-  That is one rule three views were each about to grow their own copy of, so it
-  lives with the model.
-- **The write replaces, it does not accumulate.** A class moved or cancelled in
-  Canvas has to disappear, and an upsert into a growing set would leave the old
-  occurrence on the grid forever. Both writers delete the subject's rows and
-  re-insert, which is safe only because the fetch is always a whole course's
-  calendar — keep it that way if the query ever grows a date window.
-- **Repeating classes are already expanded.** Canvas materialises a series
-  server-side, so a semester of lectures is many rows and there is no
-  recurrence rule stored or interpreted anywhere. `all_events=true` fetches the
-  whole span in one walk rather than guessing a window that would clip the
-  first or last teaching week.
-- **A sectioned class is a parent plus children.** When staff schedule one
-  event per tutorial section, Canvas returns a parent spanning them all with
-  the real occurrences as `child_events`. Rendering the parent would show every
-  section's tutorial as if the student attended all of them, so children
-  replace their parent, filtered to the sections the user is actually enrolled
-  in — `include[]=sections` on the courses API returns the *calling user's*
-  sections, which is what makes that filter possible. When no child matches
-  (sections unknown, or scoped some other way) every child is kept: a crowded
-  calendar beats an empty one.
-- **The query asks about the course and its sections, then deduplicates.**
-  Canvas has returned a section occurrence nested under its parent in some
-  cases and top-level in others; requesting both contexts and deduplicating by
-  id makes the result the same either way.
-- **Recordings fill in only where Canvas is silent.** A subject with `class`
-  rows suppresses its `lecture` layer (`loadCalendar` in
-  `app/src/lib/calendar.ts`) — otherwise a published lecture and its Echo360
-  recording would draw the same class twice. In practice most UniMelb subjects
-  publish nothing to the Canvas calendar, so the recordings *are* the
-  timetable; see [sync.md](./sync.md) for how that list is fetched.
-- **Past and future are drawn differently, and "now" is live.** Elapsed hours
-  carry a grey wash, finished events drop their subject colour for the neutral
-  `chart-other`, and today's column gets a time line — all driven by
-  `app/src/hooks/useNow.ts`, which re-renders on the minute so a window left
-  open all day does not quietly lie. Two consequences worth knowing: the week
-  containing today stretches its hour range to keep "now" on the grid (at 10pm
-  every class is over and the grid would otherwise stop at 7pm with nothing
-  marking where you are), and the wash is mixed from `muted-foreground`, not
-  `surface` — `surface` sits within a couple of percent of the page background
-  and is invisible as a wash.
-- **A deadline is drawn at its hour when the grid covers that hour**, as a slim
-  marker laid over the classes rather than a block competing with them — a
-  submission is an instant, not a span. The marker is centred on the exact
-  minute and then clamped back inside the grid: deadlines cluster at the ends
-  of the day (11:59pm above all), and one centred there hangs half off the
-  bottom edge. It is nudged by at most half its own height rather than snapped
-  to the nearest hour, which would redraw an 11:59pm cutoff at 11pm or at
-  midnight — a time it is not due. The ones the grid cannot reach (an
-  11:59pm cutoff against a grid that stops at 7pm) collect in a labelled strip
-  above it. Every deadline is in exactly one of the two, never both. **The
-  strip is named after the loudest layer in it** — "Due", "Tasks" or "Notes",
-  with the matching mark beside the word — because it now collects three kinds:
-  a week whose unplaceable instants are all tasks filed under "Due" would be
-  making a claim about a deadline that does not exist. A real deadline, or an
-  all-day class (which has no quieter name), still takes the heading whenever
-  one is present. Deadlines are also kept out of `hourRange`: letting an
-  11:59pm cutoff stretch the grid would pin every week open to midnight for one
-  marker.
-- **A class block is clamped into the grid too.** Canvas publishes
-  cutoff-shaped *events*, not only assignments — a peer-review "class" that
-  runs 11:59pm to 11:59pm is a `class` row of no length, and drawn at its own
-  minute with the minimum block height it hangs off the bottom of the card.
-  A block that has real length is shortened to the last row rather than moved,
-  so an 11pm–12:30am class still starts at 11pm; only one that cannot fit at
-  all rides up against the bottom edge
-  (`app/src/components/calendar/WeekView.tsx`).
-- **The agenda's row is shared with Home.**
-  `app/src/components/calendar/EventRow.tsx` is the row the Agenda view and
-  Home's Today list both render, extracted when Home needed the same grammar —
-  the same move `EventMark` made one level down. It takes `now` as a prop
-  rather than calling `useNow()` itself: a list is one clock, and a row that
-  owned its own would put a minute timer behind every line.
-- **A deadline never has a class's shape**, and neither layer of self-imposed
-  instant borrows one either. `app/src/components/calendar/EventMark.tsx` is
-  the one vocabulary all three views draw from: a filled flag is a Canvas
-  deadline, a filled pin is a note, an **outline** checkbox is a project task,
-  and a dot is anything that occupies time. The silhouettes differ rather than
-  only the colours, because a task's date must not read as a submission cutoff
-  at a glance; the mark is shared rather than branched per view because the
-  flag-or-dot test had already grown a copy in each of the three views, and a
-  new kind would have drifted between them.
-- **The week grid sizes itself to what it must show**: the classes in view, an
-  hour of padding either side, a floor of 8am–6pm, and — on the week containing
-  today — the current hour, which is why the grid reaches 3am when you open it
-  at 4am. An event running past midnight counts as ending at 24:00 rather than
-  at its clock time, or 11pm–12:30am would read as "ends at 0:30" and shrink
-  the grid below the block it needs to hold.
-- **Nothing can hide outside the fitted range, by construction.** The split in
-  `app/src/components/calendar/WeekView.tsx` is exhaustive: an event is either
-  timed (and `hourRange` is computed *from* that set, so the grid covers it) or
-  it is a deadline/all-day (and lands in the grid when the hours reach it, in
-  the strip when they do not). There is no third case to leak through. A `24h`
-  toggle in the grid's corner still opens the full midnight-to-midnight day and
-  remembers the choice — the guarantee is structural, but "these hours do not
-  exist" reads as a limitation, and the whole day should be reachable when you
-  want to look.
-- **The week has a floor width and scrolls sideways under it.** The page is not
-  the window: the docked side panel takes a resizable bite out of it, and seven
-  columns divided into what is left get small fast — small enough that a class
-  block was an ellipsis, and a block halved again by `packLanes` for an overlap
-  was not even that. Below `MIN_GRID_PX` in
-  `app/src/components/calendar/WeekView.tsx` the grid stops compressing and the
-  view scrolls horizontally instead. **One scroller carries both axes**, with
-  the day headers and the deadline strip pinned to its top and the hour gutter
-  pinned to its left, so the times stay readable however far the week is pushed
-  sideways. The three stacked grids — headers, strip and hour grid — share one
-  column template and have to move together, which is why they sit in the same
-  scrollport rather than one inside another: a `sticky` gutter resolves against
-  the *nearest* scrollport, so with the old vertical scroller wrapped around
-  the hours alone, `left: 0` only ever pinned the hours to the content's own
-  left edge and they slid away with the columns.
-- **A month cell shows as many chips as it measures room for.** The count used
-  to be the constant four, which is right only at one window height: with the
-  side panel open, or simply a short window, the fourth chip was sliced in half
-  by the cell's `overflow-hidden` and no "+N more" said anything was missing.
-  `MonthView` observes the grid's own height, divides by the six rows it always
-  has, and works the capacity out from there — and trades one chip for the
-  "+N more" link whenever there is a remainder, which always fits because the
-  link is shorter than a chip.
-- **The header's controls wrap; they never clip.** Title, period, the week/month
-  stepper, the view switch, New event and Refresh had been one no-wrap row, so
-  the page's `overflow-hidden` simply cut the last pill in half once the panel
-  opened. The title shrinks and its period truncates, and the right-hand group
-  wraps onto as many lines as it needs. New event sits with the title rather
-  than at the end of that group: it is the page's one action, the rest are about
-  looking, and keeping it out of the run is what lets the run stay on one line.
-- **Times are stored exactly as each source gives them.** Canvas sends ISO8601
-  UTC, Echo360 sends local wall clock with no zone marker, and `new Date` reads
-  each correctly. A task's `due_at` is a third shape, and is two shapes at
-  once: ISO8601 from the app, SQLite's own `YYYY-MM-DD HH:MM:SS` from the CLI,
-  whichever writer got there — so tasks go through `sqliteUtcToMs`
-  (`app/src/lib/format.ts`), which reads both. Nothing normalises any of them
-  on the way in: a room booking is a wall-clock fact, and rewriting it to UTC
-  would only add a way to be wrong.
+## What Oculus owns lives outside the Canvas table
+
+- `local_events` is never touched by a sync and is merged by `loadCalendar`
+  *after* Canvas and lectures, so a local `class` cannot suppress recordings.
+  Its `subject_id` is nullable (`ON DELETE SET NULL`); subject-less rows file
+  under a "Personal" key kept out of the subject palette.
+- Tasks are read live through `getAllOpenTasks` (undated and finished dropped
+  in SQL, project joined LEFT so unfiled tasks survive), never copied into
+  `local_events`: a copy would outlive the task being re-dated, finished or
+  deleted. The page refreshes on `PROJECTS_UPDATED_EVENT` as well as
+  `CALENDAR_UPDATED_EVENT`.
+- `projects.event_id` holds a `CalEvent.id` (a Canvas id, or `local_<n>`) and
+  is resolved live against `loadCalendar()`. A pin that fails to resolve
+  says so and offers to clear itself. `task` events are excluded from the
+  picker, since pinning a project to its own task is a loop.
+
+## Deadlines, notes and tasks are instants
+
+`isInstant` and `isSelfImposed` in `app/src/lib/calendar.ts` are the one
+model: a deadline, note or task is a point in time, and a note or task is one
+*you* set, drawn in a quieter register. `app/src/components/calendar/EventMark.tsx`
+is the shared vocabulary — filled flag for a Canvas deadline, filled pin for a
+note, outline checkbox for a task, dot for anything with duration — so a
+task's date never reads as a submission cutoff.
+
+## The week grid fits its hours and hides nothing
+
+In `app/src/components/calendar/WeekView.tsx`:
+
+- `hourRange` covers the timed events in view plus an hour either side, a
+  floor of 8am–6pm, and on the current week the current hour. An event past
+  midnight counts as ending at 24:00.
+- The split is exhaustive: a timed event is inside `hourRange` by
+  construction; an instant or all-day event sits on the grid when the hours
+  reach it and in a strip above it when they do not — never both. Instants are
+  kept out of `hourRange`, or one 11:59pm cutoff pins every week to midnight.
+- An instant's marker is centred on its minute and nudged back inside the grid
+  by at most half its height, never snapped to an hour. A zero-length `class`
+  is clamped the same way; a class with real length is shortened, not moved.
+- The strip is headed by its loudest layer ("Due", "Tasks" or "Notes").
+- A `24h` toggle opens the whole day and is remembered in `localStorage`.
+- Below `MIN_GRID_PX` the week scrolls sideways. One scroller carries both
+  axes with headers, strip and hour gutter sticky inside it, because `sticky`
+  resolves against the nearest scrollport.
+- Past hours carry a wash mixed from `muted-foreground`, finished events turn
+  `chart-other`, and today gets a time line — all from `useNow`.
+
+## Gotchas
+
+- Never add a date window to the Canvas fetch — the write deletes the subject's rows, so a window would erase everything outside it.
+- Never make `projects.event_id` a foreign key — the sync's delete-and-reinsert would cascade every pin to NULL even though the ids come back identical.
+- Never copy tasks into `local_events` — nothing cleans that table up.
+- `EventRow` takes `now` as a prop; a row calling `useNow()` puts a timer behind every line of Agenda and Home's Today list.
+- `MonthView` measures its chip capacity from the grid height; a constant clips the last chip with no "+N more".
+- The header's control group wraps rather than clipping under the page's `overflow-hidden`.
+- A wash mixed from `surface` is invisible — it is within a few percent of the background.
+- Times are stored as each source gives them (Canvas UTC ISO, Echo360 zone-less wall clock, task `due_at` in either ISO or SQLite format); read task times with `sqliteUtcToMs` in `app/src/lib/format.ts`, and never normalise on the way in.

@@ -258,7 +258,7 @@ pub trait Parser: Send + Sync {
 
 // ── Failure ──────────────────────────────────────────────────────────────────
 
-/// Why a parse did not happen. Nothing falls back (see CLAUDE.md), so the
+/// Why a parse did not happen. Nothing falls back (see `docs/parsing.md`), so the
 /// variants keep "wait", "retry" and "fix a setting" distinguishable.
 ///
 /// **No variant carries server response text**: MinerU's error bodies can hold

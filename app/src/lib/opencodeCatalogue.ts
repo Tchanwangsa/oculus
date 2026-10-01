@@ -2,8 +2,8 @@
  * Which opencode models a picker may offer. opencode lists models that will
  * not answer; every filter here is free to check — capability
  * (`unusableReason`), the Zen rule (`isZen`) and the student's hides — because
- * a settings page may never make a billed call (see CLAUDE.md, "Nothing in
- * Settings may spend money"). A stale key is left to fail once in the timeline.
+ * a settings page may never make a billed call (see docs/harness.md, "No
+ * model is ever probed"). A stale key is left to fail once in the timeline.
  *
  * Stored as one JSON value in `settings`; a module-level cache like
  * `useBridgeHealth`'s, since every picker reads it and only Settings writes it.

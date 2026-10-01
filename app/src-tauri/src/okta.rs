@@ -2,7 +2,7 @@
 //!
 //! Canvas authenticates through Okta Identity Engine at `sso.unimelb.edu.au`,
 //! whose widget is a thin client over a JSON state machine at `/idp/idx/*`. So
-//! the flow runs in Rust with no webview (see CLAUDE.md on hidden WebViews):
+//! the flow runs in Rust with no webview (see `docs/architecture.md`):
 //! introspect the login page's state token, answer each *remediation*, then
 //! replay the SAML app URL and POST the `SAMLResponse` to Canvas.
 //!

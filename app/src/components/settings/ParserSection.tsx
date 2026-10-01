@@ -52,7 +52,7 @@ interface LocalProbe {
  * Which MinerU reads the library's PDFs. Engine list and unavailable reasons
  * come from Rust. Switching destroys nothing (nothing is re-parsed), so unlike
  * the embedding engine there is no confirmation. No fallback between engines —
- * see CLAUDE.md: nothing catches a failed parse.
+ * see docs/parsing.md: nothing catches a failed parse.
  */
 export function ParserSection() {
   const [settings, setSettings] = useState<ParseSettings | null>(null);

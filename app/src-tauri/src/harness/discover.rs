@@ -203,7 +203,7 @@ pub fn oculus_cli() -> Option<PathBuf> {
         return search_path_env("oculus");
     }
     // Newest wins: its dir heads the thread's PATH (`child_env`), so a stale dev
-    // build would shadow the current CLI. See CLAUDE.md: Toolchain.
+    // build would shadow the current CLI. See `docs/development.md`.
     found.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
     let chosen = found.pop();
     if let Some(bin) = &chosen {

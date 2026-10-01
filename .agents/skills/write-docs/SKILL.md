@@ -1,57 +1,35 @@
 ---
 name: write-docs
-description: Update the Oculus docs under docs/ after changing code. Use whenever you add, move, rename, or delete a feature, module, page, store, endpoint, or workflow in app/, when a doc contradicts the code, or when asked to document how something works.
+description: Update the Oculus docs under docs/ after changing code. Use whenever you add, move, rename, replace or delete a feature, module, page, store, endpoint or workflow in app/, when a doc contradicts the code, or when asked to document how something works.
 ---
 
 # Keep the docs true
 
-Docs live in `docs/` as plain Markdown and ship in the **same change** as the
-code they describe. A commit that moves a feature and leaves its page stale
-is incomplete. Nothing enforces this automatically — it is on you.
+Docs describe the code **as it is now**, and ship in the same commit as the
+code they describe. They are a map for understanding the codebase, not an audit
+trail.
 
-Read `read-docs` first if you have not oriented yet.
+## Removing is half the job
 
-## What belongs here
+When a feature is removed, replaced, renamed or changes shape, find every
+mention and fix or delete it — not only the obvious page:
 
-These pages answer **"where does this live and how does it connect?"** — a
-new engineer's map, plus the measured facts that justify non-obvious
-decisions.
+```bash
+git grep -n -i "<name>\|<old path>\|<old identifier>" -- docs app/src app/src-tauri/src
+```
 
-Write:
-- Where a feature's UI, Rust commands, and schema live
-- How the processes connect, and which module owns which responsibility
-- Non-obvious constraints, gotchas, and why a shape is the way it is —
-  especially anything *measured* (benchmarks, timings) that a refactor could
-  silently undo
+- Delete the mention outright. Don't leave "X was removed", "no longer",
+  "used to", "replaced by", or a note that it might come back.
+- The only record of what was removed is the short "Don't re-add" list in the
+  root `CLAUDE.md`, and only when agents keep trying to re-add it.
+- Code comments that cite a doc section move with it.
 
-Do not write:
-- Line-by-line walkthroughs, function signatures, or copies of the code
-- Anything that changes every time someone touches a file
-- Conventions — those belong in the root `CLAUDE.md`
-
-If a fact is already obvious from reading one file, leave it out.
-
-## Editing a page
-
-1. Find the page via the map in `docs/index.md`.
-2. Most pages carry a `## Where` table mapping pieces to paths. Keep those
-   paths exact, current, and **repo-relative** (`app/src-tauri/src/sync.rs`,
-   not `src/sync.rs`) — `check-doc-drift` resolves every backticked path
-   against the filesystem, so citations are load-bearing.
-3. Every page needs a `## How it connects` section with facts that could not
-   be guessed from the file tree. A page that is only a `Where` table tells
-   the reader nothing `ls` wouldn't.
-4. Delete claims the change made false. Removing a stale paragraph is as
-   valuable as adding a new one.
-
-## Adding a page
-
-Create `docs/<topic>.md`:
+## Page shape
 
 ```md
-# Topic name
+# Topic
 
-What it is, in a line or two.
+One or two lines: what it is.
 
 ## Where
 
@@ -59,45 +37,47 @@ What it is, in a line or two.
 | --- | --- |
 | Thing | `app/src/...` |
 
-## How it connects
+## <A heading that states a claim>
 
-- At least one fact you had to open a file to learn.
+Short paragraphs, bullets for unordered sets, numbered lists for flows.
+
+## Gotchas
+
+- One line each: the rule, and what breaks if you ignore it.
 ```
 
-Then add a row to the table in `docs/index.md`, and — if agents should be
-routed there for a class of task — a row to the doc maps in `CLAUDE.md` and
-`.agents/skills/read-docs/SKILL.md`.
+- **Headings are claims** ("Parses are never retried on the other engine"),
+  not categories. No "How it connects", "Notes" or "Details".
+- **Gotchas are one-liners** at the bottom. If a gotcha needs a paragraph, the
+  paragraph belongs in the section it concerns and the gotcha points there.
+- **Aim for 100–250 lines per page.** Past that, cut before you split.
 
-### The "How it connects" rule
+## What to write
 
-`Where` says what exists. `How it connects` says what a reader would get
-wrong. Good bullets look like:
+Write what a reader would get wrong from the code alone: which module owns a
+decision, ordering that must not change, a guard that looks removable and
+isn't, a measured fact behind a design choice (as one line — the number and
+the choice it justifies).
 
-- *"In the app the frontend writes the scrape tables; the CLI writes the same
-  rows via `store.rs` — change a table and both writers move together."*
-- *"`.pages.json` is only written when a parse finishes, so an interrupted
-  parse never reads as done."*
-- *"Averaging image and text vectors scored worse than image alone — don't
-  hybridize at the vector level."*
+Don't write:
+- History: how it got here, incidents, earlier versions, dates, "measured once
+  at…". That goes in the commit message.
+- Anything obvious from reading the one file it describes.
+- Walkthroughs, signatures, copies of code, or the same fact on two pages —
+  state it once and link.
 
-Reach for: which layer owns a decision, ordering that must not change, a
-constant two processes depend on, a pin or guard that looks removable and
-isn't, something named misleadingly, and cross-links to the page on the
-other side of the boundary.
+## Citations
 
-## Style
-
-- Plain GitHub Markdown only — no MDX, no frontmatter, no components.
-- Links between docs are relative with the `.md` extension
-  (`./retrieval.md`).
-- Paths and identifiers in backticks; keep paths specific enough to be real
-  claims (the drift checker skips globs and `<placeholders>`).
+- Paths in backticks, repo-relative (`app/src-tauri/src/sync.rs`) —
+  `check-doc-drift` resolves every one.
+- Links between pages are relative with `.md` (`./retrieval.md#anchor`).
+- Add a new page to the table in `docs/index.md`.
 
 ## Verify
-
-There is no build. Verify by running the drift scan — the page you just
-edited must not report BROKEN citations:
 
 ```bash
 node .agents/skills/check-doc-drift/check-drift.mjs
 ```
+
+It must report no broken paths or links on the pages you touched, and no
+history phrasing.

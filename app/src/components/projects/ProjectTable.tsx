@@ -170,7 +170,7 @@ function TaskRow({
           onPointerDown={onGrab}
           className={cn(
             "absolute inset-0 flex items-center text-muted-foreground/70 transition-opacity",
-            // Not preventDefault on press — see CLAUDE.md (WebKit click).
+            // Not preventDefault on press — see docs/frontend.md (WebKit click).
             DRAG_SURFACE,
             // Set here, not via `:active`: the grip holds pointer capture, so
             // its cursor shows for the whole gesture.

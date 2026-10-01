@@ -641,7 +641,7 @@ function copyAsMarkdown(e: React.ClipboardEvent) {
   e.preventDefault();
 }
 
-/** The same, dragged out. No `preventDefault` — see CLAUDE.md (WebKit drag). */
+/** The same, dragged out. No `preventDefault` — see docs/frontend.md (WebKit drag). */
 function dragAsMarkdown(e: React.DragEvent) {
   const md = markdownFor(e.target);
   if (md) e.dataTransfer.setData("text/plain", md);

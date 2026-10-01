@@ -731,7 +731,7 @@ function runLabel(progress: IndexProgress): string {
 
 /**
  * Start, watch and stop an index run. Names the current file so a slow run
- * shows it is alive (see CLAUDE.md: a parse or an embed blocks for minutes).
+ * shows it is alive (see docs/retrieval.md: an embed blocks for minutes).
  */
 function IndexRunRow({
   outstanding,
