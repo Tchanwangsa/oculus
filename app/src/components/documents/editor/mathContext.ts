@@ -1,6 +1,6 @@
-import { syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import type { SyntaxNode } from "@lezer/common";
+import { ancestorAt } from "./syntax";
 
 /** The maths around a position: its span, its LaTeX between the delimiters,
  *  and whether it is a display block. */
@@ -23,19 +23,14 @@ const CODE = new Set(["InlineCode", "FencedCode", "CodeBlock"]);
 /** The `InlineMath` or `BlockMath` whose LaTeX holds `pos`, edges included;
  *  null on or outside the delimiters. */
 export function mathAt(state: EditorState, pos: number): MathContext | null {
-  const tree = syntaxTree(state);
-  for (const side of [-1, 1] as const) {
-    for (let n: SyntaxNode | null = tree.resolveInner(pos, side); n; n = n.parent) {
-      if (n.name !== "InlineMath" && n.name !== "BlockMath") continue;
-      const marks = n.getChildren("MathMark");
-      if (marks.length < 2) return null;
-      const from = marks[0].to;
-      const to = marks[marks.length - 1].from;
-      if (pos < from || pos > to) return null;
-      return { node: n, start: n.from, end: n.to, from, to, display: n.name === "BlockMath" };
-    }
-  }
-  return emptyPair(state, pos);
+  const node = ancestorAt(state, pos, (n) => n.name === "InlineMath" || n.name === "BlockMath", [-1, 1]);
+  if (!node) return emptyPair(state, pos);
+  const marks = node.getChildren("MathMark");
+  if (marks.length < 2) return null;
+  const from = marks[0].to;
+  const to = marks[marks.length - 1].from;
+  if (pos < from || pos > to) return null;
+  return { node, start: node.from, end: node.to, from, to, display: node.name === "BlockMath" };
 }
 
 /** The caret between a lone `$$` pair — what Σ inserts mid-line — counts as
@@ -45,8 +40,6 @@ function emptyPair(state: EditorState, pos: number): MathContext | null {
   const at = (i: number) => (i >= 0 && i < doc.length ? doc.sliceString(i, i + 1).charCodeAt(0) : -1);
   if (at(pos - 1) !== DOLLAR || at(pos) !== DOLLAR) return null;
   if (at(pos - 2) === DOLLAR || at(pos - 2) === BACKSLASH || at(pos + 1) === DOLLAR) return null;
-  for (let n: SyntaxNode | null = syntaxTree(state).resolveInner(pos, 1); n; n = n.parent) {
-    if (CODE.has(n.name)) return null;
-  }
+  if (ancestorAt(state, pos, (node) => CODE.has(node.name), [1])) return null;
   return { node: null, start: pos - 1, end: pos + 1, from: pos, to: pos, display: false };
 }

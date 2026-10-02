@@ -3,7 +3,7 @@ import { browseId, browsePath, browser, openExternal } from "@/lib/browser";
 import { ownsPlayback, stopLecturePlayback } from "@/lib/lecturePlayback";
 import { confirmLeavingLecture } from "@/stores/leaveLectureStore";
 import { closeActivePanel } from "@/stores/sidePanelStore";
-import { activeTab, focusedPane, useTabStore } from "@/stores/tabStore";
+import { activeTab, activePane, focusedPane, useTabStore } from "@/stores/tabStore";
 
 /**
  * Every pane's memory router (`app/src/components/tabs/TabPane.tsx`), so the
@@ -71,10 +71,8 @@ export function navigateActive(path: string): void {
  *  Rust). Only the **page's** player prompts: an arrow leaves the side panel,
  *  and so a peek's lecture, open. */
 export function goInActiveTab(delta: 1 | -1): void {
-  const { tabs, activeId } = useTabStore.getState();
-  const tab = tabs.find((t) => t.id === activeId);
-  if (!tab) return;
-  const pane = focusedPane(tab);
+  const pane = activePane();
+  if (!pane) return;
   const go = () => routers.get(pane.id)?.navigate(delta);
   if (ownsPlayback(pane.id, "page")) {
     confirmLeavingLecture(() => {

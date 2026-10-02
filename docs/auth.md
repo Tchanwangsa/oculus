@@ -19,6 +19,7 @@ cookie.
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
 | Frontend auth state | `app/src/hooks/useAuth.ts`, `app/src/hooks/useKeepalive.ts` |
 | Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
+| Keychain entry lifecycle (also used by MinerU and Voyage) | `app/src-tauri/src/credentials.rs` |
 | Credential entry UI | `app/src/components/settings/AutoSignIn.tsx` |
 
 ## Canvas authenticates by session cookie only

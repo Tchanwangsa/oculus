@@ -42,11 +42,7 @@ pub fn is_valid_rule(rule: &str) -> bool {
 
 /// The student's approvals; a row that does not parse is none.
 pub async fn stored(pool: &sqlx::SqlitePool) -> Result<Vec<String>, String> {
-    let raw: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?1")
-        .bind(SETTINGS_KEY)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    let raw = crate::store::setting(pool, SETTINGS_KEY).await?;
     Ok(raw
         .and_then(|r| serde_json::from_str::<Vec<String>>(&r).ok())
         .unwrap_or_default()
@@ -57,16 +53,7 @@ pub async fn stored(pool: &sqlx::SqlitePool) -> Result<Vec<String>, String> {
 
 pub async fn save(pool: &sqlx::SqlitePool, rules: &[String]) -> Result<(), String> {
     let value = serde_json::to_string(rules).map_err(|e| e.to_string())?;
-    sqlx::query(
-        "INSERT INTO settings (key, value) VALUES (?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    )
-    .bind(SETTINGS_KEY)
-    .bind(value)
-    .execute(pool)
-    .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    crate::store::set_setting(pool, SETTINGS_KEY, &value).await
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

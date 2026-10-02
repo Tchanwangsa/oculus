@@ -17,6 +17,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Paths no agent may write; opencode's ruleset; agy's rules | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/antigravity_rules.rs` |
 | Finding, installing and signing in the CLIs | `app/src-tauri/src/harness/discover.rs`, `app/src-tauri/src/harness/install.rs`, `app/src-tauri/src/harness/signin.rs` |
 | …their frontend | `app/src/hooks/useBridgeHealth.ts`, `app/src/hooks/useSignInStatus.ts`, `app/src/components/settings/InstallAgentDialog.tsx`, `app/src/components/harness/SignInDialog.tsx` |
+| Process pipes, JSON lines and terminal turn failures shared by the bridges | `app/src-tauri/src/harness/child.rs` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store.rs` |
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents.rs` |
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
@@ -29,6 +30,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db.ts`, `app/src/pages/settings/AiPage.tsx` |
 | One-off turns (`Harness::one_off`): thread names, the editor's inline suggestions (`document_suggest`) | `app/src-tauri/src/harness/mod.rs`, `app/src-tauri/src/harness/suggest.rs` |
 | `@` menu and mention input | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
+| Send, queue and stop controls shared by both composers | `app/src/components/harness/SendControls.tsx` |
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/useAttachments.ts`, `app/src/hooks/useFileDrop.ts` |
 | Library paths in rows and prose; copy as markdown | `app/src/lib/openFile.ts`, `app/src/lib/selectionMarkdown.ts` |
 | The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/chapters.rs` |
@@ -52,6 +54,9 @@ persisted the same way. `classify` in `event.rs` is the one tool table.
   writes every event to `harness_threads`/`harness_items`, then emits
   `harness-event` with the row id — a tool's finish never overtakes its start,
   and a reload loses nothing.
+- **Settings storage is shared.** Job selections, rate limits and Antigravity
+  approvals use `store::setting` / `store::set_setting`; each caller owns its
+  JSON shape and fallback policy.
 - **Account events have no thread.** Codex's `account/rateLimits/updated` is
   dispatched before the route lookup (`translate_account`) on thread 0, which
   is why `harness-event` carries the provider.
@@ -148,7 +153,8 @@ CLI puts the skill index in every turn, headless jobs included.
 
 A Dock-launched app has launchd's PATH, so `discover.rs` tries
 `OCULUS_{CLAUDE,CODEX,OPENCODE,ANTIGRAVITY}_BIN`, PATH, `well_known_dirs`, then
-a login shell. Answers and the `--version` health probe are cached, failures
+a login shell. Provider and installer-tool discovery share that executable lookup order.
+Answers and the `--version` health probe are cached, failures
 included (every picker asks); `harness_health`'s `recheck` drops both.
 
 **Install** runs a literal vendor command (shown with Copy) only for routes
@@ -174,6 +180,11 @@ the store per delta; stick-to-bottom (`useStickToBottom`) is a
 deltas from 402 commits / 6.2s of render to 34 / 55ms. `items` is keyed by
 thread, so each Chat tab and the lecture dock hold their own.
 
+- **Metadata is parsed once per row object** in `app/src/lib/harness.ts`,
+  shared by tool, error, permission and lecture-moment readers. `parseItemMeta`
+  caches JSON by the immutable row object; a tool update replaces that object
+  and gets a fresh parse. Malformed or non-object metadata draws an ordinary
+  row with no permission action; unknown tool kinds have no icon.
 - **A row decides what truncates** (`RowShell` in `WorkRow.tsx`) — it draws at
   760px and in the dock's 300px. Both scrollers carry `overflow-x-hidden`:
   `overflow-y: auto` makes x `auto` too, and one wide row slides the thread.
@@ -384,6 +395,10 @@ on a range over the `@` token, since a collapsed range's rect can be zeros in
 WebKit.
 
 ## Attachments are files in `agents/attachments/`
+
+The page and lecture dock share `SendControls` for send/queue/stop controls
+and `useAttachments.prepare` for message assembly. Preparation writes pictures
+before clearing the composer; a failed write keeps the draft and attachments.
 
 A CLI reads files, so a picture becomes one — in `agents/`, the one folder
 every CLI reads and writes. `harness_attach_image` (clipboard bytes) and

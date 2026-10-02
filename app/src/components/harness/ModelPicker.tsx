@@ -4,25 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProviderMark } from "@/components/harness/ProviderMark";
-import type { ProviderHealth } from "@/hooks/useBridgeHealth";
-import { reasoningLabel, type HarnessModel, type Provider } from "@/lib/harness";
+import { reasoningLabel, type PickerProvider, type Provider } from "@/lib/harness";
 import { navigateActive } from "@/lib/tabRouters";
 import { cn } from "@/lib/utils";
 
 /** Above this many models the menu grows a search box. */
 const SEARCH_THRESHOLD = 8;
 
-export interface PickerProvider {
-  id: Provider;
-  label: string;
-  models: HarnessModel[];
-  loading?: boolean;
-  /** Absent reads as `unknown` (`app/src/hooks/useBridgeHealth.ts`). */
-  health?: ProviderHealth;
-  /** Shown instead of "No models available" — `ProviderInfo.emptyNote` in
-   *  `app/src/lib/harness.ts`. A field, so the gate never tests a provider id. */
-  emptyNote?: string;
-}
+export type { PickerProvider } from "@/lib/harness";
 
 /**
  * The composer's model-and-reasoning switcher (after bb's

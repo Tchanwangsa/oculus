@@ -119,24 +119,20 @@ fn attachment_ref(name: &str) -> String {
 #[tauri::command]
 pub async fn harness_attach_image(data: String) -> Result<String, String> {
     let bytes = decode(&data)?;
-    tokio::task::spawn_blocking(move || {
+    crate::blocking::run(move || {
         let dir = attachments_dir(&crate::paths::data_dir());
         write_image(&dir, &bytes).map(|name| attachment_ref(&name))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    }).await
 }
 
 /// A picture dropped onto the composer from Finder, by path.
 #[tauri::command]
 pub async fn harness_attach_file(path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+    crate::blocking::run(move || {
         let bytes = read_dropped(&path)?;
         let dir = attachments_dir(&crate::paths::data_dir());
         write_image(&dir, &bytes).map(|name| attachment_ref(&name))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    }).await
 }
 
 #[cfg(test)]

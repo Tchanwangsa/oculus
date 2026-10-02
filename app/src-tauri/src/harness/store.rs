@@ -461,16 +461,7 @@ pub async fn save_rate_limits(pool: &SqlitePool, provider: Provider, ev: &Harnes
     };
     let key = format!("harness_rate_limits_{}", provider.as_str());
     let value = serde_json::to_string(windows).map_err(|e| e.to_string())?;
-    sqlx::query(
-        "INSERT INTO settings (key, value) VALUES (?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    )
-    .bind(key)
-    .bind(value)
-    .execute(pool)
-    .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
+    crate::store::set_setting(pool, &key, &value).await
 }
 
 /// Threads left `running` by a crash or a quit mid-turn. Called at startup;

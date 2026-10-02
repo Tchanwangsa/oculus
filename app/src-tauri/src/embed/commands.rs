@@ -13,7 +13,7 @@ use super::estimate::EmbedEstimate;
 use super::voyage::ledger::{self, UsageLedger};
 use super::{Engine, EMBED_DIM, EMBED_MODEL};
 use crate::retrieval::IndexStats;
-use crate::store::{db_path, pool};
+use crate::store::{db_path, edit_setting, pool};
 
 /// The `settings` row this module writes and `embed::embed_config` reads.
 const SETTINGS_KEY: &str = "embed";
@@ -197,11 +197,10 @@ pub fn embed_blocked() -> Option<String> {
 pub async fn embed_estimate() -> Result<EmbedEstimate, String> {
     let database = db_path();
     let base = crate::paths::data_dir();
-    tauri::async_runtime::spawn_blocking(move || {
+    crate::blocking::run(move || {
         tauri::async_runtime::block_on(super::estimate::estimate(&database, &base))
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 // ── Changing it ──────────────────────────────────────────────────────────────
@@ -295,32 +294,11 @@ async fn embeddable_paths(db: &sqlx::SqlitePool) -> Result<Vec<String>, String> 
 /// Write the engine into the `embed` row, editing the shared JSON blob in
 /// place. `engineUrl` is dropped: it pointed at the old engine.
 async fn write_engine(db: &sqlx::SqlitePool, engine: Engine) -> Result<(), String> {
-    let stored = sqlx::query("SELECT value FROM settings WHERE key = ?1")
-        .bind(SETTINGS_KEY)
-        .fetch_optional(db)
-        .await
-        .map_err(|e| e.to_string())?
-        .map(|row| row.get::<String, _>("value"));
-
-    let mut value = stored
-        .as_deref()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-        .filter(|v| v.is_object())
-        .unwrap_or_else(|| serde_json::json!({}));
-    let object = value.as_object_mut().ok_or("embed settings are not an object")?;
-    object.insert("engine".into(), serde_json::Value::String(engine.as_str().into()));
-    object.remove("engineUrl");
-
-    sqlx::query(
-        "INSERT INTO settings (key, value) VALUES (?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    )
-    .bind(SETTINGS_KEY)
-    .bind(serde_json::to_string(&value).map_err(|e| e.to_string())?)
-    .execute(db)
+    edit_setting(db, SETTINGS_KEY, |object| {
+        object.insert("engine".into(), serde_json::Value::String(engine.as_str().into()));
+        object.remove("engineUrl");
+    })
     .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

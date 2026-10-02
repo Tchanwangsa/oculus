@@ -1,3 +1,4 @@
+import { useStoredState } from "@/hooks/useStoredState";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type {
@@ -97,11 +98,11 @@ export function PDFViewer({ src }: Props) {
   const [page, setPage] = useState(1);
   /** Absolute scale, straight off pdf.js. 1 is actual size. */
   const [scale, setScale] = useState(1);
-  const [mode, setMode] = useState<LayoutMode>(
-    () => (localStorage.getItem(MODE_KEY) as LayoutMode) || "scroll",
+  const [mode, setMode] = useStoredState<LayoutMode>(MODE_KEY, (stored) =>
+    (stored as LayoutMode) || "scroll",
   );
-  const [tool, setTool] = useState<Tool>(
-    () => (localStorage.getItem(TOOL_KEY) as Tool) || "select",
+  const [tool, setTool] = useStoredState<Tool>(TOOL_KEY, (stored) =>
+    (stored as Tool) || "select",
   );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -117,13 +118,6 @@ export function PDFViewer({ src }: Props) {
   /** Bumped when the engine is live, to re-run the effects that need it. */
   const [engineReady, setEngineReady] = useState(0);
 
-  useEffect(() => {
-    localStorage.setItem(MODE_KEY, mode);
-  }, [mode]);
-
-  useEffect(() => {
-    localStorage.setItem(TOOL_KEY, tool);
-  }, [tool]);
 
   // ── The viewer itself ────────────────────────────────────────────────────
 

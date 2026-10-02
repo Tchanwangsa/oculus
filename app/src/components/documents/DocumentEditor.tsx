@@ -437,6 +437,11 @@ export function DocumentEditor({
     }
     try {
       await flush();
+      // A failed save keeps its error status and must not move the unsaved note.
+      if (draft.current !== saved.current) {
+        setTitle(current);
+        return;
+      }
       const path = await renameDocument(fileRef.current, next);
       // Until the row reloads, saves must go to the new path.
       fileRef.current = {

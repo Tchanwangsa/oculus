@@ -1,40 +1,11 @@
-#!/usr/bin/env node
-// Everything `tauri dev` needs on disk before the app comes up.
-//
-// Named for bun's lifecycle, not by coincidence: `bun run dev` runs `predev`
-// first, and `bun run dev` is what `beforeDevCommand` calls — so the preflight
-// is not a step anyone can forget to add to the chain. `OCULUS_CLI_WATCH=1`
-// (set in beforeDevCommand) also leaves the CLI watcher running behind it;
-// `OCULUS_SKIP_PREDEV=1` skips the whole thing for a vite-only session.
-//
-// **The step that earns this script is the `oculus` CLI.** It is a second
-// binary in the same crate, and nothing in the dev path ever built it:
-// `tauri dev` issues a bare `cargo run`, which builds `app` and no other bin
-// target, and `bun run cli` builds the *release* one by hand. So
-// `target/debug/oculus` sat at whatever the CLI looked like the last time
-// somebody ran `cargo test` — measured, ten days and several subcommands
-// stale — while being the sibling of the running app and therefore the first
-// `oculus` on a coding agent's PATH (`child_env` in
-// src-tauri/src/harness/discover.rs). The agent called `oculus project create`
-// and got `unrecognized subcommand`, from a binary that looked entirely
-// legitimate. Building it here costs ~25s after a Rust change and ~3s when
-// nothing moved, because the library it links is the one the app build is
-// about to compile anyway.
-//
-// Debug, not release, is deliberate: the dev app runs out of `target/debug`,
-// so this is the profile whose artifacts are already warm. A release CLI in
-// front of every dev start would be a minute of optimising a binary the dev
-// session does not use.
-
+// Dev preflight: dependencies, native binaries, debug CLI and generated docs.
+// OCULUS_CLI_WATCH=1 also starts the CLI watcher; OCULUS_SKIP_PREDEV skips it.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, rmSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { app, buildCli, cliPath } from "./runtime.mjs";
 
-const app = dirname(dirname(fileURLToPath(import.meta.url)));
-const manifest = join(app, "src-tauri", "Cargo.toml");
-const exe = process.platform === "win32" ? ".exe" : "";
-const cli = join(app, "src-tauri", "target", "debug", `oculus${exe}`);
+const cli = cliPath("debug");
 
 const watch = process.argv.includes("--watch") || process.env.OCULUS_CLI_WATCH === "1";
 const log = (msg) => console.log(`[predev] ${msg}`);
@@ -66,25 +37,13 @@ for (const script of ["fetch-ffmpeg.mjs", "fetch-pdfium.mjs"]) {
   execFileSync(process.execPath, [join(app, "scripts", script)], { cwd: app, stdio: "inherit" });
 }
 
-// 3. The CLI. The `rm` is not superstition: cargo reports "Finished" and
-//    leaves the previous binary in place when it decides the uplift from
-//    target/debug/deps is unnecessary, which is the exact failure this script
-//    exists to prevent.
 const started = Date.now();
-rmSync(cli, { force: true });
 try {
-  execFileSync("cargo", ["build", "--manifest-path", manifest, "--bin", "oculus"], {
-    stdio: "inherit",
-  });
-} catch {
-  console.error("[predev] the oculus CLI did not build — fix the error above");
+  buildCli("debug");
+} catch (e) {
+  console.error(`[predev] the oculus CLI did not build: ${e.message}`);
   process.exit(1);
 }
-if (!existsSync(cli)) {
-  console.error(`[predev] cargo reported success but ${cli} is not there`);
-  process.exit(1);
-}
-
 
 // A binary that builds but cannot answer `--version` is a linker problem
 // (pdfium, sqlite) that would otherwise surface as a silent tool failure
@@ -98,10 +57,7 @@ try {
 }
 log(`${version} built in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 
-// 4. The generated reference, from the binary that was just built. It rewrites
-//    docs/cli-reference.md only when the help actually changed, so a clean tree
-//    stays clean — and when it does change, the doc and the code it describes
-//    are dirty in the same commit, which is the rule in the root CLAUDE.md.
+// Regenerate the reference from this build, writing only changed help.
 try {
   execFileSync(process.execPath, [join(app, "scripts", "gen-cli-docs.mjs")], {
     cwd: app,
@@ -112,26 +68,15 @@ try {
   log("could not regenerate docs/cli-reference.md — carrying on");
 }
 
-// 5. The library's own copy of all of that. The templates an agent actually
-//    reads — AGENTS.md, the skills, TASTE.md's guidance, OCULUS-CLI.md — live
-//    in the data directory, not in this repo, and they only get there when
-//    something runs `oculus docs`. Until this step existed that was a sync or
-//    a `cli:install`, so editing a template and starting the app left every
-//    thread reading the previous wording, with nothing on screen to say so.
-//    The brief compiled into the app (HARNESS.template.md) comes up with the
-//    app itself; this is everything that does not.
-//
-//    Non-fatal on purpose: a machine where the app has never run has no data
-//    directory to fill, and that is not a reason to refuse to start.
+// Refresh the library's agent docs. A fresh machine has no data directory,
+// so failure here must not prevent the app from starting.
 try {
   execFileSync(cli, ["docs"], { stdio: "inherit" });
 } catch {
   log("could not refresh the library's agent docs — carrying on");
 }
 
-// 6. The session watcher. `tauri dev` rebuilds and relaunches the app on a
-//    Rust change but never re-runs this hook, so without it the CLI is only as
-//    fresh as the moment the session started.
+// Keep the CLI current because tauri dev does not re-run this preflight.
 if (watch) {
   const child = spawn(process.execPath, [join(app, "scripts", "watch-cli.mjs")], {
     cwd: app,

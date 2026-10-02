@@ -119,6 +119,7 @@ export default function SubjectFilePage() {
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {isDocument ? (
           <DocumentEditor
+            key={file.id}
             file={file}
             files={files}
             mode={mode}

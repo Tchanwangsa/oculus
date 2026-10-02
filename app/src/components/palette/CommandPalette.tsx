@@ -18,6 +18,7 @@ import {
   filterPlaceholder,
   filterToken,
   openSearchItem,
+  matchesFilterDraft,
   resolveFilter,
   withFilter,
   type FilterDraft,
@@ -113,6 +114,8 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
 
   function pick(item: SearchItem, newTab: boolean) {
     const { target } = item;
+    // A debounced list may still belong to the preceding draft key.
+    if (!matchesFilterDraft(draft, target.kind === "filter" ? target.filter : null)) return;
     // Filter rows edit the field and keep the palette open; ⌘ changes nothing.
     if (target.kind === "filter-key") {
       setDraft({ key: target.key, value: "" });
@@ -122,9 +125,6 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       addFilter(target.filter);
       return;
     }
-    // Under a draft only its values are live; anything else is a list the
-    // debounce has not replaced yet.
-    if (draft) return;
     onClose();
     openSearchItem(item, {
       newTab,

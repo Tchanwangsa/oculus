@@ -7,6 +7,7 @@ import {
   pendingFromPath,
   releaseAttachment,
   writeAttachment,
+  withAttachments,
   type PendingAttachment,
 } from "@/lib/attachments";
 
@@ -16,15 +17,13 @@ const NOT_A_PICTURE = "Only images can be attached — use @ for a course file."
 export interface Attachments {
   items: PendingAttachment[];
   error: string | null;
-  setError: (e: string | null) => void;
   writing: boolean;
   dropping: boolean;
   /** From a paste. */
   attach: (files: File[]) => void;
   detach: (id: string) => void;
-  /** Write everything pending and answer the paths; `null` if a write failed
-   *  (the error is set and the caller must keep the box as it was). */
-  flush: () => Promise<string[] | null>;
+  /** Prepare a trimmed message and its attachments; null keeps the editor intact. */
+  prepare: (text: string) => Promise<string | null>;
 }
 
 /** Pictures on their way into a message, for every composer: pasted or
@@ -78,9 +77,11 @@ export function useAttachments(
   itemsRef.current = items;
   useEffect(() => () => itemsRef.current.forEach(releaseAttachment), []);
 
-  async function flush(): Promise<string[] | null> {
+  async function prepare(text: string): Promise<string | null> {
+    const trimmed = text.trim();
     const pictures = itemsRef.current;
-    if (!pictures.length) return [];
+    if ((!trimmed && !pictures.length) || writing) return null;
+    if (!pictures.length) return trimmed;
     setWriting(true);
     let paths: string[];
     try {
@@ -94,8 +95,8 @@ export function useAttachments(
     pictures.forEach(releaseAttachment);
     setItems([]);
     setError(null);
-    return paths;
+    return withAttachments(trimmed, paths);
   }
 
-  return { items, error, setError, writing, dropping, attach, detach, flush };
+  return { items, error, writing, dropping, attach, detach, prepare };
 }

@@ -137,7 +137,10 @@ impl CodexServer {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();
         self.pending.lock().unwrap().insert(id, tx);
-        self.proc.write_line(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
+        if let Err(error) = self.proc.write_line(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })) {
+            self.pending.lock().unwrap().remove(&id);
+            return Err(error);
+        }
         match rx.recv_timeout(REQUEST_TIMEOUT) {
             Ok(r) => r,
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -780,6 +783,32 @@ fn ensure_open(out: &mut Vec<HarnessEvent>, st: &mut ThreadState, id: &str, name
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_request_write_does_not_leave_a_pending_reply() {
+        use std::io::{BufRead, BufReader};
+
+        // Close stdin but keep the process alive, so the request exercises a
+        // broken pipe rather than the early "server is not running" check.
+        let mut command = Command::new("sh");
+        command.args(["-c", "exec 0<&-; printf 'ready\\n'; exec sleep 10"]);
+        let (proc, stdout) = ChildProc::spawn("codex", &mut command, true).unwrap();
+        let mut ready = String::new();
+        BufReader::new(stdout).read_line(&mut ready).unwrap();
+        assert_eq!(ready.trim(), "ready");
+        let server = CodexServer {
+            proc,
+            next_id: AtomicI64::new(1),
+            pending: Mutex::new(HashMap::new()),
+            routes: Mutex::new(HashMap::new()),
+            account_sink: None,
+        };
+        let result = server.request("test", Value::Null);
+        server.proc.kill();
+        assert!(matches!(result, Err(error) if error.starts_with("codex stdin:")));
+        assert!(server.pending.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn a_thread_may_write_the_database_and_nothing_else_outside_its_cwd() {

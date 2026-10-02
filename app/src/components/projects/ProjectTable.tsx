@@ -1,19 +1,17 @@
 import { useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Link } from "react-router-dom";
-import { CaretRight, DotsSixVertical, Plus } from "@phosphor-icons/react";
+import { DotsSixVertical, Plus } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { usePagedRows } from "@/components/ui/TablePagination";
 import { GridTable, HeaderLabels } from "@/components/ui/GridTable";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DRAG_SURFACE, useCardDrag, useSettledList } from "@/hooks/useCardDrag";
-import { displayCode } from "@/lib/format";
 import type { DbProject, DbProjectTask } from "@/lib/projects";
 import { InlineAdd } from "./InlineAdd";
 import { StatusPill } from "./StatusPill";
 import { taskHref } from "./taskHref";
-import { AgentMark, DueChip, SubtaskProgressBar, TaskGlyph } from "./TaskMarks";
+import { AgentMark, DueChip, SubtaskProgressBar, SubtaskToggle, TaskGlyph, TaskSubject } from "./TaskMarks";
 import {
   appendSlot,
   columnOf,
@@ -55,18 +53,6 @@ function slotIn<T>(rest: T[], slot: number, idOf: (item: T) => number) {
     before: slot > 0 ? idOf(rest[slot - 1]) : null,
     after: slot < rest.length ? idOf(rest[slot]) : null,
   };
-}
-
-function SubjectCell({ project }: { project: DbProject }) {
-  if (!project.subject_code) {
-    return <span className="text-[11px] text-muted-foreground/60">Personal</span>;
-  }
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2 py-0.5 text-[11px] text-foreground">
-      <SubjectIcon code={project.subject_code} size={11} />
-      <span className="truncate">{displayCode(project.subject_code)}</span>
-    </span>
-  );
 }
 
 /** Disabled on a subtask: `createTask` refuses a grandchild. */
@@ -184,22 +170,7 @@ function TaskRow({
       </div>
 
       <div className={cn("flex min-w-0 items-center gap-1.5", depth === 1 && "pl-5")}>
-        {expandable ? (
-          <button
-            type="button"
-            aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
-            aria-expanded={expanded}
-            onClick={onToggle}
-            className="shrink-0 cursor-pointer p-0.5 text-muted-foreground/50 transition-colors hover:text-foreground"
-          >
-            <CaretRight
-              size={9}
-              className={cn("transition-transform", expanded && "rotate-90")}
-            />
-          </button>
-        ) : (
-          <span aria-hidden className="w-[13px] shrink-0" />
-        )}
+        <SubtaskToggle expandable={expandable} expanded={expanded} onToggle={onToggle} />
 
         <TaskGlyph kind={columnOf(project, task.column_id)?.kind ?? null} size={depth ? 11 : 13} />
         {/* Title-only link: a whole-row link would swallow the other controls. */}
@@ -217,7 +188,7 @@ function TaskRow({
         <AddSubtaskButton disabled={onAddSubtask == null} onClick={() => onAddSubtask?.()} />
       </div>
 
-      <SubjectCell project={project} />
+      <TaskSubject code={project.subject_code} />
 
       <StatusPill project={project} columnId={task.column_id} onPick={onMove} />
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   ChatCircle,
   ChatsCircle,
@@ -6,14 +6,14 @@ import {
   Circle,
   Megaphone,
 } from "@phosphor-icons/react";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SubjectLoading, SubjectPage, SubjectEmpty } from "@/components/subjects/SubjectPage";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { fmtShortDate, humanizeSlug } from "@/lib/format";
 import type { DbFile } from "@/lib/db";
-import { readCourseFile } from "@/lib/courseFiles";
+import { useCourseFileData } from "@/hooks/useCourseFileData";
 import { ListCard } from "@/components/ui/PageParts";
 
 /** Header metadata parsed from a scraped thread doc (see ed.rs). */
@@ -62,27 +62,8 @@ function parseThreadMeta(md: string): ThreadMeta {
   };
 }
 
-/** file.id -> parsed header meta; empty until the docs load. */
-function useThreadMetas(files: DbFile[]): Record<number, ThreadMeta> {
-  const [metas, setMetas] = useState<Record<number, ThreadMeta>>({});
-
-  useEffect(() => {
-    if (files.length === 0) return;
-    let cancelled = false;
-    Promise.all(
-      files.map(async (f) => {
-        const md = await readCourseFile(f.relative_path).catch(() => "");
-        return [f.id, parseThreadMeta(md)] as const;
-      }),
-    ).then((entries) => {
-      if (!cancelled) setMetas(Object.fromEntries(entries));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [files]);
-
-  return metas;
+function parseThreadEntry(md: string, file: DbFile) {
+  return [file.id, parseThreadMeta(md)] as const;
 }
 
 /**
@@ -100,85 +81,74 @@ export default function SubjectDiscussionPage() {
       [...byCategory.ed].sort((a, b) => b.filename.localeCompare(a.filename)),
     [byCategory.ed],
   );
-  const metas = useThreadMetas(threads);
+  const entries = useCourseFileData(threads, loading, parseThreadEntry);
+  const metas = useMemo(() => Object.fromEntries(entries ?? []), [entries]);
 
   if (loading && threads.length === 0) {
-    return (
-      <div className="page-scroll">
-        <div className="mx-auto max-w-5xl px-6 py-6 space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-8 w-full" />
-          ))}
-        </div>
-      </div>
-    );
+    return <SubjectLoading count={5} />;
   }
 
   if (threads.length === 0) {
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-2">
-        <ChatsCircle size={24} className="text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">No Ed threads scraped.</p>
+      <SubjectEmpty icon={<ChatsCircle size={24} className="text-muted-foreground/40" />} title="No Ed threads scraped.">
         <p className="text-xs text-muted-foreground/70 max-w-sm text-center">
           Run a sync — Ed connects automatically through your Canvas session
           when the subject has an Ed Discussion board.
         </p>
-      </div>
+      </SubjectEmpty>
     );
   }
 
   return (
-    <div className="page-scroll">
-      <div className="mx-auto max-w-5xl px-6 py-5">
-        <ListCard>
-          {threads.map((f) => {
-            const number = /^(\d+)-/.exec(f.filename)?.[1];
-            const meta = metas[f.id];
-            return (
-              <button
-                key={f.id}
-                data-tab-href={filePageHref(f) ?? undefined}
-                onClick={() => openFileSmart(f)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface transition-colors"
-              >
-                {/* One icon per row so titles align: questions show resolved
-                    state, the other two types show what they are. */}
-                <span className="shrink-0 w-3 flex items-center justify-center">
-                  {meta?.resolved === true ? (
-                    <CheckCircle size={11} weight="fill" className="text-success" />
-                  ) : meta?.resolved === false ? (
-                    <Circle size={11} className="text-warning" />
-                  ) : meta?.kind === "announcement" ? (
-                    <Megaphone size={11} className="text-muted-foreground/60" />
-                  ) : meta?.kind === "question" ? (
-                    // Doc predates the status token — unknown until a re-sync.
-                    <Circle size={11} className="text-muted-foreground/40" />
-                  ) : (
-                    <ChatCircle size={11} className="text-muted-foreground/60" />
-                  )}
-                </span>
-                <span className="text-[12px] text-foreground truncate flex-1">
-                  {humanizeSlug(f.filename)}
-                </span>
-                {meta?.category && (
-                  <span className="shrink-0 max-w-40 truncate text-[10px] text-muted-foreground">
-                    {meta.category}
-                  </span>
+    <SubjectPage>
+      <ListCard>
+        {threads.map((f) => {
+          const number = /^(\d+)-/.exec(f.filename)?.[1];
+          const meta = metas[f.id];
+          return (
+            <button
+              key={f.id}
+              data-tab-href={filePageHref(f) ?? undefined}
+              onClick={() => openFileSmart(f)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface transition-colors"
+            >
+              {/* One icon per row so titles align: questions show resolved
+                  state, the other two types show what they are. */}
+              <span className="shrink-0 w-3 flex items-center justify-center">
+                {meta?.resolved === true ? (
+                  <CheckCircle size={11} weight="fill" className="text-success" />
+                ) : meta?.resolved === false ? (
+                  <Circle size={11} className="text-warning" />
+                ) : meta?.kind === "announcement" ? (
+                  <Megaphone size={11} className="text-muted-foreground/60" />
+                ) : meta?.kind === "question" ? (
+                  // Doc predates the status token — unknown until a re-sync.
+                  <Circle size={11} className="text-muted-foreground/40" />
+                ) : (
+                  <ChatCircle size={11} className="text-muted-foreground/60" />
                 )}
-                <span className="shrink-0 w-12 text-right text-[11px] text-muted-foreground">
-                  {meta?.posted ? fmtShortDate(meta.posted) : ""}
+              </span>
+              <span className="text-[12px] text-foreground truncate flex-1">
+                {humanizeSlug(f.filename)}
+              </span>
+              {meta?.category && (
+                <span className="shrink-0 max-w-40 truncate text-[10px] text-muted-foreground">
+                  {meta.category}
                 </span>
-                <span className="shrink-0 w-10 text-right text-[11px] text-muted-foreground tabular-nums">
-                  {number ? `#${Number(number)}` : ""}
-                </span>
-                <span className="shrink-0 w-13 flex items-center justify-end">
-                  <FileRecency file={f} />
-                </span>
-              </button>
-            );
-          })}
-        </ListCard>
-      </div>
-    </div>
+              )}
+              <span className="shrink-0 w-12 text-right text-[11px] text-muted-foreground">
+                {meta?.posted ? fmtShortDate(meta.posted) : ""}
+              </span>
+              <span className="shrink-0 w-10 text-right text-[11px] text-muted-foreground tabular-nums">
+                {number ? `#${Number(number)}` : ""}
+              </span>
+              <span className="shrink-0 w-13 flex items-center justify-end">
+                <FileRecency file={f} />
+              </span>
+            </button>
+          );
+        })}
+      </ListCard>
+    </SubjectPage>
   );
 }

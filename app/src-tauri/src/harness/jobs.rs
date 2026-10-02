@@ -6,7 +6,7 @@
 //! `app/src/lib/db.ts`); an unreadable value costs the job its config, not its run.
 
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 
 use super::Provider;
 
@@ -85,13 +85,7 @@ pub fn default_selection(job: Job) -> JobSelection {
 /// The job's configured selection, or its default when anything about the
 /// stored row is unreadable.
 pub async fn selection(pool: &SqlitePool, job: Job) -> JobSelection {
-    let stored = sqlx::query("SELECT value FROM settings WHERE key = ?1")
-        .bind(SETTINGS_KEY)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-        .map(|r| r.get::<String, _>("value"));
+    let stored = crate::store::setting(pool, SETTINGS_KEY).await.ok().flatten();
     stored
         .as_deref()
         .and_then(|raw| from_json(raw, job))

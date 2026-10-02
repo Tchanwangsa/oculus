@@ -113,6 +113,17 @@ fn read_line(prompt: &str) -> Result<String, String> {
     Ok(line.trim().to_string())
 }
 
+/// `-` reads stdin; a path reads UTF-8, with the command's name on stdin errors.
+fn read_input(source: &str, what: &str) -> Result<String, String> {
+    if source != "-" {
+        return std::fs::read_to_string(source).map_err(|e| format!("reading {source}: {e}"));
+    }
+    let mut buffer = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut buffer)
+        .map_err(|e| format!("reading the {what} from stdin: {e}"))?;
+    Ok(buffer)
+}
+
 /// Prompt without echoing; echo is restored even if the read fails.
 fn read_secret(prompt: &str) -> Result<String, String> {
     use std::io::Write;

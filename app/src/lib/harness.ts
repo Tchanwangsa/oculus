@@ -54,6 +54,18 @@ export interface HarnessModel {
   textOutput?: boolean;
 }
 
+/** Whether a provider's CLI is available to model pickers. */
+export type ProviderHealth = "unknown" | "installed" | "missing";
+
+export interface PickerProvider {
+  id: Provider;
+  label: string;
+  models: HarnessModel[];
+  loading?: boolean;
+  health?: ProviderHealth;
+  emptyNote?: string;
+}
+
 /** The model and level a fresh composer opens on. */
 export function defaultSelection(models: HarnessModel[]): {
   model: string | null;
@@ -175,9 +187,8 @@ export function defaultSelectionFor(provider: Provider): {
   return models ? defaultSelection(models) : { model: null, reasoning: null };
 }
 
-export type ToolKind =
-  | "read" | "edit" | "write" | "bash" | "search" | "oculus_cli"
-  | "task" | "web" | "plan" | "other";
+const TOOL_KINDS = ["read", "edit", "write", "bash", "search", "oculus_cli", "task", "web", "plan", "other"] as const;
+export type ToolKind = (typeof TOOL_KINDS)[number];
 
 /** "Ran", "Read", "Edited" — past tense once done. Shared with the chapter
  *  panel so both speak one vocabulary. */
@@ -447,46 +458,53 @@ export function parseUsage(t: HarnessThread | null): ThreadUsage | null {
   }
 }
 
-/** Parsed tool `meta` per row object — outputs can be large, and the store
- *  replaces a row object on change, so the cache self-invalidates. */
+/** Row objects are replaced on change, so parsed metadata invalidates itself.
+ *  Non-object JSON is rejected before any row reads its fields. */
+const ITEM_META = new WeakMap<HarnessItem, Record<string, unknown>>();
+
+export function parseItemMeta(item: HarnessItem): Record<string, unknown> {
+  const hit = ITEM_META.get(item);
+  if (hit) return hit;
+  let meta: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(item.meta ?? "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      meta = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Invalid metadata leaves the row readable, without actions to approve.
+  }
+  ITEM_META.set(item, meta);
+  return meta;
+}
+
 const TOOL_META = new WeakMap<HarnessItem, ToolMeta>();
 
 export function parseToolMeta(item: HarnessItem): ToolMeta {
-  if (!item.meta) return {};
   const hit = TOOL_META.get(item);
   if (hit) return hit;
-  let meta: ToolMeta = {};
-  try {
-    meta = JSON.parse(item.meta);
-  } catch {
-    meta = {};
-  }
-  TOOL_META.set(item, meta);
-  return meta;
+  const meta: Record<string, unknown> = { ...parseItemMeta(item) };
+  // An unknown kind has no icon; invalid outputs cannot be rendered as text.
+  if (!TOOL_KINDS.includes(meta.kind as ToolKind)) delete meta.kind;
+  if (typeof meta.name !== "string") delete meta.name;
+  if (meta.ok != null && typeof meta.ok !== "boolean") delete meta.ok;
+  if (meta.output != null && typeof meta.output !== "string") delete meta.output;
+  TOOL_META.set(item, meta as ToolMeta);
+  return meta as ToolMeta;
 }
 
 /** The playhead second a lecture-dock question was asked at, from the user
  *  row's `meta` (`{"at": 220}`); null elsewhere. */
 export function messageAt(item: HarnessItem): number | null {
-  if (!item.meta) return null;
-  try {
-    const at = (JSON.parse(item.meta) as { at?: unknown }).at;
-    return typeof at === "number" ? at : null;
-  } catch {
-    return null;
-  }
+  const { at } = parseItemMeta(item);
+  return typeof at === "number" ? at : null;
 }
 
 /** The agent a credentials-failure error row is about (`{"auth":"claude"}`);
  *  an unknown provider reads as an ordinary error. */
 export function parseErrorMeta(item: HarnessItem): ErrorMeta {
-  if (!item.meta) return {};
-  try {
-    const auth = (JSON.parse(item.meta) as { auth?: unknown }).auth;
-    return isProvider(auth) ? { auth } : {};
-  } catch {
-    return {};
-  }
+  const { auth } = parseItemMeta(item);
+  return isProvider(auth) ? { auth } : {};
 }
 
 /** A `permission` row's `meta`. A row that does not parse draws as a refusal
@@ -499,19 +517,14 @@ export interface PermissionMeta {
 }
 
 export function parsePermissionMeta(item: HarnessItem): PermissionMeta {
-  if (!item.meta) return {};
-  try {
-    const m = JSON.parse(item.meta) as Record<string, unknown>;
-    const str = (v: unknown) => (typeof v === "string" && v ? v : null);
-    return {
-      tool: str(m.tool) ?? undefined,
-      action: str(m.action) ?? undefined,
-      target: str(m.target),
-      rule: str(m.rule),
-    };
-  } catch {
-    return {};
-  }
+  const m = parseItemMeta(item);
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  return {
+    tool: str(m.tool) ?? undefined,
+    action: str(m.action) ?? undefined,
+    target: str(m.target),
+    rule: str(m.rule),
+  };
 }
 
 /** An `agy` rule taken apart; null outside the shapes `is_valid_rule` in

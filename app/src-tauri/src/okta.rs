@@ -147,23 +147,20 @@ pub fn totp_seconds_remaining() -> u64 {
 
 const KEYCHAIN_SERVICE: &str = "com.oculus.unimelb-sso";
 
-fn entry(account: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, account).map_err(|e| e.to_string())
+fn secret(account: &str) -> crate::credentials::Secret<'_> {
+    crate::credentials::Secret::new(KEYCHAIN_SERVICE, account)
 }
 
 fn read(account: &str) -> Option<String> {
-    entry(account).ok()?.get_password().ok().filter(|s| !s.is_empty())
+    secret(account).read().filter(|s| !s.is_empty())
 }
 
 fn write(account: &str, value: &str) -> Result<(), String> {
-    entry(account)?.set_password(value).map_err(|e| e.to_string())
+    secret(account).write(value)
 }
 
 fn erase(account: &str) -> Result<(), String> {
-    match entry(account)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
+    secret(account).delete()
 }
 
 /// Never logged, never written outside the keychain, never sent anywhere but
@@ -889,19 +886,9 @@ fn complete_saml(jar: &mut Jar, saml_url: &str) -> Result<String, LoginError> {
         url = url
             .join(&action)
             .map_err(|e| LoginError::Unexpected(format!("bad form action: {e}")))?;
-        form = Some(
-            fields
-                .iter()
-                .map(|(k, v)| {
-                    format!(
-                        "{}={}",
-                        url::form_urlencoded::byte_serialize(k.as_bytes()).collect::<String>(),
-                        url::form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>()
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("&"),
-        );
+        form = Some(url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(&fields)
+            .finish());
         posted_assertion = true;
     }
     Err(LoginError::Unexpected(
@@ -1025,9 +1012,7 @@ pub fn okta_clear_credentials() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn okta_sign_in(app: tauri::AppHandle) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || run_sign_in(&app, &crate::paths::data_dir()))
-    .await
-    .map_err(|e| e.to_string())?
+    crate::blocking::run(move || run_sign_in(&app, &crate::paths::data_dir())).await
 }
 
 /// Sign in, then set the auth flag, state and event exactly as the

@@ -107,9 +107,9 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
   // ── Write wrappers ────────────────────────────────────────────────────────
   // Thin on purpose: only state a re-read cannot fix, i.e. clearing `activeId`.
 
-  createProject: async (input) => createProject(input),
+  createProject,
 
-  updateProject: async (id, patch) => updateProject(id, patch),
+  updateProject,
 
   archiveProject: async (id) => {
     await archiveProject(id);
@@ -119,23 +119,22 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     }
   },
 
-  unarchiveProject: async (id) => unarchiveProject(id),
+  unarchiveProject,
 
   deleteProject: async (id) => {
     await deleteProject(id);
     if (get().activeId === id) set({ activeId: null, tasks: [] });
   },
 
-  createTask: async (input) => createTask(input),
+  createTask,
 
-  updateTask: async (id, patch) => updateTask(id, patch),
+  updateTask,
 
-  deleteTask: async (id) => deleteTask(id),
+  deleteTask,
 
-  moveTask: async (id, columnId, beforeId, afterId) =>
-    moveTask(id, columnId, beforeId, afterId),
+  moveTask,
 
-  refileTask: async (id, projectId) => refileTask(id, projectId),
+  refileTask,
 }));
 
 async function readList(

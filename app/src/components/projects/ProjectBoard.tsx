@@ -3,7 +3,7 @@ import { ArrowElbowDownRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import type { ColumnKind, DbProject } from "@/lib/projects";
 import { useCardDrag, useSettledList } from "@/hooks/useCardDrag";
-import { BoardCard, BoardColumn, LiftedCard } from "./BoardParts";
+import { BoardView } from "./BoardParts";
 import { CardTitle } from "./CardTitle";
 import { InlineAdd } from "./InlineAdd";
 import { taskHref } from "./taskHref";
@@ -77,10 +77,6 @@ export function ProjectBoard({
   const lifted = live
     ? [...byColumn.values()].flat().find((e) => e.task.id === live.id) ?? null
     : null;
-  const liftedKind = lifted
-    ? columns.find((c) => c.id === lifted.task.column_id)?.kind ?? null
-    : null;
-
   if (columns.length === 0) {
     return (
       <div className="flex h-full items-center justify-center px-6">
@@ -92,48 +88,29 @@ export function ProjectBoard({
   }
 
   return (
-    <div className="flex h-full gap-3 overflow-x-auto px-5 py-4">
-      {columns.map((column) => {
-        const cards = byColumn.get(column.id) ?? [];
-        return (
-          <BoardColumn
-            key={column.id}
-            drag={drag}
-            id={column.id}
-            name={column.name}
-            count={cards.length}
-            highlighted={live?.targetContainerId === column.id}
-            footer={
-              <InlineAdd
-                label="New task"
-                placeholder="Task title"
-                onAdd={(title) => onCreate({ title, columnId: column.id })}
-              />
-            }
-          >
-            {cards.map((entry, i) => (
-              <BoardCard
-                key={entry.task.id}
-                drag={drag}
-                containerId={column.id}
-                id={entry.task.id}
-                index={i}
-                href={taskHref(project.id, entry.task)}
-                className={entry.depth === 1 ? SUBTASK_INSET : undefined}
-              >
-                <CardBody projectId={project.id} entry={entry} kind={column.kind} />
-              </BoardCard>
-            ))}
-          </BoardColumn>
-        );
-      })}
-
-      {live && lifted && (
-        <LiftedCard live={live}>
-          <CardBody projectId={project.id} entry={lifted} kind={liftedKind} />
-        </LiftedCard>
+    <BoardView
+      columns={columns}
+      byColumn={byColumn}
+      drag={drag}
+      lifted={lifted}
+      idOf={(entry) => entry.task.id}
+      hrefOf={(entry) => taskHref(project.id, entry.task)}
+      cardClassName={(entry) => entry.depth === 1 ? SUBTASK_INSET : undefined}
+      renderCard={(entry) => (
+        <CardBody
+          projectId={project.id}
+          entry={entry}
+          kind={columns.find((c) => c.id === entry.task.column_id)?.kind ?? null}
+        />
       )}
-    </div>
+      footer={(column) => (
+        <InlineAdd
+          label="New task"
+          placeholder="Task title"
+          onAdd={(title) => onCreate({ title, columnId: column.id })}
+        />
+      )}
+    />
   );
 }
 

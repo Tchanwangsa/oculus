@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { harnessHealth, type BridgeHealth, type Provider } from "@/lib/harness";
+import { harnessHealth, type BridgeHealth, type Provider, type ProviderHealth } from "@/lib/harness";
 
 /** Whether each provider's CLI is on this machine, shared by every picker.
  *  Cached here (one in-flight invoke) and in Rust (`harness/discover.rs`);
  *  only Settings' Recheck clears both. */
-export type ProviderHealth = "unknown" | "installed" | "missing";
+export type { ProviderHealth } from "@/lib/harness";
 
 let cached: BridgeHealth[] | null = null;
 let inFlight: Promise<BridgeHealth[]> | null = null;

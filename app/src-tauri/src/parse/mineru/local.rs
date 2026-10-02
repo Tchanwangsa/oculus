@@ -21,7 +21,7 @@ use crate::parse::{
     parse_config, Health, ParseError, ParseOutput, Parser, Progress, PARSER_VERSION,
 };
 
-use super::client::{find_content_list, page_count, safe_extract, transport_detail};
+use super::client::{page_count, safe_extract, transport_detail};
 use super::{render, WorkDir};
 
 /// The `backend` stamped into every record this client writes.
@@ -153,21 +153,12 @@ impl Parser for MinerULocal {
         self.post_file_parse(pdf, &archive)?;
         safe_extract(&archive, &extracted)?;
 
-        // Globbed: the archive layout varies between MinerU versions.
-        let content_path = find_content_list(&extracted)
-            .ok_or(ParseError::Document { code: "no-content-list".into() })?;
-        let content: Value = fs::read_to_string(&content_path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .ok_or(ParseError::Document { code: "unreadable-content-list".into() })?;
-        let Some(items) = content.as_array() else {
-            return Err(ParseError::Document { code: "invalid-content-list".into() });
-        };
+        let (content_path, items) = super::content_list(&extracted)?;
 
         // One POST is one task: `page_idx` is absolute, crops are unique.
         let source_images = content_path.parent().unwrap_or(&extracted).join("images");
         let (pages, image_count) =
-            render::render(items, total, &source_images, images_dir, images_rel)?;
+            render::render(&items, total, &source_images, images_dir, images_rel)?;
 
         on_progress(Progress { pages_done: total, total_pages: total, backend: BACKEND });
         Ok(ParseOutput::new(pdf, total, pages, Some(BACKEND.to_string()), image_count))

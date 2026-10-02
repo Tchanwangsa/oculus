@@ -13,11 +13,11 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | The seam: trait, artifact contract, `ParseError`, `PARSER_VERSION` | `app/src-tauri/src/parse/mod.rs` |
 | MinerU cloud protocol + its `Parser` | `app/src-tauri/src/parse/mineru/client.rs` |
 | Local MinerU server: its `Parser` and the probe | `app/src-tauri/src/parse/mineru/local.rs` |
-| Content list → page records (shared by both engines) | `app/src-tauri/src/parse/mineru/render.rs` |
+| Result content-list loading; page rendering (shared by both engines) | `app/src-tauri/src/parse/mineru/mod.rs`, `app/src-tauri/src/parse/mineru/render.rs` |
 | Cloud submission queue (window, in-flight cap) | `app/src-tauri/src/parse/mineru/batch.rs` |
 | Cloud daily allowance + the two rate limiters | `app/src-tauri/src/parse/mineru/ledger.rs` |
 | Token bucket, semaphore, retry ladder (shared with Voyage) | `app/src-tauri/src/ratelimit.rs` |
-| The `parse-status` event | `app/src-tauri/src/parse/events.rs` |
+| The `parse-status` event and shared wire payload | `app/src-tauri/src/parse/events.rs`, `app/src-tauri/src/pipeline_events.rs` |
 | Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync.rs` |
 | Artifact purging | `app/src-tauri/src/paths.rs` |
 | MinerU keychain commands + the pre-store token probe | `app/src-tauri/src/mineru.rs` |

@@ -15,7 +15,7 @@ rules are in [UI system](#ui-system); the WebKit and CSS traps are in
 | Tabs, split panes, per-pane routers, titles from paths | `app/src/stores/tabStore.ts`, `app/src/components/tabs/TabPane.tsx`, `app/src/lib/tabRouters.ts`, `app/src/components/tabs/tabInfo.tsx` |
 | Window shortcuts (all menu items) | `app/src-tauri/src/menu.rs` |
 | ⌘-click → a new tab, app-wide | `app/src/lib/newTabClicks.ts` |
-| Search (⌘K and the new-tab field), Recent group | `app/src/lib/search.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
+| Search (⌘K and the new-tab field), Recent group | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
 | Backend events → SQLite and stores | `app/src/hooks/useBackendEvents.ts`, `app/src/hooks/useEvents.ts`, `app/src/lib/db.ts` |
 | Files tab: uploads and documents | `app/src/pages/subject/FilesPage.tsx`, `app/src/lib/uploads.ts`, `app/src/lib/documents.ts`, `app/src/components/documents/DocumentEditor.tsx`, `app/src/components/documents/editor/`, `app/src-tauri/src/files.rs` |
 | Tasks section (`/projects`, `/tasks`) | `app/src/components/projects/`, `app/src/pages/TasksPage.tsx`, `app/src/lib/projects.ts`, `app/src/stores/projectsStore.ts` |
@@ -23,10 +23,16 @@ rules are in [UI system](#ui-system); the WebKit and CSS traps are in
 | Side panel (file/lecture peek) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
 | In-app browser | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/lib/browserHistory.ts`, `app/src-tauri/src/browser.rs` |
 | Settings → Library: parser, embedding, index run | `app/src/components/settings/ParserSection.tsx`, `app/src/components/settings/EmbeddingSection.tsx`, `app/src/stores/indexStore.ts` |
+| Parser and embedding engine selection UI | `app/src/components/settings/EngineSelect.tsx` |
 | Parse state, pipeline ledger, recovery sweep | `app/src/lib/parseState.ts`, `app/src/stores/parseStore.ts`, `app/src/stores/pipelineStore.ts`, `app/src/hooks/useQualitySweep.ts` |
 | Markdown, maths, mermaid, lightbox, PDF | `app/src/components/markdown/`, `app/src/components/ui/Lightbox.tsx`, `app/src/components/files/PDFViewer.tsx` |
 | Lecture player | `app/src/components/lectures/`, `app/src/lib/lecturePlayback.ts`, `app/src/stores/playerPrefsStore.ts`, `app/src/hooks/useTranscriptDock.ts` |
+| Persisted view state and collapsed groups | `app/src/hooks/useStoredState.ts` |
+| Scraped document metadata loaders | `app/src/hooks/useCourseFileData.ts`, `app/src/hooks/useModuleTocs.ts` |
+| Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/PageParts.tsx` |
 | Drag gestures | `app/src/hooks/usePointerDrag.ts`, `app/src/hooks/useCardDrag.ts`, `app/src/hooks/useFileDrop.ts` |
+| Subject grouping and persisted collapsed groups | `app/src/lib/subjectGroups.ts`, `app/src/hooks/useCollapsedGroups.ts` |
+| Transcript search and source-index mapping | `app/src/hooks/useTranscriptSearch.ts` |
 | Table chrome | `app/src/components/ui/GridTable.tsx`, `app/src/components/ui/ViewTabs.tsx`, `app/src/components/ui/TablePagination.tsx` |
 
 ## UI system
@@ -80,6 +86,8 @@ headings and Inter for everything else, Notion-style layout.
 - **Tables are full-bleed in `GridTable`**, header outside the scroller (or the
   bar runs down it). Alternate views are sibling `ViewTabs`/`PillTabs`, not a
   dropdown, over a fixed-height toolbar so switching never jolts the rows.
+- **Subject tabs share `SubjectPage` for width and gutters**, `SubjectLoading` for skeleton rows and `SubjectEmpty` for the empty view. Per-tab content and actions stay with the page.
+- **View preferences use `useStoredState`**, with readers that own defaults and validation; `useStoredSet` keeps collapsed group keys. Storage failures leave the live view usable.
 - **No toasts, no bottom progress bars** — background jobs surface in the
   sidebar only. No placeholder UI, section-header icons, stat cards or filler.
 - Slugs display through `humanizeSlug`, Canvas codes through `displayCode`
@@ -208,6 +216,7 @@ global.
   (reachable, unreachable, `version_mismatch`, not asked yet — never drawn as a
   failure) only under Local. Engine lists and refusals come from Rust. Saving a
   token checks it and lifts the parse latch. See [parsing.md](./parsing.md).
+- **`EngineSelect` and `CredentialField` share the settings controls** (`app/src/components/settings/EngineSelect.tsx`, `app/src/components/settings/CredentialField.tsx`); each section owns validation, switching and destructive confirmation.
 - **Changing the embedding engine is destructive on purpose** — two models'
   vectors share a table and no geometry. `embed_set_engine` clears the
   `.emb.json` records, the vectors and `embed_status`, then writes the setting
@@ -255,14 +264,16 @@ global.
   dialog. `deleteFileRow` deletes `pages` by hand, since the cascade fires only
   with `foreign_keys` on. A parse in flight can land after a delete, so
   `store_upload` purges artifacts on a reused name whenever the bytes differ.
+- **Scraped header metadata loads through `useCourseFileData`**: assignments, discussion threads and module TOCs supply a stable parser, while the hook owns parallel reads and cancellation of stale answers.
 - **A document is `courses/<code>/documents/<title>.md`** with a
   `category = 'document'` row. The title is the filename (`fileTitle`); a rename
   moves the file and keeps the row id. `reconcileDocuments` brings rows in line
   with the folder on mount, so a note written elsewhere just appears.
 - **The note editor is CodeMirror 6 over the file's exact text**
   (`app/src/components/documents/editor/`); nothing is re-serialised.
-  `DocumentEditor.tsx` owns load, save, title and mode; the view is keyed on
-  the row, so a rename keeps it. **Live** mode renders markdown in place —
+  `DocumentEditor.tsx` owns load, save, title and mode. `FilePage` keys the
+  whole editor by row id: pending saves and image attachments belong to one
+  note, while a rename keeps its editor. **Live** mode renders markdown in place —
   headings, marks, links, lists and checkboxes, quotes, rules, code, pictures,
   KaTeX maths and mermaid diagrams — and shows a construct's source while the selection touches
   it (a heading, quote or list marker while the caret is on its line). **Raw**
@@ -286,8 +297,10 @@ global.
   redrawn in place as it is typed and kept at its last good drawing while the
   source does not parse.
 - **A pipe table is a grid whose cells edit in place**
-  (`app/src/components/documents/editor/table.ts`): a cell writes back only its
-  own source range, Tab/Enter move between cells, the frame scrolls sideways.
+  (`app/src/components/documents/editor/table.ts`): its DOM and input handlers
+  use `app/src/components/documents/editor/tableModel.ts` for source-preserving
+  edits. A cell writes back only its own source range, Tab/Enter move between
+  cells, and the frame scrolls sideways.
   A drag across cells (or Shift with a click or ↑/↓) selects a block, which
   the scroller holds focus for: Delete empties it, and on a block already
   empty removes the whole rows (never the header) or columns it spans, or
@@ -399,6 +412,10 @@ global.
   `.dark`, overriding the `:root` rule pdf.js's stylesheet adds. A pinch arrives
   as both `ctrlKey` wheel and `gesture*` events; only the gesture zooms.
 
+Editor commands, links, maths and completions share `ancestorAt` in
+`app/src/components/documents/editor/syntax.ts`; each caller chooses its caret
+bias and eligibility rules at a construct's boundary.
+
 Chat's composer (`MentionInput.tsx` sends chips as backticked library paths),
 picker and timeline are [harness.md](./harness.md).
 
@@ -435,7 +452,8 @@ semantic search stays in chat ([retrieval.md](./retrieval.md)). No match is
 offered as a URL or web search through `normalizeAddress`, shared with the
 address bar.
 
-⌘K alone takes Discord-style filters: `in:<subject>` and `type:<kind>`. Typing
+`app/src/lib/searchFilters.ts` owns the filter catalogue, tokens and resolution
+without database or navigation effects. ⌘K takes Discord-style filters: `in:<subject>` and `type:<kind>`. Typing
 the colon turns the key into a chip with the caret inside it, and the list shows
 only its values; picking one (or a space after an unambiguous value) fixes the
 chip, one per key. Backspace at a field's start drops the chip being typed, or

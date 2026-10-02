@@ -14,14 +14,7 @@ impl Ctx {
     pub(crate) fn search(&self, args: &SearchArgs) -> Result<(), String> {
         let pool = self.db().ok_or("the retrieval index lives in the database")?;
         let subjects = self.rt.block_on(store::subjects(&pool))?;
-        let ids: Vec<i64> = match &args.subject {
-            // A bare code can match one subject in two terms; both are in scope.
-            Some(code) => filter_subjects(&subjects, std::slice::from_ref(code), false)?
-                .iter()
-                .map(|s| s.id)
-                .collect(),
-            None => Vec::new(),
-        };
+        let ids = subject_ids(&subjects, args.subject.as_slice())?;
         let codes: HashMap<i64, String> =
             subjects.iter().map(|s| (s.id, s.code.clone())).collect();
 
@@ -123,11 +116,7 @@ impl Ctx {
     /// interleave instead of one half crowding out the other.
     pub(crate) fn grep(&self, args: &GrepArgs) -> Result<(), String> {
         let pool = self.db().ok_or("the library index lives in the database")?;
-        let subjects = self.rt.block_on(store::subjects(&pool))?;
-        let ids: Vec<i64> = filter_subjects(&subjects, &args.subject, false)?
-            .iter()
-            .map(|s| s.id)
-            .collect();
+        let ids = self.subject_ids(&pool, &args.subject)?;
         let files = filter_categories(self.library_files(&pool, &ids)?, &args.category)?;
         let pages = self.page_text(&pool, &ids)?;
         let re = build_regex(&args.pattern, args.fixed, args.case_sensitive)?;
@@ -148,51 +137,33 @@ impl Ctx {
         let mut truncated = false;
 
         'files: for f in &files {
-            // Parsed documents: the text is in the database, never on disk.
-            if let Some(pages) = pages.get(&f.id) {
-                for (page_no, markdown) in pages {
-                    for line in markdown.lines() {
-                        if !re.is_match(line) {
-                            continue;
-                        }
-                        if hits.len() >= limit {
-                            truncated = true;
-                            break 'files;
-                        }
-                        hits.push(Match {
-                            subject: f.code.clone(),
-                            path: f.relative_path.clone(),
-                            page_no: Some(*page_no),
-                            line_no: None,
-                            line: line.trim().to_string(),
-                        });
-                    }
-                }
-                continue;
-            }
-
-            // Everything else worth scanning is text on disk.
-            if !is_text_file(&f.relative_path) {
-                continue;
-            }
-            let Ok(body) = std::fs::read_to_string(self.data_dir.join(&f.relative_path)) else {
-                continue;
+            // PDF markdown lives in pages; other text lives on disk. Feed
+            // both through the same limit and matching rules in file order.
+            let disk = if pages.contains_key(&f.id) || !is_text_file(&f.relative_path) {
+                None
+            } else {
+                std::fs::read_to_string(self.data_dir.join(&f.relative_path)).ok()
             };
-            for (i, line) in body.lines().enumerate() {
-                if !re.is_match(line) {
-                    continue;
+            let chunks = pages.get(&f.id).into_iter().flatten()
+                .map(|(page, text)| (Some(*page), text.as_str()))
+                .chain(disk.as_deref().map(|text| (None, text)));
+            for (page_no, text) in chunks {
+                for (i, line) in text.lines().enumerate() {
+                    if !re.is_match(line) {
+                        continue;
+                    }
+                    if hits.len() >= limit {
+                        truncated = true;
+                        break 'files;
+                    }
+                    hits.push(Match {
+                        subject: f.code.clone(),
+                        path: f.relative_path.clone(),
+                        page_no,
+                        line_no: page_no.is_none().then_some(i + 1),
+                        line: line.trim().to_string(),
+                    });
                 }
-                if hits.len() >= limit {
-                    truncated = true;
-                    break 'files;
-                }
-                hits.push(Match {
-                    subject: f.code.clone(),
-                    path: f.relative_path.clone(),
-                    page_no: None,
-                    line_no: Some(i + 1),
-                    line: line.trim().to_string(),
-                });
             }
         }
 
@@ -248,14 +219,7 @@ impl Ctx {
     /// on disk for anything else.
     pub(crate) fn read(&self, args: &ReadArgs) -> Result<(), String> {
         let pool = self.db().ok_or("the library index lives in the database")?;
-        let subjects = self.rt.block_on(store::subjects(&pool))?;
-        let ids: Vec<i64> = match &args.subject {
-            Some(code) => filter_subjects(&subjects, std::slice::from_ref(code), false)?
-                .iter()
-                .map(|s| s.id)
-                .collect(),
-            None => Vec::new(),
-        };
+        let ids = self.subject_ids(&pool, args.subject.as_slice())?;
         let files = self.library_files(&pool, &ids)?;
         let file = resolve_file(&files, &args.file)?;
 
@@ -365,11 +329,7 @@ impl Ctx {
 
     pub(crate) fn files(&self, args: &FilesArgs) -> Result<(), String> {
         let pool = self.db().ok_or("the library index lives in the database")?;
-        let subjects = self.rt.block_on(store::subjects(&pool))?;
-        let ids: Vec<i64> = filter_subjects(&subjects, &args.codes, false)?
-            .iter()
-            .map(|s| s.id)
-            .collect();
+        let ids = self.subject_ids(&pool, &args.codes)?;
 
         let needle = args.r#match.as_ref().map(|m| m.to_lowercase());
         let all = filter_categories(self.library_files(&pool, &ids)?, &args.category)?;
@@ -385,32 +345,8 @@ impl Ctx {
             .take(args.limit.max(1))
             .collect();
 
-        #[derive(Serialize)]
-        struct Entry<'a> {
-            subject: &'a str,
-            path: &'a str,
-            filename: &'a str,
-            file_type: &'a str,
-            category: Option<&'a str>,
-            size_bytes: Option<i64>,
-            parse_status: Option<&'a str>,
-            indexed_pages: i64,
-        }
         if self.json {
-            let out: Vec<Entry> = rows
-                .iter()
-                .map(|f| Entry {
-                    subject: &f.code,
-                    path: &f.relative_path,
-                    filename: &f.filename,
-                    file_type: &f.file_type,
-                    category: f.category.as_deref(),
-                    size_bytes: f.size_bytes,
-                    parse_status: f.parse_status.as_deref(),
-                    indexed_pages: f.indexed_pages,
-                })
-                .collect();
-            return self.emit(&out);
+            return self.emit(&rows);
         }
 
         if rows.is_empty() {
@@ -445,11 +381,7 @@ impl Ctx {
 
     pub(crate) fn calendar(&self, args: &CalendarArgs) -> Result<(), String> {
         let pool = self.db().ok_or("the calendar lives in the database")?;
-        let subjects = self.rt.block_on(store::subjects(&pool))?;
-        let ids: Vec<i64> = filter_subjects(&subjects, &args.codes, false)?
-            .iter()
-            .map(|s| s.id)
-            .collect();
+        let ids = self.subject_ids(&pool, &args.codes)?;
 
         let mut clauses: Vec<String> = Vec::new();
         if !ids.is_empty() {
@@ -534,6 +466,11 @@ impl Ctx {
     }
 
     // ── shared loaders ───────────────────────────────────────────────────────
+
+    /// Subject-prefix selection shared by the read commands and indexing.
+    pub(super) fn subject_ids(&self, pool: &SqlitePool, codes: &[String]) -> Result<Vec<i64>, String> {
+        subject_ids(&self.rt.block_on(store::subjects(pool))?, codes)
+    }
 
     /// Every library file for the given subjects (all when empty), in the order
     /// `grep` scans and `files` prints: subject, then path.
@@ -633,11 +570,15 @@ impl Ctx {
 // ── Library lookup ───────────────────────────────────────────────────────────
 
 /// One row of `files` with its subject code and how much of it is searchable.
+#[derive(Serialize)]
 pub(crate) struct LibFile {
+    #[serde(skip)]
     id: i64,
+    #[serde(rename = "subject")]
     code: String,
-    filename: String,
+    #[serde(rename = "path")]
     relative_path: String,
+    filename: String,
     file_type: String,
     category: Option<String>,
     size_bytes: Option<i64>,
@@ -749,6 +690,19 @@ mod query_tests {
     use super::*;
 
     #[test]
+    fn query_scopes_include_every_term_and_never_hide_an_unknown_code() {
+        let subjects: Vec<store::SubjectRow> = ["COMP10001_2026_SM1", "COMP10001_2026_SM2", "MULT20015_2026_SM2"]
+            .iter().enumerate().map(|(n, code)| store::SubjectRow {
+                id: n as i64 + 1, code: code.to_string(), name: String::new(),
+                term_name: None, is_current: n != 0, selected: true, last_synced_at: None,
+            }).collect();
+        assert!(subject_ids(&subjects, &[]).unwrap().is_empty());
+        assert_eq!(subject_ids(&subjects, &["COMP10001".into()]).unwrap(), [1, 2]);
+        assert_eq!(subject_ids(&subjects, &["COMP10001_2026_SM2".into()]).unwrap(), [2]);
+        assert!(subject_ids(&subjects, &["MISS10000".into()]).unwrap_err().contains("no subject matched"));
+    }
+
+    #[test]
     fn page_specs_cover_points_ranges_and_open_ends() {
         let spec = parse_page_spec("3,7-9,20-").unwrap();
         for wanted in [3, 7, 8, 9, 20, 4000] {
@@ -782,6 +736,21 @@ mod query_tests {
             parse_status: None,
             indexed_pages: 0,
         }
+    }
+
+    #[test]
+    fn file_json_keeps_the_public_names_without_a_database_id() {
+        let row = file("COMP30026", "courses/COMP30026/files/week-01.pdf");
+        assert_eq!(serde_json::to_value(&row).unwrap(), serde_json::json!({
+            "subject": "COMP30026",
+            "path": "courses/COMP30026/files/week-01.pdf",
+            "filename": "week-01.pdf",
+            "file_type": "pdf",
+            "category": null,
+            "size_bytes": null,
+            "parse_status": null,
+            "indexed_pages": 0
+        }));
     }
 
     /// A filename shared by two subjects resolves by full path, and is reported
@@ -922,4 +891,10 @@ pub(crate) fn filter_subjects(
         return Err(format!("no subject matched {}", codes.join(", ")));
     }
     Ok(picked)
+}
+
+/// An empty set means all subjects to query loaders; a bare code includes every term.
+fn subject_ids(subjects: &[store::SubjectRow], codes: &[String]) -> Result<Vec<i64>, String> {
+    if codes.is_empty() { return Ok(Vec::new()); }
+    Ok(filter_subjects(subjects, codes, false)?.iter().map(|s| s.id).collect())
 }

@@ -12,11 +12,13 @@ Rust `run`.
 | Piece | Location |
 | --- | --- |
 | Detection, stream choice, frame grabs, outline, prompt, reply parser, validator, the job, `Step` | `app/src-tauri/src/chapters.rs` |
-| The app commands, events, progress shape and startup sweep | `chapters::app` in `app/src-tauri/src/chapters.rs`, `reading::app` in `app/src-tauri/src/reading.rs` |
+| The app commands and job-specific events | `chapters::app` in `app/src-tauri/src/chapters.rs`, `reading::app` in `app/src-tauri/src/reading.rs` |
+| Shared run inputs, recording checks, app progress and thread orchestration | `app/src-tauri/src/lecture_jobs.rs` |
 | Reading copy: segmentation, windows, prompt, validation, `para`, the job | `app/src-tauri/src/reading.rs` |
 | Row writes, status, claims, reconcile; the tables (migrations 29, 34) | `app/src-tauri/src/store.rs`; `app/src-tauri/src/migrations.rs` |
 | `oculus lecture candidates` / `chapters` / `reading` | `app/src-tauri/src/bin/oculus/lecture.rs` |
 | Which agent, model and effort each job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/pages/settings/AiPage.tsx` |
+| Transcript search and stable source indexes | `app/src/hooks/useTranscriptSearch.ts` |
 | The one-turn headless run both use; ffmpeg lookup | `run_once` in `app/src-tauri/src/harness/mod.rs`; `app/src-tauri/src/echo360.rs` |
 | Frontend bindings, event names, `chapterEnds` / `spanAt`, the VTT parser | `app/src/lib/lectures.ts` |
 | Rows and job state; the job hooks | `app/src/lib/db.ts`; `app/src/hooks/useLectureJob.ts`, `app/src/hooks/useLectureChapters.ts`, `app/src/hooks/useLectureReading.ts` |
@@ -187,7 +189,9 @@ is stored; `reading_status` / `reading_written_at` / `reading_error` and a
 startup reconcile mirror chapters. The app door is `lecture_write_reading`,
 with `lecture-reading-progress` and `lecture-reading`.
 
-**The jobs share code, not data.** The reading copy needs no chapter set; when
+**The jobs share code, not data.** `lecture_jobs` owns their run inputs, source
+loading, recording checks and app orchestration. Each job owns when it claims
+the lecture and commits its output. The reading copy needs no chapter set; when
 one exists it reads `store::chapters` only to snap window edges and to name
 the enclosing chapter in each prompt.
 

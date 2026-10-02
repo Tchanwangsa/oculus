@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { ArrowSquareOut, PencilLine, Rocket } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SubjectLoading, SubjectPage, SubjectEmpty } from "@/components/subjects/SubjectPage";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useModuleTocs } from "@/hooks/useModuleTocs";
 import { useSubject } from "@/layouts/SubjectLayout";
@@ -9,7 +9,7 @@ import { filePageHref, openFileSmart } from "@/lib/openFile";
 import { FileRecency } from "@/components/files/FileRecency";
 import { humanizeSlug } from "@/lib/format";
 import type { DbFile } from "@/lib/db";
-import { readCourseFile } from "@/lib/courseFiles";
+import { useCourseFileData } from "@/hooks/useCourseFileData";
 import { ListCard } from "@/components/ui/PageParts";
 
 interface TaskDoc {
@@ -59,41 +59,16 @@ function groupOf(t: TaskDoc, now: number): Group {
   return "upcoming";
 }
 
-/**
- * Loads every scraped assignment/quiz document and lifts its header metadata
- * (title, due date, points) into list rows. `null` while loading.
- */
-function useTaskDocs(files: DbFile[], loading: boolean): TaskDoc[] | null {
-  const [docs, setDocs] = useState<TaskDoc[] | null>(null);
-
-  useEffect(() => {
-    if (files.length === 0) {
-      if (!loading) setDocs([]);
-      return;
-    }
-    let cancelled = false;
-    Promise.all(
-      files.map(async (file): Promise<TaskDoc> => {
-        const md = await readCourseFile(file.relative_path).catch(() => "");
-        return {
-          file,
-          title: /^# (.+)$/m.exec(md)?.[1] ?? humanizeSlug(file.filename),
-          kind: file.category === "quiz" ? "quiz" : "assignment",
-          due: parseTs(md, "Due"),
-          lock: parseTs(md, "Available until"),
-          submitted: /^\*\*Status:\*\* (submitted|graded)\s*$/m.test(md),
-          points: /^\*\*Points:\*\* (.+?)\s*$/m.exec(md)?.[1] ?? null,
-        };
-      }),
-    ).then((loaded) => {
-      if (!cancelled) setDocs(loaded);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [files, loading]);
-
-  return docs;
+function parseTaskDoc(md: string, file: DbFile): TaskDoc {
+  return {
+    file,
+    title: /^# (.+)$/m.exec(md)?.[1] ?? humanizeSlug(file.filename),
+    kind: file.category === "quiz" ? "quiz" : "assignment",
+    due: parseTs(md, "Due"),
+    lock: parseTs(md, "Available until"),
+    submitted: /^\*\*Status:\*\* (submitted|graded)\s*$/m.test(md),
+    points: /^\*\*Points:\*\* (.+?)\s*$/m.exec(md)?.[1] ?? null,
+  };
 }
 
 function fmtDue(d: Date): string {
@@ -119,7 +94,7 @@ export default function SubjectAssignmentsPage() {
     () => [...byCategory.assignment, ...byCategory.quiz],
     [byCategory.assignment, byCategory.quiz],
   );
-  const docs = useTaskDocs(taskFiles, loading);
+  const docs = useCourseFileData(taskFiles, loading, parseTaskDoc);
 
   const grouped = useMemo(() => {
     if (!docs) return null;
@@ -139,15 +114,7 @@ export default function SubjectAssignmentsPage() {
   }, [docs]);
 
   if (grouped == null) {
-    return (
-      <div className="page-scroll">
-        <div className="mx-auto max-w-5xl px-6 py-6 space-y-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-10 w-full" />
-          ))}
-        </div>
-      </div>
-    );
+    return <SubjectLoading count={4} rowClassName="h-10" />;
   }
 
   if ([...grouped.values()].every((g) => g.length === 0)) {
@@ -155,26 +122,24 @@ export default function SubjectAssignmentsPage() {
   }
 
   return (
-    <div className="page-scroll">
-      <div className="mx-auto max-w-5xl px-6 py-5 space-y-5">
-        {GROUPS.map((group) => {
-          const tasks = grouped.get(group);
-          if (!tasks || tasks.length === 0) return null;
-          return (
-            <section key={group}>
-              <h2 className="mb-2 px-0.5 text-[13px] font-semibold text-foreground">
-                {GROUP_LABELS[group]}
-              </h2>
-              <ListCard>
-                {tasks.map((t) => (
-                  <TaskRow key={t.file.id} task={t} muted={group === "closed" || group === "done"} />
-                ))}
-              </ListCard>
-            </section>
-          );
-        })}
-      </div>
-    </div>
+    <SubjectPage className="py-5 space-y-5">
+      {GROUPS.map((group) => {
+        const tasks = grouped.get(group);
+        if (!tasks || tasks.length === 0) return null;
+        return (
+          <section key={group}>
+            <h2 className="mb-2 px-0.5 text-[13px] font-semibold text-foreground">
+              {GROUP_LABELS[group]}
+            </h2>
+            <ListCard>
+              {tasks.map((t) => (
+                <TaskRow key={t.file.id} task={t} muted={group === "closed" || group === "done"} />
+              ))}
+            </ListCard>
+          </section>
+        );
+      })}
+    </SubjectPage>
   );
 }
 
@@ -242,60 +207,53 @@ function TocFallback() {
 
   if (tasks.length === 0) {
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-2">
-        <PencilLine size={24} className="text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">
-          No quizzes or assignments scraped yet — run a sync.
-        </p>
-      </div>
+      <SubjectEmpty icon={<PencilLine size={24} className="text-muted-foreground/40" />} title="No quizzes or assignments scraped yet — run a sync." />
     );
   }
 
   return (
-    <div className="page-scroll">
-      <div className="mx-auto max-w-5xl px-6 py-5">
-        <ListCard>
-          {tasks.map((t, i) => {
-            const Icon = t.kind === "quiz" ? Rocket : PencilLine;
-            const inner = (
-              <>
-                <Icon size={13} className="shrink-0 opacity-60" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[12px] text-foreground truncate">
-                    {t.title}
-                  </span>
-                  <span className="block text-[11px] text-muted-foreground truncate">
-                    {t.moduleTitle}
-                  </span>
+    <SubjectPage>
+      <ListCard>
+        {tasks.map((t, i) => {
+          const Icon = t.kind === "quiz" ? Rocket : PencilLine;
+          const inner = (
+            <>
+              <Icon size={13} className="shrink-0 opacity-60" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[12px] text-foreground truncate">
+                  {t.title}
                 </span>
-                <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {t.kind}
+                <span className="block text-[11px] text-muted-foreground truncate">
+                  {t.moduleTitle}
                 </span>
-                {t.url && (
-                  <ArrowSquareOut size={12} className="shrink-0 opacity-40" />
-                )}
-              </>
-            );
-            const rowClass =
-              "w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors";
-            return t.url ? (
-              <a
-                key={i}
-                href={t.url}
-                target="_blank"
-                rel="noreferrer"
-                className={`${rowClass} hover:bg-surface`}
-              >
-                {inner}
-              </a>
-            ) : (
-              <div key={i} className={`${rowClass} cursor-default`}>
-                {inner}
-              </div>
-            );
-          })}
-        </ListCard>
-      </div>
-    </div>
+              </span>
+              <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+                {t.kind}
+              </span>
+              {t.url && (
+                <ArrowSquareOut size={12} className="shrink-0 opacity-40" />
+              )}
+            </>
+          );
+          const rowClass =
+            "w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors";
+          return t.url ? (
+            <a
+              key={i}
+              href={t.url}
+              target="_blank"
+              rel="noreferrer"
+              className={`${rowClass} hover:bg-surface`}
+            >
+              {inner}
+            </a>
+          ) : (
+            <div key={i} className={`${rowClass} cursor-default`}>
+              {inner}
+            </div>
+          );
+        })}
+      </ListCard>
+    </SubjectPage>
   );
 }

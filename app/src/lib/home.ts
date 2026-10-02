@@ -13,18 +13,11 @@ import { getHarnessThreads, type HarnessThread } from "@/lib/harness";
 const CONTINUE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** One row of Home's Continue list. `at` is the raw stamp it was ranked by;
- *  convert with `sqliteUtcToMs` (see `stampMs`). */
+ *  convert with `sqliteUtcToMs`. */
 export type ContinueItem =
   | { kind: "lecture"; at: string; lecture: Lecture & { subject_code: string } }
   | { kind: "file"; at: string; file: LibraryFileHit }
   | { kind: "thread"; at: string; thread: HarnessThread };
-
-/** Every stamp goes through this: `datetime('now')` writes zoneless UTC,
- *  which `new Date` reads as local, while `harness_threads.updated_at` may
- *  be zoned ISO8601 — compared raw, the list sorts hours out of order. */
-function stampMs(at: string | null): number | undefined {
-  return sqliteUtcToMs(at);
-}
 
 /** Recent lectures, files and threads, merged newest first. Each source is
  *  fetched to `limit` since any one kind may fill the list. */
@@ -40,7 +33,7 @@ export async function loadContinue(limit = 4): Promise<ContinueItem[]> {
 
   const push = (at: string | null, make: (at: string) => ContinueItem) => {
     if (!at) return;
-    const ms = stampMs(at);
+    const ms = sqliteUtcToMs(at);
     if (ms == null || ms < cutoff) return;
     ranked.push({ ms, item: make(at) });
   };

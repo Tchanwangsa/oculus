@@ -1,6 +1,7 @@
-import { memo, useMemo, useState } from "react";
+import { memo } from "react";
 
 import { cn } from "@/lib/utils";
+import { useTranscriptSearch } from "@/hooks/useTranscriptSearch";
 import type { ReadingLine } from "@/lib/db";
 import { InlineMd } from "@/components/markdown/MdComponents";
 import { FollowList, Highlight, SearchField } from "@/components/lectures/FollowList";
@@ -72,23 +73,8 @@ export const ReadingList = memo(function ReadingList({
   onSeek,
   picker,
 }: ReadingListProps) {
-  // The virtualizer counts rows, playback counts lines; `rows[i]` maps one to
-  // the other.
-  const [query, setQuery] = useState("");
-  const needle = query.trim().toLowerCase();
-  const searching = needle.length > 0;
-
-  const rows = useMemo(() => {
-    if (!needle) return lines.map((_, i) => i);
-    const out: number[] = [];
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].text.toLowerCase().includes(needle)) out.push(i);
-    }
-    return out;
-  }, [lines, needle]);
-
-  // Suspended while searching: the playing line may not be in the results.
-  const followIdx = searching ? -1 : activeLineIdx;
+  const { query, setQuery, needle, searching, rows, followIdx } =
+    useTranscriptSearch(lines, activeLineIdx);
 
   const running = status === "running";
 

@@ -441,19 +441,9 @@ fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::
             format!("no LTI form at {url} — the Canvas session may have lapsed")
         })?;
         url = url.join(&action).map_err(|e| format!("bad form action: {e}"))?;
-        form = Some(
-            fields
-                .iter()
-                .map(|(k, v)| {
-                    format!(
-                        "{}={}",
-                        url::form_urlencoded::byte_serialize(k.as_bytes()).collect::<String>(),
-                        url::form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>()
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("&"),
-        );
+        form = Some(url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(&fields)
+            .finish());
     }
     Err("LTI launch never produced a login token (redirect loop?)".to_string())
 }

@@ -16,12 +16,15 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Embed seam, Voyage client, page rasterizer | `app/src-tauri/src/embed/mod.rs`, `app/src-tauri/src/embed/voyage/`, `app/src-tauri/src/embed/raster.rs` |
 | Ingest and search over `pages` | `app/src-tauri/src/retrieval.rs` |
 | Rate limiting both cloud clients share | `app/src-tauri/src/ratelimit.rs` |
-| Crash-safe file replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
-| Cloud credentials (keychain only) | `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs` |
+| Shared parse/embed event payload and channels | `app/src-tauri/src/pipeline_events.rs` |
+| Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
+| Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
+| Credential storage (keychain only); provider probes | `app/src-tauri/src/credentials.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/okta.rs` |
 | Lecture video server | `app/src-tauri/src/media.rs` |
 | In-app browser | `app/src-tauri/src/browser.rs`, `app/src-tauri/capabilities/default.json` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/store.rs`, `app/src-tauri/src/projects.rs` |
+| File-pipeline event payload and bound channels | `app/src-tauri/src/pipeline_events.rs` |
 | Frontend DB access and event folding | `app/src/lib/db.ts`, `app/src/hooks/useBackendEvents.ts` |
 | The CLI over the same engine | `app/src-tauri/src/bin/oculus/` |
 
@@ -38,7 +41,8 @@ its failure rules are in [parsing.md](./parsing.md).
 
 - Tauri commands go in; events come out. Scrape, parse and embed progress
   arrive as events that `app/src/hooks/useBackendEvents.ts` folds into zustand
-  stores.
+  stores. Parse and embed share the optional-field payload in
+  `pipeline_events`, while their channels keep separate success and error vocabularies.
 - `parse::events` and `embed::events` bind the app handle once, first thing in
   `setup`, instead of threading it through the call path. The CLI never binds,
   so the same parse and embed code runs headless and its emits are no-ops.
@@ -118,7 +122,8 @@ never creates the database, so a fresh machine opens the app once first.
 - `harness_threads`/`harness_items` are the chat timeline
   ([harness.md](./harness.md)).
 - Parse and embed settings are the `parse` and `embed` rows of `settings`, read
-  by `parse_config` and `embed_config`. Unknown keys are ignored, not migrated.
+  by `parse_config` and `embed_config`. `store::edit_setting` preserves unknown
+  keys when changing either object; malformed records start from defaults.
 
 ## The main window holds one webview per browser tab
 

@@ -1,3 +1,4 @@
+import { Skeleton } from "./skeleton";
 import type { ReactNode } from "react";
 import { CircleNotch } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,21 @@ export function EmptyState({
         <p className="text-[12px] text-muted-foreground">{body}</p>
       </div>
       {children}
+    </div>
+  );
+}
+
+/** Fixed placeholder rows while a page's data is loading. */
+export function SkeletonRows({ count, rowClassName = "h-8", className }: {
+  count: number;
+  rowClassName?: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("space-y-2", className)}>
+      {Array.from({ length: count }, (_, i) => (
+        <Skeleton key={i} className={cn("w-full", rowClassName)} />
+      ))}
     </div>
   );
 }

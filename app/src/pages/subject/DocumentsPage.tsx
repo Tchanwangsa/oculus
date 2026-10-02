@@ -1,10 +1,10 @@
+import { SubjectPage } from "@/components/subjects/SubjectPage";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CircleNotch, NotePencil, Trash, Warning } from "@phosphor-icons/react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import { FileRecency } from "@/components/files/FileRecency";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
@@ -13,7 +13,7 @@ import { createDocument, deleteDocument, reconcileDocuments } from "@/lib/docume
 import { fmtSize, sqliteUtcToMs } from "@/lib/format";
 import { filePagePath, fileTitle } from "@/lib/openFile";
 import { navigateActive } from "@/lib/tabRouters";
-import { EmptyState, ListCard } from "@/components/ui/PageParts";
+import { EmptyState, ListCard, SkeletonRows } from "@/components/ui/PageParts";
 
 /**
  * The student's own markdown notes for a subject, kept under
@@ -63,58 +63,52 @@ export default function SubjectDocumentsPage() {
 
   return (
     <>
-      <div className="page-scroll">
-        <div className="mx-auto max-w-5xl px-6 py-5">
-          <header className="mb-4 flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h2 className="text-[13px] font-medium text-foreground">Your notes</h2>
-              <p className="mt-0.5 text-[12px] text-muted-foreground">
-                Markdown you write here. Notes are searchable, and the chat
-                agent can read them alongside the rest of the subject.
-              </p>
-            </div>
-            <Button size="sm" onClick={create} disabled={creating}>
-              {creating ? (
-                <CircleNotch className="animate-spin" aria-hidden />
-              ) : (
-                <NotePencil aria-hidden />
-              )}
+      <SubjectPage>
+        <header className="mb-4 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-[13px] font-medium text-foreground">Your notes</h2>
+            <p className="mt-0.5 text-[12px] text-muted-foreground">
+              Markdown you write here. Notes are searchable, and the chat
+              agent can read them alongside the rest of the subject.
+            </p>
+          </div>
+          <Button size="sm" onClick={create} disabled={creating}>
+            {creating ? (
+              <CircleNotch className="animate-spin" aria-hidden />
+            ) : (
+              <NotePencil aria-hidden />
+            )}
+            New document
+          </Button>
+        </header>
+
+        {problem && (
+          <Alert variant="warning" className="mb-3 w-auto px-2.5 py-2">
+            <Warning aria-hidden />
+            <AlertDescription className="text-[11px] leading-snug">{problem}</AlertDescription>
+          </Alert>
+        )}
+
+        {loading && documents.length === 0 ? (
+          <SkeletonRows count={4} />
+        ) : empty ? (
+          <EmptyState
+            icon={<NotePencil size={24} className="text-muted-foreground/40" aria-hidden />}
+            title="No notes yet"
+            body="Write in markdown. Each note is a file the subject's search and chat can see."
+          >
+            <Button variant="outline" size="sm" onClick={create} disabled={creating}>
               New document
             </Button>
-          </header>
-
-          {problem && (
-            <Alert variant="warning" className="mb-3 w-auto px-2.5 py-2">
-              <Warning aria-hidden />
-              <AlertDescription className="text-[11px] leading-snug">{problem}</AlertDescription>
-            </Alert>
-          )}
-
-          {loading && documents.length === 0 ? (
-            <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-8 w-full" />
-              ))}
-            </div>
-          ) : empty ? (
-            <EmptyState
-              icon={<NotePencil size={24} className="text-muted-foreground/40" aria-hidden />}
-              title="No notes yet"
-              body="Write in markdown. Each note is a file the subject's search and chat can see."
-            >
-              <Button variant="outline" size="sm" onClick={create} disabled={creating}>
-                New document
-              </Button>
-            </EmptyState>
-          ) : (
-            <ListCard>
-              {documents.map((f) => (
-                <DocumentRow key={f.id} file={f} onDelete={() => setPendingDelete(f)} />
-              ))}
-            </ListCard>
-          )}
-        </div>
-      </div>
+          </EmptyState>
+        ) : (
+          <ListCard>
+            {documents.map((f) => (
+              <DocumentRow key={f.id} file={f} onDelete={() => setPendingDelete(f)} />
+            ))}
+          </ListCard>
+        )}
+      </SubjectPage>
 
       <ConfirmDialog
         open={!!pendingDelete}

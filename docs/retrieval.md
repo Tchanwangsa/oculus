@@ -17,7 +17,7 @@ over the same pages sits beside it.
 | Token bucket, semaphore, retry ladder (shared with MinerU) | `app/src-tauri/src/ratelimit.rs` |
 | Cost of an outstanding run, before it runs | `app/src-tauri/src/embed/estimate.rs` |
 | Engine selection, throwing the index away, `embed_blocked` | `app/src-tauri/src/embed/commands.rs` |
-| The `embed-status` event | `app/src-tauri/src/embed/events.rs` |
+| The `embed-status` event and shared wire payload | `app/src-tauri/src/embed/events.rs`, `app/src-tauri/src/pipeline_events.rs` |
 | API key (keychain only) | `app/src-tauri/src/voyage.rs` |
 | Ingest, brute-force cosine search, `PAGES_FTS_SQL` + `fts_tests` | `app/src-tauri/src/retrieval.rs` |
 | Who writes `pages.markdown` (`store::upsert_pages`) | `app/src-tauri/src/sync.rs`, `app/src-tauri/src/store.rs` |
@@ -111,7 +111,7 @@ resolves to `EmbedError::NotReady`, never to the cloud.
 and the client paces itself; a second deadline could only abandon progressing
 work (same rule as [parsing.md](./parsing.md#a-parse-takes-minutes-and-only-the-engine-bounds-it)).
 The call site owes an honest page counter instead: `ingest_reporting`'s
-`ProgressSink`, emitted by the app as `embed-status` (a copy of `parse-status`)
+`ProgressSink`, emitted by the app as `embed-status` (the shared pipeline payload)
 *around* `ingest`, because `ingest` is also the CLI's path.
 
 ## The ledger and the spend guard

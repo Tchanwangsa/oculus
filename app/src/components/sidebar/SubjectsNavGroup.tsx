@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useStoredState } from "@/hooks/useStoredState";
+import { useState } from "react";
 import { CaretRight, DotsThree } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { navigateActive } from "@/lib/tabRouters";
@@ -30,17 +31,12 @@ function storePastShown(n: number) {
 /** Header navigates to the subject index; the caret expands the list in place. */
 export default function SubjectsNavGroup() {
   const { current, past, loading } = useSubjects();
-  const [open, setOpen] = useState(
-    () => localStorage.getItem(OPEN_KEY) !== "false",
-  );
+  const [open, setOpen] = useStoredState(OPEN_KEY, (stored) => stored !== "false");
   const [pastShown, setPastShown] = useState(() => pastShownCache);
 
   // Only on the index itself; inside a subject its own row lights instead.
   const inSection = useActivePath().split("?")[0] === "/subjects";
 
-  useEffect(() => {
-    localStorage.setItem(OPEN_KEY, String(open));
-  }, [open]);
 
   return (
     <div>

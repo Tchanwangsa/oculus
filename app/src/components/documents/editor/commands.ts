@@ -18,22 +18,18 @@ import type { SyntaxNode } from "@lezer/common";
  * selection is already formatted that way.
  */
 
+import { ancestorAt } from "./syntax";
+
 type Dispatch = (tr: Transaction) => void;
 
 /** The innermost `name` node holding the range. A caret must be strictly
  *  inside, so one just past `**bold**` starts new bold rather than unwrapping. */
 function enclosing(state: EditorState, range: SelectionRange, name: string): SyntaxNode | null {
-  const tree = syntaxTree(state);
-  for (const side of [1, -1] as const) {
-    for (let n: SyntaxNode | null = tree.resolveInner(range.from, side); n; n = n.parent) {
-      if (n.name !== name) continue;
-      const inside = range.empty
-        ? n.from < range.from && range.to < n.to
-        : n.from <= range.from && range.to <= n.to;
-      if (inside) return n;
-    }
-  }
-  return null;
+  return ancestorAt(state, range.from, (node) =>
+    node.name === name && (range.empty
+      ? node.from < range.from && range.to < node.to
+      : node.from <= range.from && range.to <= node.to),
+  );
 }
 
 // ── Inline marks ──────────────────────────────────────────────────────────
@@ -383,10 +379,7 @@ export const noteKeymap: KeyBinding[] = [
 function enclosingBlock(state: EditorState, pos: number, name: string): SyntaxNode | null {
   const ln = state.doc.lineAt(pos);
   const start = ln.from + (ln.text.length - ln.text.trimStart().length);
-  for (let n: SyntaxNode | null = syntaxTree(state).resolveInner(start, 1); n; n = n.parent) {
-    if (n.name === name) return n;
-  }
-  return null;
+  return ancestorAt(state, start, (node) => node.name === name, [1]);
 }
 
 export interface ActiveFormats {

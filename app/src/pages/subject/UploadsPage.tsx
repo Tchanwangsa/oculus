@@ -1,3 +1,4 @@
+import { SubjectPage } from "@/components/subjects/SubjectPage";
 import { useMemo, useState } from "react";
 import { CircleNotch, Trash, UploadSimple, Warning } from "@phosphor-icons/react";
 
@@ -5,7 +6,6 @@ import { cn } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useParseStore } from "@/stores/parseStore";
 import { useReconcileParseStatus } from "@/hooks/useReconcileParseStatus";
@@ -16,7 +16,7 @@ import { openFileSmart } from "@/lib/openFile";
 import { useFilesTab } from "@/pages/subject/FilesPage";
 import { UPLOADS_CHANGED_EVENT, removeUpload } from "@/lib/uploads";
 import { useWindowEvent } from "@/hooks/useEvents";
-import { EmptyState, ListCard } from "@/components/ui/PageParts";
+import { EmptyState, ListCard, SkeletonRows } from "@/components/ui/PageParts";
 
 /**
  * A subject's own files — material that belongs to the subject but was never
@@ -46,73 +46,67 @@ export default function SubjectUploadsPage() {
 
   return (
     <>
-      <div className="page-scroll">
-        <div className="mx-auto max-w-5xl px-6 py-5">
-          <header className="mb-4 flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h2 className="text-[13px] font-medium text-foreground">Your files</h2>
-              <p className="mt-0.5 text-[12px] text-muted-foreground">
-                Anything relevant that isn't on Canvas. PDFs and Office
-                documents are read and indexed like the rest of the subject —
-                other formats are kept, but not searchable.
-              </p>
-            </div>
-            <Button size="sm" onClick={choose} disabled={busy}>
-              {busy ? (
-                <CircleNotch className="animate-spin" aria-hidden />
-              ) : (
-                <UploadSimple aria-hidden />
-              )}
-              {busy ? "Adding…" : "Add files"}
+      <SubjectPage>
+        <header className="mb-4 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="text-[13px] font-medium text-foreground">Your files</h2>
+            <p className="mt-0.5 text-[12px] text-muted-foreground">
+              Anything relevant that isn't on Canvas. PDFs and Office
+              documents are read and indexed like the rest of the subject —
+              other formats are kept, but not searchable.
+            </p>
+          </div>
+          <Button size="sm" onClick={choose} disabled={busy}>
+            {busy ? (
+              <CircleNotch className="animate-spin" aria-hidden />
+            ) : (
+              <UploadSimple aria-hidden />
+            )}
+            {busy ? "Adding…" : "Add files"}
+          </Button>
+        </header>
+
+        {problems.length > 0 && (
+          <Alert variant="warning" className="mb-3 w-auto px-2.5 py-2">
+            <Warning aria-hidden />
+            <AlertDescription className="text-[11px] leading-snug">
+              {problems.map((p) => (
+                <span key={p} className="block">
+                  {p}
+                </span>
+              ))}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {loading && uploads.length === 0 && !busy ? (
+          <SkeletonRows count={4} />
+        ) : empty ? (
+          <EmptyState
+            icon={<UploadSimple size={24} className="text-muted-foreground/40" aria-hidden />}
+            title="Drop files here"
+            body="PDF, Word, PowerPoint and Excel are parsed and become searchable."
+          >
+            <Button variant="outline" size="sm" onClick={choose}>
+              Choose files
             </Button>
-          </header>
-
-          {problems.length > 0 && (
-            <Alert variant="warning" className="mb-3 w-auto px-2.5 py-2">
-              <Warning aria-hidden />
-              <AlertDescription className="text-[11px] leading-snug">
-                {problems.map((p) => (
-                  <span key={p} className="block">
-                    {p}
-                  </span>
-                ))}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {loading && uploads.length === 0 && !busy ? (
-            <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-8 w-full" />
-              ))}
-            </div>
-          ) : empty ? (
-            <EmptyState
-              icon={<UploadSimple size={24} className="text-muted-foreground/40" aria-hidden />}
-              title="Drop files here"
-              body="PDF, Word, PowerPoint and Excel are parsed and become searchable."
-            >
-              <Button variant="outline" size="sm" onClick={choose}>
-                Choose files
-              </Button>
-            </EmptyState>
-          ) : (
-            <ListCard>
-              {importing.map((name) => (
-                <ImportingRow key={`importing:${name}`} name={name} />
-              ))}
-              {uploads.map((f) => (
-                <UploadRow
-                  key={f.id}
-                  file={f}
-                  status={liveStatuses[f.relative_path]}
-                  onDelete={() => setPendingDelete(f)}
-                />
-              ))}
-            </ListCard>
-          )}
-        </div>
-      </div>
+          </EmptyState>
+        ) : (
+          <ListCard>
+            {importing.map((name) => (
+              <ImportingRow key={`importing:${name}`} name={name} />
+            ))}
+            {uploads.map((f) => (
+              <UploadRow
+                key={f.id}
+                file={f}
+                status={liveStatuses[f.relative_path]}
+                onDelete={() => setPendingDelete(f)}
+              />
+            ))}
+          </ListCard>
+        )}
+      </SubjectPage>
 
       <ConfirmDialog
         open={!!pendingDelete}

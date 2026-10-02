@@ -1,6 +1,6 @@
 import { Compartment, Facet, type EditorState } from "@codemirror/state";
-import { syntaxTree } from "@codemirror/language";
 import type { SyntaxNode } from "@lezer/common";
+import { ancestorAt } from "./syntax";
 
 import { isWebUrl, openExternal } from "@/lib/browser";
 import type { DbFile } from "@/lib/db";
@@ -47,15 +47,9 @@ export function openNoteLink(href: string, files: DbFile[]): void {
 export function linkAt(state: EditorState, pos: number): string | null {
   // A `<…>` link destination's URL node keeps the brackets.
   const href = (url: SyntaxNode) => state.sliceDoc(url.from, url.to).replace(/^<(.*)>$/, "$1");
-  for (const side of [1, -1] as const) {
-    let node: SyntaxNode | null = syntaxTree(state).resolveInner(pos, side);
-    for (; node; node = node.parent) {
-      if (node.name === "URL") return href(node);
-      if (node.name === "Link" || node.name === "Autolink") {
-        const url = node.getChild("URL");
-        return url ? href(url) : null;
-      }
-    }
-  }
-  return null;
+  const node = ancestorAt(state, pos, (n) =>
+    n.name === "URL" || n.name === "Link" || n.name === "Autolink",
+  );
+  const url = node?.name === "URL" ? node : node?.getChild("URL");
+  return url ? href(url) : null;
 }

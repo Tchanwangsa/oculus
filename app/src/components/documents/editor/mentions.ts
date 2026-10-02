@@ -1,6 +1,4 @@
 import type { Completion, CompletionContext, CompletionResult } from "@codemirror/autocomplete";
-import { syntaxTree } from "@codemirror/language";
-import type { SyntaxNode } from "@lezer/common";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
@@ -13,6 +11,7 @@ import { fileTitle } from "@/lib/openFile";
 
 import { noteHost } from "./host";
 import { mathAt } from "./mathContext";
+import { ancestorAt } from "./syntax";
 
 /**
  * `@` in a note links a library file: the query after it searches the note's
@@ -30,15 +29,6 @@ const MENTION = new RegExp(`(?:^|\\s)@([^\\s@\`][^@\`]{0,${MAX_MENTION - 1}})?$`
 
 /** Where a link would be literal text, or already is markup. */
 const NO_MENTION = new Set(["InlineCode", "FencedCode", "CodeBlock", "Frontmatter", "URL", "Autolink", "HTMLBlock", "CommentBlock"]);
-
-function inCode(cx: CompletionContext): boolean {
-  for (const side of [-1, 1] as const) {
-    for (let n: SyntaxNode | null = syntaxTree(cx.state).resolveInner(cx.pos, side); n; n = n.parent) {
-      if (NO_MENTION.has(n.name)) return true;
-    }
-  }
-  return false;
-}
 
 /** The file behind each option, for `mentionOptionIcon`. */
 const optionFiles = new WeakMap<Completion, DbFile>();
@@ -64,7 +54,7 @@ export async function mentionCompletionSource(cx: CompletionContext): Promise<Co
   if (!m) return null;
   const query = m[1] ?? "";
   if (query.split(/\s+/).filter(Boolean).length > MAX_MENTION_WORDS) return null;
-  if (mathAt(cx.state, cx.pos) || inCode(cx)) return null;
+  if (mathAt(cx.state, cx.pos) || ancestorAt(cx.state, cx.pos, (node) => NO_MENTION.has(node.name), [-1, 1])) return null;
   const { subjectId, notePath } = cx.state.facet(noteHost);
   if (subjectId == null || !notePath) return null;
 

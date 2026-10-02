@@ -88,17 +88,9 @@ pub fn connect(canvas_cookie: &str, course_id: i64) -> Result<Session, String> {
             .to_string()
     })?;
 
-    let body: String = fields
-        .iter()
-        .map(|(k, v)| {
-            format!(
-                "{}={}",
-                url::form_urlencoded::byte_serialize(k.as_bytes()).collect::<String>(),
-                url::form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("&");
+    let body = url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(&fields)
+        .finish();
 
     // The session cookies are spread across the redirect chain; the agent jars them.
     let agent = ureq::AgentBuilder::new().build();

@@ -92,6 +92,9 @@ rewriting itself in place is how a long run is told from a stuck one.
 - `read` uses the page numbers `search` reports and the viewer shows — all
   three key `pages.markdown` on `(file_id, page_no)`. An Office document's
   pages are its derived PDF's (`paths::doc_pdf_rel`).
+- Read commands share subject-ID resolution in `query.rs`: an omitted scope
+  means every subject, while a prefix keeps every matching term and an unknown
+  code fails before querying files.
 - File lookup is tiered, not fuzzy: exact path, exact filename,
   case-insensitive filename, path substring. Only the best tier that matched
   counts, and a tie in it is reported, never guessed.
@@ -118,6 +121,8 @@ are in [projects.md](./projects.md); the CLI-shaped parts:
   mapping the column by kind; a lone subtask is refused.
 - `-s` resolves a code matching two terms to the current term, and reports a
   tie that survives that. Omitting `-s` makes a personal project.
+- Batch task input and memory bodies share the UTF-8 file/stdin reader in
+  `main.rs`; `-` is stdin and each command retains its own input validation.
 - Every project and task it writes is marked `source: agent`.
 
 ## `oculus docs` writes the agents folder

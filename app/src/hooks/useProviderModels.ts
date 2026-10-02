@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { PickerProvider } from "@/components/harness/ModelPicker";
 import { providerHealth, useBridgeHealth } from "@/hooks/useBridgeHealth";
-import { PROVIDERS, providerInfo, type HarnessModel, type Provider } from "@/lib/harness";
+import { PROVIDERS, providerInfo, type HarnessModel, type Provider, type PickerProvider } from "@/lib/harness";
 import { useCatalogue } from "@/lib/opencodeCatalogue";
 
 /**

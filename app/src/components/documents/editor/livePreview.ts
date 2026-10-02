@@ -22,7 +22,8 @@ import type { SyntaxNode, SyntaxNodeRef } from "@lezer/common";
 
 import { fenceCode, fenceLanguage } from "./codeLanguages";
 import { noteHost } from "./host";
-import { enterTable, parseTable, TableWidget } from "./table";
+import { enterTable, TableWidget } from "./table";
+import { parseTable } from "./tableModel";
 import {
   BulletWidget,
   CheckboxWidget,

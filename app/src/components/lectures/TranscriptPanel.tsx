@@ -3,12 +3,12 @@ import {
   useCallback,
   useMemo,
   useRef,
-  useState,
   type CSSProperties,
 } from "react";
 import { DotsSixVertical, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useScrollFade } from "@/hooks/useScrollFade";
+import { useTranscriptSearch } from "@/hooks/useTranscriptSearch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ViewTabs, type ViewTab } from "@/components/ui/ViewTabs";
 import {
@@ -196,23 +196,8 @@ export const TranscriptPanel = memo(function TranscriptPanel({
 
   // ── Search ───────────────────────────────────────────────────────────────
 
-  // The list is a window onto `rows`, not `cues`: searching makes row and cue
-  // indexes differ, and `rows[i]` is the only bridge.
-  const [query, setQuery] = useState("");
-  const needle = query.trim().toLowerCase();
-  const searching = needle.length > 0;
-
-  const rows = useMemo(() => {
-    if (!needle) return cues.map((_, i) => i);
-    const out: number[] = [];
-    for (let i = 0; i < cues.length; i++) {
-      if (cues[i].text.toLowerCase().includes(needle)) out.push(i);
-    }
-    return out;
-  }, [cues, needle]);
-
-  // Search suspends the follow-scroll and the pill.
-  const followIdx = searching ? -1 : activeCueIdx;
+  const { query, setQuery, needle, searching, rows, followIdx } =
+    useTranscriptSearch(cues, activeCueIdx);
 
   return (
     <div

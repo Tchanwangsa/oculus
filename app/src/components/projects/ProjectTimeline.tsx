@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CaretRight, Flag } from "@phosphor-icons/react";
+import { Flag } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/useNow";
 import {
@@ -12,7 +12,7 @@ import {
 import { packLanes } from "@/lib/lanes";
 import { fmtClock, sqliteUtcToMs, startOfDay } from "@/lib/format";
 import type { DbProject, DbProjectTask } from "@/lib/projects";
-import { TaskGlyph } from "./TaskMarks";
+import { SubtaskToggle, TaskGlyph } from "./TaskMarks";
 import { columnOf, type TaskNode } from "./taskTree";
 
 /**
@@ -537,22 +537,7 @@ function TimelineRow({
         )}
         style={{ width: NAME_PX }}
       >
-        {row.depth === 0 && row.expandable ? (
-          <button
-            type="button"
-            aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
-            aria-expanded={expanded}
-            onClick={onToggle}
-            className="shrink-0 cursor-pointer p-0.5 text-muted-foreground/50 transition-colors hover:text-foreground"
-          >
-            <CaretRight
-              size={9}
-              className={cn("transition-transform", expanded && "rotate-90")}
-            />
-          </button>
-        ) : (
-          <span aria-hidden className="w-[13px] shrink-0" />
-        )}
+        <SubtaskToggle expandable={row.depth === 0 && row.expandable} expanded={expanded} onToggle={onToggle} />
         <TaskGlyph
           kind={columnOf(project, row.task.column_id)?.kind ?? null}
           size={row.depth === 0 ? 12 : 10}

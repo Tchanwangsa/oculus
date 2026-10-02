@@ -726,18 +726,8 @@ impl MinerUCloud {
         self.download_zip(zip_url, &zip_path)?;
         safe_extract(&zip_path, &result_dir)?;
 
-        // Globbed, not named: the archive layout varies between MinerU
-        // versions. The flat `.md` is no substitute — no page boundaries, and
-        // it drops `header` items (slide titles).
-        let content_path = find_content_list(&result_dir)
-            .ok_or(ParseError::Document { code: "no-content-list".into() })?;
-        let content: Value = fs::read_to_string(&content_path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .ok_or(ParseError::Document { code: "unreadable-content-list".into() })?;
-        let Some(items) = content.as_array() else {
-            return Err(ParseError::Document { code: "invalid-content-list".into() });
-        };
+        let (content_path, items) = super::content_list(&result_dir)?;
+
 
         let source_images = content_path.parent().unwrap_or(&result_dir).join("images");
         let staging = document.source_images();
@@ -746,7 +736,7 @@ impl MinerUCloud {
 
         let mut renamed: HashMap<String, String> = HashMap::new();
         let mut rebased = Vec::with_capacity(items.len());
-        for item in items {
+        for item in &items {
             let Some(object) = item.as_object() else {
                 return Err(ParseError::Document { code: "invalid-content-list".into() });
             };

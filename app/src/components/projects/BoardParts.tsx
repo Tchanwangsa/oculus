@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { ProjectColumn } from "@/lib/projects";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -157,5 +158,59 @@ export function LiftedCard({ live, children }: { live: CardDragState; children: 
       <article className={cn(BOARD_CARD, "shadow-md")}>{children}</article>
     </div>,
     document.body,
+  );
+}
+
+/** Column/card/overlay composition; each board supplies its ordered cards,
+ *  content and drop policy. The lifted copy renders the same card body. */
+export function BoardView<T>({
+  columns, byColumn, drag, lifted, idOf, hrefOf, renderCard,
+  cardClassName, footer, frozen = false,
+}: {
+  columns: readonly ProjectColumn[];
+  byColumn: Map<string, T[]>;
+  drag: CardDragHandle;
+  lifted: T | null;
+  idOf: (card: T) => number;
+  hrefOf: (card: T) => string;
+  renderCard: (card: T) => ReactNode;
+  cardClassName?: (card: T) => string | undefined;
+  footer?: (column: ProjectColumn) => ReactNode;
+  frozen?: boolean;
+}) {
+  const live = drag.drag;
+  return (
+    <div className="flex h-full gap-3 overflow-x-auto px-5 py-4">
+      {columns.map((column) => {
+        const cards = byColumn.get(column.id) ?? [];
+        return (
+          <BoardColumn
+            key={column.id}
+            drag={drag}
+            id={column.id}
+            name={column.name}
+            count={cards.length}
+            highlighted={live?.targetContainerId === column.id && !frozen}
+            footer={footer?.(column)}
+          >
+            {cards.map((card, index) => (
+              <BoardCard
+                key={idOf(card)}
+                drag={drag}
+                containerId={column.id}
+                id={idOf(card)}
+                index={index}
+                href={hrefOf(card)}
+                className={cardClassName?.(card)}
+                frozen={frozen}
+              >
+                {renderCard(card)}
+              </BoardCard>
+            ))}
+          </BoardColumn>
+        );
+      })}
+      {live && lifted && <LiftedCard live={live}>{renderCard(lifted)}</LiftedCard>}
+    </div>
   );
 }

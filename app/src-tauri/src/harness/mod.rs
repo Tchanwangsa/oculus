@@ -1172,6 +1172,7 @@ fn drain_turn(
 
 pub mod app {
     use super::*;
+    use crate::blocking::run as blocking;
     use sqlx::SqlitePool;
     use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -1205,13 +1206,6 @@ pub mod app {
         })
     }
 
-    /// Run blocking work off the async runtime; a failed join is an error.
-    async fn blocking<T: Send + 'static>(
-        f: impl FnOnce() -> Result<T, String> + Send + 'static,
-    ) -> Result<T, String> {
-        tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string())?
-    }
-
     /// One consumer thread folds every event, from every thread, in order:
     /// a row is written before the webview hears about it, and a tool's
     /// finish can never overtake its start.
@@ -1220,19 +1214,9 @@ pub mod app {
         let handle = app.clone();
         let harness = Arc::new(Harness::new(crate::paths::data_dir()));
         let queue: Arc<Mutex<Queue>> = Arc::new(Mutex::new(Queue::default()));
-        // Thread-less events go out as thread 0, the id their raw logs use.
-        {
-            let bus = tx.clone();
-            harness.set_codex_account_sink(Arc::new(move |ev| {
-                let _ = bus.send((0, Provider::Codex, ev));
-            }));
-        }
-        {
-            let bus = tx.clone();
-            harness.set_opencode_default_sink(Arc::new(move |ev| {
-                let _ = bus.send((0, Provider::Opencode, ev));
-            }));
-        }
+        // Thread-less events use the same routing as thread events, on id 0.
+        harness.set_codex_account_sink(sink_for(&tx, 0, Provider::Codex));
+        harness.set_opencode_default_sink(sink_for(&tx, 0, Provider::Opencode));
         // The naming turn's answer comes back in as an event like any other,
         // so it is written and forwarded by this same loop.
         let (namer, bus, queued) = (harness.clone(), tx.clone(), queue.clone());

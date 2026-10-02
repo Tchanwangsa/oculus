@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { DbFile, Lecture } from "@/lib/db";
 import { ownsPlayback, stopLecturePlayback } from "@/lib/lecturePlayback";
-import { activePane, useTabStore, focusedPane } from "@/stores/tabStore";
+import { activePane, useActivePaneId } from "@/stores/tabStore";
 
 /** What the side panel is showing. One item at a time, per pane — a split
  *  tab's two halves each peek at their own thing. */
@@ -75,9 +75,6 @@ export function closeActivePanel(): void {
 }
 
 export function useActivePanelItem(): PanelItem | null {
-  const paneId = useTabStore((s) => {
-    const tab = s.tabs.find((t) => t.id === s.activeId);
-    return tab ? focusedPane(tab).id : 0;
-  });
+  const paneId = useActivePaneId();
   return useSidePanelStore((s) => s.items[paneId] ?? null);
 }

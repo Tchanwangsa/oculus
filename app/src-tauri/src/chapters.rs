@@ -11,7 +11,6 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 
 /// 160×90 greyscale: the geometry ffmpeg is asked for, so one frame's size on
 /// the pipe.
@@ -922,17 +921,7 @@ pub fn validate(
 // One implementation for the CLI and the app; they differ only in where the
 // agent selection comes from and how progress is shown.
 
-pub struct Run<'a> {
-    pub data_dir: &'a Path,
-    /// A full lecture id (prefix matching is the CLI's).
-    pub lecture_id: &'a str,
-    /// Already resolved by the caller (`harness::jobs`).
-    pub selection: &'a crate::harness::jobs::JobSelection,
-    /// Replace an existing chapter set instead of refusing.
-    pub force: bool,
-    /// Read this stream instead of letting [`detect`] choose.
-    pub source: Option<crate::echo360::SourceNum>,
-}
+pub use crate::lecture_jobs::Run;
 
 /// The pipeline's own phases, for a caller that draws progress; what happens
 /// inside the agent turn arrives on `on_event` instead.
@@ -972,27 +961,12 @@ pub fn run(
     on_step: impl Fn(Step),
     on_event: impl Fn(&crate::harness::HarnessEvent) + Send + Sync + 'static,
 ) -> Result<Outcome, String> {
-    use crate::harness::{self, HarnessEvent};
-    use sqlx::Row;
-
     let id = job.lecture_id;
-    let row = rt
-        .block_on(
-            sqlx::query(
-                "SELECT l.title, l.duration_seconds, l.video_path, l.transcript_path, s.code
-                   FROM lectures l LEFT JOIN subjects s ON s.id = l.subject_id
-                  WHERE l.id = ?1",
-            )
-            .bind(id)
-            .fetch_optional(pool),
-        )
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("no lecture {id}"))?;
-    let title: String = row.get("title");
-    let duration = row.get::<i64, _>("duration_seconds").max(0) as u32;
-    let video: Option<String> = row.get("video_path");
-    let transcript: Option<String> = row.get("transcript_path");
-    let code: Option<String> = row.get("code");
+    let source = rt.block_on(crate::lecture_jobs::source(pool, id))?;
+    let title = &source.title;
+    let duration = source.duration;
+    let transcript = &source.transcript;
+    let code = &source.code;
 
     let existing = rt.block_on(crate::store::chapters(pool, id))?;
     if !existing.is_empty() && !job.force {
@@ -1001,13 +975,7 @@ pub fn run(
             existing.len()
         ));
     }
-    let video = video.ok_or_else(|| {
-        format!("{title} is not downloaded — `oculus run -l --videos` fetches it")
-    })?;
-    let video = PathBuf::from(&video);
-    if !video.exists() {
-        return Err(format!("{} is on record but missing from disk", video.display()));
-    }
+    let video = source.video()?;
     let ffmpeg = crate::echo360::find_ffmpeg(None)
         .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
 
@@ -1080,29 +1048,8 @@ pub fn run(
         });
 
         on_step(Step::Asking);
-        let reply = Arc::new(Mutex::new(String::new()));
-        let collect = reply.clone();
-        let opts = harness::SendOptions {
-            model: Some(job.selection.model.clone()),
-            reasoning_effort: job.selection.reasoning_effort.clone(),
-            ..Default::default()
-        };
-        let turn = harness::run_once(
-            job.data_dir,
-            job.selection.provider,
-            &opts,
-            &text,
-            move |ev| {
-                if let HarnessEvent::AssistantMessage { text } = ev {
-                    collect.lock().unwrap().push_str(text);
-                }
-                on_event(ev);
-            },
-        );
-
-        let reply = reply.lock().unwrap().clone();
-        let chapters = turn
-            .and_then(|()| parse_chapters(&reply))
+        let chapters = crate::lecture_jobs::reply(job.data_dir, job.selection, &text, on_event)
+            .and_then(|reply| parse_chapters(&reply))
             .and_then(|chapters| validate(&chapters, &boundaries, duration).map(|()| chapters))?;
         on_step(Step::Writing);
         rt.block_on(crate::store::save_chapters(pool, id, &chapters))?;
@@ -1126,6 +1073,7 @@ pub fn run(
 pub mod app {
     use super::*;
     use tauri::{AppHandle, Emitter};
+    use crate::lecture_jobs::{check_start, reconcile_status, spawn_job, Progress};
 
     /// Emitted once when a run ends. Not `lectures-changed`, which fires on
     /// every playback-progress save.
@@ -1133,44 +1081,6 @@ pub mod app {
 
     /// Emitted throughout a run; display only, never persisted.
     pub const LECTURE_CHAPTER_PROGRESS_EVENT: &str = "lecture-chapter-progress";
-
-    /// A reading-copy window count; chaptering never sets it.
-    #[derive(serde::Serialize, Clone, Copy)]
-    #[serde(rename_all = "camelCase")]
-    pub(crate) struct WindowProgress {
-        pub(crate) done: u32,
-        pub(crate) total: u32,
-    }
-
-    /// One step of a lecture job in flight, shared by chapters and `reading`.
-    #[derive(serde::Serialize, Clone)]
-    #[serde(rename_all = "camelCase")]
-    pub(crate) struct Progress {
-        pub(crate) lecture_id: String,
-        /// `decoding` | `frames` | `agent` | `naming` | `writing`.
-        pub(crate) phase: &'static str,
-        /// A tool's own title while the agent works.
-        pub(crate) detail: Option<String>,
-        pub(crate) kind: Option<crate::harness::ToolKind>,
-        /// Countable phases only; the agent turn has no denominator.
-        pub(crate) done: Option<u32>,
-        pub(crate) total: Option<u32>,
-        pub(crate) window: Option<WindowProgress>,
-    }
-
-    impl Progress {
-        pub(crate) fn at(lecture_id: &str, phase: &'static str) -> Progress {
-            Progress {
-                lecture_id: lecture_id.to_string(),
-                phase,
-                detail: None,
-                kind: None,
-                done: None,
-                total: None,
-                window: None,
-            }
-        }
-    }
 
     #[derive(serde::Serialize, Clone)]
     #[serde(rename_all = "camelCase")]
@@ -1181,74 +1091,6 @@ pub mod app {
         status: &'static str,
         chapters: usize,
         error: Option<String>,
-    }
-
-    /// Refuse a `source` that is not 1 or 2, or a lecture whose
-    /// `status_column` says a run is already in flight.
-    pub(crate) async fn check_start(
-        lecture_id: &str,
-        source: Option<u8>,
-        status_column: &str,
-        busy: &str,
-    ) -> Result<(), String> {
-        if let Some(n) = source {
-            if n != 1 && n != 2 {
-                return Err(format!("{n} is not a source — a capture has 1 and sometimes 2"));
-            }
-        }
-        let pool = crate::store::open_pool().await?;
-        let running: Option<String> =
-            sqlx::query_scalar(&format!("SELECT {status_column} FROM lectures WHERE id = ?1"))
-                .bind(lecture_id)
-                .fetch_optional(&pool)
-                .await
-                .map_err(|e| e.to_string())?
-                .flatten();
-        if running.as_deref() == Some("running") {
-            return Err(busy.into());
-        }
-        Ok(())
-    }
-
-    /// Run `body` on a thread of its own with its own runtime, pool and the
-    /// agent selection configured for `job`. `tag` prefixes setup errors.
-    pub(crate) fn spawn_job(
-        tag: &'static str,
-        job: crate::harness::jobs::Job,
-        body: impl FnOnce(&tokio::runtime::Runtime, &sqlx::SqlitePool, crate::harness::jobs::JobSelection)
-            + Send
-            + 'static,
-    ) {
-        std::thread::spawn(move || {
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt,
-                Err(e) => return eprintln!("[oculus] {tag}: {e}"),
-            };
-            let pool = match rt.block_on(crate::store::open_pool()) {
-                Ok(p) => p,
-                Err(e) => return eprintln!("[oculus] {tag}: {e}"),
-            };
-            let selection = rt.block_on(crate::harness::jobs::selection(&pool, job));
-            body(&rt, &pool, selection);
-        });
-    }
-
-    /// Startup sweep: clear a `running` status a killed run left behind.
-    pub(crate) fn reconcile_status<F>(
-        tag: &'static str,
-        sweep: impl FnOnce(sqlx::SqlitePool) -> F + Send + 'static,
-    ) where
-        F: std::future::Future<Output = Result<u64, String>> + Send,
-    {
-        tauri::async_runtime::spawn(async move {
-            if let Ok(pool) = crate::store::open_pool().await {
-                if let Ok(n) = sweep(pool).await {
-                    if n > 0 {
-                        eprintln!("[oculus] {tag}: cleared {n} interrupted run(s)");
-                    }
-                }
-            }
-        });
     }
 
     /// Chapter a lecture with the agent the `lectureChapters` job is

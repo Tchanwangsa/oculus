@@ -4,31 +4,16 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { ArrowSquareOut, Info } from "@phosphor-icons/react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { CredentialField } from "./CredentialField";
+import { EngineSelect, type EngineOption } from "./EngineSelect";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { embedReady, getUnembeddedPdfs } from "@/lib/retrieval";
 import { Progress } from "@/components/ui/progress";
 import { useIndexStore, type IndexProgress, type IndexState } from "@/stores/indexStore";
 import { Section, StatRow } from "@/pages/settings/section";
 import { ReindexConfirmDialog, type ReindexPrompt } from "./ReindexConfirmDialog";
-
-/** Mirrors `EngineOption` in `app/src-tauri/src/embed/commands.rs`. */
-interface EngineOption {
-  id: string;
-  label: string;
-  detail: string;
-  available: boolean;
-  /** Present only when `available` is false, and then always. */
-  unavailable_reason: string | null;
-}
 
 /**
  * Mirrors `VoyageUsage` in `app/src-tauri/src/embed/commands.rs`. Oculus's own
@@ -317,30 +302,13 @@ export function EmbeddingSection() {
               {selected?.detail ?? "Where page images are turned into vectors."}
             </p>
           </div>
-          <Select
+          <EngineSelect
+            label="Embedding model"
             value={settings?.engine ?? ""}
             disabled={!settings || switching}
-            onValueChange={choose}
-          >
-            <SelectTrigger aria-label="Embedding model" size="sm" className="h-7 w-48 text-xs">
-              <SelectValue placeholder="—" />
-            </SelectTrigger>
-            <SelectContent>
-              {(settings?.engines ?? []).map((engine) => (
-                <SelectItem
-                  key={engine.id}
-                  value={engine.id}
-                  disabled={!engine.available}
-                  className="text-xs"
-                >
-                  <span>{engine.label}</span>
-                  {engine.available ? null : (
-                    <span className="text-[11px] text-muted-foreground">Unavailable</span>
-                  )}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            engines={settings?.engines ?? []}
+            onChange={choose}
+          />
         </div>
 
         {settings && !settings.credentials_ready && settings.engine === "cloud" ? (
@@ -349,56 +317,17 @@ export function EmbeddingSection() {
           </p>
         ) : null}
 
-        <div className="py-2">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs text-foreground">Voyage API key</p>
-              <p className="text-[11px] text-muted-foreground">
-                Stored in your Mac keychain, never in the library database.
-              </p>
-            </div>
-            {settings?.credentials_ready ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-success">Connected</span>
-                <Button variant="outline" size="xs" onClick={() => void deleteKey()}>
-                  Remove
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Input
-                  aria-label="Voyage API key"
-                  type="password"
-                  autoComplete="off"
-                  value={key}
-                  onChange={(event) => setKey(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void saveKey();
-                  }}
-                  placeholder="Paste key"
-                  className="h-7 w-44 text-xs"
-                />
-                <Button
-                  size="xs"
-                  disabled={!key.trim() || checkingKey}
-                  onClick={() => void saveKey()}
-                >
-                  {checkingKey ? "Checking…" : "Save"}
-                </Button>
-              </div>
-            )}
-          </div>
-          {keyNote ? (
-            <p
-              className={cn(
-                "mt-2 text-[11px] leading-relaxed",
-                keyNote.kind === "error" ? "text-destructive" : "text-warning",
-              )}
-            >
-              {keyNote.text}
-            </p>
-          ) : null}
-        </div>
+        <CredentialField
+          label="Voyage API key"
+          value={key}
+          connected={settings?.credentials_ready ?? false}
+          busy={checkingKey}
+          placeholder="Paste key"
+          onChange={setKey}
+          onSave={() => void saveKey()}
+          onRemove={() => void deleteKey()}
+          note={keyNote}
+        />
 
         <StatRow
           label="Pages indexed"

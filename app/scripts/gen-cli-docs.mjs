@@ -1,43 +1,12 @@
-// Refresh `docs/cli-reference.md` from the CLI's own clap tree.
-//
-// `docs/cli.md` is prose — why the CLI splits into a write half and a read
-// half, why `search` fails loudly instead of returning zero hits. None of that
-// can be generated. The *reference* can: `oculus docs --stdout` walks clap's
-// command tree, so a new subcommand or flag appears the moment it exists.
-//
-// That reference already reaches coding agents as `OCULUS-CLI.md` in the data
-// directory, but only on a machine where the CLI has been installed. This puts
-// the same text in the repo, where a reader — or an agent working on the repo
-// rather than on a library — can find it without a build.
-//
-// Runs from `beforeBuildCommand`, after `stage-cli` has already built the
-// release binary — so a bundle can never ship a CLI the reference does not
-// describe. Run it by hand (`bun run docs:cli`) after changing the CLI;
-// standalone it builds a binary if none is there.
-
+// Refresh docs/cli-reference.md from the binary’s clap tree, writing only changes.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { app, buildCli, cliPath } from "./runtime.mjs";
 
-const app = dirname(dirname(fileURLToPath(import.meta.url)));
-const manifest = join(app, "src-tauri", "Cargo.toml");
 const out = join(dirname(app), "docs", "cli-reference.md");
-
-const exe = process.platform === "win32" ? ".exe" : "";
-const binary = process.env.OCULUS_BIN ?? join(app, "src-tauri", "target", "release", `oculus${exe}`);
-
-if (!existsSync(binary)) {
-  // Cargo will report "Finished" while leaving a stale binary in place, so the
-  // old one goes first — otherwise the reference could describe a build that
-  // no longer matches the source it was generated from.
-  rmSync(binary, { force: true });
-  execFileSync(
-    "cargo",
-    ["build", "--release", "--manifest-path", manifest, "--bin", "oculus"],
-    { stdio: "inherit" },
-  );
-}
+const binary = process.env.OCULUS_BIN ?? cliPath();
+if (!existsSync(binary)) buildCli();
 
 // `--stdout` renders and returns before touching the data directory, so this
 // works on a machine where the app has never run and no database exists.

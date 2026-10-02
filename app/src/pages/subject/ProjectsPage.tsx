@@ -1,3 +1,4 @@
+import { SubjectPage } from "@/components/subjects/SubjectPage";
 import { useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ProjectFlatList } from "@/components/projects/ProjectList";
@@ -38,16 +39,14 @@ export default function SubjectProjectsPage() {
   const actions = useProjectActions();
 
   return (
-    <div className="page-scroll">
-      <div className="mx-auto max-w-5xl px-6 py-6">
-        <ProjectFlatList
-          projects={projects}
-          counts={counts}
-          subjectLabel={displayCode(subject.code)}
-          onCreate={create}
-          actions={actions}
-        />
-      </div>
-    </div>
+    <SubjectPage className="py-6">
+      <ProjectFlatList
+        projects={projects}
+        counts={counts}
+        subjectLabel={displayCode(subject.code)}
+        onCreate={create}
+        actions={actions}
+      />
+    </SubjectPage>
   );
 }

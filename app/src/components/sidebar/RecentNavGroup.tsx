@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useStoredState } from "@/hooks/useStoredState";
 import { CaretRight, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { navigateActive } from "@/lib/tabRouters";
@@ -20,13 +20,8 @@ export default function RecentNavGroup() {
   const here = useActivePath();
   const hereKey = recentKey(here);
   const { subjects } = useSubjects();
-  const [open, setOpen] = useState(
-    () => localStorage.getItem(OPEN_KEY) !== "false",
-  );
+  const [open, setOpen] = useStoredState(OPEN_KEY, (stored) => stored !== "false");
 
-  useEffect(() => {
-    localStorage.setItem(OPEN_KEY, String(open));
-  }, [open]);
 
   if (recents.length === 0) return null;
 

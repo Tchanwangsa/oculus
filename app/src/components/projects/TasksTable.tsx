@@ -2,15 +2,14 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowElbowDownRight, CaretDown, CaretUp } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { usePagedRows } from "@/components/ui/TablePagination";
 import { GridTable } from "@/components/ui/GridTable";
-import { displayCode, sqliteUtcToMs } from "@/lib/format";
+import { sqliteUtcToMs } from "@/lib/format";
 import type { DbProject, DbTaskWithProject } from "@/lib/projects";
 import { ProjectPicker } from "./ProjectPicker";
 import { StatusPill } from "./StatusPill";
 import { taskHref } from "./taskHref";
-import { AgentMark, DueChip, TaskGlyph } from "./TaskMarks";
+import { AgentMark, DueChip, TaskGlyph, TaskSubject } from "./TaskMarks";
 import {
   UNIVERSAL_COLUMNS,
   projectLabel,
@@ -246,18 +245,7 @@ export function TasksTable({
                 </ProjectPicker>
               )}
 
-              {task.project_id == null ? (
-                <span className="text-[11px] text-muted-foreground/50">—</span>
-              ) : task.project_subject_code ? (
-                <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2 py-0.5 text-[11px] text-foreground">
-                  <SubjectIcon code={task.project_subject_code} size={11} />
-                  <span className="truncate">
-                    {displayCode(task.project_subject_code)}
-                  </span>
-                </span>
-              ) : (
-                <span className="text-[11px] text-muted-foreground/60">Personal</span>
-              )}
+              <TaskSubject code={task.project_subject_code} unfiled={task.project_id == null} />
 
               {/* The task's own board — the default four when unfiled. */}
               <StatusPill

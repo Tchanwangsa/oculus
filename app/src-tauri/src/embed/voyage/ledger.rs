@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::clock::{now_nanos, now_secs};
+use crate::clock::now_secs;
 use crate::embed::EmbedError;
 use crate::ratelimit::{hold, TokenBucket};
 
@@ -378,16 +378,7 @@ impl UsageLedger {
     /// Temp file (pid + nanos suffix) then rename, so a crash leaves the
     /// previous record.
     fn write(&self, usage: &Usage) {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).ok();
-        }
-        let temporary = self
-            .path
-            .with_extension(format!("json.tmp-{}-{}", std::process::id(), now_nanos()));
-        let Ok(body) = serde_json::to_vec_pretty(usage) else {
-            return;
-        };
-        crate::atomic_write::write(&self.path, &temporary, &body).ok();
+        crate::atomic_write::json(&self.path, usage).ok();
     }
 }
 

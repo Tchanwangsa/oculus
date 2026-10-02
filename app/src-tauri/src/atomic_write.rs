@@ -24,3 +24,16 @@ pub fn write(path: &Path, tmp: &Path, body: &[u8]) -> Result<(), String> {
         format!("rename into {}: {e}", path.display())
     })
 }
+
+/// Persist a JSON record through a unique sibling temporary file. Parents
+/// are created here so every ledger uses the same crash-safe write discipline.
+pub(crate) fn json(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let temporary = path.with_extension(format!(
+        "json.tmp-{}-{}", std::process::id(), crate::clock::now_nanos()
+    ));
+    let body = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    write(path, &temporary, &body)
+}

@@ -685,7 +685,7 @@ const LECTURE_HAYSTACK = `l.title || ' ' || s.code`;
 /** Words beyond this are ignored (noise from a pasted line). */
 const MAX_TERMS = 6;
 
-function likeEscape(s: string): string {
+export function likeEscape(s: string): string {
   return s.replace(/[%_\\]/g, (c) => `\\${c}`);
 }
 

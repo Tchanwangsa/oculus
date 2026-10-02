@@ -18,12 +18,14 @@ repair a bad row.
 | `oculus project` / `oculus task` | `app/src-tauri/src/bin/oculus/planning.rs` |
 | One open project and its tasks | `app/src/stores/projectsStore.ts` |
 | Index, one project, one task, every task | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/TaskPage.tsx`, `app/src/pages/TasksPage.tsx` |
+| Index subject groups and collapsed preferences (shared with chat) | `app/src/lib/subjectGroups.ts`, `app/src/hooks/useCollapsedGroups.ts` |
 | A subject's Projects tab | `app/src/pages/subject/ProjectsPage.tsx` |
 | The Projects / Tasks strip and its sidebar row | `app/src/components/projects/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
 | Overview, tags, pinned calendar event | `app/src/components/projects/ProjectOverview.tsx`, `app/src/components/projects/TagEditor.tsx`, `app/src/components/projects/EventLink.tsx` |
 | Board, table, timeline, and the shaping behind them | `app/src/components/projects/ProjectBoard.tsx`, `app/src/components/projects/ProjectTable.tsx`, `app/src/components/projects/ProjectTimeline.tsx`, `app/src/components/projects/taskTree.ts` |
 | The universal view: hook, filters, views, shared rules | `app/src/hooks/useTaskList.ts`, `app/src/components/projects/TaskFilters.tsx`, `app/src/components/projects/TasksBoard.tsx`, `app/src/components/projects/TasksTable.tsx`, `app/src/components/projects/universalTasks.ts` |
 | Card drag and board chrome | `app/src/hooks/useCardDrag.ts` (on `app/src/hooks/usePointerDrag.ts`), `app/src/components/projects/BoardParts.tsx` |
+| Subject chips, subtask expansion, status and progress marks | `app/src/components/projects/TaskMarks.tsx` |
 | A card's title | `app/src/components/projects/CardTitle.tsx` |
 | Filing a task; creating one | `app/src/components/projects/ProjectPicker.tsx`, `app/src/components/projects/NewTaskButton.tsx` |
 | Rename / archive / delete | `app/src/components/projects/ProjectMenu.tsx`, `app/src/components/projects/useProjectActions.ts` |
@@ -222,6 +224,19 @@ table (`app/src/pages/TasksPage.tsx`), under the same strip as `/projects`.
   - carries the task's subtasks, each by its own kind; refiling a subtask
     alone is refused;
   - appends at the destination column's end, then places via `moveTask`.
+
+## Boards share rendering while each view owns placement
+
+`BoardView` in `app/src/components/projects/BoardParts.tsx` composes columns,
+draggable cards and the lifted copy. Project and universal boards supply the
+card body, ordered rows and drop policy; parent/sibling placement stays in
+`app/src/components/projects/taskTree.ts`. Tables and timelines share the
+subtask disclosure control in `app/src/components/projects/TaskMarks.tsx`.
+
+Project and task patches bind values through `app/src/lib/sqlPatch.ts`.
+`undefined` leaves a field alone, `null` clears it, and an empty patch neither
+updates timestamps nor announces a write. Domain validation and refresh events
+remain in `app/src/lib/projects.ts`.
 
 ## Gotchas
 

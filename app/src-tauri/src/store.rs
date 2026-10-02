@@ -41,6 +41,52 @@ pub async fn open_pool() -> Result<SqlitePool, String> {
     pool(&path).await
 }
 
+/// Read a settings row through the caller's pool, connection or transaction.
+pub async fn setting<'e, E>(executor: E, key: &str) -> Result<Option<String>, String>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query_scalar("SELECT value FROM settings WHERE key = ?1")
+        .bind(key)
+        .fetch_optional(executor)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Upsert one settings row; callers own its format and validation.
+pub async fn set_setting<'e, E>(executor: E, key: &str, value: &str) -> Result<(), String>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(key)
+    .bind(value)
+    .execute(executor)
+    .await
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Edit an object settings row, retaining unknown keys. Missing or malformed
+/// objects use the same empty default as the parse and embed config readers.
+pub async fn edit_setting(
+    pool: &SqlitePool,
+    key: &str,
+    edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+) -> Result<(), String> {
+    let stored = setting(pool, key).await?;
+    let mut object = stored
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(raw).ok())
+        .unwrap_or_default();
+    edit(&mut object);
+    let value = serde_json::to_string(&object).map_err(|e| e.to_string())?;
+    set_setting(pool, key, &value).await
+}
+
 /// Read one `settings` row from a **synchronous** caller, from any context.
 ///
 /// The seams read their backend setting from plain threads and non-async
@@ -65,14 +111,9 @@ pub fn setting_blocking(key: &str) -> Option<String> {
                 .create_if_missing(false)
                 .busy_timeout(Duration::from_secs(15));
             let mut connection = sqlx::SqliteConnection::connect_with(&options).await.ok()?;
-            let row = sqlx::query("SELECT value FROM settings WHERE key = ?1")
-                .bind(&key)
-                .fetch_optional(&mut connection)
-                .await
-                .ok()
-                .flatten();
+            let value = setting(&mut connection, &key).await.ok().flatten();
             connection.close().await.ok();
-            row?.try_get::<String, _>("value").ok()
+            value
         })
     })
     .join()
@@ -172,9 +213,10 @@ pub async fn upsert_file(
     let file_type = filename.rsplit_once('.').map(|(_, e)| e.to_string()).unwrap_or_else(|| "md".into());
 
     // `changed` is the engine's action; content_changed_at moves only on new bytes.
-    let sql = if changed {
+    sqlx::query(
         r#"INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes, category, canvas_id, source_url, first_seen_at, content_changed_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'),
+                   CASE WHEN ?9 THEN datetime('now') ELSE NULL END)
            ON CONFLICT(subject_id, relative_path) DO UPDATE SET
              filename   = excluded.filename,
              file_type  = excluded.file_type,
@@ -183,20 +225,8 @@ pub async fn upsert_file(
              canvas_id  = excluded.canvas_id,
              source_url = excluded.source_url,
              scraped_at = datetime('now'),
-             content_changed_at = datetime('now')"#
-    } else {
-        r#"INSERT INTO files (subject_id, filename, relative_path, file_type, size_bytes, category, canvas_id, source_url, first_seen_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
-           ON CONFLICT(subject_id, relative_path) DO UPDATE SET
-             filename   = excluded.filename,
-             file_type  = excluded.file_type,
-             size_bytes = excluded.size_bytes,
-             category   = excluded.category,
-             canvas_id  = excluded.canvas_id,
-             source_url = excluded.source_url,
-             scraped_at = datetime('now')"#
-    };
-    sqlx::query(sql)
+             content_changed_at = CASE WHEN ?9 THEN excluded.content_changed_at ELSE files.content_changed_at END"#,
+    )
     .bind(subject_id)
     .bind(&filename)
     .bind(relative_path)
@@ -205,6 +235,7 @@ pub async fn upsert_file(
     .bind(category)
     .bind(canvas_id)
     .bind(source_url)
+    .bind(changed)
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
@@ -766,6 +797,75 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::*;
+
+    async fn migrated_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new().max_connections(1)
+            .connect("sqlite::memory:").await.unwrap();
+        for migration in crate::migrations::all() {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        pool
+    }
+
+    #[tokio::test]
+    async fn setting_edits_keep_unknown_keys_and_transactions_can_roll_back() {
+        let pool = migrated_pool().await;
+        set_setting(&pool, "parse", r#"{"engineUrl":"http://old","unknown":{"enabled":true}}"#).await.unwrap();
+        set_setting(&pool, "embed", r#"{"engine":"cloud"}"#).await.unwrap();
+        edit_setting(&pool, "parse", |object| {
+            object.insert("engine".into(), "local".into());
+            object.remove("engineUrl");
+        }).await.unwrap();
+        let raw = setting(&pool, "parse").await.unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
+            serde_json::json!({"engine":"local", "unknown":{"enabled":true}}));
+        assert_eq!(setting(&pool, "embed").await.unwrap().as_deref(), Some(r#"{"engine":"cloud"}"#));
+        assert_eq!(setting(&pool, "missing").await.unwrap(), None);
+
+        let mut tx = pool.begin().await.unwrap();
+        set_setting(&mut *tx, "parse", "replacement").await.unwrap();
+        assert_eq!(setting(&mut *tx, "parse").await.unwrap().as_deref(), Some("replacement"));
+        tx.rollback().await.unwrap();
+        assert_eq!(setting(&pool, "parse").await.unwrap(), Some(raw));
+
+        for invalid in [None, Some("invalid json"), Some("{broken"), Some("null"), Some("[]"), Some("42")] {
+            sqlx::query("DELETE FROM settings WHERE key = 'embed'").execute(&pool).await.unwrap();
+            if let Some(raw) = invalid {
+                set_setting(&pool, "embed", raw).await.unwrap();
+            }
+            edit_setting(&pool, "embed", |object| {
+                object.insert("engine".into(), "cloud".into());
+            }).await.unwrap();
+            assert_eq!(setting(&pool, "embed").await.unwrap().as_deref(),
+                Some(r#"{"engine":"cloud"}"#));
+        }
+    }
+
+    #[tokio::test]
+    async fn file_upserts_preserve_content_time_unless_bytes_changed() {
+        let pool = migrated_pool().await;
+        sqlx::query("INSERT INTO subjects (id, code, name) VALUES (1, 'SUBJ', 'Subject')")
+            .execute(&pool).await.unwrap();
+        upsert_file(&pool, 1, "courses/SUBJ/files/a.pdf", 4, "files", Some(7), None, false)
+            .await.unwrap();
+        let id = file_id(&pool, 1, "courses/SUBJ/files/a.pdf").await.unwrap().unwrap();
+        let stamp: Option<String> = sqlx::query_scalar("SELECT content_changed_at FROM files WHERE id = ?1")
+            .bind(id).fetch_one(&pool).await.unwrap();
+        assert_eq!(stamp, None, "an unchanged insert has no content-change stamp");
+        sqlx::query("UPDATE files SET first_seen_at = 'first', content_changed_at = 'content' WHERE id = ?1")
+            .bind(id).execute(&pool).await.unwrap();
+        for changed in [false, true] {
+            upsert_file(&pool, 1, "courses/SUBJ/files/a.pdf", 8, "files", Some(9), Some("https://source"), changed)
+                .await.unwrap();
+            let row = sqlx::query("SELECT first_seen_at, content_changed_at, size_bytes, canvas_id, source_url FROM files WHERE id = ?1")
+                .bind(id).fetch_one(&pool).await.unwrap();
+            assert_eq!(row.get::<String, _>("first_seen_at"), "first");
+            assert_eq!(row.get::<String, _>("content_changed_at") == "content", !changed);
+            assert_eq!(row.get::<i64, _>("size_bytes"), 8);
+            assert_eq!(row.get::<i64, _>("canvas_id"), 9);
+            assert_eq!(row.get::<String, _>("source_url"), "https://source");
+        }
+    }
 
     async fn reading_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()

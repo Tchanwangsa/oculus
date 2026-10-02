@@ -8,7 +8,7 @@
 //! own, so a failure leaves the completed windows visible. See
 //! `docs/chapters.md`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 /// Shortest segment (paragraph) the slide changes are thinned to.
@@ -459,14 +459,7 @@ pub fn mark_paragraphs(lines: &mut [ReadingLine], slide_changes: &[u32]) {
 
 // ── Running the whole job ────────────────────────────────────────────────────
 
-pub struct Run<'a> {
-    pub data_dir: &'a Path,
-    pub lecture_id: &'a str,
-    pub selection: &'a crate::harness::jobs::JobSelection,
-    pub force: bool,
-    /// Read this stream instead of letting `chapters::detect` choose.
-    pub source: Option<crate::echo360::SourceNum>,
-}
+pub use crate::lecture_jobs::Run;
 
 pub enum Step<'a> {
     Decoding { second: u32, duration: u32 },
@@ -495,27 +488,14 @@ pub fn run(
     on_step: impl Fn(Step),
     on_event: impl Fn(&crate::harness::HarnessEvent) + Send + Sync + 'static,
 ) -> Result<Outcome, String> {
-    use crate::harness::{self, HarnessEvent};
-    use sqlx::Row;
+    use crate::harness::HarnessEvent;
 
     let id = job.lecture_id;
-    let row = rt
-        .block_on(
-            sqlx::query(
-                "SELECT l.title, l.duration_seconds, l.video_path, l.transcript_path, s.code
-                   FROM lectures l LEFT JOIN subjects s ON s.id = l.subject_id
-                  WHERE l.id = ?1",
-            )
-            .bind(id)
-            .fetch_optional(pool),
-        )
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("no lecture {id}"))?;
-    let title: String = row.get("title");
-    let duration = row.get::<i64, _>("duration_seconds").max(0) as u32;
-    let video: Option<String> = row.get("video_path");
-    let transcript: Option<String> = row.get("transcript_path");
-    let code: Option<String> = row.get("code");
+    let source = rt.block_on(crate::lecture_jobs::source(pool, id))?;
+    let title = &source.title;
+    let duration = source.duration;
+    let transcript = &source.transcript;
+    let code = &source.code;
 
     let existing = rt.block_on(crate::store::reading(pool, id))?;
     if !existing.is_empty() && !job.force {
@@ -524,14 +504,8 @@ pub fn run(
             existing.len()
         ));
     }
-    let video = video.ok_or_else(|| {
-        format!("{title} is not downloaded — `oculus run -l --videos` fetches it")
-    })?;
-    let video = PathBuf::from(video);
-    if !video.exists() {
-        return Err(format!("{} is on record but missing from disk", video.display()));
-    }
-    let transcript = transcript.ok_or_else(|| {
+    let video = source.video()?;
+    let transcript = transcript.as_deref().ok_or_else(|| {
         format!("{title} has no transcript — `oculus run -l --videos` downloads it")
     })?;
     let transcript_path = PathBuf::from(transcript);
@@ -637,29 +611,11 @@ pub fn run(
                         failure.as_deref().unwrap_or("the agent turn failed")
                     )
                 };
-                let reply = Arc::new(Mutex::new(String::new()));
-                let collect = reply.clone();
                 let report = on_event.clone();
-                let opts = harness::SendOptions {
-                    model: Some(job.selection.model.clone()),
-                    reasoning_effort: job.selection.reasoning_effort.clone(),
-                    ..Default::default()
-                };
-                let turn = harness::run_once(
-                    job.data_dir,
-                    job.selection.provider,
-                    &opts,
-                    &text,
-                    move |event| {
-                        if let HarnessEvent::AssistantMessage { text } = event {
-                            collect.lock().unwrap().push_str(text);
-                        }
-                        report(event);
-                    },
-                );
-                let reply = reply.lock().unwrap().clone();
-                let result = turn
-                    .and_then(|()| parse_lines(&reply))
+                let result = crate::lecture_jobs::reply(
+                    job.data_dir, job.selection, &text, move |event| report(event),
+                )
+                    .and_then(|reply| parse_lines(&reply))
                     .and_then(|lines| validate(&lines, window, &cues).map(|()| lines));
                 match result {
                     Ok(lines) => {
@@ -709,7 +665,7 @@ pub fn run(
 
 pub mod app {
     use super::*;
-    use crate::chapters::app::{check_start, reconcile_status, spawn_job, Progress, WindowProgress};
+    use crate::lecture_jobs::{check_start, reconcile_status, spawn_job, Progress, WindowProgress};
     use tauri::{AppHandle, Emitter};
 
     pub const LECTURE_READING_EVENT: &str = "lecture-reading";

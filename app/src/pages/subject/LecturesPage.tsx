@@ -1,3 +1,4 @@
+import { SubjectPage } from "@/components/subjects/SubjectPage";
 import { useCallback, useEffect, useState } from "react";
 import {
   ArrowsClockwise,
@@ -164,131 +165,129 @@ export default function SubjectLecturesPage() {
 
   return (
     <>
-      <div className="page-scroll">
-        <div className="mx-auto max-w-5xl px-6 py-5">
-          <div className="mb-3 flex items-center justify-end">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1.5 px-2 text-[11px] text-muted-foreground"
-              onClick={handleSync}
-              disabled={syncing}
-            >
-              <ArrowsClockwise size={11} className={syncing ? "animate-spin" : ""} />
-              {syncing ? "Syncing…" : "Sync lectures"}
-            </Button>
+      <SubjectPage>
+        <div className="mb-3 flex items-center justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1.5 px-2 text-[11px] text-muted-foreground"
+            onClick={handleSync}
+            disabled={syncing}
+          >
+            <ArrowsClockwise size={11} className={syncing ? "animate-spin" : ""} />
+            {syncing ? "Syncing…" : "Sync lectures"}
+          </Button>
+        </div>
+
+        {syncError && (
+          <Alert variant="destructive" className="mb-3 w-auto px-2.5 py-2">
+            <WarningCircle />
+            <AlertDescription className="text-[11px] break-words">
+              {syncError}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {lectures.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-2 text-center">
+            <Play size={24} className="text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">No lectures synced yet.</p>
           </div>
-
-          {syncError && (
-            <Alert variant="destructive" className="mb-3 w-auto px-2.5 py-2">
-              <WarningCircle />
-              <AlertDescription className="text-[11px] break-words">
-                {syncError}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {lectures.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-2 text-center">
-              <Play size={24} className="text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">No lectures synced yet.</p>
-            </div>
-          ) : (
-            <ListCard>
-              {lectures.map((lec) => {
-                const active = selectedId === lec.id;
-                const pl = progressLabel(lec);
-                const prog = downloads.progress[lec.id];
-                const isDown = !lec.video_path && isDownloading(downloads, lec.id);
-                return (
-                  <button
-                    key={lec.id}
-                    /* ⌘-click opens the lecture as a page of its own. */
-                    data-tab-href={lecturePagePath(lec)}
-                    onClick={() => handleSelectLecture(lec)}
-                    className={cn(
-                      "w-full text-left px-3 py-2.5 flex gap-3 items-center hover:bg-surface transition-colors",
-                      active && "bg-surface-raised",
+        ) : (
+          <ListCard>
+            {lectures.map((lec) => {
+              const active = selectedId === lec.id;
+              const pl = progressLabel(lec);
+              const prog = downloads.progress[lec.id];
+              const isDown = !lec.video_path && isDownloading(downloads, lec.id);
+              return (
+                <button
+                  key={lec.id}
+                  /* ⌘-click opens the lecture as a page of its own. */
+                  data-tab-href={lecturePagePath(lec)}
+                  onClick={() => handleSelectLecture(lec)}
+                  className={cn(
+                    "w-full text-left px-3 py-2.5 flex gap-3 items-center hover:bg-surface transition-colors",
+                    active && "bg-surface-raised",
+                  )}
+                >
+                  <div className="shrink-0">
+                    {lec.completed ? (
+                      <CheckCircle size={14} className="text-success" />
+                    ) : (
+                      <div
+                        className={cn(
+                          "w-3 h-3 rounded-full border-2",
+                          active ? "border-brand" : "border-muted-foreground/40",
+                        )}
+                      />
                     )}
-                  >
-                    <div className="shrink-0">
-                      {lec.completed ? (
-                        <CheckCircle size={14} className="text-success" />
-                      ) : (
-                        <div
-                          className={cn(
-                            "w-3 h-3 rounded-full border-2",
-                            active ? "border-brand" : "border-muted-foreground/40",
-                          )}
-                        />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[12px] font-medium text-foreground truncate leading-tight">
-                        {lec.title}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {fmtLectureDate(lec.date)}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground flex items-center gap-1 w-18 whitespace-nowrap">
-                      <Clock size={10} />
-                      {fmtDurationSecs(lec.duration_seconds)}
-                    </span>
-                    <span className={cn("shrink-0 text-[11px] w-20 text-right", pl.color)}>
-                      {pl.text}
-                    </span>
-                    {/* Downloaded ✓ + delete · downloading NN% + cancel ·
-                        otherwise a download trigger. */}
-                    <span className="shrink-0 w-16 flex items-center justify-end gap-1.5">
-                      {lec.video_path ? (
-                        <>
-                          <CheckCircle size={11} className="text-success" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12px] font-medium text-foreground truncate leading-tight">
+                      {lec.title}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {fmtLectureDate(lec.date)}
+                  </span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground flex items-center gap-1 w-18 whitespace-nowrap">
+                    <Clock size={10} />
+                    {fmtDurationSecs(lec.duration_seconds)}
+                  </span>
+                  <span className={cn("shrink-0 text-[11px] w-20 text-right", pl.color)}>
+                    {pl.text}
+                  </span>
+                  {/* Downloaded ✓ + delete · downloading NN% + cancel ·
+                      otherwise a download trigger. */}
+                  <span className="shrink-0 w-16 flex items-center justify-end gap-1.5">
+                    {lec.video_path ? (
+                      <>
+                        <CheckCircle size={11} className="text-success" />
+                        <RowAction
+                          label="Delete download"
+                          onTrigger={() => setPendingDelete(lec)}
+                          className="hover:text-destructive"
+                        >
+                          <Trash size={11} />
+                        </RowAction>
+                      </>
+                    ) : isDown ? (
+                      <>
+                        {prog == null || prog.phase === "trimming" ? (
+                          <CircleNotch size={11} className="animate-spin text-brand" />
+                        ) : (
+                          <span className="text-[10px] tabular-nums text-brand">
+                            {prog.percent}%
+                          </span>
+                        )}
+                        {/* Trimming has no transfer left to cancel. */}
+                        {prog?.phase !== "trimming" && (
                           <RowAction
-                            label="Delete download"
-                            onTrigger={() => setPendingDelete(lec)}
+                            label="Cancel download"
+                            onTrigger={() => cancelLectureDownload(lec.id)}
                             className="hover:text-destructive"
                           >
-                            <Trash size={11} />
+                            <X size={11} />
                           </RowAction>
-                        </>
-                      ) : isDown ? (
-                        <>
-                          {prog == null || prog.phase === "trimming" ? (
-                            <CircleNotch size={11} className="animate-spin text-brand" />
-                          ) : (
-                            <span className="text-[10px] tabular-nums text-brand">
-                              {prog.percent}%
-                            </span>
-                          )}
-                          {/* Trimming has no transfer left to cancel. */}
-                          {prog?.phase !== "trimming" && (
-                            <RowAction
-                              label="Cancel download"
-                              onTrigger={() => cancelLectureDownload(lec.id)}
-                              className="hover:text-destructive"
-                            >
-                              <X size={11} />
-                            </RowAction>
-                          )}
-                        </>
-                      ) : (
-                        <RowAction
-                          label="Download video"
-                          onTrigger={() => handleDownload(lec)}
-                          className="hover:text-foreground"
-                        >
-                          <DownloadSimple size={11} />
-                        </RowAction>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
-            </ListCard>
-          )}
-        </div>
-      </div>
+                        )}
+                      </>
+                    ) : (
+                      <RowAction
+                        label="Download video"
+                        onTrigger={() => handleDownload(lec)}
+                        className="hover:text-foreground"
+                      >
+                        <DownloadSimple size={11} />
+                      </RowAction>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </ListCard>
+        )}
+      </SubjectPage>
 
       <ConfirmDialog
         open={!!pendingDelete}

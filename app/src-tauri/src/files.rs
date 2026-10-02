@@ -362,11 +362,10 @@ pub async fn attach_document_image(
 ) -> Result<String, String> {
     let dir = document_assets_dir(&document_path(&relative_path)?)?;
     let bytes = crate::harness::attach::decode(&data)?;
-    tokio::task::spawn_blocking(move || {
+    crate::blocking::run(move || {
         crate::harness::attach::write_image(&dir, &bytes).map(|name| document_asset_ref(&name))
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// The same, for a picture dropped from Finder (a path, read here).
@@ -376,12 +375,11 @@ pub async fn attach_document_file(
     path: String,
 ) -> Result<String, String> {
     let dir = document_assets_dir(&document_path(&relative_path)?)?;
-    tokio::task::spawn_blocking(move || {
+    crate::blocking::run(move || {
         let bytes = crate::harness::attach::read_dropped(&path)?;
         crate::harness::attach::write_image(&dir, &bytes).map(|name| document_asset_ref(&name))
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Derive parse status from disk for a set of PDF-backed relative paths

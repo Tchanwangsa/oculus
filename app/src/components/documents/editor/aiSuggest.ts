@@ -12,7 +12,6 @@
  */
 import { completionStatus } from "@codemirror/autocomplete";
 import { isolateHistory } from "@codemirror/commands";
-import { syntaxTree } from "@codemirror/language";
 import {
   Compartment,
   EditorSelection,
@@ -32,7 +31,7 @@ import {
   keymap,
   type ViewUpdate,
 } from "@codemirror/view";
-import type { SyntaxNode } from "@lezer/common";
+import { ancestorAt } from "./syntax";
 
 /** Quiet time after the last edit before a request goes out. */
 export const SUGGEST_DELAY_MS = 500;
@@ -162,10 +161,7 @@ function canSuggest(state: EditorState): boolean {
   const head = sel.main.head;
   // Mid-word, an insertion would split the word; not worth a turn.
   if (WORD_CHAR.test(state.sliceDoc(head, head + 1))) return false;
-  for (let n: SyntaxNode | null = syntaxTree(state).resolveInner(head, -1); n; n = n.parent) {
-    if (NO_SUGGEST.has(n.name)) return false;
-  }
-  return true;
+  return ancestorAt(state, head, (node) => NO_SUGGEST.has(node.name), [-1]) === null;
 }
 
 /** Module-wide: Rust keeps one suggestion in flight across every editor, and

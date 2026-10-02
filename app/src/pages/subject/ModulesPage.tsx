@@ -11,7 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { SubjectLoading, SubjectPage, SubjectEmpty } from "@/components/subjects/SubjectPage";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useModuleTocs, type LoadedModule } from "@/hooks/useModuleTocs";
 import { useSubject } from "@/layouts/SubjectLayout";
@@ -45,22 +45,12 @@ export default function SubjectModulesPage() {
   );
 
   if (modules == null) {
-    return (
-      <div className="page-scroll">
-        <div className="mx-auto max-w-5xl px-6 py-6 space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 w-full" />
-          ))}
-        </div>
-      </div>
-    );
+    return <SubjectLoading count={3} rowClassName="h-28" spacing="space-y-3" />;
   }
 
   if (modules.length === 0) {
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-2">
-        <Stack size={24} className="text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">No modules scraped yet.</p>
+      <SubjectEmpty icon={<Stack size={24} className="text-muted-foreground/40" />} title="No modules scraped yet.">
         <Button
           variant="link"
           className="h-auto p-0 text-xs font-normal"
@@ -68,41 +58,39 @@ export default function SubjectModulesPage() {
         >
           Run a sync →
         </Button>
-      </div>
+      </SubjectEmpty>
     );
   }
 
   return (
-    <div className="page-scroll">
-      <div className="mx-auto max-w-5xl px-6 py-5">
-        <div className="mb-3 flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-[11px] text-muted-foreground"
-            onClick={() =>
-              setCollapsed(
-                allCollapsed ? new Set() : new Set(modules.map((m) => m.relPath)),
-              )
-            }
-          >
-            {allCollapsed ? "Expand all" : "Collapse all"}
-          </Button>
-        </div>
-
-        <div className="space-y-2.5">
-          {modules.map((mod) => (
-            <ModuleCard
-              key={mod.relPath}
-              module={mod}
-              files={files}
-              open={!collapsed.has(mod.relPath)}
-              onToggle={() => toggle(mod.relPath)}
-            />
-          ))}
-        </div>
+    <SubjectPage>
+      <div className="mb-3 flex justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-[11px] text-muted-foreground"
+          onClick={() =>
+            setCollapsed(
+              allCollapsed ? new Set() : new Set(modules.map((m) => m.relPath)),
+            )
+          }
+        >
+          {allCollapsed ? "Expand all" : "Collapse all"}
+        </Button>
       </div>
-    </div>
+
+      <div className="space-y-2.5">
+        {modules.map((mod) => (
+          <ModuleCard
+            key={mod.relPath}
+            module={mod}
+            files={files}
+            open={!collapsed.has(mod.relPath)}
+            onToggle={() => toggle(mod.relPath)}
+          />
+        ))}
+      </div>
+    </SubjectPage>
   );
 }
 

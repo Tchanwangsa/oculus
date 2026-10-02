@@ -1,3 +1,4 @@
+import { useStoredState } from "@/hooks/useStoredState";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PillTabs } from "@/components/ui/PillTabs";
 import { NewTaskButton } from "@/components/projects/NewTaskButton";
@@ -64,18 +65,14 @@ function storedStatus(): readonly string[] {
 }
 
 export default function TasksPage() {
-  const [view, setView] = useState<TaskView>(() => {
-    const stored = localStorage.getItem(VIEW_KEY);
-    return isView(stored) ? stored : "board";
-  });
+  const [view, setView] = useStoredState<TaskView>(VIEW_KEY, (stored) =>
+    isView(stored) ? stored : "board",
+  );
   const [filter, setFilter] = useState<TaskFilter>(() => ({
     ...DEFAULT_FILTER,
     status: storedStatus(),
   }));
 
-  useEffect(() => {
-    localStorage.setItem(VIEW_KEY, view);
-  }, [view]);
 
   useEffect(() => {
     localStorage.setItem(STATUS_KEY, JSON.stringify(filter.status));

@@ -1,37 +1,13 @@
-#!/usr/bin/env node
-// Keeps `target/debug/oculus` in step with the Rust sources for as long as a
-// dev session lasts.
-//
-// `scripts/predev.mjs` builds the CLI once, before the app starts. That is not
-// enough on its own: `tauri dev` re-runs cargo and relaunches the app on every
-// Rust change, but it never re-runs `beforeDevCommand`, so on a long session
-// the CLI drifts back to the vintage of whenever the session began — which is
-// the same silent staleness, just measured in hours instead of days. The app's
-// own binary is rebuilt for free by the watcher tauri already runs; this is
-// that watcher's missing half.
-//
-// It deliberately loses the race with tauri's rebuild. The debounce here is
-// longer than tauri's, so the app's cargo build takes the package lock first
-// and the CLI build waits behind it — the dev feedback loop keeps the latency
-// it had, and the CLI catches up in the background a few seconds after the app
-// has already relaunched.
-//
-// Started detached by `predev --watch`, so nothing kills it when the hook's
-// shell exits. It ends itself by watching the vite dev server: when the port
-// in tauri.conf.json stops answering, the session is over.
-
+// Rebuild the debug CLI after Rust/template changes until the dev server ends.
+// The debounce lets Tauri's app rebuild take cargo's lock first.
 import { execFile } from "node:child_process";
 import { readFileSync, rmSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { connect } from "node:net";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { app, cliBuildArgs, cliPath, rust } from "./runtime.mjs";
 
-const app = dirname(dirname(fileURLToPath(import.meta.url)));
-const manifest = join(app, "src-tauri", "Cargo.toml");
-const target = join(app, "src-tauri", "target");
-const exe = process.platform === "win32" ? ".exe" : "";
-const cli = join(target, "debug", `oculus${exe}`);
-const pidFile = join(target, ".oculus-cli-watch.pid");
+const cli = cliPath("debug");
+const pidFile = join(rust, "target", ".oculus-cli-watch.pid");
 
 /** Long enough that tauri's own rebuild reaches the package lock first. */
 const DEBOUNCE_MS = 5000;
@@ -95,7 +71,7 @@ function build() {
   rmSync(cli, { force: true });
   execFile(
     "cargo",
-    ["build", "--manifest-path", manifest, "--bin", "oculus"],
+    cliBuildArgs("debug"),
     { maxBuffer: 32 * 1024 * 1024 },
     (err, _out, stderr) => {
       building = false;

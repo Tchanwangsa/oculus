@@ -106,6 +106,13 @@ fn ask_login_shell(name: &str) -> Option<PathBuf> {
     is_executable(&p).then_some(p)
 }
 
+/// The same lookup order for provider CLIs and installer tools.
+fn find_executable(name: &str) -> Option<PathBuf> {
+    search_path_env(name)
+        .or_else(|| well_known_dirs().into_iter().map(|d| d.join(name)).find(|p| is_executable(p)))
+        .or_else(|| ask_login_shell(name))
+}
+
 fn locate(provider: Provider) -> Result<PathBuf, String> {
     let name = binary_name(provider);
     if let Some(p) = std::env::var_os(override_env(provider)) {
@@ -120,13 +127,7 @@ fn locate(provider: Provider) -> Result<PathBuf, String> {
             ))
         };
     }
-    if let Some(p) = search_path_env(name) {
-        return Ok(p);
-    }
-    if let Some(p) = well_known_dirs().into_iter().map(|d| d.join(name)).find(|p| is_executable(p)) {
-        return Ok(p);
-    }
-    if let Some(p) = ask_login_shell(name) {
+    if let Some(p) = find_executable(name) {
         return Ok(p);
     }
     Err(format!(
@@ -160,14 +161,7 @@ pub fn tool(name: &str) -> Option<PathBuf> {
     if let Some(hit) = tool_cache().lock().unwrap().get(name) {
         return hit.clone();
     }
-    let found = search_path_env(name)
-        .or_else(|| {
-            well_known_dirs()
-                .into_iter()
-                .map(|d| d.join(name))
-                .find(|p| is_executable(p))
-        })
-        .or_else(|| ask_login_shell(name));
+    let found = find_executable(name);
     tool_cache().lock().unwrap().insert(name.to_string(), found.clone());
     found
 }

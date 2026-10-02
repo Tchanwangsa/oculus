@@ -511,9 +511,7 @@ impl Ctx {
     /// Re-run parse and embed over PDFs already on record, without downloading.
     pub(crate) fn index(&self, args: &IndexArgs) -> Result<(), String> {
         let pool = self.db().ok_or("the index lives in the database")?;
-        let subjects = self.rt.block_on(store::subjects(&pool))?;
-        let wanted = filter_subjects(&subjects, &args.codes, false)?;
-        let ids: Vec<i64> = wanted.iter().map(|s| s.id).collect();
+        let ids = self.subject_ids(&pool, &args.codes)?;
 
         let pdfs = self.rt.block_on(store::pdf_files(&pool, &ids))?;
         if pdfs.is_empty() {

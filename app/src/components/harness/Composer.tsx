@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { PaperPlaneTilt, Stop } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
+import { SendControls } from "@/components/harness/SendControls";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/MentionInput";
 import { MentionMenu } from "@/components/harness/MentionMenu";
 import { useMentionMenu } from "@/components/harness/useMentionMenu";
@@ -18,7 +17,6 @@ import {
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { useAttachments } from "@/hooks/useAttachments";
 import { AttachmentStrip } from "@/components/harness/AttachmentStrip";
-import { withAttachments } from "@/lib/attachments";
 import { useDraftStore } from "@/stores/draftStore";
 import { signInState, useSignInStatus } from "@/hooks/useSignInStatus";
 import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
@@ -129,16 +127,13 @@ export function Composer({
 
   /** Send or queue. Pictures are written first; if that fails the box is kept as is. */
   const send = async () => {
-    const t = text.trim();
-    if ((!t && !att.items.length) || att.writing) return;
-
-    const paths = await att.flush();
-    if (!paths) return;
+    const message = await att.prepare(text);
+    if (message == null) return;
 
     ref.current?.clear();
     mentions.close();
     // Rust decides send-now vs queue.
-    onSend(withAttachments(t, paths));
+    onSend(message);
   };
 
   return (
@@ -236,22 +231,7 @@ export function Composer({
           />
           <div className="flex-1" />
           <UsageMeter usage={usage} rateLimits={rateLimits} />
-          {running && (
-            <Button size="icon-xs" variant="ghost" className="shrink-0" aria-label="Stop" onClick={onStop}>
-              <Stop weight="fill" />
-            </Button>
-          )}
-          {(!running || ready) && (
-            <Button
-              size="icon-xs"
-              disabled={!ready || att.writing}
-              onClick={() => void send()}
-              className="shrink-0"
-              aria-label={running ? "Queue" : "Send"}
-            >
-              <PaperPlaneTilt />
-            </Button>
-          )}
+          <SendControls running={running} ready={ready} writing={att.writing} onSend={() => void send()} onStop={onStop} />
         </div>
       </div>
     </div>

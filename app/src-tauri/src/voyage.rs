@@ -5,27 +5,17 @@
 
 use std::time::Duration;
 
-const KEYCHAIN_SERVICE: &str = "com.tchan.oculus.voyage";
-const KEYCHAIN_ACCOUNT: &str = "voyage";
+use crate::credentials::{Secret, Verdict};
+
+const KEY: Secret = Secret::new("com.tchan.oculus.voyage", "voyage");
 
 /// The cheapest authenticated call Voyage has: Voyage has no free
 /// authenticated GET, so the probe embeds a two-letter string (one text token).
 const PROBE_URL: &str = "https://api.voyageai.com/v1/embeddings";
 const PROBE_BODY: &str = r#"{"model":"voyage-3.5","input":["ok"],"output_dimension":512}"#;
 
-fn keychain() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).map_err(|e| e.to_string())
-}
-
 pub(crate) fn stored_api_key() -> Option<String> {
-    keychain().ok()?.get_password().ok()
-}
-
-/// What a probe learned about a key. `Unverified`: unreachable, or Voyage
-/// answered about the account rather than the key.
-enum Verdict {
-    Good,
-    Unverified,
+    KEY.read()
 }
 
 /// Voyage's `{"detail": "..."}` — for us to read, never to show.
@@ -111,16 +101,7 @@ fn probe(key: &str) -> Result<Verdict, String> {
 /// or rate-limited and the key was stored on trust.
 #[tauri::command]
 pub fn voyage_set_api_key(key: String) -> Result<String, String> {
-    let key = key.trim();
-    if key.is_empty() {
-        return Err("empty key".into());
-    }
-    let verdict = probe(key)?;
-    keychain()?.set_password(key).map_err(|e| e.to_string())?;
-    Ok(match verdict {
-        Verdict::Good => "ok".into(),
-        Verdict::Unverified => "unverified".into(),
-    })
+    KEY.store_checked(&key, probe)
 }
 
 #[tauri::command]
@@ -130,10 +111,7 @@ pub fn voyage_has_api_key() -> bool {
 
 #[tauri::command]
 pub fn voyage_delete_api_key() -> Result<(), String> {
-    match keychain()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(error.to_string()),
-    }
+    KEY.delete()
 }
 
 #[cfg(test)]

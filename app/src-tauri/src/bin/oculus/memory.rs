@@ -98,14 +98,7 @@ impl Ctx {
 
         let body = match (&args.text, &args.body) {
             (Some(text), _) => Some(text.clone()),
-            (None, Some(source)) => Some(if source == "-" {
-                let mut buffer = String::new();
-                std::io::Read::read_to_string(&mut std::io::stdin(), &mut buffer)
-                    .map_err(|e| format!("reading the memory from stdin: {e}"))?;
-                buffer
-            } else {
-                std::fs::read_to_string(source).map_err(|e| format!("reading {source}: {e}"))?
-            }),
+            (None, Some(source)) => Some(read_input(source, "memory")?),
             (None, None) => None,
         };
 

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   defaultSelectionFor,
+  parseItemMeta,
   getHarnessItems,
   getHarnessThreads,
   harnessQueued,
@@ -311,7 +312,7 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
           if (held) {
             for (let i = rows.length - 1; i >= 0; i--) {
               if (rows[i].kind === "tool" && rows[i].ref_id === event.id) {
-                const meta = rows[i].meta ? JSON.parse(rows[i].meta!) : {};
+                const meta = parseItemMeta(rows[i]);
                 rows = [...rows];
                 rows[i] = {
                   ...rows[i],

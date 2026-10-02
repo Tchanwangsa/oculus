@@ -5,7 +5,7 @@ import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { useCardDrag, useSettledList } from "@/hooks/useCardDrag";
 import { displayCode } from "@/lib/format";
 import type { DbProject, DbTaskWithProject, ProjectColumn } from "@/lib/projects";
-import { BoardCard, BoardColumn, LiftedCard } from "./BoardParts";
+import { BoardView } from "./BoardParts";
 import { CardTitle } from "./CardTitle";
 import { taskHref } from "./taskHref";
 import { AgentMark, DueChip, TaskGlyph } from "./TaskMarks";
@@ -82,49 +82,22 @@ export function TasksBoard({
   const lifted = live ? byId.get(live.id) ?? null : null;
 
   return (
-    <div className="flex h-full gap-3 overflow-x-auto px-5 py-4">
-      {columns.map((column) => {
-        const cards = byColumn.get(column.id) ?? [];
-        return (
-          <BoardColumn
-            key={column.id}
-            drag={drag}
-            id={column.id}
-            name={column.name}
-            count={cards.length}
-            highlighted={live?.targetContainerId === column.id && !idle}
-          >
-            {cards.map((task, i) => (
-              <BoardCard
-                key={task.id}
-                drag={drag}
-                containerId={column.id}
-                id={task.id}
-                index={i}
-                href={taskHref(task.project_id, task)}
-                frozen={idle}
-              >
-                <TaskCard
-                  task={task}
-                  parent={task.parent_id != null ? byId.get(task.parent_id) ?? null : null}
-                  projectById={projectById}
-                />
-              </BoardCard>
-            ))}
-          </BoardColumn>
-        );
-      })}
-
-      {live && lifted && (
-        <LiftedCard live={live}>
-          <TaskCard
-            task={lifted}
-            parent={lifted.parent_id != null ? byId.get(lifted.parent_id) ?? null : null}
-            projectById={projectById}
-          />
-        </LiftedCard>
+    <BoardView
+      columns={columns}
+      byColumn={byColumn}
+      drag={drag}
+      lifted={lifted}
+      idOf={(task) => task.id}
+      hrefOf={(task) => taskHref(task.project_id, task)}
+      frozen={idle}
+      renderCard={(task) => (
+        <TaskCard
+          task={task}
+          parent={task.parent_id != null ? byId.get(task.parent_id) ?? null : null}
+          projectById={projectById}
+        />
       )}
-    </div>
+    />
   );
 }
 

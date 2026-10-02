@@ -1,40 +1,25 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { parseModuleToc, type ModuleToc } from "@/lib/moduleToc";
 import type { DbFile } from "@/lib/db";
-import { readCourseFile } from "@/lib/courseFiles";
+import { useCourseFileData } from "@/hooks/useCourseFileData";
 
 export interface LoadedModule extends ModuleToc {
   /** `modules/03-week-1.md` — hrefs inside resolve against this. */
   relPath: string;
 }
 
+const parse = (markdown: string, file: DbFile): LoadedModule =>
+  ({ ...parseModuleToc(markdown), relPath: file.relative_path });
+
 /** Loads and parses every module TOC for a subject. `null` while loading. */
 export function useModuleTocs(
   moduleFiles: DbFile[],
   filesLoading: boolean,
 ): LoadedModule[] | null {
-  const [modules, setModules] = useState<LoadedModule[] | null>(null);
-
-  useEffect(() => {
-    if (moduleFiles.length === 0) {
-      if (!filesLoading) setModules([]);
-      return;
-    }
-    let cancelled = false;
-    Promise.all(
-      moduleFiles.map(async (f) => {
-        const md = await readCourseFile(f.relative_path).catch(() => "");
-        return { ...parseModuleToc(md), relPath: f.relative_path };
-      }),
-    ).then((loaded) => {
-      if (cancelled) return;
-      // Filenames are `NN-slug.md`, NN being the Canvas module position.
-      setModules(loaded.sort((a, b) => a.relPath.localeCompare(b.relPath)));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [moduleFiles, filesLoading]);
-
-  return modules;
+  const modules = useCourseFileData(moduleFiles, filesLoading, parse);
+  // Filenames are `NN-slug.md`, NN being the Canvas module position.
+  return useMemo(
+    () => modules && [...modules].sort((a, b) => a.relPath.localeCompare(b.relPath)),
+    [modules],
+  );
 }

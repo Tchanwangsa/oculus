@@ -9,12 +9,11 @@
 //! job, a status line beside the endpoint field — not a gate on the choice.
 
 use serde::Serialize;
-use serde_json::{Map, Value};
-use sqlx::Row;
+use serde_json::Value;
 
 use super::mineru::local::{self, LocalHealth};
 use super::{parse_config, Engine, LOCAL_BASE_URL, PARSER_VERSION};
-use crate::store::{db_path, pool};
+use crate::store::{db_path, edit_setting, pool};
 
 /// The `settings` row this module writes; `parse::parse_config` reads it.
 const SETTINGS_KEY: &str = "parse";
@@ -124,7 +123,7 @@ pub async fn parse_set_engine(engine: String) -> Result<ParseSettings, String> {
     }
 
     let db = pool(&db_path()).await?;
-    let result = edit_settings(&db, |object| {
+    let result = edit_setting(&db, SETTINGS_KEY, |object| {
         object.insert("engine".into(), Value::String(chosen.as_str().into()));
         // An override belongs to one engine's API.
         object.remove("engineUrl");
@@ -154,7 +153,7 @@ pub async fn parse_set_engine_url(url: String) -> Result<ParseSettings, String> 
     }
 
     let db = pool(&db_path()).await?;
-    let result = edit_settings(&db, |object| {
+    let result = edit_setting(&db, SETTINGS_KEY, |object| {
         if override_url.is_empty() {
             object.remove("engineUrl");
         } else {
@@ -231,39 +230,6 @@ fn configured_local_url() -> String {
         Engine::Local => config.base_url,
         Engine::Cloud => LOCAL_BASE_URL.to_string(),
     }
-}
-
-/// Edit the `parse` row without disturbing its other keys: read, edit, write
-/// back.
-async fn edit_settings(
-    db: &sqlx::SqlitePool,
-    edit: impl FnOnce(&mut Map<String, Value>),
-) -> Result<(), String> {
-    let stored = sqlx::query("SELECT value FROM settings WHERE key = ?1")
-        .bind(SETTINGS_KEY)
-        .fetch_optional(db)
-        .await
-        .map_err(|e| e.to_string())?
-        .map(|row| row.get::<String, _>("value"));
-
-    let mut value = stored
-        .as_deref()
-        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-        .filter(|v| v.is_object())
-        .unwrap_or_else(|| serde_json::json!({}));
-    let object = value.as_object_mut().ok_or("parse settings are not an object")?;
-    edit(object);
-
-    sqlx::query(
-        "INSERT INTO settings (key, value) VALUES (?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    )
-    .bind(SETTINGS_KEY)
-    .bind(serde_json::to_string(&value).map_err(|e| e.to_string())?)
-    .execute(db)
-    .await
-    .map(|_| ())
-    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

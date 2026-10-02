@@ -2,27 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { CredentialField } from "./CredentialField";
+import { EngineSelect, type EngineOption } from "./EngineSelect";
 import { tokenish } from "@/lib/parseState";
 import { useParseStore } from "@/stores/parseStore";
 import { Section, StatRow } from "@/pages/settings/section";
-
-/** Mirrors `EngineOption` in `app/src-tauri/src/parse/commands.rs`. */
-interface EngineOption {
-  id: string;
-  label: string;
-  detail: string;
-  available: boolean;
-  /** Present only when `available` is false, and then always. */
-  unavailable_reason: string | null;
-}
 
 /** Mirrors `ParseSettings` in `app/src-tauri/src/parse/commands.rs`. */
 interface ParseSettings {
@@ -237,30 +221,13 @@ export function ParserSection() {
               {selected?.detail ?? "Where PDFs are turned into per-page markdown."}
             </p>
           </div>
-          <Select
+          <EngineSelect
+            label="Parser"
             value={settings?.engine ?? ""}
             disabled={!settings || switching}
-            onValueChange={(engine) => void choose(engine)}
-          >
-            <SelectTrigger aria-label="Parser" size="sm" className="h-7 w-48 text-xs">
-              <SelectValue placeholder="—" />
-            </SelectTrigger>
-            <SelectContent>
-              {(settings?.engines ?? []).map((engine) => (
-                <SelectItem
-                  key={engine.id}
-                  value={engine.id}
-                  disabled={!engine.available}
-                  className="text-xs"
-                >
-                  <span>{engine.label}</span>
-                  {engine.available ? null : (
-                    <span className="text-[11px] text-muted-foreground">Unavailable</span>
-                  )}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            engines={settings?.engines ?? []}
+            onChange={(engine) => void choose(engine)}
+          />
         </div>
 
         {unavailable.map((engine) => (
@@ -271,56 +238,18 @@ export function ParserSection() {
 
         {/* Cloud only: a local server needs no credential. */}
         {isCloud ? (
-          <div className="py-2">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs text-foreground">MinerU API token</p>
-                <p className="text-[11px] text-muted-foreground">
-                  Stored in your Mac keychain, never in the library database.
-                </p>
-              </div>
-              {hasToken === true && !tokenExpired ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-success">Connected</span>
-                  <Button variant="outline" size="xs" onClick={() => void deleteToken()}>
-                    Remove
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  {tokenExpired ? <span className="text-xs text-warning">Expired</span> : null}
-                  <Input
-                    aria-label="MinerU API token"
-                    type="password"
-                    autoComplete="off"
-                    value={token}
-                    onChange={(event) => setToken(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") void saveToken();
-                    }}
-                    placeholder={tokenExpired ? "Paste new token" : "Paste token"}
-                    className="h-7 w-44 text-xs"
-                  />
-                  <Button
-                    size="xs"
-                    disabled={!token.trim() || checkingToken}
-                    onClick={() => void saveToken()}
-                  >
-                    {checkingToken ? "Checking…" : "Save"}
-                  </Button>
-                </div>
-              )}
-            </div>
-            {tokenNote ? (
-              <p
-                className={cn(
-                  "mt-2 text-[11px] leading-relaxed",
-                  tokenNote.kind === "error" ? "text-destructive" : "text-warning",
-                )}
-              >
-                {tokenNote.text}
-              </p>
-            ) : null}
+          <CredentialField
+            label="MinerU API token"
+            value={token}
+            connected={hasToken === true && !tokenExpired}
+            busy={checkingToken}
+            placeholder={tokenExpired ? "Paste new token" : "Paste token"}
+            onChange={setToken}
+            onSave={() => void saveToken()}
+            onRemove={() => void deleteToken()}
+            status={tokenExpired ? <span className="text-xs text-warning">Expired</span> : null}
+            note={tokenNote}
+          >
             {tokenExpired ? (
               <p className="mt-2 text-[11px] leading-relaxed text-warning">
                 MinerU refused this token during a parse. Nothing is being parsed until you paste a
@@ -340,7 +269,7 @@ export function ParserSection() {
                   : "Checking for a saved token…"}
               </p>
             ) : null}
-          </div>
+          </CredentialField>
         ) : null}
 
         {isLocal ? (

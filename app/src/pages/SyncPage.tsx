@@ -1,3 +1,4 @@
+import { useStoredState } from "@/hooks/useStoredState";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   WarningCircle,
@@ -73,13 +74,9 @@ export default function SyncPage() {
   const [loadingSubjects, setLoadingSubjects] = useState(false);
   const [subjectsError, setSubjectsError] = useState<string | null>(null);
   const [runs, setRuns] = useState<SyncRunSummary[]>([]);
-  const [view, setView] = useState<ActivityView>(() =>
-    localStorage.getItem(VIEW_KEY) === "pipeline" ? "pipeline" : "history",
+  const [view, setView] = useStoredState<ActivityView>(VIEW_KEY, (stored) =>
+    stored === "pipeline" ? "pipeline" : "history",
   );
-
-  useEffect(() => {
-    localStorage.setItem(VIEW_KEY, view);
-  }, [view]);
 
   // In the global store, so it survives navigation.
   // Sync progress lives in the global store (survives navigation).

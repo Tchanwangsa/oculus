@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { ProviderMark } from "@/components/harness/ProviderMark";
 import type { HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
-import { displayCode, displayName } from "@/lib/format";
+import { groupBySubject } from "@/lib/subjectGroups";
+import { useCollapsedGroups } from "@/hooks/useCollapsedGroups";
+import { useStoredSet } from "@/hooks/useStoredState";
 import { cn } from "@/lib/utils";
 import { usePointerDrag } from "@/hooks/usePointerDrag";
 
@@ -13,60 +15,6 @@ const ORDER_KEY = "oculus-chat-groups-order";
 
 /** Threads a group shows at first, and how many each "Show more" adds. */
 const PAGE = 5;
-
-/** Stores the collapsed groups, so a newly scoped subject arrives expanded. */
-function loadCollapsed(): Set<string> {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]");
-    return new Set(Array.isArray(raw) ? raw.filter((k): k is string => typeof k === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
-
-/** The dragged order, by group key; unlisted groups sort by recency. */
-function loadOrder(): string[] {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(ORDER_KEY) ?? "[]");
-    return Array.isArray(raw) ? raw.filter((k): k is string => typeof k === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Groups by scope in first-appearance (i.e. `updated_at`) order; a deleted
- *  subject's threads fall back into General. */
-function group(
-  threads: HarnessThread[],
-  subjects: Subject[],
-): {
-  key: string;
-  label: string;
-  title: string;
-  subjectId: number | null;
-  threads: HarnessThread[];
-}[] {
-  const out: ReturnType<typeof group> = [];
-  const byKey = new Map<string, (typeof out)[number]>();
-  for (const t of threads) {
-    const subject = t.subject_id == null ? null : subjects.find((s) => s.id === t.subject_id) ?? null;
-    const key = subject ? String(subject.id) : "general";
-    let g = byKey.get(key);
-    if (!g) {
-      g = {
-        key,
-        label: subject ? displayCode(subject.code) : "General",
-        title: subject ? displayName(subject.name, subject.code) : "Not scoped to a subject",
-        subjectId: subject?.id ?? null,
-        threads: [],
-      };
-      byKey.set(key, g);
-      out.push(g);
-    }
-    g.threads.push(t);
-  }
-  return out;
-}
 
 /** Recency, overruled by the dragged `order`. Unplaced groups (index -1) sort
  *  above placed ones — a new subject has a live conversation — and stay in
@@ -116,22 +64,20 @@ export const ThreadList = memo(function ThreadList({
 }) {
   const [confirming, setConfirming] = useState<number | null>(null);
   // Folded *groups* — not the panel's own `collapsed`.
-  const [folded, setFolded] = useState<Set<string>>(loadCollapsed);
+  const { folded, setOpen: setGroupOpen } = useCollapsedGroups(COLLAPSED_KEY);
   // Per-group page expansion; not persisted.
   const [shown, setShown] = useState<Record<string, number>>({});
-  const [order, setOrder] = useState<string[]>(loadOrder);
+  // A Set keeps insertion order, so the stored set is the dragged order.
+  const [orderSet, setOrderSet] = useStoredSet(ORDER_KEY);
+  const order = useMemo(() => [...orderSet], [orderSet]);
   // The lifted group and the gap it would drop into.
   const [drag, setDrag] = useState<{ key: string; at: number } | null>(null);
   const boxes = useRef(new Map<string, HTMLDivElement>());
   // `didDrag` swallows the `click` that ends a drag, which would otherwise fold the group.
   const gesture = usePointerDrag("y");
 
-  useEffect(() => {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...folded]));
-  }, [folded]);
-
   const groups = useMemo(
-    () => arrange(group(threads, subjects), order),
+    () => arrange(groupBySubject(threads, subjects, { key: "general", label: "General" }), order),
     [threads, subjects, order],
   );
 
@@ -164,22 +110,12 @@ export const ThreadList = memo(function ThreadList({
           keys.splice(from, 1);
           // Gap indices count the dragged group; below it, shift up by one.
           keys.splice(latest > from ? latest - 1 : latest, 0, key);
-          setOrder(keys);
-          localStorage.setItem(ORDER_KEY, JSON.stringify(keys));
+          setOrderSet(new Set(keys));
         }
         setDrag(null);
       },
     });
   };
-
-  const setGroupOpen = (key: string, open: boolean) =>
-    setFolded((prev) => {
-      if (open === !prev.has(key)) return prev;
-      const next = new Set(prev);
-      if (open) next.delete(key);
-      else next.add(key);
-      return next;
-    });
 
   const setGroupOpenAndReset = (key: string, open: boolean) => {
     setGroupOpen(key, open);
@@ -219,11 +155,11 @@ export const ThreadList = memo(function ThreadList({
         <div className="flex flex-1 flex-col overflow-y-scroll px-2 pb-2">
           {groups.map((g, gi) => {
             const open = !folded.has(g.key);
-            const busy = g.threads.some((t) => runningIds.has(t.id));
+            const busy = g.items.some((t) => runningIds.has(t.id));
             // The open thread is always drawn, however far down it sits.
-            const activeAt = g.threads.findIndex((t) => t.id === activeId);
+            const activeAt = g.items.findIndex((t) => t.id === activeId);
             const limit = Math.max(shown[g.key] ?? PAGE, activeAt + 1);
-            const rest = g.threads.length - limit;
+            const rest = g.items.length - limit;
             return (
               <div
                 key={g.key}
@@ -283,14 +219,14 @@ export const ThreadList = memo(function ThreadList({
                       <CircleNotch size={11} className="animate-spin text-muted-foreground group-hover/head:hidden" />
                     ) : (
                       <span className="text-[10px] tabular-nums text-muted-foreground opacity-60 group-hover/head:hidden">
-                        {g.threads.length}
+                        {g.items.length}
                       </span>
                     )}
                   </div>
                 </div>
                 {open && (
                   <div className="flex flex-col gap-0.5">
-                    {g.threads.slice(0, limit).map((t) => {
+                    {g.items.slice(0, limit).map((t) => {
                       const running = runningIds.has(t.id);
                       const active = t.id === activeId;
                       return (

@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { CaretRight, Plus } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
-import { displayCode, displayName } from "@/lib/format";
+import { groupBySubject } from "@/lib/subjectGroups";
+import { useCollapsedGroups } from "@/hooks/useCollapsedGroups";
+import { useStoredState } from "@/hooks/useStoredState";
 import type { Subject } from "@/lib/db";
 import type { DbProject, ProjectTaskCounts } from "@/lib/projects";
 import { InlineAdd } from "./InlineAdd";
@@ -14,16 +16,6 @@ import { ListCard } from "@/components/ui/PageParts";
 
 const COLLAPSED_KEY = "oculus-projects-groups-collapsed";
 
-/** Stores the *collapsed* groups, so a new group arrives open. */
-function loadCollapsed(): Set<string> {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]");
-    return new Set(Array.isArray(raw) ? raw.filter((k): k is string => typeof k === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
-
 /** A row's overflow-menu actions; omit to draw no menu. */
 export interface ProjectRowActions {
   /** Trimmed and changed — {@link ProjectMenu} drops no-ops. */
@@ -31,41 +23,6 @@ export interface ProjectRowActions {
   onArchive: (project: DbProject) => void;
   onUnarchive: (project: DbProject) => void;
   onDelete: (project: DbProject) => void;
-}
-
-/** Groups by subject; subject-less or deleted-subject projects go under
- *  "Personal". */
-function group(
-  projects: DbProject[],
-  subjects: Subject[],
-): {
-  key: string;
-  label: string;
-  title: string;
-  subjectId: number | null;
-  projects: DbProject[];
-}[] {
-  const out: ReturnType<typeof group> = [];
-  const byKey = new Map<string, (typeof out)[number]>();
-  for (const p of projects) {
-    const subject =
-      p.subject_id == null ? null : subjects.find((s) => s.id === p.subject_id) ?? null;
-    const key = subject ? String(subject.id) : "personal";
-    let g = byKey.get(key);
-    if (!g) {
-      g = {
-        key,
-        label: subject ? displayCode(subject.code) : "Personal",
-        title: subject ? displayName(subject.name, subject.code) : "Not scoped to a subject",
-        subjectId: subject?.id ?? null,
-        projects: [],
-      };
-      byKey.set(key, g);
-      out.push(g);
-    }
-    g.projects.push(p);
-  }
-  return out;
 }
 
 /** The menu is a sibling of the link, not inside it: a button nested in an
@@ -200,22 +157,12 @@ export function ProjectGroups({
   onCreate: (subjectId: number | null, name: string) => void;
   actions?: ProjectRowActions;
 }) {
-  const [folded, setFolded] = useState<Set<string>>(loadCollapsed);
+  const { folded, setOpen } = useCollapsedGroups(COLLAPSED_KEY);
   const [arming, setArming] = useState<string | null>(null);
-  const groups = useMemo(() => group(projects, subjects), [projects, subjects]);
-
-  useEffect(() => {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...folded]));
-  }, [folded]);
-
-  const setOpen = (key: string, open: boolean) =>
-    setFolded((prev) => {
-      if (open === !prev.has(key)) return prev;
-      const next = new Set(prev);
-      if (open) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  const groups = useMemo(
+    () => groupBySubject(projects, subjects, { key: "personal", label: "Personal" }),
+    [projects, subjects],
+  );
 
   // Personal is always shown, even empty, so it can be discovered.
   const shown = groups.some((g) => g.key === "personal")
@@ -227,7 +174,7 @@ export function ProjectGroups({
           label: "Personal",
           title: "Not scoped to a subject",
           subjectId: null,
-          projects: [],
+          items: [],
         },
       ];
 
@@ -260,7 +207,7 @@ export function ProjectGroups({
                 />
               </button>
               <span className="text-[11px] tabular-nums text-muted-foreground/60">
-                {g.projects.length}
+                {g.items.length}
               </span>
               <span className="flex-1" />
               <button
@@ -279,7 +226,7 @@ export function ProjectGroups({
 
             {open && (
               <RowBox
-                projects={g.projects}
+                projects={g.items}
                 counts={counts}
                 actions={actions}
                 armed={arming === g.key}
@@ -313,11 +260,7 @@ export function ArchivedProjects({
   counts: Map<number, ProjectTaskCounts>;
   actions?: ProjectRowActions;
 }) {
-  const [open, setOpen] = useState(() => localStorage.getItem(ARCHIVED_OPEN_KEY) === "true");
-
-  useEffect(() => {
-    localStorage.setItem(ARCHIVED_OPEN_KEY, String(open));
-  }, [open]);
+  const [open, setOpen] = useStoredState(ARCHIVED_OPEN_KEY, (stored) => stored === "true");
 
   return (
     <section>

@@ -1,4 +1,5 @@
 import { getDb, matchSql, type SearchScope } from "@/lib/db";
+import { patchColumns } from "@/lib/sqlPatch";
 
 /**
  * Projects: a piece of work scoped to one subject or none, broken into tasks
@@ -453,29 +454,19 @@ export interface UpdateProjectInput {
 /** Patch a project: `undefined` leaves a field alone, `null` clears it. */
 export async function updateProject(id: number, patch: UpdateProjectInput): Promise<void> {
   const db = await getDb();
-  const sets: string[] = [];
-  const args: unknown[] = [];
-  const put = (col: string, value: unknown) => {
-    args.push(value);
-    sets.push(`${col} = $${args.length}`);
-  };
-  if (patch.name !== undefined) put("name", patch.name);
-  if (patch.subjectId !== undefined) put("subject_id", patch.subjectId);
-  if (patch.brief !== undefined) put("brief", patch.brief);
-  if (patch.status !== undefined) put("status", patch.status);
-  if (patch.startsAt !== undefined) put("starts_at", patch.startsAt);
-  if (patch.dueAt !== undefined) put("due_at", patch.dueAt);
-  if (patch.columns !== undefined) put("columns", JSON.stringify(patch.columns));
-  if (patch.tags !== undefined) put("tags", JSON.stringify(normaliseTags(patch.tags)));
-  if (patch.eventId !== undefined) put("event_id", patch.eventId);
-  if (patch.position !== undefined) put("position", patch.position);
-  if (!sets.length) return;
-  args.push(id);
-  await db.execute(
-    `UPDATE projects SET ${sets.join(", ")}, updated_at = datetime('now')
-      WHERE id = $${args.length}`,
-    args,
-  );
+  const changed = await patchColumns(db, "projects", id, {
+    name: patch.name,
+    subject_id: patch.subjectId,
+    brief: patch.brief,
+    status: patch.status,
+    starts_at: patch.startsAt,
+    due_at: patch.dueAt,
+    columns: patch.columns === undefined ? undefined : JSON.stringify(patch.columns),
+    tags: patch.tags === undefined ? undefined : JSON.stringify(normaliseTags(patch.tags)),
+    event_id: patch.eventId,
+    position: patch.position,
+  });
+  if (!changed) return;
   notifyProjectsUpdated();
 }
 
@@ -692,25 +683,15 @@ export async function updateTask(id: number, patch: UpdateTaskInput): Promise<vo
       throw new Error("subtasks are one level deep: a task with children cannot have a parent");
     }
   }
-  const sets: string[] = [];
-  const args: unknown[] = [];
-  const put = (col: string, value: unknown) => {
-    args.push(value);
-    sets.push(`${col} = $${args.length}`);
-  };
-  if (patch.title !== undefined) put("title", patch.title);
-  if (patch.body !== undefined) put("body", patch.body);
-  if (patch.parentId !== undefined) put("parent_id", patch.parentId);
-  if (patch.startsAt !== undefined) put("starts_at", patch.startsAt);
-  if (patch.dueAt !== undefined) put("due_at", patch.dueAt);
-  if (patch.estimateMinutes !== undefined) put("estimate_minutes", patch.estimateMinutes);
-  if (!sets.length) return;
-  args.push(id);
-  await db.execute(
-    `UPDATE project_tasks SET ${sets.join(", ")}, updated_at = datetime('now')
-      WHERE id = $${args.length}`,
-    args,
-  );
+  const changed = await patchColumns(db, "project_tasks", id, {
+    title: patch.title,
+    body: patch.body,
+    parent_id: patch.parentId,
+    starts_at: patch.startsAt,
+    due_at: patch.dueAt,
+    estimate_minutes: patch.estimateMinutes,
+  });
+  if (!changed) return;
   await touchProject(await projectOfTask(id));
   notifyProjectsUpdated();
 }

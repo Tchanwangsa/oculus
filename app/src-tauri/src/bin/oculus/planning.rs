@@ -314,15 +314,7 @@ impl Ctx {
         let pool = self.planning_db()?;
         let mut items: Vec<projects::NewTask> = match &args.batch {
             Some(source) => {
-                let text = if source == "-" {
-                    let mut buffer = String::new();
-                    std::io::Read::read_to_string(&mut std::io::stdin(), &mut buffer)
-                        .map_err(|e| format!("reading the batch from stdin: {e}"))?;
-                    buffer
-                } else {
-                    std::fs::read_to_string(source)
-                        .map_err(|e| format!("reading {source}: {e}"))?
-                };
+                let text = read_input(source, "batch")?;
                 if text.trim().is_empty() {
                     return Err("--batch got an empty input".to_string());
                 }

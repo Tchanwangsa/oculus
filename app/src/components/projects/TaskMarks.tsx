@@ -1,7 +1,8 @@
-import { CheckCircle, Circle, CircleDashed, Sparkle } from "@phosphor-icons/react";
+import { CaretRight, CheckCircle, Circle, CircleDashed, Sparkle } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
-import { fmtClock, sqliteUtcToMs } from "@/lib/format";
+import { displayCode, fmtClock, sqliteUtcToMs } from "@/lib/format";
+import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import type { ColumnKind, ProjectTaskCounts } from "@/lib/projects";
 import type { SubtaskProgress } from "./taskTree";
 
@@ -136,4 +137,35 @@ export function ProjectProgress({
       className={cn("shrink-0", className)}
     />
   );
+}
+
+/** An unfiled task has no subject; a subject-less project is Personal. */
+export function TaskSubject({ code, unfiled = false }: { code: string | null; unfiled?: boolean }) {
+  if (unfiled) return <span className="text-[11px] text-muted-foreground/50">—</span>;
+  if (!code) return <span className="text-[11px] text-muted-foreground/60">Personal</span>;
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2 py-0.5 text-[11px] text-foreground">
+      <SubjectIcon code={code} size={11} />
+      <span className="truncate">{displayCode(code)}</span>
+    </span>
+  );
+}
+
+/** Reserve the caret's space even when the task has no children. */
+export function SubtaskToggle({ expandable, expanded, onToggle }: {
+  expandable: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return expandable ? (
+    <button
+      type="button"
+      aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
+      aria-expanded={expanded}
+      onClick={onToggle}
+      className="shrink-0 cursor-pointer p-0.5 text-muted-foreground/50 transition-colors hover:text-foreground"
+    >
+      <CaretRight size={9} className={cn("transition-transform", expanded && "rotate-90")} />
+    </button>
+  ) : <span aria-hidden className="w-[13px] shrink-0" />;
 }

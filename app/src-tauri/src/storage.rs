@@ -69,7 +69,7 @@ fn disk_space(_path: &Path) -> (u64, u64) {
 
 #[tauri::command]
 pub async fn storage_report() -> Result<StorageReport, String> {
-    tauri::async_runtime::spawn_blocking(|| {
+    crate::blocking::run(|| {
         let root = crate::paths::data_dir();
         let mut files = Vec::new();
         let mut total = 0u64;
@@ -85,5 +85,4 @@ pub async fn storage_report() -> Result<StorageReport, String> {
         })
     })
     .await
-    .map_err(|e| e.to_string())?
 }

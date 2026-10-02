@@ -1,5 +1,6 @@
-import { getDb } from "@/lib/db";
+import { getDb, likeEscape } from "@/lib/db";
 import { hostOf, isWebUrl } from "@/lib/browser";
+import { sqliteUtcToMs } from "@/lib/format";
 
 /**
  * The in-app browser's history and site icons. **One row per URL, not per
@@ -22,11 +23,6 @@ export interface HistoryDay {
   /** Local midnight, epoch ms — what `fmtDayHeading` takes. */
   day: number;
   entries: HistoryEntry[];
-}
-
-/** Escapes LIKE wildcards; pair with an `ESCAPE '\\'` clause. */
-function likeSafe(text: string): string {
-  return text.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
 // ── What is safe to remember ─────────────────────────────────────────────
@@ -99,7 +95,7 @@ function wordFilter(text: string): { sql: string; binds: string[] } {
   const words = text.split(/\s+/).filter(Boolean);
   const binds: string[] = [];
   const clauses = words.map((word, i) => {
-    binds.push(`%${likeSafe(word).replace(/[-_]/g, " ").replace(/ /g, "%")}%`);
+    binds.push(`%${likeEscape(word).replace(/[-_]/g, " ").replace(/ /g, "%")}%`);
     const n = i + 1;
     return (
       `(REPLACE(REPLACE(url, '-', ' '), '_', ' ') LIKE $${n} ESCAPE '\\'` +
@@ -112,15 +108,9 @@ function wordFilter(text: string): { sql: string; binds: string[] } {
 /** A visit's weight halves every week. */
 const HALF_LIFE_DAYS = 7;
 
-/** `sqliteUtcToMs`, copied to keep the data layer off `format.ts`. */
-function sqliteMs(s: string): number | undefined {
-  const ms = Date.parse(s.includes("T") ? s : `${s.replace(" ", "T")}Z`);
-  return Number.isNaN(ms) ? undefined : ms;
-}
-
 /** Frecency, boosted for a host that starts with what is typed. */
 function score(entry: HistoryEntry, prefix: string, nowMs: number): number {
-  const visited = sqliteMs(entry.last_visit) ?? nowMs;
+  const visited = sqliteUtcToMs(entry.last_visit) ?? nowMs;
   const ageDays = Math.max(0, (nowMs - visited) / 86_400_000);
   const frecency = entry.visits * Math.pow(2, -ageDays / HALF_LIFE_DAYS);
   const onPrefix =

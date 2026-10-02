@@ -1,3 +1,4 @@
+import { useStoredState } from "@/hooks/useStoredState";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -77,32 +78,18 @@ export default function ProjectPage() {
 
   const [listed, setListed] = useState(false);
 
-  const [tab, setTab] = useState<ProjectTab>(() => {
-    const stored = localStorage.getItem(TAB_KEY);
-    return isTab(stored) ? stored : "overview";
-  });
-  const [view, setView] = useState<TaskView>(() => {
-    const stored = localStorage.getItem(VIEW_KEY);
-    return isView(stored) ? stored : "board";
-  });
+  const [tab, setTab] = useStoredState<ProjectTab>(TAB_KEY, (stored) =>
+    isTab(stored) ? stored : "overview",
+  );
+  const [view, setView] = useStoredState<TaskView>(VIEW_KEY, (stored) =>
+    isView(stored) ? stored : "board",
+  );
 
   // The page's state, because its control sits in the view row; persisted.
-  const [zoom, setZoom] = useState<TimelineZoom>(() => {
-    const stored = localStorage.getItem(TIMELINE_ZOOM_KEY);
-    return isTimelineZoom(stored) ? stored : "week";
-  });
+  const [zoom, setZoom] = useStoredState<TimelineZoom>(TIMELINE_ZOOM_KEY, (stored) =>
+    isTimelineZoom(stored) ? stored : "week",
+  );
 
-  useEffect(() => {
-    localStorage.setItem(TAB_KEY, tab);
-  }, [tab]);
-
-  useEffect(() => {
-    localStorage.setItem(VIEW_KEY, view);
-  }, [view]);
-
-  useEffect(() => {
-    localStorage.setItem(TIMELINE_ZOOM_KEY, zoom);
-  }, [zoom]);
 
   // `status: "all"` so an archived project opened by its link still resolves.
   useEffect(() => {
