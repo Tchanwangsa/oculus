@@ -7,6 +7,7 @@ import { ThreadMap } from "@/components/harness/ThreadMap";
 import { Timeline } from "@/components/harness/Timeline";
 import { useThreadActions } from "@/components/harness/useThreadActions";
 import { Button } from "@/components/ui/button";
+import { DropOverlay } from "@/components/ui/DropOverlay";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { useWindowEvent } from "@/hooks/useEvents";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
@@ -205,6 +206,9 @@ export default function ChatPage() {
   );
   const onSubject = useCallback((id: number | null) => store.getState().setSubject(id), [store]);
   const onRestored = useCallback(() => setRestore(null), []);
+  /** Pictures drop anywhere on the conversation, not only on the box. */
+  const columnRef = useRef<HTMLDivElement>(null);
+  const [dropping, setDropping] = useState(false);
 
   const composer = (
     <Composer
@@ -228,6 +232,8 @@ export default function ChatPage() {
       onSend={send}
       onStop={onStop}
       autoFocus
+      dropRef={columnRef}
+      onDropping={setDropping}
     />
   );
 
@@ -250,7 +256,7 @@ export default function ChatPage() {
       {/* On the seam: negative margins cost no layout width. */}
       <ResizeHandle onMouseDown={list.onMouseDown} dragging={list.dragging} className="-mx-0.5" />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div ref={columnRef} className="relative flex min-w-0 flex-1 flex-col">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle px-6">
           {/* Folded, the panel leaves nothing behind, so the way back is here. */}
           {list.collapsed && (
@@ -317,6 +323,8 @@ export default function ChatPage() {
             </div>
           </>
         )}
+
+        <DropOverlay show={dropping} label="Drop to attach a picture" />
       </div>
     </div>
   );

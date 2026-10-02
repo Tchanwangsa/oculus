@@ -14,6 +14,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { DropOverlay } from "@/components/ui/DropOverlay";
 import { PillTabs } from "@/components/ui/PillTabs";
 import { useTabActive } from "@/components/tabs/TabContext";
 import { useDataDir } from "@/hooks/useDataDir";
@@ -524,18 +525,8 @@ export function DocumentEditor({
         </div>
       </div>
 
-      {/* Overlay over the whole note, since that is the drop target. */}
-      <div
-        aria-hidden
-        className={cn(
-          "pointer-events-none absolute inset-3 flex items-center justify-center rounded-xl border-2 border-dashed border-brand bg-brand/5 transition-opacity duration-150",
-          dropping ? "opacity-100" : "opacity-0",
-        )}
-      >
-        <span className="rounded-full bg-card px-3 py-1.5 text-[13px] font-medium text-brand shadow-sm">
-          Drop to add a picture
-        </span>
-      </div>
+      {/* Over the whole note, since that is the drop target. */}
+      <DropOverlay show={dropping} label="Drop to add a picture" />
     </div>
   );
 }

@@ -397,7 +397,11 @@ picture draws broken; a dropped file is scoped by Tauri on delivery.
 ### File drop
 
 Tauri's handler sits in front of the webview, so a Finder drop never reaches
-React; `useFileDrop` hit-tests Tauri's events against element rects.
+React; `useFileDrop` hit-tests Tauri's events against element rects. The Chat
+page's conversation column and the lecture dock's Chat panel are the drop
+targets, not just the box: each passes its own ref as the composer's `dropRef`
+and draws `DropOverlay` (`app/src/components/ui/DropOverlay.tsx`) from
+`onDropping`.
 
 - **The position is in points despite the `PhysicalPosition` type.** wry
   never applies the backing scale, so dividing by `devicePixelRatio` halves

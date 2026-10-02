@@ -6,7 +6,7 @@ import {
   useOutletContext,
 } from "react-router-dom";
 
-import { cn } from "@/lib/utils";
+import { DropOverlay } from "@/components/ui/DropOverlay";
 import { PillTabs } from "@/components/ui/PillTabs";
 import { useSubject } from "@/layouts/SubjectLayout";
 import { useFileDrop } from "@/hooks/useFileDrop";
@@ -89,17 +89,7 @@ export default function SubjectFilesPage() {
       </div>
 
       {/* An overlay, because the whole tab accepts the drop. */}
-      <div
-        aria-hidden
-        className={cn(
-          "pointer-events-none absolute inset-3 flex items-center justify-center rounded-xl border-2 border-dashed border-brand bg-brand/5 transition-opacity duration-150",
-          dropping ? "opacity-100" : "opacity-0",
-        )}
-      >
-        <span className="rounded-full bg-card px-3 py-1.5 text-[13px] font-medium text-brand shadow-sm">
-          Drop to add to {subject.code}
-        </span>
-      </div>
+      <DropOverlay show={dropping} label={`Drop to add to ${subject.code}`} />
     </div>
   );
 }

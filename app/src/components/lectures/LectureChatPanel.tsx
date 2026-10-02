@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ClockCounterClockwise, NotePencil } from "@phosphor-icons/react";
 
+import { DropOverlay } from "@/components/ui/DropOverlay";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ProviderMark } from "@/components/harness/ProviderMark";
 import { Timeline } from "@/components/harness/Timeline";
@@ -137,6 +138,9 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   const empty = items.length === 0 && !running;
   const scroll = useStickToBottom(threadId, !empty);
   useScrollFade(scroll.outer, "y", !empty);
+  /** Pictures drop anywhere on the panel, not only on the box. */
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [dropping, setDropping] = useState(false);
 
   const openThread = useCallback(
     (id: number | null) => {
@@ -169,7 +173,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   );
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div ref={panelRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex h-8 shrink-0 items-center gap-1 px-2">
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
           {thread?.title || "New thread"}
@@ -270,8 +274,12 @@ export const LectureChatPanel = memo(function LectureChatPanel({
           onReasoning={onReasoning}
           onSend={send}
           onStop={onStop}
+          dropRef={panelRef}
+          onDropping={setDropping}
         />
       </div>
+
+      <DropOverlay show={dropping} label="Drop to attach a picture" compact />
     </div>
   );
 });

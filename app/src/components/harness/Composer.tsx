@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { PaperPlaneTilt, Stop } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/MentionInput";
@@ -53,6 +53,8 @@ export function Composer({
   onSend,
   onStop,
   autoFocus,
+  dropRef,
+  onDropping,
 }: {
   /** Whose draft this box shows (`draftKey` in `stores/draftStore.ts`). */
   draftKey: string;
@@ -79,6 +81,10 @@ export function Composer({
   onSend: (text: string) => void;
   onStop: () => void;
   autoFocus?: boolean;
+  /** A wider drop target than the box (the page around it), which then draws
+   *  its own overlay from `onDropping`. */
+  dropRef?: RefObject<HTMLElement | null>;
+  onDropping?: (over: boolean) => void;
 }) {
   /** The serialized message (chips as paths); emptiness checks read this. */
   const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
@@ -88,7 +94,8 @@ export function Composer({
   /** The drop target for attachments: the whole box, not just the editor. */
   const wrapRef = useRef<HTMLDivElement>(null);
   /** Pasted/dropped pictures, in memory until send writes them to the library. */
-  const att = useAttachments(wrapRef);
+  const att = useAttachments(dropRef ?? wrapRef);
+  useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
 
   // Restored text goes before anything typed since, because it was typed first.
   useEffect(() => {
@@ -184,7 +191,7 @@ export function Composer({
       <div
         className={cn(
           "flex flex-col gap-4 rounded-xl border border-border bg-card px-3 py-3 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
-          att.dropping && "border-brand ring-[3px] ring-brand/25",
+          att.dropping && !dropRef && "border-brand ring-[3px] ring-brand/25",
         )}
       >
         <div className="flex flex-col gap-2">

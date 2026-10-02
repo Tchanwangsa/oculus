@@ -93,6 +93,8 @@ export function LectureChatComposer({
   onReasoning,
   onSend,
   onStop,
+  dropRef,
+  onDropping,
 }: {
   /** Whose draft this box shows (`draftKey` in `stores/draftStore.ts`). */
   draftKey: string;
@@ -116,6 +118,10 @@ export function LectureChatComposer({
   onReasoning: (level: string | null) => void;
   onSend: (text: string) => void;
   onStop: () => void;
+  /** A wider drop target than the box (the panel around it), which then
+   *  draws its own overlay from `onDropping`. */
+  dropRef?: RefObject<HTMLElement | null>;
+  onDropping?: (over: boolean) => void;
 }) {
   const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
   const setDraft = useDraftStore((s) => s.setDraft);
@@ -128,9 +134,10 @@ export function LectureChatComposer({
   const wrapRef = useRef<HTMLDivElement>(null);
   /** Pictures pasted or dropped in, written on send. No `@` menu here, so the
    *  refusal says to type a path. */
-  const att = useAttachments(wrapRef, {
+  const att = useAttachments(dropRef ?? wrapRef, {
     notAPicture: "Only images can be attached — type a path for a course file.",
   });
+  useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
 
   /** Whether there is a message at all: words, pictures, or both. */
   const ready = text.trim().length > 0 || att.items.length > 0;
@@ -179,7 +186,7 @@ export function LectureChatComposer({
         className={cn(
           "flex flex-col gap-2 rounded-lg border border-border bg-card px-2 py-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
           // Drag-over styling in focus's vocabulary, like the page composer.
-          att.dropping && "border-brand ring-[3px] ring-brand/25",
+          att.dropping && !dropRef && "border-brand ring-[3px] ring-brand/25",
         )}
       >
         <AttachmentStrip items={att.items} onDetach={att.detach} compact />
