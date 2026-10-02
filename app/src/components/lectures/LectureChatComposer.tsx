@@ -134,12 +134,16 @@ export function LectureChatComposer({
   }, [restore]);
 
   // Autosize in a layout effect: in the change handler the textarea still holds
-  // the old string.
+  // the old string. The card is held at its height while the field collapses to
+  // measure: the thread above would grow, clamp its scroll and come unpinned.
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    const card = el?.parentElement;
+    if (!el || !card) return;
+    card.style.minHeight = `${card.offsetHeight}px`;
     el.style.height = `${LINE_H}px`;
     el.style.height = `${Math.min(el.scrollHeight, MAX_H)}px`;
+    card.style.minHeight = "";
   }, [text]);
 
   // Pictures are written before the message is assembled; if that fails the
