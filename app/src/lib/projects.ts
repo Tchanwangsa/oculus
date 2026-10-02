@@ -1,4 +1,4 @@
-import { getDb, matchSql } from "@/lib/db";
+import { getDb, matchSql, type SearchScope } from "@/lib/db";
 
 /**
  * Projects: a piece of work scoped to one subject or none, broken into tasks
@@ -228,11 +228,13 @@ export interface TaskHit {
 export async function searchProjects(
   query: string,
   limit = 4,
+  scope: Pick<SearchScope, "subjectId"> = {},
 ): Promise<ProjectHit[]> {
   const db = await getDb();
   const { where, rank, params } = matchSql(
     `p.name || ' ' || COALESCE(s.code, '')`,
     query,
+    [["p.subject_id", scope.subjectId]],
   );
   return db.select<ProjectHit[]>(
     `SELECT p.id, p.name, s.code AS subject_code, p.status, p.due_at
@@ -256,11 +258,14 @@ export async function searchProjects(
 export async function searchTasks(
   query: string,
   limit = 4,
+  scope: Pick<SearchScope, "subjectId"> = {},
 ): Promise<TaskHit[]> {
   const db = await getDb();
+  // A subject scope is the project's, so it drops unfiled tasks.
   const { where, rank, params } = matchSql(
     `t.title || ' ' || COALESCE(p.name, '')`,
     query,
+    [["p.subject_id", scope.subjectId]],
   );
   return db.select<TaskHit[]>(
     `SELECT t.id, t.title, t.project_id, p.name AS project_name,

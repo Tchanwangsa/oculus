@@ -9,26 +9,26 @@ import { cn } from "@/lib/utils";
  * `app/src/lib/search.ts`; nothing here reads the library or navigates.
  */
 
-function Glyph({ spec }: { spec: IconSpec }) {
-  if (spec.kind === "subject") return <SubjectIcon code={spec.code} size={15} />;
+export function SearchGlyph({ spec, size = 15 }: { spec: IconSpec; size?: number }) {
+  if (spec.kind === "subject") return <SubjectIcon code={spec.code} size={size} />;
   const Icon = spec.icon;
-  return <Icon size={15} className="shrink-0 text-muted-foreground" />;
+  return <Icon size={size} className="shrink-0 text-muted-foreground" />;
 }
 
 /**
  * Keyboard selection over a list rebuilt every keystroke: clamped, and reset
- * to the first row when the list changes.
+ * to the first row when `resetKey` (the query, plus any chips) changes.
  */
 export function useSearchSelection(
   sections: SearchSection[],
-  query: string,
+  resetKey: string,
   pick: (item: SearchItem, newTab: boolean) => void,
 ) {
   const [index, setIndex] = useState(0);
   const flat = useMemo(() => sections.flatMap((s) => s.items), [sections]);
   const selected = Math.min(index, Math.max(0, flat.length - 1));
 
-  useEffect(() => setIndex(0), [query]);
+  useEffect(() => setIndex(0), [resetKey]);
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (flat.length === 0) return;
@@ -44,7 +44,8 @@ export function useSearchSelection(
     }
   }
 
-  return { selected, setIndex, onKeyDown, count: flat.length };
+  const item: SearchItem | undefined = flat[selected];
+  return { selected, setIndex, onKeyDown, count: flat.length, item };
 }
 
 export function SearchList({
@@ -113,10 +114,10 @@ export function SearchList({
                       : "text-foreground/90",
                   )}
                 >
-                  <Glyph spec={item.icon} />
+                  <SearchGlyph spec={item.icon} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{item.label}</span>
-                    {/* The matching line inside a document, clipped to one line. */}
+                    {/* A document's matching line or a filter's syntax, one line. */}
                     {item.snippet && (
                       <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
                         {item.snippet.map((part, pi) => (
