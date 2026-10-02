@@ -102,6 +102,18 @@
   --color-chart-5: #008300;
   --color-chart-other: #a1a1a1;
 
+  /* Code highlighting in the note editor, read on `surface-raised`. Muted so
+     a block never outshouts the prose; no slot borrows the brand indigo. */
+  --color-syntax-keyword:  #b4405e;
+  --color-syntax-string:   #2a7350;
+  --color-syntax-comment:  #737373;
+  --color-syntax-number:   #9a540b;
+  --color-syntax-function: #6e4fb8;
+  --color-syntax-type:     #1b7183;
+  --color-syntax-property: #35609b;
+  --color-syntax-operator: #5c5c5c;
+  --color-syntax-meta:     #7e6129;
+
   /* ── Typography ─────────────────────────────────────────────── */
   --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Manrope Variable", "Manrope", "Inter Variable", ui-sans-serif, system-ui, sans-serif;
@@ -202,6 +214,16 @@
   --color-chart-4: #d55181;
   --color-chart-5: #008300;
   --color-chart-other: #6e6e6e;
+
+  --color-syntax-keyword:  #f07a95;
+  --color-syntax-string:   #93c99f;
+  --color-syntax-comment:  #909090;
+  --color-syntax-number:   #e0a35e;
+  --color-syntax-function: #b9a4f2;
+  --color-syntax-type:     #6cc4d4;
+  --color-syntax-property: #8fb6f0;
+  --color-syntax-operator: #b0b0b0;
+  --color-syntax-meta:     #d0b06e;
 
   --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.3);
@@ -395,6 +417,7 @@
   /* Cap the box, not the picture: shrinking a tall diagram to fit would
    * push its labels under the readable minimum. */
   max-height: min(60vh, 30rem);
+}
 
 /* Edge fades for any scroller `useScrollFade` / `syncScrollFade` has marked:
  * `data-scroll-fade` is the axis, `--fade-{x,y}-{start,end}` are 0/1. A mask,

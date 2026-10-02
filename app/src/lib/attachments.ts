@@ -15,8 +15,10 @@ export interface PendingAttachment {
   source: { kind: "bytes"; file: File } | { kind: "path"; path: string };
 }
 
-/** Pre-filters dropped paths; Rust still sniffs the bytes. */
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|heic|heif|avif)$/i;
+/** Picture extensions, for a drop's paths and the open panel's filter; Rust
+ *  still sniffs the bytes. */
+export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "avif"];
+const IMAGE_EXT = new RegExp(`\\.(${IMAGE_EXTENSIONS.join("|")})$`, "i");
 
 let seq = 0;
 const nextId = () => `att-${Date.now()}-${seq++}`;

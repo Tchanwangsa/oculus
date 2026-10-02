@@ -128,6 +128,28 @@ export function fmtClock(ms: number | undefined, withDate = false): string {
   return `${d.toLocaleDateString([], { day: "numeric", month: "short" })}, ${time}`;
 }
 
+/** "just now", "12 min ago", "today, 2:18 pm", "yesterday, 2:18 pm", else
+ *  "15 Aug" (+ year). Pass a ticking `now` (`useNow`) so it doesn't go stale. */
+export function fmtRecent(ms: number, now: Date = new Date()): string {
+  const mins = Math.floor((now.getTime() - ms) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const d = new Date(ms);
+  const daysAgo = Math.round(
+    (startOfDay(now).getTime() - startOfDay(d).getTime()) / 86_400_000,
+  );
+  if (daysAgo === 0) return `today, ${fmtTime(ms)}`;
+  if (daysAgo === 1) return `yesterday, ${fmtTime(ms)}`;
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString([], opts);
+}
+
+/** The whole stamp, for a tooltip: "Friday 2 October 2026 at 2:18 pm". */
+export function fmtFullStamp(ms: number): string {
+  return new Date(ms).toLocaleString([], { dateStyle: "full", timeStyle: "short" });
+}
+
 /** Elapsed time between two epoch-ms stamps: "34s", "2m 10s", "1h 4m". */
 export function fmtDuration(startMs: number | undefined, endMs: number | undefined): string {
   if (startMs == null || endMs == null) return "—";

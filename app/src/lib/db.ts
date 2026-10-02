@@ -219,7 +219,7 @@ export async function setSyncOptions(options: SyncOptions): Promise<void> {
 // JSON value, read back in Rust by `harness::jobs`, where the jobs run.
 
 /** Mirrors `Job` in `app/src-tauri/src/harness/jobs.rs`. */
-export type JobId = "lectureChapters" | "lectureReading" | "threadNaming";
+export type JobId = "lectureChapters" | "lectureReading" | "threadNaming" | "documentSuggestions";
 
 /** `reasoningEffort` is null only for a model that takes no level. */
 export interface JobSelection {
@@ -250,6 +250,12 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
     description:
       "One line naming a conversation from its first exchange, once, after the first reply.",
   },
+  {
+    id: "documentSuggestions",
+    label: "Document suggestions",
+    description:
+      "Inline ghost-text completions in notes, half a second after you stop typing. One short turn per pause.",
+  },
 ];
 
 /** Mirrors `default_selection` in `app/src-tauri/src/harness/jobs.rs`; either
@@ -258,6 +264,7 @@ export const DEFAULT_JOB_MODELS: JobModels = {
   lectureChapters: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
   lectureReading: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" },
   threadNaming: { provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null },
+  documentSuggestions: { provider: "claude", model: "claude-sonnet-5-5", reasoningEffort: "medium" },
 };
 
 const JOB_MODELS_KEY = "job_models";
@@ -601,6 +608,31 @@ export async function searchMentionFiles(
   );
 }
 
+/** Files a note's `@` can link: every file of its subject, parsed or not (a
+ *  link opens the file, nothing reads it), the note itself excluded. Ranked
+ *  like `searchMentionFiles`, so an empty query lists recently opened files. */
+export async function searchNoteLinkFiles(
+  subjectId: number,
+  notePath: string,
+  query: string,
+  limit = 8,
+): Promise<DbFile[]> {
+  const db = await getDb();
+  const { where, params, prefix } = mentionMatch(query, 3);
+  return db.select<DbFile[]>(
+    `SELECT f.*
+     FROM files f
+     WHERE f.subject_id = $1
+       AND f.relative_path != $2
+       AND (${where})
+     ORDER BY (f.filename LIKE $${params.length + 3} ESCAPE '\\') DESC,
+              f.last_accessed_at DESC,
+              f.filename ASC
+     LIMIT $${params.length + 4}`,
+    [subjectId, notePath, ...params, prefix, limit],
+  );
+}
+
 /** How many PDF-backed files the `@` query would match if they were parsed,
  *  so the menu can say why they're missing rather than look like a typo. */
 export async function countUnparsedMentionMatches(
@@ -666,18 +698,35 @@ function terms(query: string): string[] {
  * `AND`-ed substring predicates (every word, any order) plus a rank: whether
  * some haystack word *starts* with the first term (a leading space is
  * prepended so the first word counts).
+ *
+ * `scope` adds `column = value` predicates (skipped when the value is
+ * undefined), numbered before the rank so placeholders keep text order (see
+ * `mentionMatch`).
  */
 export function matchSql(
   haystack: string,
   query: string,
-): { where: string; rank: string; params: string[] } {
+  scope: [column: string, value: string | number | undefined][] = [],
+): { where: string; rank: string; params: (string | number)[] } {
   const words = terms(query);
-  const where = words.length
-    ? words.map((_, i) => `${haystack} LIKE $${i + 1} ESCAPE '\\'`).join(" AND ")
-    : "1";
-  const params = [...words.map((w) => `%${w}%`), `% ${words[0] ?? ""}%`];
+  const preds = words.map((_, i) => `${haystack} LIKE $${i + 1} ESCAPE '\\'`);
+  const params: (string | number)[] = words.map((w) => `%${w}%`);
+  for (const [column, value] of scope) {
+    if (value === undefined) continue;
+    params.push(value);
+    preds.push(`${column} = $${params.length}`);
+  }
+  params.push(`% ${words[0] ?? ""}%`);
+  const where = preds.length ? preds.join(" AND ") : "1";
   const rank = `((' ' || ${haystack}) LIKE $${params.length} ESCAPE '\\')`;
   return { where, rank, params };
+}
+
+/** Narrows a palette search (`in:` / `type:` in `app/src/lib/search.ts`). */
+export interface SearchScope {
+  subjectId?: number;
+  /** A `files.category` (`category_from_path` in `app/src-tauri/src/paths.rs`). */
+  category?: string;
 }
 
 export interface LibraryFileHit extends DbFile {
@@ -698,9 +747,13 @@ export interface LibraryLectureHit {
 export async function searchLibraryFiles(
   query: string,
   limit = 8,
+  scope: SearchScope = {},
 ): Promise<LibraryFileHit[]> {
   const db = await getDb();
-  const { where, rank, params } = matchSql(FILE_HAYSTACK, query);
+  const { where, rank, params } = matchSql(FILE_HAYSTACK, query, [
+    ["f.subject_id", scope.subjectId],
+    ["f.category", scope.category],
+  ]);
   return db.select<LibraryFileHit[]>(
     `SELECT f.*, s.code AS subject_code
      FROM files f
@@ -719,9 +772,12 @@ export async function searchLibraryFiles(
 export async function searchLibraryLectures(
   query: string,
   limit = 4,
+  scope: Pick<SearchScope, "subjectId"> = {},
 ): Promise<LibraryLectureHit[]> {
   const db = await getDb();
-  const { where, rank, params } = matchSql(LECTURE_HAYSTACK, query);
+  const { where, rank, params } = matchSql(LECTURE_HAYSTACK, query, [
+    ["l.subject_id", scope.subjectId],
+  ]);
   return db.select<LibraryLectureHit[]>(
     `SELECT l.id, l.subject_id, s.code AS subject_code, l.title, l.date
      FROM lectures l
@@ -788,10 +844,22 @@ function ftsMatch(query: string): string | null {
 export async function searchPageText(
   query: string,
   limit = 5,
+  scope: SearchScope = {},
 ): Promise<PageTextHit[]> {
   const match = ftsMatch(query);
   if (!match) return [];
   const db = await getDb();
+  // Scope placeholders follow MATCH's `$3`, in text order.
+  const params: (string | number)[] = [SNIP_OPEN, SNIP_CLOSE, match];
+  let scoped = "";
+  for (const [column, value] of [
+    ["f.subject_id", scope.subjectId],
+    ["f.category", scope.category],
+  ] as const) {
+    if (value === undefined) continue;
+    params.push(value);
+    scoped += ` AND ${column} = $${params.length}`;
+  }
   try {
     return await db.select<PageTextHit[]>(
       `SELECT p.file_id        AS file_id,
@@ -807,11 +875,11 @@ export async function searchPageText(
          JOIN pages p    ON p.id = pages_fts.rowid
          JOIN files f    ON f.id = p.file_id
          JOIN subjects s ON s.id = f.subject_id
-        WHERE pages_fts MATCH $3
+        WHERE pages_fts MATCH $3${scoped}
         GROUP BY p.file_id
         ORDER BY score ASC, s.is_current DESC
-        LIMIT $4`,
-      [SNIP_OPEN, SNIP_CLOSE, match, limit],
+        LIMIT $${params.length + 1}`,
+      [...params, limit],
     );
   } catch (e) {
     // A malformed MATCH is the user still typing, not a broken index.

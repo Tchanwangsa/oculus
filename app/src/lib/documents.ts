@@ -1,12 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
-import { base64 } from "@/lib/attachments";
+import { base64, IMAGE_EXTENSIONS } from "@/lib/attachments";
 
 import {
   deleteFileRow,
   getFileByRelativePath,
   getFilesForSubject,
+  getSetting,
   renameFileRow,
+  setSetting,
   touchFileRow,
   upsertFile,
   type DbFile,
@@ -103,6 +106,47 @@ export async function attachDocumentFile(file: DbFile, path: string): Promise<st
     relativePath: file.relative_path,
     path,
   });
+}
+
+/** The native open panel for pictures to put in a note; `[]` if cancelled. */
+export async function pickDocumentImages(): Promise<string[]> {
+  const picked = await open({
+    multiple: true,
+    title: "Add pictures to this note",
+    filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }],
+  });
+  if (picked == null) return [];
+  return Array.isArray(picked) ? picked : [picked];
+}
+
+// ── Inline suggestions ───────────────────────────────────────────────────────
+
+/** Text to insert at the caret of the note at `path`, from the
+ *  `documentSuggestions` job's model; `""` for none. A higher `requestId`
+ *  supersedes a lower one, which then resolves `""`. */
+export function suggestDocument(req: {
+  requestId: number;
+  path: string;
+  before: string;
+  after: string;
+}): Promise<string> {
+  return invoke<string>("document_suggest", req);
+}
+
+/** Drop the suggestion in flight, if any. */
+export function cancelDocumentSuggestion(): Promise<void> {
+  return invoke("document_suggest_cancel");
+}
+
+const SUGGESTIONS_KEY = "document_suggestions_enabled";
+
+/** Off unless the student turned it on: every suggestion is a model turn. */
+export async function getDocumentSuggestions(): Promise<boolean> {
+  return (await getSetting(SUGGESTIONS_KEY)) === "1";
+}
+
+export async function setDocumentSuggestions(on: boolean): Promise<void> {
+  await setSetting(SUGGESTIONS_KEY, on ? "1" : "0");
 }
 
 /** Delete the file, then its row. No trash, so the page confirms first. */

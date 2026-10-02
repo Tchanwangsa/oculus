@@ -17,7 +17,7 @@ rules are in [UI system](#ui-system); the WebKit and CSS traps are in
 | ⌘-click → a new tab, app-wide | `app/src/lib/newTabClicks.ts` |
 | Search (⌘K and the new-tab field), Recent group | `app/src/lib/search.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
 | Backend events → SQLite and stores | `app/src/hooks/useBackendEvents.ts`, `app/src/hooks/useEvents.ts`, `app/src/lib/db.ts` |
-| Files tab: uploads and documents | `app/src/pages/subject/FilesPage.tsx`, `app/src/lib/uploads.ts`, `app/src/lib/documents.ts`, `app/src/components/documents/DocumentEditor.tsx`, `app/src-tauri/src/files.rs` |
+| Files tab: uploads and documents | `app/src/pages/subject/FilesPage.tsx`, `app/src/lib/uploads.ts`, `app/src/lib/documents.ts`, `app/src/components/documents/DocumentEditor.tsx`, `app/src/components/documents/editor/`, `app/src-tauri/src/files.rs` |
 | Tasks section (`/projects`, `/tasks`) | `app/src/components/projects/`, `app/src/pages/TasksPage.tsx`, `app/src/lib/projects.ts`, `app/src/stores/projectsStore.ts` |
 | Chat | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/harnessStore.ts` |
 | Side panel (file/lecture peek) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
@@ -50,8 +50,10 @@ headings and Inter for everything else, Notion-style layout.
   name wraps. Call sites don't override these — don't restore what
   `shadcn add` generates.
 - **Monospace is for code only** — the one `font-mono` is
-  `app/src/components/markdown/MdComponents.tsx`. Timestamps, counts, IDs and
-  badges take the body font, with `tabular-nums` when digits hold a column.
+  `app/src/components/markdown/MdComponents.tsx`; the note editor's theme
+  (`app/src/components/documents/editor/theme.ts`) gives `--font-mono` to code
+  and LaTeX source. Timestamps, counts, IDs and badges take the body font,
+  with `tabular-nums` when digits hold a column.
 - Headings get Manrope from an `h1–h4` rule in `@layer base`; a title that
   isn't a heading element takes `font-display`.
 - **shadcn/ui** lives in `app/src/components/ui` (config `app/components.json`,
@@ -68,8 +70,6 @@ headings and Inter for everything else, Notion-style layout.
   (`app/src/lib/theme.ts`); `@custom-variant dark` follows the class, not the OS.
 - **Full pages scroll through `page-scroll`**, which reserves the scrollbar
   gutter so a page that starts overflowing doesn't jog sideways.
-- **Tables are full-bleed in `GridTable`**, header outside the scroller (or the
-  bar runs down it). Alternate views are sibling `ViewTabs`/`PillTabs`, not a
 - **Every scroller fades its overflowing edges through `useScrollFade`**
   (`app/src/hooks/useScrollFade.ts`; `syncScrollFade` in
   `app/src/lib/scrollFade.ts` for non-React callers like the maths palette).
@@ -77,6 +77,8 @@ headings and Inter for everything else, Notion-style layout.
   into a mask, so no overlay and no background colour. Set `--scroll-fade` for
   a ramp other than 24px, and keep the scroller flush against what it sits on
   — padding between them leaves a visible gap under the fade.
+- **Tables are full-bleed in `GridTable`**, header outside the scroller (or the
+  bar runs down it). Alternate views are sibling `ViewTabs`/`PillTabs`, not a
   dropdown, over a fixed-height toolbar so switching never jolts the rows.
 - **No toasts, no bottom progress bars** — background jobs surface in the
   sidebar only. No placeholder UI, section-header icons, stat cards or filler.
@@ -256,12 +258,109 @@ global.
 - **A document is `courses/<code>/documents/<title>.md`** with a
   `category = 'document'` row. The title is the filename (`fileTitle`); a rename
   moves the file and keeps the row id. `reconcileDocuments` brings rows in line
-  with the folder on mount, so a note written elsewhere just appears. List
-  editing lives in `app/src/lib/markdownEditing.ts`, applied through
-  `execCommand("insertText")` so ⌘Z undoes it.
-- **A pasted picture is written beside its note** in `documents/assets/`, on
-  arrival, with a relative link both renderers resolve. `is_document_rel`
-  demands a `.md` one level down, so nothing can edit `assets/`.
+  with the folder on mount, so a note written elsewhere just appears.
+- **The note editor is CodeMirror 6 over the file's exact text**
+  (`app/src/components/documents/editor/`); nothing is re-serialised.
+  `DocumentEditor.tsx` owns load, save, title and mode; the view is keyed on
+  the row, so a rename keeps it. **Live** mode renders markdown in place —
+  headings, marks, links, lists and checkboxes, quotes, rules, code, pictures,
+  KaTeX maths and mermaid diagrams — and shows a construct's source while the selection touches
+  it (a heading, quote or list marker while the caret is on its line). **Raw**
+  is the same view with those decorations swapped out by a `Compartment`
+  for `rawMode.ts`: monospace source with line numbers, markdown and
+  frontmatter YAML coloured with the `--color-syntax-*` tokens.
+  Under the title, `DocumentMeta` shows subject, created (`first_seen_at`),
+  last updated (`modified_at` or this mount's last save) and a word count.
+- **Fenced code is parsed in its own language**
+  (`app/src/components/documents/editor/codeLanguages.ts`): the info string's
+  first word picks a `@codemirror/language-data` grammar, loaded lazily on
+  first use; an untagged fence is guessed with highlight.js over a small
+  subset, cached, and left plain unless a pattern for that language agrees.
+  Highlight classes stop at a nested grammar's edge, so block code's font is a
+  `cm-code-text` mark in both modes. Live mode hides the fences behind a
+  header row (the label, which reveals the fence to retag it, and Copy) until
+  the selection touches the block. Colours are the `--color-syntax-*` tokens.
+  A ```mermaid fence that owns its lines draws as a diagram (`MermaidWidget`
+  in `widgets.ts`, through `mermaidRender.ts`, shared with `Mermaid.tsx`);
+  while the selection touches it, the source shows with the diagram under it,
+  redrawn in place as it is typed and kept at its last good drawing while the
+  source does not parse.
+- **A pipe table is a grid whose cells edit in place**
+  (`app/src/components/documents/editor/table.ts`): a cell writes back only its
+  own source range, Tab/Enter move between cells, the frame scrolls sideways.
+  A drag across cells (or Shift with a click or ↑/↓) selects a block, which
+  the scroller holds focus for: Delete empties it, and on a block already
+  empty removes the whole rows (never the header) or columns it spans, or
+  the table. ⌘C copies it tab-separated. Edge handles for the row and column
+  under the pointer select them on a click and move them on a drag; a moved
+  row keeps its bytes, a moved column rewrites rows with outer pipes, and the
+  header row never moves (a body row may be short of cells).
+  Rows are split from the line text, since lezer emits no node for an empty
+  cell. In Live mode it never shows its source: its range is atomic, and
+  `tableKeys` (`livePreview.ts`) hands the caret in — ↑/← from the line under
+  it into the last row, ↓/→ from the line over it into the header, Backspace
+  and Delete likewise (deleting an empty line in between when no text would
+  end up against the table). Arrows at the grid's edges, and Esc, hand it back.
+  Text typed or pasted at a table's edge goes on its own line, after a blank
+  line below it, since GFM reads a line straight under a table as a row.
+  **Leading YAML frontmatter** parses as `Frontmatter`
+  (`app/src/components/documents/editor/frontmatter.ts`) and draws as a
+  Properties card, revealing its source when touched.
+- **Toolbar buttons and shortcuts are plain CodeMirror commands**
+  (`app/src/components/documents/editor/commands.ts`) that rewrite markdown
+  and unwrap when already applied, so they work in both modes. ⌘-click opens a
+  link — library files through `libraryLinkTarget` and `openFileSmart`, web
+  URLs in the in-app browser; a plain click edits it. Maths is `$…$` (pandoc's
+  spacing rule), `\(…\)`, and `$$` / `\[` blocks on their own lines
+  (`app/src/components/documents/editor/mathSyntax.ts`).
+- **Maths is typed as LaTeX in the note, with a popover beside it**
+  (`app/src/components/documents/editor/mathTools.ts`): while the caret is in
+  maths (`mathAt` in `mathContext.ts`), in either mode, a CodeMirror tooltip
+  under the maths shows a live KaTeX preview (the parse error in red), recents
+  (`localStorage`), a one-row tab strip that scrolls sideways, and a palette
+  three rows tall that scrolls, with a matrix-size grid (`mathPalette.ts`). Esc hides it until the caret leaves that maths. Inside
+  maths, `\` plus a letter opens completion with KaTeX previews; it is the
+  editor's one `autocompletion()` (`extensions.ts`), so other sources join its
+  `override`. Palette buttons and completions insert `snippet()`s whose `{}`
+  slots are Tab fields; the snippet keymap is `Prec.highest`, above the note's
+  Tab. The caret between a lone `$$` pair (what Σ inserts mid-line) counts as
+  empty maths, since `$$` never parses inline.
+- **Typed shorthands expand inside maths**
+  (`app/src/components/documents/editor/mathShorthand.ts`, rule tables at the
+  top): `a/` → `\frac{a}{}`, `sr` → `^2`, `@a` → `\alpha`, `->` → `\to`,
+  `sin ` → `\sin `, `\left…\right` around a closed group holding a tall
+  construct. Never inside `\text{}`-like arguments. The typed character lands
+  first and the rewrite is its own history event, so ⌘Z gives back what was
+  typed.
+- **A pasted, dropped or picked picture is written beside its note** in
+  `documents/assets/`, on arrival, and linked relatively; `FileViewer` and the
+  editor both resolve it with `libraryImageSrc` (`app/src/lib/libraryLinks.ts`).
+  `is_document_rel` demands a `.md` one level down, so nothing can edit
+  `assets/`.
+- **AI suggestions are ghost text at the caret**
+  (`app/src/components/documents/editor/aiSuggest.ts`), off by default
+  (`document_suggestions_enabled`; the topbar's `SuggestToggle`, shared by
+  every note through `documentPrefsStore`). 500 ms after an edit, with one
+  empty caret not mid-word, outside code and frontmatter and with no
+  completion open, up to 4000 characters before the caret and 1500 after go to
+  `document_suggest` on the `documentSuggestions` job's model. An answer
+  lands only if it is the newest request and the text and caret are
+  unchanged. Tab takes it (one undo step), Mod-→ the next word, Esc drops it;
+  typing its front eats it, anything else drops it. Its keymap is
+  `Prec.highest` but passes without a ghost, so the note's and snippets' Tab
+  are untouched. Blur, toggle-off and note switch call
+  `document_suggest_cancel`. A failure is a red dot on the toggle until a
+  request succeeds.
+- **`@` links a library file**
+  (`app/src/components/documents/editor/mentions.ts`): at a word start,
+  outside maths, code and frontmatter, the query after it (the chat's caps)
+  searches every file of the note's subject, parsed or not, but the note
+  (`searchNoteLinkFiles`); an empty query lists recently opened files. It is a
+  source in the one `autocompletion()`. Accepting writes
+  `[title](../<path>)`, each segment percent-encoded (`libraryLinkHref`),
+  which `libraryLinkTarget` decodes, so ⌘-click and `FileViewer` resolve it
+  alike. The subject and note path reach the editor through `NoteHost`.
+  Lectures have no link form a note can open, so `@` lists files only.
 
 ## One markdown renderer serves every surface
 
@@ -274,9 +373,11 @@ global.
   utilities they override. **`InlineMd` flattens blocks** because chapter
   summaries sit inside buttons, and a `<p>` in a `<button>` closes it early.
 - **`FileViewer` resolves in-file links locally** — relative links and Canvas
-  `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`.
+  `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`
+  (`app/src/lib/libraryLinks.ts`, shared with the note editor).
 - **A ```mermaid fence is caught at `pre`** (`Mermaid.tsx`), and the original
-  `<pre>` shows until it renders or if it never parses:
+  `<pre>` shows until it renders or if it never parses. Config and drawing are
+  `mermaidRender.ts`:
   - `htmlLabels: false` must sit at the config's **top level** (mermaid 12
     ignores it under `flowchart`); HTML labels wrap by an exact float compare
     that page zoom breaks, clipping every long label.
@@ -333,6 +434,14 @@ in any order. **Text inside documents is lexical**: `searchPageText` over the
 semantic search stays in chat ([retrieval.md](./retrieval.md)). No match is
 offered as a URL or web search through `normalizeAddress`, shared with the
 address bar.
+
+⌘K alone takes Discord-style filters: `in:<subject>` and `type:<kind>`. Typing
+the colon turns the key into a chip with the caret inside it, and the list shows
+only its values; picking one (or a space after an unambiguous value) fixes the
+chip, one per key. Backspace at a field's start drops the chip being typed, or
+else the last chip. Chips scope the SQL (`SearchScope` in
+`app/src/lib/db.ts`) and drop the Web and Go to sections; `runSearch`'s
+`offerFilters` is what the new-tab field leaves off.
 
 ## The lecture player's elements outlive the page
 
@@ -409,5 +518,20 @@ address bar.
   clicks; use `RowAction` (`app/src/pages/subject/LecturesPage.tsx`).
 - **A `Link`'s ⌘-click reloads the whole webview** — leave modified clicks to
   `newTabClicks.ts`.
+- **CodeMirror block decorations come from a `StateField`** — it throws for
+  block widgets from a view plugin
+  (`app/src/components/documents/editor/livePreview.ts`). Reveal-on-caret
+  decorations rebuild on selection and focus changes, not only edits.
+- **An editable widget must patch itself in `updateDOM`** — every edit rebuilds
+  the field, and fresh widget DOM drops the caret in a focused table cell
+  (`app/src/components/documents/editor/table.ts`).
+- **`@codemirror/view` is patched** (`app/patches/`) — its scroller search took
+  any box whose `scrollHeight` beat `clientHeight`, and under page zoom the
+  editor's `overflow: visible` wrappers round a pixel over, so drag-select never
+  scrolled `page-scroll`. The sticky toolbar's height is a `scrollMargins` top.
+- **A window shortcut skips a key an editor already took** — `AppLayout`'s
+  ⌘B (sidebar) checks `defaultPrevented`, since the note editor's ⌘B is bold.
+  ⌘K is a menu item, so it never reaches a keymap: the palette's `menu-search`
+  handler asks `linkInFocusedNote` first, and a focused note makes a link.
 - **`data-tauri-drag-region` needs `core:window:allow-start-dragging`**
   (`app/src-tauri/capabilities/default.json`) or it silently does nothing.

@@ -1,0 +1,60 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 224fb1129590c9c84b2b91b5d394d25bebae5f91..da5bac7f84e3ca9693281bbb009642f692d02e6a 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -640,6 +640,10 @@ function scrollRectIntoView(dom, rect, side, x, y, xMargin, yMargin, ltr) {
+         }
+     }
+ }
++function canScroll(elt, axis) {
++    let value = elt.ownerDocument.defaultView.getComputedStyle(elt)[axis];
++    return value != "visible" && value != "clip";
++}
+ function scrollableParents(dom, getX = true) {
+     let doc = dom.ownerDocument, x = null, y = null;
+     for (let cur = dom.parentNode; cur;) {
+@@ -647,9 +651,12 @@ function scrollableParents(dom, getX = true) {
+             break;
+         }
+         else if (cur.nodeType == 1) {
+-            if (!y && cur.scrollHeight > cur.clientHeight)
++            // A box with `overflow: visible` or `clip` cannot scroll, yet a
++            // fractional height can round its scrollHeight a pixel past its
++            // clientHeight; skip it so the real scroller is found.
++            if (!y && cur.scrollHeight > cur.clientHeight && canScroll(cur, "overflowY"))
+                 y = cur;
+-            if (getX && !x && cur.scrollWidth > cur.clientWidth)
++            if (getX && !x && cur.scrollWidth > cur.clientWidth && canScroll(cur, "overflowX"))
+                 x = cur;
+             cur = cur.assignedSlot || cur.parentNode;
+         }
+diff --git a/dist/index.js b/dist/index.js
+index 522f3b69e1e0bc9c8738282c2b52d0aa4a63543b..88648110ce7276c90a600ff2998f1dfd7d99e453 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -637,6 +637,10 @@ function scrollRectIntoView(dom, rect, side, x, y, xMargin, yMargin, ltr) {
+         }
+     }
+ }
++function canScroll(elt, axis) {
++    let value = elt.ownerDocument.defaultView.getComputedStyle(elt)[axis];
++    return value != "visible" && value != "clip";
++}
+ function scrollableParents(dom, getX = true) {
+     let doc = dom.ownerDocument, x = null, y = null;
+     for (let cur = dom.parentNode; cur;) {
+@@ -644,9 +648,12 @@ function scrollableParents(dom, getX = true) {
+             break;
+         }
+         else if (cur.nodeType == 1) {
+-            if (!y && cur.scrollHeight > cur.clientHeight)
++            // A box with `overflow: visible` or `clip` cannot scroll, yet a
++            // fractional height can round its scrollHeight a pixel past its
++            // clientHeight; skip it so the real scroller is found.
++            if (!y && cur.scrollHeight > cur.clientHeight && canScroll(cur, "overflowY"))
+                 y = cur;
+-            if (getX && !x && cur.scrollWidth > cur.clientWidth)
++            if (getX && !x && cur.scrollWidth > cur.clientWidth && canScroll(cur, "overflowX"))
+                 x = cur;
+             cur = cur.assignedSlot || cur.parentNode;
+         }

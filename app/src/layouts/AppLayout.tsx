@@ -118,9 +118,11 @@ export default function AppLayout() {
 
   // ⌘B has no menu item. ⌘+ is here because muda binds the physical key and
   // ⌘+ is ⇧⌘=, which the menu's ⌘= does not match; the unshifted zoom keys
-  // never reach here on macOS (the menu bar takes them first).
+  // never reach here on macOS (the menu bar takes them first). A key an
+  // editor already took (the note editor's ⌘B is bold) is left alone.
   useWindowEvent("keydown", (ev) => {
     const e = ev as KeyboardEvent;
+    if (e.defaultPrevented) return;
     // Keeps ⌘⌥B (ChatPage's panel) from also toggling the sidebar.
     if (e.altKey) return;
     if (!(e.metaKey || e.ctrlKey)) return;

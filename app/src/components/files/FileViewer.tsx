@@ -13,6 +13,7 @@ import { MD_COMPONENTS, normalizeMath } from "@/components/markdown/MdComponents
 import { PDFViewer } from "@/components/files/PDFViewer";
 import { docPdfRelPath, isPdfBacked, parsedMdRelPath } from "@/lib/fileTypes";
 import { filePageHref } from "@/lib/openFile";
+import { libraryImageSrc, libraryLinkTarget } from "@/lib/libraryLinks";
 import { useDataDir } from "@/hooks/useDataDir";
 import type { DbFile } from "@/lib/db";
 import { readCourseFile } from "@/lib/courseFiles";
@@ -147,40 +148,19 @@ export function FileViewer({
  * `MD_COMPONENTS` for a library file: links to files we hold locally (`../`
  * paths and raw Canvas `/files/<id>` / `/pages/<slug>` URLs) open in the same
  * peek, others open externally, and relative images resolve against the
- * file's directory. Shared with the document editor's preview.
+ * file's directory (`app/src/lib/libraryLinks.ts`).
  */
-export function useLibraryMdComponents(
+function useLibraryMdComponents(
   file: Pick<DbFile, "relative_path">,
   files: DbFile[],
   onOpenFile: (file: DbFile) => void,
 ) {
   const dataDir = useDataDir();
   return useMemo(() => {
-    const baseDir = file.relative_path.replace(/[^/]+$/, "");
-    const localTarget = (href: string): DbFile | undefined => {
-      if (/^\.\.\//.test(href)) {
-        const rel = href.replace(/^\.\.\//, "");
-        return files.find((f) => f.relative_path.endsWith(rel));
-      }
-      if (href.includes("/courses/")) {
-        const fileId = /\/files\/(\d+)/.exec(href)?.[1];
-        if (fileId) return files.find((f) => f.canvas_id === Number(fileId));
-        const slug = /\/pages\/([^/?#]+)/.exec(href)?.[1];
-        if (slug) {
-          return (
-            files.find((f) => f.relative_path.endsWith(`pages/${slug}.md`)) ??
-            // A renamed page keeps its Canvas URL slug while the saved file
-            // tracks the title — source_url holds the canonical URL.
-            files.find((f) => f.source_url?.endsWith(`/pages/${slug}`))
-          );
-        }
-      }
-      return undefined;
-    };
     return {
       ...MD_COMPONENTS,
       a: ({ href, children, ...p }: any) => {
-        const target = href ? localTarget(href) : undefined;
+        const target = href ? libraryLinkTarget(href, files) : undefined;
         if (target) {
           return (
             <Button
@@ -202,11 +182,7 @@ export function useLibraryMdComponents(
         );
       },
       img: ({ src, alt, ...p }: any) => {
-        let resolved = src || "";
-        if (resolved && !/^(https?:|data:|asset:|blob:)/.test(resolved) && dataDir) {
-          const abs = `${dataDir}/${baseDir}${resolved}`.replace(/\/{2,}/g, "/");
-          resolved = convertFileSrc(abs);
-        }
+        const resolved = libraryImageSrc(src || "", file.relative_path, dataDir);
         return (
           <img
             className="max-w-full rounded-lg my-3 border border-border"

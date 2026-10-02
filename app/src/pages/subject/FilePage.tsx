@@ -8,10 +8,12 @@ import {
 } from "@/components/documents/DocumentEditor";
 import { FileViewer, PdfMdToggle, usePdfMd } from "@/components/files/FileViewer";
 import { MarkdownUnavailable } from "@/components/files/ParseState";
+import { SUGGEST_IDLE, type SuggestStatus } from "@/components/documents/editor/aiSuggest";
 import { SubjectCrumbs, fileCrumbTab } from "@/components/subjects/SubjectCrumbs";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { filePagePath, fileTitle, openFileSmart, recordFileAccess } from "@/lib/openFile";
 import { LoadingFill } from "@/components/ui/PageParts";
+import { useDocumentPrefsStore } from "@/stores/documentPrefsStore";
 
 /**
  * A file as a full page (the peek's expand target). Standalone, not under
@@ -50,8 +52,18 @@ export default function SubjectFilePage() {
 
   const pdf = usePdfMd(file);
   const isDocument = file?.category === "document";
-  const [mode, setMode] = useState<EditorMode>("write");
+  const [mode, setMode] = useState<EditorMode>("live");
   const [status, setStatus] = useState<SaveStatus>({ state: "idle" });
+  const suggestions = useDocumentPrefsStore((s) => s.suggestions);
+  const setSuggestions = useDocumentPrefsStore((s) => s.setSuggestions);
+  const loadDocumentPrefs = useDocumentPrefsStore((s) => s.load);
+  const [suggestStatus, setSuggestStatus] = useState<SuggestStatus>(SUGGEST_IDLE);
+  useEffect(() => {
+    if (isDocument) void loadDocumentPrefs();
+  }, [isDocument, loadDocumentPrefs]);
+  const toggleSuggestions = (on: boolean) => {
+    setSuggestions(on).catch(console.error);
+  };
 
   // Direct navigation (restored tab, deep link) bypasses openFileSmart, so
   // record the access here. Keyed on id: the refresh the record triggers
@@ -87,7 +99,14 @@ export default function SubjectFilePage() {
         </h1>
         {/* A PDF without markdown says why rather than lacking the toggle. */}
         {isDocument ? (
-          <DocumentControls mode={mode} onMode={setMode} status={status} />
+          <DocumentControls
+            mode={mode}
+            onMode={setMode}
+            status={status}
+            suggestions={suggestions}
+            onSuggestions={toggleSuggestions}
+            suggestStatus={suggestStatus}
+          />
         ) : (
           pdf.isPdf && pdf.mdChecked &&
           (pdf.mdExists ? (
@@ -105,6 +124,8 @@ export default function SubjectFilePage() {
             mode={mode}
             onMode={setMode}
             onStatus={setStatus}
+            suggestions={suggestions}
+            onSuggestStatus={setSuggestStatus}
           />
         ) : (
           /* In-document links open the linked file as a peek over this page. */
