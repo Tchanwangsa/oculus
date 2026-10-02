@@ -57,6 +57,17 @@ function SelectContent({
   position = "popper",
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  // Radix shows a scroll arrow whenever scrollHeight exceeds clientHeight, and
+  // under page zoom WebKit rounds those a pixel apart on a list that fits.
+  const [overflows, setOverflows] = React.useState(false);
+  const viewportRef = React.useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const measure = () => setOverflows(el.scrollHeight - el.clientHeight > 1);
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -71,8 +82,9 @@ function SelectContent({
         position={position}
         {...props}
       >
-        <SelectScrollUpButton />
+        <SelectScrollUpButton className={cn(!overflows && "hidden")} />
         <SelectPrimitive.Viewport
+          ref={viewportRef}
           className={cn(
             "p-1",
             position === "popper" &&
@@ -81,7 +93,7 @@ function SelectContent({
         >
           {children}
         </SelectPrimitive.Viewport>
-        <SelectScrollDownButton />
+        <SelectScrollDownButton className={cn(!overflows && "hidden")} />
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   );
