@@ -359,6 +359,21 @@
 .md-compact :is(p, ul, ol, blockquote) {
   margin-block: 0.6rem;
 }
+/* A reply's headings are body text set larger, not display titles: the body
+ * font, without the tracking Manrope's width needs. */
+.md-compact :is(h1, h2, h3, h4) {
+  font-family: var(--font-sans);
+  letter-spacing: normal;
+}
+.md-compact h1 {
+  font-size: 16px;
+  margin-block: 1.2rem 0.5rem;
+}
+.md-compact h2 {
+  font-size: 15px;
+  margin-block: 1.1rem 0.45rem;
+  padding-bottom: 0.3rem;
+}
 .md-compact h3 {
   font-size: 14px;
   margin-block: 1rem 0.4rem;
@@ -513,4 +528,16 @@ html:root.dark {
   box-shadow:
     0 1px 3px 0 rgb(0 0 0 / 0.1),
     0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+/* A cited passage: its text-layer spans in a PDF (`PDFViewer.tsx`, whose text
+ * is transparent over the canvas, so the ground shows through) and the
+ * markdown highlight (`FilePanel.tsx`). */
+.pdf-surface .textLayer .citation-hit {
+  background-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
+  border-radius: 2px;
+}
+/* Its own rule: a selector list with one unknown pseudo-element is dropped whole. */
+::highlight(citation-hit) {
+  background-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
 }

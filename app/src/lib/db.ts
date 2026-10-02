@@ -666,6 +666,17 @@ export async function getFileByRelativePath(
   return rows[0] ?? null;
 }
 
+/** Files whose library path ends in `/<tail>` — a course-relative path or a
+ *  bare filename an agent cited. At most two, so a caller can tell a unique
+ *  hit from an ambiguous one. */
+export async function findFilesByTail(tail: string): Promise<DbFile[]> {
+  const db = await getDb();
+  return db.select<DbFile[]>(
+    `SELECT * FROM files WHERE relative_path LIKE $1 ESCAPE '\\' LIMIT 2`,
+    [`%/${likeEscape(tail)}`],
+  );
+}
+
 export async function getFilesForSubject(subjectId: number): Promise<DbFile[]> {
   const db = await getDb();
   return db.select<DbFile[]>(
@@ -1062,6 +1073,12 @@ export async function upsertLectures(subjectId: number, lectures: LectureData[])
       ]
     );
   }
+}
+
+export async function getLecture(id: string): Promise<Lecture | null> {
+  const db = await getDb();
+  const rows = await db.select<Lecture[]>(`SELECT * FROM lectures WHERE id = $1`, [id]);
+  return rows[0] ?? null;
 }
 
 export async function getLectures(subjectId: number): Promise<Lecture[]> {

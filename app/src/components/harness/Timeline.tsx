@@ -12,7 +12,7 @@ import {
 import type { Icon } from "@phosphor-icons/react";
 import { CompactMd } from "@/components/markdown/MdComponents";
 import { FileChip } from "@/components/markdown/FileChip";
-import { openLibraryPath, splitLibraryPaths, type TextPart } from "@/lib/openFile";
+import { openCitation, splitLibraryPaths, type TextPart } from "@/lib/openFile";
 import { attachmentSrc } from "@/lib/attachments";
 import { ImageLightbox } from "@/components/ui/Lightbox";
 import { selectionMarkdown } from "@/lib/selectionMarkdown";
@@ -412,11 +412,13 @@ function QuestionBubble({
             >
               {prose.map((p, i) => {
                 if (p.kind === "text") return p.text;
+                if (p.kind !== "path") return null;
                 return (
                   <FileChip
                     key={i}
                     path={p.path}
-                    onClick={(newTab) => openLibraryPath(p.path, newTab)}
+                    cite={p.cite}
+                    onClick={(newTab) => openCitation(p.cite, newTab)}
                   />
                 );
               })}

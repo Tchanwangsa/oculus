@@ -16,6 +16,7 @@ import { filePageHref } from "@/lib/openFile";
 import { libraryImageSrc, libraryLinkTarget } from "@/lib/libraryLinks";
 import { useDataDir } from "@/hooks/useDataDir";
 import type { DbFile } from "@/lib/db";
+import type { FileLocate } from "@/stores/sidePanelStore";
 import { readCourseFile } from "@/lib/courseFiles";
 import { LoadingFill } from "@/components/ui/PageParts";
 
@@ -93,6 +94,8 @@ interface FileViewerProps {
   onOpenFile: (file: DbFile) => void;
   /** From `usePdfMd` — which face of a parsed PDF to show. */
   pdfViewMode?: "pdf" | "markdown";
+  /** A cited spot in the PDF (`PDFViewer`). */
+  locate?: FileLocate;
 }
 
 /**
@@ -104,6 +107,7 @@ export function FileViewer({
   files,
   onOpenFile,
   pdfViewMode = "pdf",
+  locate,
 }: FileViewerProps) {
   const dataDir = useDataDir();
   // Office documents render as their converted sibling PDF.
@@ -135,7 +139,7 @@ export function FileViewer({
         {pdfViewMode === "markdown" && mdRelPath ? (
           <MdFromPath relPath={mdRelPath} components={components} />
         ) : (
-          <PDFViewer src={assetUrl(pdfRelPath)} />
+          <PDFViewer src={assetUrl(pdfRelPath)} locate={locate} />
         )}
       </div>
     );

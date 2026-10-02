@@ -188,10 +188,24 @@ thread, so each Chat tab and the lecture dock hold their own.
 - **A row decides what truncates** (`RowShell` in `WorkRow.tsx`) — it draws at
   760px and in the dock's 300px. Both scrollers carry `overflow-x-hidden`:
   `overflow-y: auto` makes x `auto` too, and one wide row slides the thread.
-- **A library path opens the file.** `libraryPath` matches on shape, no query
-  per row: `courses/…`, `../courses/…`, absolute, a `:97` suffix, a parsed
-  `.md` (looked through with `parsedMdSource`); it decodes first because the
-  data dir has a space. Unmatched schemeless links render as text.
+- **A citation opens the file at the cited spot.** One grammar
+  (`app/src/lib/citations.ts`) reads an inline code span, a link's href or a
+  bare path in prose: `courses/…`, `../courses/…`, `agents/…`, `lectures/…`,
+  absolute, agent-cwd `./x`, plus `:97-120` / `#L97-L120` / `#page=12`. It is
+  shape-only and decodes first (the data dir has a space); a course-relative
+  path or bare filename is a *tail*, rendered as code until one cached
+  `LIKE '%/<tail>'` finds a unique row. A line of a parsed `.md` maps to its
+  PDF page because the `.md` is the `.pages.json` pages joined with `\n\n`;
+  `openCitation` opens the side panel there and `PDFViewer` marks the line's
+  text in the text layer (`citation-hit`). Unmatched schemeless links render
+  as text.
+- **What an agent makes, it shows.** The brief sends pictures and HTML pages
+  to `agents/outputs/` and has `![alt](outputs/x.html)` embed them;
+  `OutputEmbed.tsx` draws a picture inline and a page in an
+  `allow-scripts`-only sandboxed `srcdoc` iframe (never `allow-same-origin`,
+  which would hand it the app's origin and IPC), with an injected `<base>`
+  built by hand — `convertFileSrc` encodes `/` — and a height reporter the
+  parent accepts only from its own frame.
 - **Codex web search** completes with no `status` — absent means it ran — and
   `ToolFinished`'s optional `title` fills in the query `item/started` lacked.
 - **Copy/drag out is markdown** (`selectionMarkdown.ts`).
@@ -406,8 +420,9 @@ every CLI reads and writes. `harness_attach_image` (clipboard bytes) and
 send, writes on paste) and answer `./attachments/<name>`, appended fenced.
 The claimed filename never reaches disk: bytes are sniffed, the stem is a
 timestamp, non-images are refused, 20 MB cap. `assetProtocol.scope` in
-`app/src-tauri/tauri.conf.json` must name `agents/attachments/` or every
-picture draws broken; a dropped file is scoped by Tauri on delivery.
+`app/src-tauri/tauri.conf.json` must name `agents/` or every picture (and
+every page an agent made) draws broken; a dropped file is scoped by Tauri on
+delivery.
 
 ### File drop
 
@@ -465,5 +480,6 @@ chapter list inline — rebuilt on every send and before any spawn.
 - Claude: take tool inputs from the `assistant` line, not `input_json_delta`s; `content_block_start` can carry text the deltas don't repeat.
 - Don't cache sign-in status in Rust — a stale "signed out" after a sign-in is the wrong answer that matters.
 - The ⌘⌥B column fold tests `e.code` — ⌥B types `∫` — and `AppLayout`'s ⌘B returns early on ⌥, or one chord closes both panels.
+- Never give an agent's HTML embed `allow-same-origin` — the page would run with the app's origin and reach the Tauri IPC.
 - Thread-row delete commits on `mousedown` — WebKit blurs the focused confirm on press and unmounts it before `click`.
 - The thread list reserves its gutter with `overflow-y: scroll`; `scrollbar-gutter: stable` is a no-op in this WebKit.

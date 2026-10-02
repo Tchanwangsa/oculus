@@ -27,6 +27,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { loadPdfjs, type Pdfjs } from "@/lib/pdfjs";
+import { centerIn, matchSpans } from "@/lib/locateQuote";
+import type { FileLocate } from "@/stores/sidePanelStore";
 
 type LayoutMode = "scroll" | "single" | "spread";
 
@@ -68,7 +70,12 @@ const DEFAULT_FIT = "auto";
 
 interface Props {
   src: string;
+  /** A cited spot: go to its page and highlight its quote there. */
+  locate?: FileLocate;
 }
+
+/** The class a cited passage's text-layer spans carry (`index.css`). */
+const HIT = "citation-hit";
 
 type Engine = {
   pdfjs: Pdfjs;
@@ -93,7 +100,7 @@ function applyLayout(viewer: PdfjsViewer, pdfjs: Pdfjs, mode: LayoutMode) {
  * layouts, the select-versus-pan tool, and pinch/⌘-wheel zoom, which pdf.js
  * does not bind itself. pdf.js loads through `@/lib/pdfjs` (see there for why).
  */
-export function PDFViewer({ src }: Props) {
+export function PDFViewer({ src, locate }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
   /** Absolute scale, straight off pdf.js. 1 is actual size. */
@@ -117,6 +124,8 @@ export function PDFViewer({ src }: Props) {
   const engineRef = useRef<Engine | null>(null);
   /** Bumped when the engine is live, to re-run the effects that need it. */
   const [engineReady, setEngineReady] = useState(0);
+  /** Bumped on `pagesinit`, zeroed per document: pages can be scrolled to. */
+  const [pagesReady, setPagesReady] = useState(0);
 
 
   // ── The viewer itself ────────────────────────────────────────────────────
@@ -149,6 +158,7 @@ export function PDFViewer({ src }: Props) {
         eventBus.on("pagesinit", () => {
           applyLayout(viewer, pdfjs, modeRef.current);
           viewer.currentScaleValue = DEFAULT_FIT;
+          setPagesReady((n) => n + 1);
         });
         eventBus.on("pagechanging", (e: { pageNumber: number }) =>
           setPage(e.pageNumber),
@@ -184,6 +194,7 @@ export function PDFViewer({ src }: Props) {
     setLoadError(null);
     setNumPages(0);
     setPage(1);
+    setPagesReady(0);
 
     let cancelled = false;
     let doc: PDFDocumentProxy | null = null;
@@ -222,6 +233,45 @@ export function PDFViewer({ src }: Props) {
     if (!engine) return;
     applyLayout(engine.viewer, engine.pdfjs, mode);
   }, [mode, engineReady]);
+
+  // ── Citation locate ──────────────────────────────────────────────────────
+  //
+  // Go to the cited page, then mark the quote's spans once that page's text
+  // layer exists — now, or on `textlayerrendered`, which also fires when
+  // pdf.js re-renders a page it had evicted, so the marks come back while
+  // this locate is current. Scrolls to the passage only the first time.
+
+  useEffect(() => {
+    const viewer = engineRef.current?.viewer;
+    const container = containerRef.current;
+    if (!viewer || !container || !pagesReady || !locate?.page) return;
+    for (const el of container.querySelectorAll(`.${HIT}`)) el.classList.remove(HIT);
+    const pageNumber = Math.min(Math.max(1, locate.page), viewer.pagesCount);
+    viewer.scrollPageIntoView({ pageNumber });
+    const quote = locate.quote;
+    if (!quote) return;
+    let scrolled = false;
+    const mark = () => {
+      const layer = container.querySelector(`.page[data-page-number="${pageNumber}"] .textLayer`);
+      if (!layer) return;
+      const spans = Array.from(layer.querySelectorAll<HTMLElement>("span:not(.markedContent)"));
+      const hits = matchSpans(spans, quote);
+      for (const el of hits) el.classList.add(HIT);
+      if (hits.length && !scrolled) {
+        scrolled = true;
+        centerIn(container, hits[0]);
+      }
+    };
+    mark();
+    const onRendered = (e: { pageNumber: number }) => {
+      if (e.pageNumber === pageNumber) mark();
+    };
+    viewer.eventBus.on("textlayerrendered", onRendered);
+    return () => viewer.eventBus.off("textlayerrendered", onRendered);
+    // `locate` is read through its `seq`: a new object with the same seq is
+    // the same citation (a refreshed row).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locate?.seq, pagesReady]);
 
   const prev = useCallback(() => engineRef.current?.viewer.previousPage(), []);
   const next = useCallback(() => engineRef.current?.viewer.nextPage(), []);

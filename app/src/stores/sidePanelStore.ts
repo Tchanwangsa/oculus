@@ -6,10 +6,20 @@ import { activePane, useActivePaneId } from "@/stores/tabStore";
 /** What the side panel is showing. One item at a time, per pane — a split
  *  tab's two halves each peek at their own thing. */
 export type PanelItem =
-  | { kind: "file"; file: DbFile }
+  | { kind: "file"; file: DbFile; locate?: FileLocate }
   | { kind: "lecture"; lecture: Lecture };
 
-/** Identity within a pane, and the React key that remounts the body. */
+/** A spot in the file a citation points at: a PDF page (and the passage to
+ *  highlight on it), or for markdown just the passage. `seq` is fresh per
+ *  click, so citing the same spot again re-jumps. */
+export interface FileLocate {
+  page?: number;
+  quote?: string;
+  seq: number;
+}
+
+/** Identity within a pane, and the React key that remounts the body. Not
+ *  `locate`: another citation into the open file moves it, not reloads it. */
 export function itemKey(item: PanelItem): string {
   return item.kind === "file"
     ? `file:${item.file.relative_path}`
@@ -49,7 +59,9 @@ export const useSidePanelStore = create<SidePanelState>((set) => ({
     set((s) => {
       const cur = s.items[paneId];
       if (!cur || itemKey(cur) !== itemKey(item)) return s;
-      return { items: { ...s.items, [paneId]: item } };
+      // A refreshed row keeps the spot it was opened at.
+      const next = cur.kind === "file" && item.kind === "file" ? { ...item, locate: item.locate ?? cur.locate } : item;
+      return { items: { ...s.items, [paneId]: next } };
     }),
 
   close: (paneId) =>

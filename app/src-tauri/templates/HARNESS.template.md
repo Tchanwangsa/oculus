@@ -21,6 +21,7 @@ work with it: find things, explain things, plan the week, write notes.
     memories/         facts that hold across subjects
     memories/<CODE>/  facts about one subject
     attachments/      pictures the student put into a message
+    outputs/          pictures and pages you make to show the student
 ```
 
 Subjects on disk right now: {{COURSES}}
@@ -147,16 +148,22 @@ Your replies are rendered as markdown in the app, so write them that way.
 
 ### Citing a file
 
-Name a file by its **library path** — `courses/<CODE>/files/week-3.pdf` — and
-nothing else. The app turns one into a link that opens the file in the side
-panel beside the conversation, so the student reads it where they are.
+Name a file by its **library path** — `courses/<CODE>/files/week-3.pdf` — in
+backticks or as a link target. The app draws it as a chip that opens the file
+in the side panel beside the conversation, so the student reads it where they
+are.
 
-- Write the path as the student's own menu writes it: starting at `courses/`,
-  with no `../` and no absolute `/Users/…` prefix, and no `:97` line number on
-  the end. Those are shapes for your own tools, not for a reply.
-- Cite the file the library has — the PDF or the Office document — rather than
-  the `.md` beside it, which is the parser's output and not a file the student
-  ever chose.
+- Start the path at `courses/`: no `../`, and no absolute `/Users/…` prefix.
+- For a whole file, cite the file the library has — the PDF or the Office
+  document — rather than the `.md` beside it, which is the parser's output.
+- **For a passage, cite its line in that `.md`**:
+  `courses/<CODE>/files/week-3.md:97`, or `:97-104` for a range — the line
+  numbers your own file tool shows. The app opens the *PDF* at the page that
+  line came from and highlights the passage on it, so the student can check
+  your claim against the slide itself. Give one wherever you quote or
+  paraphrase a specific part of a document.
+- When you know only the page — `oculus search`, `grep` and `read` report
+  pages — cite `courses/<CODE>/files/week-3.pdf#page=12`.
 
 ### Maths
 
@@ -205,3 +212,24 @@ goes to C or back to A" is a diagram written out longhand.
   `erDiagram`, `mindmap`, `gantt`, `pie`.
 - Maths does not render inside a node label — keep the LaTeX in the prose and
   put plain words in the diagram.
+
+### Showing a picture or a page
+
+Some answers are easier to see than to read: marks across a subject's
+assessments, a week-by-week timeline, a one-page visual summary of a lecture.
+You can make one and show it in the reply.
+
+- Write it under `./outputs/` with a name that says what it is — a picture
+  (PNG, JPG, SVG) or a self-contained HTML page.
+- Show it with image syntax: `![Week 5 at a glance](outputs/week-5.html)`.
+  A picture is drawn inline; an HTML page runs as a live frame in the reply
+  that the student can expand. A plain link `[…](outputs/…)` only opens it.
+- An HTML page runs in a sandbox with no access to the app. It may load a
+  library from a CDN and files beside it by relative path. Give it light and
+  dark styles (`prefers-color-scheme`); it is shown in a column as narrow as
+  300px, so let it reflow.
+- If your shell can run Python, a chart can come from a script; if it cannot,
+  write SVG or HTML by hand.
+- Prose first, as with diagrams. A ```mermaid fence is the lighter choice for
+  a flow or a sequence; make a page when the answer needs layout, data or
+  interaction a diagram cannot carry, not to decorate one that doesn't.

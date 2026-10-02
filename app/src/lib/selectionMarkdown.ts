@@ -3,7 +3,9 @@
  * message copies its source instead). Special cases:
  * - KaTeX renders twice (MathML + spans); the TeX comes from its `<annotation>`
  *   and the subtree is never descended into.
- * - A mermaid figure carries its fence source in `data-md` (`Mermaid.tsx`).
+ * - A mermaid figure carries its fence source in `data-md` (`Mermaid.tsx`), as
+ *   does an embedded picture or page (`OutputEmbed.tsx`) — inline, since it
+ *   usually sits in a `<p>`.
  * - `data-copy-skip` marks chrome that happens to be selectable.
  */
 
@@ -81,6 +83,8 @@ function inline(node: Node, range: Range): string {
     const source = tex(el);
     return source ? `$${source}$` : "";
   }
+  const md = el.getAttribute("data-md");
+  if (md) return md.trim();
   // A mention chip (`FileChip.tsx`) copies as its path.
   const path = el.getAttribute("data-path");
   if (path) return `\`${path}\``;

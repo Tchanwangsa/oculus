@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useSidePanelStore } from "@/stores/sidePanelStore";
+import { useSidePanelStore, type FileLocate } from "@/stores/sidePanelStore";
 import { useTabStore } from "@/stores/tabStore";
 import { humanizeSlug } from "@/lib/format";
-import { isPdfBacked, parsedMdSource } from "@/lib/fileTypes";
-import { getFileByRelativePath, markFileAccessed, type DbFile } from "@/lib/db";
+import { isPdfBacked, parsedMdRelPath, parsedMdSource } from "@/lib/fileTypes";
+import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
 import { attachmentPath } from "@/lib/attachments";
+import { readCourseFile } from "@/lib/courseFiles";
+import { lecturePagePath } from "@/lib/lectures";
+import { citedPage, fullCitation, quoteFromLines, type Citation } from "@/lib/citations";
 
 /** Categories whose rows carry real filenames, not Canvas slugs. */
 const REAL_FILENAME = new Set(["file", "image", "upload"]);
@@ -29,9 +32,9 @@ export function recordFileAccess(file: Pick<DbFile, "id">): void {
 }
 
 /** How any list row opens a file: anything renderable (including Office
- *  documents, via their converted PDF) in the side panel, other binaries in
- *  the system viewer. */
-export function openFileSmart(file: DbFile): void {
+ *  documents, via their converted PDF) in the side panel, at `locate` if
+ *  given, other binaries in the system viewer. */
+export function openFileSmart(file: DbFile, locate?: FileLocate): void {
   recordFileAccess(file);
   const binary = file.category === "file" || file.category === "upload";
   if (binary && !isPdfBacked(file.filename)) {
@@ -40,7 +43,7 @@ export function openFileSmart(file: DbFile): void {
     );
     return;
   }
-  useSidePanelStore.getState().open({ kind: "file", file });
+  useSidePanelStore.getState().open({ kind: "file", file, locate });
 }
 
 export function filePagePath(subjectId: number, relativePath: string): string {
@@ -54,36 +57,10 @@ export function filePageHref(file: DbFile): string | null {
   return filePagePath(file.subject_id, file.relative_path);
 }
 
-/** A library path as an agent writes it: `courses/…`, or `../courses/…`
- *  since threads run from `agents/`. Matched on shape so rendering costs no
- *  queries; the lookup happens on click. */
-const LIBRARY_PATH = /^(?:\.\.\/)?(courses\/[^\s]+)$/;
-
-/** The same path from the filesystem root, as agents write it into links
- *  (left to the anchor it 404s against the dev server). Anchored on `/` so a
- *  command containing a path stays a command; lazy so the capture starts at
- *  the first `courses/`. */
-const ABSOLUTE_PATH = /^\/.*?\/(courses\/.+)$/;
-
-/** A `:97` or `:97-120` line citation, trimmed — nothing honours it. */
-const LINE_SUFFIX = /:\d+(?:-\d+)?$/;
-
-/** micromark percent-encodes link destinations ("Application%20Support").
- *  `decodeURI`, not `decodeURIComponent`: an encoded `%2F` is not a separator. */
-function decodePath(raw: string): string {
-  if (!raw.includes("%")) return raw;
-  try {
-    return decodeURI(raw);
-  } catch {
-    return raw;
-  }
-}
-
+/** A full-shape library path (`citations.ts`) without its location: what a
+ *  tool row or image needs. Shape-only, so rendering costs no queries. */
 export function libraryPath(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const path = decodePath(raw.trim()).replace(LINE_SUFFIX, "");
-  const m = ABSOLUTE_PATH.exec(path) ?? LIBRARY_PATH.exec(path);
-  return m ? m[1] : null;
+  return fullCitation(raw)?.path ?? null;
 }
 
 /** Folder under `courses/<CODE>/` to category. Must agree with
@@ -118,7 +95,7 @@ function categoryFromPath(rel: string): string {
  *  already `<img>`-loadable; see `app/src/lib/attachments.ts`). */
 export type TextPart =
   | { kind: "text"; text: string }
-  | { kind: "path"; path: string }
+  | { kind: "path"; path: string; cite: Citation }
   | { kind: "image"; path: string; raw: string };
 
 const FENCED = /`([^`\n]+)`/g;
@@ -131,12 +108,14 @@ export function splitLibraryPaths(text: string): TextPart[] {
   let at = 0;
   for (const m of text.matchAll(FENCED)) {
     const picture = attachmentPath(m[1]);
-    const path = picture ? null : libraryPath(m[1]);
+    const cite = picture ? null : fullCitation(m[1]);
     const i = m.index ?? 0;
-    if (!picture && !path) continue;
+    if (!picture && !cite) continue;
     if (i > at) parts.push({ kind: "text", text: text.slice(at, i) });
     parts.push(
-      picture ? { kind: "image", path: picture, raw: m[1] } : { kind: "path", path: path! },
+      picture
+        ? { kind: "image", path: picture, raw: m[1] }
+        : { kind: "path", path: cite!.path, cite: cite! },
     );
     at = i + m[0].length;
   }
@@ -144,21 +123,63 @@ export function splitLibraryPaths(text: string): TextPart[] {
   return parts;
 }
 
-/** Opens a file the agent named; a path with no row goes to the system
- *  viewer. `newTab` is the ⌘-click, answered here rather than through
- *  `data-tab-href` because the route is a database lookup away. */
+/** Opens a file the agent named; see `openCitation`. */
 export function openLibraryPath(path: string, newTab = false): void {
-  resolveLibraryFile(path)
-    .then((file) => {
-      if (!file) {
-        invoke("open_course_file", { relativePath: path }).catch(console.error);
-        return;
-      }
-      const href = newTab ? filePageHref(file) : null;
-      if (href) useTabStore.getState().addTab(href);
-      else openFileSmart(file);
-    })
-    .catch(console.error);
+  openCitation({ path }, newTab);
+}
+
+let locateSeq = 0;
+
+/**
+ * Opens a citation. A course file opens in the side panel at the cited spot
+ * (`citationLocate`); a path with no row, an `agents/` file, or a binary goes
+ * to the system viewer; `lectures/<id>/…` opens the lecture. `newTab` is the
+ * ⌘-click, answered here rather than through `data-tab-href` because the
+ * route is a database lookup away. Pictures under `agents/` are the caller's
+ * to show (the lightbox in `components/markdown/Citation.tsx`).
+ */
+export function openCitation(cite: Citation, newTab = false): void {
+  openCitationAsync(cite, newTab).catch(console.error);
+}
+
+async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void> {
+  const system = () => invoke<void>("open_course_file", { relativePath: cite.path });
+  const lectureId = /^lectures\/([^/]+)\//.exec(cite.path)?.[1];
+  if (lectureId) {
+    const lecture = await getLecture(lectureId);
+    if (!lecture) return system();
+    if (newTab) useTabStore.getState().addTab(lecturePagePath(lecture));
+    else useSidePanelStore.getState().open({ kind: "lecture", lecture });
+    return;
+  }
+  if (!cite.path.startsWith("courses/")) return system();
+  const file = await resolveLibraryFile(cite.path);
+  if (!file) return system();
+  const href = newTab ? filePageHref(file) : null;
+  if (href) {
+    useTabStore.getState().addTab(href);
+    return;
+  }
+  openFileSmart(file, await citationLocate(cite, file));
+}
+
+/** Where in `file` the citation points. A line of a parsed `.md` becomes its
+ *  PDF page and the line's text; a `#page=` on anything PDF-backed is just
+ *  the page; a line of a plain markdown file is just its text. */
+async function citationLocate(cite: Citation, file: DbFile): Promise<FileLocate | undefined> {
+  const seq = ++locateSeq;
+  const pdf = isPdfBacked(file.filename);
+  if (pdf && cite.line && cite.path === parsedMdRelPath(file)) {
+    const hit = await citedPage(cite.path, cite.line);
+    if (hit) return { page: hit.page, quote: hit.quote || undefined, seq };
+  }
+  if (pdf && cite.page) return { page: cite.page, seq };
+  if (!pdf && cite.line && /\.md$/i.test(file.relative_path)) {
+    const text = await readCourseFile(file.relative_path).catch(() => "");
+    const quote = quoteFromLines(text.split("\n"), cite.line);
+    if (quote) return { quote, seq };
+  }
+  return undefined;
 }
 
 /** The row behind a library path, falling back to the PDF/Office source of

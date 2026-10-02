@@ -4,10 +4,13 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { isValidElement } from "react";
 import { ArrowSquareOut } from "@phosphor-icons/react";
+import { CitationCode, CitationLink, linkCitation } from "@/components/markdown/Citation";
 import { FileChip } from "@/components/markdown/FileChip";
 import { Mermaid } from "@/components/markdown/Mermaid";
+import { OutputEmbed, embedKind } from "@/components/markdown/OutputEmbed";
 import { attachmentPath, attachmentSrc } from "@/lib/attachments";
 import { useDataDir } from "@/hooks/useDataDir";
+import { parseCitation, remarkProsePaths } from "@/lib/citations";
 import { libraryPath, openLibraryPath } from "@/lib/openFile";
 import { cn } from "@/lib/utils";
 
@@ -81,14 +84,16 @@ function LibraryImage({ path, alt }: { path: string; alt?: string }) {
 }
 
 /**
- * `![alt](src)`: a library attachment or course file, then any src with a
+ * `![alt](src)`: a library picture or HTML page drawn in place
+ * (`OutputEmbed`), any other library file as its chip, then any src with a
  * scheme as-is; a schemeless path to nothing renders its alt text rather
  * than WebKit's broken-image glyph.
  */
 function MdImage({ src, alt, ...p }: any) {
   const raw = typeof src === "string" ? src : "";
   const path = attachmentPath(raw) ?? libraryPath(raw);
-  if (path) return <LibraryImage path={path} alt={alt} />;
+  if (path && embedKind(path)) return <OutputEmbed path={path} alt={alt} />;
+  if (path) return <FileChip path={path} onClick={(newTab) => openLibraryPath(path, newTab)} />;
   if (/^[a-z][a-z0-9+.-]*:/i.test(raw))
     return (
       <img className="max-w-full max-h-80 rounded-lg my-3 border border-border" src={raw} alt={alt} {...p} />
@@ -101,25 +106,26 @@ function MdImage({ src, alt, ...p }: any) {
  * only filters the parsed tree, not an `<img>` a component draws.
  */
 function codeRenderer(pictures: boolean) {
-  // An inline span that is nothing but a library path draws as a FileChip,
-  // or as the picture for an attachment; anything else stays code.
+  // An inline span that is nothing but a citation (`lib/citations.ts`) draws
+  // as a FileChip, or as the picture for an attachment; anything else stays code.
   return ({ className, children, ...p }: any) => {
     const isBlock = /language-/.test(className ?? "") || String(children).includes("\n");
-    const span = isBlock ? null : String(children);
-    const att = span && pictures ? attachmentPath(span) : null;
+    if (isBlock)
+      return (
+        <code className="block p-3 rounded-lg bg-surface-raised text-[13px] font-mono text-foreground overflow-x-auto" {...p}>
+          {children}
+        </code>
+      );
+    const span = String(children);
+    const att = pictures ? attachmentPath(span) : null;
     if (att) return <LibraryImage path={att} alt="Attached picture" />;
-    const lib = span && !att ? libraryPath(span) : null;
-    if (lib)
-      return <FileChip path={lib} onClick={(newTab) => openLibraryPath(lib, newTab)} />;
-    return isBlock ? (
-      <code className="block p-3 rounded-lg bg-surface-raised text-[13px] font-mono text-foreground overflow-x-auto" {...p}>
-        {children}
-      </code>
-    ) : (
+    const code = (
       <code className="px-1.5 py-0.5 rounded bg-surface-raised text-[13px] font-mono text-foreground" {...p}>
         {children}
       </code>
     );
+    const shape = parseCitation(span);
+    return shape ? <CitationCode shape={shape} code={code} /> : code;
   };
 }
 
@@ -139,20 +145,15 @@ export const MD_COMPONENTS: Components = {
   p: (p: any) => (
     <p className="text-sm text-foreground/90 leading-relaxed my-3" {...p} />
   ),
-  // Library paths open in-app; web URLs stay plain anchors, which `AppLayout`
+  // Citations open in-app; web URLs stay plain anchors, which `AppLayout`
   // routes to the in-app browser.
   a: ({ href, children, ...p }: any) => {
-    const lib = libraryPath(href);
-    if (lib) {
+    const shape = linkCitation(href, children);
+    if (shape) {
       return (
-        <button
-          type="button"
-          onClick={(e) => openLibraryPath(lib, e.metaKey || e.ctrlKey)}
-          className="text-left text-brand hover:underline"
-          {...p}
-        >
+        <CitationLink shape={shape} {...p}>
           {children}
-        </button>
+        </CitationLink>
       );
     }
     // A schemeless non-library path would resolve against the app's origin
@@ -208,8 +209,8 @@ export const MD_COMPONENTS: Components = {
 // ── Two ready-made renderers ─────────────────────────────────────────────────
 
 /** Hoisted for stable array identity across re-renders. */
-const PLAIN = [remarkGfm];
-const WITH_MATH = [remarkGfm, remarkMath];
+const PLAIN = [remarkGfm, remarkProsePaths];
+const WITH_MATH = [remarkGfm, remarkMath, remarkProsePaths];
 const KATEX = [rehypeKatex];
 const NO_PLUGINS: never[] = [];
 

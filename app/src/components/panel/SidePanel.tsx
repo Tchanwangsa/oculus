@@ -191,6 +191,7 @@ export function SidePanel() {
                 <FilePanel
                   key={itemKey(drawn.item)}
                   file={drawn.item.file}
+                  locate={drawn.item.locate}
                   paneId={drawn.paneId}
                   onExpand={expand}
                 />

@@ -1,7 +1,18 @@
 import type { KeyboardEvent, MouseEvent } from "react";
 import { categoryIconFor } from "@/lib/fileTypes";
 import { fileTitle, pathFile } from "@/lib/openFile";
+import { citationText, parsedSourceOf, type Citation } from "@/lib/citations";
+import { useCitedPage } from "@/hooks/useCitation";
 import { cn } from "@/lib/utils";
+
+/** The chip's location suffix: a page, else a line range. */
+function locationLabel(cite: Citation | undefined, page: number | null): string {
+  const p = page ?? cite?.page;
+  if (p) return ` · p. ${p}`;
+  if (!cite?.line) return "";
+  const { from, to } = cite.line;
+  return ` · L${from}${to !== from ? `–${to}` : ""}`;
+}
 
 /**
  * A library path drawn as a file mention (glyph + display name), shared by the
@@ -12,25 +23,33 @@ import { cn } from "@/lib/utils";
  */
 export function FileChip({
   path,
+  cite,
   onClick,
   className,
 }: {
   /** The library path, `courses/<CODE>/…` — what the message says. */
   path: string;
+  /** Where in the file an agent's citation points; adds ` · p. 12` or
+   *  ` · L97–120` to the label, and copies as the whole citation. */
+  cite?: Citation;
   /** Omitted in the composer, where a click belongs to the caret. `newTab` is
    *  ⌘-click, carried by hand since a path is not a `data-tab-href` route. */
   onClick?: (newTab: boolean) => void;
   className?: string;
 }) {
-  const file = pathFile(path);
+  // A parse artifact is named for the PDF or Office file the student knows,
+  // and its line becomes that file's page once `.pages.json` is read.
+  const file = pathFile(parsedSourceOf(path) ?? path);
   const Icon = categoryIconFor(file);
+  const page = useCitedPage(cite);
+  const full = cite ? citationText(cite) : path;
   return (
     <span
       // In the composer: atomic to the caret, and `data-path` is read back
-      // into the message. Inert elsewhere.
+      // into the message. Elsewhere it is what a copy writes.
       contentEditable={false}
-      data-path={path}
-      title={path}
+      data-path={full}
+      title={full}
       {...(onClick
         ? {
             role: "button",
@@ -56,6 +75,7 @@ export function FileChip({
     >
       <Icon size={12} className="mr-1 inline align-[-2px] text-muted-foreground" />
       {fileTitle(file)}
+      {locationLabel(cite, page)}
     </span>
   );
 }

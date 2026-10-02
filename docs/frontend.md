@@ -61,7 +61,8 @@ headings and Inter for everything else, Notion-style layout.
   and LaTeX source. Timestamps, counts, IDs and badges take the body font,
   with `tabular-nums` when digits hold a column.
 - Headings get Manrope from an `h1–h4` rule in `@layer base`; a title that
-  isn't a heading element takes `font-display`.
+  isn't a heading element takes `font-display`. A reply's headings
+  (`.md-compact`) take the body font.
 - **shadcn/ui** lives in `app/src/components/ui` (config `app/components.json`,
   primitives from the unified `radix-ui` package). Add with
   `bunx shadcn@latest add <name>`, then swap `lucide-react` for
@@ -158,7 +159,7 @@ before leaving a playing lecture.
   `app/src/lib/newTabClicks.ts` is one capture-phase listener that walks up to
   an `href` or a `data-tab-href`, stops at `data-tab-skip`, and matches against
   the real route table (an agent's absolute file paths are not routes). A file
-  chip is the one exception, carried by `openLibraryPath` in
+  chip is the one exception, carried by `openCitation` in
   `app/src/lib/openFile.ts`. Plain external links open in the in-app browser
   through a capture handler in `AppLayout` (`openExternal`).
 - **A new tab lands on `/new`**, not Home: a search field, a browser door, a
@@ -380,7 +381,9 @@ global.
 - **`app/src/components/markdown/MdComponents.tsx`** renders Canvas bodies,
   parsed PDFs, Ed threads and replies with KaTeX. `normalizeMath` rewrites
   `\(…\)` / `\[…\]` to `$…$` / `$$…$$` because CommonMark eats the backslash
-  first. An inline `<code>` holding only a library path renders as `FileChip`.
+  first. An inline `<code>` holding only a citation (`app/src/lib/citations.ts`)
+  renders as `FileChip`. `![alt](path)` naming a library picture or HTML
+  page renders it in place (`OutputEmbed.tsx`).
 - **A reply goes through `CompactMd`**, whose `.md-compact` rules in `index.css`
   are deliberately *unlayered* — in `@layer base` they would lose to the
   utilities they override. **`InlineMd` flattens blocks** because chapter
