@@ -21,6 +21,7 @@ import {
 } from "@phosphor-icons/react";
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
+import { useScrollFade } from "@/hooks/useScrollFade";
 
 /** A one-line cue at the panel's default width; two-liners are measured. */
 const ESTIMATED_ROW = 26;
@@ -291,33 +292,13 @@ export function FollowList({
 
   // ── Edges ────────────────────────────────────────────────────────────────
 
-  // Fades only over content they are actually hiding.
-  const [edges, setEdges] = useState({ above: false, below: false });
-
-  const readEdges = useCallback(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const above = list.scrollTop > 1;
-    const below = list.scrollTop + list.clientHeight < list.scrollHeight - 1;
-    setEdges((e) => (e.above === above && e.below === below ? e : { above, below }));
-  }, []);
-
-  // Measuring, filtering, opening or a dock resize change what fits unscrolled.
-  const totalSize = virtualizer.getTotalSize();
-  useEffect(() => {
-    readEdges();
-  }, [readEdges, totalSize, count, open]);
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(readEdges);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [readEdges]);
+  // Fades only over content they are actually hiding. The virtualizer's sized
+  // wrapper is the first child, so measuring, filtering or a dock resize all
+  // trip the hook's observer; opening re-hangs it.
+  useScrollFade(listRef, "y", open);
 
   const handleScroll = useCallback(() => {
     readDirection();
-    readEdges();
     if (nudgedRef.current) {
       // A nudge that pushed the row out of frame is the only way out of following.
       if (!rowInFrame()) onScrollAway();
@@ -326,7 +307,7 @@ export function FollowList({
       softResumeRef.current = true;
       onBackToLive();
     }
-  }, [readDirection, readEdges, rowInFrame, onScrollAway, onBackToLive]);
+  }, [readDirection, rowInFrame, onScrollAway, onBackToLive]);
 
   const showBackToLive = !following && followIdx >= 0;
 
@@ -344,7 +325,7 @@ export function FollowList({
         onPointerDown={(e) => {
           if (e.target === e.currentTarget) handleUserScroll();
         }}
-        className="absolute inset-0 overflow-y-auto px-1.5 py-2"
+        className="absolute inset-0 overflow-y-auto px-1.5 py-2 [--scroll-fade:40px]"
       >
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {/* Keyed with the virtualizer's key, so a row is never remounted and
@@ -354,31 +335,6 @@ export function FollowList({
           ))}
         </div>
       </div>
-
-      {/* Gradients, not `backdrop-filter` (compositing beside a decoding video).
-          Solid for the first 15% so text doesn't read as clipped, and ending
-          at `background/0` — `transparent` is transparent *black* and greys
-          the ramp. */}
-      <div
-        aria-hidden
-        className={cn(
-          "pointer-events-none absolute inset-x-0 top-0 h-10 z-10",
-          "bg-gradient-to-b from-background from-15%",
-          "via-background/50 via-50% to-background/0",
-          "transition-opacity duration-150",
-          edges.above ? "opacity-100" : "opacity-0",
-        )}
-      />
-      <div
-        aria-hidden
-        className={cn(
-          "pointer-events-none absolute inset-x-0 bottom-0 h-10 z-10",
-          "bg-gradient-to-t from-background from-15%",
-          "via-background/50 via-50% to-background/0",
-          "transition-opacity duration-150",
-          edges.below ? "opacity-100" : "opacity-0",
-        )}
-      />
 
       {overlay && (
         <div className="pointer-events-none absolute inset-x-0 top-6 text-center text-[11px] text-muted-foreground">

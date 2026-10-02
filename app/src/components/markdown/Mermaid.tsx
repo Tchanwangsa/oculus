@@ -12,6 +12,7 @@ import { DiagramLightbox, type DiagramSize } from "@/components/markdown/Diagram
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isDark, subscribeDark } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { useScrollFade } from "@/hooks/useScrollFade";
 
 /**
  * A ```mermaid fence, drawn. Reached from `MD_COMPONENTS.pre`, so every
@@ -121,6 +122,7 @@ function config(dark: boolean): MermaidConfig {
     fontSize: LABEL_PX,
     // SVG `<text>` labels; only the top-level key takes effect (mermaid 12
     // ignores the `flowchart` one). HTML labels decide wrapping by an exact
+  useScrollFade(el, "xy", svg);
     // float compare against `getBoundingClientRect`, which the app's page zoom
     // breaks, so at zoom ≠ 1 every long label is clipped.
     htmlLabels: false,
@@ -289,22 +291,14 @@ function Scroller({ svg, natural }: { svg: string; natural: DiagramSize | null }
   /** Whether the box clips the picture on either axis. */
   const [pannable, setPannable] = useState(false);
 
-  /**
-   * Set `.diagram`'s per-edge fade vars (written to the element, not state —
-   * this runs per scroll event) and `pannable`. `> 1`, not `> 0`: a scaled
-   * width leaves sub-pixel slack that would read as overflow.
-   */
+  // `> 1`, not `> 0`: a scaled width leaves sub-pixel slack that would read
+  // as overflow.
   const sync = useCallback(() => {
     const box = el.current;
     if (!box) return;
-    const overX = box.scrollWidth - box.clientWidth;
-    const overY = box.scrollHeight - box.clientHeight;
-    setPannable(overX > 1 || overY > 1);
-    const edge = (on: boolean) => (on ? "1" : "0");
-    box.style.setProperty("--fade-inline-start", edge(box.scrollLeft > 1));
-    box.style.setProperty("--fade-inline-end", edge(box.scrollLeft < overX - 1));
-    box.style.setProperty("--fade-block-start", edge(box.scrollTop > 1));
-    box.style.setProperty("--fade-block-end", edge(box.scrollTop < overY - 1));
+    setPannable(
+      box.scrollWidth - box.clientWidth > 1 || box.scrollHeight - box.clientHeight > 1,
+    );
   }, []);
 
   useLayoutEffect(() => {
@@ -351,7 +345,6 @@ function Scroller({ svg, natural }: { svg: string; natural: DiagramSize | null }
       className={cn("diagram", pannable && "cursor-grab active:cursor-grabbing")}
       style={bounds}
       role="img"
-      onScroll={sync}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}

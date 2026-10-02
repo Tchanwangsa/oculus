@@ -396,23 +396,52 @@
    * push its labels under the readable minimum. */
   max-height: min(60vh, 30rem);
 
-  /* Fade each edge with more behind it (`--fade-*`, 0/1, set by `Mermaid.tsx`
-   * on scroll). A mask, not an overlay, so it needs no background colour. The
-   * stops sit 1px outside the box so an unfaded edge keeps its hairline. */
-  --diagram-fade: 24px;
+/* Edge fades for any scroller `useScrollFade` / `syncScrollFade` has marked:
+ * `data-scroll-fade` is the axis, `--fade-{x,y}-{start,end}` are 0/1. A mask,
+ * so it needs no background colour. The stops sit 1px outside the box so an
+ * unfaded edge keeps its hairline. `--scroll-fade` sets the ramp length. Vertical scrollers spare their classic
+ * scrollbar via a second layer `--fade-bar` wide. */
+[data-scroll-fade="x"] {
+  mask-image: linear-gradient(
+    to right,
+    #0000 -1px,
+    #000 calc(var(--fade-x-start, 0) * var(--scroll-fade, 24px)),
+    #000 calc(100% - var(--fade-x-end, 0) * var(--scroll-fade, 24px)),
+    #0000 calc(100% + 1px)
+  );
+}
+[data-scroll-fade="y"] {
+  mask-image:
+    linear-gradient(
+      to bottom,
+      #0000 -1px,
+      #000 calc(var(--fade-y-start, 0) * var(--scroll-fade, 24px)),
+      #000 calc(100% - var(--fade-y-end, 0) * var(--scroll-fade, 24px)),
+      #0000 calc(100% + 1px)
+    ),
+    linear-gradient(#000, #000);
+  mask-size:
+    calc(100% - var(--fade-bar, 0px)) 100%,
+    var(--fade-bar, 0px) 100%;
+  mask-position:
+    left top,
+    right top;
+  mask-repeat: no-repeat;
+}
+[data-scroll-fade="xy"] {
   mask-image:
     linear-gradient(
       to right,
       #0000 -1px,
-      #000 calc(var(--fade-inline-start, 0) * var(--diagram-fade)),
-      #000 calc(100% - var(--fade-inline-end, 0) * var(--diagram-fade)),
+      #000 calc(var(--fade-x-start, 0) * var(--scroll-fade, 24px)),
+      #000 calc(100% - var(--fade-x-end, 0) * var(--scroll-fade, 24px)),
       #0000 calc(100% + 1px)
     ),
     linear-gradient(
       to bottom,
       #0000 -1px,
-      #000 calc(var(--fade-block-start, 0) * var(--diagram-fade)),
-      #000 calc(100% - var(--fade-block-end, 0) * var(--diagram-fade)),
+      #000 calc(var(--fade-y-start, 0) * var(--scroll-fade, 24px)),
+      #000 calc(100% - var(--fade-y-end, 0) * var(--scroll-fade, 24px)),
       #0000 calc(100% + 1px)
     );
   mask-composite: intersect;

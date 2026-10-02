@@ -188,10 +188,12 @@ function MessageActions({
 }) {
   return (
     <div
-      // Kept out of a copied selection (`selectionMarkdown`).
+      // Kept out of a copied selection (`selectionMarkdown`), and not
+      // selectable at all: a drag across it highlights the icons, which reads
+      // as them bolding and unbolding.
       data-copy-skip
       className={cn(
-        "-mt-0.5 flex h-8 items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100",
+        "-mt-0.5 flex select-none h-8 items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100",
         side === "right" ? "justify-end" : "pl-1",
       )}
     >

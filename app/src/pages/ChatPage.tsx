@@ -11,6 +11,7 @@ import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { useWindowEvent } from "@/hooks/useEvents";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
+import { useScrollFade } from "@/hooks/useScrollFade";
 import {
   getHarnessRateLimits,
   harnessRefreshRateLimits,
@@ -147,6 +148,7 @@ export default function ChatPage() {
 
   const empty = items.length === 0 && !running;
   const scroll = useStickToBottom(activeId, !empty);
+  useScrollFade(scroll.outer, "y", !empty);
   const list = useResizablePanel(LIST);
 
   // ⌘⌥B folds the conversations column. `e.code`, not `e.key`: on macOS ⌥B
@@ -310,7 +312,7 @@ export default function ChatPage() {
               </div>
               <ThreadMap scrollRef={scroll.outer} contentRef={scroll.inner} markers={markers} />
             </div>
-            <div className="shrink-0 px-6 pb-4 pt-2">
+            <div className="shrink-0 px-6 pb-4">
               <div className="mx-auto max-w-[760px]">{composer}</div>
             </div>
           </>

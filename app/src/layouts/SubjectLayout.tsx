@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   NavLink,
   Navigate,
@@ -19,6 +19,7 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useSubjects } from "@/hooks/useSubjects";
+import { useScrollFade } from "@/hooks/useScrollFade";
 import { NewCountBadge } from "@/components/NewCountBadge";
 import { newCountForTab, useNewFilesStore } from "@/stores/newFilesStore";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
@@ -155,31 +156,8 @@ export default function SubjectLayout() {
  */
 function TabStrip({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLElement>(null);
-  const [edges, setEdges] = useState({ left: false, right: false });
   const { pathname } = useLocation();
-
-  const measure = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    const left = el.scrollLeft > 1;
-    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
-    setEdges((prev) =>
-      prev.left === left && prev.right === right ? prev : { left, right },
-    );
-  }, []);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    measure();
-    el.addEventListener("scroll", measure, { passive: true });
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => {
-      el.removeEventListener("scroll", measure);
-      ro.disconnect();
-    };
-  }, [measure]);
+  useScrollFade(ref, "x");
 
   // Keep the active tab in view when reached from elsewhere (⌘K, restore).
   useEffect(() => {
@@ -201,26 +179,7 @@ function TabStrip({ children }: { children: React.ReactNode }) {
       >
         {children}
       </nav>
-      <StripFade side="left" show={edges.left} />
-      <StripFade side="right" show={edges.right} />
     </div>
-  );
-}
-
-/** Fade over one end of the strip while there is more that way. A plain
- *  gradient, not a backdrop layer, to avoid a compositing layer. */
-function StripFade({ side, show }: { side: "left" | "right"; show: boolean }) {
-  return (
-    <div
-      aria-hidden
-      className={cn(
-        "pointer-events-none absolute inset-y-0 w-8 transition-opacity duration-150",
-        side === "left"
-          ? "left-0 bg-gradient-to-r from-card via-card/85 to-transparent"
-          : "right-0 bg-gradient-to-l from-card via-card/85 to-transparent",
-        show ? "opacity-100" : "opacity-0",
-      )}
-    />
   );
 }
 

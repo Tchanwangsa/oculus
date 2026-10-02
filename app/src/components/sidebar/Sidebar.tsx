@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import {
   Chat,
   CalendarBlank,
@@ -13,6 +13,7 @@ import { anyRunning, useHarnessStore } from "@/stores/harnessStore";
 import { useIndexStore } from "@/stores/indexStore";
 import { usePaletteStore } from "@/stores/paletteStore";
 import { cn } from "@/lib/utils";
+import { useScrollFade } from "@/hooks/useScrollFade";
 import NavItem from "./NavItem";
 import SubjectsNavGroup from "./SubjectsNavGroup";
 import RecentNavGroup from "./RecentNavGroup";
@@ -36,36 +37,13 @@ const WIDTH = 212;
 export default function Sidebar({ collapsed }: SidebarProps) {
   const width = collapsed ? 0 : WIDTH;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [edges, setEdges] = useState({ top: false, bottom: false });
   // Background jobs surface only in the sidebar (see docs/frontend.md): a spinner.
   const agentBusy = useHarnessStore((s) => anyRunning(s.live));
   const indexing = useIndexStore((s) => s.running);
 
-  const measure = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const top = el.scrollTop > 1;
-    const bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
-    setEdges((prev) =>
-      prev.top === top && prev.bottom === bottom ? prev : { top, bottom },
-    );
-  }, []);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    measure();
-    el.addEventListener("scroll", measure, { passive: true });
-    // The list grows and shrinks as past subjects unfold, so watch the content
-    // box too — a scroll event alone would miss it.
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    if (el.firstElementChild) ro.observe(el.firstElementChild);
-    return () => {
-      el.removeEventListener("scroll", measure);
-      ro.disconnect();
-    };
-  }, [measure]);
+  // The list grows and shrinks as past subjects unfold; the hook watches the
+  // content box (its one wrapper child) as well as the scroller.
+  useScrollFade(scrollRef);
 
   return (
     <aside
@@ -120,8 +98,6 @@ export default function Sidebar({ collapsed }: SidebarProps) {
               <SubjectsNavGroup />
             </div>
           </div>
-          <ScrollFade side="top" show={edges.top} />
-          <ScrollFade side="bottom" show={edges.bottom} />
         </div>
 
         <Rule />
@@ -174,24 +150,4 @@ function SearchButton() {
 /** Inset hairline, short of both edges so it reads as a seam. */
 function Rule() {
   return <div aria-hidden className="mx-3 h-px shrink-0 bg-sidebar-border/70" />;
-}
-
-/**
- * Fade over a scroll edge while there is more content that way. A plain
- * gradient, not `backdrop-filter`: in this clipped, width-transitioning aside
- * WebKit drops the whole compositing layer on teardown, blanking the sidebar.
- */
-function ScrollFade({ side, show }: { side: "top" | "bottom"; show: boolean }) {
-  return (
-    <div
-      aria-hidden
-      className={cn(
-        "pointer-events-none absolute inset-x-0 h-8 transition-opacity duration-150",
-        side === "top"
-          ? "top-0 bg-gradient-to-b from-sidebar via-sidebar/85 to-transparent"
-          : "bottom-0 bg-gradient-to-t from-sidebar via-sidebar/85 to-transparent",
-        show ? "opacity-100" : "opacity-0",
-      )}
-    />
-  );
 }

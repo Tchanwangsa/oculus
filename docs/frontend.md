@@ -70,6 +70,13 @@ headings and Inter for everything else, Notion-style layout.
   gutter so a page that starts overflowing doesn't jog sideways.
 - **Tables are full-bleed in `GridTable`**, header outside the scroller (or the
   bar runs down it). Alternate views are sibling `ViewTabs`/`PillTabs`, not a
+- **Every scroller fades its overflowing edges through `useScrollFade`**
+  (`app/src/hooks/useScrollFade.ts`; `syncScrollFade` in
+  `app/src/lib/scrollFade.ts` for non-React callers like the maths palette).
+  It marks the element `data-scroll-fade="x|y|xy"` and `index.css` turns that
+  into a mask, so no overlay and no background colour. Set `--scroll-fade` for
+  a ramp other than 24px, and keep the scroller flush against what it sits on
+  — padding between them leaves a visible gap under the fade.
   dropdown, over a fixed-height toolbar so switching never jolts the rows.
 - **No toasts, no bottom progress bars** — background jobs surface in the
   sidebar only. No placeholder UI, section-header icons, stat cards or filler.

@@ -8,6 +8,7 @@ import { useThreadActions } from "@/components/harness/useThreadActions";
 import { LectureChatComposer } from "@/components/lectures/LectureChatComposer";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
+import { useScrollFade } from "@/hooks/useScrollFade";
 import { fmtAgo, sqliteUtcToMs } from "@/lib/format";
 import { defaultSelection, getLectureThreads, type HarnessThread } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
@@ -135,6 +136,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
 
   const empty = items.length === 0 && !running;
   const scroll = useStickToBottom(threadId, !empty);
+  useScrollFade(scroll.outer, "y", !empty);
 
   const openThread = useCallback(
     (id: number | null) => {
@@ -250,7 +252,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
         </div>
       </div>
 
-      <div className="shrink-0 px-2 pb-2 pt-1">
+      <div className="shrink-0 px-2 pb-2">
         <LectureChatComposer
           draftKey={draftKey(threadId, `lecture:${lectureId}`)}
           providers={pickerProviders}

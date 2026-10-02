@@ -1,7 +1,6 @@
 import {
   memo,
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -9,6 +8,7 @@ import {
 } from "react";
 import { DotsSixVertical, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
+import { useScrollFade } from "@/hooks/useScrollFade";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ViewTabs, type ViewTab } from "@/components/ui/ViewTabs";
 import {
@@ -190,30 +190,9 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   // ── The strip's own overflow ─────────────────────────────────────────────
 
   // The strip scrolls sideways with no visible bar; fades show the overflow.
+  // Resizing, re-docking or losing a tab changes what fits; `live` re-hangs it.
   const stripRef = useRef<HTMLDivElement>(null);
-  const [stripEdges, setStripEdges] = useState({ left: false, right: false });
-
-  const readStripEdges = useCallback(() => {
-    const el = stripRef.current;
-    if (!el) return;
-    const left = el.scrollLeft > 1;
-    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
-    setStripEdges((e) => (e.left === left && e.right === right ? e : { left, right }));
-  }, []);
-
-  // Resizing, re-docking or losing a tab changes what fits; the header lays out
-  // after first paint, so the initial read comes from the observer.
-  useEffect(() => {
-    const el = stripRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(readStripEdges);
-    ro.observe(el);
-    if (el.firstElementChild) ro.observe(el.firstElementChild);
-    return () => ro.disconnect();
-  }, [readStripEdges]);
-  useEffect(() => {
-    readStripEdges();
-  }, [readStripEdges, tabs, size, dock, open]);
+  useScrollFade(stripRef, "x", open);
 
   // ── Search ───────────────────────────────────────────────────────────────
 
@@ -267,10 +246,9 @@ export const TranscriptPanel = memo(function TranscriptPanel({
             <TooltipContent>Drag to dock left, right, top or bottom</TooltipContent>
           </Tooltip>
           {/* No visible scrollbar (classic scrollbars here); the fades carry it. */}
-          <div className="relative min-w-0">
+          <div className="min-w-0">
             <div
               ref={stripRef}
-              onScroll={readStripEdges}
               className="min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               onPointerDown={(e) => e.stopPropagation()}
             >
@@ -282,8 +260,6 @@ export const TranscriptPanel = memo(function TranscriptPanel({
                 className="w-max gap-3"
               />
             </div>
-            <StripFade side="left" show={stripEdges.left} />
-            <StripFade side="right" show={stripEdges.right} />
           </div>
           <button
             type="button"
@@ -421,22 +397,5 @@ export function DockResizeHandle({
         )}
       />
     </div>
-  );
-}
-
-/** Fade over one end of the header's tab strip while there is more that way;
- *  same gradient as `FollowList`'s, narrower because it covers a word. */
-function StripFade({ side, show }: { side: "left" | "right"; show: boolean }) {
-  return (
-    <div
-      aria-hidden
-      className={cn(
-        "pointer-events-none absolute inset-y-0 w-6 transition-opacity duration-150",
-        side === "left"
-          ? "left-0 bg-gradient-to-r from-background from-15% via-background/50 via-50% to-background/0"
-          : "right-0 bg-gradient-to-l from-background from-15% via-background/50 via-50% to-background/0",
-        show ? "opacity-100" : "opacity-0",
-      )}
-    />
   );
 }
