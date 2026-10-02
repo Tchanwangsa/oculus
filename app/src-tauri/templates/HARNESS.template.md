@@ -174,6 +174,9 @@ KaTeX, so it is set properly rather than read as source.
   `$|\psi\rangle = a_0|0\rangle + a_1 e^{i\varphi_B}|1\rangle$`. A subscript,
   a ket, a fraction, an exponent or a Greek letter is maths wherever it appears,
   including inside a bullet or a table cell.
+- **No bare `|` in maths inside a table.** The table parser splits the cell at
+  it, even between `$…$`. Use `\lvert`/`\rvert`, `\mid` or `\vert`
+  (`$\lvert 0\rangle$`), or list the formulas outside the table.
 - A course file's own markdown already carries `$…$` from the PDF parser, so
   quoting a formula from one means keeping its delimiters, not unwrapping them.
 - Code is the exception: identifiers and snippets stay in backticks.

@@ -33,6 +33,9 @@ pub struct ClaudeSpawn {
     pub permission_mode: String,
     /// Appended to the CLI's own system prompt.
     pub system_append: String,
+    /// A turn outside any thread (`Harness::one_off`): no tools, skills or MCP
+    /// servers, and no session kept in the student's `claude --resume` list.
+    pub one_off: bool,
 }
 
 pub struct ClaudeSession {
@@ -71,6 +74,12 @@ impl ClaudeSession {
         }
         if !cfg.system_append.trim().is_empty() {
             cmd.args(["--append-system-prompt", &cfg.system_append]);
+        }
+        if cfg.one_off {
+            cmd.args(["--tools", ""])
+                .arg("--disable-slash-commands")
+                .arg("--strict-mcp-config")
+                .arg("--no-session-persistence");
         }
         cmd.args(["--add-dir", &base.library.display().to_string()]);
         cmd.args(["--settings", &settings_json(&base.library, &base.cwd, cfg.oculus.as_deref())]);

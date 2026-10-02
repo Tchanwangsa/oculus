@@ -48,8 +48,10 @@ const SERVE_ARGS: [&str; 6] = [
 
 /// The agent id the sessions run as, defined in the rendered config.
 pub const AGENT: &str = "oculus";
-/// The hidden agent a naming turn runs as: same permissions, one-line prompt.
+/// The hidden agents the one-off turns run as (`Harness::one_off`): no tools,
+/// and the turn's brief as the whole prompt.
 pub const NAMING_AGENT: &str = "oculus-namer";
+pub const WRITER_AGENT: &str = "oculus-writer";
 
 const CONFIG_TEMPLATE: &str = include_str!("../../templates/OPENCODE.template.json");
 pub const CONFIG_NAME: &str = "opencode.json";
@@ -73,7 +75,7 @@ pub struct OpencodeSessionOpts {
     pub variant: Option<String>,
     /// The per-thread part of the brief, sent ahead of the first message.
     pub brief: String,
-    /// [`AGENT`] or [`NAMING_AGENT`].
+    /// [`AGENT`], [`NAMING_AGENT`] or [`WRITER_AGENT`].
     pub agent: &'static str,
 }
 
@@ -921,12 +923,23 @@ fn ps_field<'a>(rest: &mut &'a str) -> Option<&'a str> {
 
 // ── The config document ──────────────────────────────────────────────────────
 
-/// Write `agents/opencode.json`: the permissions and the system prompt.
+/// The hidden agents' prompts, one per [`NAMING_AGENT`] and [`WRITER_AGENT`].
+pub struct OneOffPrompts<'a> {
+    pub naming: &'a str,
+    pub writer: &'a str,
+}
+
+/// Write `agents/opencode.json`: the permissions and the system prompts.
 /// Rewritten on every server start, since both carry the library's paths.
-pub fn write_config(directory: &Path, library: &Path, prompt: &str, naming_prompt: &str) -> Result<PathBuf, String> {
+pub fn write_config(
+    directory: &Path,
+    library: &Path,
+    prompt: &str,
+    one_off: &OneOffPrompts,
+) -> Result<PathBuf, String> {
     std::fs::create_dir_all(directory).map_err(|e| format!("cannot create {}: {e}", directory.display()))?;
     let path = directory.join(CONFIG_NAME);
-    std::fs::write(&path, render_config(library, prompt, naming_prompt))
+    std::fs::write(&path, render_config(library, prompt, one_off))
         .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(path)
 }
@@ -934,11 +947,12 @@ pub fn write_config(directory: &Path, library: &Path, prompt: &str, naming_promp
 /// Text substitution, never a parse/re-serialize: the ruleset is ordered
 /// (last rule wins) and `serde_json`'s map sorts keys, which would silently
 /// invert the containment. Values are JSON-escaped.
-fn render_config(library: &Path, prompt: &str, naming_prompt: &str) -> String {
+fn render_config(library: &Path, prompt: &str, one_off: &OneOffPrompts) -> String {
     CONFIG_TEMPLATE
         .replace("{{LIBRARY}}", &json_fragment(&library.display().to_string()))
         .replace("\"{{PROMPT}}\"", &json_string(prompt))
-        .replace("\"{{NAMING_PROMPT}}\"", &json_string(naming_prompt))
+        .replace("\"{{NAMING_PROMPT}}\"", &json_string(one_off.naming))
+        .replace("\"{{WRITER_PROMPT}}\"", &json_string(one_off.writer))
 }
 
 fn json_string(s: &str) -> String {
@@ -2022,7 +2036,10 @@ mod tests {
         let rendered = render_config(
             Path::new("/Users/x/Library/Application Support/oculus"),
             "# Working inside Oculus\n\n\"quoted\" \\ backslash",
-            "You name conversations.",
+            &OneOffPrompts {
+                naming: "You name conversations.",
+                writer: "You complete \"notes\".",
+            },
         );
         let v: Value = serde_json::from_str(&rendered).expect("the template renders valid JSON");
 
@@ -2055,7 +2072,13 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("\"quoted\" \\ backslash"));
-        assert_eq!(v["agent"][NAMING_AGENT]["hidden"], true);
+        // The one-off agents are hidden, tool-less (a trailing `*` deny is the
+        // last rule for every tool) and carry their own prompt.
+        for (agent, prompt) in [(NAMING_AGENT, "You name conversations."), (WRITER_AGENT, "You complete \"notes\".")] {
+            assert_eq!(v["agent"][agent]["hidden"], true, "{agent}");
+            assert_eq!(v["agent"][agent]["permission"]["*"], "deny", "{agent}");
+            assert_eq!(v["agent"][agent]["prompt"], prompt, "{agent}");
+        }
     }
 
     // ── Provider credentials (JSON verbatim from opencode 1.18.2) ─────────
@@ -2336,7 +2359,10 @@ mod tests {
             &directory,
             &dir,
             "You are a test agent. Do exactly what the message asks, briefly.",
-            "You name conversations.",
+            &OneOffPrompts {
+                naming: "You name conversations.",
+                writer: "You complete notes.",
+            },
         )
         .expect("the agent config");
         let server = OpencodeServer::spawn(OpencodeSpawn {

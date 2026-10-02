@@ -235,6 +235,8 @@ pub fn run() {
             harness::app::harness_edit_queued,
             harness::app::harness_interrupt,
             harness::app::harness_delete_thread,
+            harness::app::document_suggest,
+            harness::app::document_suggest_cancel,
             harness::attach::harness_attach_image,
             harness::attach::harness_attach_file,
             chapters::app::lecture_find_chapters,

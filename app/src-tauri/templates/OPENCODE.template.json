@@ -54,7 +54,15 @@
       "mode": "primary",
       "hidden": true,
       "description": "Names one conversation",
-      "prompt": "{{NAMING_PROMPT}}"
+      "prompt": "{{NAMING_PROMPT}}",
+      "permission": { "*": "deny" }
+    },
+    "oculus-writer": {
+      "mode": "primary",
+      "hidden": true,
+      "description": "Completes the sentence at a note's caret",
+      "prompt": "{{WRITER_PROMPT}}",
+      "permission": { "*": "deny" }
     }
   }
 }

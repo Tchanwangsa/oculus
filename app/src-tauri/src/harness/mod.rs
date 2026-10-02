@@ -26,6 +26,7 @@ pub mod opencode;
 mod protected;
 pub mod signin;
 pub mod store;
+mod suggest;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -489,6 +490,22 @@ impl Handle {
         }
     }
 
+    /// Stop a one-off turn as fast as the provider allows: a process per turn
+    /// is killed (its reader closes the turn), a server's turn interrupted.
+    fn cancel(&self) -> Result<(), String> {
+        match self {
+            Handle::Claude(s) => {
+                s.kill();
+                Ok(())
+            }
+            Handle::Antigravity(s) => {
+                s.kill();
+                Ok(())
+            }
+            Handle::Codex(..) | Handle::Opencode(..) => self.interrupt(),
+        }
+    }
+
     /// End this session; a shared server stays up. With `delete`, an opencode
     /// session is removed from the server rather than detached.
     fn close(&self, delete: bool) {
@@ -529,6 +546,8 @@ pub struct Harness {
     /// Claude Code's last catalogue, keyed by the binary's resolved path and
     /// mtime (the list only moves when the CLI does). A sign-in drops it.
     claude_models: Mutex<Option<ClaudeCatalogue>>,
+    /// The document editor's suggestion turn in flight and its warm spare.
+    suggest: Mutex<suggest::Suggestions>,
 }
 
 struct ClaudeCatalogue {
@@ -547,6 +566,7 @@ impl Harness {
             codex_account_sink: Mutex::new(None),
             opencode_default_sink: Mutex::new(None),
             claude_models: Mutex::new(None),
+            suggest: Mutex::new(suggest::Suggestions::default()),
         }
     }
 
@@ -649,7 +669,10 @@ impl Harness {
             &directory,
             &self.data_dir,
             &instructions(&self.data_dir, None, None),
-            NAMING_INSTRUCTIONS,
+            &opencode::OneOffPrompts {
+                naming: NAMING_INSTRUCTIONS,
+                writer: suggest::INSTRUCTIONS,
+            },
         )?;
         let server = OpencodeServer::spawn(OpencodeSpawn {
             bin,
@@ -814,6 +837,7 @@ impl Harness {
                         opts.scope.as_deref(),
                         opts.lecture.as_ref(),
                     ),
+                    one_off: false,
                 },
                 sink,
             )?),
@@ -835,6 +859,7 @@ impl Harness {
                         opts.scope.as_deref(),
                         opts.lecture.as_ref(),
                     ),
+                    ephemeral: false,
                 };
                 let tid = match resume {
                     Some(id) => {
@@ -894,13 +919,41 @@ impl Harness {
         first_message: &str,
         reply: &str,
     ) -> Result<String, String> {
+        let turn = self.one_off(sel, NAMING_INSTRUCTIONS, opencode::NAMING_AGENT)?;
+        let timeout = Some(std::time::Duration::from_secs(NAMING_TIMEOUT_SECS));
+        let answer = turn
+            .handle
+            .send(&naming_prompt(first_message, reply))
+            .map(|()| turn.wait(timeout, "naming the thread"));
+        turn.close();
+        let answer = answer?;
+        let text = answer.message_or_streamed();
+        match (clean_title(text), &answer.failed) {
+            (Some(t), _) => Ok(t),
+            (None, Some(e)) => Err(e.clone()),
+            (None, None) => Err(format!("no usable name in the reply: {text:?}")),
+        }
+    }
+
+    /// A tool-less session outside any thread, on `sel`'s agent, model and
+    /// level, not yet prompted. `instructions` is its brief — appended to
+    /// Claude's system prompt, Codex's developer instructions, ahead of agy's
+    /// first message — except on opencode, whose `agent` carries it as its
+    /// prompt. Nothing is persisted or raw-logged.
+    fn one_off(
+        &self,
+        sel: &jobs::JobSelection,
+        instructions: &str,
+        agent: &'static str,
+    ) -> Result<OneOff, String> {
         let provider = sel.provider;
-        let prompt = naming_prompt(first_message, reply);
         let (tx, rx) = mpsc::channel::<HarnessEvent>();
         let sink: Sink = Arc::new(move |ev| {
             let _ = tx.send(ev);
         });
         let cwd = thread_cwd(&self.data_dir);
+        std::fs::create_dir_all(&cwd)
+            .map_err(|e| format!("cannot create {}: {e}", cwd.display()))?;
         let base = |cwd: PathBuf| -> Result<ThreadSpawn, String> {
             Ok(ThreadSpawn {
                 bin: discover::binary(provider)?,
@@ -922,7 +975,8 @@ impl Harness {
                     // `default` auto-allows no tool; with prompts routed to
                     // `none` a stray call is refused rather than hanging.
                     permission_mode: "default".into(),
-                    system_append: String::new(),
+                    system_append: instructions.to_string(),
+                    one_off: true,
                 },
                 sink,
             )?),
@@ -933,20 +987,21 @@ impl Harness {
                     writable_files: Vec::new(),
                     model: Some(sel.model.clone()),
                     reasoning_effort: sel.reasoning_effort.clone(),
-                    instructions: NAMING_INSTRUCTIONS.into(),
+                    instructions: instructions.to_string(),
+                    ephemeral: true,
                 };
                 let tid = server.start_thread(&opts, sink)?;
                 Handle::Codex(server, tid, Arc::new(opts))
             }
             Provider::Opencode => {
                 let server = self.opencode_server()?;
-                // opencode has no per-session instructions, so the naming
-                // brief is the hidden `oculus-namer` agent's prompt.
+                // opencode has no per-session instructions, so the brief is
+                // the hidden agent's prompt (`opencode::write_config`).
                 let sopts = OpencodeSessionOpts {
                     model: Some(sel.model.clone()),
                     variant: sel.reasoning_effort.clone(),
                     brief: String::new(),
-                    agent: opencode::NAMING_AGENT,
+                    agent,
                 };
                 let ses = server.start_session(&sopts, sink)?;
                 Handle::Opencode(server, ses)
@@ -954,30 +1009,14 @@ impl Harness {
             Provider::Antigravity => Handle::Antigravity(AntigravitySession::spawn(
                 AntigravitySpawn {
                     base: base(cwd)?,
-                    brief: String::new(),
+                    brief: instructions.to_string(),
                     // No database here: keep the approvals last written.
                     approved: None,
                 },
                 sink,
             )?),
         };
-        handle.send(&prompt)?;
-
-        let mut text = String::new();
-        let timeout = Some(std::time::Duration::from_secs(NAMING_TIMEOUT_SECS));
-        let failed = drain_turn(&rx, timeout, "naming the thread", |ev| {
-            if let HarnessEvent::AssistantMessage { text: t } = ev {
-                text.push_str(t);
-            }
-        });
-        // Deleted rather than detached: a naming session left on the opencode
-        // server would sit in the student's own session list.
-        handle.close(true);
-        match (clean_title(&text), failed) {
-            (Some(t), _) => Ok(t),
-            (None, Some(e)) => Err(e),
-            (None, None) => Err(format!("no usable name in the reply: {text:?}")),
-        }
+        Ok(OneOff { handle, rx })
     }
 
     pub fn interrupt(&self, thread_id: i64) -> Result<(), String> {
@@ -1009,6 +1048,7 @@ impl Harness {
 
     /// Everything, on quit.
     pub fn shutdown(&self) {
+        self.drop_suggestions();
         let ids: Vec<i64> = self.live.lock().unwrap().keys().copied().collect();
         for id in ids {
             self.close(id);
@@ -1019,6 +1059,49 @@ impl Harness {
         if let Some(s) = self.opencode.lock().unwrap().take() {
             s.kill();
         }
+    }
+}
+
+/// A session [`Harness::one_off`] opened, and the events it answers on.
+struct OneOff {
+    handle: Handle,
+    rx: mpsc::Receiver<HarnessEvent>,
+}
+
+/// What a one-off turn said. `streamed` is the deltas, which keep the leading
+/// whitespace Claude's committed message trims off.
+struct OneOffReply {
+    message: String,
+    streamed: String,
+    failed: Option<String>,
+}
+
+impl OneOffReply {
+    fn message_or_streamed(&self) -> &str {
+        if self.message.trim().is_empty() {
+            &self.streamed
+        } else {
+            &self.message
+        }
+    }
+}
+
+impl OneOff {
+    /// Wait out the turn a prompt started.
+    fn wait(&self, timeout: Option<std::time::Duration>, doing: &str) -> OneOffReply {
+        let (mut message, mut streamed) = (String::new(), String::new());
+        let failed = drain_turn(&self.rx, timeout, doing, |ev| match ev {
+            HarnessEvent::AssistantMessage { text } => message.push_str(text),
+            HarnessEvent::AssistantDelta { text } => streamed.push_str(text),
+            _ => {}
+        });
+        OneOffReply { message, streamed, failed }
+    }
+
+    /// Deleted rather than detached: a session left on the opencode server
+    /// would sit in the student's own session list.
+    fn close(&self) {
+        self.handle.close(true);
     }
 }
 
@@ -1848,6 +1931,35 @@ pub mod app {
         let h = state.harness.clone();
         blocking(move || h.interrupt(thread_id)).await?;
         Ok(cleared.into_iter().map(|m| m.text).collect())
+    }
+
+    /// One inline completion for the document editor: the text to insert at
+    /// the caret between `before` and `after` in the note at `path`
+    /// (library-relative, for the prompt's title and subject). Empty for none,
+    /// and for a call a newer `request_id` or a cancel superseded.
+    #[tauri::command]
+    pub async fn document_suggest(
+        state: State<'_, HarnessState>,
+        request_id: u64,
+        path: String,
+        before: String,
+        after: String,
+    ) -> Result<String, String> {
+        let pool = crate::store::open_pool().await?;
+        let sel = jobs::selection(&pool, jobs::Job::DocumentSuggestions).await;
+        let h = state.harness.clone();
+        blocking(move || h.suggest(request_id, &sel, &path, &before, &after)).await
+    }
+
+    /// Stop the suggestion in flight, if any; its call answers empty.
+    #[tauri::command]
+    pub async fn document_suggest_cancel(state: State<'_, HarnessState>) -> Result<(), String> {
+        let h = state.harness.clone();
+        blocking(move || {
+            h.cancel_suggestion();
+            Ok(())
+        })
+        .await
     }
 
     #[tauri::command]

@@ -46,6 +46,8 @@ pub struct CodexThreadOpts {
     pub reasoning_effort: Option<String>,
     /// Appended to Codex's own instructions (`developerInstructions`).
     pub instructions: String,
+    /// Kept out of the student's `codex resume` list: a one-off turn's thread.
+    pub ephemeral: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -269,7 +271,7 @@ impl CodexServer {
     /// Start a thread; returns Codex's id for it.
     pub fn start_thread(&self, opts: &CodexThreadOpts, sink: Sink) -> Result<String, String> {
         let mut p = Self::thread_params(opts);
-        p["ephemeral"] = json!(false);
+        p["ephemeral"] = json!(opts.ephemeral);
         let r = self.request("thread/start", p)?;
         let id = thread_id_of(&r).ok_or("thread/start: no thread id")?;
         self.route(&id, sink.clone(), false);
@@ -788,6 +790,7 @@ mod tests {
             model: Some("gpt-5.3-codex".into()),
             reasoning_effort: Some("high".into()),
             instructions: String::new(),
+            ephemeral: false,
         };
         let want = serde_json::json!([
             "/Users/x/Library/Application Support/com.tchan.oculus/oculus.db",

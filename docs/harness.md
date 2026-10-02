@@ -27,6 +27,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Model picker and its catalogue hook | `app/src/components/harness/ModelPicker.tsx`, `app/src/hooks/useProviderModels.ts` |
 | opencode providers and the offered-model gate | `app/src/components/settings/OpencodeCatalogDialog.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeCatalogue.ts` |
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db.ts`, `app/src/pages/settings/AiPage.tsx` |
+| One-off turns (`Harness::one_off`): thread names, the editor's inline suggestions (`document_suggest`) | `app/src-tauri/src/harness/mod.rs`, `app/src-tauri/src/harness/suggest.rs` |
 | `@` menu and mention input | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/useAttachments.ts`, `app/src/hooks/useFileDrop.ts` |
 | Library paths in rows and prose; copy as markdown | `app/src/lib/openFile.ts`, `app/src/lib/selectionMarkdown.ts` |
@@ -185,6 +186,8 @@ thread, so each Chat tab and the lecture dock hold their own.
 - **Copy/drag out is markdown** (`selectionMarkdown.ts`).
 - **Maths**: the brief asks for `$…$`/`$$…$$`; `normalizeMath` rewrites
   `\(…\)`/`\[…\]`, which CommonMark eats before remark-math.
+  The brief also bans a bare `|` in maths inside a table (the table splits the
+  cell first); agents use `\lvert`/`\rvert`.
 - **Usage is a ring of context only** (`UsageMeter.tsx`); spend is hidden, as
   subscriptions aren't billed per token. Claude context is the last
   `assistant` usage, since `result.usage` sums the turn. Codex windows are read
@@ -195,6 +198,38 @@ thread, so each Chat tab and the lecture dock hold their own.
 `Harness::name_thread` runs one on the `threadNaming` job's model;
 `store::claim_naming` flips `title_generated` atomically so only one turn pays
 and a failure never retries; `clean_title` rejects prose.
+
+## One-off turns
+
+Naming and the editor's suggestions share `Harness::one_off`: a session outside
+any thread, no rows, no raw log, closed (an opencode session deleted) after its
+turn. Its brief is Claude's `--append-system-prompt`, Codex's
+`developerInstructions` or the head of `agy`'s first message; opencode takes it
+as a hidden agent's prompt (`oculus-namer`, `oculus-writer` in
+`agents/opencode.json`). Claude runs with `--tools ""`, no skills, no MCP and
+no persisted session, and Codex's thread is `ephemeral`; both opencode agents
+end on a `"*": "deny"`. Codex and `agy` cannot drop their tools, so the brief
+forbids them.
+
+**Suggestions** (`document_suggest`, the `documentSuggestions` job) are one
+short turn per pause in typing. The prompt carries the note's path, up to
+4000 characters before the caret and 1500 after, and what the character before
+the caret means for spacing; a caret inside a word costs no turn. `clean`
+strips quotes, fences, labels and echoes of the text either side, and keeps one
+line of at most 30 words. The streamed deltas are read, not the committed
+message, because Claude's trims the leading space that says "new word".
+
+- **Only the newest request is wanted.** A new `request_id` (or
+  `document_suggest_cancel`) cancels the turn in flight — Claude and `agy` are
+  killed, Codex and opencode interrupted — and the stopped call answers `""`.
+  The cancel is repeated after the prompt is written, since a server ignores
+  an interrupt for a turn it has not started. An older id arriving late answers
+  `""` without a turn.
+- **One warm process.** Claude and `agy` read the prompt off stdin, so after
+  each request the next one's process is spawned and left waiting; a different
+  provider, model or level discards it. Codex and opencode only open a
+  thread/session on their running server. The first suggestion is cold.
+- No timeout: a provider error rejects with its message.
 
 ## Each Chat tab owns its conversation, in its route
 
@@ -310,8 +345,8 @@ provider-verified model (Meta's Muse Spark) fails once in the timeline.
 
 ## Per-job models
 
-Chaptering, the reading copy and thread naming each name their agent, model
-and level in a Settings → AI row using `ModelPicker`. The registry is one
+Chaptering, the reading copy, thread naming and document suggestions each name
+their agent, model and level in a Settings → AI row using `ModelPicker`. The registry is one
 `settings` value, `job_models`, read by `jobs.rs` and written by `db.ts`; both
 carry the defaults and must agree (a new job is a `Job` variant plus entries in
 `JOBS` and `DEFAULT_JOB_MODELS`). A bad value costs the configuration, not the

@@ -23,6 +23,8 @@ pub enum Job {
     LectureReading,
     /// The one-line naming turn after a thread's first exchange.
     ThreadNaming,
+    /// The document editor's inline completion (`document_suggest`).
+    DocumentSuggestions,
 }
 
 impl Job {
@@ -32,6 +34,7 @@ impl Job {
             Job::LectureChapters => "lectureChapters",
             Job::LectureReading => "lectureReading",
             Job::ThreadNaming => "threadNaming",
+            Job::DocumentSuggestions => "documentSuggestions",
         }
     }
 }
@@ -69,6 +72,12 @@ pub fn default_selection(job: Job) -> JobSelection {
             // Haiku declares no effort levels, so none is asked for.
             model: "claude-haiku-4-5-20251001".into(),
             reasoning_effort: None,
+        },
+        Job::DocumentSuggestions => JobSelection {
+            provider: Provider::Claude,
+            // Sonnet 5.5: `sonnet` in the CLI's catalogue, stored resolved.
+            model: "claude-sonnet-5-5".into(),
+            reasoning_effort: Some("medium".into()),
         },
     }
 }
@@ -177,5 +186,18 @@ mod tests {
             (r.provider, r.model.as_str(), r.effort()),
             (Provider::Codex, "gpt-5.6-luna", Some("medium"))
         );
+        let d = default_selection(Job::DocumentSuggestions);
+        assert_eq!(
+            (d.provider, d.model.as_str(), d.effort()),
+            (Provider::Claude, "claude-sonnet-5-5", Some("medium"))
+        );
+    }
+
+    #[test]
+    fn document_suggestions_have_their_own_registry_key() {
+        let body = r#"{"documentSuggestions":{"provider":"opencode","model":"openrouter/x","reasoningEffort":null}}"#;
+        let s = from_json(body, Job::DocumentSuggestions).expect("the suggestions key resolves");
+        assert_eq!((s.provider, s.model.as_str()), (Provider::Opencode, "openrouter/x"));
+        assert!(from_json(body, Job::ThreadNaming).is_none());
     }
 }
