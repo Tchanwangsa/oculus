@@ -59,8 +59,8 @@ function MomentChip({
       </TooltipTrigger>
       <TooltipContent>
         {on
-          ? "Sending the moment: this second, the frame, the last minute of transcript and the chapter"
-          : "Sending the message on its own"}
+          ? "Includes the current frame, the last minute of transcript and the chapter"
+          : "Sending without the moment"}
       </TooltipContent>
     </Tooltip>
   );
@@ -210,7 +210,7 @@ export function LectureChatComposer({
         />
         <div className="flex items-center gap-1">
           <ModelPicker
-            className="-ml-1 min-w-0 flex-1 justify-start"
+            className="-ml-1 min-w-0"
             providers={providers}
             provider={provider}
             providerLocked={providerLocked}
@@ -220,23 +220,25 @@ export function LectureChatComposer({
             onModel={onModel}
             onReasoning={onReasoning}
           />
-          <MomentChip atRef={atRef} on={moment} onToggle={() => onMoment(!moment)} />
-          {running && (
-            <Button size="icon-xs" variant="ghost" className="shrink-0" aria-label="Stop" onClick={onStop}>
-              <Stop weight="fill" />
-            </Button>
-          )}
-          {(!running || ready) && (
-            <Button
-              size="icon-xs"
-              disabled={!ready || att.writing}
-              onClick={() => void send()}
-              className="shrink-0"
-              aria-label={running ? "Queue" : "Send"}
-            >
-              <PaperPlaneTilt />
-            </Button>
-          )}
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <MomentChip atRef={atRef} on={moment} onToggle={() => onMoment(!moment)} />
+            {running && (
+              <Button size="icon-xs" variant="ghost" className="shrink-0" aria-label="Stop" onClick={onStop}>
+                <Stop weight="fill" />
+              </Button>
+            )}
+            {(!running || ready) && (
+              <Button
+                size="icon-xs"
+                disabled={!ready || att.writing}
+                onClick={() => void send()}
+                className="shrink-0"
+                aria-label={running ? "Queue" : "Send"}
+              >
+                <PaperPlaneTilt />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>
