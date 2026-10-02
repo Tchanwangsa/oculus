@@ -23,6 +23,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Provider table (`PROVIDERS`), types, commands | `app/src/lib/harness.ts` |
 | Live state and event folding | `app/src/stores/harnessStore.ts`, `app/src/hooks/useBackendEvents.ts` |
 | Page, thread list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` |
+| Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/draftStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/ModelPicker.tsx`, `app/src/hooks/useProviderModels.ts` |
 | opencode providers and the offered-model gate | `app/src/components/settings/OpencodeCatalogDialog.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeCatalogue.ts` |
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db.ts`, `app/src/pages/settings/AiPage.tsx` |

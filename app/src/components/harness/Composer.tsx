@@ -19,6 +19,7 @@ import { useProviderModels } from "@/hooks/useProviderModels";
 import { useAttachments } from "@/hooks/useAttachments";
 import { AttachmentStrip } from "@/components/harness/AttachmentStrip";
 import { withAttachments } from "@/lib/attachments";
+import { useDraftStore } from "@/stores/draftStore";
 import { signInState, useSignInStatus } from "@/hooks/useSignInStatus";
 import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
 import { cn } from "@/lib/utils";
@@ -29,8 +30,10 @@ import { cn } from "@/lib/utils";
  * `app/src-tauri/src/harness/mod.rs`); Stop hands the queue back as `restore`.
  * Scope is chosen above the box, only while the thread is new. `@` mentions
  * insert library paths (drawn as chips by `MentionInput`), never file content.
+ * Unsent text lives in `draftStore` under `draftKey`, so it outlives the box.
  */
 export function Composer({
+  draftKey,
   provider,
   model,
   reasoning,
@@ -51,6 +54,8 @@ export function Composer({
   onStop,
   autoFocus,
 }: {
+  /** Whose draft this box shows (`draftKey` in `stores/draftStore.ts`). */
+  draftKey: string;
   provider: Provider;
   model: string | null;
   /** Reasoning effort for the next turn; null leaves the flag off. */
@@ -76,7 +81,8 @@ export function Composer({
   autoFocus?: boolean;
 }) {
   /** The serialized message (chips as paths); emptiness checks read this. */
-  const [text, setText] = useState("");
+  const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
+  const setDraft = useDraftStore((s) => s.setDraft);
   const ref = useRef<MentionInputHandle>(null);
   const mentions = useMentionMenu({ subjectId, input: ref });
   /** The drop target for attachments: the whole box, not just the editor. */
@@ -183,11 +189,14 @@ export function Composer({
       >
         <div className="flex flex-col gap-2">
           <AttachmentStrip items={att.items} onDetach={att.detach} />
+          {/* Keyed: the editor reads its text once, at mount. */}
           <MentionInput
+            key={draftKey}
             ref={ref}
+            initialText={text}
             autoFocus={autoFocus}
             onEdit={(next, caret) => {
-              setText(next);
+              setDraft(draftKey, next);
               mentions.track(next, caret);
             }}
             onFiles={att.attach}

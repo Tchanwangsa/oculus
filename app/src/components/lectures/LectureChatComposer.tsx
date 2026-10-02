@@ -11,6 +11,7 @@ import { imageFiles, withAttachments } from "@/lib/attachments";
 import type { Provider } from "@/lib/harness";
 import { fmtClockSecs } from "@/lib/lectures";
 import { cn } from "@/lib/utils";
+import { useDraftStore } from "@/stores/draftStore";
 
 /** The empty box's height; must stay the textarea's own line-height. */
 const LINE_H = 16;
@@ -73,9 +74,10 @@ function MomentChip({
  * (`useAttachments`, `AttachmentStrip`).
  *
  * Enter sends, Shift+Enter breaks a line. While a turn runs a send is queued by
- * Rust, so stop and send sit side by side.
+ * Rust, so stop and send sit side by side. Unsent text lives in `draftStore`.
  */
 export function LectureChatComposer({
+  draftKey,
   providers,
   provider,
   providerLocked,
@@ -92,6 +94,8 @@ export function LectureChatComposer({
   onSend,
   onStop,
 }: {
+  /** Whose draft this box shows (`draftKey` in `stores/draftStore.ts`). */
+  draftKey: string;
   providers: PickerProvider[];
   provider: Provider;
   /** An open thread keeps its agent; only a new one can pick. */
@@ -113,7 +117,12 @@ export function LectureChatComposer({
   onSend: (text: string) => void;
   onStop: () => void;
 }) {
-  const [text, setText] = useState("");
+  const text = useDraftStore((s) => s.drafts[draftKey] ?? "");
+  const setDraft = useDraftStore((s) => s.setDraft);
+  const setText = (t: string) => setDraft(draftKey, t);
+  /** Read by the restore, which must not re-run when the thread changes. */
+  const keyRef = useRef(draftKey);
+  keyRef.current = draftKey;
   const ref = useRef<HTMLTextAreaElement>(null);
   /** The drop target: the box and its attachment strip. */
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -129,7 +138,9 @@ export function LectureChatComposer({
   // Put back before anything already typed, because it was typed first.
   useEffect(() => {
     if (!restore) return;
-    setText((t) => [restore.text, t].filter(Boolean).join("\n\n"));
+    const { drafts, setDraft } = useDraftStore.getState();
+    const t = drafts[keyRef.current] ?? "";
+    setDraft(keyRef.current, [restore.text, t].filter(Boolean).join("\n\n"));
     ref.current?.focus();
   }, [restore]);
 

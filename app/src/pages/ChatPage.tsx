@@ -20,6 +20,7 @@ import {
   parseUsage,
 } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
+import { draftKey, useDraftStore } from "@/stores/draftStore";
 
 const SUGGESTIONS = [
   "What's due this week?",
@@ -191,7 +192,10 @@ export default function ChatPage() {
   const onDelete = useCallback(
     (id: number) => {
       harnessDeleteThread(id)
-        .then(() => store.getState().removed(id))
+        .then(() => {
+          store.getState().removed(id);
+          useDraftStore.getState().setDraft(draftKey(id, "chat"), "");
+        })
         // Never swallow: a failed delete looks exactly like a lost click.
         .catch((e) => console.error("harness delete failed", e));
     },
@@ -202,6 +206,7 @@ export default function ChatPage() {
 
   const composer = (
     <Composer
+      draftKey={draftKey(activeId, "chat")}
       provider={activeProvider}
       model={activeModel}
       reasoning={reasoning}

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Composer } from "@/components/harness/Composer";
 import { chatHref, harnessSend, type Provider } from "@/lib/harness";
 import { useHarnessStore } from "@/stores/harnessStore";
+import { draftKey } from "@/stores/draftStore";
 
 /**
  * The Chat composer with the thread pinned at `null`: every send opens a new
@@ -53,6 +54,7 @@ export function HomeComposer() {
 
   return (
     <Composer
+      draftKey={draftKey(null, "home")}
       provider={provider}
       model={model}
       reasoning={reasoning}

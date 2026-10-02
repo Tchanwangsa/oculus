@@ -11,6 +11,7 @@ import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { fmtAgo, sqliteUtcToMs } from "@/lib/format";
 import { defaultSelection, getLectureThreads, type HarnessThread } from "@/lib/harness";
 import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
+import { draftKey } from "@/stores/draftStore";
 import { cn } from "@/lib/utils";
 
 /**
@@ -251,6 +252,7 @@ export const LectureChatPanel = memo(function LectureChatPanel({
 
       <div className="shrink-0 px-2 pb-2 pt-1">
         <LectureChatComposer
+          draftKey={draftKey(threadId, `lecture:${lectureId}`)}
           providers={pickerProviders}
           provider={activeProvider}
           providerLocked={thread != null}
