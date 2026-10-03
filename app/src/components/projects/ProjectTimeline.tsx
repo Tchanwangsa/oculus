@@ -265,6 +265,7 @@ export function ProjectTimeline({
   zoom: TimelineZoom;
 }) {
   const now = useNow();
+  const todayMs = startOfDay(now).getTime();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -292,8 +293,8 @@ export function ProjectTimeline({
         if (d != null) points.push(d);
       }
     }
-    return timelineRange(points, now, zoom);
-  }, [onBoard, now, zoom]);
+    return timelineRange(points, new Date(todayMs), zoom);
+  }, [onBoard, todayMs, zoom]);
 
   const origin = rangeStart.getTime();
   const px = PX_PER_DAY[zoom];
@@ -304,8 +305,8 @@ export function ProjectTimeline({
   const total = x(rangeEnd.getTime());
 
   const ticks = useMemo(
-    () => ticksFor(zoom, rangeStart, rangeEnd, now),
-    [zoom, rangeStart, rangeEnd, now],
+    () => ticksFor(zoom, rangeStart, rangeEnd, new Date(todayMs)),
+    [zoom, rangeStart, rangeEnd, todayMs],
   );
   const bands = useMemo(() => bandsFor(zoom, rangeStart, rangeEnd), [zoom, rangeStart, rangeEnd]);
 
@@ -523,7 +524,7 @@ function TimelineRow({
   onToggle: () => void;
 }) {
   const height = row.depth === 0 ? ROW_PX : SUB_ROW_PX;
-  const laid = packLanes(row.items, laneSpan);
+  const laid = useMemo(() => packLanes(row.items, laneSpan), [row.items]);
 
   return (
     <div

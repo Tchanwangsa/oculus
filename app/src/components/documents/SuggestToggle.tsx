@@ -8,7 +8,7 @@ import { getJobModels, type JobSelection } from "@/lib/db";
 import { reasoningLabel } from "@/lib/harness";
 import { cn } from "@/lib/utils";
 
-import type { SuggestStatus } from "./editor/aiSuggest";
+import type { SuggestStatus } from "./DocumentControls";
 
 /** Keeps the note focused, so turning suggestions on mid-sentence works on
  *  the next keystroke. */

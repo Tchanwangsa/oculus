@@ -139,8 +139,7 @@ function SubjectNavRow({
   subject: Subject;
   dimmed?: boolean;
 }) {
-  const bySubject = useNewFilesStore((s) => s.bySubject);
-  const newCount = newCountForSubject(bySubject, subject.id);
+  const newCount = useNewFilesStore((s) => newCountForSubject(s.bySubject, subject.id));
   const to = `/subjects/${subject.id}`;
   // Exact match (`NavLink`'s `end`), so a lecture or file tab doesn't light it.
   const isActive = useActivePath().split("?")[0] === to;

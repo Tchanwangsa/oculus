@@ -12,6 +12,7 @@ import type { Provider } from "@/lib/harness";
 import { fmtClockSecs } from "@/lib/lectures";
 import { cn } from "@/lib/utils";
 import { useDraftStore } from "@/stores/draftStore";
+import { useTabActive } from "@/components/tabs/TabContext";
 
 /** The empty box's height; must stay the textarea's own line-height. */
 const LINE_H = 16;
@@ -32,11 +33,14 @@ function MomentChip({
   on: boolean;
   onToggle: () => void;
 }) {
+  const active = useTabActive();
   const [at, setAt] = useState(() => atRef.current);
   useEffect(() => {
+    if (!active) return;
+    setAt(atRef.current);
     const t = setInterval(() => setAt(atRef.current), 1000);
     return () => clearInterval(t);
-  }, [atRef]);
+  }, [atRef, active]);
 
   const Icon = on ? Camera : CameraSlash;
   return (

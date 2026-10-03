@@ -9,7 +9,7 @@ import {
   type StateCommand,
   type Transaction,
 } from "@codemirror/state";
-import { EditorView, type Command, type KeyBinding } from "@codemirror/view";
+import type { Command, KeyBinding } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 
 /**
@@ -351,16 +351,6 @@ export const indentOrTab: Command = (view) => {
   view.dispatch(state.replaceSelection("  "), { scrollIntoView: true, userEvent: "input" });
   return true;
 };
-
-/**
- * ⌘K for a focused note: the menu bar takes ⌘K for Search before the editor's
- * keymap sees it, so the palette's menu handler asks here first.
- */
-export function linkInFocusedNote(): boolean {
-  const dom = document.activeElement?.closest<HTMLElement>(".cm-editor");
-  const view = dom ? EditorView.findFromDOM(dom) : null;
-  return view ? toggleLink(view) : false;
-}
 
 export const noteKeymap: KeyBinding[] = [
   { key: "Mod-b", run: toggleBold },

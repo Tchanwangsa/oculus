@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { listen } from "@tauri-apps/api/event";
 import {
   CaretLeft,
@@ -55,7 +56,15 @@ export default function TopTabBar({
   onToggleSidebar,
 }: TopTabBarProps) {
   const { tabs, activeId, addTab, setActive, closeTab, toggleSplit, reopenTab } =
-    useTabStore();
+    useTabStore(useShallow((s) => ({
+      tabs: s.tabs,
+      activeId: s.activeId,
+      addTab: s.addTab,
+      setActive: s.setActive,
+      closeTab: s.closeTab,
+      toggleSplit: s.toggleSplit,
+      reopenTab: s.reopenTab,
+    })));
   const { subjects } = useSubjects();
   const browserTabs = useBrowserStore((s) => s.tabs);
   const favicons = useBrowserStore((s) => s.favicons);

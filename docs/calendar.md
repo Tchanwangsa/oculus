@@ -39,6 +39,9 @@ database, so it works offline.
 - The dialog is mounted once in `app/src/layouts/AppLayout.tsx` and raised
   through `eventEditorStore`, because its two openers — the page header and
   `EventPopover`, which Home's Today list also renders — share no subtree.
+  Its date picker loads the first time a `DateTimeField` popover opens. Each
+  opening has its own session, so a pending save refreshes calendars when it
+  finishes but only closes its own form.
 
 ## Canvas rows are replaced per subject after a sync
 
@@ -106,6 +109,8 @@ In `app/src/components/calendar/WeekView.tsx`:
 - Below `MIN_GRID_PX` the week scrolls sideways. One scroller carries both
   axes with headers, strip and hour gutter sticky inside it, because `sticky`
   resolves against the nearest scrollport.
+- Week overlap lanes are cached until the events, week or grid start changes;
+  minute ticks update time styling. Month overflow lists share the grid clock.
 - Past hours carry a wash mixed from `muted-foreground`, finished events turn
   `chart-other`, and today gets a time line — all from `useNow`.
 

@@ -198,6 +198,8 @@ export const TranscriptPanel = memo(function TranscriptPanel({
 
   const { query, setQuery, needle, searching, rows, followIdx } =
     useTranscriptSearch(cues, activeCueIdx);
+  // The virtualizer keys its measurement memo by this function identity.
+  const getCueKey = useCallback((row: number) => rows[row], [rows]);
 
   return (
     <div
@@ -280,7 +282,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
               count={rows.length}
               followIdx={followIdx}
               // Keyed by cue index so measured heights survive filtering.
-              getItemKey={(i) => rows[i]}
+              getItemKey={getCueKey}
               open={open}
               active={activeTab === "transcript"}
               following={following}

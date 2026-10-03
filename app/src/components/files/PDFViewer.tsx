@@ -103,7 +103,8 @@ function applyLayout(viewer: PdfjsViewer, pdfjs: Pdfjs, mode: LayoutMode) {
 export function PDFViewer({ src, locate }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
-  /** Absolute scale, straight off pdf.js. 1 is actual size. */
+  /** pdf.js's absolute scale (1 is actual size), as of the last change to the
+   *  displayed percentage or to whether it sits at an end stop. */
   const [scale, setScale] = useState(1);
   const [mode, setMode] = useStoredState<LayoutMode>(MODE_KEY, (stored) =>
     (stored as LayoutMode) || "scroll",
@@ -160,12 +161,22 @@ export function PDFViewer({ src, locate }: Props) {
           viewer.currentScaleValue = DEFAULT_FIT;
           setPagesReady((n) => n + 1);
         });
-        eventBus.on("pagechanging", (e: { pageNumber: number }) =>
-          setPage(e.pageNumber),
-        );
-        eventBus.on("scalechanging", (e: { scale: number }) =>
-          setScale(e.scale),
-        );
+        eventBus.on("pagechanging", (e: { pageNumber: number }) => {
+          // In scroll mode the toolbar doesn't show a current page. Avoid
+          // rerendering the React host as pdf.js scrolls through the document.
+          if (modeRef.current !== "scroll") setPage(e.pageNumber);
+        });
+        eventBus.on("scalechanging", (e: { scale: number }) => {
+          // The toolbar displays whole percentages and only uses the exact
+          // scale to disable the end-stop buttons. Ignore finer changes.
+          setScale((current) =>
+            Math.round(current * 100) === Math.round(e.scale * 100) &&
+            (current <= MIN_ZOOM) === (e.scale <= MIN_ZOOM) &&
+            (current >= MAX_ZOOM) === (e.scale >= MAX_ZOOM)
+              ? current
+              : e.scale,
+          );
+        });
 
         engine = { pdfjs, viewer, linkService };
         engineRef.current = engine;
@@ -232,6 +243,9 @@ export function PDFViewer({ src, locate }: Props) {
     const engine = engineRef.current;
     if (!engine) return;
     applyLayout(engine.viewer, engine.pdfjs, mode);
+    // Scroll mode leaves `page` untouched; sync the toolbar when paging is
+    // enabled so it starts at the page pdf.js is already showing.
+    if (mode !== "scroll") setPage(engine.viewer.currentPageNumber);
   }, [mode, engineReady]);
 
   // ── Citation locate ──────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { ArrowElbowDownRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
@@ -68,13 +68,19 @@ export function TasksBoard({
   // `CardDragState.settling`.
   const settledTasks = useSettledList(tasks, live);
 
-  const byId = new Map(settledTasks.map((t) => [t.id, t]));
+  const byId = useMemo(
+    () => new Map(settledTasks.map((t) => [t.id, t])),
+    [settledTasks],
+  );
 
-  const byColumn = new Map(columns.map((c) => [c.id, [] as DbTaskWithProject[]]));
-  // A task whose universal column is filtered out has no bucket and is not drawn.
-  for (const task of settledTasks) {
-    byColumn.get(universalColumnOf(task, projectById).id)?.push(task);
-  }
+  const byColumn = useMemo(() => {
+    const grouped = new Map(columns.map((c) => [c.id, [] as DbTaskWithProject[]]));
+    // A task whose universal column is filtered out has no bucket and is not drawn.
+    for (const task of settledTasks) {
+      grouped.get(universalColumnOf(task, projectById).id)?.push(task);
+    }
+    return grouped;
+  }, [columns, projectById, settledTasks]);
 
   // Back over its own column a drop does nothing, so nothing slides apart.
   const idle = live != null && live.targetContainerId === live.containerId;

@@ -139,11 +139,11 @@ const CPP_ONLY = /\bstd::|\bnamespace\b|\btemplate\s*<|\bclass\s+\w+|\b(cout|cin
 /** The fence tag for `sample`, or null when no guess is confident. */
 function guessTag(sample: string): string | null {
   if (sample.replace(/\s/g, "").length < MIN_CHARS) return null;
-  const ranked = IDS.map((id) => ({ id, relevance: hljs.highlight(sample, { language: id }).relevance }))
+  const ranked = IDS.filter((id) => GUESS[id].sign.test(sample))
+    .map((id) => ({ id, relevance: hljs.highlight(sample, { language: id }).relevance }))
     .filter((c) => c.relevance >= MIN_RELEVANCE)
     .sort((a, b) => b.relevance - a.relevance);
   for (const { id } of ranked) {
-    if (!GUESS[id].sign.test(sample)) continue;
     return id === "cpp" && CPP_ONLY.test(sample) ? "c++" : GUESS[id].tag;
   }
   return null;

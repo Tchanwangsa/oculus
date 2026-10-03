@@ -1,7 +1,23 @@
-import { Book } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
+import { Book, type Icon as PhosphorIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { ICON_BY_NAME } from "@/components/subjects/iconCatalog";
 import { courseColor, iconKey, useSubjectIconStore } from "@/stores/subjectIconStore";
+
+let catalogue: Map<string, PhosphorIcon> | null = null;
+let loading: Promise<Map<string, PhosphorIcon>> | null = null;
+
+/** The full Phosphor catalogue, loaded once and cached for every glyph. Only a
+ *  stored custom icon or an opened picker asks for it. */
+export function loadIconCatalogue(): Promise<Map<string, PhosphorIcon>> {
+  loading ??= import("@/components/subjects/iconCatalog").then(({ ICON_BY_NAME }) => {
+    catalogue = ICON_BY_NAME;
+    return ICON_BY_NAME;
+  }).catch((error) => {
+    loading = null;
+    throw error;
+  });
+  return loading;
+}
 
 /**
  * A subject's identity glyph: the user's chosen icon + colour, defaulting to a
@@ -19,7 +35,15 @@ export function SubjectIcon({
 }) {
   const pref = useSubjectIconStore((s) => s.prefs[iconKey(code)]);
   const color = pref?.color ?? courseColor(code);
-  const Icon = (pref?.icon && ICON_BY_NAME.get(pref.icon)) || Book;
+  const name = pref?.icon;
+  const [, setLoaded] = useState(catalogue != null);
+  useEffect(() => {
+    if (!name || catalogue) return;
+    let live = true;
+    loadIconCatalogue().then(() => live && setLoaded(true)).catch(() => {});
+    return () => { live = false; };
+  }, [name]);
+  const Icon = (name && catalogue?.get(name)) || Book;
 
   return (
     <span

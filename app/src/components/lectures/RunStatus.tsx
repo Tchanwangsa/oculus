@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { fmtClockSecs } from "@/lib/lectures";
 import { toolVerb, type ToolKind } from "@/lib/harness";
+import { useTabActive } from "@/components/tabs/TabContext";
 
 /** The pieces the chapter list and the reading copy share for an agent job:
  *  the empty state, the in-flight status, and the Regenerate footer. */
@@ -65,12 +66,14 @@ export function RunStatus({
   note: string;
   compact?: boolean;
 }) {
+  const active = useTabActive();
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (since === null) return;
+    if (since === null || !active) return;
+    setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [since]);
+  }, [since, active]);
 
   const elapsed = since === null ? null : Math.max(0, Math.floor((now - since) / 1000));
   const detail = progress ? stepDetail(progress) : null;

@@ -1,4 +1,5 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   ArrowClockwise,
   ArrowCounterClockwise,
@@ -481,7 +482,7 @@ const Reply = memo(function Reply({
 }: {
   item: HarnessItem;
   /** The question this answered, for Retry. */
-  asked?: { id: number; text: string };
+  asked?: HarnessItem;
   actions?: QuestionActions;
 }) {
   const busy = useHarnessStore((s) => s.live[item.thread_id]?.running ?? false);
@@ -496,7 +497,7 @@ const Reply = memo(function Reply({
           <Action
             label="Retry"
             icon={ArrowClockwise}
-            onClick={() => retry(asked.id, asked.text)}
+            onClick={() => retry(asked.id, asked.content ?? "")}
           />
         )}
       </MessageActions>
@@ -547,7 +548,7 @@ const Item = memo(function Item({
   /** Stable for the life of the page, so memoising these rows still works. */
   actions?: QuestionActions;
   /** For an answer: the question above it (identity-stable with `items`). */
-  asked?: { id: number; text: string };
+  asked?: HarnessItem;
   /** Opens the sign-in dialog; a `setState`, so stable. */
   onSignIn?: (provider: Provider) => void;
   /** For a `permission` row: the latest refusal carries the allow button. */
@@ -586,17 +587,21 @@ const Bundle = memo(function Bundle({ items }: { items: HarnessItem[] }) {
       </div>
     </RowShell>
   );
-});
+}, (prev, next) => prev.items.length === next.items.length &&
+  prev.items.every((item, i) => item === next.items[i]));
 
 /** The turn in flight: reasoning and text with no row yet, or "Working…". */
 function LiveTail({ threadId }: { threadId: number }) {
-  const live = useHarnessStore((s) => s.live[threadId]);
-  if (!live) return null;
-  const quiet = live.running && !live.streaming && !live.thinking;
+  const { running, streaming, thinking } = useHarnessStore(useShallow((s) => ({
+    running: s.live[threadId]?.running ?? false,
+    streaming: s.live[threadId]?.streaming ?? "",
+    thinking: s.live[threadId]?.thinking ?? "",
+  })));
+  const quiet = running && !streaming && !thinking;
   return (
     <>
-      {live.thinking && <ThinkingRow text={live.thinking} live />}
-      {live.streaming && <Assistant text={live.streaming} />}
+      {thinking && <ThinkingRow text={thinking} live />}
+      {streaming && <Assistant text={streaming} />}
       {quiet && (
         <div className="mt-1 flex items-center gap-2 px-2 text-xs text-muted-foreground">
           <CircleNotch size={13} className="animate-spin" />
@@ -632,7 +637,7 @@ export interface PendingActions {
   unqueue: (queueId: string) => void;
 }
 
-export function Timeline({
+export const Timeline = memo(function Timeline({
   items,
   threadId,
   running,
@@ -655,10 +660,10 @@ export function Timeline({
   const rows = useMemo(() => buildRows(items, running), [items, running]);
   // Which question each answer answered, for Retry.
   const asked = useMemo(() => {
-    const map = new Map<number, { id: number; text: string }>();
-    let last: { id: number; text: string } | undefined;
+    const map = new Map<number, HarnessItem>();
+    let last: HarnessItem | undefined;
     for (const i of items) {
-      if (i.kind === "user") last = { id: i.id, text: i.content ?? "" };
+      if (i.kind === "user") last = i;
       else if (i.kind === "assistant" && last) map.set(i.id, last);
     }
     return map;
@@ -709,4 +714,4 @@ export function Timeline({
       )}
     </div>
   );
-}
+});

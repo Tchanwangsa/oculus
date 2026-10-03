@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { ArrowElbowDownRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import type { ColumnKind, DbProject } from "@/lib/projects";
@@ -37,7 +37,7 @@ export function ProjectBoard({
   onMove: (id: number, columnId: string, before: number | null, after: number | null) => void;
   onCreate: (input: { title: string; columnId: string }) => void;
 }) {
-  const columns = boardColumns(project);
+  const columns = useMemo(() => boardColumns(project), [project]);
 
   // The drop resolves against a ref: the grouping below needs the gesture's
   // state, which needs this callback. At drop time both are the same list.
@@ -70,12 +70,15 @@ export function ProjectBoard({
   // `CardDragState.settling`.
   const settledNodes = useSettledList(nodes, live);
 
-  const byColumn = new Map(
-    columns.map((c) => [c.id, columnEntries(settledNodes, c.id)]),
+  // Pointer movement updates `live` every frame, while the settled list stays
+  // the same. Keep the expensive tree grouping out of those drag renders.
+  const byColumn = useMemo(
+    () => new Map(columns.map((c) => [c.id, columnEntries(settledNodes, c.id)])),
+    [columns, settledNodes],
   );
 
   const lifted = live
-    ? [...byColumn.values()].flat().find((e) => e.task.id === live.id) ?? null
+    ? byColumn.get(live.containerId)?.find((e) => e.task.id === live.id) ?? null
     : null;
   if (columns.length === 0) {
     return (

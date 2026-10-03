@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { embedReady, getUnembeddedPdfs } from "@/lib/retrieval";
 import { Progress } from "@/components/ui/progress";
-import { useIndexStore, type IndexProgress, type IndexState } from "@/stores/indexStore";
+import { useIndexStore, type IndexProgress } from "@/stores/indexStore";
 import { Section, StatRow } from "@/pages/settings/section";
 import { ReindexConfirmDialog, type ReindexPrompt } from "./ReindexConfirmDialog";
 
@@ -133,7 +133,9 @@ export function EmbeddingSection() {
   const [estimate, setEstimate] = useState<EmbedEstimate | null>(null);
   const [estimating, setEstimating] = useState(false);
 
-  const run = useIndexStore();
+  const runRunning = useIndexStore((state) => state.running);
+  const runResult = useIndexStore((state) => state.result);
+  const runError = useIndexStore((state) => state.error);
 
   // One sweep at a time: pdfium is a single process-wide session (`raster.rs`),
   // so concurrent calls just queue. A request during a sweep is remembered and
@@ -202,9 +204,9 @@ export function EmbeddingSection() {
   // A finished run moves every number here — including the detected tier the
   // estimate's hours depend on — so re-read them.
   useEffect(() => {
-    if (!run.running && (run.result || run.error)) reload();
+    if (!runRunning && (runResult || runError)) reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.running]);
+  }, [runRunning]);
 
   const selected = settings?.engines.find((engine) => engine.id === settings.engine) ?? null;
 
@@ -364,7 +366,7 @@ export function EmbeddingSection() {
         {usage ? (
           <AllowanceMeter
             usage={usage}
-            runPixels={run.running || !estimate?.files ? 0 : estimate.pixels}
+            runPixels={runRunning || !estimate?.files ? 0 : estimate.pixels}
             onChange={(percent) => void setBudget(percent)}
           />
         ) : null}
@@ -372,10 +374,9 @@ export function EmbeddingSection() {
         <IndexRunRow
           outstanding={outstanding}
           ready={Boolean(settings?.credentials_ready)}
-          run={run}
         />
 
-        {!run.running && outstanding !== 0 ? (
+        {!runRunning && outstanding !== 0 ? (
           <RunEstimate estimate={estimate} estimating={estimating} usage={usage} />
         ) : null}
 
@@ -665,13 +666,18 @@ function runLabel(progress: IndexProgress): string {
 function IndexRunRow({
   outstanding,
   ready,
-  run,
 }: {
   outstanding: number | null;
   ready: boolean;
-  run: IndexState;
 }) {
   const nothingToDo = outstanding === 0;
+  const running = useIndexStore((state) => state.running);
+  const progress = useIndexStore((state) => state.progress);
+  const stopping = useIndexStore((state) => state.stopping);
+  const result = useIndexStore((state) => state.result);
+  const error = useIndexStore((state) => state.error);
+  const start = useIndexStore((state) => state.start);
+  const stop = useIndexStore((state) => state.stop);
 
   return (
     <div className="pt-2">
@@ -679,10 +685,10 @@ function IndexRunRow({
         <div className="min-w-0">
           <p className="text-xs text-foreground">Build the index</p>
           <p className="text-[11px] text-muted-foreground">
-            {run.running
-              ? run.progress
-                ? `${runLabel(run.progress)}${
-                    run.progress.filename ? ` · ${run.progress.filename}` : ""
+            {running
+              ? progress
+                ? `${runLabel(progress)}${
+                    progress.filename ? ` · ${progress.filename}` : ""
                   }`
                 : "Working out what is outstanding…"
               : outstanding == null
@@ -692,61 +698,61 @@ function IndexRunRow({
                   : `${outstanding} file${outstanding === 1 ? "" : "s"} to embed.`}
           </p>
         </div>
-        {run.running ? (
-          <Button variant="outline" size="xs" disabled={run.stopping} onClick={() => run.stop()}>
+        {running ? (
+          <Button variant="outline" size="xs" disabled={stopping} onClick={stop}>
             {/* Stopping lands on a file boundary. */}
-            {run.stopping ? "Stopping…" : "Stop"}
+            {stopping ? "Stopping…" : "Stop"}
           </Button>
         ) : (
           <Button
             size="xs"
             disabled={!ready || nothingToDo}
-            onClick={() => void run.start()}
+            onClick={() => void start()}
           >
             Index
           </Button>
         )}
       </div>
 
-      {run.running && run.progress ? (
-        <Progress value={runPercent(run.progress)} className="mt-2 h-1" />
+      {running && progress ? (
+        <Progress value={runPercent(progress)} className="mt-2 h-1" />
       ) : null}
 
-      {!ready && !run.running ? (
+      {!ready && !running ? (
         <p className="mt-2 text-[11px] text-muted-foreground">
           Save a Voyage API key first — there is nothing to embed against without one.
         </p>
       ) : null}
 
-      {run.result ? (
+      {result ? (
         <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-          {run.result.stopped ? "Stopped after " : "Indexed "}
-          {run.result.files} file{run.result.files === 1 ? "" : "s"} ·{" "}
-          {run.result.pages.toLocaleString()} pages
-          {run.result.errors.length
-            ? ` · ${run.result.errors.length} failed`
+          {result.stopped ? "Stopped after " : "Indexed "}
+          {result.files} file{result.files === 1 ? "" : "s"} ·{" "}
+          {result.pages.toLocaleString()} pages
+          {result.errors.length
+            ? ` · ${result.errors.length} failed`
             : ""}
         </p>
       ) : null}
 
       {/* Named, not counted: reasons differ per file. */}
-      {run.result?.errors.length ? (
+      {result?.errors.length ? (
         <ul className="mt-1 space-y-0.5">
-          {run.result.errors.slice(0, 5).map((message) => (
+          {result.errors.slice(0, 5).map((message) => (
             <li key={message} className="text-[11px] leading-relaxed text-destructive">
               {message}
             </li>
           ))}
-          {run.result.errors.length > 5 ? (
+          {result.errors.length > 5 ? (
             <li className="text-[11px] text-muted-foreground">
-              …and {run.result.errors.length - 5} more
+              …and {result.errors.length - 5} more
             </li>
           ) : null}
         </ul>
       ) : null}
 
-      {run.error ? (
-        <p className="mt-2 text-[11px] leading-relaxed text-destructive">{run.error}</p>
+      {error ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-destructive">{error}</p>
       ) : null}
     </div>
   );

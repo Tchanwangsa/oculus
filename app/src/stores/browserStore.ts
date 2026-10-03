@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { shallow } from "zustand/shallow";
 import type { BrowserSnapshot, BrowserTab } from "@/lib/browser";
 
 /** A mirror of Rust's browser tab list (`app/src-tauri/src/browser.rs`),
@@ -19,10 +20,22 @@ export const useBrowserStore = create<BrowserState>((set) => ({
   tabs: [],
   favicons: {},
   loaded: false,
-  apply: (snapshot) => set({ tabs: snapshot.tabs, loaded: true }),
+  apply: (snapshot) => set((s) => {
+    const previous = new Map(s.tabs.map((tab) => [tab.id, tab]));
+    const tabs = snapshot.tabs.map((tab) => {
+      const cached = previous.get(tab.id);
+      return cached && shallow(cached, tab) ? cached : tab;
+    });
+    // Native snapshots carry every page, even if only one changed. Preserve
+    // the other page objects so their panes' selectors do not re-render.
+    return s.loaded && shallow(s.tabs, tabs) ? s : { tabs, loaded: true };
+  }),
   setFavicon: (host, icon) =>
-    set((s) => ({ favicons: { ...s.favicons, [host]: icon } })),
+    set((s) => s.favicons[host] === icon ? s : { favicons: { ...s.favicons, [host]: icon } }),
   // Merged *under* icons that arrived while the database read was in flight.
   seedFavicons: (icons) =>
-    set((s) => ({ favicons: { ...icons, ...s.favicons } })),
+    set((s) => {
+      const favicons = { ...icons, ...s.favicons };
+      return shallow(s.favicons, favicons) ? s : { favicons };
+    }),
 }));

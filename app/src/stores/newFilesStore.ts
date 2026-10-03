@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { shallow } from "zustand/shallow";
 import { listen } from "@tauri-apps/api/event";
 import { getDb } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/openFile";
@@ -43,7 +44,13 @@ export const useNewFilesStore = create<NewFilesState>((set) => ({
       for (const r of rows) {
         (bySubject[r.subject_id] ??= {})[r.category] = r.n;
       }
-      set({ bySubject });
+      set((s) => {
+        for (const key of Object.keys(bySubject)) {
+          const id = Number(key);
+          if (shallow(s.bySubject[id], bySubject[id])) bySubject[id] = s.bySubject[id];
+        }
+        return shallow(s.bySubject, bySubject) ? s : { bySubject };
+      });
     } catch {
       /* db not ready yet — the next trigger retries */
     }

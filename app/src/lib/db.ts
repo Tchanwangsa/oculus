@@ -86,13 +86,15 @@ export interface DbFile {
 
 // ── Singleton ────────────────────────────────────────────────────────────────
 
-let _db: Database | null = null;
+let _db: Promise<Database> | null = null;
 
-export async function getDb(): Promise<Database> {
-  if (!_db) {
-    _db = await Database.load("sqlite:oculus.db");
-  }
-  return _db;
+export function getDb(): Promise<Database> {
+  // Share initialization across the shell, restored panes and StrictMode mounts.
+  // A failed load must leave the next call free to retry.
+  return _db ??= Database.load("sqlite:oculus.db").catch((error) => {
+    _db = null;
+    throw error;
+  });
 }
 
 // ── Subjects ─────────────────────────────────────────────────────────────────
@@ -135,11 +137,14 @@ export async function getSubjects(): Promise<Subject[]> {
   const db = await getDb();
   // `last_synced_at` is derived: the latest completed run that targeted the subject.
   const rows = await db.select<Subject[]>(
-    `SELECT s.*,
-            (SELECT MAX(r.finished_at)
-             FROM sync_runs r, json_each(r.subject_codes) j
-             WHERE r.status = 'completed' AND j.value = s.code) AS last_synced_at
-     FROM subjects s
+    `WITH last_sync AS (
+       SELECT j.value AS code, MAX(r.finished_at) AS finished_at
+       FROM sync_runs r, json_each(r.subject_codes) j
+       WHERE r.status = 'completed'
+       GROUP BY j.value
+     )
+     SELECT s.*, ls.finished_at AS last_synced_at
+     FROM subjects s LEFT JOIN last_sync ls ON ls.code = s.code
      ORDER BY CAST(substr(s.term_name, 1, 4) AS INTEGER) DESC,
               ${TERM_RANK_SQL("s.term_name")} DESC,
               s.name ASC`
@@ -927,14 +932,15 @@ export async function setParseStatus(
   subjectId: number,
   relativePath: string,
   status: string,
-): Promise<void> {
+): Promise<boolean> {
   const db = await getDb();
   const setParsedAt = status === "quality";
-  await db.execute(
+  const result = await db.execute(
     `UPDATE files SET parse_status = $1${setParsedAt ? ", parsed_at = datetime('now')" : ""}
      WHERE subject_id = $2 AND relative_path = $3`,
     [status, subjectId, relativePath],
   );
+  return result.rowsAffected > 0;
 }
 
 export interface EmbedCoverageRow {

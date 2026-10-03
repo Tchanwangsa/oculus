@@ -25,9 +25,11 @@ export function fileTitle(file: Pick<DbFile, "category" | "filename">): string {
 /** Fired after a file's last_accessed_at is stamped, so open lists refresh. */
 export const FILE_ACCESSED_EVENT = "oculus:file-accessed";
 
-export function recordFileAccess(file: Pick<DbFile, "id">): void {
+export function recordFileAccess(file: Pick<DbFile, "id"> & Partial<Pick<DbFile, "subject_id">>): void {
   markFileAccessed(file.id)
-    .then(() => window.dispatchEvent(new CustomEvent(FILE_ACCESSED_EVENT)))
+    .then(() => window.dispatchEvent(new CustomEvent(FILE_ACCESSED_EVENT, {
+      detail: { subjectId: file.subject_id },
+    })))
     .catch(console.error);
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CaretDown, Check, MagnifyingGlass } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -19,9 +19,11 @@ export type { PickerProvider } from "@/lib/harness";
  * reasoning levels. Nothing inside closes it — agent, model and level are one
  * decision. Neither row has a "default" entry: a turn always names an explicit
  * model and level. Levels come off the model, not the provider. A provider
- * whose CLI is missing shows `NotInstalled` instead of its catalogue.
+ * whose CLI is missing shows `NotInstalled` instead of its catalogue. Stable
+ * selection props keep composer draft keystrokes outside this catalogue's
+ * memo boundary.
  */
-export function ModelPicker({
+export const ModelPicker = memo(function ModelPicker({
   providers,
   provider,
   providerLocked,
@@ -259,7 +261,7 @@ export function ModelPicker({
       </PopoverContent>
     </Popover>
   );
-}
+});
 
 /** Shown in place of the catalogue when the CLI wasn't found. Navigates via
  *  `navigateActive`, since a portalled popover has no router to `useNavigate`. */

@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback } from "react";
 
 import { cn } from "@/lib/utils";
 import { useTranscriptSearch } from "@/hooks/useTranscriptSearch";
@@ -75,6 +75,8 @@ export const ReadingList = memo(function ReadingList({
 }: ReadingListProps) {
   const { query, setQuery, needle, searching, rows, followIdx } =
     useTranscriptSearch(lines, activeLineIdx);
+  // Playback moves the highlight without invalidating every line measurement.
+  const getLineKey = useCallback((row: number) => rows[row], [rows]);
 
   const running = status === "running";
 
@@ -111,7 +113,7 @@ export const ReadingList = memo(function ReadingList({
         count={rows.length}
         followIdx={followIdx}
         // Keyed by line, not row, so a measured height survives a query.
-        getItemKey={(i) => rows[i]}
+        getItemKey={getLineKey}
         open={open}
         active={active}
         following={following}

@@ -89,6 +89,8 @@ export function FollowList({
   /** Read by the delayed scroll below, which fires after the panel slides. */
   const followingRef = useRef(following);
   followingRef.current = following;
+  const followIdxRef = useRef(followIdx);
+  followIdxRef.current = followIdx;
   /** Hand-scrolled with the playing row still in frame: hold position, stay
    *  live. Only the row leaving the frame ends following. */
   const [nudged, setNudged] = useState(false);
@@ -168,8 +170,8 @@ export function FollowList({
     if (!open || !active) return;
     snapRef.current = true;
     const t = setTimeout(() => {
-      if (followingRef.current && followIdx >= 0) {
-        virtualizer.scrollToIndex(followIdx, { align: "center" });
+      if (followingRef.current && followIdxRef.current >= 0) {
+        virtualizer.scrollToIndex(followIdxRef.current, { align: "center" });
       }
     }, SLIDE_MS + 30);
     return () => clearTimeout(t);

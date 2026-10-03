@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   NavLink,
   Navigate,
@@ -47,7 +48,9 @@ export default function SubjectLayout() {
   const { subjectId } = useParams();
   const id = Number(subjectId);
   const { subjects, loading } = useSubjects();
-  const newCounts = useNewFilesStore((s) => s.bySubject);
+  const newCounts = useNewFilesStore(useShallow((s) =>
+    TABS.map((tab) => newCountForTab(s.bySubject, id, tab.to)),
+  ));
 
   const subject = useMemo(
     () => subjects.find((s) => s.id === id) ?? null,
@@ -106,8 +109,8 @@ export default function SubjectLayout() {
           </div>
 
           <TabStrip>
-            {TABS.map((tab) => {
-              const newCount = newCountForTab(newCounts, subject.id, tab.to);
+            {TABS.map((tab, index) => {
+              const newCount = newCounts[index];
               return (
                 <NavLink
                   key={tab.to}

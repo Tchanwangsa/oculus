@@ -178,7 +178,15 @@ memoised and only `LiveTail` and the one tool row still receiving output read
 the store per delta; stick-to-bottom (`useStickToBottom`) is a
 `ResizeObserver`, not a `scrollTo` per delta. On a 38-row thread that took 400
 deltas from 402 commits / 6.2s of render to 34 / 55ms. `items` is keyed by
-thread, so each Chat tab and the lecture dock hold their own.
+thread, so each Chat tab and the lecture dock hold their own. Retry links retain
+their original question row object, and work bundles compare their constituent
+row identities; appending a row leaves earlier rows memoised. `LiveTail` reads
+only running, thinking and assistant text, so tool output updates its tool row.
+
+The model picker keeps a memo boundary around its catalogue: the provider list
+and selection callbacks have stable identities, so composer draft keystrokes
+do not rebuild model rows. Catalogue, provider, model and reasoning changes
+still update the picker.
 
 - **Metadata is parsed once per row object** in `app/src/lib/harness.ts`,
   shared by tool, error, permission and lecture-moment readers. `parseItemMeta`
@@ -271,6 +279,9 @@ the name lands.
   empty composer.
 - A route naming a thread missing from the list walks back to bare `/chat` —
   only after the list has loaded, or a restored tab drops its thread.
+
+Deleting a thread drops its retained live output, view holds and context-drift
+marker as well as rows and queue, so removed turns cannot leave the sidebar busy.
 
 ## One turn at a time
 
@@ -461,7 +472,9 @@ chapter list inline — rebuilt on every send and before any spawn.
   unreadable at 768. A failed frame drops its line; the message still sends.
 - **The dock** reuses `Timeline` and owns its thread id, as each Chat tab does, remembered per lecture in a module-level `Map` because the
   player unmounts on tab switch. The playhead reaches the chip as a stable ref,
-  so nothing re-renders the memoised transcript.
+  so nothing re-renders the memoised transcript. Lecture docks and Chat tabs
+  use counted `hold`/`unhold` ownership of cached rows; closing one view does
+  not release a thread still displayed by another.
 
 ## Gotchas
 

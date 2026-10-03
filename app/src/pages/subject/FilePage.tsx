@@ -1,19 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   DocumentControls,
-  DocumentEditor,
+  SUGGEST_IDLE,
   type EditorMode,
   type SaveStatus,
-} from "@/components/documents/DocumentEditor";
+  type SuggestStatus,
+} from "@/components/documents/DocumentControls";
 import { FileViewer, PdfMdToggle, usePdfMd } from "@/components/files/FileViewer";
 import { MarkdownUnavailable } from "@/components/files/ParseState";
-import { SUGGEST_IDLE, type SuggestStatus } from "@/components/documents/editor/aiSuggest";
 import { SubjectCrumbs, fileCrumbTab } from "@/components/subjects/SubjectCrumbs";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { filePagePath, fileTitle, openFileSmart, recordFileAccess } from "@/lib/openFile";
 import { LoadingFill } from "@/components/ui/PageParts";
 import { useDocumentPrefsStore } from "@/stores/documentPrefsStore";
+
+const DocumentEditor = lazy(() =>
+  import("@/components/documents/DocumentEditor").then((m) => ({ default: m.DocumentEditor })),
+);
 
 /**
  * A file as a full page (the peek's expand target). Standalone, not under
@@ -69,9 +73,10 @@ export default function SubjectFilePage() {
   // record the access here. Keyed on id: the refresh the record triggers
   // replaces `file` with an equal object and must not re-stamp.
   const fileId = file?.id;
+  const fileSubjectId = file?.subject_id;
   useEffect(() => {
-    if (fileId != null) recordFileAccess({ id: fileId });
-  }, [fileId]);
+    if (fileId != null) recordFileAccess({ id: fileId, subject_id: fileSubjectId });
+  }, [fileId, fileSubjectId]);
 
   if (!Number.isFinite(id) || !relPath) return <Navigate to="/subjects" replace />;
 
@@ -118,16 +123,18 @@ export default function SubjectFilePage() {
       </div>
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {isDocument ? (
-          <DocumentEditor
-            key={file.id}
-            file={file}
-            files={files}
-            mode={mode}
-            onMode={setMode}
-            onStatus={setStatus}
-            suggestions={suggestions}
-            onSuggestStatus={setSuggestStatus}
-          />
+          <Suspense fallback={<LoadingFill />}>
+            <DocumentEditor
+              key={file.id}
+              file={file}
+              files={files}
+              mode={mode}
+              onMode={setMode}
+              onStatus={setStatus}
+              suggestions={suggestions}
+              onSuggestStatus={setSuggestStatus}
+            />
+          </Suspense>
         ) : (
           /* In-document links open the linked file as a peek over this page. */
           <FileViewer

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,7 +18,7 @@ const COLUMN = 760;
 /** With no question on screen, the one above this viewport fraction is active. */
 const ACTIVE_LINE = 0.35;
 
-export function ThreadMap({
+export const ThreadMap = memo(function ThreadMap({
   scrollRef,
   contentRef,
   markers,
@@ -39,20 +39,31 @@ export function ThreadMap({
     const el = scrollRef.current;
     const content = contentRef.current;
     if (!el || !content) return;
+    const height = Math.max(0, el.clientHeight - PAD * 2);
+    const room = (el.clientWidth - COLUMN) / 2 >= 44;
+    setBox((prev) => (prev.height === height && prev.room === room ? prev : { height, room }));
+    // The rail is absent in narrow panes and single-question threads.
+    if (!room || markers.length < 2) {
+      tops.current = [];
+      bottoms.current = [];
+      return;
+    }
     const base = el.getBoundingClientRect().top - el.scrollTop;
+    // One DOM walk per resize, instead of one tree search per question.
+    const nodes = new Map<number, HTMLElement>();
+    for (const node of content.querySelectorAll<HTMLElement>("[data-msg-id]")) {
+      nodes.set(Number(node.dataset.msgId), node);
+    }
     const t: number[] = [];
     const b: number[] = [];
     for (const m of markers) {
-      const node = content.querySelector<HTMLElement>(`[data-msg-id="${m.id}"]`);
+      const node = nodes.get(m.id);
       const r = node?.getBoundingClientRect();
       t.push(r ? r.top - base : 0);
       b.push(r ? r.bottom - base : 0);
     }
     tops.current = t;
     bottoms.current = b;
-    const height = Math.max(0, el.clientHeight - PAD * 2);
-    const room = (el.clientWidth - COLUMN) / 2 >= 44;
-    setBox((prev) => (prev.height === height && prev.room === room ? prev : { height, room }));
   }, [scrollRef, contentRef, markers]);
 
   useEffect(() => {
@@ -108,6 +119,8 @@ export function ThreadMap({
   const blockH = pitch * (markers.length - 1);
   const start = Math.max(0, (box.height - blockH) / 2);
 
+  const hovered = hover == null ? undefined : markers[hover];
+
   const jump = (i: number) => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: Math.max(0, tops.current[i] - 16), behavior: "smooth" });
@@ -143,15 +156,15 @@ export function ThreadMap({
           );
         })}
 
-        {hover != null && (
+        {hover != null && hovered && (
           <div
             className="pointer-events-none absolute left-9 z-20 max-w-[240px] -translate-y-1/2 truncate rounded-md border border-border bg-popover px-2 py-1 text-[11.5px] text-popover-foreground shadow-sm"
             style={{ top: start + hover * pitch }}
           >
-            {markers[hover].text.split("\n")[0] || "Message"}
+            {hovered.text.split("\n")[0] || "Message"}
           </div>
         )}
       </div>
     </div>
   );
-}
+});

@@ -32,6 +32,7 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import { ancestorAt } from "./syntax";
+import { SUGGEST_IDLE, type SuggestStatus } from "../DocumentControls";
 
 /** Quiet time after the last edit before a request goes out. */
 export const SUGGEST_DELAY_MS = 500;
@@ -44,15 +45,6 @@ export interface SuggestRequest {
   before: string;
   after: string;
 }
-
-/** What the toggle shows: a request in flight, and the last failure until a
- *  request succeeds. */
-export interface SuggestStatus {
-  pending: boolean;
-  error: string | null;
-}
-
-export const SUGGEST_IDLE: SuggestStatus = { pending: false, error: null };
 
 export interface SuggestConfig {
   /** The text to insert at the caret; `""` for none. */

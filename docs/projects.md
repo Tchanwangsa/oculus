@@ -157,7 +157,9 @@ whose parent is missing rather than dropping it.
   and the header's in-place edit — both through `useProjectActions`.
 - **The timeline** packs overlapping bars with `packLanes`, shared with
   `app/src/components/calendar/WeekView.tsx` and generic over how a span is
-  measured.
+  measured. Range and axis geometry follow the calendar day rather than each
+  minute; row lane layouts are cached by their placed items, while the current
+  time line, elapsed wash and overdue colours still refresh each minute.
 
 ## Cards drag on pointer events and settle before swapping
 

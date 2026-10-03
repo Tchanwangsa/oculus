@@ -1,15 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ArrowSquareOut, File, FileText } from "@phosphor-icons/react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeRaw from "rehype-raw";
-import rehypeKatex from "rehype-katex";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { MD_COMPONENTS, normalizeMath } from "@/components/markdown/MdComponents";
+import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
 import { PDFViewer } from "@/components/files/PDFViewer";
 import { docPdfRelPath, isPdfBacked, parsedMdRelPath } from "@/lib/fileTypes";
 import { filePageHref } from "@/lib/openFile";
@@ -17,9 +11,8 @@ import { libraryImageSrc, libraryLinkTarget } from "@/lib/libraryLinks";
 import { useDataDir } from "@/hooks/useDataDir";
 import type { DbFile } from "@/lib/db";
 import type { FileLocate } from "@/stores/sidePanelStore";
-import { readCourseFile } from "@/lib/courseFiles";
-import { copyAsMarkdown, dragAsMarkdown } from "@/lib/selectionMarkdown";
-import { LoadingFill } from "@/components/ui/PageParts";
+import { courseFileHasContent } from "@/lib/courseFiles";
+import { FileMarkdown } from "@/components/files/FileMarkdown";
 
 /**
  * PDF ↔ parsed-markdown toggle state, lifted out so the host renders the
@@ -40,8 +33,8 @@ export function usePdfMd(file: DbFile | null) {
     setMdChecked(false);
     if (!mdRelPath) return;
     let live = true;
-    readCourseFile(mdRelPath)
-      .then((t) => live && setMdExists(t.length > 0))
+    courseFileHasContent(mdRelPath)
+      .then((exists) => live && setMdExists(exists))
       .catch(() => live && setMdExists(false))
       .finally(() => live && setMdChecked(true));
     return () => {
@@ -138,7 +131,7 @@ export function FileViewer({
     return (
       <div className="flex flex-col h-full">
         {pdfViewMode === "markdown" && mdRelPath ? (
-          <MdFromPath relPath={mdRelPath} components={components} />
+          <FileMarkdown relPath={mdRelPath} components={components} />
         ) : (
           <PDFViewer src={assetUrl(pdfRelPath)} locate={locate} />
         )}
@@ -146,7 +139,7 @@ export function FileViewer({
     );
   }
 
-  return <MdFromPath relPath={file.relative_path} components={components} />;
+  return <FileMarkdown relPath={file.relative_path} components={components} />;
 }
 
 /**
@@ -199,56 +192,4 @@ function useLibraryMdComponents(
       },
     };
   }, [dataDir, file.relative_path, files, onOpenFile]);
-}
-
-// ── MdFromPath ────────────────────────────────────────────────────────────────
-
-function MdFromPath({
-  relPath, components,
-}: {
-  relPath: string;
-  components: any;
-}) {
-  const [text, setText] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    setText(null);
-    setErr(null);
-    readCourseFile(relPath)
-      .then(setText)
-      .catch((e) => setErr(String(e)));
-  }, [relPath]);
-
-  if (err)
-    return (
-      <div className="px-6 py-5">
-        <Alert variant="destructive">
-          <AlertDescription className="text-xs">
-            Failed to load file: {err}
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  if (text === null)
-    return (
-      <LoadingFill />
-    );
-  return (
-    <div className="flex-1 overflow-y-auto">
-      <article
-        className="markdown-body px-6 py-5 max-w-3xl"
-        onCopy={copyAsMarkdown}
-        onDragStart={dragAsMarkdown}
-      >
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeRaw, rehypeKatex]}
-          components={components}
-        >
-          {normalizeMath(text)}
-        </ReactMarkdown>
-      </article>
-    </div>
-  );
 }

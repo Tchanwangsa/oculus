@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { CaretRight, FilePdf, Play } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -203,7 +203,7 @@ function Timeline({ item, embedStage }: { item: PipelineItem; embedStage: boolea
 
 // ── Rows ──────────────────────────────────────────────────────────────────────
 
-function Row({
+const Row = memo(function Row({
   item,
   embedStage,
   expanded,
@@ -213,7 +213,7 @@ function Row({
   item: PipelineItem;
   embedStage: boolean;
   expanded: boolean;
-  onToggle: () => void;
+  onToggle: (path: string) => void;
   onResume?: (item: PipelineItem) => void;
 }) {
   const s = statusOf(item, embedStage);
@@ -229,8 +229,8 @@ function Row({
       <div
         role="button"
         tabIndex={0}
-        onClick={onToggle}
-        onKeyDown={(e) => e.key === "Enter" && onToggle()}
+        onClick={() => onToggle(item.relativePath)}
+        onKeyDown={(e) => e.key === "Enter" && onToggle(item.relativePath)}
         className={cn(COLS, "py-2.5 cursor-pointer hover:bg-surface/60 transition-colors")}
       >
         <div className="flex items-center gap-2 min-w-0">
@@ -289,7 +289,7 @@ function Row({
       {expanded && <Timeline item={item} embedStage={embedStage} />}
     </div>
   );
-}
+});
 
 /** Most recent stage timestamp; the full breakdown is in the timeline. */
 function StageDates({ item }: { item: PipelineItem }) {
@@ -322,7 +322,7 @@ function byActivity(embedStage: boolean) {
 /** Files per page; caps how many live rows animate. */
 const PAGE_SIZE = 50;
 
-export function PipelineTable({
+export const PipelineTable = memo(function PipelineTable({
   items,
   onResume,
 }: {
@@ -332,12 +332,12 @@ export function PipelineTable({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const embedStage = usePipelineStore((s) => s.embedStage);
 
-  const toggle = (path: string) =>
+  const toggle = useCallback((path: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
       next.has(path) ? next.delete(path) : next.add(path);
       return next;
-    });
+    }), []);
 
   const sorted = useMemo(
     () => [...items].sort(byActivity(embedStage)),
@@ -359,11 +359,11 @@ export function PipelineTable({
             item={it}
             embedStage={embedStage}
             expanded={expanded.has(it.relativePath)}
-            onToggle={() => toggle(it.relativePath)}
+            onToggle={toggle}
             onResume={onResume}
           />
         ))}
       </div>
     </GridTable>
   );
-}
+});

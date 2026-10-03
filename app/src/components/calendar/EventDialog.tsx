@@ -61,6 +61,7 @@ function defaultStart(day: Date | null): Date {
  */
 export function EventDialog() {
   const open = useEventEditor((s) => s.open);
+  const session = useEventEditor((s) => s.session);
   const editing = useEventEditor((s) => s.editing);
   const day = useEventEditor((s) => s.day);
   const close = useEventEditor((s) => s.close);
@@ -107,7 +108,7 @@ export function EventDialog() {
       setAllDay(false);
       setNotes("");
     }
-  }, [open, editing, day]);
+  }, [open, editing, day, session]);
 
   // Only a class occupies time; instants and all-day rows have no end.
   const hasEnd = kind === "class" && !allDay;
@@ -154,10 +155,13 @@ export function EventDialog() {
       .then(() => {
         // The same signal a sync raises, so every open calendar re-reads.
         window.dispatchEvent(new CustomEvent(CALENDAR_UPDATED_EVENT));
-        close();
+        // A save can finish after this form closed and another opened.
+        useEventEditor.getState().closeSaved(session);
       })
       .catch((e) => {
         console.error(e);
+        const editor = useEventEditor.getState();
+        if (!editor.open || editor.session !== session) return;
         setError(String(e));
         setSaving(false);
       });

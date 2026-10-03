@@ -20,10 +20,12 @@ import { notifyProjectsUpdated } from "@/lib/projects";
 import { useHarnessStore } from "@/stores/harnessStore";
 import type { HarnessEnvelope } from "@/lib/harness";
 import { useTauriEvent } from "@/hooks/useEvents";
+import { createParseStatusWriter } from "@/lib/parseStatusWriter";
 
 /** `parse-status` and `files.parse_status` share this vocabulary; `"quality"`
  *  is a finished parse, and renaming it would invalidate every stored row. */
 const PARSE_STATUSES = new Set(["queued", "running", "quality", "error"]);
+const parseStatuses = createParseStatusWriter(setParseStatus);
 
 const EMBED_STATUSES = new Set(["queued", "running", "done", "error"]);
 
@@ -104,15 +106,17 @@ export function useBackendEvents() {
       const filename = relative_path.split("/").pop() ?? relative_path;
       const ext = filename.includes(".") ? filename.split(".").pop()! : "md";
       try {
-        await upsertFile(subject_id, filename, relative_path, ext, size_bytes, category ?? undefined, canvas_id ?? undefined, source_url ?? undefined);
-        if (action === "new" || action === "updated") {
-          await markFileContentChanged(subject_id, relative_path);
-        }
-        // Rust purged the parse artifacts; clear stale statuses and pages
-        // so search never serves the old text.
-        if (action === "updated" && isPdfBacked(relative_path)) {
-          await resetFilePipeline(subject_id, relative_path);
-        }
+        await parseStatuses.mutate(subject_id, relative_path, async () => {
+          await upsertFile(subject_id, filename, relative_path, ext, size_bytes, category ?? undefined, canvas_id ?? undefined, source_url ?? undefined);
+          if (action === "new" || action === "updated") {
+            await markFileContentChanged(subject_id, relative_path);
+          }
+          // Rust purged the parse artifacts; clear stale statuses and pages
+          // so search never serves the old text.
+          if (action === "updated" && isPdfBacked(relative_path)) {
+            await resetFilePipeline(subject_id, relative_path);
+          }
+        });
       } catch { /* ignore */ }
       window.dispatchEvent(
         new CustomEvent<FileScraped>(FILE_SCRAPED_EVENT, { detail: { subject_id, canvas_id } }),
@@ -173,7 +177,7 @@ export function useBackendEvents() {
   });
 
   // ── PDF parse stage events ──────────────────────────────────────────────
-  useTauriEvent<ParseJob>("parse-status", async (e) => {
+  useTauriEvent<ParseJob>("parse-status", (e) => {
     const ev = e.payload;
     const path = ev.relative_path;
     if (!path) return;
@@ -184,12 +188,12 @@ export function useBackendEvents() {
       usePipelineStore.getState().items[path]?.parse === "done";
     if (staleRunning) return;
 
+    let persisted = Promise.resolve();
     if (PARSE_STATUSES.has(ev.status)) {
       // Also records failure discriminants and the sweep's latch.
       useParseStore.getState().update(ev);
-      try {
-        await setParseStatus(ev.subject_id, path, ev.status);
-      } catch { /* ignore */ }
+      // Persistence is ordered per file, while live progress lands immediately.
+      persisted = parseStatuses.write(ev.subject_id, path, ev.status).catch(() => {});
     }
 
     const touch = pipeline().touch;
@@ -223,7 +227,7 @@ export function useBackendEvents() {
         // Auto-embed (gated on a Voyage key). The queue needs the file
         // row's `id`, and this event carries only a path.
         if (useIndexStore.getState().ready) {
-          getFileByRelativePath(path)
+          persisted.then(() => getFileByRelativePath(path))
             .then((file) => {
               if (file) useIndexStore.getState().enqueueFile(file);
             })

@@ -386,6 +386,7 @@ export function LecturePlayer({
   host = "page",
 }: LecturePlayerProps) {
   const [cues, setCues] = useState<Cue[]>([]);
+  const cueStarts = useMemo(() => cues.map((cue) => cue.start), [cues]);
   const [activeCueIdx, setActiveCueIdx] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -416,11 +417,14 @@ export function LecturePlayer({
   const layoutPref = usePlayerPrefs((s) => s.layout);
   const mainPref = usePlayerPrefs((s) => s.mainSource);
   const setPrefs = usePlayerPrefs((s) => s.set);
+  const handleDockTabChange = useCallback((dockTab: DockTab) => setPrefs({ dockTab }), [setPrefs]);
+  const handleDockClose = useCallback(() => setPrefs({ transcriptVisible: false }), [setPrefs]);
 
   // Global: a download outlives this component (it runs in Rust).
-  const downloads = useLectureDownloads();
-  const downloading = isDownloading(downloads, lecture.id);
-  const dlProgress = downloads.progress[dlKey(lecture.id, 1)] ?? null;
+  const downloading = useLectureDownloads((s) => isDownloading(s, lecture.id));
+  const downloadingSecond = useLectureDownloads((s) => isDownloading(s, lecture.id, 2));
+  const dlProgress = useLectureDownloads((s) => s.progress[dlKey(lecture.id, 1)] ?? null);
+  const secondDlProgress = useLectureDownloads((s) => s.progress[dlKey(lecture.id, 2)] ?? null);
 
   /** The leader element while this player has it; see lib/lecturePlayback.ts. */
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -488,16 +492,16 @@ export function LecturePlayer({
   /** Downloaded / downloading, per source, for the two source controls. */
   const sources: SourceStates = useMemo(() => {
     const of = (n: SourceNum): SourceState => {
-      const p = downloads.progress[dlKey(lecture.id, n)] ?? null;
+      const p = n === 1 ? dlProgress : secondDlProgress;
       return {
         ready: !!videoPathFor(lecture, n),
-        busy: isDownloading(downloads, lecture.id, n),
+        busy: n === 1 ? downloading : downloadingSecond,
         percent: p?.percent ?? 0,
         phase: p?.phase ?? "",
       };
     };
     return { 1: of(1), 2: of(2) };
-  }, [downloads, lecture]);
+  }, [dlProgress, secondDlProgress, downloading, downloadingSecond, lecture.video_path, lecture.video2_path]);
 
   /** Echo360 publishes a camera stream for this capture (`docs/sync.md`). */
   const hasSecondSource = lecture.has_source2 === 1;
@@ -776,14 +780,7 @@ export function LecturePlayer({
     setCurrentTime(t);
     atRef.current = t;
 
-    let idx = -1;
-    for (let i = cues.length - 1; i >= 0; i--) {
-      if (t >= cues[i].start) {
-        idx = i;
-        break;
-      }
-    }
-    setActiveCueIdx(idx);
+    setActiveCueIdx(spanAt(cueStarts, t));
   };
 
   // ── Follow ───────────────────────────────────────────────────────────────
@@ -1403,7 +1400,7 @@ export function LecturePlayer({
             cues={cues}
             activeCueIdx={activeCueIdx}
             tab={dockTab}
-            onTabChange={(t) => setPrefs({ dockTab: t })}
+            onTabChange={handleDockTabChange}
             chapters={chaptersProps}
             reading={readingProps}
             chat={chatProps}
@@ -1412,7 +1409,7 @@ export function LecturePlayer({
             open={showDock}
             resizing={resizing}
             onSeek={handleCueSeek}
-            onClose={() => setPrefs({ transcriptVisible: false })}
+            onClose={handleDockClose}
             onHeaderPointerDown={startDockDrag}
             following={following}
             onScrollAway={handleScrollAway}

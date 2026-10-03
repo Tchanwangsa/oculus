@@ -38,8 +38,8 @@ export interface LectureChatPanelProps {
  * available on every recording.
  *
  * It owns its thread id, as each Chat tab owns its own in its route.
- * `load`/`release` keep this thread's rows in the store while it is showing;
- * `release` skips a thread a Chat tab holds.
+ * `hold`/`unhold` protect its rows alongside other chat views; leaving the
+ * dock releases the cache only when nobody else holds that thread.
  */
 export const LectureChatPanel = memo(function LectureChatPanel({
   lectureId,
@@ -115,8 +115,9 @@ export const LectureChatPanel = memo(function LectureChatPanel({
   // Hold the thread's rows only while this panel is the one showing them.
   useEffect(() => {
     if (threadId == null) return;
-    void store.getState().load(threadId);
+    void store.getState().hold(threadId);
     return () => {
+      store.getState().unhold(threadId);
       store.getState().release(threadId);
     };
   }, [store, threadId]);

@@ -1,5 +1,6 @@
 import { useStoredState } from "@/hooks/useStoredState";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useTabActive } from "@/components/tabs/TabContext";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   WarningCircle,
   XCircle,
@@ -69,6 +70,8 @@ const VIEWS = [
 
 export default function SyncPage() {
   const { status: authStatus, connect } = useAuth();
+  const active = useTabActive();
+  const pipelineSeeded = useRef(false);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [loadingSubjects, setLoadingSubjects] = useState(false);
@@ -105,22 +108,24 @@ export default function SyncPage() {
   }, []);
 
   useEffect(() => {
-    loadFromDb();
-  }, [loadFromDb]);
+    if (active) loadFromDb();
+  }, [active, loadFromDb]);
 
   // While a run is scraping, keep the history table's counts live.
   useEffect(() => {
-    if (!scraping) return;
+    if (!scraping || !active) return;
     const tick = () => getSyncRunSummaries().then(setRuns).catch(() => {});
     tick();
     const t = setInterval(tick, 2000);
     return () => clearInterval(t);
-  }, [scraping]);
+  }, [scraping, active]);
 
   // Backfill the pipeline table with every PDF on record. The DB's
   // parse_status can lag disk (e.g. CLI parses), so disk is consulted for
   // anything not fully parsed and the DB patched to match.
   useEffect(() => {
+    if (!active || pipelineSeeded.current) return;
+    pipelineSeeded.current = true;
     (async () => {
       try {
         const rows = await getPdfPipelineRows();
@@ -161,10 +166,11 @@ export default function SyncPage() {
           })),
         );
       } catch (e) {
+        pipelineSeeded.current = false;
         console.error("pipeline seed failed", e);
       }
     })();
-  }, [seedPipeline]);
+  }, [active, seedPipeline]);
 
   // ── Derived pipeline counts ───────────────────────────────────────────────
 

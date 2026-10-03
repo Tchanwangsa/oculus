@@ -30,7 +30,7 @@ import { useTauriEvent } from "@/hooks/useEvents";
 import { usePaletteStore } from "@/stores/paletteStore";
 import { useTabStore } from "@/stores/tabStore";
 import { useSubjects } from "@/hooks/useSubjects";
-import { linkInFocusedNote } from "@/components/documents/editor/commands";
+import { linkInFocusedNote } from "@/lib/noteShortcuts";
 
 /**
  * The ⌘K palette over everything reachable (library, pages, web). What it

@@ -16,7 +16,7 @@ rules are in [UI system](#ui-system); the WebKit and CSS traps are in
 | Window shortcuts (all menu items) | `app/src-tauri/src/menu.rs` |
 | ⌘-click → a new tab, app-wide | `app/src/lib/newTabClicks.ts` |
 | Search (⌘K and the new-tab field), Recent group | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
-| Backend events → SQLite and stores | `app/src/hooks/useBackendEvents.ts`, `app/src/hooks/useEvents.ts`, `app/src/lib/db.ts` |
+| Backend events → SQLite and stores | `app/src/hooks/useBackendEvents.ts`, `app/src/hooks/useEvents.ts`, `app/src/lib/parseStatusWriter.ts`, `app/src/lib/db.ts` |
 | Files tab: uploads and documents | `app/src/pages/subject/FilesPage.tsx`, `app/src/lib/uploads.ts`, `app/src/lib/documents.ts`, `app/src/components/documents/DocumentEditor.tsx`, `app/src/components/documents/editor/`, `app/src-tauri/src/files.rs` |
 | Tasks section (`/projects`, `/tasks`) | `app/src/components/projects/`, `app/src/pages/TasksPage.tsx`, `app/src/lib/projects.ts`, `app/src/stores/projectsStore.ts` |
 | Chat | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/harnessStore.ts` |
@@ -81,9 +81,10 @@ headings and Inter for everything else, Notion-style layout.
   (`app/src/hooks/useScrollFade.ts`; `syncScrollFade` in
   `app/src/lib/scrollFade.ts` for non-React callers like the maths palette).
   It marks the element `data-scroll-fade="x|y|xy"` and `index.css` turns that
-  into a mask, so no overlay and no background colour. Set `--scroll-fade` for
-  a ramp other than 24px, and keep the scroller flush against what it sits on
-  — padding between them leaves a visible gap under the fade.
+  into a mask, so no overlay and no background colour. Unchanged edge states
+  skip style writes. Set `--scroll-fade` for a ramp other than 24px, and keep
+  the scroller flush against what it sits on — padding between them leaves a
+  visible gap under the fade.
 - **Tables are full-bleed in `GridTable`**, header outside the scroller (or the
   bar runs down it). Alternate views are sibling `ViewTabs`/`PillTabs`, not a
   dropdown, over a fixed-height toolbar so switching never jolts the rows.
@@ -94,15 +95,28 @@ headings and Inter for everything else, Notion-style layout.
 - Slugs display through `humanizeSlug`, Canvas codes through `displayCode`
   ("MULT20015", not "MULT20015_2026_SM2"), both in `app/src/lib/format.ts`.
 
+Subject glyphs load the full Phosphor catalogue (`loadIconCatalogue` in
+`app/src/components/subjects/SubjectIcon.tsx`, cached for every glyph) only
+for a stored custom icon or an opened picker; default Books stay in the
+startup bundle. With a custom icon stored, `main.tsx` awaits the catalogue
+before the first render so the icon never paints as a Book. The picker grid
+mounts on open and loads through the same cache.
+
 ## Each pane has its own router, and the path is its only state
 
 `app/src/routes.tsx` is the route table, and each **pane** — a tab, or one half
 of a split tab — builds its own memory router over it
-(`app/src/components/tabs/TabPane.tsx`). The shell sits above all of them and
-navigates through `navigateActive` / `goInActiveTab` in
-`app/src/lib/tabRouters.ts`, which resolve to the focused pane and hold the
-departure rules: close the peek, keep a browser tab pinned to its page, ask
-before leaving a playing lecture.
+(`app/src/components/tabs/TabPane.tsx`). Paths are available synchronously for
+matching and ⌘-click; page modules load through route `lazy` only when
+visited, except Home and `/new`, which are in the startup bundle. A pane
+opening on any other page shows `LoadingFill` while its module loads.
+`TabPane` is memoised: a path change keeps unrelated tab objects stable, so
+those panes skip shell-driven renders. Display clocks pause in inactive panes
+and refresh when the pane returns; downloads and agent jobs continue globally.
+The shell sits above all of them and navigates through `navigateActive` /
+`goInActiveTab` in `app/src/lib/tabRouters.ts`, which resolve to the focused
+pane and hold the departure rules: close the peek, keep a browser tab pinned
+to its page, ask before leaving a playing lecture.
 
 - **A tab is titled from its path alone** (`tabInfo`, shared with Recent), so a
   title not in the path rides in the query — `?n=` from `projectHref` /
@@ -177,6 +191,8 @@ is a flex row, so the page beside it is really narrower and `BrowserPage` can
 re-place its native view instead of hiding it. Contents are per pane; width is
 global.
 
+- File and lecture bodies load lazily when first opened; the always-mounted
+  frame owns pane identity and the slide/width lifecycle while they load.
 - `open()` takes no pane id — background panes are `inert`, so a click can only
   come from the front. A list re-fetching an open row calls `sync()`, which
   names its pane.
@@ -195,6 +211,16 @@ global.
   `app/src-tauri/src/store.rs`, so a table's shape moves both writers and the
   migration together. `harness-event` rows are written by Rust; the hook only
   feeds `harnessStore` ([harness.md](./harness.md)).
+- **Callers share one in-flight database load** (`getDb` in
+  `app/src/lib/db.ts`), including restored panes and StrictMode mounts; a
+  failed load lets the next caller retry.
+- **Unread file counts preserve unchanged subject/category maps**, and badge
+  subscribers read only their own subject's counts. A refresh with identical
+  counts does not publish a store update.
+- **Parse status writes are ordered per file** through `parseStatusWriter`:
+  progress heartbeats share a transition write, while live page counts update
+  immediately. Scrape insertion and reset share that queue; only an update
+  that found its row counts as persisted, so failed and early writes can retry.
 - **A page reloads on the hook's own window event** (e.g.
   `FILE_SCRAPED_EVENT` in `app/src/lib/syncRunner.ts`), never on the Tauri
   event, which races the upsert. Subscribe with `useTauriEvent` /
@@ -246,6 +272,9 @@ global.
   when `embedStage` is set. Embed progress comes from page coverage
   (`getEmbedCoverage`), never `files.embed_status`, which can't tell which
   model wrote the vectors; that column is read only for a failure.
+- **The Sync page's pipeline rows keep their immutable item identity**
+  (`app/src/components/sync/PipelineTable.tsx`), so one progress tick renders
+  only its changed row.
 - **`useQualitySweep` is the recovery path, with two gates**: never re-kick
   `retryable === false`, and stand down on a latching failure until a parse
   progresses or `LATCH_PROBE_AFTER_MS` allows one probe. Without them one bad
@@ -265,14 +294,30 @@ global.
   dialog. `deleteFileRow` deletes `pages` by hand, since the cascade fires only
   with `foreign_keys` on. A parse in flight can land after a delete, so
   `store_upload` purges artifacts on a reused name whenever the bytes differ.
-- **Scraped header metadata loads through `useCourseFileData`**: assignments, discussion threads and module TOCs supply a stable parser, while the hook owns parallel reads and cancellation of stale answers.
+- **The PDF/markdown toggle probes file metadata**, through
+  `course_file_has_content` in `app/src-tauri/src/files.rs`, without reading or
+  transferring the parsed text. `app/src/components/files/FileMarkdown.tsx`
+  renders the markdown and discards obsolete read responses.
+- **Scraped header metadata loads through `useCourseFileData`**: assignments,
+  discussion threads and module TOCs supply a stable parser, while the hook
+  owns parallel reads and cancellation of stale answers. Unchanged file rows
+  reuse parsed results and pending reads; scrape/access stamps invalidate them,
+  and entries outside the current list are discarded.
+- **Subject and file lists share in-flight reads**: concurrent subject reads
+  and each subject's initial file reads share one query, without caching
+  completed rows. Explicit reloads read fresh rows; obsolete replies cannot
+  replace a newer subject or refresh. File-access and document-change events
+  carry their subject id, so unrelated mounted file lists do not requery;
+  events without an id refresh every list.
 - **A document is `courses/<code>/documents/<title>.md`** with a
   `category = 'document'` row. The title is the filename (`fileTitle`); a rename
   moves the file and keeps the row id. `reconcileDocuments` brings rows in line
   with the folder on mount, so a note written elsewhere just appears.
 - **The note editor is CodeMirror 6 over the file's exact text**
   (`app/src/components/documents/editor/`); nothing is re-serialised.
-  `DocumentEditor.tsx` owns load, save, title and mode. `FilePage` keys the
+  `DocumentEditor.tsx` owns load, save, title and mode and loads only for a
+  student document; its lightweight header controls live in
+  `app/src/components/documents/DocumentControls.tsx`. `FilePage` keys the
   whole editor by row id: pending saves and image attachments belong to one
   note, while a rename keeps its editor. **Live** mode renders markdown in place —
   headings, marks, links, lists and checkboxes, quotes, rules, code, pictures,
@@ -286,8 +331,9 @@ global.
 - **Fenced code is parsed in its own language**
   (`app/src/components/documents/editor/codeLanguages.ts`): the info string's
   first word picks a `@codemirror/language-data` grammar, loaded lazily on
-  first use; an untagged fence is guessed with highlight.js over a small
-  subset, cached, and left plain unless a pattern for that language agrees.
+  first use; an untagged fence is guessed with highlight.js, which scores only
+  the languages of a small subset whose pattern matches the sample. The guess
+  is cached, and the fence left plain when no score is confident.
   Highlight classes stop at a nested grammar's edge, so block code's font is a
   `cm-code-text` mark in both modes. Live mode hides the fences behind a
   header row (the label, which reveals the fence to retag it, and Copy) until
@@ -378,6 +424,10 @@ global.
 
 ## One markdown renderer serves every surface
 
+`app/src/lib/mathMarkdown.ts` owns delimiter detection and source normalization.
+Library file rendering always applies KaTeX so math fences and HTML math
+classes work even when there are no dollar delimiters.
+
 - **`app/src/components/markdown/MdComponents.tsx`** renders Canvas bodies,
   parsed PDFs, Ed threads and replies with KaTeX. `normalizeMath` rewrites
   `\(…\)` / `\[…\]` to `$…$` / `$$…$$` because CommonMark eats the backslash
@@ -431,7 +481,9 @@ A browser tab is `/browse/<id>`, naming a WKWebView that
 refuses iframes).
 
 - **Rust owns the tab list** and pushes `browser-state` on every change;
-  `useBrowserTabs` reconciles it per *pane*. Page navigations change the URL in
+  `useBrowserTabs` reconciles it per *pane*. The mirror preserves unchanged
+  page objects so another tab's snapshot does not rerender every pane.
+  Page navigations change the URL in
   Rust only, never the route. What a page knows about itself (history, find,
   zoom) is pushed as events, because `with_webview` returns nothing.
 - **A native page can't interleave with the DOM.** `BrowserPage` hides it while
@@ -499,8 +551,16 @@ else the last chip. Chips scope the SQL (`SearchScope` in
   shared by both registers. Following is tracked by pointer *intent*, since the
   follow-scroll fires `scroll` too, and runs off the active-cue index rather
   than `timeupdate`. Don't call `measure()` on a search: heights are cached by
-  cue key and survive it. Chapters and the reading copy are
-  [chapters.md](./chapters.md).
+  cue key and survive it. Key callbacks stay stable between searches so a
+  playback highlight does not rebuild every row's offsets. Chapters and the
+  reading copy are [chapters.md](./chapters.md).
+
+Playback's ordered cue, chapter and reading starts use an upper-bound lookup,
+including the last entry when timestamps coincide. A player subscribes only to
+its lecture's download progress; stable dock callbacks keep playback ticks
+outside the transcript's memo boundary. The catalogue's `LectureRow`
+(`app/src/components/lectures/LectureRow.tsx`) reads only its own
+source-qualified download progress and active state.
 
 ## Gotchas
 
@@ -538,7 +598,7 @@ else the last chip. Chips scope the SQL (`SearchScope` in
 - **Import `app/src/lib/tauriEvents.ts` before `./App`** — it patches an
   `unlisten` that throws under StrictMode's remount and leaks the subscription.
 - **Never nest a `<button>` in a row that is a button** — WebKit drops the inner
-  clicks; use `RowAction` (`app/src/pages/subject/LecturesPage.tsx`).
+  clicks; use `RowAction` (`app/src/components/lectures/LectureRow.tsx`).
 - **A `Link`'s ⌘-click reloads the whole webview** — leave modified clicks to
   `newTabClicks.ts`.
 - **CodeMirror block decorations come from a `StateField`** — it throws for
@@ -556,5 +616,7 @@ else the last chip. Chips scope the SQL (`SearchScope` in
   ⌘B (sidebar) checks `defaultPrevented`, since the note editor's ⌘B is bold.
   ⌘K is a menu item, so it never reaches a keymap: the palette's `menu-search`
   handler asks `linkInFocusedNote` first, and a focused note makes a link.
+  `app/src/lib/noteShortcuts.ts` holds callbacks registered by mounted editors,
+  so listening for the menu does not load CodeMirror.
 - **`data-tauri-drag-region` needs `core:window:allow-start-dragging`**
   (`app/src-tauri/capabilities/default.json`) or it silently does nothing.

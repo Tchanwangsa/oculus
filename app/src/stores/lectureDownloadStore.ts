@@ -132,21 +132,31 @@ export async function deleteLectureVideo(
 
 /** Subscribe the store to backend progress events. Mount once at the app root. */
 export function watchLectureDownloads(): () => void {
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  let disposed = false;
   const unsub = listen<DlProgress>("lecture-download-progress", (e) => {
+    if (disposed) return;
     const p = e.payload;
     const key = dlKey(p.mediaId, p.source);
+    clearTimeout(timers.get(key));
+    timers.delete(key);
     useLectureDownloads.setState((s) => ({ progress: { ...s.progress, [key]: p } }));
     if (SETTLED.includes(p.phase)) {
-      setTimeout(() => {
+      timers.set(key, setTimeout(() => {
+        timers.delete(key);
         useLectureDownloads.setState((s) => {
+          if (s.progress[key] !== p) return s;
           const progress = { ...s.progress };
           delete progress[key];
           return { progress };
         });
-      }, 2000);
+      }, 2000));
     }
   });
   return () => {
+    disposed = true;
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
     unsub.then((f) => f()).catch(() => {});
   };
 }

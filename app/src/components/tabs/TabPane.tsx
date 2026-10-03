@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { routes } from "@/routes";
 import { TabContext } from "@/components/tabs/TabContext";
@@ -30,7 +30,7 @@ function storedRatio(): number {
   return RATIO_DEFAULT;
 }
 
-export default function TabPane({
+const TabPane = memo(function TabPane({
   tab,
   active,
 }: {
@@ -124,7 +124,9 @@ export default function TabPane({
       )}
     </div>
   );
-}
+});
+
+export default TabPane;
 
 /**
  * One pane and its router, mounted for as long as the pane exists. The pane id

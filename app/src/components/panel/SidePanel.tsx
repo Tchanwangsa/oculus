@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useActivePaneId, useTabStore } from "@/stores/tabStore";
@@ -11,8 +11,10 @@ import {
 } from "@/stores/sidePanelStore";
 import { TabContext } from "@/components/tabs/TabContext";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
-import FilePanel from "@/components/panel/FilePanel";
-import LecturePanel from "@/components/panel/LecturePanel";
+import { LoadingFill } from "@/components/ui/PageParts";
+
+const FilePanel = lazy(() => import("@/components/panel/FilePanel"));
+const LecturePanel = lazy(() => import("@/components/panel/LecturePanel"));
 
 const PANEL = {
   defaultWidth: 520,
@@ -186,23 +188,25 @@ export function SidePanel() {
                 otherwise a playing lecture is owned by nobody and survives
                 closing its tab. */}
             <TabContext.Provider value={panelTab}>
-              {/* Keyed so a different item builds a fresh body. */}
-              {drawn.item.kind === "file" ? (
-                <FilePanel
-                  key={itemKey(drawn.item)}
-                  file={drawn.item.file}
-                  locate={drawn.item.locate}
-                  paneId={drawn.paneId}
-                  onExpand={expand}
-                />
-              ) : (
-                <LecturePanel
-                  key={itemKey(drawn.item)}
-                  lecture={drawn.item.lecture}
-                  paneId={drawn.paneId}
-                  onExpand={expand}
-                />
-              )}
+              <Suspense fallback={<LoadingFill />}>
+                {/* Keyed so a different item builds a fresh body. */}
+                {drawn.item.kind === "file" ? (
+                  <FilePanel
+                    key={itemKey(drawn.item)}
+                    file={drawn.item.file}
+                    locate={drawn.item.locate}
+                    paneId={drawn.paneId}
+                    onExpand={expand}
+                  />
+                ) : (
+                  <LecturePanel
+                    key={itemKey(drawn.item)}
+                    lecture={drawn.item.lecture}
+                    paneId={drawn.paneId}
+                    onExpand={expand}
+                  />
+                )}
+              </Suspense>
             </TabContext.Provider>
           </div>
         )}

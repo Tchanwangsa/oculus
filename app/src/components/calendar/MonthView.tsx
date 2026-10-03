@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/useNow";
 import {
-  eventsOn,
   fmtEventTime,
+  groupEventsByDay,
   isInstant,
   isPast,
   isSelfImposed,
@@ -37,7 +37,8 @@ export function MonthView({
   events: CalEvent[];
   colors: Map<number, string>;
 }) {
-  const weeks = monthGrid(month);
+  const weeks = useMemo(() => monthGrid(month), [month]);
+  const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
   const today = useNow();
   const todayStart = startOfDay(today).getTime();
 
@@ -79,7 +80,7 @@ export function MonthView({
           <div key={wi} className="grid grid-cols-7 border-b border-border-subtle last:border-b-0">
             {week.map((day) => {
               const inMonth = day.getMonth() === month.getMonth();
-              const dayEvents = eventsOn(events, day);
+              const dayEvents = eventsByDay.get(startOfDay(day).getTime()) ?? [];
               const isToday = sameDay(day, today);
               // Past days read grey.
               const dayGone = day.getTime() < todayStart;
@@ -124,6 +125,7 @@ export function MonthView({
                       events={dayEvents}
                       colors={colors}
                       hidden={dayEvents.length - visible}
+                      now={today}
                     />
                   )}
                 </div>
@@ -204,14 +206,15 @@ function MoreLink({
   events,
   colors,
   hidden,
+  now,
 }: {
   day: Date;
   events: CalEvent[];
   colors: Map<number, string>;
   hidden: number;
+  now: Date;
 }) {
   const [open, setOpen] = useState(false);
-  const now = useNow();
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>

@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/useNow";
 import {
   durationMinutes,
-  eventsOn,
   fmtEventTime,
+  groupEventsByDay,
   hourRange,
   isInstant,
   isPast,
@@ -67,14 +67,16 @@ export function WeekView({
   events: CalEvent[];
   colors: Map<number, string>;
 }) {
-  const days = weekDays(anchor);
+  const days = useMemo(() => weekDays(anchor), [anchor]);
+  const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
   const today = useNow();
   const weekHasToday = days.some((d) => sameDay(d, today));
 
-  const inWeek = events.filter((e) =>
-    days.some((d) => sameDay(d, e.start)),
+  const inWeek = useMemo(
+    () => days.flatMap((day) => eventsByDay.get(startOfDay(day).getTime()) ?? []),
+    [days, eventsByDay],
   );
-  const timed = inWeek.filter((e) => !isInstant(e) && !e.allDay);
+  const timed = useMemo(() => inWeek.filter((e) => !isInstant(e) && !e.allDay), [inWeek]);
   // The fitted range covers every class; the toggle shows the whole day on
   // demand, and the choice sticks.
   const [fullDay, setFullDay] = useState(
@@ -95,8 +97,20 @@ export function WeekView({
     return m >= fromHour * 60 && m <= toHour * 60;
   };
 
+  // Only the time styling changes each minute; event overlap geometry does not.
+  const lanesByDay = useMemo(
+    () => days.map((day) => packLanes(
+      (eventsByDay.get(startOfDay(day).getTime()) ?? []).filter(
+        (e) => !isInstant(e) && !e.allDay && minutesFromMidnight(e.start) >= fromHour * 60,
+      ),
+      classSpan,
+    )),
+    [days, eventsByDay, fromHour],
+  );
+
   const scroller = useRef<HTMLDivElement>(null);
   const stripDue = inWeek.filter((e) => (isInstant(e) || e.allDay) && !placeable(e));
+  const stripDueByDay = groupEventsByDay(stripDue);
   const hasDue = stripDue.length > 0;
   // Named after the loudest layer: "Due" only when a real deadline (or an
   // all-day class) is present.
@@ -189,7 +203,7 @@ export function WeekView({
                   key={d.toISOString()}
                   className="min-w-0 border-l border-border-subtle px-1 py-1 space-y-0.5"
                 >
-                  {eventsOn(stripDue, d).map((e) => {
+                  {(stripDueByDay.get(startOfDay(d).getTime()) ?? []).map((e) => {
                       const gone = isPast(e, today);
                       const tone = gone
                         ? "var(--color-chart-other)"
@@ -251,13 +265,8 @@ export function WeekView({
             ))}
           </div>
 
-              {days.map((day) => {
-                const laid = packLanes(
-                  eventsOn(timed, day).filter(
-                    (e) => minutesFromMidnight(e.start) >= fromHour * 60,
-                  ),
-                  classSpan,
-                );
+              {days.map((day, dayIndex) => {
+                const laid = lanesByDay[dayIndex];
                 return (
                   <div
                     key={day.toISOString()}
@@ -336,7 +345,7 @@ export function WeekView({
                     })}
 
                     {/* Instants land at their own time, over the classes. */}
-                    {eventsOn(inWeek, day)
+                    {(eventsByDay.get(startOfDay(day).getTime()) ?? [])
                       .filter(placeable)
                       .map((e) => {
                         const gone = isPast(e, today);

@@ -1,4 +1,5 @@
 import { useEffect, useRef, type RefObject } from "react";
+import { useTabActive } from "@/components/tabs/TabContext";
 
 /** Re-measure interval in ms, matched by a linear CSS transition so the line
  *  crawls and a seek slides. */
@@ -18,9 +19,11 @@ export interface EntryProgressProps {
  * hairline disappears on the active card's `brand/12` wash.
  */
 export function EntryProgress({ atRef, start, end }: EntryProgressProps) {
+  const active = useTabActive();
   const fill = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
+    if (!active) return;
     const span = Math.max(1, end - start);
     const paint = () => {
       const node = fill.current;
@@ -31,7 +34,7 @@ export function EntryProgress({ atRef, start, end }: EntryProgressProps) {
     paint();
     const t = setInterval(paint, TICK);
     return () => clearInterval(t);
-  }, [atRef, start, end]);
+  }, [atRef, start, end, active]);
 
   return (
     <span

@@ -1,109 +1,90 @@
+import type { ComponentType } from "react";
 import { Navigate, Outlet, type RouteObject } from "react-router-dom";
+import { LoadingFill } from "@/components/ui/PageParts";
 import { RouteError } from "@/components/ErrorBoundary";
 import SubjectLayout from "@/layouts/SubjectLayout";
+import SettingsLayout from "@/layouts/SettingsLayout";
 import HomePage from "@/pages/HomePage";
 import NewTabPage from "@/pages/NewTabPage";
-import ChatPage from "@/pages/ChatPage";
-import CalendarPage from "@/pages/CalendarPage";
-import ProjectsIndexPage from "@/pages/ProjectsIndexPage";
-import ProjectPage from "@/pages/ProjectPage";
-import TaskPage from "@/pages/TaskPage";
-import TasksPage from "@/pages/TasksPage";
-import SubjectsIndexPage from "@/pages/SubjectsIndexPage";
-import SubjectOverviewPage from "@/pages/subject/OverviewPage";
-import SubjectModulesPage from "@/pages/subject/ModulesPage";
-import SubjectFilesPage from "@/pages/subject/FilesPage";
-import SubjectDownloadsPage from "@/pages/subject/DownloadsPage";
-import SubjectUploadsPage from "@/pages/subject/UploadsPage";
-import SubjectDocumentsPage from "@/pages/subject/DocumentsPage";
-import SubjectLecturesPage from "@/pages/subject/LecturesPage";
-import SubjectAnnouncementsPage from "@/pages/subject/AnnouncementsPage";
-import SubjectAssignmentsPage from "@/pages/subject/AssignmentsPage";
-import SubjectDiscussionPage from "@/pages/subject/DiscussionPage";
-import SubjectProjectsPage from "@/pages/subject/ProjectsPage";
-import SubjectFilePage from "@/pages/subject/FilePage";
-import SubjectLecturePage from "@/pages/subject/LecturePage";
-import SyncPage from "@/pages/SyncPage";
-import BrowserPage from "@/pages/BrowserPage";
-import SettingsLayout from "@/layouts/SettingsLayout";
-import SettingsCanvasPage from "@/pages/settings/CanvasPage";
-import SettingsAiPage from "@/pages/settings/AiPage";
-import SettingsStoragePage from "@/pages/settings/StoragePage";
-import SettingsLibraryPage from "@/pages/settings/LibraryPage";
-import SettingsBrowserPage from "@/pages/settings/BrowserPage";
-import SettingsAppearancePage from "@/pages/settings/AppearancePage";
 
-/** The route table; each pane builds its own memory router over it
+/** Paths stay synchronous for matching and ⌘-click; page modules load only
+ *  when a pane visits them, except Home and the new-tab page, which a fresh
+ *  pane opens on. Each pane builds its own memory router over it
  *  (`app/src/components/tabs/TabPane.tsx`). The shell sits outside them all. */
 function PaneRoot() {
   return <Outlet />;
 }
+
+/** A route `lazy` for a page module's default export. */
+const page = (load: () => Promise<{ default: ComponentType }>) => () =>
+  load().then((m) => ({ Component: m.default }));
 
 export const routes: RouteObject[] = [
   {
     path: "/",
     element: <PaneRoot />,
     errorElement: <RouteError />,
+    hydrateFallbackElement: <LoadingFill />,
     children: [
       { index: true, element: <HomePage /> },
       // Where the + button and ⌘T land.
       { path: "new", element: <NewTabPage /> },
-      { path: "chat", element: <ChatPage /> },
-      { path: "calendar", element: <CalendarPage /> },
-      { path: "projects", element: <ProjectsIndexPage /> },
-      { path: "projects/:projectId", element: <ProjectPage /> },
+      { path: "chat", lazy: page(() => import("@/pages/ChatPage")) },
+      { path: "calendar", lazy: page(() => import("@/pages/CalendarPage")) },
+      { path: "projects", lazy: page(() => import("@/pages/ProjectsIndexPage")) },
+      { path: "projects/:projectId", lazy: page(() => import("@/pages/ProjectPage")) },
       // Nested under the project, whose columns define its statuses.
-      { path: "projects/:projectId/tasks/:taskId", element: <TaskPage /> },
-      { path: "tasks", element: <TasksPage /> },
+      { path: "projects/:projectId/tasks/:taskId", lazy: page(() => import("@/pages/TaskPage")) },
+      { path: "tasks", lazy: page(() => import("@/pages/TasksPage")) },
       // An unfiled task: same page, with a null project and the default board.
-      { path: "tasks/:taskId", element: <TaskPage /> },
-      { path: "subjects", element: <SubjectsIndexPage /> },
+      { path: "tasks/:taskId", lazy: page(() => import("@/pages/TaskPage")) },
+      { path: "subjects", lazy: page(() => import("@/pages/SubjectsIndexPage")) },
       // A peek expanded to a full page, outside SubjectLayout's tabs.
-      { path: "subjects/:subjectId/file", element: <SubjectFilePage /> },
-      { path: "subjects/:subjectId/lecture", element: <SubjectLecturePage /> },
+      { path: "subjects/:subjectId/file", lazy: page(() => import("@/pages/subject/FilePage")) },
+      { path: "subjects/:subjectId/lecture", lazy: page(() => import("@/pages/subject/LecturePage")) },
       {
         // SubjectLayout resolves the subject once, via outlet context.
         path: "subjects/:subjectId",
         element: <SubjectLayout />,
         children: [
-          { index: true, element: <SubjectOverviewPage /> },
-          { path: "modules", element: <SubjectModulesPage /> },
+          { index: true, lazy: page(() => import("@/pages/subject/OverviewPage")) },
+          { path: "modules", lazy: page(() => import("@/pages/subject/ModulesPage")) },
           {
             // Sub-tabs are child routes so restore, crumbs and ⌘-click key
             // off the path (see FilesPage).
             path: "files",
-            element: <SubjectFilesPage />,
+            lazy: page(() => import("@/pages/subject/FilesPage")),
             children: [
               { index: true, element: <Navigate to="downloads" replace /> },
-              { path: "downloads", element: <SubjectDownloadsPage /> },
-              { path: "uploads", element: <SubjectUploadsPage /> },
-              { path: "documents", element: <SubjectDocumentsPage /> },
+              { path: "downloads", lazy: page(() => import("@/pages/subject/DownloadsPage")) },
+              { path: "uploads", lazy: page(() => import("@/pages/subject/UploadsPage")) },
+              { path: "documents", lazy: page(() => import("@/pages/subject/DocumentsPage")) },
             ],
           },
-          { path: "lectures", element: <SubjectLecturesPage /> },
-          { path: "announcements", element: <SubjectAnnouncementsPage /> },
-          { path: "assignments", element: <SubjectAssignmentsPage /> },
-          { path: "discussion", element: <SubjectDiscussionPage /> },
-          { path: "projects", element: <SubjectProjectsPage /> },
+          { path: "lectures", lazy: page(() => import("@/pages/subject/LecturesPage")) },
+          { path: "announcements", lazy: page(() => import("@/pages/subject/AnnouncementsPage")) },
+          { path: "assignments", lazy: page(() => import("@/pages/subject/AssignmentsPage")) },
+          { path: "discussion", lazy: page(() => import("@/pages/subject/DiscussionPage")) },
+          { path: "projects", lazy: page(() => import("@/pages/subject/ProjectsPage")) },
           // Legacy paths that restored tabs and Recent entries may carry.
           { path: "downloads", element: <Navigate to="../files/downloads" replace /> },
           { path: "uploads", element: <Navigate to="../files/uploads" replace /> },
         ],
       },
-      { path: "sync", element: <SyncPage /> },
+      { path: "sync", lazy: page(() => import("@/pages/SyncPage")) },
       // The id names a native WebView Rust parks over this content area.
-      { path: "browse/:id", element: <BrowserPage /> },
+      { path: "browse/:id", lazy: page(() => import("@/pages/BrowserPage")) },
       {
         path: "settings",
         element: <SettingsLayout />,
         children: [
           { index: true, element: <Navigate to="canvas" replace /> },
-          { path: "canvas", element: <SettingsCanvasPage /> },
-          { path: "ai", element: <SettingsAiPage /> },
-          { path: "storage", element: <SettingsStoragePage /> },
-          { path: "library", element: <SettingsLibraryPage /> },
-          { path: "browser", element: <SettingsBrowserPage /> },
-          { path: "appearance", element: <SettingsAppearancePage /> },
+          { path: "canvas", lazy: page(() => import("@/pages/settings/CanvasPage")) },
+          { path: "ai", lazy: page(() => import("@/pages/settings/AiPage")) },
+          { path: "storage", lazy: page(() => import("@/pages/settings/StoragePage")) },
+          { path: "library", lazy: page(() => import("@/pages/settings/LibraryPage")) },
+          { path: "browser", lazy: page(() => import("@/pages/settings/BrowserPage")) },
+          { path: "appearance", lazy: page(() => import("@/pages/settings/AppearancePage")) },
         ],
       },
       // Legacy path with no subject.

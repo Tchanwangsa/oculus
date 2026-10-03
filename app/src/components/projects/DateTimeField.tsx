@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { CalendarBlank, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { sqliteUtcToMs } from "@/lib/format";
+
+const Calendar = lazy(() =>
+  import("@/components/ui/calendar").then((module) => ({ default: module.Calendar })),
+);
 
 /** What a date with no time yet gets: a deadline lands at the end of its day,
  *  a start at the beginning of the working one. */
@@ -89,13 +92,19 @@ export function DateTimeField({
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-auto p-0">
-        <Calendar
-          mode="single"
-          selected={current ?? undefined}
-          defaultMonth={current ?? undefined}
-          onSelect={pickDay}
-          autoFocus
-        />
+        {open && (
+          /* The calendar's size from its `--cell-size` (24px): seven columns
+             plus `p-2` wide, and caption, weekdays and five weeks tall. */
+          <Suspense fallback={<div className="h-[193px] w-[184px]" />}>
+            <Calendar
+              mode="single"
+              selected={current ?? undefined}
+              defaultMonth={current ?? undefined}
+              onSelect={pickDay}
+              autoFocus
+            />
+          </Suspense>
+        )}
         <div className="flex items-center gap-2 border-t border-border-subtle px-2 py-1.5">
           <span className="text-[11px] text-muted-foreground">Time</span>
           <input

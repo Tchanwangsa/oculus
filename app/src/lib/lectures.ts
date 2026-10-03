@@ -212,14 +212,16 @@ export function chapterEnds(starts: number[], duration: number): number[] {
 /** Index of the span `t` falls in over ordered `starts` (chapters or reading
  *  lines), or -1 before the first. */
 export function spanAt(starts: number[], t: number): number {
-  let idx = -1;
-  for (let i = starts.length - 1; i >= 0; i--) {
-    if (t >= starts[i]) {
-      idx = i;
-      break;
-    }
+  if (Number.isNaN(t)) return -1;
+  // Starts are chronological; the upper bound also selects the last duplicate.
+  let low = 0;
+  let high = starts.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (starts[middle] <= t) low = middle + 1;
+    else high = middle;
   }
-  return idx;
+  return low - 1;
 }
 
 /** The full-page player route; `t` titles the tab. */

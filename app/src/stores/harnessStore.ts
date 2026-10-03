@@ -64,7 +64,7 @@ interface HarnessState {
   /** The view moved off it. Rows stay cached for an instant switch back, but
    *  the thread is no longer protected from `release`. */
   unhold: (id: number) => void;
-  /** Read a thread's rows and queue into the map (the lecture dock calls it). */
+  /** Read a thread's rows and queue into the map (`hold` calls it). */
   load: (id: number) => Promise<void>;
   setProvider: (p: Provider) => void;
   setModel: (m: string | null) => void;
@@ -201,12 +201,21 @@ export const useHarnessStore = create<HarnessState>((set, get) => ({
       delete queued[id];
       const items = { ...s.items };
       delete items[id];
+      const live = { ...s.live };
+      delete live[id];
+      const holds = { ...s.holds };
+      delete holds[id];
+      const contextDrift = { ...s.contextDrift };
+      delete contextDrift[id];
       return {
         // A Chat tab still pointing at it notices the thread is gone from
         // this list and walks itself back to the empty composer (`ChatPage`).
         threads: s.threads.filter((t) => t.id !== id),
         items,
         queued,
+        live,
+        holds,
+        contextDrift,
       };
     });
   },

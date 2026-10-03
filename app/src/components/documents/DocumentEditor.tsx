@@ -15,7 +15,6 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { DropOverlay } from "@/components/ui/DropOverlay";
-import { PillTabs } from "@/components/ui/PillTabs";
 import { useTabActive } from "@/components/tabs/TabContext";
 import { useDataDir } from "@/hooks/useDataDir";
 import { useFileDrop } from "@/hooks/useFileDrop";
@@ -39,9 +38,9 @@ import {
   sqliteUtcToMs,
 } from "@/lib/format";
 import { libraryImageSrc } from "@/lib/libraryLinks";
+import { registerNoteLinkCommand } from "@/lib/noteShortcuts";
 import { fileTitle } from "@/lib/openFile";
 import { navigateActive } from "@/lib/tabRouters";
-import { cn } from "@/lib/utils";
 import type { DbFile } from "@/lib/db";
 import { readCourseFile } from "@/lib/courseFiles";
 import { LoadingFill } from "@/components/ui/PageParts";
@@ -51,78 +50,25 @@ import {
   insertImage,
   NO_FORMATS,
   sameFormats,
+  toggleLink,
   type ActiveFormats,
 } from "./editor/commands";
 import {
   suggestCompartment,
   suggestExtension,
   type SuggestConfig,
-  type SuggestStatus,
 } from "./editor/aiSuggest";
 import { liveCompartment, modeExtension, noteExtensions } from "./editor/extensions";
 import { hostCompartment, noteHost, openNoteLink, type NoteHost } from "./editor/host";
 import { syncLiveFocus } from "./editor/livePreview";
 import { Toolbar } from "./editor/Toolbar";
-import { SuggestToggle } from "./SuggestToggle";
-
-export type EditorMode = "live" | "raw";
-
-/** The header's status word; `idle` is blank. */
-export type SaveStatus =
-  | { state: "idle" }
-  | { state: "saving" }
-  | { state: "saved" }
-  | { state: "error"; message: string };
-
-const MODES = [
-  { value: "live", label: "Live" },
-  { value: "raw", label: "Raw" },
-] as const;
+import type { EditorMode, SaveStatus, SuggestStatus } from "./DocumentControls";
 
 /** How long after the last keystroke the draft goes to disk. */
 const SAVE_DELAY_MS = 600;
 
 /** A freshly created note, still wearing the name Rust gave it. */
 const UNTITLED = /^Untitled(?:-\d+)?$/;
-
-/** The save word, the AI-suggestions toggle and the Live/Raw pills, drawn in
- *  the host page's header. */
-export function DocumentControls({
-  mode,
-  onMode,
-  status,
-  suggestions,
-  onSuggestions,
-  suggestStatus,
-}: {
-  mode: EditorMode;
-  onMode: (mode: EditorMode) => void;
-  status: SaveStatus;
-  suggestions: boolean;
-  onSuggestions: (on: boolean) => void;
-  suggestStatus: SuggestStatus;
-}) {
-  const word =
-    status.state === "saving" ? "Saving…"
-    : status.state === "saved" ? "Saved"
-    : status.state === "error" ? status.message
-    : "";
-  return (
-    <div className="flex shrink-0 items-center gap-3">
-      <span
-        className={cn(
-          "max-w-64 truncate text-[11px]",
-          status.state === "error" ? "text-destructive" : "text-muted-foreground",
-        )}
-        title={status.state === "error" ? status.message : undefined}
-      >
-        {word}
-      </span>
-      <SuggestToggle on={suggestions} onChange={onSuggestions} status={suggestStatus} />
-      <PillTabs tabs={MODES} value={mode} onChange={onMode} />
-    </div>
-  );
-}
 
 /**
  * A markdown note, edited in place in CodeMirror (`./editor/`); controls live
@@ -369,10 +315,12 @@ export function DocumentEditor({
         ],
       }),
     });
+    const unregisterLink = registerNoteLinkCommand(v.dom, () => toggleLink(v));
     viewRef.current = v;
     setView(v);
     setActive(activeFormats(v.state));
     return () => {
+      unregisterLink();
       v.destroy();
       viewRef.current = null;
       setView(null);

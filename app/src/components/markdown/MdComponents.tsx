@@ -2,7 +2,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { isValidElement } from "react";
+import { isValidElement, memo } from "react";
 import { ArrowSquareOut } from "@phosphor-icons/react";
 import { CitationCode, CitationLink, linkCitation } from "@/components/markdown/Citation";
 import { FileChip } from "@/components/markdown/FileChip";
@@ -18,30 +18,7 @@ import { cn } from "@/lib/utils";
 // keeps its own metrics over Tailwind's layers.
 import "katex/dist/katex.min.css";
 
-/** Gates remark-math/KaTeX (the expensive part) on a delimiter being present.
- *  `\(` and `\[` count: the gate runs before [`normalizeMath`] rewrites them. */
-const MATH = /\$|\\\(|\\\[/;
-
-/** Code fences and inline code spans, which are left exactly as written. */
-const CODE = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g;
-const DISPLAY = /\\\[([\s\S]+?)\\\]/g;
-const INLINE = /\\\(([\s\S]+?)\\\)/g;
-
-/**
- * Rewrite `\(…\)` / `\[…\]` to `$…$` / `$$…$$`. CommonMark treats `\(` as an
- * escaped `(` and eats the backslash before remark-math sees a delimiter.
- * Code spans and fences are left alone.
- */
-export function normalizeMath(text: string): string {
-  return text
-    .split(CODE)
-    .map((part, i) =>
-      i % 2 === 1
-        ? part
-        : part.replace(DISPLAY, (_, m) => `$$${m}$$`).replace(INLINE, (_, m) => `$${m}$`),
-    )
-    .join("");
-}
+import { hasMath, normalizeMath } from "@/lib/mathMarkdown";
 
 /** Code outside markdown. The app's only `font-mono` lives in this file. */
 export function CodeText({ className, ...p }: React.ComponentProps<"pre">) {
@@ -219,8 +196,8 @@ const NO_PLUGINS: never[] = [];
  * (transcript lines, chapter summaries): a block element inside a button makes
  * WebKit close the button early.
  */
-export function InlineMd({ text, className }: { text: string; className?: string }) {
-  const math = MATH.test(text);
+export const InlineMd = memo(function InlineMd({ text, className }: { text: string; className?: string }) {
+  const math = hasMath(text);
   return (
     <span className={cn("md-inline", className)}>
       <ReactMarkdown
@@ -234,7 +211,7 @@ export function InlineMd({ text, className }: { text: string; className?: string
       </ReactMarkdown>
     </span>
   );
-}
+});
 
 /** Unwrapped (`unwrapDisallowed`), not dropped, so their text survives. */
 const BLOCKS = ["h1", "h2", "h3", "h4", "h5", "h6", "hr", "img", "table", "blockquote"];
@@ -254,8 +231,8 @@ const INLINE_COMPONENTS: Components = {
  * `index.css` scales the document-sized components down; it is unlayered so
  * it beats their utilities.
  */
-export function CompactMd({ text, className }: { text: string; className?: string }) {
-  const math = MATH.test(text);
+export const CompactMd = memo(function CompactMd({ text, className }: { text: string; className?: string }) {
+  const math = hasMath(text);
   return (
     <div className={cn("md-compact min-w-0", className)}>
       <ReactMarkdown
@@ -267,4 +244,4 @@ export function CompactMd({ text, className }: { text: string; className?: strin
       </ReactMarkdown>
     </div>
   );
-}
+});

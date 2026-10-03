@@ -4,6 +4,8 @@ import ReactDOM from "react-dom/client";
 import "./lib/tauriEvents";
 import "./index.css";
 import App from "./App";
+import { loadIconCatalogue } from "./components/subjects/SubjectIcon";
+import { useSubjectIconStore } from "./stores/subjectIconStore";
 
 // A release webview has no console, so paint uncaught errors over the window.
 // Escape dismisses; a later error replaces the box rather than stacking.
@@ -39,8 +41,17 @@ window.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") document.querySelector(`[${OVERLAY_ATTR}]`)?.remove();
 });
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+function render() {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+}
+
+// A stored custom glyph would first paint as a Book, so its catalogue loads
+// before the first render. The store hydrates from localStorage synchronously;
+// without a custom icon the catalogue stays off the startup path.
+const customIcon = Object.values(useSubjectIconStore.getState().prefs).some((p) => p.icon);
+if (customIcon) void loadIconCatalogue().catch(() => {}).finally(render);
+else render();

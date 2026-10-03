@@ -28,8 +28,8 @@ import type { ImportedFile } from "@/lib/uploads";
  *  on save, which changes nothing a list shows. */
 export const DOCUMENTS_CHANGED_EVENT = "oculus:documents-changed";
 
-const announce = () =>
-  window.dispatchEvent(new CustomEvent(DOCUMENTS_CHANGED_EVENT));
+const announce = (subjectId: number) =>
+  window.dispatchEvent(new CustomEvent(DOCUMENTS_CHANGED_EVENT, { detail: { subjectId } }));
 
 /** Upsert the row for a file Rust just reported and read it back. */
 async function rowFor(
@@ -59,7 +59,7 @@ export async function createDocument(
     title,
   });
   const row = await rowFor(subject.id, file);
-  announce();
+  announce(subject.id);
   return row;
 }
 
@@ -82,7 +82,7 @@ export async function renameDocument(file: DbFile, title: string): Promise<strin
   });
   if (moved.relative_path !== file.relative_path) {
     await renameFileRow(file.id, moved.filename, moved.relative_path);
-    announce();
+    announce(file.subject_id);
   }
   return moved.relative_path;
 }
@@ -153,7 +153,7 @@ export async function setDocumentSuggestions(on: boolean): Promise<void> {
 export async function deleteDocument(file: DbFile): Promise<void> {
   await invoke("delete_document", { relativePath: file.relative_path });
   await deleteFileRow(file.id);
-  announce();
+  announce(file.subject_id);
 }
 
 /**
@@ -192,6 +192,6 @@ export async function reconcileDocuments(
     changed = true;
   }
 
-  if (changed) announce();
+  if (changed) announce(subject.id);
   return changed;
 }

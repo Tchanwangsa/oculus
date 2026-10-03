@@ -9,7 +9,7 @@ import {
   type DbLocalEvent,
 } from "@/lib/db";
 import { getAllOpenTasks } from "@/lib/projects";
-import { displayCode, sameDay, sqliteUtcToMs, startOfDay } from "@/lib/format";
+import { displayCode, sqliteUtcToMs, startOfDay } from "@/lib/format";
 
 /**
  * `class`/`due` come from Canvas (or `local_events`, drawn the same way);
@@ -283,8 +283,17 @@ export function weekDays(anchor: Date): Date[] {
 
 // ── Querying a loaded set ─────────────────────────────────────────────────────
 
-export function eventsOn(events: CalEvent[], day: Date): CalEvent[] {
-  return events.filter((e) => sameDay(e.start, day));
+/** Buckets events by the local calendar day they start on. Reuse the result
+ *  across grid cells instead of filtering the full event set for each day. */
+export function groupEventsByDay(events: CalEvent[]): Map<number, CalEvent[]> {
+  const byDay = new Map<number, CalEvent[]>();
+  for (const event of events) {
+    const day = startOfDay(event.start).getTime();
+    const bucket = byDay.get(day);
+    if (bucket) bucket.push(event);
+    else byDay.set(day, [event]);
+  }
+  return byDay;
 }
 
 /** Its end (or instant) is behind `now` — what the calendar greys out. */
