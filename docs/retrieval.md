@@ -52,7 +52,13 @@ never name a client. Each page is rasterised and sent → the vector lands in
 `pages` beside that page's markdown, keyed on `(file, page_no)` and **stamped
 with the model and dim** → a query is embedded by the same backend → Rust ranks
 by dot product over vectors *in that space* → hits carry markdown and the
-`(file, page)` ref.
+`(file, page)` ref. The scan reads page IDs and packed vectors, scores on a
+blocking worker without allocating decoded vectors, and keeps the top `limit`
+(at most 50). Only those winners load markdown and file metadata; both reads
+share one SQLite snapshot, with scan order breaking score ties.
+
+Ingest reads and validates each parse/embed JSON artifact once on its blocking
+worker, and uses the already-read parse page count to check cached coverage.
 
 `.emb.json` beside each PDF records that it is indexed (`{pdf, model, dim,
 dtype, instruction, page_count, pages}`), written temp-then-rename.

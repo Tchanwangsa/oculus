@@ -97,6 +97,10 @@ semester from `/api/user`. The token is in [auth.md](./auth.md).
 
 ## Echo360 is an LTI launch with up to two streams
 
+The app's Echo360 commands run synchronous HTTP, file I/O and ffmpeg on
+blocking workers, leaving async runtime threads available for other commands.
+Workers share the course session cache and source-qualified cancellation flags.
+
 - Canvas mints an OAuth-signed form on the course's external-tool page;
   POSTing it to Echo360 creates the session, and the CloudFront cookies that
   come back are what the media CDN accepts.

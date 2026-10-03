@@ -33,9 +33,37 @@ pub fn proxy_cookie(app: &AppHandle) -> String {
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn read_course_file(relative_path: String) -> Result<String, String> {
-    let path = crate::paths::data_dir().join(&relative_path);
-    std::fs::read_to_string(path).map_err(|e| e.to_string())
+pub async fn read_course_file(relative_path: String) -> Result<String, String> {
+    crate::blocking::run(move || {
+        let path = crate::paths::data_dir().join(&relative_path);
+        std::fs::read_to_string(path).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+fn file_has_content(root: &Path, relative_path: &str) -> Result<bool, String> {
+    if relative_path.is_empty() || Path::new(relative_path).components()
+        .any(|part| !matches!(part, std::path::Component::Normal(_))) {
+        return Err("expected a path relative to the library".into());
+    }
+    let path = match root.join(relative_path).canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.to_string()),
+    };
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    if !path.starts_with(&root) { return Err("path is outside the library".into()); }
+    let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
+    Ok(metadata.is_file() && metadata.len() > 0)
+}
+
+/// Check a parsed sibling's presence without transferring its markdown.
+#[tauri::command]
+pub async fn course_file_has_content(relative_path: String) -> Result<bool, String> {
+    crate::blocking::run(move || {
+        file_has_content(&crate::paths::data_dir(), &relative_path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -72,25 +100,32 @@ pub struct ImportOutcome {
 /// Copy picked files into a subject's uploads folder; one failure does not
 /// fail the rest.
 #[tauri::command]
-pub fn import_uploads(
+pub async fn import_uploads(
     subject_code: String,
     paths: Vec<String>,
 ) -> Result<Vec<ImportOutcome>, String> {
-    let data_dir = crate::paths::data_dir();
-    Ok(paths
-        .iter()
-        .map(|p| {
-            let src = Path::new(p);
-            let source = src
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| p.clone());
-            match store_upload(&data_dir, &subject_code, src) {
-                Ok((file, error)) => ImportOutcome { source, file: Some(file), error },
-                Err(e) => ImportOutcome { source, file: None, error: Some(e) },
-            }
-        })
-        .collect())
+    crate::blocking::run(move || {
+        // Imports share name allocation; keep simultaneous batches from choosing
+        // the same unused upload name while conversion runs off the command thread.
+        static IMPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = IMPORT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let data_dir = crate::paths::data_dir();
+        Ok(paths
+            .iter()
+            .map(|p| {
+                let src = Path::new(p);
+                let source = src
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| p.clone());
+                match store_upload(&data_dir, &subject_code, src) {
+                    Ok((file, error)) => ImportOutcome { source, file: Some(file), error },
+                    Err(e) => ImportOutcome { source, file: None, error: Some(e) },
+                }
+            })
+            .collect())
+    })
+    .await
 }
 
 fn store_upload(
@@ -386,22 +421,45 @@ pub async fn attach_document_file(
 /// (PDFs, plus Office files parsed via their derived sibling PDF).
 /// Returns (relative_path, status); paths with no parse output are omitted.
 #[tauri::command]
-pub fn scan_parsed_files(
+pub async fn scan_parsed_files(
     relative_paths: Vec<String>,
 ) -> Result<Vec<(String, String)>, String> {
-    let base = crate::paths::data_dir();
-    Ok(relative_paths
-        .into_iter()
-        .filter_map(|rel| {
-            let pdf_rel = crate::paths::doc_pdf_rel(&rel)?;
-            crate::parse::parse_mode(&base.join(&pdf_rel)).map(|mode| (rel, mode.to_string()))
-        })
-        .collect())
+    crate::blocking::run(move || {
+        let base = crate::paths::data_dir();
+        Ok(relative_paths
+            .into_iter()
+            .filter_map(|rel| {
+                let pdf_rel = crate::paths::doc_pdf_rel(&rel)?;
+                crate::parse::parse_mode(&base.join(&pdf_rel)).map(|mode| (rel, mode.to_string()))
+            })
+            .collect())
+    })
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn content_metadata_distinguishes_files_and_stays_inside_the_library() {
+        let scratch = crate::test_support::Scratch::new("file-content");
+        std::fs::write(scratch.join("empty.md"), b"").unwrap();
+        std::fs::write(scratch.join("full.md"), b"markdown").unwrap();
+        std::fs::create_dir(scratch.join("directory")).unwrap();
+        assert!(!file_has_content(&scratch, "empty.md").unwrap());
+        assert!(file_has_content(&scratch, "full.md").unwrap());
+        assert!(!file_has_content(&scratch, "missing.md").unwrap());
+        assert!(!file_has_content(&scratch, "directory").unwrap());
+        assert!(file_has_content(&scratch, "../outside.md").is_err());
+        assert!(file_has_content(&scratch, "/etc/passwd").is_err());
+        #[cfg(unix)] {
+            let outside = crate::test_support::Scratch::new("file-content-outside");
+            std::fs::write(outside.join("private.md"), b"outside").unwrap();
+            std::os::unix::fs::symlink(outside.join("private.md"), scratch.join("escape.md")).unwrap();
+            assert!(file_has_content(&scratch, "escape.md").is_err());
+        }
+    }
 
     /// `assets/` sits beside the note and is not itself reachable as a note.
     #[test]

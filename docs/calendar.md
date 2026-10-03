@@ -42,6 +42,8 @@ database, so it works offline.
 
 ## Canvas rows are replaced per subject after a sync
 
+- The app fetches through `blocking::run`, keeping synchronous Canvas HTTP
+  off the async runtime.
 - Not a scrape phase: nothing is written under `courses/`. After
   `scrape-complete` the frontend calls `calendar_sync_events` per subject
   (`syncCalendar`), gated by the `calendar` sync option; the CLI calls

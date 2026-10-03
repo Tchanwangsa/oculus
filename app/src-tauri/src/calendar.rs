@@ -273,11 +273,14 @@ fn markdown_of(html: Option<&str>) -> Option<String> {
 pub async fn calendar_sync_events(
     canvas_course_id: i64,
 ) -> Result<Vec<CalendarEvent>, String> {
-    let canvas = Canvas::open(&crate::paths::data_dir());
-    if !canvas.has_session() {
-        return Err("Not signed in to Canvas.".to_string());
-    }
-    fetch(&canvas, canvas_course_id)
+    crate::blocking::run(move || {
+        let canvas = Canvas::open(&crate::paths::data_dir());
+        if !canvas.has_session() {
+            return Err("Not signed in to Canvas.".to_string());
+        }
+        fetch(&canvas, canvas_course_id)
+    })
+    .await
 }
 
 #[cfg(test)]

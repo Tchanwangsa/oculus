@@ -53,6 +53,7 @@ WHEN old.markdown IS NOT new.markdown BEGIN
 END;
 "#;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -187,38 +188,38 @@ pub async fn ingest_reporting(
     force: bool,
     on_progress: ProgressSink,
 ) -> Result<IngestSummary, IngestError> {
-    let pdf = PathBuf::from(&pdf_path);
-    if !pdf.is_file() {
-        return Err(format!("not on disk: {}", pdf.display()).into());
-    }
-
-    // Markdown is optional: a PDF can embed before its parse lands. The parse
-    // record also gives the expected page count.
-    let parsed = crate::parse::read_record(&pdf);
-    let page_count = parsed.as_ref().map(|p| p.page_count).unwrap_or(0);
-    let markdown: std::collections::HashMap<i64, String> = parsed
-        .map(|p| p.pages.into_iter().map(|page| (page.page_no as i64, page.markdown)).collect())
-        .unwrap_or_default();
-
-    let skipped = !force && embed::is_embedded(&pdf);
-    let record = if skipped {
-        embed::read_record(&pdf)
-            .ok_or_else(|| IngestError::from(format!("{}: embedding record vanished", pdf.display())))?
-    } else {
-        let target = pdf.clone();
-        tauri::async_runtime::spawn_blocking(move || {
+    // Artifact JSON can be large; keep its reads and decoding on the same
+    // blocking worker as the backend, including already-embedded files.
+    let (record, markdown, skipped) = tauri::async_runtime::spawn_blocking(move || {
+        let pdf = PathBuf::from(pdf_path);
+        if !pdf.is_file() {
+            return Err(IngestError::from(format!("not on disk: {}", pdf.display())));
+        }
+        let parsed = crate::parse::read_record(&pdf);
+        let expected_pages = parsed.as_ref().map(|record| record.page_count);
+        let page_count = expected_pages.unwrap_or(0);
+        let markdown: HashMap<i64, String> = parsed
+            .map(|p| p.pages.into_iter().map(|page| (page.page_no as i64, page.markdown)).collect())
+            .unwrap_or_default();
+        let cached = if force { None } else {
+            embed::read_record(&pdf).filter(|record| record.is_current(expected_pages))
+        };
+        let skipped = cached.is_some();
+        let record = if let Some(record) = cached {
+            record
+        } else {
             let backend = embed::backend()?;
             embed::preflight(backend.as_ref())?;
-            let output = backend.embed(&target, page_count, &|progress| on_progress(progress))?;
+            let output = backend.embed(&pdf, page_count, &|progress| on_progress(progress))?;
             // The record lands (atomically) before the database hears of it.
-            output.write(&target)?;
-            Ok::<_, embed::EmbedError>(output)
-        })
-        .await
-        // A join failure is our panic, not the backend's: no discriminants.
-        .map_err(|e| IngestError::from(e.to_string()))?
-        .map_err(IngestError::from)?
-    };
+            output.write(&pdf)?;
+            output
+        };
+        Ok::<_, IngestError>((record, markdown, skipped))
+    })
+    .await
+    // A join failure is our panic, not the backend's: no discriminants.
+    .map_err(|e| IngestError::from(e.to_string()))??;
 
     let db = pool(db_file).await.map_err(IngestError::from)?;
     let mut tx = db.begin().await.map_err(|e| IngestError::from(e.to_string()))?;
@@ -227,7 +228,7 @@ pub async fn ingest_reporting(
     for page in &record.pages {
         let vec_bytes = blob_from_wire(page.page_no, &page.vector).map_err(IngestError::from)?;
         let page_no = page.page_no as i64;
-        let md = markdown.get(&page_no).cloned().unwrap_or_default();
+        let md = markdown.get(&page_no).map(String::as_str).unwrap_or_default();
         if !md.is_empty() {
             with_md += 1;
         }
@@ -247,7 +248,7 @@ pub async fn ingest_reporting(
         )
         .bind(file_id)
         .bind(page_no)
-        .bind(&md)
+        .bind(md)
         .bind(vec_bytes)
         .bind(&record.model)
         .bind(record.dim as i64)
@@ -315,8 +316,15 @@ pub async fn search_in(
     rank(db_file, &qvec, &model, dim as i64, limit, subject_ids).await
 }
 
-/// The brute-force half, with the query already embedded; split out so the
-/// space filter tests without a key or a network.
+fn score_blob(blob: &[u8], qvec: &[f32]) -> Option<f32> {
+    if blob.len() / 2 != qvec.len() { return None; }
+    Some(blob.chunks_exact(2).zip(qvec)
+        .map(|(bytes, query)| half::f16::from_le_bytes([bytes[0], bytes[1]]).to_f32() * query)
+        .sum())
+}
+
+/// Score on a blocking worker, keep only the requested matches, and hydrate
+/// their markdown after ranking. Both reads share one SQLite snapshot.
 async fn rank(
     db_file: &Path,
     qvec: &[f32],
@@ -327,6 +335,7 @@ async fn rank(
 ) -> Result<Vec<SearchHit>, String> {
     let limit = limit.clamp(1, 50) as usize;
     let db = pool(db_file).await?;
+    let mut tx = db.begin().await.map_err(|e| e.to_string())?;
     // Inlined: sqlx has no list binding, and these are i64s.
     let filter = if subject_ids.is_empty() {
         String::new()
@@ -337,8 +346,7 @@ async fn rank(
     // The space predicate, in SQL so retired vectors are never decoded.
     let sql = format!(
         r#"
-        SELECT p.file_id, p.page_no, p.embedding, p.markdown,
-               f.filename, f.relative_path, f.subject_id
+        SELECT p.id, p.embedding
         FROM pages p
         JOIN files f ON f.id = p.file_id
         WHERE p.embedding IS NOT NULL
@@ -349,34 +357,50 @@ async fn rank(
     let rows = sqlx::query(&sql)
         .bind(model)
         .bind(dim)
-        .fetch_all(&db)
+        .fetch_all(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
-    db.close().await;
-
-    let mut scored: Vec<SearchHit> = Vec::with_capacity(rows.len());
-    for row in rows {
-        let blob: Vec<u8> = row.try_get("embedding").map_err(|e| e.to_string())?;
-        let v = embed::unpack_vector(&blob);
-        // A row can claim the current dim and hold another width.
-        if v.len() != qvec.len() {
-            continue;
+    let qvec = qvec.to_vec();
+    let best = tauri::async_runtime::spawn_blocking(move || {
+        let mut scored: Vec<(i64, f32)> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let blob: &[u8] = row.try_get("embedding").map_err(|e| e.to_string())?;
+            let Some(score) = score_blob(blob, &qvec) else { continue; };
+            scored.push((row.try_get("id").map_err(|e| e.to_string())?, score));
         }
-        let score: f32 = v.iter().zip(qvec).map(|(a, b)| a * b).sum();
-        scored.push(SearchHit {
-            file_id: row.try_get("file_id").map_err(|e| e.to_string())?,
-            page_no: row.try_get("page_no").map_err(|e| e.to_string())?,
-            score,
-            filename: row.try_get("filename").map_err(|e| e.to_string())?,
-            relative_path: row.try_get("relative_path").map_err(|e| e.to_string())?,
-            subject_id: row.try_get("subject_id").map_err(|e| e.to_string())?,
-            markdown: row.try_get("markdown").map_err(|e| e.to_string())?,
-        });
-    }
+        // Stable, so equal scores keep the scan's order.
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+        scored.truncate(limit);
+        Ok::<_, String>(scored)
+    }).await.map_err(|e| e.to_string())??;
 
-    scored.sort_by(|a, b| b.score.total_cmp(&a.score));
-    scored.truncate(limit);
-    Ok(scored)
+    let mut hits = Vec::with_capacity(best.len());
+    if !best.is_empty() {
+        let ids = best.iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT p.id, p.file_id, p.page_no, p.markdown, f.filename, f.relative_path, f.subject_id
+             FROM pages p JOIN files f ON f.id = p.file_id WHERE p.id IN ({ids})"
+        );
+        let rows = sqlx::query(&sql).fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
+        let mut rows: HashMap<i64, _> = rows.into_iter()
+            .map(|row| row.try_get("id").map(|id| (id, row)))
+            .collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+        for (id, score) in best {
+            let row = rows.remove(&id).ok_or_else(|| format!("ranked page {id} vanished"))?;
+            hits.push(SearchHit {
+                file_id: row.try_get("file_id").map_err(|e| e.to_string())?,
+                page_no: row.try_get("page_no").map_err(|e| e.to_string())?,
+                score,
+                filename: row.try_get("filename").map_err(|e| e.to_string())?,
+                relative_path: row.try_get("relative_path").map_err(|e| e.to_string())?,
+                subject_id: row.try_get("subject_id").map_err(|e| e.to_string())?,
+                markdown: row.try_get("markdown").map_err(|e| e.to_string())?,
+            });
+        }
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    db.close().await;
+    Ok(hits)
 }
 
 // ── Stats ────────────────────────────────────────────────────────────────────
@@ -652,6 +676,61 @@ mod tests {
                 .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].subject_id, 20);
+    }
+
+    #[tokio::test]
+    async fn a_current_artifact_ingests_without_a_backend_and_preserves_existing_text() {
+        let scratch = Scratch::new("retrieval-cached");
+        let path = scratch.join("oculus.db");
+        let pdf = scratch.join("cached.pdf");
+        std::fs::write(&pdf, b"fixture: no PDF rendering is needed").unwrap();
+        let parsed = crate::parse::ParseOutput::new(&pdf, 1, vec![], None, 0);
+        std::fs::write(crate::parse::pages_path(&pdf), serde_json::to_vec(&parsed).unwrap()).unwrap();
+        embed::EmbedOutput::new(&pdf, 1, vec![embed::EmbedPage {
+            page_no: 1, vector: embed::encode_vector(&axis(0)).unwrap(),
+        }]).write(&pdf).unwrap();
+        let db = fixture(&path).await;
+        add_file(&db, 1, 10, "cached.pdf").await;
+        add_page(&db, 1, 1, &axis(1), embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
+        db.close().await;
+        let summary = ingest(&path, 1, pdf.to_string_lossy().into_owned(), false).await.unwrap();
+        assert!(summary.skipped);
+        assert_eq!(summary.pages_embedded, 1);
+        assert_eq!(summary.pages_with_markdown, 0);
+        let hits = rank(&path, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 1, &[]).await.unwrap();
+        assert_eq!(hits[0].score, 1.0);
+        assert_eq!(hits[0].markdown, "page 1 of 1");
+    }
+
+    #[test]
+    fn packed_dot_product_matches_decoding_without_allocating_a_vector() {
+        let vector: Vec<_> = (0..embed::EMBED_DIM).map(|i| (i as f32 - 256.0) / 257.0).collect();
+        let blob = embed::pack_vector(&vector).unwrap();
+        let expected: f32 = embed::unpack_vector(&blob).iter().zip(&vector).map(|(a, b)| a * b).sum();
+        assert_eq!(score_blob(&blob, &vector).unwrap().to_bits(), expected.to_bits());
+        assert!(score_blob(&blob[..blob.len() - 2], &vector).is_none());
+    }
+
+    #[tokio::test]
+    async fn limited_ranking_hydrates_the_best_pages_in_score_order() {
+        let scratch = Scratch::new("retrieval-top");
+        let path = scratch.join("oculus.db");
+        let db = fixture(&path).await;
+        add_file(&db, 1, 10, "ranked.pdf").await;
+        for page in 1..=80 {
+            let mut vector = axis(0);
+            vector[1] = (80 - page) as f32;
+            add_page(&db, 1, page, &vector, embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
+        }
+        // Claims the right space, but its blob has the wrong width.
+        add_page(&db, 1, 81, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
+        sqlx::query("UPDATE pages SET embedding = ?1 WHERE page_no = 81")
+            .bind(vec![0u8; 4]).execute(&db).await.unwrap();
+        db.close().await;
+        let hits = rank(&path, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 3, &[]).await.unwrap();
+        assert_eq!(hits.iter().map(|hit| hit.page_no).collect::<Vec<_>>(), vec![80, 79, 78]);
+        assert_eq!(hits[0].markdown, "page 80 of 1");
+        assert!(hits.windows(2).all(|pair| pair[0].score >= pair[1].score));
     }
 
     #[tokio::test]

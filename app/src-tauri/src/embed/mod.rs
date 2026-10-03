@@ -64,16 +64,7 @@ pub fn is_embedded(pdf: &Path) -> bool {
     let Some(record) = read_record(pdf) else {
         return false;
     };
-    if record.model != EMBED_MODEL
-        || record.dim != EMBED_DIM
-        || record.instruction != QUERY_INSTRUCTION
-    {
-        return false;
-    }
-    match crate::parse::read_record(pdf) {
-        Some(parsed) => record.pages.len() >= parsed.page_count as usize,
-        None => true,
-    }
+    record.is_current(crate::parse::read_record(pdf).map(|parsed| parsed.page_count))
 }
 
 // ── Vector encoding ──────────────────────────────────────────────────────────
@@ -168,6 +159,14 @@ pub struct EmbedOutput {
 }
 
 impl EmbedOutput {
+    /// Identity and coverage checked against the parse record already read by
+    /// the caller, so ingest does not decode either artifact twice.
+    pub(crate) fn is_current(&self, expected_pages: Option<u32>) -> bool {
+        self.model == EMBED_MODEL && self.dim == EMBED_DIM
+            && self.instruction == QUERY_INSTRUCTION
+            && expected_pages.is_none_or(|count| self.pages.len() >= count as usize)
+    }
+
     /// Pages in ascending order, one per page number, none outside
     /// `1..=page_count`. Missing pages are dropped, not filled: unlike an empty
     /// markdown string there is no empty vector, and a zero one scores 0

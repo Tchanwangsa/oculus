@@ -173,6 +173,7 @@ pub fn run() {
             scrape::rescrape_file,
             scrape::parse_file,
             files::read_course_file,
+            files::course_file_has_content,
             files::open_course_file,
             files::scan_parsed_files,
             files::import_uploads,

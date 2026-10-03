@@ -46,6 +46,10 @@ its failure rules are in [parsing.md](./parsing.md).
 - `parse::events` and `embed::events` bind the app handle once, first thing in
   `setup`, instead of threading it through the call path. The CLI never binds,
   so the same parse and embed code runs headless and its emits are no-ops.
+- Library text reads, bulk parse-artifact scans, upload import/conversion,
+  Canvas calendar sync and Echo360's HTTP, downloads and ffmpeg run through
+  `blocking::run`, so synchronous I/O cannot hold Tauri's command thread.
+  Upload batches serialize their name allocation.
 - Credentials go keychain → in-process client. Neither key enters SQLite, the
   WebView, a health response or a progress event. The local engine needs none.
 
