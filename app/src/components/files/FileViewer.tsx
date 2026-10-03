@@ -18,6 +18,7 @@ import { useDataDir } from "@/hooks/useDataDir";
 import type { DbFile } from "@/lib/db";
 import type { FileLocate } from "@/stores/sidePanelStore";
 import { readCourseFile } from "@/lib/courseFiles";
+import { copyAsMarkdown, dragAsMarkdown } from "@/lib/selectionMarkdown";
 import { LoadingFill } from "@/components/ui/PageParts";
 
 /**
@@ -235,7 +236,11 @@ function MdFromPath({
     );
   return (
     <div className="flex-1 overflow-y-auto">
-      <article className="markdown-body px-6 py-5 max-w-3xl">
+      <article
+        className="markdown-body px-6 py-5 max-w-3xl"
+        onCopy={copyAsMarkdown}
+        onDragStart={dragAsMarkdown}
+      >
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeRaw, rehypeKatex]}

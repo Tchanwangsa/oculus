@@ -1,6 +1,9 @@
+import type { ClipboardEvent, DragEvent } from "react";
+
 /**
- * A partial selection in a rendered reply, walked back into markdown (a whole
- * message copies its source instead). Special cases:
+ * A partial selection in rendered markdown (a chat reply, a parsed PDF),
+ * walked back into markdown (a whole message copies its source instead).
+ * Special cases:
  * - KaTeX renders twice (MathML + spans); the TeX comes from its `<annotation>`
  *   and the subtree is never descended into.
  * - A mermaid figure carries its fence source in `data-md` (`Mermaid.tsx`), as
@@ -272,4 +275,29 @@ export function selectionMarkdown(selection: Selection | null): string {
   if (root.nodeType === Node.TEXT_NODE) return tidy(clipText(root as Text, range));
   if (root.nodeType !== Node.ELEMENT_NODE) return "";
   return container(root as Element, range).join("\n\n").trim();
+}
+
+/** The selection under `target` as markdown, or "" — a selection inside a
+ *  field belongs to the field, and it is already text. */
+function markdownFor(target: EventTarget | null): string {
+  if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) {
+    return "";
+  }
+  return selectionMarkdown(window.getSelection());
+}
+
+/** `onCopy` for rendered markdown: the selection goes out as `text/plain`
+ *  markdown only. */
+export function copyAsMarkdown(e: ClipboardEvent) {
+  const md = markdownFor(e.target);
+  if (!md) return;
+  e.clipboardData.setData("text/plain", md);
+  // Without this the browser writes its own flavours over ours.
+  e.preventDefault();
+}
+
+/** The same, dragged out. No `preventDefault` — see docs/frontend.md (WebKit drag). */
+export function dragAsMarkdown(e: DragEvent) {
+  const md = markdownFor(e.target);
+  if (md) e.dataTransfer.setData("text/plain", md);
 }

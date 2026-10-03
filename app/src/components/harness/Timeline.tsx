@@ -15,7 +15,7 @@ import { FileChip } from "@/components/markdown/FileChip";
 import { openCitation, splitLibraryPaths, type TextPart } from "@/lib/openFile";
 import { attachmentSrc } from "@/lib/attachments";
 import { ImageLightbox } from "@/components/ui/Lightbox";
-import { selectionMarkdown } from "@/lib/selectionMarkdown";
+import { copyAsMarkdown, dragAsMarkdown } from "@/lib/selectionMarkdown";
 import { useDataDir } from "@/hooks/useDataDir";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -625,30 +625,6 @@ function Pending({ threadId, actions }: { threadId: number; actions: PendingActi
       ))}
     </>
   );
-}
-
-/** A selection copies as markdown, read back from the DOM
- *  (`lib/selectionMarkdown.ts`), as `text/plain` only. */
-function markdownFor(target: EventTarget | null): string {
-  // A selection inside a field belongs to the field, and it is already text.
-  if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) {
-    return "";
-  }
-  return selectionMarkdown(window.getSelection());
-}
-
-function copyAsMarkdown(e: React.ClipboardEvent) {
-  const md = markdownFor(e.target);
-  if (!md) return;
-  e.clipboardData.setData("text/plain", md);
-  // Without this the browser writes its own flavours over ours.
-  e.preventDefault();
-}
-
-/** The same, dragged out. No `preventDefault` — see docs/frontend.md (WebKit drag). */
-function dragAsMarkdown(e: React.DragEvent) {
-  const md = markdownFor(e.target);
-  if (md) e.dataTransfer.setData("text/plain", md);
 }
 
 export interface PendingActions {

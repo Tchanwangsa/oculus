@@ -390,7 +390,9 @@ global.
   summaries sit inside buttons, and a `<p>` in a `<button>` closes it early.
 - **`FileViewer` resolves in-file links locally** — relative links and Canvas
   `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`
-  (`app/src/lib/libraryLinks.ts`, shared with the note editor).
+  (`app/src/lib/libraryLinks.ts`, shared with the note editor). A selection
+  in its rendered markdown copies or drags out as markdown, maths as TeX
+  (`app/src/lib/selectionMarkdown.ts`, shared with the chat timeline).
 - **A ```mermaid fence is caught at `pre`** (`Mermaid.tsx`), and the original
   `<pre>` shows until it renders or if it never parses. Config and drawing are
   `mermaidRender.ts`:
