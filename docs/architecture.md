@@ -99,6 +99,8 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
 
 Schema is the append-only, numbered migration list in
 `app/src-tauri/src/migrations.rs`; the highest `version` is the current schema.
+An applied migration's SQL, comments and whitespace included, is frozen;
+editing it fails `Database.load` with a checksum mismatch.
 In the app the *frontend* writes the scrape tables, upserting through
 `app/src/lib/db.ts` as scrape events arrive. Headless, `store.rs` writes the
 same rows with the same SQL, so a CLI sync looks like an app sync. The CLI

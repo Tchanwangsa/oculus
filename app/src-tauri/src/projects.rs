@@ -31,7 +31,7 @@ PRAGMA defer_foreign_keys = ON;
 CREATE TABLE project_tasks_new (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-    -- Itself, not `project_tasks` — see the doc comment.
+    -- Itself, not `project_tasks`, until the rename below — see the doc comment.
     parent_id   INTEGER REFERENCES project_tasks_new(id) ON DELETE CASCADE,
     title       TEXT    NOT NULL,
     body        TEXT,

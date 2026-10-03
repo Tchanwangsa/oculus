@@ -182,9 +182,11 @@ Neither is a fallback for the other. Both stop where parsing does.
 
 `pages_fts` is external content (`content='pages'`), kept in step by triggers
 whichever process writes; the update trigger is `UPDATE OF markdown` so an
-embed's blob write does not re-index text. A `files` cascade delete fires no
-trigger, so stale entries can linger — every read joins `pages ON pages.id =
-pages_fts.rowid`, so they cost ranking, never correctness.
+embed's blob write does not re-index text, and fires only when the markdown
+actually changed (migration 38), so an upsert of the same text leaves the
+index untouched. A `files` cascade delete fires no trigger, so stale entries can linger — every read joins
+`pages ON pages.id = pages_fts.rowid`, so they cost ranking, never
+correctness.
 
 ## Gotchas
 

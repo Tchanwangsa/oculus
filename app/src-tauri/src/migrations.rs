@@ -703,5 +703,26 @@ CREATE TABLE IF NOT EXISTS browser_favicons (
             sql: crate::projects::UNFILED_TASKS_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 38,
+            description: "lexical page search: reindex only changed markdown",
+            sql: crate::retrieval::PAGES_FTS_CHANGED_SQL,
+            kind: MigrationKind::Up,
+        },
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn applied_task_rebuild_sql_keeps_its_checksum() {
+        let migration = super::all().into_iter().find(|migration| migration.version == 37).unwrap();
+        let migration = sqlx::migrate::Migration::new(
+            migration.version, migration.description.into(),
+            sqlx::migrate::MigrationType::Simple, migration.sql.into(), false,
+        );
+        let checksum: String = migration.checksum.iter().map(|byte| format!("{byte:02x}")).collect();
+        assert_eq!(checksum, "5b74e95b4722a907975ca2d3987acc2450993baeb45734c2b327c92821c54bf18243b1ff91d7225967de9ec955470809",
+            "SQL comments and whitespace are part of an applied migration's identity");
+    }
 }

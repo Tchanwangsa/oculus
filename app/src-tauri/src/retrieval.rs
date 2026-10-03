@@ -41,6 +41,18 @@ CREATE TRIGGER pages_fts_au AFTER UPDATE OF markdown ON pages BEGIN
 END;
 "#;
 
+/// Upserts name `markdown` even when its value is unchanged. Keep those
+/// writes from deleting and reinserting the same FTS terms (migration 38).
+pub const PAGES_FTS_CHANGED_SQL: &str = r#"
+DROP TRIGGER pages_fts_au;
+CREATE TRIGGER pages_fts_au AFTER UPDATE OF markdown ON pages
+WHEN old.markdown IS NOT new.markdown BEGIN
+    INSERT INTO pages_fts(pages_fts, rowid, markdown)
+    VALUES ('delete', old.id, old.markdown);
+    INSERT INTO pages_fts(rowid, markdown) VALUES (new.id, new.markdown);
+END;
+"#;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -684,9 +696,9 @@ mod fts_tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::SqlitePool;
 
-    use super::PAGES_FTS_SQL;
+    use super::{PAGES_FTS_SQL, PAGES_FTS_CHANGED_SQL};
 
-    /// A `pages` table and the FTS index over it, from the SQL migration 35 runs.
+    /// A `pages` table and the FTS index over it, from the SQL migrations 35 and 38 run.
     async fn pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
@@ -711,6 +723,7 @@ mod fts_tests {
             .execute(&pool)
             .await
             .expect("pages_fts");
+        sqlx::raw_sql(PAGES_FTS_CHANGED_SQL).execute(&pool).await.expect("changed-only trigger");
         pool
     }
 
@@ -761,6 +774,24 @@ mod fts_tests {
             .await
             .expect("delete");
         assert!(hits(&pool, "dominant").await.is_empty(), "delete trigger");
+    }
+
+    #[tokio::test]
+    async fn repeated_upserts_leave_the_fts_index_untouched() {
+        let pool = pool().await;
+        let upsert = "INSERT INTO pages (file_id, page_no, markdown) VALUES (1, 1, ?1)
+                      ON CONFLICT(file_id, page_no) DO UPDATE SET markdown = excluded.markdown";
+        sqlx::query(upsert).bind("Shannon entropy").execute(&pool).await.unwrap();
+        let before: i64 = sqlx::query_scalar("SELECT total_changes()").fetch_one(&pool).await.unwrap();
+        sqlx::query(upsert).bind("Shannon entropy").execute(&pool).await.unwrap();
+        let unchanged: i64 = sqlx::query_scalar("SELECT total_changes()").fetch_one(&pool).await.unwrap();
+        assert_eq!(unchanged - before, 1, "only the page row should be written");
+        assert_eq!(hits(&pool, "entropy").await, vec![1]);
+        sqlx::query(upsert).bind("Nash equilibrium").execute(&pool).await.unwrap();
+        let changed: i64 = sqlx::query_scalar("SELECT total_changes()").fetch_one(&pool).await.unwrap();
+        assert!(changed - unchanged > 1, "changed text must update the FTS index");
+        assert!(hits(&pool, "entropy").await.is_empty());
+        assert_eq!(hits(&pool, "nash").await, vec![1]);
     }
 
     /// `snippet()` marks matched prose; prefix terms answer mid-word.
