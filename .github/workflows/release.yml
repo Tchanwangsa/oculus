@@ -1,0 +1,61 @@
+# Builds the desktop bundle with tauri-action and attaches it to a draft GitHub
+# release tagged from the app version (v<version>). Run by hand from the
+# Actions tab after bumping the version. See docs/development.md#ci-and-releases.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            os: macos-latest
+            args: ""
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      SCCACHE_GHA_ENABLED: "true"
+      # Ad-hoc signature: the bundle runs, but macOS quarantines a downloaded
+      # copy until `xattr -dr com.apple.quarantine` clears it. A Developer ID
+      # certificate and notarisation replace this.
+      APPLE_SIGNING_IDENTITY: "-"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: app/package.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.11
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+          cache-targets: false
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: bun install --frozen-lockfile
+
+      # beforeBuildCommand fetches ffmpeg and pdfium and stages the CLI.
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tauriScript: bun tauri
+          args: ${{ matrix.args }}
+          tagName: v__VERSION__
+          releaseName: Oculus v__VERSION__
+          releaseCommitish: ${{ github.sha }}
+          generateReleaseNotes: true
+          releaseDraft: true
+          prerelease: true
+          uploadWorkflowArtifacts: true

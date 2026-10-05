@@ -1,0 +1,66 @@
+# Checks every push to master and every pull request on a fresh macOS checkout:
+# the frontend tests and bundle, the Rust tests, and that the generated CLI
+# reference matches the binary. See docs/development.md#ci-and-releases.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+    env:
+      CARGO_TERM_COLOR: always
+      # app/src-tauri/.cargo/config.toml names sccache as rustc's wrapper, so
+      # every cargo call fails without it on PATH.
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: app/package.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.11
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+          # sccache already caches compiled crates; a multi-GB target/ would
+          # crowd the repo's cache quota.
+          cache-targets: false
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+      - name: Frontend and script tests
+        run: bun run test
+      - name: Type-check and bundle the frontend
+        run: bun run build
+
+      - name: Fetch ffmpeg and pdfium
+        run: bun run ffmpeg && bun run pdfium
+      # tauri-build refuses to compile anything until every externalBin exists,
+      # and stage-cli is what bootstraps the oculus sidecar on a fresh checkout.
+      - name: Build and stage the oculus CLI
+        run: bun run stage-cli
+      - name: Rust tests
+        working-directory: app/src-tauri
+        run: cargo test --release --locked
+
+      - name: CLI reference matches the binary
+        run: |
+          bun run docs:cli
+          git diff --exit-code -- ../docs/cli-reference.md

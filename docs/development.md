@@ -17,6 +17,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
 | How an agent thread finds `oculus` | `app/src-tauri/src/harness/discover.rs` |
+| CI checks and the release bundle | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
 ## Commands
 
@@ -78,6 +79,39 @@ trusting one, which covers the seconds when the dev path has no binary at all.
 CLI ships inside the bundle because the keep-alive LaunchAgent runs it
 ([auth.md](./auth.md)), and the reference is regenerated at the one moment a
 current release binary is guaranteed to exist.
+
+## CI proves a fresh checkout builds; releases are cut by hand
+
+`ci.yml` runs on every push to `master` and every pull request, on a macOS
+runner with nothing cached but crates: `bun run test`, `bun run build`, the
+two native fetches, `stage-cli`, `cargo test --release --locked`, then
+`docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
+reference fails. `stage-cli` comes before any cargo call because tauri-build
+refuses to compile until every `externalBin` exists, and it is what writes the
+placeholder sidecar on a clean tree. The release profile is shared with that
+CLI build, so the tests reuse its artifacts. sccache is installed because
+`app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
+
+`release.yml` is `workflow_dispatch` only. To cut a release, bump `version` in
+`app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` together, push,
+then run **Release** from the Actions tab. `tauri-apps/tauri-action` runs
+`tauri build` (so `beforeBuildCommand` fetches natives and stages the CLI),
+creates tag `v<version>` on that commit, and attaches the `.dmg` and `.app` to
+a draft prerelease; the same files are kept as workflow artifacts. Publishing
+the draft is a manual step on GitHub.
+
+- The matrix has one entry, Apple Silicon. Another platform is one more
+  `include` with its runner and `args` (`--target …`); the sidecars are named by
+  `hostTriple()`, so build on the runner whose triple you want.
+- The bundle is signed ad-hoc (`APPLE_SIGNING_IDENTITY: "-"`). A downloaded copy
+  is quarantined — `xattr -dr com.apple.quarantine /Applications/Oculus.app` —
+  and, having no team identifier, re-prompts for keychain items after every
+  update. A Developer ID certificate plus notarisation (the `APPLE_*` secrets
+  tauri-action reads) removes both.
+- The installed app and `tauri dev` share the identifier `com.tchan.oculus`, so
+  they open the same library, database and keychain items. Never run both at
+  once: each re-points the keep-alive LaunchAgent at its own `oculus` at
+  startup.
 
 ## Template edits reach the library only through `oculus docs`
 
