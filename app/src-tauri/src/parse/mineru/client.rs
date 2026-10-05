@@ -24,7 +24,7 @@ use crate::parse::{
     check_size, parse_config, Health, ParseError, ParseOutput, ParsePage, Parser, Progress,
     PARSER_VERSION,
 };
-use crate::ratelimit::{hold, nap, Retry, TokenBucket};
+use crate::ratelimit::{hold, nap, transport_detail, Retry, TokenBucket};
 
 use super::batch::{BatchRun, Batcher};
 use super::ledger::{
@@ -871,13 +871,6 @@ fn safe_code(code: Option<&Value>) -> String {
         Some(Value::Number(number)) => number.to_string(),
         Some(Value::String(text)) => sanitise_code(text),
         _ => "unknown".into(),
-    }
-}
-
-pub(super) fn transport_detail(transport: &ureq::Transport) -> String {
-    match transport.message() {
-        Some(message) => format!("{}: {message}", transport.kind()),
-        None => transport.kind().to_string(),
     }
 }
 

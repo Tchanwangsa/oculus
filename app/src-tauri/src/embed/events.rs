@@ -41,6 +41,8 @@ pub fn failed_with(
     retryable: Option<bool>,
     latching: Option<bool>,
 ) {
+    // The UI keeps only the error status, so the sentence also goes to stderr.
+    eprintln!("[oculus] embed failed: {relative_path}: {message}");
     CHANNEL.emit(Status::new(relative_path, subject_id, "error")
         .failure(message, kind, retryable, latching));
 }

@@ -21,7 +21,7 @@ use crate::embed::{
     Health, Progress, EMBED_DIM, EMBED_MODEL,
 };
 
-use crate::ratelimit::{nap, Retry};
+use crate::ratelimit::{nap, transport_detail, Retry};
 
 use super::batch::{self, Limits, RequestRun};
 use super::ledger::{is_about_credit, RateGate, UsageLedger};
@@ -335,14 +335,6 @@ fn decode_embedding(value: &Value) -> Result<Vec<f32>, EmbedError> {
             })
             .collect(),
         _ => Err(EmbedError::Document { code: "embedding-wrong-type".into() }),
-    }
-}
-
-/// The local transport kind, never a response body.
-fn transport_detail(transport: &ureq::Transport) -> String {
-    match transport.message() {
-        Some(message) => format!("{}: {message}", transport.kind()),
-        None => transport.kind().to_string(),
     }
 }
 

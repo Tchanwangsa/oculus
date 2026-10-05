@@ -1,5 +1,5 @@
 //! The pacing both cloud clients (MinerU, Voyage) share: a token bucket, a
-//! counting semaphore, and the retry ladder.
+//! counting semaphore, the retry ladder, and how a transport failure reads.
 
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -155,6 +155,26 @@ impl Retry {
     }
 }
 
+// ── Transport failures ───────────────────────────────────────────────────────
+
+/// A transport failure as one line: kind, message, then the source chain,
+/// which is where the cause lives ("certificate expired", "connection reset").
+/// Never the URL — a signed one carries its signature in the query.
+pub fn transport_detail(transport: &ureq::Transport) -> String {
+    let mut detail = transport.kind().to_string();
+    if let Some(message) = transport.message() {
+        detail.push_str(": ");
+        detail.push_str(message);
+    }
+    let mut source = std::error::Error::source(transport);
+    while let Some(cause) = source {
+        detail.push_str(": ");
+        detail.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    detail
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,5 +220,18 @@ mod tests {
             backoffs += 1;
         }
         assert_eq!(backoffs, 3);
+    }
+
+    #[test]
+    fn transport_detail_keeps_the_cause() {
+        // A port nobody listens on: the cause is only in the source chain.
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{port}/secret?signature=x");
+        let Err(ureq::Error::Transport(transport)) = ureq::get(&url).call() else {
+            panic!("expected a transport error");
+        };
+        let detail = transport_detail(&transport);
+        assert!(detail.to_lowercase().contains("refused"), "{detail}");
+        assert!(!detail.contains("signature"), "{detail}");
     }
 }

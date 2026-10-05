@@ -20,8 +20,9 @@ use serde_json::Value;
 use crate::parse::{
     parse_config, Health, ParseError, ParseOutput, Parser, Progress, PARSER_VERSION,
 };
+use crate::ratelimit::transport_detail;
 
-use super::client::{page_count, safe_extract, transport_detail};
+use super::client::{page_count, safe_extract};
 use super::{render, WorkDir};
 
 /// The `backend` stamped into every record this client writes.

@@ -57,6 +57,10 @@ must say so. `ParseError` keeps the answers distinguishable:
   `LATCH_PROBE_AFTER_MS`).
 - **`NotReady` is retryable and non-latching on purpose**: a local server that
   is stopped or still loading must not mark any file permanently broken.
+- **`Offline` names its cause**: `ratelimit::transport_detail` keeps ureq's
+  source chain ("certificate expired", "connection refused") and drops the URL,
+  and the sentence shows it. Every failure is also printed to stderr as
+  `[oculus] parse failed: <path>: <sentence>`, since the DB keeps only `error`.
 
 ## A parse takes minutes, and only the engine bounds it
 

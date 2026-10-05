@@ -411,9 +411,7 @@ impl fmt::Display for EmbedError {
                 "Indexing stopped at the {percent}% spend limit set in Settings → Library. \
                  Raise or turn off the limit there to carry on."
             ),
-            EmbedError::Offline(_) => {
-                write!(f, "Could not reach Voyage. Check your connection, then try again.")
-            }
+            EmbedError::Offline(detail) => write!(f, "Could not reach Voyage: {detail}"),
             EmbedError::Document { code } => write!(
                 f,
                 "Could not read the pages of this PDF to index it (error {code}). Other files \

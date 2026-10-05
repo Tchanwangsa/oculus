@@ -29,6 +29,8 @@ pub fn parsed(relative_path: &str, subject_id: i64) {
 }
 
 pub fn failed(relative_path: &str, subject_id: i64, error: &ParseError) {
+    // The UI keeps only the error status, so the sentence also goes to stderr.
+    eprintln!("[oculus] parse failed: {relative_path}: {error}");
     CHANNEL.emit(Status::new(relative_path, subject_id, "error").failure(
         error.to_string(), Some(error.kind()), Some(error.retryable()), Some(error.latching()),
     ));

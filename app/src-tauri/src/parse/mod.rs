@@ -360,9 +360,7 @@ impl fmt::Display for ParseError {
                 "MinerU's daily quota is used up. Parsing resumes on its own after the quota \
                  resets."
             ),
-            ParseError::Offline(_) => {
-                write!(f, "Could not reach MinerU. Check your connection, then try again.")
-            }
+            ParseError::Offline(detail) => write!(f, "Could not reach MinerU: {detail}"),
             ParseError::TooLarge { bytes, limit_bytes } => write!(
                 f,
                 "This PDF is {} and MinerU accepts files up to {}, so it was not sent.",
