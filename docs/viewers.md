@@ -68,6 +68,9 @@ classes work even when there are no dollar delimiters.
     walkers), figure links match the Markdown view's copy, and an end on an
     unparsed or unalignable page copies that page's text. It is bound in the
     **capture** phase: pdf.js's text layer writes its own copy and stops it.
+  - **Find is pdf.js's `PDFFindController` behind `ui/FindBar.tsx`**; each
+    viewer is a find target, and which one ⌘F reaches is
+    [find routing](./shell.md#f-reaches-one-registered-find).
   - **The page box names the pages on screen** — a spread, or in continuous
     scroll every page filling a fifth of the viewport or showing half of
     itself (`shownPages`) — and takes a page number to jump to.

@@ -16,6 +16,7 @@ import {
   Rows,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { FindBar } from "@/components/ui/FindBar";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -27,6 +28,7 @@ import {
 import { loadPdfjs, type Pdfjs } from "@/lib/pdfjs";
 import { centerIn, matchSpans } from "@/lib/locateQuote";
 import type { FileLocate } from "@/lib/openFile";
+import { selectContents, useFindTarget } from "@/lib/find";
 import { useDataDir } from "@/hooks/useDataDir";
 import { loadParsedPages } from "@/lib/citations";
 import { libraryImageSrc } from "@/lib/libraryLinks";
@@ -125,6 +127,9 @@ function shownPages(viewer: PdfjsViewer, mode: LayoutMode): Shown | null {
   return { first, last };
 }
 
+type Find = { open: boolean; query: string; status?: string };
+const FIND_CLOSED: Find = { open: false, query: "" };
+
 type Engine = {
   pdfjs: Pdfjs;
   viewer: PdfjsViewer;
@@ -155,6 +160,8 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
   const shownRef = useRef(shown);
   /** The page box's text while it has focus; null shows the live range. */
   const [pageDraft, setPageDraft] = useState<string | null>(null);
+  const [find, setFind] = useState<Find>(FIND_CLOSED);
+  const findRef = useRef<HTMLInputElement>(null);
   /** pdf.js's absolute scale (1 is actual size), as of the last change to the
    *  displayed percentage or to whether it sits at an end stop. */
   const [scale, setScale] = useState(1);
@@ -168,6 +175,8 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
   const modeRef = useRef(mode);
   modeRef.current = mode;
 
+  /** The whole viewer, toolbar included: what ⌘F engagement is judged on. */
+  const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   /** The parsed pages, once read; the copy handlers need them synchronously. */
   const pagesRef = useRef<ReadonlyMap<number, string> | null>(null);
@@ -204,11 +213,17 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
 
         const eventBus = new pdfjs.EventBus();
         const linkService = new pdfjs.PDFLinkService({ eventBus });
+        // The viewer hands it each document itself.
+        const findController = new pdfjs.PDFFindController({
+          linkService,
+          eventBus,
+        });
         const viewer = new pdfjs.PDFViewer({
           container,
           viewer: viewerEl,
           eventBus,
           linkService,
+          findController,
           // The page frame is drawn in `index.css` instead.
           removePageBorders: true,
         });
@@ -231,6 +246,34 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
         // Continuous scroll names the pages on screen; this fires per scroll
         // frame, and `syncShown` skips setState unless the range moved.
         eventBus.on("updateviewarea", syncShown);
+        const count = (m: { current: number; total: number }) =>
+          m.current ? `${m.current} of ${m.total}` : `${m.total} matches`;
+        // While a search is pending the last status stands, rather than
+        // blinking out on every keystroke.
+        eventBus.on(
+          "updatefindcontrolstate",
+          (e: { state: number; matchesCount: { current: number; total: number } }) =>
+            setFind((f) => {
+              const status =
+                e.state === pdfjs.FindState.PENDING
+                  ? f.status
+                  : e.state === pdfjs.FindState.NOT_FOUND
+                    ? "No results"
+                    : e.matchesCount.total
+                      ? count(e.matchesCount)
+                      : undefined;
+              return status === f.status ? f : { ...f, status };
+            }),
+        );
+        eventBus.on(
+          "updatefindmatchescount",
+          (e: { matchesCount: { current: number; total: number } }) =>
+            setFind((f) => {
+              if (!e.matchesCount.total) return f;
+              const status = count(e.matchesCount);
+              return status === f.status ? f : { ...f, status };
+            }),
+        );
         eventBus.on("scalechanging", (e: { scale: number }) => {
           // The toolbar displays whole percentages and only uses the exact
           // scale to disable the end-stop buttons. Ignore finer changes.
@@ -272,6 +315,8 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
     shownRef.current = { first: 1, last: 1 };
     setShown(shownRef.current);
     setPageDraft(null);
+    // `setDocument` resets the find controller; the bar goes with it.
+    setFind(FIND_CLOSED);
     setPagesReady(0);
 
     let cancelled = false;
@@ -386,6 +431,71 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
       viewer.pagesCount,
     );
   };
+
+  // ── Find ─────────────────────────────────────────────────────────────────
+  //
+  // pdf.js's `PDFFindController` searches and highlights; the bar only
+  // dispatches its `find` events and shows the status it reports back.
+
+  const runFind = (query: string, again: boolean, findPrevious = false) => {
+    const viewer = engineRef.current?.viewer;
+    viewer?.eventBus.dispatch("find", {
+      source: viewer,
+      // "" debounces and restarts from the current page; "again" steps.
+      type: again ? "again" : "",
+      query,
+      caseSensitive: false,
+      entireWord: false,
+      highlightAll: true,
+      findPrevious,
+      matchDiacritics: false,
+    });
+  };
+
+  const closeFind = () => {
+    const viewer = engineRef.current?.viewer;
+    viewer?.eventBus.dispatch("findbarclose", { source: viewer });
+    setFind(FIND_CLOSED);
+  };
+
+  /** Seeds the query from a text selection in the pages, then selects the
+   *  field, so a repeat ⌘F replaces what is there. */
+  const openFind = () => {
+    const container = containerRef.current;
+    const selection = window.getSelection();
+    const picked =
+      container &&
+      selection &&
+      !selection.isCollapsed &&
+      selection.rangeCount &&
+      container.contains(selection.getRangeAt(0).commonAncestorContainer)
+        ? selection.toString().replace(/\s+/g, " ").trim()
+        : "";
+    if (picked && picked !== find.query) {
+      setFind({ open: true, query: picked });
+      runFind(picked, false);
+    } else {
+      setFind((f) => (f.open ? f : { ...f, open: true }));
+    }
+    // After mount when the bar was closed.
+    requestAnimationFrame(() => findRef.current?.select());
+  };
+
+  const stepFind = (backwards: boolean) => {
+    if (!find.open) openFind();
+    else if (find.query) runFind(find.query, true, backwards);
+  };
+
+  // A PDF can be open in several tabs and side panels at once;
+  // `lib/find.ts` picks the one ⌘F reaches. Select All takes the pages, not
+  // the toolbar.
+  useFindTarget(rootRef, {
+    open: openFind,
+    step: stepFind,
+    selectAll: () => {
+      if (viewerElRef.current) selectContents(viewerElRef.current);
+    },
+  });
 
   // Arrow keys page in paged layouts; in scroll layout the list scrolls
   // natively, so the keys are left alone.
@@ -535,7 +645,7 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
   const paged = mode !== "scroll" && numPages > 1;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div ref={rootRef} className="flex flex-col h-full min-h-0">
       {/* One slim control row: layout · page · zoom */}
       <div className="shrink-0 flex items-center gap-3 px-3 h-9 border-b border-border-subtle bg-surface">
         <ToggleGroup
@@ -648,6 +758,22 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
           </Button>
         </div>
       </div>
+
+      {find.open && (
+        <FindBar
+          inputRef={findRef}
+          query={find.query}
+          onQueryChange={(query) => {
+            setFind((f) => ({ ...f, query, status: undefined }));
+            runFind(query, false);
+          }}
+          onStep={(backwards) => find.query && runFind(find.query, true, backwards)}
+          onClose={closeFind}
+          status={find.status}
+          placeholder="Find in PDF"
+          className="shrink-0 border-b border-border-subtle bg-surface"
+        />
+      )}
 
       {/* pdf.js throws unless its container is `absolute`. */}
       <div className="relative flex-1 min-h-0">

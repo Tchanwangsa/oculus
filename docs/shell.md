@@ -163,7 +163,7 @@ closed panel opens one on `/new`.
 
 Edit ▸ Find, Find Next and Find Previous emit `menu-find*`, which `AppLayout`
 hands to `routeFind` (`app/src/lib/find.ts`). Every mounted find registers a
-target: a browser tab and a DOM find over each
+target: a PDF viewer, a browser tab, and a DOM find over each
 pane — a tab's main page and its side panel's front item alike.
 
 - **One target answers**: of those on screen, the innermost holding focus,
@@ -176,7 +176,7 @@ pane — a tab's main page and its side panel's front item alike.
 - **A page hands ⌘F to its one find**: when the pointer, the last click or
   the pane fallback picks a page-level target or a DOM find, and exactly one
   non-DOM target sits directly inside it (no other target in between), that
-  one answers.
+  one answers — so the pointer over a PDF page's header searches the PDF.
   Focus never hands off: a text field on a page with one editor (a task's
   title) is how the rest of that page stays searchable.
 - **Every pane has a page find** (`PageFind`, mounted by `TabPane`'s `Pane`):
