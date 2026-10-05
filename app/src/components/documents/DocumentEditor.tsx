@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from "react";
 import { syntaxTree } from "@codemirror/language";
-import { EditorState } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -27,9 +26,9 @@ import {
   cancelDocumentSuggestion,
   pickDocumentImages,
   renameDocument,
-  saveDocument,
   suggestDocument,
 } from "@/lib/documents";
+import { documentSessions, type DocumentLease } from "@/lib/documentSessions";
 import {
   displayCode,
   displayName,
@@ -42,7 +41,6 @@ import { registerNoteLinkCommand } from "@/lib/noteShortcuts";
 import { fileTitle } from "@/lib/openFile";
 import { navigateActive } from "@/lib/tabRouters";
 import type { DbFile } from "@/lib/db";
-import { readCourseFile } from "@/lib/courseFiles";
 import { LoadingFill } from "@/components/ui/PageParts";
 
 import {
@@ -64,9 +62,6 @@ import { syncLiveFocus } from "./editor/livePreview";
 import { Toolbar } from "./editor/Toolbar";
 import type { EditorMode, SaveStatus, SuggestStatus } from "./DocumentControls";
 
-/** How long after the last keystroke the draft goes to disk. */
-const SAVE_DELAY_MS = 600;
-
 /** A freshly created note, still wearing the name Rust gave it. */
 const UNTITLED = /^Untitled(?:-\d+)?$/;
 
@@ -76,9 +71,9 @@ const UNTITLED = /^Untitled(?:-\d+)?$/;
  * re-serialised. Live mode renders markdown around the caret, Raw is the same
  * editor without that.
  *
- * The draft lives in a ref so every save (timer, blur, ⌘S, unmount) takes the
- * latest text, and writes are serialised — one in flight, looping until the
- * draft on disk is current — so saves never land out of order.
+ * The text and its saves belong to the note's session (`@/lib/documentSessions`),
+ * shared with every other editor of the same note: they stay identical, and
+ * one serialised write loop saves for all of them.
  */
 export function DocumentEditor({
   file,
@@ -100,8 +95,8 @@ export function DocumentEditor({
   onSuggestStatus: (status: SuggestStatus) => void;
 }) {
   const tabActive = useTabActive();
-  /** The text as loaded; after that the editor holds it. */
-  const [initial, setInitial] = useState<string | null>(null);
+  /** The row whose text the session has; the view is made once it does. */
+  const [loadedId, setLoadedId] = useState<number | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [title, setTitle] = useState(() => fileTitle(file));
   /** Picture-attach failures; separate from the save word, which the next
@@ -109,15 +104,12 @@ export function DocumentEditor({
   const [attachError, setAttachError] = useState<string | null>(null);
   const [view, setView] = useState<EditorView | null>(null);
   const [active, setActive] = useState<ActiveFormats>(NO_FORMATS);
-  /** The last save this mount made, and the words on disk — both move on
-   *  save, not per keystroke. The row's `modified_at` isn't re-read on save. */
+  /** The session's last save, and the words on disk — both move on save,
+   *  not per keystroke. The row's `modified_at` isn't re-read on save. */
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [words, setWords] = useState(0);
 
-  const draft = useRef("");
-  const saved = useRef("");
-  const timer = useRef<number | null>(null);
-  const inFlight = useRef<Promise<void> | null>(null);
+  const leaseRef = useRef<DocumentLease<DbFile> | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -154,81 +146,43 @@ export function DocumentEditor({
     [],
   );
 
-  /** Write the draft if it differs from disk. Idempotent. */
-  const flush = useCallback((): Promise<void> => {
-    if (timer.current != null) {
-      window.clearTimeout(timer.current);
-      timer.current = null;
-    }
-    if (inFlight.current) return inFlight.current;
-    if (draft.current === saved.current) return Promise.resolve();
-    const run = (async () => {
-      while (draft.current !== saved.current) {
-        const content = draft.current;
-        const id = fileRef.current.id;
-        statusRef.current({ state: "saving" });
-        try {
-          await saveDocument(fileRef.current, content);
-          saved.current = content;
-          // A save that lands after a file switch belongs to the old note.
-          if (fileRef.current.id === id) {
-            setSavedAt(Date.now());
-            setWords(countWords(content));
-          }
-          statusRef.current({ state: "saved" });
-        } catch (e) {
-          // Not retried: the next keystroke schedules another attempt.
-          statusRef.current({ state: "error", message: String(e) });
-          break;
-        }
-      }
-      inFlight.current = null;
-    })();
-    inFlight.current = run;
-    return run;
-  }, []);
+  /** Write the note if it differs from disk. Idempotent. */
+  const flush = useCallback(
+    (): Promise<void> => leaseRef.current?.flush() ?? Promise.resolve(),
+    [],
+  );
 
-  const schedule = useCallback(() => {
-    if (timer.current != null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      timer.current = null;
-      void flush();
-    }, SAVE_DELAY_MS);
-  }, [flush]);
-
-  // Keyed on the row, not its path: a rename must not reload the draft.
+  // Join the note's session, keyed on the row, not its path: a rename must
+  // not reload the text. Leaving writes anything unsaved (the session does).
   useEffect(() => {
     let live = true;
-    draft.current = "";
-    saved.current = "";
-    setInitial(null);
     setLoadError(null);
-    setSavedAt(null);
-    statusRef.current({ state: "idle" });
-    readCourseFile(file.relative_path)
-      .then((t) => {
-        if (!live) return;
-        draft.current = t;
-        saved.current = t;
-        setWords(countWords(t));
-        setInitial(t);
-      })
-      .catch((e) => live && setLoadError(String(e)));
+    const lease = documentSessions.open(file, {
+      status: (s) => statusRef.current(s),
+      saved: (text, at) => {
+        setSavedAt(at);
+        setWords(countWords(text));
+      },
+    });
+    leaseRef.current = lease;
+    const ready = () => {
+      setWords(countWords(lease.savedText));
+      setSavedAt(lease.savedAt);
+      setLoadedId(file.id);
+    };
+    if (lease.text !== null) ready();
+    else {
+      lease
+        .load()
+        .then(() => live && ready())
+        .catch((e) => live && setLoadError(String(e)));
+    }
     return () => {
       live = false;
+      if (leaseRef.current === lease) leaseRef.current = null;
+      lease.release();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file.id]);
-
-  // On leave, write anything unsaved; an in-flight save already loops on it.
-  useEffect(() => {
-    return () => {
-      if (timer.current != null) window.clearTimeout(timer.current);
-      timer.current = null;
-      if (!inFlight.current && draft.current !== saved.current) {
-        saveDocument(fileRef.current, draft.current).catch(console.error);
-      }
-    };
   }, [file.id]);
 
   // Pictures resolve against the note's folder, which a rename keeps.
@@ -282,16 +236,16 @@ export function DocumentEditor({
     [embed],
   );
 
-  // The view lives as long as the loaded text: a file switch replaces it, a
-  // rename does not. Creating it writes nothing — only an edit schedules.
+  // The view lives as long as the session: a file switch replaces it, a
+  // rename does not. It starts from the session's current text, so a second
+  // pane shows the first one's unsaved typing. Only a local edit schedules.
   useEffect(() => {
-    if (initial === null || !editorRef.current) return;
+    const lease = leaseRef.current;
+    const text = lease?.text;
+    if (loadedId === null || !lease || text == null || !editorRef.current) return;
     const onUpdate = (u: ViewUpdate) => {
-      if (u.docChanged) {
-        draft.current = u.state.doc.toString();
-        schedule();
-      }
-      if (u.focusChanged && !u.view.hasFocus) void flush();
+      if (u.docChanged) lease.changed(u.view, u.transactions);
+      if (u.focusChanged && !u.view.hasFocus) void lease.flush();
       if (u.docChanged || u.selectionSet || syntaxTree(u.state) !== syntaxTree(u.startState)) {
         const next = activeFormats(u.state);
         setActive((prev) => (sameFormats(prev, next) ? prev : next));
@@ -299,8 +253,7 @@ export function DocumentEditor({
     };
     const v = new EditorView({
       parent: editorRef.current,
-      state: EditorState.create({
-        doc: initial,
+      state: lease.restore({
         extensions: [
           noteExtensions({
             live: modeRef.current === "live",
@@ -315,17 +268,19 @@ export function DocumentEditor({
         ],
       }),
     });
+    const unbind = lease.bind(v);
     const unregisterLink = registerNoteLinkCommand(v.dom, () => toggleLink(v));
     viewRef.current = v;
     setView(v);
     setActive(activeFormats(v.state));
     return () => {
+      unbind();
       unregisterLink();
       v.destroy();
       viewRef.current = null;
       setView(null);
     };
-  }, [initial, schedule, flush, pastePictures, suggestConfig]);
+  }, [loadedId, pastePictures, suggestConfig]);
 
   // Off destroys the plugin, which cancels anything in flight.
   useEffect(() => {
@@ -351,7 +306,7 @@ export function DocumentEditor({
   }, [file.filename, file.category]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A new note opens on its title, selected, so typing replaces "Untitled".
-  const loaded = initial !== null;
+  const loaded = loadedId !== null;
   useEffect(() => {
     if (!loaded || !UNTITLED.test(fileTitle(fileRef.current))) return;
     titleRef.current?.focus();
@@ -383,26 +338,33 @@ export function DocumentEditor({
       setTitle(current);
       return;
     }
+    const lease = leaseRef.current;
+    if (!lease) {
+      setTitle(current);
+      return;
+    }
     try {
-      await flush();
       // A failed save keeps its error status and must not move the unsaved note.
-      if (draft.current !== saved.current) {
+      const moved = await lease.rename(async (note) => {
+        const path = await renameDocument(note, next);
+        return { ...note, relative_path: path, filename: path.slice(path.lastIndexOf("/") + 1) };
+      });
+      if (!moved) {
         setTitle(current);
         return;
       }
-      const path = await renameDocument(fileRef.current, next);
-      // Until the row reloads, saves must go to the new path.
+      // Until the row reloads, suggestions and `@` search use the new path.
       fileRef.current = {
         ...fileRef.current,
-        relative_path: path,
-        filename: path.slice(path.lastIndexOf("/") + 1),
+        relative_path: lease.file.relative_path,
+        filename: lease.file.filename,
       };
       setTitle(fileTitle(fileRef.current));
     } catch (e) {
       statusRef.current({ state: "error", message: String(e) });
       setTitle(current);
     }
-  }, [title, flush]);
+  }, [title]);
 
   const onTitleKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -450,7 +412,7 @@ export function DocumentEditor({
       </div>
     );
   }
-  if (initial === null) {
+  if (loadedId === null) {
     return <LoadingFill />;
   }
 
@@ -496,7 +458,7 @@ function countWords(text: string): number {
  * row's first sighting (`first_seen_at`: the app's own create, or when
  * `reconcileDocuments` found a note written elsewhere). Updated is the later
  * of the row's `modified_at` — bumped on every save and on an outside edit —
- * and this mount's own last save; a note never edited has none.
+ * and the session's last save; a note never edited has none.
  */
 function DocumentMeta({
   file,

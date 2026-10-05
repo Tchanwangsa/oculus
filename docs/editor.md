@@ -9,17 +9,18 @@ maths is [editor-maths.md](./editor-maths.md).
 
 | Piece | Location |
 | --- | --- |
-| Load, save, title and mode; header controls | `app/src/components/documents/DocumentEditor.tsx`, `app/src/components/documents/DocumentControls.tsx` |
+| The view, title and mode; header controls | `app/src/components/documents/DocumentEditor.tsx`, `app/src/components/documents/DocumentControls.tsx` |
 | Extensions: live preview, Raw mode, code, tables, widgets, commands | `app/src/components/documents/editor/` |
+| One session per note | `app/src/lib/documentSessions.ts` |
 
 ## The note editor is CodeMirror 6 over the file's exact text
 
 It lives in `app/src/components/documents/editor/`; nothing is re-serialised.
-`DocumentEditor.tsx` owns load, save, title and mode and loads only for a
+`DocumentEditor.tsx` owns the view, title and mode and loads only for a
 student document; its lightweight header controls live in
 `app/src/components/documents/DocumentControls.tsx`. `FilePage` keys the
-whole editor by row id: pending saves and image attachments belong to one
-note, while a rename keeps its editor. **Live** mode renders markdown in place —
+whole editor by row id: image attachments belong to one note, while a
+rename keeps its editor. **Live** mode renders markdown in place —
 headings, marks, links, lists and checkboxes, quotes, rules, code, pictures,
 KaTeX maths and mermaid diagrams — and shows a construct's source while the selection touches
 it (a heading, quote or list marker while the caret is on its line). **Raw**
@@ -27,11 +28,7 @@ is the same view with those decorations swapped out by a `Compartment`
 for `rawMode.ts`: monospace source with line numbers, markdown and
 frontmatter YAML coloured with the `--color-syntax-*` tokens.
 Under the title, `DocumentMeta` shows subject, created (`first_seen_at`),
-last updated (`modified_at` or this mount's last save) and a word count.
-`write_document` writes a hidden
-`.<name>.md.<pid>-<nanos>.tmp` sibling, fsyncs and renames it over the
-note, so a reader never sees a truncated file; the `.tmp` suffix keeps a
-leftover out of `list_documents`.
+last updated (`modified_at` or the session's last save) and a word count.
 
 - **Fenced code is parsed in its own language**
   (`app/src/components/documents/editor/codeLanguages.ts`): the info string's
@@ -82,6 +79,28 @@ leftover out of `list_documents`.
 Editor commands, links, maths and completions share `ancestorAt` in
 `app/src/components/documents/editor/syntax.ts`; each caller chooses its caret
 bias and eligibility rules at a construct's boundary.
+
+## Every editor of a note shares one session
+
+Sessions (`app/src/lib/documentSessions.ts`) are keyed by row id, because
+tabs stay mounted, a note can be open in both panes of a split tab, and Fast
+Refresh remounts editors. The session holds the text, the text on disk, the
+600 ms debounce and the one write in flight; writes loop until disk matches,
+and blur, ⌘S, the last editor leaving, `pagehide` and `beforeunload` flush.
+Only the first editor reads the file; later ones (another pane, a remount)
+take the session's text, so no read races a write. Each local change is
+replayed into the note's other views with the `syncedEdit` annotation and
+outside their undo history, so copies stay identical while selection, scroll
+and undo stay per view. A
+detaching view leaves its state (caret and undo history, as JSON) on the
+session and the next view starts from it (`lease.restore`) while the text
+still matches, so a remount never empties ⌘Z. A
+session is dropped a tick after no editor holds it and nothing is unsaved;
+a failed save keeps it, and its text, until the next edit retries. A
+rename holds writes until the move lands. `write_document` writes a hidden
+`.<name>.md.<pid>-<nanos>.tmp` sibling, fsyncs and renames it over the
+note, so a reader never sees a truncated file; the `.tmp` suffix keeps a
+leftover out of `list_documents`.
 
 ## Pictures and `@` links resolve to library files
 
