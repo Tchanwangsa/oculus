@@ -58,6 +58,16 @@ classes work even when there are no dollar delimiters.
   as both `ctrlKey` wheel and `gesture*` events; only the gesture zooms.
   - **Selection and cursor are pdf.js's own**: a drag selects text and the
     trackpad scrolls. `index.css` only recolours `::selection` to the accent.
+  - **A selection copies as the parse's markdown** when the file has one
+    (`app/src/lib/pdfSelectionMarkdown.ts`). Text layer and `.pages.json`
+    meet in `normalizeText` form and are aligned patience-diff style; the
+    selection's ends land in the pages joined as one document, because
+    MinerU files a paragraph that runs onto the next page under the page it
+    starts on. The slice grows to keep maths, figures, links, code and HTML
+    tables whole (tables come out as pipe tables through `selectionMarkdown`'s
+    walkers), figure links match the Markdown view's copy, and an end on an
+    unparsed or unalignable page copies that page's text. It is bound in the
+    **capture** phase: pdf.js's text layer writes its own copy and stops it.
   - **The page box names the pages on screen** — a spread, or in continuous
     scroll every page filling a fifth of the viewport or showing half of
     itself (`shownPages`) — and takes a page number to jump to.

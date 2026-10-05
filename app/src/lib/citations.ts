@@ -277,7 +277,7 @@ const paged = new Map<string, Promise<PagedMd | null>>();
  * The parser writes the `.md` as the `.pages.json` pages' markdown joined
  * with "\n\n" (`document_markdown` in `app/src-tauri/src/parse/mod.rs`), blank
  * pages keeping their slot, so page k starts at line
- * 1 + Σ_{j<k} (lines(md_j) + 1). Cached per path for the session.
+ * 1 + Σ_{j<k} (lines(md_j) + 1). Cached per path; a failed read is retried.
  */
 function loadPaged(mdPath: string): Promise<PagedMd | null> {
   let p = paged.get(mdPath);
@@ -294,10 +294,29 @@ function loadPaged(mdPath: string): Promise<PagedMd | null> {
         });
         return { lines: md.split("\n"), pages };
       })
-      .catch(() => null);
+      .catch(() => {
+        // Not parsed yet, perhaps: the next ask reads again.
+        paged.delete(mdPath);
+        return null;
+      });
     paged.set(mdPath, p);
   }
   return p;
+}
+
+const pageMaps = new WeakMap<PagedMd, Map<number, string>>();
+
+/** A parsed `.md`'s pages, `page_no` (1-based) → that page's markdown, from
+ *  the same cached read as `citedPage`; null when the file is not parsed. */
+export async function loadParsedPages(mdPath: string): Promise<Map<number, string> | null> {
+  const doc = await loadPaged(mdPath);
+  if (!doc) return null;
+  let map = pageMaps.get(doc);
+  if (!map) {
+    map = new Map(doc.pages.map((p) => [p.pageNo, p.text]));
+    pageMaps.set(doc, map);
+  }
+  return map;
 }
 
 /** Letters and digits only, lowercased, ligatures and accents folded — the

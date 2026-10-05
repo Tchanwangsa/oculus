@@ -27,6 +27,10 @@ import {
 import { loadPdfjs, type Pdfjs } from "@/lib/pdfjs";
 import { centerIn, matchSpans } from "@/lib/locateQuote";
 import type { FileLocate } from "@/stores/sidePanelStore";
+import { useDataDir } from "@/hooks/useDataDir";
+import { loadParsedPages } from "@/lib/citations";
+import { libraryImageSrc } from "@/lib/libraryLinks";
+import { copyPdfAsMarkdown, dragPdfAsMarkdown } from "@/lib/pdfSelectionMarkdown";
 
 type LayoutMode = "scroll" | "single" | "spread";
 
@@ -66,6 +70,9 @@ interface Props {
   src: string;
   /** A cited spot: go to its page and highlight its quote there. */
   locate?: FileLocate;
+  /** The parse's `.md` (library-relative): a selection copies as its
+   *  markdown (`pdfSelectionMarkdown.ts`). */
+  markdownPath?: string;
 }
 
 /** The class a cited passage's text-layer spans carry (`index.css`). */
@@ -141,7 +148,7 @@ function applyLayout(viewer: PdfjsViewer, pdfjs: Pdfjs, mode: LayoutMode) {
  * layouts, and pinch/⌘-wheel zoom, which pdf.js
  * does not bind itself. pdf.js loads through `@/lib/pdfjs` (see there for why).
  */
-export function PDFViewer({ src, locate }: Props) {
+export function PDFViewer({ src, locate, markdownPath }: Props) {
   const [numPages, setNumPages] = useState(0);
   const [shown, setShown] = useState<Shown>({ first: 1, last: 1 });
   /** Mirrors `shown` so a scroll that leaves the range alone skips setState. */
@@ -162,6 +169,9 @@ export function PDFViewer({ src, locate }: Props) {
   modeRef.current = mode;
 
   const containerRef = useRef<HTMLDivElement>(null);
+  /** The parsed pages, once read; the copy handlers need them synchronously. */
+  const pagesRef = useRef<ReadonlyMap<number, string> | null>(null);
+  const dataDir = useDataDir();
   /** The `.pdfViewer` element pdf.js fills with pages. */
   const viewerElRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -341,6 +351,25 @@ export function PDFViewer({ src, locate }: Props) {
     // the same citation (a refreshed row).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locate?.seq, pagesReady]);
+
+  // ── Copy as markdown ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    pagesRef.current = null;
+    if (!markdownPath) return;
+    let live = true;
+    loadParsedPages(markdownPath).then((pages) => {
+      if (live) pagesRef.current = pages;
+    });
+    return () => {
+      live = false;
+    };
+  }, [markdownPath]);
+
+  /** A figure's link as the Markdown view's copy writes it, so both faces of
+   *  a file copy the same text. */
+  const resolveImage = (src: string) =>
+    markdownPath ? libraryImageSrc(src, markdownPath, dataDir) : src;
 
   const prev = useCallback(() => engineRef.current?.viewer.previousPage(), []);
   const next = useCallback(() => engineRef.current?.viewer.nextPage(), []);
@@ -624,6 +653,9 @@ export function PDFViewer({ src, locate }: Props) {
       <div className="relative flex-1 min-h-0">
         <div
           ref={containerRef}
+          // Capture: pdf.js's text layer writes its own copy and stops it.
+          onCopyCapture={(e) => pagesRef.current && copyPdfAsMarkdown(e, e.currentTarget, pagesRef.current, resolveImage)}
+          onDragStart={(e) => pagesRef.current && dragPdfAsMarkdown(e, e.currentTarget, pagesRef.current, resolveImage)}
           className="pdf-surface absolute inset-0 overflow-auto"
         >
           <div ref={viewerElRef} className="pdfViewer" />

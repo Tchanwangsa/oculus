@@ -133,7 +133,7 @@ export function FileViewer({
         {pdfViewMode === "markdown" && mdRelPath ? (
           <FileMarkdown relPath={mdRelPath} components={components} />
         ) : (
-          <PDFViewer src={assetUrl(pdfRelPath)} locate={locate} />
+          <PDFViewer src={assetUrl(pdfRelPath)} locate={locate} markdownPath={mdRelPath ?? undefined} />
         )}
       </div>
     );

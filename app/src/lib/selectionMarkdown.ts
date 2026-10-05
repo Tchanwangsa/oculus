@@ -277,6 +277,14 @@ export function selectionMarkdown(selection: Selection | null): string {
   return container(root as Element, range).join("\n\n").trim();
 }
 
+/** An element's whole contents as markdown, through the same walkers — for
+ *  HTML that was never on screen (a parsed page's `<table>`). */
+export function elementMarkdown(el: Element): string {
+  const range = el.ownerDocument.createRange();
+  range.selectNodeContents(el);
+  return block(el, range).join("\n\n").trim();
+}
+
 /** The selection under `target` as markdown, or "" — a selection inside a
  *  field belongs to the field, and it is already text. */
 function markdownFor(target: EventTarget | null): string {
