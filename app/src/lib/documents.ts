@@ -63,9 +63,39 @@ export async function createDocument(
   return row;
 }
 
+/** FNV-1a (32-bit) of the text, as hex: cheap and synchronous, enough to tell
+ *  the app's own write from another writer's. Not for dedupe (sha-256 is). */
+export function quickHash(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+const writtenKey = (fileId: number) => `oculus:note-written:${fileId}`;
+
+/** The {@link quickHash} of the text this app last sent to the note's file;
+ *  null when it never has (or storage is unavailable). */
+export function lastNoteWrite(fileId: number): string | null {
+  try {
+    return localStorage.getItem(writtenKey(fileId));
+  } catch {
+    return null;
+  }
+}
+
 /** Write the text and touch the row as *seen* — the student's own edit is not
  *  news for the unseen dot. */
 export async function saveDocument(file: DbFile, content: string): Promise<void> {
+  // Recorded as the write is issued, synchronously: on quit the reply may
+  // never come back, but the next open must still know this text was ours.
+  try {
+    localStorage.setItem(writtenKey(file.id), quickHash(content));
+  } catch {
+    // No storage: an open then reads as the app's own text, never `external`.
+  }
   const bytes = await invoke<number>("write_document", {
     relativePath: file.relative_path,
     content,

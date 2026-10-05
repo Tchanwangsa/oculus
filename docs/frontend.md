@@ -115,8 +115,8 @@ library files; the rest of the frontend has its own pages:
   `useFileDrop` ignores a `visibility: hidden` element — how background panes
   hide.
 - **Delete is guarded by `is_upload_rel`** (`app/src-tauri/src/paths.rs`), not a
-  dialog. `deleteFileRow` deletes `pages` by hand, since the cascade fires only
-  with `foreign_keys` on. A parse in flight can land after a delete, so
+  dialog. `deleteFileRow` deletes `pages` and `document_versions` by hand,
+  since the cascade fires only with `foreign_keys` on. A parse in flight can land after a delete, so
   `store_upload` purges artifacts on a reused name whenever the bytes differ.
 - **The PDF/markdown toggle probes file metadata**, through
   `course_file_has_content` in `app/src-tauri/src/files.rs`, without reading or

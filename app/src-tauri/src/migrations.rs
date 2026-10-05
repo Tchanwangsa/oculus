@@ -709,6 +709,31 @@ CREATE TABLE IF NOT EXISTS browser_favicons (
             sql: crate::retrieval::PAGES_FTS_CHANGED_SQL,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 39,
+            description: "document versions: checkpoints and automatic snapshots of a note's text",
+            // Whole text per version; `number` only on checkpoints. Rows are deleted by
+            // hand with their file (`deleteFileRow`), since the cascade needs `foreign_keys`.
+            sql: r#"
+CREATE TABLE IF NOT EXISTS document_versions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id    INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    number     INTEGER,
+    label      TEXT,
+    kind       TEXT    NOT NULL CHECK (kind IN ('checkpoint', 'auto', 'external', 'restore')),
+    text       TEXT    NOT NULL,
+    hash       TEXT    NOT NULL,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_versions_file
+    ON document_versions(file_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_versions_number
+    ON document_versions(file_id, number) WHERE number IS NOT NULL;
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

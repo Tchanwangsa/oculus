@@ -146,9 +146,10 @@ export function FileViewer({
  * `MD_COMPONENTS` for a library file: links to files we hold locally (`../`
  * paths and raw Canvas `/files/<id>` / `/pages/<slug>` URLs) open in the same
  * peek, others open externally, and relative images resolve against the
- * file's directory (`app/src/lib/libraryLinks.ts`).
+ * file's directory (`app/src/lib/libraryLinks.ts`). Also draws a note's
+ * saved versions (`HistoryPanel`).
  */
-function useLibraryMdComponents(
+export function useLibraryMdComponents(
   file: Pick<DbFile, "relative_path">,
   files: DbFile[],
   onOpenFile: (file: DbFile) => void,

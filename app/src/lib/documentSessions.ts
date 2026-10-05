@@ -11,6 +11,7 @@ import type { SaveStatus } from "@/components/documents/DocumentControls";
 import { readCourseFile } from "@/lib/courseFiles";
 import type { DbFile } from "@/lib/db";
 import { saveDocument } from "@/lib/documents";
+import { AUTO_SNAPSHOT_MS, sessionSnapshot, type SnapshotReason } from "@/lib/documentVersions";
 
 /**
  * One editing session per open note, shared by every editor showing it — a
@@ -29,6 +30,11 @@ import { saveDocument } from "@/lib/documents";
  * later, so a detach and re-attach in the same tick keeps it. A failed save
  * keeps it alive with the unsaved text. Free of React so Fast Refresh rarely
  * re-evaluates it.
+ *
+ * A session also asks for the note's automatic versions (`documentVersions`):
+ * once its first read lands, after a write once {@link AUTO_SNAPSHOT_MS} have
+ * passed since the last, and with the text on disk when it ends. Never
+ * awaited, so a slow or failed snapshot cannot hold up or fail a save.
  */
 
 /** How long after the last keystroke the text goes to disk. */
@@ -60,8 +66,10 @@ export interface SessionListener {
 export interface SessionIO<F extends NoteRef> {
   read(relativePath: string): Promise<string>;
   write(file: F, text: string): Promise<void>;
+  /** Take an automatic version; fire-and-forget, errors are logged. */
+  snapshot?(file: F, text: string, reason: SnapshotReason): void | Promise<void>;
   delay?: number;
-  /** The clock for `savedAt`. */
+  /** The clock for `savedAt` and the snapshot interval. */
   now?: () => number;
 }
 
@@ -85,6 +93,8 @@ export interface Session<F extends NoteRef> {
    *  detached; {@link DocumentLease.restore} uses it while the text still
    *  matches. */
   stash: { doc?: string } | null;
+  /** When the session last asked for a snapshot. */
+  snapshotAt: number | null;
 }
 
 /** One editor's hold on a note's session. */
@@ -121,6 +131,17 @@ export function createDocumentSessions<F extends NoteRef>(
   const now = io.now ?? Date.now;
   const dirty = (s: Session<F>) => s.text !== null && s.text !== s.disk;
 
+  function snapshot(s: Session<F>, text: string, reason: SnapshotReason) {
+    if (!io.snapshot) return;
+    s.snapshotAt = now();
+    const failed = (e: unknown) => console.error(`[oculus] ${reason} snapshot failed`, e);
+    try {
+      void Promise.resolve(io.snapshot(s.file, text, reason)).catch(failed);
+    } catch (e) {
+      failed(e);
+    }
+  }
+
   function emit(s: Session<F>, status: SaveStatus) {
     s.status = status;
     for (const l of s.listeners) l.status(status);
@@ -155,6 +176,7 @@ export function createDocumentSessions<F extends NoteRef>(
           s.savedAt = at;
           for (const l of s.listeners) l.saved(text, at);
           emit(s, { state: "saved" });
+          if (at - (s.snapshotAt ?? at) >= AUTO_SNAPSHOT_MS) snapshot(s, text, "interval");
         }
       } finally {
         s.writing = null;
@@ -181,6 +203,7 @@ export function createDocumentSessions<F extends NoteRef>(
         !s.listeners.size && !s.views.size && !s.writing && !s.loading && s.timer == null;
       if (!idle || dirty(s) || sessions.get(s.id) !== s) return;
       sessions.delete(s.id);
+      if (s.text !== null) snapshot(s, s.disk, "close");
     }, 0);
   }
 
@@ -192,6 +215,7 @@ export function createDocumentSessions<F extends NoteRef>(
         if (s.text === null) {
           s.text = text;
           s.disk = text;
+          snapshot(s, text, "open");
         }
       })
       .finally(() => {
@@ -218,6 +242,7 @@ export function createDocumentSessions<F extends NoteRef>(
         status: { state: "idle" },
         savedAt: null,
         stash: null,
+        snapshotAt: null,
       };
       sessions.set(file.id, s);
     }
@@ -323,6 +348,7 @@ export const documentSessions = createDocumentSessions<DbFile>(
   {
     read: readCourseFile,
     write: saveDocument,
+    snapshot: (file, text, reason) => sessionSnapshot(file.id, text, reason),
   },
   shared,
 );

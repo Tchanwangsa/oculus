@@ -8,7 +8,9 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
+import { isolateHistory } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
@@ -29,6 +31,7 @@ import {
   suggestDocument,
 } from "@/lib/documents";
 import { documentSessions, type DocumentLease } from "@/lib/documentSessions";
+import { saveCheckpoint } from "@/lib/documentVersions";
 import {
   displayCode,
   displayName,
@@ -40,7 +43,7 @@ import { libraryImageSrc } from "@/lib/libraryLinks";
 import { registerNoteLinkCommand } from "@/lib/noteShortcuts";
 import { fileTitle } from "@/lib/openFile";
 import { navigateActive } from "@/lib/tabRouters";
-import type { DbFile } from "@/lib/db";
+import type { DbFile, Subject } from "@/lib/db";
 import { LoadingFill } from "@/components/ui/PageParts";
 
 import {
@@ -60,7 +63,8 @@ import { liveCompartment, modeExtension, noteExtensions } from "./editor/extensi
 import { hostCompartment, noteHost, openNoteLink, type NoteHost } from "./editor/host";
 import { syncLiveFocus } from "./editor/livePreview";
 import { Toolbar } from "./editor/Toolbar";
-import type { EditorMode, SaveStatus, SuggestStatus } from "./DocumentControls";
+import { HistoryPanel } from "./HistoryPanel";
+import type { DocumentActions, EditorMode, SaveStatus, SuggestStatus } from "./DocumentControls";
 
 /** A freshly created note, still wearing the name Rust gave it. */
 const UNTITLED = /^Untitled(?:-\d+)?$/;
@@ -73,7 +77,8 @@ const UNTITLED = /^Untitled(?:-\d+)?$/;
  *
  * The text and its saves belong to the note's session (`@/lib/documentSessions`),
  * shared with every other editor of the same note: they stay identical, and
- * one serialised write loop saves for all of them.
+ * one serialised write loop saves for all of them. Saved versions
+ * (`@/lib/documentVersions`) dock beside the note in `HistoryPanel`.
  */
 export function DocumentEditor({
   file,
@@ -83,6 +88,9 @@ export function DocumentEditor({
   onStatus,
   suggestions,
   onSuggestStatus,
+  history = false,
+  onHistory,
+  actions,
 }: {
   file: DbFile;
   /** The subject's files, for links to resolve against. */
@@ -93,6 +101,11 @@ export function DocumentEditor({
   /** Inline AI suggestions (`./editor/aiSuggest.ts`) on or off. */
   suggestions: boolean;
   onSuggestStatus: (status: SuggestStatus) => void;
+  /** The version history panel, opened from the host's header. */
+  history?: boolean;
+  onHistory?: (open: boolean) => void;
+  /** Filled while mounted, for the header's Save version. */
+  actions?: RefObject<DocumentActions | null>;
 }) {
   const tabActive = useTabActive();
   /** The row whose text the session has; the view is made once it does. */
@@ -151,6 +164,45 @@ export function DocumentEditor({
     (): Promise<void> => leaseRef.current?.flush() ?? Promise.resolve(),
     [],
   );
+
+  /** What the editor shows now: the view's text, else the session's. */
+  const currentText = useCallback(
+    (): string | null => viewRef.current?.state.doc.toString() ?? leaseRef.current?.text ?? null,
+    [],
+  );
+
+  // Writes what is pending first, so the version and the file agree.
+  useEffect(() => {
+    if (!actions) return;
+    const mine: DocumentActions = {
+      saveVersion: async (label) => {
+        await flush();
+        const text = currentText();
+        if (text == null) throw new Error("The note is still loading.");
+        return saveCheckpoint(fileRef.current.id, text, label);
+      },
+    };
+    actions.current = mine;
+    return () => {
+      if (actions.current === mine) actions.current = null;
+    };
+  }, [actions, flush, currentText]);
+
+  /** A restored version replaces the whole text as one ordinary edit, kept
+   *  out of neighbouring typing's undo step: it saves through the session,
+   *  reaches the note's other views, and ⌘Z takes it back. */
+  const replaceText = useCallback((text: string): boolean => {
+    const v = viewRef.current;
+    if (!v) return false;
+    v.dispatch({
+      changes: { from: 0, to: v.state.doc.length, insert: text },
+      annotations: isolateHistory.of("full"),
+    });
+    return true;
+  }, []);
+
+  const { subjects } = useSubjects();
+  const subject = subjects.find((s) => s.id === file.subject_id) ?? null;
 
   // Join the note's session, keyed on the row, not its path: a rename must
   // not reload the text. Leaving writes anything unsaved (the session does).
@@ -417,31 +469,43 @@ export function DocumentEditor({
   }
 
   return (
-    <div ref={pageRef} className="relative h-full min-h-0">
-      <div className="page-scroll">
-        <div className="mx-auto w-full max-w-3xl px-6 py-8">
-          <input
-            ref={titleRef}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => void commitTitle()}
-            onKeyDown={onTitleKeyDown}
-            placeholder="Untitled"
-            aria-label="Title"
-            spellCheck={false}
-            className="block w-full border-0 bg-transparent p-0 font-display text-[22px] font-semibold leading-tight text-foreground outline-none placeholder:text-muted-foreground/40"
-          />
-          <DocumentMeta file={file} savedAt={savedAt} words={words} />
-          {attachError && (
-            <p className="mt-3 text-[11px] text-destructive">{attachError}</p>
-          )}
-          <Toolbar ref={toolbarRef} view={view} active={active} onImage={pickImages} />
-          <div ref={editorRef} className="mt-4" />
+    <div className="flex h-full min-h-0">
+      <div ref={pageRef} className="relative min-w-0 flex-1">
+        <div className="page-scroll">
+          <div className="mx-auto w-full max-w-3xl px-6 py-8">
+            <input
+              ref={titleRef}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={() => void commitTitle()}
+              onKeyDown={onTitleKeyDown}
+              placeholder="Untitled"
+              aria-label="Title"
+              spellCheck={false}
+              className="block w-full border-0 bg-transparent p-0 font-display text-[22px] font-semibold leading-tight text-foreground outline-none placeholder:text-muted-foreground/40"
+            />
+            <DocumentMeta file={file} subject={subject} savedAt={savedAt} words={words} />
+            {attachError && (
+              <p className="mt-3 text-[11px] text-destructive">{attachError}</p>
+            )}
+            <Toolbar ref={toolbarRef} view={view} active={active} onImage={pickImages} />
+            <div ref={editorRef} className="mt-4" />
+          </div>
         </div>
-      </div>
 
-      {/* Over the whole note, since that is the drop target. */}
-      <DropOverlay show={dropping} label="Drop to add a picture" />
+        {/* Over the whole note, since that is the drop target. */}
+        <DropOverlay show={dropping} label="Drop to add a picture" />
+      </div>
+      {history && (
+        <HistoryPanel
+          file={file}
+          files={files}
+          subject={subject}
+          currentText={currentText}
+          replaceText={replaceText}
+          onClose={() => onHistory?.(false)}
+        />
+      )}
     </div>
   );
 }
@@ -462,16 +526,16 @@ function countWords(text: string): number {
  */
 function DocumentMeta({
   file,
+  subject,
   savedAt,
   words,
 }: {
   file: DbFile;
+  subject: Subject | null;
   savedAt: number | null;
   words: number;
 }) {
   const now = useNow();
-  const { subjects } = useSubjects();
-  const subject = subjects.find((s) => s.id === file.subject_id) ?? null;
   const created = sqliteUtcToMs(file.first_seen_at) ?? sqliteUtcToMs(file.scraped_at);
   const rowUpdated = sqliteUtcToMs(file.modified_at);
   const updated =

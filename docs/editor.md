@@ -12,6 +12,7 @@ maths is [editor-maths.md](./editor-maths.md).
 | The view, title and mode; header controls | `app/src/components/documents/DocumentEditor.tsx`, `app/src/components/documents/DocumentControls.tsx` |
 | Extensions: live preview, Raw mode, code, tables, widgets, commands | `app/src/components/documents/editor/` |
 | One session per note | `app/src/lib/documentSessions.ts` |
+| A note's versions and its History panel | `app/src/lib/documentVersions.ts`, `app/src/components/documents/HistoryPanel.tsx` |
 
 ## The note editor is CodeMirror 6 over the file's exact text
 
@@ -101,6 +102,35 @@ rename holds writes until the move lands. `write_document` writes a hidden
 `.<name>.md.<pid>-<nanos>.tmp` sibling, fsyncs and renames it over the
 note, so a reader never sees a truncated file; the `.tmp` suffix keeps a
 leftover out of `list_documents`.
+
+## A note's versions live in the database, never on disk
+
+- **`document_versions` holds the whole text per row**
+  (`app/src/lib/documentVersions.ts`), keyed by the file's row id so a rename
+  keeps its history, and outside `documents/` so listing, search and agents
+  never see them. **Checkpoints** are the student's "Save version" (numbered
+  v1, v2… per note, optional label) and never pruned. **Snapshots** are the
+  app's: the session asks for one through `SessionIO.snapshot` when its first
+  read lands, after a save once 10 min have passed since the last, and with
+  the disk text when it ends — never awaited, so a failed snapshot cannot
+  hold up or fail a save. A snapshot is skipped when its sha-256 matches the
+  note's newest version, and `versionsToPrune` keeps every snapshot from the
+  last 24 h, then the newest per UTC day to 30 days.
+- **An `open` snapshot is `external` only when the app didn't write that
+  text**: `saveDocument` records an FNV hash (`quickHash`) in localStorage as
+  the write is *issued*, synchronously, because on quit the reply may never
+  arrive. No record reads as the app's own text, never `external`. A note
+  deleted or renamed outside the app gets a new row (or none) from
+  `reconcileDocuments`, so its history goes with the old row.
+- **History docks inside the editor**
+  (`app/src/components/documents/HistoryPanel.tsx`), not as a side panel
+  item, because Replace current goes through that editor's view and the note
+  stays beside the version. The header's Save version (⇧⌘S, focused pane
+  only; ⌘S stays a flush) flushes first so the checkpoint matches the file.
+  **Restore as copy** is the default: a new note "<title> (v3)" in a new tab.
+  **Replace current** takes a `restore` snapshot first, then swaps the text
+  as one `isolateHistory` transaction, so it saves like typing, reaches the
+  other views and ⌘Z takes it back.
 
 ## Pictures and `@` links resolve to library files
 

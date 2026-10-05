@@ -3,6 +3,7 @@ import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-
 import {
   DocumentControls,
   SUGGEST_IDLE,
+  type DocumentActions,
   type EditorMode,
   type SaveStatus,
   type SuggestStatus,
@@ -62,6 +63,13 @@ export default function SubjectFilePage() {
   const setSuggestions = useDocumentPrefsStore((s) => s.setSuggestions);
   const loadDocumentPrefs = useDocumentPrefsStore((s) => s.load);
   const [suggestStatus, setSuggestStatus] = useState<SuggestStatus>(SUGGEST_IDLE);
+  const [history, setHistory] = useState(false);
+  /** The mounted editor's, for the header's Save version. */
+  const documentActions = useRef<DocumentActions | null>(null);
+  const saveVersion = (label?: string) =>
+    documentActions.current
+      ? documentActions.current.saveVersion(label)
+      : Promise.reject(new Error("The note is still loading."));
   useEffect(() => {
     if (isDocument) void loadDocumentPrefs();
   }, [isDocument, loadDocumentPrefs]);
@@ -111,6 +119,9 @@ export default function SubjectFilePage() {
             suggestions={suggestions}
             onSuggestions={toggleSuggestions}
             suggestStatus={suggestStatus}
+            history={history}
+            onHistory={setHistory}
+            onSaveVersion={saveVersion}
           />
         ) : (
           pdf.isPdf && pdf.mdChecked &&
@@ -133,6 +144,9 @@ export default function SubjectFilePage() {
               onStatus={setStatus}
               suggestions={suggestions}
               onSuggestStatus={setSuggestStatus}
+              history={history}
+              onHistory={setHistory}
+              actions={documentActions}
             />
           </Suspense>
         ) : (

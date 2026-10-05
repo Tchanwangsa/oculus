@@ -125,6 +125,8 @@ never creates the database, so a fresh machine opens the app once first.
   `ON DELETE SET NULL`, so dropping a course never takes the user's work with
   it. Written by `app/src/lib/projects.ts` in the app and
   `app/src-tauri/src/projects.rs` headless ([projects.md](./projects.md)).
+- `document_versions` holds a note's checkpoints and snapshots, written only by
+  `app/src/lib/documentVersions.ts` ([editor.md](./editor.md#a-notes-versions-live-in-the-database-never-on-disk)).
 - `harness_threads`/`harness_items` are the chat timeline
   ([harness.md](./harness.md)).
 - Parse and embed settings are the `parse` and `embed` rows of `settings`, read
