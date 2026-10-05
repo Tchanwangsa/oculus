@@ -24,6 +24,7 @@ import { mathCompletionSource, mathOptionPreview, mathTools } from "./mathTools"
 import { mentionCompletionSource, mentionOptionClass, mentionOptionIcon } from "./mentions";
 import { rawMode } from "./rawMode";
 import { noteHighlight, noteTheme } from "./theme";
+import { noteUndoRouting } from "./undoRouting";
 
 /** Live decorations, or Raw's code-editor look in their place. */
 export const liveCompartment = new Compartment();
@@ -57,6 +58,7 @@ export function noteExtensions(opts: {
 }): Extension {
   return [
     history(),
+    noteUndoRouting(),
     drawSelection(),
     dropCursor(),
     indentUnit.of("  "),

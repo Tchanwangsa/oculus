@@ -71,6 +71,21 @@ before leaving a playing lecture.
   to the menu. The app's tab and window keys (⌘T, ⌘W, ⌘N, ⌘K, ⌘L, ⌘1–9 and
   their ⇧/⌥ variants) never go to the page. The monitor is Rust's
   (`app/src-tauri/src/keys.rs`).
+- **Undo and Redo are menu items that emit, not the predefined ones.** The
+  predefined items hand ⌘Z to WebKit's own undo stack, which a note's
+  CodeMirror history never fills. While a browser page holds focus Rust sends
+  it the stock `undo:` / `redo:`; otherwise `menu-undo` / `menu-redo` go to
+  `routeEdit` (`app/src/lib/editRouting.ts`): a note editor's history
+  (`undoRouting.ts`, which also remembers the last focused note and acts only
+  while it is visible), else `execCommand` on the focused input.
+- **Select All is a custom item too**, because WebKit's `selectAll:` with no
+  field focused selects the whole window. A focused browser page gets the
+  native `selectAll:`; otherwise `menu-select-all` goes to `routeSelectAll`:
+  the focused control's own ⌘A (replayed as a keydown, which CodeMirror and a
+  table's cell block take; a maths field's `select()`), else a focused input's
+  contents, else the dialog or popover holding focus, else the target ⌘F
+  would search (`currentFindTarget` in `app/src/lib/find.ts`) — never the
+  whole window.
 - **⌘1–⌘8 are strip positions** (a missing slot is a no-op), ⌘9 is the last
   tab, and ⇧⌘T pops `tabStore`'s `closed` stack back to the old index. A
   browser tab is remembered by URL, recorded by `TopTabBar` *before* Rust

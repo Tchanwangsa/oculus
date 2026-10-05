@@ -3,8 +3,10 @@
 //! no keys, so ⌘-shortcuts must be menu items to work everywhere. Built by hand
 //! so ⌘W closes the tab (Close Window moves to ⇧⌘W).
 //!
-//! The items only emit; the frontend decides what they mean. A focused page
-//! sees ⌘-keys before the menu, bar the chrome keys `keys.rs` reserves.
+//! The items emit and the frontend decides what they mean, except that Undo,
+//! Redo and Select All act natively while a browser page holds focus. A
+//! focused page sees ⌘-keys before the menu, bar the chrome keys `keys.rs`
+//! reserves.
 
 use tauri::menu::{
     AboutMetadata, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
@@ -20,6 +22,9 @@ const LAST_TAB: &str = "last-tab";
 const SIDE_NEXT: &str = "side-next";
 const SIDE_PREV: &str = "side-prev";
 const CLOSE_WINDOW: &str = "close-window";
+const UNDO: &str = "undo";
+const REDO: &str = "redo";
+const SELECT_ALL: &str = "select-all";
 const FIND: &str = "find";
 const FIND_NEXT: &str = "find-next";
 const FIND_PREV: &str = "find-prev";
@@ -49,6 +54,9 @@ pub const SIDE_NEXT_EVENT: &str = "menu-side-next";
 pub const SIDE_PREV_EVENT: &str = "menu-side-prev";
 /// Carries the **zero-based** index of the slot pressed.
 pub const SELECT_TAB_EVENT: &str = "menu-select-tab";
+pub const UNDO_EVENT: &str = "menu-undo";
+pub const REDO_EVENT: &str = "menu-redo";
+pub const SELECT_ALL_EVENT: &str = "menu-select-all";
 pub const FIND_EVENT: &str = "menu-find";
 pub const FIND_NEXT_EVENT: &str = "menu-find-next";
 pub const FIND_PREV_EVENT: &str = "menu-find-prev";
@@ -122,13 +130,16 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         "Edit",
         true,
         &[
-            &PredefinedMenuItem::undo(app, None)?,
-            &PredefinedMenuItem::redo(app, None)?,
+            // Undo, Redo and Select All are not the predefined items: those
+            // hand ⌘Z to WebKit's own undo stack, which a note's history never
+            // fills. The frontend routes them, bar a focused browser page (`edit`).
+            &MenuItem::with_id(app, UNDO, "Undo", true, Some("CmdOrCtrl+Z"))?,
+            &MenuItem::with_id(app, REDO, "Redo", true, Some("Shift+CmdOrCtrl+Z"))?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::cut(app, None)?,
             &PredefinedMenuItem::copy(app, None)?,
             &PredefinedMenuItem::paste(app, None)?,
-            &PredefinedMenuItem::select_all(app, None)?,
+            &MenuItem::with_id(app, SELECT_ALL, "Select All", true, Some("CmdOrCtrl+A"))?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, FIND, "Find…", true, Some("CmdOrCtrl+F"))?,
             &MenuItem::with_id(app, FIND_NEXT, "Find Next", true, Some("CmdOrCtrl+G"))?,
@@ -282,6 +293,9 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
         SIDE_PREV => {
             app.emit(SIDE_PREV_EVENT, ()).ok();
         }
+        UNDO => edit(app, UNDO_EVENT, c"undo:"),
+        REDO => edit(app, REDO_EVENT, c"redo:"),
+        SELECT_ALL => edit(app, SELECT_ALL_EVENT, c"selectAll:"),
         FIND => {
             app.emit(FIND_EVENT, ()).ok();
         }
@@ -331,4 +345,21 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
             }
         }
     }
+}
+
+/// Sends `action` down the responder chain when a browser page holds focus,
+/// as the predefined item would (the page already saw the key, `keys.rs`);
+/// otherwise emits `event` for the frontend.
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+fn edit<R: Runtime>(app: &AppHandle<R>, event: &str, action: &std::ffi::CStr) {
+    #[cfg(target_os = "macos")]
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        if crate::keys::focused_page(mtm).is_some() {
+            let ns_app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+            let sel = objc2::runtime::Sel::register(action);
+            unsafe { ns_app.sendAction_to_from(sel, None, None) };
+            return;
+        }
+    }
+    app.emit(event, ()).ok();
 }

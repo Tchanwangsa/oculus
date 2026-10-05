@@ -16,6 +16,7 @@ import {
 } from "@/lib/browser";
 import { useBrowserTabs } from "@/hooks/useBrowserTabs";
 import { useTauriEvent, useWindowEvent } from "@/hooks/useEvents";
+import { routeEdit, routeSelectAll } from "@/lib/editRouting";
 import { routeFind } from "@/lib/find";
 import { useNewTabClicks } from "@/lib/newTabClicks";
 import { useBrowserStore } from "@/stores/browserStore";
@@ -115,6 +116,12 @@ export default function AppLayout() {
   useTauriEvent("menu-zoom-reset", () => zoomBy(0));
   useTauriEvent("menu-reload", () => reload(false));
   useTauriEvent("menu-hard-reload", () => reload(true));
+
+  // Edit ▸ Undo / Redo / Select All. The menu owns ⌘Z and ⌘A and emits only
+  // while the app's webview has focus (a browser page handles its own).
+  useTauriEvent("menu-undo", () => routeEdit(false));
+  useTauriEvent("menu-redo", () => routeEdit(true));
+  useTauriEvent("menu-select-all", () => routeSelectAll(activePane()?.id));
 
   // Edit ▸ Find, Find Next, Find Previous: one mounted find answers.
   useTauriEvent("menu-find", () => routeFind("open", activePane()?.id));
