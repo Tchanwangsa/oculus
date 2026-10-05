@@ -5,6 +5,8 @@ import { humanizeSlug } from "@/lib/format";
 import { isPdfBacked, parsedMdRelPath, parsedMdSource } from "@/lib/fileTypes";
 import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
 import { attachmentPath } from "@/lib/attachments";
+import { isWebUrl, openExternal } from "@/lib/browser";
+import { libraryLinkTarget } from "@/lib/libraryLinks";
 import { readCourseFile } from "@/lib/courseFiles";
 import { lecturePagePath } from "@/lib/lectures";
 import { citedPage, fullCitation, quoteFromLines, type Citation } from "@/lib/citations";
@@ -153,6 +155,23 @@ export function splitLibraryPaths(text: string): TextPart[] {
 /** Opens a file the agent named; see `openCitation`. */
 export function openLibraryPath(path: string, newTab = false): void {
   openCitation({ path }, newTab);
+}
+
+/** A link in a note: a library file (the same resolution `FileViewer` uses)
+ *  or library path opens in the side panel, a web URL in the in-app browser. */
+export function openNoteLink(href: string, files: DbFile[]): void {
+  const target = libraryLinkTarget(href, files);
+  if (target) {
+    openFileSmart(target);
+    return;
+  }
+  const lib = libraryPath(href);
+  if (lib) {
+    openLibraryPath(lib);
+    return;
+  }
+  const url = /^www\./i.test(href) ? `https://${href}` : href;
+  if (isWebUrl(url)) void openExternal(url);
 }
 
 let locateSeq = 0;

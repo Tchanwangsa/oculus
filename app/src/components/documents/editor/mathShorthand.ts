@@ -27,7 +27,7 @@ import { mathAt } from "./mathContext";
 // ── Rule tables ───────────────────────────────────────────────────────────
 
 /** `@<key>` → Greek letter. */
-const GREEK: Record<string, string> = {
+export const GREEK: Record<string, string> = {
   a: "alpha", b: "beta", g: "gamma", G: "Gamma", d: "delta", D: "Delta",
   e: "epsilon", ve: "varepsilon", z: "zeta", h: "eta", t: "theta", T: "Theta",
   vt: "vartheta", i: "iota", k: "kappa", l: "lambda", L: "Lambda", m: "mu",
@@ -37,7 +37,7 @@ const GREEK: Record<string, string> = {
 };
 
 /** Letters typed after a base (`x`, `2`, `)`, `\alpha`) → its superscript. */
-const POWERS: Record<string, string> = {
+export const POWERS: Record<string, string> = {
   sr: "^2",
   cb: "^3",
   rd: "^{#{1}}#{0}",
@@ -45,7 +45,7 @@ const POWERS: Record<string, string> = {
 };
 
 /** Symbol runs → operators, longest first. `\le>` is `<=` already expanded. */
-const OPERATORS: [string, string][] = [
+export const OPERATORS: [string, string][] = [
   ["<->", "\\leftrightarrow"],
   ["<=>", "\\iff"],
   ["\\le>", "\\iff"],

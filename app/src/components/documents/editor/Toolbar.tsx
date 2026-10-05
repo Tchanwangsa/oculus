@@ -43,6 +43,7 @@ import {
   type ActiveFormats,
   type BlockType,
 } from "./commands";
+import { toggleMathTools } from "./mathTools";
 
 const BLOCKS: { value: BlockType; label: string; Icon: ComponentType<IconProps> }[] = [
   { value: "p", label: "Text", Icon: TextT },
@@ -62,7 +63,8 @@ const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 /**
  * Formatting for the note, sticky under the title unless `className` places
  * it (merged with `cn`, so it overrides). Every button is a command
- * from `commands.ts` that rewrites markdown text, so it works in both modes.
+ * from `commands.ts` that rewrites markdown text, so it works in both modes;
+ * Σ in maths toggles the maths toolbox instead (`mathTools.ts`).
  * Active states follow the syntax tree at the main selection (`active`).
  */
 export function Toolbar({
@@ -156,7 +158,12 @@ export function Toolbar({
       <Tool label="Code block" on={active.codeBlock} onRun={() => run(toggleCodeBlock)}>
         <CodeBlock />
       </Tool>
-      <Tool label="Equation" on={active.math} onRun={() => run(insertMath)}>
+      <Tool
+        label={active.math ? "Maths tools" : "Equation"}
+        keys={active.math ? "⌘⇧Space" : undefined}
+        on={active.math}
+        onRun={() => view && (toggleMathTools(view) || (!active.math && run(insertMath)))}
+      >
         <Sigma />
       </Tool>
       <TablePicker onPick={(rows, cols) => run(insertTable(rows, cols))} onClose={() => view?.focus()} />

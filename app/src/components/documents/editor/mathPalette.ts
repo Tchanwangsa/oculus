@@ -257,3 +257,12 @@ export const COMMON_COMMANDS = new Set([
   "\\mu", "\\sigma", "\\pi", "\\infty", "\\partial", "\\left", "\\mathbb", "\\text", "\\cdot",
   "\\times", "\\leq", "\\geq", "\\neq", "\\to", "\\in", "\\hat", "\\bar", "\\vec", "\\begin",
 ]);
+
+/** The Popular tab's cells before there is history to rank (`mathUsage.ts`):
+ *  palette templates, most useful first. */
+export const POPULAR_DEFAULTS = [
+  "\\frac{#{}}{#{}}", "^{#{}}", "_{#{}}", "\\sqrt{#{}}", "\\left( #{} \\right)", "\\sum_{#{}}^{#{}} #{}",
+  "\\int #{} \\, d#{}", "\\lim_{#{} \\to #{}} #{}", "\\alpha", "\\beta", "\\theta", "\\lambda", "\\mu",
+  "\\sigma", "\\pi", "\\infty", "\\partial", "\\cdot", "\\times", "\\leq", "\\geq", "\\neq", "\\to",
+  "\\in", "\\text{#{}}",
+];

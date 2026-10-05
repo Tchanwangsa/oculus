@@ -3,7 +3,6 @@ import {
   EditorSelection,
   EditorState,
   Prec,
-  StateEffect,
   StateField,
   type ChangeSpec,
   type Extension,
@@ -24,8 +23,13 @@ import { fenceCode, fenceLanguage } from "./codeLanguages";
 import { findRevealed } from "./find";
 import { inlineCodeCitation } from "./mentionSyntax";
 import { noteHost } from "./host";
+import { focusedField, setFocused, trackFocus } from "./liveFocus";
+import { continuation, ownsLines } from "./mathContext";
+import { BLOCK_MATH_TYPE, MathFieldWidget, mathField, touchedMath, visualMath, visualMathField, type ActiveMath } from "./mathField";
+import { offerShapeSwitch } from "./mathTools";
 import { enterTable, TableWidget } from "./table";
 import { parseTable } from "./tableModel";
+import { ancestorAt } from "./syntax";
 import {
   BulletWidget,
   CheckboxWidget,
@@ -42,7 +46,8 @@ import {
  * Live mode: markdown renders in place and a construct shows its source while
  * the selection touches it — headings, quotes, list markers and code fences
  * while the caret is on their lines. Unfocused, nothing is revealed. A table
- * never is: it is atomic, and its cells take the caret instead.
+ * never is: it is atomic, and its cells take the caret instead. Rendered
+ * maths is atomic too, and the visual field (`mathField.ts`) edits it.
  *
  * An inline code span holding only a citation draws as the chat's file chip
  * (`mentionSyntax.ts`).
@@ -54,18 +59,6 @@ import {
  * selection and focus changes, not only edits.
  */
 
-const setFocused = StateEffect.define<boolean>();
-
-const focusedField = StateField.define<boolean>({
-  create: () => false,
-  update(value, tr) {
-    for (const e of tr.effects) if (e.is(setFocused)) value = e.value;
-    return value;
-  },
-});
-
-const trackFocus = EditorView.focusChangeEffect.of((_state, focusing) => setFocused.of(focusing));
-
 /** Whether a selection range touches `from..to`, edges included. A match
  *  the find bar selected counts while the bar has focus (`find.ts`). */
 function touches(state: EditorState, from: number, to: number): boolean {
@@ -76,6 +69,11 @@ function touches(state: EditorState, from: number, to: number): boolean {
 /** The same, widened to whole lines. */
 function touchesLines(state: EditorState, from: number, to: number): boolean {
   return touches(state, state.doc.lineAt(from).from, state.doc.lineAt(to).to);
+}
+
+/** Whether a non-empty selection range covers part of `from..to`. */
+function selectedIn(state: EditorState, from: number, to: number): boolean {
+  return state.selection.ranges.some((r) => !r.empty && r.from < to && r.to > from);
 }
 
 const hide = Decoration.replace({});
@@ -99,14 +97,6 @@ function isBlockImage(state: EditorState, node: SyntaxNodeRef): boolean {
   return node.to <= ln.to && ln.text.trim() === state.sliceDoc(node.from, node.to);
 }
 
-/** A block that starts its line (not inside a quote or list item, whose
- *  markers a block widget would swallow) and ends its last. */
-function ownsLines(state: EditorState, node: SyntaxNodeRef): boolean {
-  const first = state.doc.lineAt(node.from);
-  const last = state.doc.lineAt(node.to);
-  return node.from === first.from && state.sliceDoc(node.to, last.to).trim() === "";
-}
-
 /** The maths between a node's two `MathMark`s, and where the caret goes. */
 function mathParts(state: EditorState, node: SyntaxNode) {
   const marks = node.getChildren("MathMark");
@@ -117,7 +107,22 @@ function mathParts(state: EditorState, node: SyntaxNode) {
   // Into the first content line, past a bare `$$` line.
   const newline = source.indexOf("\n");
   const caret = from - node.from + (newline >= 0 && source.slice(0, newline).trim() === "" ? newline + 1 : 0);
-  return { source: source.trim(), caret };
+  return { source: source.trim(), caret, from, to };
+}
+
+/** Rendered or source, for maths the selection touches (`touchedMath`).
+ *  A find match shows as source: the field, which would take it, needs focus. */
+function showsSource(state: EditorState, node: SyntaxNodeRef, parts: { from: number; to: number }, display: boolean) {
+  if (!touches(state, node.from, node.to)) return false;
+  return !state.field(focusedField) || touchedMath(state, node.from, parts.from, parts.to, display) === "source";
+}
+
+/** The MathLive field over the maths it is editing. */
+function fieldDecoration(state: EditorState, v: ActiveMath): Range<Decoration> {
+  const widget = new MathFieldWidget(state.sliceDoc(v.from, v.to).trim(), v.display, v.block, v.id);
+  return v.block
+    ? Decoration.replace({ widget, block: true }).range(v.start, state.doc.lineAt(v.end).to)
+    : Decoration.replace({ widget }).range(v.start, v.end);
 }
 
 /** A ```mermaid fence's source, or null for any other fence. */
@@ -138,24 +143,34 @@ function isDrawnMermaid(state: EditorState, node: SyntaxNodeRef): boolean {
 function buildBlocks(state: EditorState): DecorationSet {
   const host = state.facet(noteHost);
   const out: Range<Decoration>[] = [];
+  const visual = visualMath(state);
+  if (visual?.block) out.push(fieldDecoration(state, visual));
   syntaxTree(state).iterate({
     enter: (node) => {
       switch (node.name) {
         case "BlockMath": {
-          if (!ownsLines(state, node) || touches(state, node.from, node.to)) return false;
+          if (!ownsLines(state, node) || (visual?.block && node.from === visual.start)) return false;
           const parts = mathParts(state, node.node);
-          if (!parts) return false;
+          if (!parts || showsSource(state, node, parts, true)) return false;
           const to = state.doc.lineAt(node.to).to;
-          out.push(
-            Decoration.replace({ widget: new MathWidget(parts.source, true, parts.caret), block: true }).range(
-              node.from,
-              to,
-            ),
-          );
+          const widget = new MathWidget(parts.source, true, parts.caret, true, selectedIn(state, node.from, to));
+          out.push(Decoration.replace({ widget, block: true }).range(node.from, to));
           return false;
         }
         case "HorizontalRule": {
-          if (!ownsLines(state, node) || touchesLines(state, node.from, node.to)) return false;
+          if (!ownsLines(state, node)) return false;
+          // A rule needs a blank line above it, or it underlines a heading; the
+          // blank lines beside it shrink to a gap unless the caret is on them.
+          const first = state.doc.lineAt(node.from).number;
+          const last = state.doc.lineAt(node.to).number;
+          for (const n of [first - 1, last + 1]) {
+            if (n < 1 || n > state.doc.lines) continue;
+            const blank = state.doc.line(n);
+            if (blank.text.trim() === "" && !touches(state, blank.from, blank.to)) {
+              out.push(line("cm-hr-gap").range(blank.from));
+            }
+          }
+          if (touchesLines(state, node.from, node.to)) return false;
           out.push(
             Decoration.replace({ widget: new RuleWidget(), block: true }).range(
               node.from,
@@ -242,6 +257,7 @@ const blockField = StateField.define<DecorationSet>({
       tr.selection ||
       tr.effects.some((e) => e.is(setFocused)) ||
       findRevealed(tr.state) !== findRevealed(tr.startState) ||
+      tr.state.field(visualMathField) !== tr.startState.field(visualMathField, false) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
       tr.state.facet(noteHost) !== tr.startState.facet(noteHost);
     return stale ? buildBlocks(tr.state) : deco;
@@ -368,20 +384,113 @@ const tableKeys = Prec.highest(
   ]),
 );
 
-/** How text put at `pos` is padded to stay off a drawn table: GFM reads a line
- *  straight under a table as a row, so text at its end or on the empty line
- *  under it starts after a blank line; at its start, it gets its own line. */
-function tablePadding(state: EditorState, pos: number): [string, string] | null {
+// ── Rendered maths: atomic, a block's caret spots ─────────────────────────
+
+/** The rendered maths among `decos`, inline or blocks. */
+function mathIn(decos: DecorationSet, block: boolean): DecorationSet {
+  const out: Range<Decoration>[] = [];
+  for (const iter = decos.iter(); iter.value; iter.next()) {
+    const w = iter.value.spec.widget;
+    if (w instanceof MathWidget && w.block === block) out.push(iter.value.range(iter.from, iter.to));
+  }
+  return Decoration.set(out);
+}
+
+/** Rendered maths is atomic once the field can take it, so a selection
+ *  covers it whole and the caret rests only at its edges. Before MathLive
+ *  loads, Backspace at its edge would take the whole node. */
+function mathAtoms(view: EditorView, set: DecorationSet | undefined): DecorationSet {
+  return view.state.field(visualMathField, false)?.lib === "ready" && set ? set : Decoration.none;
+}
+
+const mathBlockField = StateField.define<DecorationSet>({
+  create: (state) => mathIn(state.field(blockField), true),
+  update(blocks, tr) {
+    const next = tr.state.field(blockField);
+    return next === tr.startState.field(blockField, false) ? blocks : mathIn(next, true);
+  },
+  provide: (f) => EditorView.atomicRanges.of((view) => mathAtoms(view, view.state.field(f))),
+});
+
+/** The drawn maths block starting (`from`) or ending (`to`) exactly at `pos`. */
+function mathBlockAt(state: EditorState, pos: number, edge: "from" | "to"): Span | null {
+  let found = null as Span | null;
+  state.field(mathBlockField, false)?.between(pos, pos, (from, to) => {
+    if ((edge === "from" ? from : to) !== pos) return;
+    found = { from, to };
+    return false;
+  });
+  return found;
+}
+
+/** From the caret before a block (`forward`) or after it, into the field at
+ *  that end: →/↓/Delete before it, ←/↑/Backspace after it. */
+function intoMathBlock(forward: boolean): Command {
+  return (view) => {
+    const { state } = view;
+    const head = caretOf(state);
+    const block = head == null ? null : mathBlockAt(state, head, forward ? "from" : "to");
+    const node = block && syntaxTree(state).resolveInner(block.from, 1);
+    let math: SyntaxNode | null = node;
+    while (math && math.name !== "BlockMath") math = math.parent;
+    const parts = math && mathParts(state, math);
+    if (!parts) return false;
+    view.dispatch({ selection: { anchor: forward ? parts.from : parts.to }, scrollIntoView: true });
+    return true;
+  };
+}
+
+/** Backspace before a block, Delete after it: an empty line beyond goes,
+ *  else the caret steps onto that line rather than joining it to a `$$`. */
+function deleteBesideMathBlock(forward: boolean): Command {
+  return (view) => {
+    const { state } = view;
+    const head = caretOf(state);
+    if (head == null || !mathBlockAt(state, head, forward ? "to" : "from")) return false;
+    const ln = state.doc.lineAt(head);
+    const n = ln.number + (forward ? 1 : -1);
+    if (n < 1 || n > state.doc.lines) return true;
+    const beyond = state.doc.line(n);
+    if (beyond.length) view.dispatch({ selection: { anchor: forward ? beyond.from : beyond.to }, scrollIntoView: true });
+    else {
+      const change = forward ? { from: ln.to, to: beyond.to } : { from: beyond.from, to: ln.from };
+      view.dispatch({ changes: change, scrollIntoView: true, userEvent: "delete" });
+    }
+    return true;
+  };
+}
+
+const mathBlockKeys = Prec.highest(
+  keymap.of([
+    { key: "ArrowRight", run: intoMathBlock(true) },
+    { key: "ArrowDown", run: intoMathBlock(true) },
+    { key: "Delete", run: (view) => intoMathBlock(true)(view) || deleteBesideMathBlock(true)(view) },
+    { key: "ArrowLeft", run: intoMathBlock(false) },
+    { key: "ArrowUp", run: intoMathBlock(false) },
+    { key: "Backspace", run: (view) => intoMathBlock(false)(view) || deleteBesideMathBlock(false)(view) },
+  ]),
+);
+
+// ── Text at a block's edge ─────────────────────────────────────────────────
+
+/** How text put at `pos` is padded to stay off a drawn block. GFM reads a
+ *  line straight under a table as a row, so text at its end or on the empty
+ *  line under it starts after a blank line; at its start, it gets its own
+ *  line. Text at a maths block's edge gets its own line, or it would join a
+ *  `$$` and undo the block. */
+function edgePadding(state: EditorState, pos: number): [string, string] | null {
   if (tableAt(state, pos, "to")) return ["\n\n", ""];
   if (tableAt(state, pos, "from")) return ["", "\n"];
   if (!state.doc.lineAt(pos).length && tableBeside(state, pos, true)) return ["\n", ""];
+  if (mathBlockAt(state, pos, "to")) return ["\n", ""];
+  if (mathBlockAt(state, pos, "from")) return ["", "\n"];
   return null;
 }
 
-/** Typing beside a table; a cell's own writes are dispatched, not typed. */
-const tableTyping = EditorView.inputHandler.of((view, from, to, text) => {
+/** Typing beside a block; a cell's own writes are dispatched, not typed. */
+const edgeTyping = EditorView.inputHandler.of((view, from, to, text) => {
   if (from !== to || view.composing || caretOf(view.state) !== from) return false;
-  const pad = tablePadding(view.state, from);
+  const pad = edgePadding(view.state, from);
   if (!pad) return false;
   view.dispatch({
     changes: { from, insert: pad[0] + text + pad[1] },
@@ -392,15 +501,15 @@ const tableTyping = EditorView.inputHandler.of((view, from, to, text) => {
   return true;
 });
 
-/** Pasting beside a table, which skips the input handler. */
-const tablePaste = EditorState.transactionFilter.of((tr) => {
+/** Pasting beside a block, which skips the input handler. */
+const edgePaste = EditorState.transactionFilter.of((tr) => {
   if (!tr.docChanged || !tr.isUserEvent("input.paste")) return tr;
   const pos = caretOf(tr.startState);
   if (pos == null) return tr;
   const parts: { from: number; to: number; text: string }[] = [];
   tr.changes.iterChanges((from, to, _a, _b, inserted) => parts.push({ from, to, text: inserted.toString() }));
   if (parts.length !== 1 || parts[0].from !== pos || parts[0].to !== pos) return tr;
-  const pad = tablePadding(tr.startState, pos);
+  const pad = edgePadding(tr.startState, pos);
   if (!pad) return tr;
   const { text } = parts[0];
   return {
@@ -409,6 +518,45 @@ const tablePaste = EditorState.transactionFilter.of((tr) => {
     scrollIntoView: true,
     userEvent: "input.paste",
   };
+});
+
+/** LaTeX copied from a maths field pasted outside maths keeps rendering
+ *  and its shape: a block's copy goes in as a block on lines of its own
+ *  (inline in a table row, which a block would break), the rest as `$…$`.
+ *  Inside maths' source it stays bare. */
+const fieldLatexPaste = EditorView.domEventHandlers({
+  paste(e, view) {
+    const data = e.clipboardData;
+    const latex = data?.getData("text/plain").trim();
+    if (!latex || !data?.types.includes("application/x-latex") || view.state.readOnly) return false;
+    const inMaths = (pos: number) => {
+      const node = ancestorAt(view.state, pos, (n) => n.name === "InlineMath" || n.name === "BlockMath");
+      return node != null && node.from < pos && pos < node.to;
+    };
+    if (view.state.selection.ranges.some((r) => inMaths(r.from))) return false;
+    e.preventDefault();
+    const { state } = view;
+    const block = data.getData(BLOCK_MATH_TYPE);
+    const spec = state.changeByRange((r) => {
+      if (!block || ancestorAt(state, r.from, (n) => n.name === "Table")) {
+        const insert = `$${latex}$`;
+        return { changes: { from: r.from, to: r.to, insert }, range: EditorSelection.cursor(r.from + insert.length) };
+      }
+      const line = state.doc.lineAt(r.from);
+      const prefix = continuation(line.text);
+      const nl = `\n${prefix}`;
+      const before = state.sliceDoc(line.from, r.from).slice(prefix.length).trim() ? nl : "";
+      const after = state.sliceDoc(r.to, state.doc.lineAt(r.to).to).trim() ? nl : "";
+      const body = block.replace(/\n/g, nl);
+      return {
+        changes: { from: r.from, to: r.to, insert: before + body + after },
+        range: EditorSelection.cursor(r.from + before.length + body.length),
+      };
+    });
+    view.dispatch(state.update(spec, { scrollIntoView: true, userEvent: "input.paste" }));
+    if (view.state.selection.ranges.length === 1) offerShapeSwitch(view, view.state.selection.main.head);
+    return true;
+  },
 });
 
 // ── Inline decorations (view plugin) ───────────────────────────────────────
@@ -431,6 +579,8 @@ function buildInline(view: EditorView): DecorationSet {
   const host = state.facet(noteHost);
   const out: Range<Decoration>[] = [];
   const { from, to } = view.viewport;
+  const visual = visualMath(state);
+  if (visual && !visual.block) out.push(fieldDecoration(state, visual));
 
   /** Hide `[from, to)` plus one following space, as after `#` or `>`. */
   const hideWithSpace = (a: number, b: number) => {
@@ -590,9 +740,9 @@ function buildInline(view: EditorView): DecorationSet {
           return false;
         }
         case "InlineMath": {
-          if (touches(state, node.from, node.to)) return false;
+          if (visual && !visual.block && node.from === visual.start) return false;
           const parts = mathParts(state, node.node);
-          if (parts) {
+          if (parts && !showsSource(state, node, parts, false)) {
             out.push(
               Decoration.replace({ widget: new MathWidget(parts.source, false, parts.caret) }).range(
                 node.from,
@@ -605,10 +755,10 @@ function buildInline(view: EditorView): DecorationSet {
         case "BlockMath": {
           // Inside a quote or list item the field cannot draw it; one line
           // still renders inline, several stay source.
-          if (ownsLines(state, node) || touches(state, node.from, node.to)) return false;
+          if (ownsLines(state, node) || (visual && !visual.block && node.from === visual.start)) return false;
           if (state.doc.lineAt(node.from).number !== state.doc.lineAt(node.to).number) return false;
           const parts = mathParts(state, node.node);
-          if (parts) {
+          if (parts && !showsSource(state, node, parts, true)) {
             out.push(
               Decoration.replace({ widget: new MathWidget(parts.source, true, parts.caret) }).range(
                 node.from,
@@ -628,8 +778,11 @@ function buildInline(view: EditorView): DecorationSet {
 const inlinePlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
+    /** The rendered inline maths, atomic (`mathAtoms`). */
+    atoms: DecorationSet;
     constructor(view: EditorView) {
       this.decorations = buildInline(view);
+      this.atoms = mathIn(this.decorations, false);
     }
     update(u: ViewUpdate) {
       if (
@@ -639,25 +792,37 @@ const inlinePlugin = ViewPlugin.fromClass(
         u.focusChanged ||
         u.transactions.some((tr) => tr.effects.some((e) => e.is(setFocused))) ||
         findRevealed(u.state) !== findRevealed(u.startState) ||
+        u.state.field(visualMathField) !== u.startState.field(visualMathField, false) ||
         syntaxTree(u.state) !== syntaxTree(u.startState) ||
         u.state.facet(noteHost) !== u.startState.facet(noteHost)
       ) {
         this.decorations = buildInline(u.view);
+        this.atoms = mathIn(this.decorations, false);
       }
     }
   },
-  { decorations: (v) => v.decorations },
+  {
+    decorations: (v) => v.decorations,
+    provide: (plugin) => EditorView.atomicRanges.of((view) => mathAtoms(view, view.plugin(plugin)?.atoms)),
+  },
 );
 
-/** Tell a freshly configured Live mode whether the editor has focus: the
- *  field starts unfocused, and only a focus change would correct it. */
-export function syncLiveFocus(view: EditorView): void {
-  if (view.state.field(focusedField, false) !== undefined) {
-    view.dispatch({ effects: setFocused.of(view.hasFocus) });
-  }
-}
+export { syncLiveFocus } from "./liveFocus";
 
 /** Everything Live mode adds over Raw; swapped through a compartment. */
 export function livePreview(): Extension {
-  return [focusedField, trackFocus, blockField, tableField, tableKeys, tableTyping, tablePaste, inlinePlugin];
+  return [
+    focusedField,
+    trackFocus,
+    mathBlockKeys,
+    mathField(),
+    blockField,
+    tableField,
+    mathBlockField,
+    tableKeys,
+    edgeTyping,
+    edgePaste,
+    fieldLatexPaste,
+    inlinePlugin,
+  ];
 }

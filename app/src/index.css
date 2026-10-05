@@ -514,6 +514,58 @@
   overflow-wrap: anywhere;
 }
 
+/* MathLive's `\` command list (the note editor's maths field), on the body
+ * outside the editor. The doubled id outranks MathLive's adopted sheet. */
+#mathlive-suggestion-popover#mathlive-suggestion-popover {
+  background-color: var(--color-popover);
+  color: var(--color-popover-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  text-align: left;
+}
+#mathlive-suggestion-popover#mathlive-suggestion-popover::after {
+  display: none;
+}
+#mathlive-suggestion-popover#mathlive-suggestion-popover ul {
+  max-height: 240px;
+  padding: 4px;
+}
+#mathlive-suggestion-popover#mathlive-suggestion-popover li {
+  margin: 0;
+  padding: 2px 8px;
+  width: 100%;
+  box-sizing: border-box;
+  align-items: center;
+  border-radius: 8px;
+}
+#mathlive-suggestion-popover#mathlive-suggestion-popover li:hover,
+#mathlive-suggestion-popover#mathlive-suggestion-popover li.is-pressed,
+#mathlive-suggestion-popover#mathlive-suggestion-popover li.is-active {
+  background: var(--color-accent);
+}
+#mathlive-suggestion-popover#mathlive-suggestion-popover li a {
+  color: var(--color-brand);
+}
+#mathlive-suggestion-popover#mathlive-suggestion-popover .ML__popover__command {
+  font-size: 16px;
+}
+#mathlive-suggestion-popover#mathlive-suggestion-popover .ML__popover__current {
+  background: var(--color-accent);
+  color: inherit;
+}
+#mathlive-suggestion-popover#mathlive-suggestion-popover .ML__popover__latex {
+  font-family: var(--font-mono);
+  color: var(--color-muted-foreground);
+}
+#mathlive-suggestion-popover#mathlive-suggestion-popover .ML__popover__keybinding {
+  font-family: var(--font-sans);
+  color: var(--color-muted-foreground);
+  opacity: 1;
+}
+
 /* Overrides for pdf.js's unlayered `pdf_viewer.css` (`PDFViewer.tsx`), each one
  * step more specific than the rule it answers. That sheet sets `color-scheme:
  * light dark` on `:root`; pin it to the `.dark` class instead. */

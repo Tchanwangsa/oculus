@@ -4,6 +4,7 @@ import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
 import { noteLanguage } from "./language";
+import { MATH_LINE_GAP } from "./mathField";
 
 /**
  * The note editor's look, all from the app's tokens in `index.css` so dark
@@ -115,6 +116,7 @@ export const noteTheme = EditorView.theme({
   },
   ".cm-hr": { display: "flex", alignItems: "center", height: "1.7em", cursor: "text" },
   ".cm-hr::before": { content: '""', flex: "1", borderTop: "1px solid var(--color-border)" },
+  ".cm-line.cm-hr-gap": { lineHeight: "0.6" },
 
   // Fenced code
   ".cm-line.cm-codeblock": {
@@ -189,9 +191,108 @@ export const noteTheme = EditorView.theme({
 
   // Maths
   ".cm-math": { cursor: "text" },
-  ".cm-math-display": { textAlign: "center", padding: "0.4em 0", overflowX: "auto" },
+  // `contain` keeps a too-wide formula scrolling in its block rather than
+  // widening the whole note, as `.cm-math-field-block` does for the field.
+  ".cm-math-display": { textAlign: "center", padding: "0.4em 0", overflowX: "auto", contain: "inline-size" },
+  // MathLive's static rendering (`staticMath`) in the box the field takes:
+  // its size, padding and, in a block, a `\displaylines` table spanning the
+  // column with its rows centred, as `centredRows` draws them in the field.
+  ".cm-math-ml": {
+    display: "inline-block",
+    verticalAlign: "baseline",
+    fontSize: "1.21em",
+    lineHeight: "1.2",
+    padding: "0 2px",
+  },
+  ".cm-math-display > .cm-math-ml": { display: "block" },
+  // `\text{}` in LaTeX's roman, as KaTeX sets it (MathLive defaults to the
+  // system sans). The field draws text one span per letter, so no kerning or
+  // ligatures here either, or entering the maths shifts it.
+  ".cm-math-ml .ML__text": { fontFamily: "KaTeX_Main", fontKerning: "none", fontVariantLigatures: "none" },
+  ".cm-math-ml .ML__latex > .ML__base:has(> .ML__multiline_environment)": { width: "100%" },
+  ".cm-math-ml .ML__latex > .ML__base > .ML__multiline_environment": { justifyContent: "safe center" },
+  ".cm-math-ml .ML__latex > .ML__base > .ML__mtable > .col-align-l:only-child > .ML__vlist-t": {
+    textAlign: "center",
+  },
+  // KaTeX, while MathLive loads or for maths it can't read.
   ".cm-math-display .katex-display": { margin: "0" },
+  // A block's top-level `\\` lines, spaced as the field spaces its rows.
+  ".cm-math-display .katex-html > .newline": { height: `${MATH_LINE_GAP}em` },
+  // Rendered maths selects as one unit (`MathWidget`): no native highlight on
+  // KaTeX's glyphs, which CodeMirror hides only inside a line. A selected
+  // block fills opaquely over the card, so the selection layer under it
+  // can't double its tint.
+  ".cm-content .cm-math::selection, .cm-content .cm-math ::selection": { backgroundColor: "transparent" },
+  ".cm-math-display.cm-math-selected": {
+    backgroundColor: `color-mix(in srgb, ${brand} 22%, var(--color-card))`,
+    borderRadius: "6px",
+  },
   ".cm-math-error": { color: "var(--color-destructive)", fontFamily: mono, fontSize: "13px" },
+  // The MathLive field (`mathField.ts`) at the static rendering's size and
+  // line height, so opening it doesn't move the maths or its line. Rules
+  // from out here beat its shadow `:host`.
+  ".cm-math-field math-field": {
+    display: "inline-block",
+    verticalAlign: "baseline",
+    fontSize: "1.21em",
+    lineHeight: "1.2",
+    color: "inherit",
+    backgroundColor: `color-mix(in srgb, ${brand} 7%, transparent)`,
+    border: "0",
+    borderRadius: "4px",
+    outline: "none",
+    padding: "0 2px",
+    "--caret-color": brand,
+    "--selection-color": "inherit",
+    "--selection-background-color": `color-mix(in srgb, ${brand} 22%, transparent)`,
+    "--contains-highlight-background-color": `color-mix(in srgb, ${brand} 9%, transparent)`,
+    "--placeholder-color": brand,
+    "--smart-fence-color": muted,
+    "--latex-color": brand,
+    "--text-font-family": "KaTeX_Main",
+  },
+  ".cm-math-field math-field::part(container)": {
+    minHeight: "0",
+    padding: "0",
+    "--_placeholder-color": brand,
+    "--_placeholder-opacity": "0.5",
+    "--_selection-background-color": `color-mix(in srgb, ${brand} 22%, transparent)`,
+    "--_contains-highlight-background-color": `color-mix(in srgb, ${brand} 9%, transparent)`,
+    "--_latex-color": brand,
+    "--_smart-fence-color": muted,
+  },
+  ".cm-math-field math-field::part(content)": { padding: "0" },
+  // MathLive clips its content box, which cuts subscripts below the inline
+  // field's tight line box; an inline field never needs to scroll.
+  ".cm-math-field:not(.cm-math-field-block) math-field::part(content)": { overflow: "visible" },
+  ".cm-math-field math-field::part(menu-toggle), .cm-math-field math-field::part(virtual-keyboard-toggle)": {
+    display: "none",
+  },
+  // A block's field spans the column with the maths centred, as KaTeX draws
+  // `.cm-math-display`; `safe` keeps a too-wide formula's start in view.
+  // `contain` stops a too-wide formula widening the whole note.
+  ".cm-math-field-block": { position: "relative", padding: "0.4em 0", contain: "inline-size" },
+  ".cm-math-field-block math-field": { display: "block", width: "100%", boxSizing: "border-box" },
+  ".cm-math-field-block math-field::part(content)": { justifyContent: "safe center" },
+  // An empty block's caret sits at its centre; the hint starts just past it.
+  ".cm-math-hint": {
+    position: "absolute",
+    top: "50%",
+    left: "calc(50% + 6px)",
+    maxWidth: "calc(50% - 6px)",
+    transform: "translateY(-50%)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: muted,
+    pointerEvents: "none",
+    userSelect: "none",
+  },
+  ".cm-math-hint[hidden]": { display: "none" },
+  // Until it renders, the field lies unseen over its static stand-in, still
+  // focusable (`FieldController.mount`).
+  ".cm-math-field-mounting": { position: "relative" },
+  ".cm-math-field-mounting math-field": { position: "absolute", inset: "0", opacity: "0" },
 
   // Mermaid diagrams; the picture's box is `.diagram` (`index.css`).
   ".cm-mermaid": { padding: "6px 0", cursor: "text" },
@@ -224,7 +325,15 @@ export const noteTheme = EditorView.theme({
     fontSize: "12px",
     lineHeight: "1.4",
   },
-  ".cm-math-tools.cm-math-tools-hidden": { display: "none" },
+  ".cm-math-tools.cm-math-tools-hidden, &.cm-math-command .cm-math-tools": { display: "none" },
+  // Under the MathLive field: no preview, the field is the preview.
+  ".cm-math-tools-visual .cm-math-preview, .cm-math-tools-visual .cm-math-error-text": { display: "none" },
+  ".cm-math-tools-visual .cm-math-recents": { marginTop: "0" },
+  ".cm-math-tools-visual .cm-math-recents[hidden] + .cm-math-tabbar": {
+    marginTop: "0",
+    paddingTop: "0",
+    borderTop: "0",
+  },
   ".cm-math-preview": {
     minHeight: "36px",
     maxHeight: "160px",
@@ -249,12 +358,17 @@ export const noteTheme = EditorView.theme({
   ".cm-math-error-text:empty": { display: "none" },
   ".cm-math-matrix-kinds": { display: "flex", flexWrap: "wrap", gap: "2px" },
   ".cm-math-tabbar": {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
     marginTop: "6px",
     paddingTop: "6px",
     borderTop: "1px solid var(--color-border-subtle)",
   },
   // One row that scrolls sideways; faded by `syncScrollFade` (`index.css`).
   ".cm-math-tabs": {
+    flex: "1",
+    minWidth: "0",
     display: "flex",
     gap: "2px",
     overflowX: "auto",
@@ -275,18 +389,45 @@ export const noteTheme = EditorView.theme({
     whiteSpace: "nowrap",
     transition: "background-color 120ms, color 120ms",
   },
+  ".cm-math-mode, .cm-math-shape": { flex: "none", color: "var(--color-foreground)", fontWeight: "500" },
+  ".cm-math-mode[hidden], .cm-math-shape[hidden]": { display: "none" },
+  ".cm-math-close": {
+    flex: "none",
+    width: "22px",
+    height: "22px",
+    display: "grid",
+    placeItems: "center",
+    padding: "0",
+    border: "0",
+    borderRadius: "9999px",
+    backgroundColor: "transparent",
+    color: muted,
+    cursor: "pointer",
+    transition: "background-color 120ms, color 120ms",
+  },
+  ".cm-math-close:hover": { backgroundColor: "var(--color-accent)", color: "var(--color-foreground)" },
   ".cm-math-pill:hover": { backgroundColor: "var(--color-accent)", color: "var(--color-foreground)" },
   ".cm-math-pill[aria-pressed=true]": { backgroundColor: "var(--color-accent)", color: "var(--color-foreground)" },
   ".cm-math-recents": {
     display: "flex",
-    flexWrap: "wrap",
     alignItems: "center",
     gap: "2px",
     marginTop: "6px",
   },
   ".cm-math-recents[hidden]": { display: "none" },
-  ".cm-math-caption": { color: muted, fontSize: "11px", marginRight: "4px" },
-  ".cm-math-recents .cm-math-cell": { width: "36px" },
+  ".cm-math-caption": { flex: "none", color: muted, fontSize: "11px", marginRight: "4px" },
+  // One row that scrolls sideways, like the tab strip.
+  ".cm-math-recent-cells": {
+    flex: "1",
+    minWidth: "0",
+    display: "flex",
+    alignItems: "center",
+    gap: "2px",
+    overflowX: "auto",
+    scrollbarWidth: "none",
+  },
+  ".cm-math-recent-cells::-webkit-scrollbar": { display: "none" },
+  ".cm-math-recents .cm-math-cell": { flex: "none", width: "36px" },
   ".cm-math-recents .cm-math-cell-wide": { width: "74px" },
   // Three rows of cells (32px + 2px gaps); the rest scrolls.
   // Faded top and bottom like the tab strip.
@@ -319,6 +460,30 @@ export const noteTheme = EditorView.theme({
   ".cm-math-cell-wide": { gridColumn: "span 2" },
   ".cm-math-cell:hover": { backgroundColor: "var(--color-accent)" },
   ".cm-math-cell .katex": { cursor: "pointer" },
+  // The visual field's quick picks: one row of palette cells, each with its
+  // number key in the corner, and the expand button.
+  // After `.cm-math-tools`, which it overrides; `-hidden` still beats it.
+  ".cm-math-quick": {
+    width: "auto",
+    display: "flex",
+    alignItems: "center",
+    gap: "2px",
+    padding: "4px",
+  },
+  ".cm-math-quick .cm-math-cell": { position: "relative", flex: "none", width: "36px" },
+  ".cm-math-quick .cm-math-cell-wide": { width: "74px" },
+  ".cm-math-quick-key": {
+    position: "absolute",
+    top: "1px",
+    left: "3px",
+    color: muted,
+    fontFamily: "var(--font-sans)",
+    fontSize: "9px",
+    lineHeight: "1",
+    fontVariantNumeric: "tabular-nums",
+    pointerEvents: "none",
+  },
+  ".cm-math-quick .cm-math-close": { marginLeft: "2px" },
   ".cm-math-matrix": { display: "flex", alignItems: "flex-start", gap: "12px", marginBottom: "8px" },
   ".cm-math-matrix-grid": { display: "grid", gridTemplateColumns: "repeat(6, 14px)", gap: "2px" },
   ".cm-math-matrix-cell": {

@@ -25,7 +25,9 @@ whole editor by row id: image attachments belong to one note, while a
 rename keeps its editor. **Live** mode renders markdown in place —
 headings, marks, links, lists and checkboxes, quotes, rules, code, pictures,
 KaTeX maths and mermaid diagrams — and shows a construct's source while the selection touches
-it (a heading, quote or list marker while the caret is on its line). **Raw**
+it (a heading, quote or list marker while the caret is on its line); maths
+is edited in a visual field instead
+([editor-maths.md](./editor-maths.md)). **Raw**
 is the same view with those decorations swapped out by a `Compartment`
 for `rawMode.ts`: monospace source with line numbers, markdown and
 frontmatter YAML coloured with the `--color-syntax-*` tokens.
@@ -72,7 +74,10 @@ last updated (`modified_at` or the session's last save) and a word count.
   Properties card, revealing its source when touched.
 - **Toolbar buttons and shortcuts are plain CodeMirror commands**
   (`app/src/components/documents/editor/commands.ts`) that rewrite markdown
-  and unwrap when already applied, so they work in both modes. ⌘-click opens a
+  and unwrap when already applied, so they work in both modes; Σ is the
+  exception inside maths, where it opens or closes the maths toolbox
+  (`toggleMathTools`,
+  [editor-maths.md](./editor-maths.md#maths-has-a-toolbox-opened-on-demand)). ⌘-click opens a
   link — library files through `libraryLinkTarget` and `openFileSmart`, web
   URLs in the in-app browser; a plain click edits it. Maths is `$…$` (pandoc's
   spacing rule), `\(…\)`, and `$$` / `\[` blocks on their own lines

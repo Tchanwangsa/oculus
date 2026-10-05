@@ -1,5 +1,5 @@
 import type { EditorState } from "@codemirror/state";
-import type { SyntaxNode } from "@lezer/common";
+import type { SyntaxNode, SyntaxNodeRef } from "@lezer/common";
 import { ancestorAt } from "./syntax";
 
 /** The maths around a position: its span, its LaTeX between the delimiters,
@@ -25,12 +25,34 @@ const CODE = new Set(["InlineCode", "FencedCode", "CodeBlock"]);
 export function mathAt(state: EditorState, pos: number): MathContext | null {
   const node = ancestorAt(state, pos, (n) => n.name === "InlineMath" || n.name === "BlockMath", [-1, 1]);
   if (!node) return emptyPair(state, pos);
+  const ctx = mathContextOf(node);
+  if (!ctx || pos < ctx.from || pos > ctx.to) return null;
+  return ctx;
+}
+
+/** The span and LaTeX range of an `InlineMath` or `BlockMath` node. */
+export function mathContextOf(node: SyntaxNode): MathContext | null {
   const marks = node.getChildren("MathMark");
   if (marks.length < 2) return null;
   const from = marks[0].to;
   const to = marks[marks.length - 1].from;
-  if (pos < from || pos > to) return null;
   return { node, start: node.from, end: node.to, from, to, display: node.name === "BlockMath" };
+}
+
+/** A block that starts its line (not inside a quote or list item, whose
+ *  markers a block widget would swallow) and ends its last. */
+export function ownsLines(state: EditorState, node: SyntaxNodeRef): boolean {
+  const first = state.doc.lineAt(node.from);
+  const last = state.doc.lineAt(node.to);
+  return node.from === first.from && state.sliceDoc(node.to, last.to).trim() === "";
+}
+
+/** A line's container markup (quote markers, list markers, indent), as the
+ *  prefix a new line inside the same container needs: list markers become
+ *  spaces, quote markers stay. */
+export function continuation(lineText: string): string {
+  const markup = /^(?:[ \t]*(?:>[ \t]?|(?:[-*+]|\d{1,9}[.)])(?:[ \t]+|$)))*[ \t]*/.exec(lineText)![0];
+  return markup.replace(/[-*+]|\d{1,9}[.)]/g, (m) => " ".repeat(m.length));
 }
 
 /** The caret between a lone `$$` pair — what Σ inserts mid-line — counts as

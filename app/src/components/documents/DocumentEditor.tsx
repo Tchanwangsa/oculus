@@ -42,7 +42,7 @@ import {
 } from "@/lib/format";
 import { libraryImageSrc } from "@/lib/libraryLinks";
 import { registerNoteLinkCommand } from "@/lib/noteShortcuts";
-import { fileTitle } from "@/lib/openFile";
+import { fileTitle, openNoteLink } from "@/lib/openFile";
 import { navigateActive } from "@/lib/tabRouters";
 import type { DbFile, Subject } from "@/lib/db";
 import { LoadingFill } from "@/components/ui/PageParts";
@@ -61,7 +61,7 @@ import {
   type SuggestConfig,
 } from "./editor/aiSuggest";
 import { liveCompartment, modeExtension, noteExtensions } from "./editor/extensions";
-import { hostCompartment, noteHost, openNoteLink, type NoteHost } from "./editor/host";
+import { hostCompartment, noteHost, type NoteHost } from "./editor/host";
 import { syncLiveFocus } from "./editor/livePreview";
 import { Toolbar } from "./editor/Toolbar";
 import { useEditorFind } from "./editor/useEditorFind";
