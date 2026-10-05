@@ -377,7 +377,7 @@ export const noteTheme = EditorView.theme({
     overflow: "hidden",
     fontSize: "10px",
   },
-  // `@` file links (`mentions.ts`): a sans title, a muted folder and glyph.
+  // `@` file mentions (`mentions.ts`): a sans title, a muted folder and glyph.
   ".cm-mention-option": { maxWidth: "420px" },
   ".cm-mention-option .cm-completionLabel": {
     fontFamily: "var(--font-sans)",

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { groupBySubject } from "../src/lib/subjectGroups";
 import { readStringSet } from "../src/hooks/useStoredState";
-import { libraryLinkHref, libraryLinkTarget } from "../src/lib/libraryLinks";
+import { libraryLinkTarget } from "../src/lib/libraryLinks";
 import { filterToken, matchesFilterDraft, resolveFilter, withFilter } from "../src/lib/searchFilters";
 import { sqliteUtcToMs } from "../src/lib/format";
 import type { DbFile, Subject } from "../src/lib/db";
@@ -43,14 +43,9 @@ describe("stored group preferences", () => {
 });
 
 describe("inherited note links and palette filters", () => {
-  test("same-subject note links round-trip spaces, parentheses, percent and Unicode", () => {
-    const path = "courses/COMP30026_2026_SM2/uploads/Notes (week 2) 100% λ.pdf";
-    const file = { relative_path: path } as DbFile;
-    const href = libraryLinkHref("courses/COMP30026_2026_SM2/documents/My note.md", path)!;
-    expect(href).not.toContain(" ");
-    expect(href).not.toContain("(");
-    expect(libraryLinkTarget(href, [file])).toBe(file);
-    expect(libraryLinkHref("courses/COMP30022_2026_SM2/documents/n.md", path)).toBeNull();
+  test("percent-encoded note links decode spaces, parentheses, percent and Unicode", () => {
+    const file = { relative_path: "courses/COMP30026_2026_SM2/uploads/Notes (week 2) 100% λ.pdf" } as DbFile;
+    expect(libraryLinkTarget("../uploads/Notes%20%28week%202%29%20100%25%20%CE%BB.pdf", [file])).toBe(file);
   });
   test("renamed Canvas pages resolve by canonical source URL and malformed percentages do not throw", () => {
     const file = { relative_path: "courses/X/pages/new-title.md", source_url: "https://canvas.test/courses/1/pages/original-slug" } as DbFile;

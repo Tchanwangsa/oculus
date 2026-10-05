@@ -21,12 +21,14 @@ import {
 import type { SyntaxNode, SyntaxNodeRef } from "@lezer/common";
 
 import { fenceCode, fenceLanguage } from "./codeLanguages";
+import { inlineCodeCitation } from "./mentionSyntax";
 import { noteHost } from "./host";
 import { enterTable, TableWidget } from "./table";
 import { parseTable } from "./tableModel";
 import {
   BulletWidget,
   CheckboxWidget,
+  CitationWidget,
   CodeHeaderWidget,
   ImageWidget,
   MathWidget,
@@ -40,6 +42,9 @@ import {
  * the selection touches it — headings, quotes, list markers and code fences
  * while the caret is on their lines. Unfocused, nothing is revealed. A table
  * never is: it is atomic, and its cells take the caret instead.
+ *
+ * An inline code span holding only a citation draws as the chat's file chip
+ * (`mentionSyntax.ts`).
  *
  * Inline decorations come from a view plugin over the viewport; block widgets
  * (display maths, a picture alone on its line, a mermaid diagram, a rule, a
@@ -464,6 +469,15 @@ function buildInline(view: EditorView): DecorationSet {
           }
         }
         return undefined;
+      }
+
+      // A citation (what `@` writes) is a chip until the selection touches it.
+      if (name === "InlineCode" && !touches(state, node.from, node.to)) {
+        const cite = inlineCodeCitation(state.sliceDoc(node.from, node.to));
+        if (cite) {
+          out.push(Decoration.replace({ widget: new CitationWidget(cite) }).range(node.from, node.to));
+          return false;
+        }
       }
 
       const inline = INLINE_STYLE[name];

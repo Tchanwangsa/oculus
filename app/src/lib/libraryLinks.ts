@@ -47,20 +47,6 @@ function decodeLinkPath(path: string): string {
     .join("/");
 }
 
-/** The `../` link from the note at `notePath` (`courses/<code>/documents/…`)
- *  to a file of the same subject, which `libraryLinkTarget` resolves back.
- *  Null for a file under another subject. */
-export function libraryLinkHref(notePath: string, targetPath: string): string | null {
-  const subject = /^courses\/[^/]+\//.exec(notePath)?.[0];
-  if (!subject || !targetPath.startsWith(subject)) return null;
-  const rest = targetPath
-    .slice(subject.length)
-    .split("/")
-    .map((s) => encodeURIComponent(s).replace(/[()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`))
-    .join("/");
-  return `../${rest}`;
-}
-
 /** What an `<img>` loads for `src` in the file at `relativePath`: a schemeless
  *  path resolves against that file's folder; anything with a scheme is as-is.
  *  Empty until the data dir is known. */

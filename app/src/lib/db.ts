@@ -614,28 +614,33 @@ export async function searchMentionFiles(
   );
 }
 
-/** Files a note's `@` can link: every file of its subject, parsed or not (a
- *  link opens the file, nothing reads it), the note itself excluded. Ranked
- *  like `searchMentionFiles`, so an empty query lists recently opened files. */
+/** A file a note's `@` offers, with its subject's code for the menu. */
+export type NoteLinkFile = DbFile & { subject_code: string };
+
+/** Files a note's `@` can mention: every file of `subjectId`, or of the whole
+ *  library when it is null, parsed or not (a mention opens the file, nothing
+ *  reads it), `excludePath` (the note itself) left out. Ranked like
+ *  `searchMentionFiles`, so an empty query lists recently opened files. */
 export async function searchNoteLinkFiles(
-  subjectId: number,
-  notePath: string,
+  subjectId: number | null,
+  excludePath: string | null,
   query: string,
   limit = 8,
-): Promise<DbFile[]> {
+): Promise<NoteLinkFile[]> {
   const db = await getDb();
   const { where, params, prefix } = mentionMatch(query, 3);
-  return db.select<DbFile[]>(
-    `SELECT f.*
+  return db.select<NoteLinkFile[]>(
+    `SELECT f.*, s.code AS subject_code
      FROM files f
-     WHERE f.subject_id = $1
-       AND f.relative_path != $2
+     JOIN subjects s ON s.id = f.subject_id
+     WHERE ($1 IS NULL OR f.subject_id = $1)
+       AND ($2 IS NULL OR f.relative_path != $2)
        AND (${where})
      ORDER BY (f.filename LIKE $${params.length + 3} ESCAPE '\\') DESC,
               f.last_accessed_at DESC,
               f.filename ASC
      LIMIT $${params.length + 4}`,
-    [subjectId, notePath, ...params, prefix, limit],
+    [subjectId, excludePath, ...params, prefix, limit],
   );
 }
 

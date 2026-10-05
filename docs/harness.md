@@ -430,6 +430,9 @@ structural changes (bumping `key`), and `revealCaret` scrolls the box because
 a contenteditable follows its caret only for edits it made. The menu anchors
 on a range over the `@` token, since a collapsed range's rect can be zeros in
 WebKit.
+A note's `@` (the note editor's own completion) writes the
+same backticked path and draws the same chip
+([editor.md](./editor.md#pictures-mentions-and-citations-resolve-to-library-files)).
 
 ## Attachments are files in `agents/attachments/`
 

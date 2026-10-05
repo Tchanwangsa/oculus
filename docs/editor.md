@@ -132,23 +132,33 @@ leftover out of `list_documents`.
   as one `isolateHistory` transaction, so it saves like typing, reaches the
   other views and ⌘Z takes it back.
 
-## Pictures and `@` links resolve to library files
+## Pictures, mentions and citations resolve to library files
 
 - **A pasted, dropped or picked picture is written beside its note** in
   `documents/assets/`, on arrival, and linked relatively; `FileViewer` and the
   editor both resolve it with `libraryImageSrc` (`app/src/lib/libraryLinks.ts`).
   `is_document_rel` demands a `.md` one level down, so nothing can edit
   `assets/`.
-- **`@` links a library file**
+- **`@` mentions a library file**
   (`app/src/components/documents/editor/mentions.ts`): at a word start,
   outside maths, code and frontmatter, the query after it (the chat's caps)
-  searches every file of the note's subject, parsed or not, but the note
-  (`searchNoteLinkFiles`); an empty query lists recently opened files. It is a
-  source in the one `autocompletion()`. Accepting writes
-  `[title](../<path>)`, each segment percent-encoded (`libraryLinkHref`),
-  which `libraryLinkTarget` decodes, so ⌘-click and `FileViewer` resolve it
-  alike. The subject and note path reach the editor through `NoteHost`.
-  Lectures have no link form a note can open, so `@` lists files only.
+  searches every file, parsed or not, of the host's subject — or of the whole
+  library when the host has none, each row then naming its subject — leaving
+  out the note itself (`searchNoteLinkFiles`); an empty query lists recently
+  opened files. It is a source in the one `autocompletion()`. Accepting writes
+  the backticked library path the chat composer sends,
+  `` `courses/<code>/files/week-3.pdf` `` (`mentionSyntax.ts`). The subject
+  and note path reach the editor through `NoteHost`; an editor with no file
+  passes a null path. `@` lists files only. A `[words](path)` link is the
+  writer's own and stays a link; an older `[title](../<path>)` still opens
+  through `libraryLinkTarget`.
+- **A citation in inline code draws as the chat's chip**: in Live mode, an
+  inline code span holding only a citation (`inlineCodeCitation`, the same
+  `parseCitation` test chat applies) is replaced by `CitationWidget`
+  (`widgets.ts`), which mounts `CitationCode` — and so `FileChip` — in a React
+  root of its own, under a `TooltipProvider` for the picture lightbox. A
+  click opens the file (⌘ in a new tab) without moving the caret; the source
+  shows while the selection touches the span. Raw mode shows the text.
 
 ## AI suggestions are ghost text at the caret
 
