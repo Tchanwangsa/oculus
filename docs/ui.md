@@ -12,6 +12,7 @@ Read this before any UI work.
 | shadcn primitives | `app/src/components/ui/` |
 | Persisted view state and collapsed groups | `app/src/hooks/useStoredState.ts` |
 | Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/PageParts.tsx` |
+| A page's nav column (Settings, subjects) | `app/src/components/ui/SideNav.tsx` |
 | Drag gestures | `app/src/hooks/usePointerDrag.ts`, `app/src/hooks/useCardDrag.ts`, `app/src/hooks/useFileDrop.ts` |
 | Subject grouping and persisted collapsed groups | `app/src/lib/subjectGroups.ts`, `app/src/hooks/useCollapsedGroups.ts` |
 | Table chrome | `app/src/components/ui/GridTable.tsx`, `app/src/components/ui/ViewTabs.tsx`, `app/src/components/ui/TablePagination.tsx` |
@@ -79,7 +80,13 @@ headings and Inter for everything else, Notion-style layout.
 - **Tables are full-bleed in `GridTable`**, header outside the scroller (or the
   bar runs down it). Alternate views are sibling `ViewTabs`/`PillTabs`, not a
   dropdown, over a fixed-height toolbar so switching never jolts the rows.
-- **Subject tabs share `SubjectPage` for width and gutters**, `SubjectLoading` for skeleton rows and `SubjectEmpty` for the empty view. Per-tab content and actions stay with the page.
+- **Settings and subjects share one nav column**, `SideNav`: a 208px column
+  on the window's `background` beside the page, a pinned header, rows with a
+  16px icon and the active row filled, never an underline strip. Rows that
+  are not links take its exported row classes.
+- **Subject tabs share `SubjectPage` for width and gutters** beside the
+  subject's nav column, `SubjectLoading` for skeleton rows and `SubjectEmpty`
+  for the empty view. Per-tab content and actions stay with the page.
 - **View preferences use `useStoredState`**, with readers that own defaults and validation; `useStoredSet` keeps collapsed group keys. Storage failures leave the live view usable.
 - **No toasts, no bottom progress bars** — background jobs surface in the
   sidebar only, as a spinner or dot on their rail item

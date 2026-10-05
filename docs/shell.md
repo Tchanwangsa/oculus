@@ -15,6 +15,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Search (⌘K and the new-tab field), the new-tab page's Recent list | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/openFile.ts`, `app/src/pages/subject/FilePage.tsx`, `app/src/hooks/useLocateHighlight.ts` |
 | ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/find.ts`, `app/src/hooks/useDomFind.ts`, `app/src/lib/findText.ts`, `app/src/components/ui/FindBar.tsx`, `app/src/components/ui/PageFind.tsx`, `app/src/components/documents/editor/useEditorFind.ts` |
+| Subject page: the nav column and subject switcher | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx` |
 | Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/settingsSearch.ts` |
 
 ## Each pane has its own router, and the path is its only state
@@ -51,7 +52,11 @@ before leaving a playing lecture.
   `/tasks/:taskId`, so `tabInfo` tests the task route first. The model is
   [projects.md](./projects.md).
 - **`SubjectLayout` resolves the subject once** and hands it down as outlet
-  context; tab pages must not re-fetch it. Files is one tab whose sub-tabs are
+  context; tab pages must not re-fetch it. Its nav column
+  (`app/src/components/subjects/SubjectNav.tsx`) holds the icon picker, the
+  code as a switcher to another subject, and a row per tab. A switch
+  navigates the pane's router to the same top-level tab of the other subject;
+  anything deeper lands on that tab's default. Files is one tab whose sub-tabs are
   routes (`files/downloads`, `files/uploads`, `files/documents`), and its
   `useFilesTab()` context *extends* the subject, because `useOutletContext`
   reads the nearest Outlet and a different shape would make `useSubject()` lie.
