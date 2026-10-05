@@ -16,6 +16,7 @@ import {
 } from "@/lib/browser";
 import { useBrowserTabs } from "@/hooks/useBrowserTabs";
 import { useTauriEvent, useWindowEvent } from "@/hooks/useEvents";
+import { routeFind } from "@/lib/find";
 import { useNewTabClicks } from "@/lib/newTabClicks";
 import { useBrowserStore } from "@/stores/browserStore";
 import { activePane, useTabStore } from "@/stores/tabStore";
@@ -114,6 +115,11 @@ export default function AppLayout() {
   useTauriEvent("menu-zoom-reset", () => zoomBy(0));
   useTauriEvent("menu-reload", () => reload(false));
   useTauriEvent("menu-hard-reload", () => reload(true));
+
+  // Edit ▸ Find, Find Next, Find Previous: one mounted find answers.
+  useTauriEvent("menu-find", () => routeFind("open", activePane()?.id));
+  useTauriEvent("menu-find-next", () => routeFind("next", activePane()?.id));
+  useTauriEvent("menu-find-prev", () => routeFind("prev", activePane()?.id));
 
   // ⌘B has no menu item. ⌘+ is here because muda binds the physical key and
   // ⌘+ is ⇧⌘=, which the menu's ⌘= does not match; the unshifted zoom keys

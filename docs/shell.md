@@ -1,7 +1,7 @@
 # Shell, tabs and the side panel
 
 The shell around every page: a strip of tabs, a router per pane, a side panel
-beside each tab's page, every window shortcut, and search.
+beside each tab's page, every window shortcut, ⌘F, and search.
 
 ## Where
 
@@ -14,6 +14,7 @@ beside each tab's page, every window shortcut, and search.
 | ⌘-click → a new tab, app-wide | `app/src/lib/newTabClicks.ts` |
 | Search (⌘K and the new-tab field), Recent group | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/openFile.ts`, `app/src/pages/subject/FilePage.tsx`, `app/src/hooks/useLocateHighlight.ts` |
+| ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/find.ts`, `app/src/hooks/useDomFind.ts`, `app/src/lib/findText.ts`, `app/src/components/ui/FindBar.tsx`, `app/src/components/ui/PageFind.tsx` |
 
 ## Each pane has its own router, and the path is its only state
 
@@ -157,6 +158,45 @@ closed panel opens one on `/new`.
   above it, so the controls sit in the header and the focus marker on the seam.
 - **Shell navigation leaves the panel open**: the sidebar, ⌘K and crumbs go to
   the focused pane.
+
+## ⌘F reaches one registered find
+
+Edit ▸ Find, Find Next and Find Previous emit `menu-find*`, which `AppLayout`
+hands to `routeFind` (`app/src/lib/find.ts`). Every mounted find registers a
+target: a browser tab and a DOM find over each
+pane — a tab's main page and its side panel's front item alike.
+
+- **One target answers**: of those on screen, the innermost holding focus,
+  else under the pointer, else where the last pointerdown or focusin landed,
+  else the focused pane's page-level target (the side panel's front item
+  while the panel has focus). Focus in a dialog or popover outside every
+  target (the palette) reaches none. While a native browser page holds the
+  keyboard `document.hasFocus()` is false and only the last step applies; a
+  browser tab is its pane's page-level target.
+- **A page hands ⌘F to its one find**: when the pointer, the last click or
+  the pane fallback picks a page-level target or a DOM find, and exactly one
+  non-DOM target sits directly inside it (no other target in between), that
+  one answers.
+  Focus never hands off: a text field on a page with one editor (a task's
+  title) is how the rest of that page stays searchable.
+- **Every pane has a page find** (`PageFind`, mounted by `TabPane`'s `Pane`):
+  a floating `FindBar` at the pane's top-right (below a row holding the side
+  panel's header), outside the page's scroller, over `useDomFind`. It is what
+  searches chat, rendered files, tasks, subjects and the calendar. The
+  standalone side panel header sits outside its item's pane, so it is not
+  searched.
+- **DOM find paints with the CSS Custom Highlight API** (`find-match` /
+  `find-current` in `index.css`, shared by every instance), never the DOM.
+  Text nodes join into one string with a separator at each block boundary
+  (`app/src/lib/findText.ts`), so a match never crosses blocks. It skips
+  `[data-find-skip]`, other targets' roots, collapsed `<details>` and
+  undrawn elements; `FollowList` is marked because it is virtualised and its
+  panels have their own search.
+- **A DOM change under the root re-searches after 150ms**, keeping the
+  current match (a live `Range`), so a streaming reply stays lit. A step
+  scrolls the match into view only when it is out of view, rescaling rects
+  for page zoom.
+- **`FindBar` is a toolbar row or a floating card** (`variant`).
 
 ## Search is one module behind two fields
 

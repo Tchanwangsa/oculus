@@ -3,13 +3,10 @@ import { useParams } from "react-router-dom";
 import {
   ArrowClockwise,
   ArrowSquareOut,
-  CaretDown,
   CaretLeft,
   CaretRight,
-  CaretUp,
   Globe,
   MagnifyingGlass,
-  X,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import {
@@ -27,6 +24,8 @@ import { useTauriEvent } from "@/hooks/useEvents";
 import { useBrowserStore } from "@/stores/browserStore";
 import { useActivePaneId } from "@/stores/tabStore";
 import { useTabActive, useTabId } from "@/components/tabs/TabContext";
+import { FindBar } from "@/components/ui/FindBar";
+import { useFindTarget } from "@/lib/find";
 
 /**
  * The `/browse/:id` route: a toolbar over an empty slot that Rust parks the
@@ -113,6 +112,7 @@ export default function BrowserPage() {
   const focused = active && paneId === focusedPaneId;
   const tab = useBrowserStore((s) => s.tabs.find((t) => t.id === id));
   const favicons = useBrowserStore((s) => s.favicons);
+  const rootRef = useRef<HTMLDivElement>(null);
   const slotRef = useRef<HTMLDivElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
   const findRef = useRef<HTMLInputElement>(null);
@@ -356,7 +356,7 @@ export default function BrowserPage() {
     if (tab) browser.findClear(tab.id).catch(() => {});
   }, [tab]);
 
-  // ⌘F / ⌘G / ⇧⌘G are menu events (see ⌘L below).
+  // ⌘F / ⌘G / ⇧⌘G are menu events, routed by `lib/find.ts`.
   const openFind = () => {
     setFind((f) => ({ ...f, open: true }));
     // After mount; select so a second ⌘F replaces the query.
@@ -366,9 +366,9 @@ export default function BrowserPage() {
     if (!find.open) openFind();
     else if (find.query) runFind(find.query, backwards, false);
   };
-  useTauriEvent("menu-find", () => focused && openFind());
-  useTauriEvent("menu-find-next", () => focused && stepFind(false));
-  useTauriEvent("menu-find-prev", () => focused && stepFind(true));
+  // The pane's page-level target, so ⌘F reaches it while the native page
+  // holds the keyboard (`lib/find.ts`).
+  useFindTarget(rootRef, { open: openFind, step: stepFind }, paneId);
 
   // ⌘L. Every browser shortcut is a menu item, never a `keydown`:
   // `browser_place` focuses the page, so the app's webview gets no key events
@@ -382,7 +382,7 @@ export default function BrowserPage() {
   const zoom = tab?.zoom ?? 1;
 
   return (
-    <div className="flex h-full flex-col">
+    <div ref={rootRef} className="flex h-full flex-col">
       <div className="relative shrink-0 border-b border-border">
         <div className="flex h-10 items-center gap-1 px-2">
           <button
@@ -465,56 +465,19 @@ export default function BrowserPage() {
         {/* A toolbar row, not a floating strip: the DOM cannot draw over the
             native page. */}
         {find.open && (
-          <div className="flex h-9 items-center gap-1 border-t border-border-subtle px-2">
-            <MagnifyingGlass size={13} className="mx-1.5 shrink-0 text-muted-foreground" />
-            <input
-              ref={findRef}
-              autoFocus
-              value={find.query}
-              onChange={(e) => {
-                const query = e.target.value;
-                setFind((f) => ({ ...f, query, found: true }));
-                runFind(query, false, true);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  runFind(find.query, e.shiftKey, false);
-                }
-                if (e.key === "Escape") {
-                  e.stopPropagation();
-                  closeFind();
-                }
-              }}
-              spellCheck={false}
-              placeholder="Find in page"
-              className="h-7 min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground"
-            />
-            {find.query && !find.found && (
-              <span className="mr-1 shrink-0 text-[11.5px] text-muted-foreground">
-                No results
-              </span>
-            )}
-            <button
-              onClick={() => runFind(find.query, true, false)}
-              disabled={!find.query}
-              aria-label="Previous match"
-              className={barButton}
-            >
-              <CaretUp size={13} />
-            </button>
-            <button
-              onClick={() => runFind(find.query, false, false)}
-              disabled={!find.query}
-              aria-label="Next match"
-              className={barButton}
-            >
-              <CaretDown size={13} />
-            </button>
-            <button onClick={closeFind} aria-label="Close find bar" className={barButton}>
-              <X size={13} />
-            </button>
-          </div>
+          <FindBar
+            inputRef={findRef}
+            query={find.query}
+            onQueryChange={(query) => {
+              setFind((f) => ({ ...f, query, found: true }));
+              runFind(query, false, true);
+            }}
+            onStep={(backwards) => runFind(find.query, backwards, false)}
+            onClose={closeFind}
+            status={find.found ? undefined : "No results"}
+            placeholder="Find in page"
+            className="border-t border-border-subtle"
+          />
         )}
 
         {/* Drawn over the still. `onMouseDown`, not `onClick`: the field's

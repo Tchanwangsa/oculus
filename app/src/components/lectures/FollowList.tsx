@@ -314,7 +314,9 @@ export function FollowList({
   const showBackToLive = !following && followIdx >= 0;
 
   return (
-    <div className={cn("relative flex-1 min-h-0", className)}>
+    // Out of the page's DOM find: only the rows near the viewport exist, so
+    // its counts would lie. The panels' own search fields cover the list.
+    <div data-find-skip className={cn("relative flex-1 min-h-0", className)}>
       <div
         ref={listRef}
         // Intent, not `scroll`: our follow-scroll fires scroll events too. A press

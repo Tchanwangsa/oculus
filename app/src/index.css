@@ -547,7 +547,22 @@ html:root.dark {
 ::highlight(citation-hit) {
   background-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
 }
+/* DOM find (`useDomFind.ts`): every match a tint of the accent, the current
+ * one stronger: the same pair as pdf.js's find below. */
+::highlight(find-match) {
+  background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+}
+::highlight(find-current) {
+  background-color: color-mix(in srgb, var(--color-brand) 50%, transparent);
+}
 /* The selection: pdf.js's own, in the accent rather than the system's. */
 .pdf-surface .textLayer ::selection {
   background: color-mix(in srgb, var(--color-brand) 30%, transparent);
+}
+/* Find matches (`PDFFindController`): pdf.js colours them through these
+ * properties on `.textLayer .highlight`. Every match is a tint of the accent
+ * and the current one is darker; both sit over the white page in either theme. */
+.pdf-surface .textLayer .highlight {
+  --highlight-bg-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+  --highlight-selected-bg-color: color-mix(in srgb, var(--color-brand) 50%, transparent);
 }

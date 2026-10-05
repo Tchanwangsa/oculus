@@ -1,4 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { createMemoryRouter, parsePath, RouterProvider } from "react-router-dom";
 import { routes } from "@/routes";
 import { TabContext } from "@/components/tabs/TabContext";
@@ -6,8 +15,10 @@ import { SidePanelHeader } from "@/components/tabs/SidePanelHeader";
 import {
   createHeaderClaim,
   SideSlotProvider,
+  type HeaderClaim,
 } from "@/components/tabs/PaneHeader";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
+import { PageFind } from "@/components/ui/PageFind";
 import { routerFor } from "@/lib/tabRouters";
 import { clampRatio, SIDE_RATIO, type SideItem } from "@/lib/sideStack";
 import { cancelRecentTab, recordRecentTab } from "@/stores/recentTabsStore";
@@ -130,6 +141,7 @@ const TabPane = memo(function TabPane({
                 tabId={tabId}
                 side="side"
                 tabActive={active}
+                claim={claim}
               />
             </SideSlotProvider>
           </div>
@@ -160,6 +172,7 @@ function Pane({
   tabActive,
   onFocus,
   style,
+  claim,
 }: {
   pane: PaneState | SideItem;
   tabId: number;
@@ -169,8 +182,11 @@ function Pane({
    *  for its pane instead. */
   onFocus?: (tabId: number, side: PaneSide) => void;
   style?: React.CSSProperties;
+  /** The side panel's header slot, which the find bar floats below. */
+  claim?: HeaderClaim;
 }) {
   const id = pane.id;
+  const rootRef = useRef<HTMLDivElement>(null);
   // Fetched once per mount, never re-created (that would unmount the page);
   // the pane's path afterwards is an output of this router, not an input.
   const [router] = useState(() =>
@@ -196,6 +212,7 @@ function Pane({
 
   return (
     <div
+      ref={rootRef}
       // Capture phase, so focus moves before the clicked control reacts.
       onPointerDownCapture={onFocus && (() => onFocus(tabId, side))}
       onFocusCapture={onFocus && (() => onFocus(tabId, side))}
@@ -205,6 +222,27 @@ function Pane({
       <TabContext.Provider value={context}>
         <RouterProvider router={router} />
       </TabContext.Provider>
+      {/* ⌘F's fallback for whatever page the pane shows (`lib/find.ts`). */}
+      {claim ? (
+        <BelowHeader claim={claim}>
+          <PageFind rootRef={rootRef} page={id} />
+        </BelowHeader>
+      ) : (
+        <PageFind rootRef={rootRef} page={id} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Moves the floating find bar below a page row holding the side panel's
+ * header, clear of expand and ×. Zero height, so it takes no clicks itself.
+ */
+function BelowHeader({ claim, children }: { claim: HeaderClaim; children: ReactNode }) {
+  const top = useSyncExternalStore(claim.subscribe, claim.height);
+  return (
+    <div className="absolute inset-x-0 h-0" style={{ top }}>
+      {children}
     </div>
   );
 }
