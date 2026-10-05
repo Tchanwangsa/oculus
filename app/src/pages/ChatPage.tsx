@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { SidebarSimple } from "@phosphor-icons/react";
+import { ChatHistory } from "@/components/harness/ChatHistory";
 import { Composer } from "@/components/harness/Composer";
 import { ThreadList } from "@/components/harness/ThreadList";
 import { ThreadMap } from "@/components/harness/ThreadMap";
@@ -24,20 +25,15 @@ import {
 import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
 import { draftKey, useDraftStore } from "@/stores/draftStore";
 
-const SUGGESTIONS = [
-  "What's due this week?",
-  "Summarise this week's lecture slides",
-  "Find the worked example on Dijkstra",
-  "Write a memory about how I like my notes",
-];
-
 /** The conversations column's width bounds. */
 const LIST = { defaultWidth: 224, minWidth: 160, maxWidth: 420, storageKey: "oculus-chat-list-width" };
 
 /**
  * Chat with a CLI agent running from the library's `agents/` folder
- * (`docs/harness.md`): thread list, timeline, and one composer that sits under
- * the hero on an empty thread and docks at the bottom otherwise.
+ * (`docs/harness.md`): the conversations column beside a thread. Bare `/chat`
+ * is the history page — a header, a composer for a new thread, then every
+ * thread (`ChatHistory`); `?t=<id>` is that thread's timeline with the
+ * composer docked at the bottom.
  *
  * Subscribes slice by slice: `live` is written many times a second mid-turn,
  * so the streaming parts subscribe where they are drawn, not here.
@@ -97,7 +93,7 @@ export default function ChatPage() {
 
   // Hold this tab's thread while it's on screen, so the lecture dock can't
   // release a timeline this tab is reading. The previous thread lends its rows
-  // for the read (`hold`), so a switch never flashes the empty hero.
+  // for the read (`hold`), so a switch never flashes an empty timeline.
   const shown = useRef<number | null>(null);
   useEffect(() => {
     if (activeId == null) {
@@ -110,7 +106,7 @@ export default function ChatPage() {
   }, [activeId, store]);
 
   // A route naming a thread the loaded list doesn't have (deleted here, in
-  // another tab, or before a restore) falls back to the empty composer.
+  // another tab, or before a restore) falls back to the history page.
   const missing = threadsLoaded && activeId != null && thread == null;
   useEffect(() => {
     if (missing) navigate(chatHref(null), { replace: true });
@@ -147,16 +143,23 @@ export default function ChatPage() {
     [items],
   );
 
-  const empty = items.length === 0 && !running;
-  const scroll = useStickToBottom(activeId, !empty);
-  useScrollFade(scroll.outer, "y", !empty);
+  const history = activeId == null;
+  const scroll = useStickToBottom(activeId, !history);
+  useScrollFade(scroll.outer, "y", !history);
+  const historyScroll = useRef<HTMLDivElement>(null);
+  useScrollFade(historyScroll, "y", history);
   const list = useResizablePanel(LIST);
+  // Entering a thread unfolds the column; ⌘⌥B still folds it while there.
+  const { setCollapsed } = list;
+  useEffect(() => {
+    if (!history) setCollapsed(false);
+  }, [history, setCollapsed]);
 
   // ⌘⌥B folds the conversations column. `e.code`, not `e.key`: on macOS ⌥B
   // arrives as `∫`.
   useWindowEvent("keydown", (e) => {
     const k = e as KeyboardEvent;
-    if (!k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
+    if (history || !k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
     k.preventDefault();
     list.toggle();
   });
@@ -184,6 +187,8 @@ export default function ChatPage() {
     },
     [store, navigate],
   );
+  // Push, so back returns to the thread.
+  const onHistory = useCallback(() => navigate(chatHref(null)), [navigate]);
   const onNew = useCallback(
     (subject?: number | null) => {
       if (activeRef.current != null) navigate(chatHref(null));
@@ -239,27 +244,32 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full">
-      <ThreadList
-        threads={threads}
-        subjects={subjects}
-        activeId={activeId}
-        runningIds={runningIds}
-        width={list.width}
-        restWidth={list.restWidth}
-        collapsed={list.collapsed}
-        animate={!list.dragging}
-        onToggle={list.toggle}
-        onOpen={onOpen}
-        onNew={onNew}
-        onDelete={onDelete}
-      />
-      {/* On the seam: negative margins cost no layout width. */}
-      <ResizeHandle onMouseDown={list.onMouseDown} dragging={list.dragging} className="-mx-0.5" />
+      {/* Only beside a thread: the history page already lists every one. */}
+      {!history && (
+        <>
+          <ThreadList
+            threads={threads}
+            subjects={subjects}
+            activeId={activeId}
+            runningIds={runningIds}
+            width={list.width}
+            restWidth={list.restWidth}
+            collapsed={list.collapsed}
+            animate={!list.dragging}
+            onToggle={list.toggle}
+            onOpen={onOpen}
+            onNew={onNew}
+            onDelete={onDelete}
+          />
+          {/* On the seam: negative margins cost no layout width. */}
+          <ResizeHandle onMouseDown={list.onMouseDown} dragging={list.dragging} className="-mx-0.5" />
+        </>
+      )}
 
-      <div ref={columnRef} className="relative flex min-w-0 flex-1 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle px-6">
+      <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
+        <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
           {/* Folded, the panel leaves nothing behind, so the way back is here. */}
-          {list.collapsed && (
+          {!history && list.collapsed && (
             <Button
               variant="ghost"
               size="icon-xs"
@@ -271,33 +281,45 @@ export default function ChatPage() {
               <SidebarSimple size={14} />
             </Button>
           )}
-          <span className="min-w-0 flex-1 truncate font-display text-[13px] font-semibold text-foreground">
-            {thread?.title ?? "Chat"}
-          </span>
+          {history ? (
+            <h1 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">Chat</h1>
+          ) : (
+            <>
+              <nav
+                aria-label="Breadcrumb"
+                className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
+              >
+                <button
+                  type="button"
+                  data-tab-href={chatHref(null)}
+                  onClick={onHistory}
+                  className="shrink-0 cursor-pointer transition-colors hover:text-foreground"
+                >
+                  Chat
+                </button>
+                <span aria-hidden className="shrink-0 text-border">
+                  /
+                </span>
+              </nav>
+              <h1 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
+                {thread ? thread.title?.trim() || "Untitled" : ""}
+              </h1>
+            </>
+          )}
         </div>
 
-        {empty ? (
-          <div className="flex-1 overflow-y-auto px-6">
-            <div className="mx-auto flex min-h-full w-full max-w-[760px] flex-col items-center justify-center gap-7 pb-16">
-              <div className="flex flex-col items-center gap-4">
-                <h1 className="text-display text-foreground">Ask Oculus anything</h1>
-                <p className="max-w-md text-center text-xs leading-relaxed text-muted-foreground">
-                  A personal university agent with your whole library in front of it — pages, slides, transcripts, Ed threads.
-                </p>
-              </div>
+        {history ? (
+          <div ref={historyScroll} className="flex-1 overflow-y-auto px-6">
+            <div className="mx-auto flex w-full max-w-[760px] flex-col gap-6 py-8">
+              <h1 className="text-display text-foreground">Ask Oculus anything</h1>
               <div className="w-full">{composer}</div>
-              <div className="flex flex-wrap justify-center gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => send(s)}
-                    className="rounded-full border border-border bg-card px-3 py-1 text-[11.5px] text-muted-foreground transition-colors hover:border-surface-overlay hover:bg-accent hover:text-foreground"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+              <ChatHistory
+                threads={threads}
+                subjects={subjects}
+                runningIds={runningIds}
+                onOpen={onOpen}
+                onDelete={onDelete}
+              />
             </div>
           </div>
         ) : (

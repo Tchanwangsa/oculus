@@ -23,7 +23,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), types, commands | `app/src/lib/harness.ts` |
 | Live state and event folding | `app/src/stores/harnessStore.ts`, `app/src/hooks/useBackendEvents.ts` |
-| Page, thread list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` |
+| Page, thread list, history list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` (history: `ChatHistory.tsx`) |
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/draftStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/ModelPicker.tsx`, `app/src/hooks/useProviderModels.ts` |
 | opencode providers and the offered-model gate | `app/src/components/settings/OpencodeCatalogDialog.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeCatalogue.ts` |
@@ -275,10 +275,22 @@ the name lands.
 
 - The store keeps only a count per thread (`holds`, via `hold` / `unhold`), so
   the dock's `release` cannot empty rows a Chat tab is reading. `hold` borrows
-  the outgoing thread's rows until the read lands, or every switch flashes the
-  empty composer.
+  the outgoing thread's rows until the read lands, or every switch flashes an
+  empty timeline.
 - A route naming a thread missing from the list walks back to bare `/chat` —
   only after the list has loaded, or a restored tab drops its thread.
+- The conversations column (`ThreadList`) sits beside an open thread, not
+  the history page, threads grouped by subject; it resizes, ⌘⌥B folds it,
+  and entering a thread unfolds it again.
+- Bare `/chat` is the history page: an "Ask Oculus anything" header, the composer for a new
+  thread, then every loaded thread (`ChatHistory`) grouped by date
+  ("Recent", the default), subject or provider (the choice persists). Running
+  threads are pulled into a "Running" group above the rest. A row is provider
+  mark, title, a chip naming its subject or General, age, and the last reply
+  flattened to one muted line (`getThreadPreviews`, one read for the list);
+  each group shows ten and pages by ten, and folds are remembered.
+- A thread's header is a breadcrumb: `Chat` pushes bare `/chat`, so back
+  returns to the thread.
 
 Deleting a thread drops its retained live output, view holds and context-drift
 marker as well as rows and queue, so removed turns cannot leave the sidebar busy.
