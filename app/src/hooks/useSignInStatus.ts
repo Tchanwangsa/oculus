@@ -8,7 +8,7 @@ import {
 } from "@/lib/harness";
 
 /**
- * Whether each CLI is signed in, shared by Settings → AI, the composer and the
+ * Whether each CLI is signed in, shared by Settings → Agents, the composer and the
  * sign-in dialog. A module-level cache with one in-flight promise, like
  * `useBridgeHealth`. Rust caches nothing (each check spawns the CLI), so a
  * finished sign-in must call `recheck` or every surface keeps saying "out".

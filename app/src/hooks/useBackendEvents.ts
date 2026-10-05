@@ -52,7 +52,7 @@ const WRITES_PLANNING = /\boculus\s+(project|task)\b/;
  * stores and never listens directly.
  */
 export function useBackendEvents() {
-  // Re-asked by Settings → Library when a key is saved or cleared.
+  // Re-asked by Settings → Embeddings when a key is saved or cleared.
   useEffect(() => {
     void embedReady().then((ready) => useIndexStore.getState().setReady(ready));
   }, []);

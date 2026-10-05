@@ -94,7 +94,7 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   provider output in `agents/threads/<id>.ndjson` ([harness.md](./harness.md)).
 - `mineru-usage.json`, `voyage-usage.json` — each cloud's daily reservations
   and quota latch. Voyage's also holds the learned rate-limit tier and the
-  spend guard from Settings → Library, kept here rather than in `settings`
+  spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
 - The session cookie, auth flag and `session-keepalive.log` ([auth.md](./auth.md)).

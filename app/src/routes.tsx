@@ -81,11 +81,17 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <Navigate to="canvas" replace /> },
           { path: "canvas", lazy: page(() => import("@/pages/settings/CanvasPage")) },
-          { path: "ai", lazy: page(() => import("@/pages/settings/AiPage")) },
-          { path: "storage", lazy: page(() => import("@/pages/settings/StoragePage")) },
-          { path: "library", lazy: page(() => import("@/pages/settings/LibraryPage")) },
-          { path: "browser", lazy: page(() => import("@/pages/settings/BrowserPage")) },
           { path: "appearance", lazy: page(() => import("@/pages/settings/AppearancePage")) },
+          { path: "browser", lazy: page(() => import("@/pages/settings/BrowserPage")) },
+          { path: "storage", lazy: page(() => import("@/pages/settings/StoragePage")) },
+          { path: "agents", lazy: page(() => import("@/pages/settings/AgentsPage")) },
+          { path: "providers", lazy: page(() => import("@/pages/settings/ProvidersPage")) },
+          { path: "jobs", lazy: page(() => import("@/pages/settings/JobsPage")) },
+          { path: "parsing", lazy: page(() => import("@/pages/settings/ParsingPage")) },
+          { path: "embeddings", lazy: page(() => import("@/pages/settings/EmbeddingsPage")) },
+          // Legacy paths that restored tabs and Recent entries may carry.
+          { path: "ai", element: <Navigate to="../agents" replace /> },
+          { path: "library", element: <Navigate to="../parsing" replace /> },
         ],
       },
       // Legacy path with no subject.

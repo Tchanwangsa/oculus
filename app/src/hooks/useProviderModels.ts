@@ -58,6 +58,7 @@ export function useProviderModels(needed: Provider | Provider[]): {
           loading: !p.staticModels && state !== "missing" && fetched[p.id] === undefined,
           health: state,
           emptyNote: p.emptyNote,
+          emptyNotePage: p.emptyNotePage,
         };
       }),
     [fetched, health],

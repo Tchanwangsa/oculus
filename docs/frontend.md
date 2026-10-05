@@ -22,7 +22,7 @@ library files; the rest of the frontend has its own pages:
 | Files tab: uploads and documents | `app/src/pages/subject/FilesPage.tsx`, `app/src/lib/uploads.ts`, `app/src/lib/documents.ts`, `app/src-tauri/src/files.rs` |
 | Tasks section (`/projects`, `/tasks`) | `app/src/components/projects/`, `app/src/pages/TasksPage.tsx`, `app/src/lib/projects.ts`, `app/src/stores/projectsStore.ts` |
 | Chat | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/harnessStore.ts` |
-| Settings → Library: parser, embedding, index run | `app/src/components/settings/ParserSection.tsx`, `app/src/components/settings/EmbeddingSection.tsx`, `app/src/stores/indexStore.ts` |
+| Settings → Parsing and Embeddings: parser, embedding, index run | `app/src/pages/settings/ParsingPage.tsx`, `app/src/components/settings/ParserSection.tsx`, `app/src/components/settings/EmbeddingSection.tsx`, `app/src/stores/indexStore.ts` |
 | Parser and embedding engine selection UI | `app/src/components/settings/EngineSelect.tsx` |
 | Parse state, pipeline ledger, recovery sweep | `app/src/lib/parseState.ts`, `app/src/stores/parseStore.ts`, `app/src/stores/pipelineStore.ts`, `app/src/hooks/useQualitySweep.ts` |
 | Scraped document metadata loaders | `app/src/hooks/useCourseFileData.ts`, `app/src/hooks/useModuleTocs.ts` |
@@ -59,7 +59,7 @@ library files; the rest of the frontend has its own pages:
 - **Errors**: `errorElement` takes down one pane, `ErrorBoundary` the shell, and
   `app/src/main.tsx`'s overlay paints handler throws (no console in release).
 
-## Settings → Library: switching parser is free, switching embedder is not
+## Settings → Parsing and Embeddings: switching parser is free, switching embedder is not
 
 - **The parser select has no confirmation dialog, and must not get one**: both
   MinerU engines write the same artifacts at the same `PARSER_VERSION`. The

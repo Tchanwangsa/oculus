@@ -235,7 +235,7 @@ export interface JobSelection {
 
 export type JobModels = Record<JobId, JobSelection>;
 
-/** The jobs Settings → AI lists, in the order it lists them. */
+/** The jobs Settings → Jobs lists, in the order it lists them. */
 export const JOBS: { id: JobId; label: string; description: string }[] = [
   {
     id: "lectureChapters",

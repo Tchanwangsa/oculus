@@ -1,10 +1,13 @@
 import {
-  Books,
+  FilePdf,
   Globe,
   GraduationCap,
+  Graph,
   HardDrives,
+  Lightning,
   PaintBrush,
-  Sparkle,
+  Plugs,
+  Robot,
   type Icon,
 } from "@phosphor-icons/react";
 
@@ -17,7 +20,16 @@ import { JOBS } from "@/lib/db";
  * the on-screen text, so a search lands where it reads.
  */
 
-export type SettingsPageId = "canvas" | "ai" | "library" | "appearance" | "browser" | "storage";
+export type SettingsPageId =
+  | "canvas"
+  | "appearance"
+  | "browser"
+  | "storage"
+  | "agents"
+  | "providers"
+  | "jobs"
+  | "parsing"
+  | "embeddings";
 
 export interface SettingsPage {
   /** Route segment under `/settings`. */
@@ -27,16 +39,19 @@ export interface SettingsPage {
   group: (typeof SETTINGS_GROUPS)[number];
 }
 
-export const SETTINGS_GROUPS = ["Integrations", "App"] as const;
+export const SETTINGS_GROUPS = ["General", "AI", "Library"] as const;
 
 /** In nav order within each group. */
 export const SETTINGS_PAGES: readonly SettingsPage[] = [
-  { id: "canvas", label: "Canvas", icon: GraduationCap, group: "Integrations" },
-  { id: "ai", label: "AI", icon: Sparkle, group: "Integrations" },
-  { id: "library", label: "Library", icon: Books, group: "Integrations" },
-  { id: "appearance", label: "Appearance", icon: PaintBrush, group: "App" },
-  { id: "browser", label: "Browser", icon: Globe, group: "App" },
-  { id: "storage", label: "Storage", icon: HardDrives, group: "App" },
+  { id: "canvas", label: "Canvas", icon: GraduationCap, group: "General" },
+  { id: "appearance", label: "Appearance", icon: PaintBrush, group: "General" },
+  { id: "browser", label: "Browser", icon: Globe, group: "General" },
+  { id: "storage", label: "Storage", icon: HardDrives, group: "General" },
+  { id: "agents", label: "Agents", icon: Robot, group: "AI" },
+  { id: "providers", label: "Providers", icon: Plugs, group: "AI" },
+  { id: "jobs", label: "Jobs", icon: Lightning, group: "AI" },
+  { id: "parsing", label: "Parsing", icon: FilePdf, group: "Library" },
+  { id: "embeddings", label: "Embeddings", icon: Graph, group: "Library" },
 ];
 
 const PAGE_BY_ID = new Map(SETTINGS_PAGES.map((p) => [p.id, p]));
@@ -88,35 +103,6 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Auto-refresh session", ["keep alive", "keepalive", "expired"]],
   ]),
 
-  page("ai", ["agents", "models"]),
-  ...section("ai", "CLI agents", ["claude code", "codex", "opencode", "antigravity", "install", "sign in"]),
-  ...section("ai", "opencode providers", ["manage providers", "models", "hidden"]),
-  ...section("ai", "Jobs", ["model", "reasoning"], JOBS.map((job) => [job.label] as const)),
-  ...section("ai", "Antigravity approvals", ["permissions", "revoke"]),
-
-  page("library", ["pdf"]),
-  ...rows("library", "Library", [["PDFs tracked"], ["Parsed"]]),
-  ...section("library", "PDF processing", ["mineru", "parse", "pdf"], [
-    ["Parser", ["engine"]],
-    ["MinerU API token"],
-    ["Server address", ["url", "local"]],
-    ["Server status"],
-  ]),
-  ...section("library", "Search index", ["embedding", "vectors", "reindex", "voyage"], [
-    ["Embedding model"],
-    ["Voyage API key"],
-    ["Pages indexed"],
-    ["Files indexed"],
-    ["Search space"],
-    ["Not indexed"],
-    ["Voyage plan"],
-    ["Free allowance", ["stop indexing", "limit", "budget"]],
-    ["Build the index"],
-  ]),
-  ...section("library", "Transcription", ["whisper", "captions", "groq", "video"], [
-    ["Groq API key"],
-  ]),
-
   page("appearance"),
   ...rows("appearance", "Appearance", [["Theme", ["dark mode", "light mode", "system"]]]),
 
@@ -129,6 +115,38 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
 
   page("storage", ["disk", "space", "videos"]),
   ...rows("storage", "Storage", [["Largest files"]]),
+
+  page("agents", ["ai", "cli"]),
+  ...section("agents", "CLI agents", ["claude code", "codex", "opencode", "antigravity", "install", "sign in"]),
+  ...section("agents", "Antigravity approvals", ["permissions", "revoke"]),
+
+  page("providers", ["ai", "models"]),
+  ...section("providers", "opencode providers", ["manage providers", "models", "hidden"]),
+
+  page("jobs", ["ai", "model", "reasoning"]),
+  ...rows("jobs", "Jobs", JOBS.map((job) => [job.label] as const)),
+
+  page("parsing", ["pdf", "library"]),
+  ...section("parsing", "Pipeline", ["pdf"], [["PDFs tracked"], ["Parsed"]]),
+  ...section("parsing", "PDF processing", ["mineru", "parse", "pdf"], [
+    ["Parser", ["engine"]],
+    ["MinerU API token"],
+    ["Server address", ["url", "local"]],
+    ["Server status"],
+  ]),
+
+  page("embeddings", ["library", "search", "vectors"]),
+  ...section("embeddings", "Search index", ["embedding", "vectors", "reindex", "voyage"], [
+    ["Embedding model"],
+    ["Voyage API key"],
+    ["Pages indexed"],
+    ["Files indexed"],
+    ["Search space"],
+    ["Not indexed"],
+    ["Voyage plan"],
+    ["Free allowance", ["stop indexing", "limit", "budget"]],
+    ["Build the index"],
+  ]),
 ];
 
 /**

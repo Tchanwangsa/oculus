@@ -52,7 +52,7 @@ export function OpencodeProvidersSection() {
       <Section title="opencode providers" description={description}>
         <p className="py-2.5 text-xs text-muted-foreground">
           opencode is not installed, so there is nothing to sign in to. Install it and press{" "}
-          <span className="text-foreground">Recheck</span> above.
+          <span className="text-foreground">Recheck</span> on the Agents page.
         </p>
       </Section>
     );

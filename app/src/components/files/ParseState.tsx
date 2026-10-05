@@ -115,13 +115,13 @@ export function MarkdownUnavailable({ file }: { file: DbFile }) {
             variant="secondary"
             size="xs"
             className="mt-3"
-            data-tab-href="/settings/library"
+            data-tab-href="/settings/parsing"
             onClick={() => {
               setOpen(false);
-              navigateActive("/settings/library");
+              navigateActive("/settings/parsing");
             }}
           >
-            Open Library settings
+            Open Parsing settings
           </Button>
         )}
       </PopoverContent>

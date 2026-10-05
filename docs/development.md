@@ -148,8 +148,9 @@ the path.
   WebView: `screencapture -x -o -l<windowid>`, where the dev window's owner is
   "app".
 
-The parser and embedder are settings (Settings → Library) and their keys live
-in the keychain — neither is an environment variable.
+The parser and embedder are settings (Settings → Parsing and Settings →
+Embeddings) and their keys live in the keychain — neither is an environment
+variable.
 
 ## Gotchas
 

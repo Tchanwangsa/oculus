@@ -27,7 +27,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/draftStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/ModelPicker.tsx`, `app/src/hooks/useProviderModels.ts` |
 | opencode providers and the offered-model gate | `app/src/components/settings/OpencodeCatalogDialog.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeCatalogue.ts` |
-| Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db.ts`, `app/src/pages/settings/AiPage.tsx` |
+| Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db.ts`, `app/src/pages/settings/JobsPage.tsx` |
 | One-off turns (`Harness::one_off`): thread names, the editor's inline suggestions (`document_suggest`) | `app/src-tauri/src/harness/mod.rs`, `app/src-tauri/src/harness/suggest.rs` |
 | `@` menu and mention input | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/SendControls.tsx` |
@@ -394,7 +394,7 @@ provider-verified model (Meta's Muse Spark) fails once in the timeline.
 ## Per-job models
 
 Chaptering, the reading copy, thread naming and document suggestions each name
-their agent, model and level in a Settings → AI row using `ModelPicker`. The registry is one
+their agent, model and level in a Settings → Jobs row using `ModelPicker`. The registry is one
 `settings` value, `job_models`, read by `jobs.rs` and written by `db.ts`; both
 carry the defaults and must agree (a new job is a `Job` variant plus entries in
 `JOBS` and `DEFAULT_JOB_MODELS`). A bad value costs the configuration, not the

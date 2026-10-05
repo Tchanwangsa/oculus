@@ -102,9 +102,14 @@ const PLACES: { label: string; path: string; icon: PhosphorIcon }[] = [
   { label: "Subjects", path: "/subjects", icon: BookOpen },
   { label: "Sync", path: "/sync", icon: ArrowsClockwise },
   { label: "Settings · Canvas", path: "/settings/canvas", icon: GearSix },
-  { label: "Settings · AI", path: "/settings/ai", icon: GearSix },
+  { label: "Settings · Appearance", path: "/settings/appearance", icon: GearSix },
+  { label: "Settings · Browser", path: "/settings/browser", icon: GearSix },
   { label: "Settings · Storage", path: "/settings/storage", icon: GearSix },
-  { label: "Settings · Library", path: "/settings/library", icon: GearSix },
+  { label: "Settings · Agents", path: "/settings/agents", icon: GearSix },
+  { label: "Settings · Providers", path: "/settings/providers", icon: GearSix },
+  { label: "Settings · Jobs", path: "/settings/jobs", icon: GearSix },
+  { label: "Settings · Parsing", path: "/settings/parsing", icon: GearSix },
+  { label: "Settings · Embeddings", path: "/settings/embeddings", icon: GearSix },
 ];
 
 /** Per-kind caps for a typed query, so no one kind pushes the others off. */

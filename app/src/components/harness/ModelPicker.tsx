@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ProviderMark } from "@/components/harness/ProviderMark";
 import { reasoningLabel, type PickerProvider, type Provider } from "@/lib/harness";
+import { settingsPage, type SettingsPageId } from "@/lib/settingsSearch";
 import { navigateActive } from "@/lib/tabRouters";
 import { cn } from "@/lib/utils";
 
@@ -173,7 +174,7 @@ export const ModelPicker = memo(function ModelPicker({
               label={active?.label ?? ""}
               onSettings={() => {
                 setOpen(false);
-                navigateActive("/settings/ai");
+                navigateActive("/settings/agents");
               }}
             />
           ) : (
@@ -192,9 +193,10 @@ export const ModelPicker = memo(function ModelPicker({
                   // catalogue filters (`app/src/lib/opencodeCatalogue.ts`).
                   <EmptyNote
                     note={active.emptyNote}
-                    onSettings={() => {
+                    page={active.emptyNotePage ?? "agents"}
+                    onSettings={(page) => {
                       setOpen(false);
-                      navigateActive("/settings/ai");
+                      navigateActive(`/settings/${page}`);
                     }}
                   />
                 ) : (
@@ -274,19 +276,28 @@ function NotInstalled({ label, onSettings }: { label: string; onSettings: () => 
         on your PATH.
       </p>
       <Button variant="outline" size="xs" className="mt-2.5" onClick={onSettings}>
-        Open Settings → AI
+        Open Settings → Agents
       </Button>
     </div>
   );
 }
 
-/** An empty catalogue with the provider's own reason and a way into Settings. */
-function EmptyNote({ note, onSettings }: { note: string; onSettings: () => void }) {
+/** An empty catalogue with the provider's own reason and a way into the
+ *  Settings page that fixes it. */
+function EmptyNote({
+  note,
+  page,
+  onSettings,
+}: {
+  note: string;
+  page: SettingsPageId;
+  onSettings: (page: SettingsPageId) => void;
+}) {
   return (
     <div className="px-2 py-3">
       <p className="text-[11px] leading-relaxed text-muted-foreground">{note}</p>
-      <Button variant="outline" size="xs" className="mt-2.5" onClick={onSettings}>
-        Open Settings → AI
+      <Button variant="outline" size="xs" className="mt-2.5" onClick={() => onSettings(page)}>
+        Open Settings → {settingsPage(page).label}
       </Button>
     </div>
   );

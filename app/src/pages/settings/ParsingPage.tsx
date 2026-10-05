@@ -1,17 +1,16 @@
 import { useEffect, useState } from "react";
 import { Separator } from "@/components/ui/separator";
 import { getPdfPipelineRows } from "@/lib/db";
-import { EmbeddingSection } from "@/components/settings/EmbeddingSection";
 import { ParserSection } from "@/components/settings/ParserSection";
 import { Section, StatRow } from "./section";
 
-interface LibraryCounts {
+interface PipelineCounts {
   tracked: number;
   parsed: number;
 }
 
-export default function SettingsLibraryPage() {
-  const [library, setLibrary] = useState<LibraryCounts | null>(null);
+export default function SettingsParsingPage() {
+  const [counts, setCounts] = useState<PipelineCounts | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -19,12 +18,12 @@ export default function SettingsLibraryPage() {
     getPdfPipelineRows()
       .then((rows) => {
         if (cancelled) return;
-        setLibrary({
+        setCounts({
           tracked: rows.length,
           parsed: rows.filter((row) => row.parse_status === "quality").length,
         });
       })
-      .catch((error) => console.error("library counts failed", error));
+      .catch((error) => console.error("pipeline counts failed", error));
 
     return () => {
       cancelled = true;
@@ -33,12 +32,12 @@ export default function SettingsLibraryPage() {
 
   return (
     <>
-      <Section title="Library" description="Where synced PDFs are in the parse pipeline.">
+      <Section title="Pipeline" description="Where synced PDFs are in the parse pipeline.">
         <div>
-          <StatRow label="PDFs tracked" value={library ? String(library.tracked) : "—"} />
+          <StatRow label="PDFs tracked" value={counts ? String(counts.tracked) : "—"} />
           <StatRow
             label="Parsed"
-            value={library ? `${library.parsed}/${library.tracked}` : "—"}
+            value={counts ? `${counts.parsed}/${counts.tracked}` : "—"}
           />
         </div>
       </Section>
@@ -46,10 +45,6 @@ export default function SettingsLibraryPage() {
       <Separator className="my-7" />
 
       <ParserSection />
-
-      <Separator className="my-7" />
-
-      <EmbeddingSection />
     </>
   );
 }

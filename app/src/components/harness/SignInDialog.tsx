@@ -116,7 +116,7 @@ export function useSignIn(onFinished: () => void): {
  * store — Oculus never sees the token. The flow is the provider's
  * (`ProviderInfo.signIn` in `app/src/lib/harness.ts`): `code` (Claude: paste the
  * callback code to stdin), `callback` (Codex: loopback server, nothing to type),
- * or null (opencode: per-provider credentials live in Settings → AI).
+ * or null (opencode: per-provider credentials live in Settings → Providers).
  * The URL gets a Copy button in case Rust's browser `open` silently failed.
  */
 export function SignInDialog({
@@ -184,10 +184,10 @@ export function SignInDialog({
               size="sm"
               onClick={() => {
                 onClose();
-                navigateActive("/settings/ai");
+                navigateActive("/settings/providers");
               }}
             >
-              Open Settings → AI
+              Open Settings → Providers
             </Button>
           </DialogFooter>
         </DialogContent>

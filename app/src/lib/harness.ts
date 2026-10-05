@@ -6,6 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDb, getSetting } from "@/lib/db";
 import { filterOffered, loadCatalogue } from "@/lib/opencodeCatalogue";
+import type { SettingsPageId } from "@/lib/settingsSearch";
 
 export type Provider = "claude" | "codex" | "opencode" | "antigravity";
 
@@ -64,6 +65,7 @@ export interface PickerProvider {
   loading?: boolean;
   health?: ProviderHealth;
   emptyNote?: string;
+  emptyNotePage?: SettingsPageId;
 }
 
 /** The model and level a fresh composer opens on. */
@@ -85,11 +87,13 @@ export interface ProviderInfo {
   fetchModels?: () => Promise<HarnessModel[]>;
   /** How the CLI's sign-in ends: `"code"` blocks on a pasted code (Claude),
    *  `"callback"` finishes via a loopback server (Codex). `null`: nothing to
-   *  drive here — opencode signs in per provider in Settings → AI. */
+   *  drive here — opencode signs in per provider in Settings → Providers. */
   signIn: "code" | "callback" | null;
   /** What the picker says when an installed CLI's list is empty because of a
    *  step the student can take. */
   emptyNote?: string;
+  /** The Settings page the empty-list note's button opens. */
+  emptyNotePage?: SettingsPageId;
   /** Whether the CLI can drop a question from its own context — gates Rewind,
    *  Edit and Retry. `agy` 1.2.9 cannot in print mode. */
   rewind: boolean;
@@ -125,7 +129,8 @@ export const PROVIDERS: ProviderInfo[] = [
       return filterOffered(models, await loadCatalogue());
     },
     signIn: null,
-    emptyNote: "Sign in to a provider in Settings → AI to get models here.",
+    emptyNote: "Sign in to a provider in Settings → Providers to get models here.",
+    emptyNotePage: "providers",
     rewind: true,
   },
   {
@@ -138,6 +143,7 @@ export const PROVIDERS: ProviderInfo[] = [
     signIn: null,
     emptyNote:
       "Run agy in a terminal and finish its Google sign-in, then its models appear here.",
+    emptyNotePage: "agents",
     rewind: false,
   },
 ];

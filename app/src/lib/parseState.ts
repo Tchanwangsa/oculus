@@ -27,7 +27,7 @@ export interface ParseState {
   detail: string;
   /** Only a genuine failure is `bad`; "not parsed yet" is not one. */
   tone: "quiet" | "progress" | "good" | "bad" | "hold";
-  /** Settings → Library can fix it (a missing or rejected token). */
+  /** Settings → Parsing can fix it (a missing or rejected token). */
   fixInSettings: boolean;
 }
 
@@ -36,7 +36,7 @@ export interface ParseState {
 export const PARSE_SWEEP_NOTE = "Oculus retries outstanding files in the background.";
 
 /**
- * Is this latching cause a token fixable in Settings → Library? (A spent quota
+ * Is this latching cause a token fixable in Settings → Parsing? (A spent quota
  * or a version mismatch is not.) Falls back to the message when `kind` is
  * absent: only the credential messages name the token.
  */

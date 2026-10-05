@@ -17,7 +17,7 @@ Rust `run`.
 | Reading copy: segmentation, windows, prompt, validation, `para`, the job | `app/src-tauri/src/reading.rs` |
 | Row writes, status, claims, reconcile; the tables (migrations 29, 34) | `app/src-tauri/src/store.rs`; `app/src-tauri/src/migrations.rs` |
 | `oculus lecture candidates` / `chapters` / `reading` | `app/src-tauri/src/bin/oculus/lecture.rs` |
-| Which agent, model and effort each job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/pages/settings/AiPage.tsx` |
+| Which agent, model and effort each job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/pages/settings/JobsPage.tsx` |
 | Transcript search and stable source indexes | `app/src/hooks/useTranscriptSearch.ts` |
 | The one-turn headless run both use; ffmpeg lookup | `run_once` in `app/src-tauri/src/harness/mod.rs`; `app/src-tauri/src/echo360.rs` |
 | Frontend bindings, event names, `chapterEnds` / `spanAt`, the VTT parser | `app/src/lib/lectures.ts` |

@@ -84,7 +84,7 @@ function SuggestTooltip({ error }: { error: string | null }) {
   return (
     <>
       {line}
-      <span className="text-[11px] text-background/60">Change in Settings → AI</span>
+      <span className="text-[11px] text-background/60">Change in Settings → Jobs</span>
       {error && <span className="text-[11px] text-destructive">{error}</span>}
     </>
   );

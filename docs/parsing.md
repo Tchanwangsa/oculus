@@ -1,7 +1,7 @@
 # Parsing — PDFs into per-page markdown
 
 Every PDF is read by **MinerU** — its cloud service, or a MinerU server the
-user runs on their own Mac over loopback — chosen in Settings → Library. Both
+user runs on their own Mac over loopback — chosen in Settings → Parsing. Both
 are HTTP calls made in-process from Rust; Oculus never starts or supervises
 either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 18% KaTeX render failures on the benchmark deck.

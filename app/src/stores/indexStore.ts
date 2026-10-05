@@ -6,7 +6,7 @@ import { usePipelineStore } from "@/stores/pipelineStore";
 
 /**
  * The index run: a queue of files to embed, fed by the Index button in
- * Settings → Library (the whole backlog) and, once `ready`, by each finished
+ * Settings → Embeddings (the whole backlog) and, once `ready`, by each finished
  * parse (`useBackendEvents`). One serial worker drains it, because Voyage
  * paces against a per-minute ceiling and a second loop would only split it.
  * A run can take hours, so it lives here (surviving navigation) and has a
