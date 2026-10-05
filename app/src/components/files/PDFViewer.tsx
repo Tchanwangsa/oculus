@@ -10,14 +10,11 @@ import {
   CaretLeft,
   CaretRight,
   CircleNotch,
-  CursorText,
   File as FileIcon,
-  Hand,
   MagnifyingGlassMinus,
   MagnifyingGlassPlus,
   Rows,
 } from "@phosphor-icons/react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -32,11 +29,7 @@ import type { FileLocate } from "@/stores/sidePanelStore";
 
 type LayoutMode = "scroll" | "single" | "spread";
 
-/** What a plain drag does. `select` reads the page, `pan` moves it. */
-type Tool = "select" | "pan";
-
 const MODE_KEY = "oculus-pdf-layout";
-const TOOL_KEY = "oculus-pdf-tool";
 
 /** pdf.js's own clamps (`MIN_SCALE`/`MAX_SCALE`), mirrored only to grey out
  *  the toolbar buttons. Scale is absolute (1 = actual size), not relative to
@@ -97,7 +90,7 @@ function applyLayout(viewer: PdfjsViewer, pdfjs: Pdfjs, mode: LayoutMode) {
 /**
  * PDF viewer: pdf.js's own `PDFViewer` (layout, virtualisation, zoom anchoring,
  * text layer) under this app's toolbar. What is ours: the toolbar, the three
- * layouts, the select-versus-pan tool, and pinch/⌘-wheel zoom, which pdf.js
+ * layouts, and pinch/⌘-wheel zoom, which pdf.js
  * does not bind itself. pdf.js loads through `@/lib/pdfjs` (see there for why).
  */
 export function PDFViewer({ src, locate }: Props) {
@@ -108,9 +101,6 @@ export function PDFViewer({ src, locate }: Props) {
   const [scale, setScale] = useState(1);
   const [mode, setMode] = useStoredState<LayoutMode>(MODE_KEY, (stored) =>
     (stored as LayoutMode) || "scroll",
-  );
-  const [tool, setTool] = useStoredState<Tool>(TOOL_KEY, (stored) =>
-    (stored as Tool) || "select",
   );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -429,58 +419,6 @@ export function PDFViewer({ src, locate }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  // ── Drag to pan ──────────────────────────────────────────────────────────
-  //
-  // Moves the scroller's own offsets (see `ui/Lightbox.tsx`). In the select
-  // tool, a press on a `.textLayer span` (a word) selects and anywhere else
-  // pans — not `.textLayer` itself, which covers the whole page.
-
-  const drag = useRef<{
-    x: number;
-    y: number;
-    left: number;
-    top: number;
-  } | null>(null);
-  const [dragging, setDragging] = useState(false);
-
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    const el = containerRef.current;
-    if (!el) return;
-    const target = e.target as Element;
-    // Links and form widgets in the annotation layer stay clickable.
-    if (target.closest?.(".annotationLayer section")) return;
-    // ⌥ pans from the words themselves.
-    if (tool === "select" && !e.altKey && target.closest?.(".textLayer span"))
-      return;
-    // Otherwise WebKit drags a text selection along behind the pan.
-    e.preventDefault();
-    drag.current = {
-      x: e.clientX,
-      y: e.clientY,
-      left: el.scrollLeft,
-      top: el.scrollTop,
-    };
-    setDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const el = containerRef.current;
-    const d = drag.current;
-    if (!el || !d) return;
-    el.scrollLeft = d.left - (e.clientX - d.x);
-    el.scrollTop = d.top - (e.clientY - d.y);
-  };
-
-  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!drag.current) return;
-    drag.current = null;
-    setDragging(false);
-    if (e.currentTarget.hasPointerCapture(e.pointerId))
-      e.currentTarget.releasePointerCapture(e.pointerId);
-  };
-
   // ── Chrome ───────────────────────────────────────────────────────────────
 
   const lastPage = mode === "spread" ? Math.max(1, numPages - 1) : numPages;
@@ -507,22 +445,6 @@ export function PDFViewer({ src, locate }: Props) {
           </ModeItem>
           <ModeItem value="spread" label="Two-page spread">
             <BookOpen size={12} />
-          </ModeItem>
-        </ToggleGroup>
-
-        <ToggleGroup
-          type="single"
-          value={tool}
-          onValueChange={(v) => v && setTool(v as Tool)}
-          variant="outline"
-          size="sm"
-          className="shrink-0"
-        >
-          <ModeItem value="select" label="Select text — drag the margins to pan">
-            <CursorText size={12} />
-          </ModeItem>
-          <ModeItem value="pan" label="Pan — or hold ⌥ while dragging">
-            <Hand size={12} />
           </ModeItem>
         </ToggleGroup>
 
@@ -591,20 +513,7 @@ export function PDFViewer({ src, locate }: Props) {
       <div className="relative flex-1 min-h-0">
         <div
           ref={containerRef}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-          className={cn(
-            "pdf-surface absolute inset-0 overflow-auto",
-            // One cursor class at a time: Tailwind, not source order, decides
-            // which of two wins.
-            dragging ? "cursor-grabbing" : "cursor-grab",
-            // `pdf_viewer.css` is unlayered, so its `cursor: text` on words
-            // beats any utility; panning switches the text layer off instead
-            // (no cursor, no selection, no `.textLayer span` match).
-            (tool === "pan" || dragging) && "[&_.textLayer]:pointer-events-none",
-          )}
+          className="pdf-surface absolute inset-0 overflow-auto"
         >
           <div ref={viewerElRef} className="pdfViewer" />
         </div>
@@ -635,7 +544,7 @@ export function PDFViewer({ src, locate }: Props) {
 function ModeItem({
   value, label, children,
 }: {
-  value: LayoutMode | Tool;
+  value: LayoutMode;
   label: string;
   children: React.ReactNode;
 }) {

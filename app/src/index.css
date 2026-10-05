@@ -547,3 +547,7 @@ html:root.dark {
 ::highlight(citation-hit) {
   background-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
 }
+/* The selection: pdf.js's own, in the accent rather than the system's. */
+.pdf-surface .textLayer ::selection {
+  background: color-mix(in srgb, var(--color-brand) 30%, transparent);
+}

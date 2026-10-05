@@ -56,6 +56,12 @@ classes work even when there are no dollar delimiters.
   `globalThis.pdfjsLib` at evaluation. `index.css` pins `color-scheme` to
   `.dark`, overriding the `:root` rule pdf.js's stylesheet adds. A pinch arrives
   as both `ctrlKey` wheel and `gesture*` events; only the gesture zooms.
+  - **Selection and cursor are pdf.js's own**: a drag selects text and the
+    trackpad scrolls. `index.css` only recolours `::selection` to the accent.
+  - **`pdfjs-dist` is patched** (`app/patches/`): its text layer multiplies
+    every font size by a 1px probe's measured height, which page zoom 1.15
+    reads as 0.87, so the selectable text ran 13% short of the glyphs. The
+    probe is clamped to at least 1.
 
 Chat's composer (`MentionInput.tsx` sends chips as backticked library paths),
 picker and timeline are [harness.md](./harness.md).
