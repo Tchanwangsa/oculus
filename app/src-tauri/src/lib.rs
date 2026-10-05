@@ -14,6 +14,8 @@ pub mod embed;
 mod files;
 pub mod harness;
 pub mod keepalive;
+#[cfg(target_os = "macos")]
+mod keys;
 pub(crate) mod lecture_jobs;
 mod lectures;
 pub mod md;
@@ -73,6 +75,9 @@ pub fn run() {
 
             // Seeds WebKit with the Canvas session and follows window resizes.
             browser::init(app.handle());
+            // A focused browser page gets ⌘-keys before the menu.
+            #[cfg(target_os = "macos")]
+            keys::install(app.handle());
 
             app.manage(harness::app::init(app.handle()));
             harness::app::reconcile(app.handle());

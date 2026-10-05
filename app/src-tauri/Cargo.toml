@@ -77,6 +77,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 block2 = "0.6"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSHTTPCookie", "NSString"] }
+# A local key-down monitor gives a focused browser page ⌘-keys before the
+# menu, and Undo/Redo/Select All reach it as AppKit actions (see `src/keys.rs`).
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSResponder", "NSWindow"] }
 # `WKWebView` and the two `WKFind*` types are the browser toolbar's: the
 # back/forward list and find-in-page have no Tauri API, so they are read
 # and driven on the WKWebView directly (see `src/browser.rs`).

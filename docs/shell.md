@@ -59,10 +59,15 @@ to its page, ask before leaving a playing lecture.
 ## The shell owns tabs, splits and every window shortcut
 
 - **Window shortcuts are menu items** (`app/src-tauri/src/menu.rs`): macOS
-  gives the menu bar every ⌘-key first, and a browser tab's native page takes
-  keys the app's webview never sees. They reach the frontend as `menu-*`
-  events and the frontend owns what each means. Close Window is ⇧⌘W, and the
-  Edit submenu must stay or ⌘C/⌘V die in every field.
+  gives the menu bar every ⌘-key before the app's webview sees it. They reach
+  the frontend as `menu-*` events and the frontend owns what each means.
+  Close Window is ⇧⌘W, and the Edit submenu must stay or ⌘C/⌘V die in every
+  field.
+- **A browser page gets ⌘-keys before the menu**, as in Safari, so a site's
+  own ⌘Z/⌘A/⌘F (Google Docs) work; a key the page doesn't take falls through
+  to the menu. The app's tab and window keys (⌘T, ⌘W, ⌘N, ⌘K, ⌘L, ⌘1–9 and
+  their ⇧/⌥ variants) never go to the page. The monitor is Rust's
+  (`app/src-tauri/src/keys.rs`).
 - **⌘1–⌘8 are strip positions** (a missing slot is a no-op), ⌘9 is the last
   tab, and ⇧⌘T pops `tabStore`'s `closed` stack back to the old index. A
   browser tab is remembered by URL, recorded by `TopTabBar` *before* Rust

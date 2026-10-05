@@ -3,7 +3,8 @@
 //! no keys, so ⌘-shortcuts must be menu items to work everywhere. Built by hand
 //! so ⌘W closes the tab (Close Window moves to ⇧⌘W).
 //!
-//! The items only emit; the frontend decides what they mean.
+//! The items only emit; the frontend decides what they mean. A focused page
+//! sees ⌘-keys before the menu, bar the chrome keys `keys.rs` reserves.
 
 use tauri::menu::{
     AboutMetadata, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu,
