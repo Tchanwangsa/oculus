@@ -21,6 +21,7 @@ import {
 import type { SyntaxNode, SyntaxNodeRef } from "@lezer/common";
 
 import { fenceCode, fenceLanguage } from "./codeLanguages";
+import { findRevealed } from "./find";
 import { inlineCodeCitation } from "./mentionSyntax";
 import { noteHost } from "./host";
 import { enterTable, TableWidget } from "./table";
@@ -65,9 +66,10 @@ const focusedField = StateField.define<boolean>({
 
 const trackFocus = EditorView.focusChangeEffect.of((_state, focusing) => setFocused.of(focusing));
 
-/** Whether a selection range touches `from..to`, edges included. */
+/** Whether a selection range touches `from..to`, edges included. A match
+ *  the find bar selected counts while the bar has focus (`find.ts`). */
 function touches(state: EditorState, from: number, to: number): boolean {
-  if (!state.field(focusedField)) return false;
+  if (!state.field(focusedField) && !findRevealed(state)) return false;
   return state.selection.ranges.some((r) => r.from <= to && r.to >= from);
 }
 
@@ -239,6 +241,7 @@ const blockField = StateField.define<DecorationSet>({
       tr.docChanged ||
       tr.selection ||
       tr.effects.some((e) => e.is(setFocused)) ||
+      findRevealed(tr.state) !== findRevealed(tr.startState) ||
       syntaxTree(tr.state) !== syntaxTree(tr.startState) ||
       tr.state.facet(noteHost) !== tr.startState.facet(noteHost);
     return stale ? buildBlocks(tr.state) : deco;
@@ -635,6 +638,7 @@ const inlinePlugin = ViewPlugin.fromClass(
         u.viewportChanged ||
         u.focusChanged ||
         u.transactions.some((tr) => tr.effects.some((e) => e.is(setFocused))) ||
+        findRevealed(u.state) !== findRevealed(u.startState) ||
         syntaxTree(u.state) !== syntaxTree(u.startState) ||
         u.state.facet(noteHost) !== u.startState.facet(noteHost)
       ) {

@@ -15,6 +15,7 @@ import { imageFiles } from "@/lib/attachments";
 
 import { suggestCompartment } from "./aiSuggest";
 import { noteKeymap } from "./commands";
+import { findExtension } from "./find";
 import { hostCompartment, linkAt, noteHost, type NoteHost } from "./host";
 import { noteMarkdown } from "./language";
 import { livePreview } from "./livePreview";
@@ -65,6 +66,7 @@ export function noteExtensions(opts: {
     noteMarkdown(),
     noteHighlight,
     noteTheme,
+    findExtension(),
     // Snippet fields' Tab is Prec.highest (autocomplete), so it beats this
     // Tab while a palette or completion snippet is active.
     Prec.high(keymap.of(noteKeymap)),

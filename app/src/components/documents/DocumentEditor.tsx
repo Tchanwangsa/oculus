@@ -16,6 +16,7 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { DropOverlay } from "@/components/ui/DropOverlay";
+import { FindBar } from "@/components/ui/FindBar";
 import { useTabActive } from "@/components/tabs/TabContext";
 import { useDataDir } from "@/hooks/useDataDir";
 import { useFileDrop } from "@/hooks/useFileDrop";
@@ -63,6 +64,7 @@ import { liveCompartment, modeExtension, noteExtensions } from "./editor/extensi
 import { hostCompartment, noteHost, openNoteLink, type NoteHost } from "./editor/host";
 import { syncLiveFocus } from "./editor/livePreview";
 import { Toolbar } from "./editor/Toolbar";
+import { useEditorFind } from "./editor/useEditorFind";
 import { HistoryPanel } from "./HistoryPanel";
 import type { DocumentActions, EditorMode, SaveStatus, SuggestStatus } from "./DocumentControls";
 
@@ -454,6 +456,8 @@ export function DocumentEditor({
   };
 
   const dropping = useFileDrop(pageRef, attachPaths);
+  // ⌘F anywhere on the page, title included, searches the note.
+  const find = useEditorFind(view, pageRef);
 
   if (loadError) {
     return (
@@ -488,7 +492,22 @@ export function DocumentEditor({
             {attachError && (
               <p className="mt-3 text-[11px] text-destructive">{attachError}</p>
             )}
-            <Toolbar ref={toolbarRef} view={view} active={active} onImage={pickImages} />
+            {/* The find row sticks with the toolbar; both are the caret's top margin. */}
+            <div ref={toolbarRef} className="sticky top-0 z-10 -mx-2 mt-3 bg-card">
+              <Toolbar
+                view={view}
+                active={active}
+                onImage={pickImages}
+                className="static z-auto mx-0 mt-0"
+              />
+              {find.open && (
+                <FindBar
+                  {...find.bar}
+                  placeholder="Find in document"
+                  className="border-b border-border-subtle"
+                />
+              )}
+            </div>
             <div ref={editorRef} className="mt-4" />
           </div>
         </div>

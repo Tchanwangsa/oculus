@@ -14,7 +14,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | ⌘-click → a new tab, app-wide | `app/src/lib/newTabClicks.ts` |
 | Search (⌘K and the new-tab field), Recent group | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/openFile.ts`, `app/src/pages/subject/FilePage.tsx`, `app/src/hooks/useLocateHighlight.ts` |
-| ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/find.ts`, `app/src/hooks/useDomFind.ts`, `app/src/lib/findText.ts`, `app/src/components/ui/FindBar.tsx`, `app/src/components/ui/PageFind.tsx` |
+| ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/find.ts`, `app/src/hooks/useDomFind.ts`, `app/src/lib/findText.ts`, `app/src/components/ui/FindBar.tsx`, `app/src/components/ui/PageFind.tsx`, `app/src/components/documents/editor/useEditorFind.ts` |
 
 ## Each pane has its own router, and the path is its only state
 
@@ -163,7 +163,7 @@ closed panel opens one on `/new`.
 
 Edit ▸ Find, Find Next and Find Previous emit `menu-find*`, which `AppLayout`
 hands to `routeFind` (`app/src/lib/find.ts`). Every mounted find registers a
-target: a PDF viewer, a browser tab, and a DOM find over each
+target: a PDF viewer, a browser tab, a note editor, and a DOM find over each
 pane — a tab's main page and its side panel's front item alike.
 
 - **One target answers**: of those on screen, the innermost holding focus,
@@ -196,7 +196,9 @@ pane — a tab's main page and its side panel's front item alike.
   current match (a live `Range`), so a streaming reply stays lit. A step
   scrolls the match into view only when it is out of view, rescaling rects
   for page zoom.
-- **`FindBar` is a toolbar row or a floating card** (`variant`).
+- **`FindBar` is a toolbar row or a floating card** (`variant`), with an
+  optional replace row (`replace`) for editors. A note editor's bar is
+  `useEditorFind` ([editor.md](./editor.md#find-and-replace-is-the-editors-own)).
 
 ## Search is one module behind two fields
 

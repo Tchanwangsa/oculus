@@ -60,7 +60,8 @@ const GRID_COLS = 6;
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
 /**
- * Formatting for the note, sticky under the title. Every button is a command
+ * Formatting for the note, sticky under the title unless `className` places
+ * it (merged with `cn`, so it overrides). Every button is a command
  * from `commands.ts` that rewrites markdown text, so it works in both modes.
  * Active states follow the syntax tree at the main selection (`active`).
  */
@@ -69,11 +70,13 @@ export function Toolbar({
   view,
   active,
   onImage,
+  className,
 }: {
   ref?: React.Ref<HTMLDivElement>;
   view: EditorView | null;
   active: ActiveFormats;
   onImage: () => void;
+  className?: string;
 }) {
   const run = (command: StateCommand) => {
     if (!view) return;
@@ -84,7 +87,13 @@ export function Toolbar({
   const heading = BLOCKS.find((b) => b.value === active.block);
 
   return (
-    <div ref={ref} className="sticky top-0 z-10 -mx-2 mt-3 flex flex-wrap items-center gap-0.5 border-b border-border-subtle bg-card px-2 py-1.5">
+    <div
+      ref={ref}
+      className={cn(
+        "sticky top-0 z-10 -mx-2 mt-3 flex flex-wrap items-center gap-0.5 border-b border-border-subtle bg-card px-2 py-1.5",
+        className,
+      )}
+    >
       <Select
         value={heading ? active.block : ""}
         onValueChange={(v) => run(setBlockType(v as BlockType))}

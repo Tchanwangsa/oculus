@@ -12,6 +12,7 @@ maths is [editor-maths.md](./editor-maths.md).
 | The view, title and mode; header controls | `app/src/components/documents/DocumentEditor.tsx`, `app/src/components/documents/DocumentControls.tsx` |
 | Extensions: live preview, Raw mode, code, tables, widgets, commands | `app/src/components/documents/editor/` |
 | One session per note | `app/src/lib/documentSessions.ts` |
+| Find and replace | `app/src/components/documents/editor/find.ts`, `app/src/components/documents/editor/useEditorFind.ts` |
 | A note's versions and its History panel | `app/src/lib/documentVersions.ts`, `app/src/components/documents/HistoryPanel.tsx` |
 
 ## The note editor is CodeMirror 6 over the file's exact text
@@ -102,6 +103,23 @@ rename holds writes until the move lands. `write_document` writes a hidden
 `.<name>.md.<pid>-<nanos>.tmp` sibling, fsyncs and renames it over the
 note, so a reader never sees a truncated file; the `.tmp` suffix keeps a
 leftover out of `list_documents`.
+
+## Find and replace is the editor's own
+
+Find and replace in either mode is `find.ts`: a literal, case-insensitive
+query, matches marked in the viewport, a step selects the next match, and
+replacing goes through the note's history (Replace All is one undo step). A
+match the find selected counts as touched in Live mode even while the find
+bar holds focus, so its construct shows source (maths too, as TeX).
+
+Its bar is `useEditorFind`, a find target like any other
+([shell.md](./shell.md#f-reaches-one-registered-find)), used by
+`DocumentEditor` (a row stuck under its `Toolbar`, rooted at the whole page,
+title included). ⌘F seeds the
+query from a one-line selection; ⌥⌘F, caught on the root since the menu
+doesn't own it, also unfolds replace, which a read-only editor never shows.
+Closing clears the highlights and focuses the editor with the last match
+selected.
 
 ## A note's versions live in the database, never on disk
 
