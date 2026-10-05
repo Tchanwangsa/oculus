@@ -134,7 +134,7 @@ whose parent is missing rather than dropping it.
   [harness.md](./harness.md). ⌘↵ or blur writes, an unchanged body writes
   nothing, an empty one writes `null`, and it goes through `updateTask`.
 - **Dates go through `DateTimeField`**, never a native input
-  ([frontend.md](./frontend.md#gotchas)). A `Date` built from local parts is
+  ([ui.md](./ui.md#gotchas)). A `Date` built from local parts is
   the instant meant and `toISOString()` is the only zone conversion. Picking a
   day keeps the set time, else defaults to 23:59 for a due date and the
   morning for a start.
@@ -166,7 +166,7 @@ whose parent is missing rather than dropping it.
 Boards and the project table drag with `useCardDrag` on the shared
 `usePointerDrag` gesture, not HTML5 drag-and-drop: in WebKit a text selection
 starting on a card's `<span>` pre-empts the element drag. The WebKit
-rules are in [frontend.md](./frontend.md#gotchas) — never cancel `pointerdown` (it kills the
+rules are in [ui.md](./ui.md#gotchas) — never cancel `pointerdown` (it kills the
 click into the task), cancel `pointermove` instead.
 
 **A drop is not the end of the move.** The new order arrives from a SQLite

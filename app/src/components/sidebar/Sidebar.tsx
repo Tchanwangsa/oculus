@@ -31,13 +31,13 @@ const WIDTH = 212;
 
 /**
  * Collapsed animates to zero width (no icon rail); the title bar's button is
- * the only toggle. No fill or divider of its own — see docs/frontend.md (UI
+ * the only toggle. No fill or divider of its own — see docs/ui.md (UI
  * system). Only the subject list scrolls; logo, nav and footer are pinned.
  */
 export default function Sidebar({ collapsed }: SidebarProps) {
   const width = collapsed ? 0 : WIDTH;
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Background jobs surface only in the sidebar (see docs/frontend.md): a spinner.
+  // Background jobs surface only in the sidebar (see docs/ui.md): a spinner.
   const agentBusy = useHarnessStore((s) => anyRunning(s.live));
   const indexing = useIndexStore((s) => s.running);
 

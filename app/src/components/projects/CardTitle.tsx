@@ -80,7 +80,7 @@ export function CardTitle({
           type="button"
           // `data-tab-skip` keeps ⌘-click off the card's tab; stopPropagation
           // keeps the card's click from navigating. Never cancel pointerdown
-          // here — see docs/frontend.md (WebKit click).
+          // here — see docs/ui.md (WebKit click).
           data-tab-skip
           aria-expanded={open}
           onClick={(e) => {

@@ -181,7 +181,7 @@ discipline as `mineru-usage.json`.
   ([cli.md](./cli.md)); the `search_pages` command is registered but unused.
 - **`pages_fts` answers a keystroke.** FTS5 over `pages.markdown` (migration
   35, `retrieval::PAGES_FTS_SQL`), read by `searchPageText` for the ⌘K palette
-  and new-tab field ([frontend.md](./frontend.md)) — local, milliseconds, and
+  and new-tab field ([shell.md](./shell.md#search-is-one-module-behind-two-fields)) — local, milliseconds, and
   good at a person's exact words, which embeddings are not.
 
 Neither is a fallback for the other. Both stop where parsing does.

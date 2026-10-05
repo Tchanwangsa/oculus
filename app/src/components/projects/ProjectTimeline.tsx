@@ -26,7 +26,7 @@ import { columnOf, type TaskNode } from "./taskTree";
 
 export type TimelineZoom = "day" | "week" | "month";
 
-/** Pixels per day, not a CSS `zoom` (see docs/frontend.md#gotchas). */
+/** Pixels per day, not a CSS `zoom` (see docs/ui.md#gotchas). */
 const TIMELINE_ZOOMS = [
   { id: "day", label: "Days" },
   { id: "week", label: "Weeks" },

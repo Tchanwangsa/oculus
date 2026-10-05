@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
  * Panning is the container's own scroll (free momentum, scrollbars, keys);
  * only the scale is a `transform`, on a host of fixed natural size inside a
  * layout box sized `natural × zoom`. A transform, not CSS `zoom` (see
- * docs/frontend.md): under a transform pointer coords and rects share one space, so
+ * docs/ui.md): under a transform pointer coords and rects share one space, so
  * the anchor maths below holds, and the content never re-lays out.
  */
 
@@ -341,7 +341,7 @@ function Viewer({
     return () => ro.disconnect();
   }, [fitZoom]);
 
-  // Drag to pan, on pointer events (see docs/frontend.md: HTML5 drag).
+  // Drag to pan, on pointer events (see docs/ui.md: HTML5 drag).
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -409,7 +409,7 @@ function Viewer({
         className={cn(
           // `overflow-scroll`, not `auto`: scrollbars appearing mid-zoom would
           // change `clientWidth` and re-centre under the pinch
-          // (`scrollbar-gutter` is a no-op in WebKit — see docs/frontend.md).
+          // (`scrollbar-gutter` is a no-op in WebKit — see docs/ui.md).
           "flex flex-1 overflow-scroll outline-none",
           scrollerClassName,
           dragging

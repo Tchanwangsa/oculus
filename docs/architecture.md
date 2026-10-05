@@ -135,7 +135,7 @@ never creates the database, so a fresh machine opens the app once first.
 
 External links open as in-app browser tabs: each is a child webview of remote
 content stacked over the slot the `/browse/:id` route leaves in the content
-card ([frontend.md](./frontend.md)). The frontend reports that slot as window
+card ([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owned-by-rust)). The frontend reports that slot as window
 insets and Rust lays pages out from them, so a resize never waits on
 JavaScript.
 

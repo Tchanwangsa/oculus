@@ -5,7 +5,7 @@ import { Dialog as DialogPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
-// Deliberately a notch below stock shadcn's scale — see docs/frontend.md; don't
+// Deliberately a notch below stock shadcn's scale — see docs/ui.md; don't
 // restore.
 
 function Dialog({

@@ -296,7 +296,7 @@ export function copyAsMarkdown(e: ClipboardEvent) {
   e.preventDefault();
 }
 
-/** The same, dragged out. No `preventDefault` — see docs/frontend.md (WebKit drag). */
+/** The same, dragged out. No `preventDefault` — see docs/ui.md (WebKit drag). */
 export function dragAsMarkdown(e: DragEvent) {
   const md = markdownFor(e.target);
   if (md) e.dataTransfer.setData("text/plain", md);

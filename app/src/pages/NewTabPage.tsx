@@ -78,7 +78,7 @@ export default function NewTabPage() {
                 }
               }}
               placeholder="Search your library, or paste a link"
-              // See docs/frontend.md: no `md:` size on a field.
+              // See docs/ui.md: no `md:` size on a field.
               className="h-9 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
             />
           </div>

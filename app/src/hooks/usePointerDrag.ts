@@ -5,7 +5,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
  * The pointer-capture gesture every in-window drag shares: past a small
  * threshold the press lifts and captures the pointer, and every exit — release, cancel, a release the
  * captured element never hears because it unmounted, the owner unmounting —
- * runs the caller's `end` once. Not HTML5 DnD: see docs/frontend.md,
+ * runs the caller's `end` once. Not HTML5 DnD: see docs/ui.md,
  * "Gotchas". `useCardDrag` builds lists on it; `useStripReorder` below
  * builds tab strips.
  */
@@ -16,7 +16,7 @@ const THRESHOLD = 4;
 /**
  * Put this on the drag surface. It holds text selection off in CSS because
  * cancelling `pointerdown` would also kill a `click` in WebKit (see
- * docs/frontend.md). The descendant half beats `index.css`'s `span`/`p` reset only
+ * docs/ui.md). The descendant half beats `index.css`'s `span`/`p` reset only
  * while that reset stays inside `@layer base`.
  */
 export const DRAG_SURFACE = "select-none [&_*]:select-none";
@@ -40,7 +40,7 @@ export function usePointerDrag(axis: "x" | "y" | "xy") {
   const start = (e: ReactPointerEvent<HTMLElement>, h: PointerDragHandlers) => {
     moved.current = false;
     if (e.button !== 0) return;
-    // Don't preventDefault the press — see docs/frontend.md: it kills the click.
+    // Don't preventDefault the press — see docs/ui.md: it kills the click.
     const el = e.currentTarget;
     const pointerId = e.pointerId;
     const startX = e.clientX;
@@ -114,7 +114,7 @@ interface Box {
 /**
  * Horizontal reorder for a strip of tabs, rects captured once at lift and the
  * order written only on drop. `swapOn` is deliberately per strip — see
- * docs/frontend.md: `ViewTabs` swaps on the leading edge, `TopTabBar` on the centre.
+ * docs/ui.md: `ViewTabs` swaps on the leading edge, `TopTabBar` on the centre.
  */
 export function useStripReorder<K>({
   keys,

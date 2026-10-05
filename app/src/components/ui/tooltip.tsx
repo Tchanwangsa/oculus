@@ -29,7 +29,7 @@ function TooltipTrigger({
 }
 
 /**
- * `max-w-64` + `break-words` are deliberate — see docs/frontend.md; don't restore
+ * `max-w-64` + `break-words` are deliberate — see docs/ui.md; don't restore
  * stock. No `text-balance`: it pulls lines in after the width is pinned at the
  * cap, leaving a wide bubble around short lines.
  */

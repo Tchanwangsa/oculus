@@ -40,7 +40,7 @@ export function ViewTabs<T extends string>({
       role="tablist"
       className={cn(
         "flex items-center gap-4",
-        // See docs/frontend.md: a text selection pre-empts the drag in WebKit.
+        // See docs/ui.md: a text selection pre-empts the drag in WebKit.
         onReorder && DRAG_SURFACE,
         className,
       )}

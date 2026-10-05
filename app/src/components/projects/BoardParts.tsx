@@ -15,7 +15,7 @@ const BOARD_CARD = cn(
   "rounded-lg border border-border-subtle bg-card px-2.5 py-2 cursor-grab active:cursor-grabbing",
   "hover:border-border",
   // Selection is held off in CSS, not by cancelling the press — see
-  // docs/frontend.md (WebKit: cancelling pointerdown kills the click).
+  // docs/ui.md (WebKit: cancelling pointerdown kills the click).
   DRAG_SURFACE,
 );
 

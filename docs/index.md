@@ -21,7 +21,12 @@ the root `CLAUDE.md` holds only the rules.
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [projects.md](./projects.md) | Projects and tasks: the Overview, board, table, timeline and the universal Tasks view |
 | [chapters.md](./chapters.md) | Lecture chapters and the reading copy: the detector and the two agent jobs |
-| [frontend.md](./frontend.md) | Routes, layouts, stores, hooks, the in-app browser, the UI system |
+| [frontend.md](./frontend.md) | The frontend's data side: backend events, settings, parse state, library files |
+| [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
+| [ui.md](./ui.md) | The UI system: design rules, and the WebKit and CSS traps |
+| [viewers.md](./viewers.md) | Markdown, PDFs, the lecture player and the in-app browser |
+| [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
+| [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
 | [cli.md](./cli.md) | The `oculus` binary: what each command writes, and the agent docs it generates |
 | [cli-reference.md](./cli-reference.md) | Every command and flag — generated from the binary, not hand-kept |
 | [development.md](./development.md) | Building, running and checking each piece |

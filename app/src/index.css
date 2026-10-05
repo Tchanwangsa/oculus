@@ -68,7 +68,7 @@
   --color-primary-foreground:#ffffff;
 
   /* The indigo as an accent, not a fill (links, selection, progress) — see
-     docs/frontend.md "UI system". */
+     docs/ui.md. */
   --color-brand:             #5e6ad2;
   --color-brand-hover:       #505bbd;
   --color-brand-muted:       #eef0fb;
@@ -256,7 +256,7 @@
 
 /* ─── Base resets ───────────────────────────────────────────────── */
 /* Every reset stays inside @layer base, or it outranks all utilities — see
-   docs/frontend.md "Gotchas". Unlayered blocks below are overrides. */
+   docs/ui.md#gotchas. Unlayered blocks below are overrides. */
 @layer base {
   *,
   *::before,

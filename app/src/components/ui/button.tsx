@@ -4,7 +4,7 @@ import { Slot } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-// Pills by design (see docs/frontend.md: UI system); a segmented toolbar
+// Pills by design (see docs/ui.md: UI system); a segmented toolbar
 // overrides the radius at its call site.
 const buttonVariants = cva(
   "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
@@ -25,7 +25,7 @@ const buttonVariants = cva(
         link: "text-brand underline-offset-4 hover:underline",
       },
       // Deliberately a notch below stock shadcn (`h-8`, not `h-9`) — see
-      // docs/frontend.md; don't restore.
+      // docs/ui.md; don't restore.
       size: {
         default: "h-8 px-4 py-1.5 has-[>svg]:px-3",
         xs: "h-6 gap-1 px-2.5 text-xs has-[>svg]:px-2 [&_svg:not([class*='size-'])]:size-3",
