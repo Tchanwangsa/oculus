@@ -4,6 +4,27 @@ import { useSubjects } from "@/hooks/useSubjects";
 import { SubjectNav, SubjectNavSkeleton } from "@/components/subjects/SubjectNav";
 import type { Subject } from "@/lib/db";
 
+const LAST_SUBJECT_KEY = "oculus-last-subject";
+
+/** The subject a page last resolved, for `/subjects` to reopen
+ *  (`app/src/pages/SubjectsRedirect.tsx`). The caller checks it still exists. */
+export function lastSubjectId(): number | null {
+  try {
+    const id = Number(localStorage.getItem(LAST_SUBJECT_KEY));
+    return Number.isInteger(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberSubject(id: number): void {
+  try {
+    localStorage.setItem(LAST_SUBJECT_KEY, String(id));
+  } catch {
+    /* quota or private mode — `/subjects` falls back to the first subject */
+  }
+}
+
 /**
  * Everything under /subjects/:subjectId: the subject's nav column beside the
  * tab. Resolves the subject once; child pages read it via `useSubject()`.
@@ -18,6 +39,11 @@ export default function SubjectLayout() {
     () => subjects.find((s) => s.id === id) ?? null,
     [subjects, id],
   );
+
+  const resolvedId = subject?.id;
+  useEffect(() => {
+    if (resolvedId != null) rememberSubject(resolvedId);
+  }, [resolvedId]);
 
   useEffect(() => {
     if (subject) document.title = `${subject.code} · Oculus`;
@@ -36,7 +62,8 @@ export default function SubjectLayout() {
     );
   }
 
-  // Loaded but no such subject — a stale id, e.g. after clearing the DB.
+  // Loaded but no such subject — a stale id, e.g. after clearing the DB. The
+  // redirect skips a remembered id that is gone, so it never bounces back.
   if (!subject) return <Navigate to="/subjects" replace />;
 
   return (

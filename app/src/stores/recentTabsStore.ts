@@ -25,8 +25,14 @@ export interface RecentTab {
  *  task gets its own. */
 export function recentKey(path: string): string | null {
   const [pathname, search = ""] = path.split("?");
-  // A browser tab's id dies with its page; `/new` lists this very trail.
-  if (browseId(pathname) != null || pathname === "/" || pathname === "/new")
+  // A browser tab's id dies with its page; `/new` lists this very trail;
+  // `/subjects` only redirects to a subject, which records itself.
+  if (
+    browseId(pathname) != null ||
+    pathname === "/" ||
+    pathname === "/new" ||
+    pathname === "/subjects"
+  )
     return null;
 
   const task = /^\/projects\/(\d+)\/tasks\/(\d+)/.exec(pathname);

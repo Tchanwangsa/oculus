@@ -15,7 +15,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Search (⌘K and the new-tab field), the new-tab page's Recent list | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/openFile.ts`, `app/src/pages/subject/FilePage.tsx`, `app/src/hooks/useLocateHighlight.ts` |
 | ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/find.ts`, `app/src/hooks/useDomFind.ts`, `app/src/lib/findText.ts`, `app/src/components/ui/FindBar.tsx`, `app/src/components/ui/PageFind.tsx`, `app/src/components/documents/editor/useEditorFind.ts` |
-| Subject page: the nav column and subject switcher | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx` |
+| Subject page: the nav column, subject switcher and `/subjects` redirect | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx`, `app/src/pages/SubjectsRedirect.tsx` |
 | Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/settingsSearch.ts` |
 
 ## Each pane has its own router, and the path is its only state
@@ -26,8 +26,9 @@ or an item in its side panel — builds its own memory router over it
 pane id (`app/src/lib/tabRouters.ts`) and outlive the mount, so a side panel
 item sent to the back keeps its history. Paths are available synchronously for
 matching and ⌘-click; page modules load through route `lazy` only when
-visited, except Home and `/new`, which are in the startup bundle. A pane
-opening on any other page shows `LoadingFill` while its module loads.
+visited, except Home, `/new` and the `/subjects` redirect, which are in the
+startup bundle. A pane opening on any other page shows `LoadingFill` while its
+module loads.
 `TabPane` is memoised: a path change keeps unrelated tab objects stable, so
 those panes skip shell-driven renders. Display clocks pause in inactive panes
 and refresh when the pane returns; downloads and agent jobs continue globally.
@@ -60,6 +61,13 @@ before leaving a playing lecture.
   routes (`files/downloads`, `files/uploads`, `files/documents`), and its
   `useFilesTab()` context *extends* the subject, because `useOutletContext`
   reads the nearest Outlet and a different shape would make `useSubject()` lie.
+- **`/subjects` is a redirect, not a page** (`SubjectsRedirect`): it replaces
+  itself with the Overview of the last subject `SubjectLayout` resolved
+  (`localStorage`, `oculus-last-subject`), else the first current subject,
+  else the first past one. A remembered id no longer in the list is skipped,
+  so a stale-id bounce from `SubjectLayout` cannot loop. It renders only with
+  no subjects synced, as an empty view pointing at Sync. Every other way to a
+  subject is the switcher, ⌘K or a crumb.
 - **`/subjects/:id/file` and `/subjects/:id/lecture` sit outside
   `SubjectLayout`** so a document takes the whole card; `SubjectCrumbs` gives
   them a trail back, as buttons with `data-tab-href` rather than `Link`s so a
@@ -150,7 +158,8 @@ list. A jump travels as router state, and the layout scrolls the section's id
   (`useHomeSection`), and its composer always starts a new thread.
 - **Recent is a still list** (`recentTabsStore`): a visit lands only after the
   pane settles, a row is a *thing* (`recentKey` — a subject's tabs are one row),
-  and a listed page refreshes in place. Browser tabs, Home and `/new` stay out.
+  and a listed page refreshes in place. Browser tabs, Home, `/new` and the
+  `/subjects` redirect stay out.
 
 ## The side panel is a stack of items beside the page
 

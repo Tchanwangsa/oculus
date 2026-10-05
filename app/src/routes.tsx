@@ -6,10 +6,12 @@ import SubjectLayout from "@/layouts/SubjectLayout";
 import SettingsLayout from "@/layouts/SettingsLayout";
 import HomePage from "@/pages/HomePage";
 import NewTabPage from "@/pages/NewTabPage";
+import SubjectsRedirect from "@/pages/SubjectsRedirect";
 
 /** Paths stay synchronous for matching and ⌘-click; page modules load only
  *  when a pane visits them, except Home and the new-tab page, which a fresh
- *  pane opens on. Each pane builds its own memory router over it
+ *  pane opens on, and the `/subjects` redirect, which the rail opens. Each
+ *  pane builds its own memory router over it
  *  (`app/src/components/tabs/TabPane.tsx`). The shell sits outside them all. */
 function PaneRoot() {
   return <Outlet />;
@@ -38,7 +40,8 @@ export const routes: RouteObject[] = [
       { path: "tasks", lazy: page(() => import("@/pages/TasksPage")) },
       // An unfiled task: same page, with a null project and the default board.
       { path: "tasks/:taskId", lazy: page(() => import("@/pages/TaskPage")) },
-      { path: "subjects", lazy: page(() => import("@/pages/SubjectsIndexPage")) },
+      // No page: reopens the last subject (SubjectsRedirect).
+      { path: "subjects", element: <SubjectsRedirect /> },
       // A file or lecture as a whole page (a tab, or the side panel), outside
       // SubjectLayout's tabs.
       { path: "subjects/:subjectId/file", lazy: page(() => import("@/pages/subject/FilePage")) },

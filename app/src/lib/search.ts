@@ -1,6 +1,5 @@
 import {
   ArrowsClockwise,
-  BookOpen,
   CalendarBlank,
   Chat,
   CheckSquare,
@@ -99,7 +98,6 @@ const PLACES: { label: string; path: string; icon: PhosphorIcon }[] = [
   { label: "Calendar", path: "/calendar", icon: CalendarBlank },
   { label: "Projects", path: "/projects", icon: Kanban },
   { label: "Tasks", path: "/tasks", icon: ListChecks },
-  { label: "Subjects", path: "/subjects", icon: BookOpen },
   { label: "Sync", path: "/sync", icon: ArrowsClockwise },
   { label: "Settings · Canvas", path: "/settings/canvas", icon: GearSix },
   { label: "Settings · Appearance", path: "/settings/appearance", icon: GearSix },

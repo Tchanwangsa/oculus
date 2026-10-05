@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  BookOpen,
   CaretUpDown,
   ChatsCircle,
   Check,
@@ -168,16 +167,6 @@ function SubjectSwitcher({
           hrefFor={(s) => switchPath(pathname, s.id)}
           onPick={(s) => (s.id === subject.id ? setOpen(false) : go(switchPath(pathname, s.id)))}
         />
-        <div className="my-1 h-px bg-border-subtle" />
-        <button
-          type="button"
-          data-tab-href="/subjects"
-          onClick={() => go("/subjects")}
-          className={cn(SWITCH_ROW, SWITCH_ROW_IDLE)}
-        >
-          <BookOpen size={14} className="shrink-0" />
-          <span className="min-w-0 flex-1 truncate">All subjects</span>
-        </button>
       </PopoverContent>
     </Popover>
   );
