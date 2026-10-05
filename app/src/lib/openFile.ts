@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useSidePanelStore, type FileLocate } from "@/stores/sidePanelStore";
 import { useTabStore } from "@/stores/tabStore";
+import { openBeside } from "@/lib/tabRouters";
 import { humanizeSlug } from "@/lib/format";
 import { isPdfBacked, parsedMdRelPath, parsedMdSource } from "@/lib/fileTypes";
 import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
@@ -33,9 +33,31 @@ export function recordFileAccess(file: Pick<DbFile, "id"> & Partial<Pick<DbFile,
     .catch(console.error);
 }
 
+/** A spot in the file a citation points at: a PDF page (and the passage to
+ *  highlight on it), or for markdown just the passage. `seq` is fresh per
+ *  click, so citing the same spot again re-jumps. Rides in the file page's
+ *  router state (`{ locate }`), not its URL: quotes are long. */
+export interface FileLocate {
+  page?: number;
+  quote?: string;
+  seq: number;
+}
+
+/** The `locate` a file page was opened at, if its router state holds one. */
+export function routeLocate(state: unknown): FileLocate | undefined {
+  const l = (state as { locate?: Partial<Record<keyof FileLocate, unknown>> } | null)?.locate;
+  if (!l || typeof l !== "object" || typeof l.seq !== "number") return undefined;
+  return {
+    page: typeof l.page === "number" ? l.page : undefined,
+    quote: typeof l.quote === "string" ? l.quote : undefined,
+    seq: l.seq,
+  };
+}
+
 /** How any list row opens a file: anything renderable (including Office
- *  documents, via their converted PDF) in the side panel, at `locate` if
- *  given, other binaries in the system viewer. */
+ *  documents, via their converted PDF) as its page in the side panel
+ *  (`openBeside`), at `locate` if given, other binaries in the system
+ *  viewer. */
 export function openFileSmart(file: DbFile, locate?: FileLocate): void {
   recordFileAccess(file);
   const binary = file.category === "file" || file.category === "upload";
@@ -45,7 +67,10 @@ export function openFileSmart(file: DbFile, locate?: FileLocate): void {
     );
     return;
   }
-  useSidePanelStore.getState().open({ kind: "file", file, locate });
+  openBeside(
+    filePagePath(file.subject_id, file.relative_path),
+    locate ? { locate } : undefined,
+  );
 }
 
 export function filePagePath(subjectId: number, relativePath: string): string {
@@ -151,18 +176,19 @@ async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void>
     const lecture = await getLecture(lectureId);
     if (!lecture) return system();
     if (newTab) useTabStore.getState().addTab(lecturePagePath(lecture));
-    else useSidePanelStore.getState().open({ kind: "lecture", lecture });
+    else openBeside(lecturePagePath(lecture));
     return;
   }
   if (!cite.path.startsWith("courses/")) return system();
   const file = await resolveLibraryFile(cite.path);
   if (!file) return system();
+  const locate = await citationLocate(cite, file);
   const href = newTab ? filePageHref(file) : null;
   if (href) {
-    useTabStore.getState().addTab(href);
+    useTabStore.getState().addTab(href, locate ? { locate } : undefined);
     return;
   }
-  openFileSmart(file, await citationLocate(cite, file));
+  openFileSmart(file, locate);
 }
 
 /** Where in `file` the citation points. A line of a parsed `.md` becomes its

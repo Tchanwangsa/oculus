@@ -8,7 +8,7 @@ interface ResizeHandleProps {
   /** Accessible name, e.g. "Resize side panel". */
   label?: string;
   className?: string;
-  /** Drawn inside the grip (e.g. the split's focus marker). */
+  /** Drawn inside the grip (e.g. the side panel's focus marker). */
   children?: React.ReactNode;
 }
 

@@ -3,12 +3,13 @@ import { Navigate, useParams, useSearchParams } from "react-router-dom";
 import { getLectures, type Lecture } from "@/lib/db";
 import { LecturePlayer } from "@/components/lectures/LecturePlayer";
 import { LoadingFill } from "@/components/ui/PageParts";
+import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { LECTURES_TAB, SubjectCrumbs } from "@/components/subjects/SubjectCrumbs";
 import { recordRecent } from "@/lib/recents";
 
 /**
- * A lecture as its own page (the peek's expand target). Standalone, so the
- * player has the height; one breadcrumb row leads back to the subject.
+ * A lecture as its own page, in a tab or in the side panel. Standalone, so
+ * the player has the height; one breadcrumb row leads back to the subject.
  */
 export default function SubjectLecturePage() {
   const { subjectId } = useParams();
@@ -50,17 +51,17 @@ export default function SubjectLecturePage() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
-      <div className="h-11 shrink-0 flex items-center gap-2.5 px-5 border-b border-border-subtle">
-        <nav
-          aria-label="Breadcrumb"
-          className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
-        >
-          <SubjectCrumbs subjectId={id} tab={LECTURES_TAB} />
-        </nav>
-        <h1 className="flex-1 min-w-0 text-[13px] font-semibold text-foreground truncate">
-          {lecture.title}
-        </h1>
-      </div>
+      <PaneHeaderRow className="h-11 shrink-0 flex items-center gap-2.5 px-5 border-b border-border-subtle">
+        <PaneTrail>
+          <nav
+            aria-label="Breadcrumb"
+            className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
+          >
+            <SubjectCrumbs subjectId={id} tab={LECTURES_TAB} />
+          </nav>
+          <PaneTitle>{lecture.title}</PaneTitle>
+        </PaneTrail>
+      </PaneHeaderRow>
       <LecturePlayer lecture={lecture} onRefresh={refresh} />
     </div>
   );

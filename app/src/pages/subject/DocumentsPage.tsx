@@ -149,7 +149,7 @@ function DocumentRow({ file, onDelete }: { file: DbFile; onDelete: () => void })
   const path = filePagePath(file.subject_id, file.relative_path);
   return (
     <div className="group flex items-center gap-3 px-3 py-2 transition-colors hover:bg-surface">
-      {/* The page, not the peek: a note opens to be written in. */}
+      {/* The page, not the side panel: a note opens to be written in. */}
       <button
         data-tab-href={path}
         onClick={() => navigateActive(path)}

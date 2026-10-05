@@ -20,8 +20,8 @@ import type { DbFile } from "@/lib/db";
 import { ListCard } from "@/components/ui/PageParts";
 
 /**
- * Every file downloaded from Canvas, flat. PDFs peek in-app; other types hand
- * off to the system viewer.
+ * Every file downloaded from Canvas, flat. PDFs open in the side panel; other
+ * types hand off to the system viewer.
  */
 export default function SubjectDownloadsPage() {
   const subject = useSubject();

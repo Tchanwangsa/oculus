@@ -13,10 +13,12 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const SEARCH: &str = "search";
 const NEW_TAB: &str = "new-tab";
-const SPLIT: &str = "split";
+const SIDE_PANEL: &str = "side-panel";
 const CLOSE_TAB: &str = "close-tab";
 const REOPEN_TAB: &str = "reopen-tab";
 const LAST_TAB: &str = "last-tab";
+const SIDE_NEXT: &str = "side-next";
+const SIDE_PREV: &str = "side-prev";
 const CLOSE_WINDOW: &str = "close-window";
 const FIND: &str = "find";
 const FIND_NEXT: &str = "find-next";
@@ -39,10 +41,12 @@ const TAB_SLOTS: usize = 8;
 /// Events the frontend listens for.
 pub const SEARCH_EVENT: &str = "menu-search";
 pub const NEW_TAB_EVENT: &str = "menu-new-tab";
-pub const SPLIT_EVENT: &str = "menu-split";
+pub const SIDE_PANEL_EVENT: &str = "menu-side-panel";
 pub const CLOSE_TAB_EVENT: &str = "menu-close-tab";
 pub const REOPEN_TAB_EVENT: &str = "menu-reopen-tab";
 pub const LAST_TAB_EVENT: &str = "menu-last-tab";
+pub const SIDE_NEXT_EVENT: &str = "menu-side-next";
+pub const SIDE_PREV_EVENT: &str = "menu-side-prev";
 /// Carries the **zero-based** index of the slot pressed.
 pub const SELECT_TAB_EVENT: &str = "menu-select-tab";
 pub const FIND_EVENT: &str = "menu-find";
@@ -73,11 +77,11 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &MenuItem::with_id(app, SEARCH, "Search…", true, Some("CmdOrCtrl+K"))?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
-            // A second pane inside the tab in front, not a second tab.
+            // The side panel of the tab in front, not a second tab.
             &MenuItem::with_id(
                 app,
-                SPLIT,
-                "Split Tab",
+                SIDE_PANEL,
+                "Side Panel",
                 true,
                 Some("Alt+CmdOrCtrl+T"),
             )?,
@@ -186,6 +190,24 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     let last = MenuItem::with_id(app, LAST_TAB, "Last Tab", true, Some("CmdOrCtrl+9"))?;
 
+    // ⌃, not ⌘: these walk the side panel's items, not the strip. The
+    // frontend ignores them unless the side panel has focus.
+    let side_separator = PredefinedMenuItem::separator(app)?;
+    let side_next = MenuItem::with_id(
+        app,
+        SIDE_NEXT,
+        "Next Side Panel Item",
+        true,
+        Some("Ctrl+Tab"),
+    )?;
+    let side_prev = MenuItem::with_id(
+        app,
+        SIDE_PREV,
+        "Previous Side Panel Item",
+        true,
+        Some("Ctrl+Shift+Tab"),
+    )?;
+
     let minimize = PredefinedMenuItem::minimize(app, None)?;
     let maximize = PredefinedMenuItem::maximize(app, None)?;
     let slots_separator = PredefinedMenuItem::separator(app)?;
@@ -200,6 +222,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     window_items.push(&slots_separator);
     window_items.extend(slots.iter().map(|i| i as &dyn IsMenuItem<R>));
     window_items.push(&last);
+    window_items.push(&side_separator);
+    window_items.push(&side_next);
+    window_items.push(&side_prev);
 
     let window = Submenu::with_items(app, "Window", true, &window_items)?;
 
@@ -239,8 +264,8 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
         NEW_TAB => {
             app.emit(NEW_TAB_EVENT, ()).ok();
         }
-        SPLIT => {
-            app.emit(SPLIT_EVENT, ()).ok();
+        SIDE_PANEL => {
+            app.emit(SIDE_PANEL_EVENT, ()).ok();
         }
         CLOSE_TAB => {
             app.emit(CLOSE_TAB_EVENT, ()).ok();
@@ -250,6 +275,12 @@ pub fn handle<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
         }
         LAST_TAB => {
             app.emit(LAST_TAB_EVENT, ()).ok();
+        }
+        SIDE_NEXT => {
+            app.emit(SIDE_NEXT_EVENT, ()).ok();
+        }
+        SIDE_PREV => {
+            app.emit(SIDE_PREV_EVENT, ()).ok();
         }
         FIND => {
             app.emit(FIND_EVENT, ()).ok();

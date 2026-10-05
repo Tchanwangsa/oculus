@@ -23,7 +23,8 @@ import type { DbFile } from "@/lib/db";
 
 /**
  * The Canvas modules page, rebuilt: one collapsible card per module, its items
- * grouped under the SubHeaders Canvas puts between them. Rows open in the peek.
+ * grouped under the SubHeaders Canvas puts between them. Rows open in the
+ * side panel.
  */
 export default function SubjectModulesPage() {
   const subject = useSubject();

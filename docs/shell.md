@@ -1,7 +1,7 @@
 # Shell, tabs and the side panel
 
-The shell around every page: a strip of tabs, a router per pane, a docked
-side panel, every window shortcut, and search.
+The shell around every page: a strip of tabs, a router per pane, a side panel
+beside each tab's page, every window shortcut, and search.
 
 ## Where
 
@@ -9,17 +9,19 @@ side panel, every window shortcut, and search.
 | --- | --- |
 | Route table | `app/src/routes.tsx` |
 | Shell: sidebar, tab strip, floating card, zoom | `app/src/layouts/AppLayout.tsx`, `app/src/components/sidebar/`, `app/src/components/tabs/TopTabBar.tsx` |
-| Tabs, split panes, per-pane routers, titles from paths | `app/src/stores/tabStore.ts`, `app/src/components/tabs/TabPane.tsx`, `app/src/lib/tabRouters.ts`, `app/src/components/tabs/tabInfo.tsx` |
+| Tabs, side panels, per-pane routers, titles from paths | `app/src/stores/tabStore.ts`, `app/src/lib/sideStack.ts`, `app/src/components/tabs/TabPane.tsx`, `app/src/components/tabs/SidePanelHeader.tsx`, `app/src/components/tabs/PaneHeader.tsx`, `app/src/lib/tabRouters.ts`, `app/src/components/tabs/tabInfo.tsx` |
 | Window shortcuts (all menu items) | `app/src-tauri/src/menu.rs` |
 | ⌘-click → a new tab, app-wide | `app/src/lib/newTabClicks.ts` |
 | Search (⌘K and the new-tab field), Recent group | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
-| Side panel (file/lecture peek) | `app/src/components/panel/`, `app/src/stores/sidePanelStore.ts` |
+| Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/openFile.ts`, `app/src/pages/subject/FilePage.tsx`, `app/src/hooks/useLocateHighlight.ts` |
 
 ## Each pane has its own router, and the path is its only state
 
-`app/src/routes.tsx` is the route table, and each **pane** — a tab, or one half
-of a split tab — builds its own memory router over it
-(`app/src/components/tabs/TabPane.tsx`). Paths are available synchronously for
+`app/src/routes.tsx` is the route table, and each **pane** — a tab's main page,
+or an item in its side panel — builds its own memory router over it
+(`app/src/components/tabs/TabPane.tsx`). Routers live in a registry keyed by
+pane id (`app/src/lib/tabRouters.ts`) and outlive the mount, so a side panel
+item sent to the back keeps its history. Paths are available synchronously for
 matching and ⌘-click; page modules load through route `lazy` only when
 visited, except Home and `/new`, which are in the startup bundle. A pane
 opening on any other page shows `LoadingFill` while its module loads.
@@ -28,8 +30,8 @@ those panes skip shell-driven renders. Display clocks pause in inactive panes
 and refresh when the pane returns; downloads and agent jobs continue globally.
 The shell sits above all of them and navigates through `navigateActive` /
 `goInActiveTab` in `app/src/lib/tabRouters.ts`, which resolve to the focused
-pane and hold the departure rules: close the peek, keep a browser tab pinned
-to its page, ask before leaving a playing lecture.
+pane and hold the departure rules: keep a browser tab pinned to its page, ask
+before leaving a playing lecture.
 
 - **A tab is titled from its path alone** (`tabInfo`, shared with Recent), so a
   title not in the path rides in the query — `?n=` from `projectHref` /
@@ -56,7 +58,7 @@ to its page, ask before leaving a playing lecture.
   them a trail back, as buttons with `data-tab-href` rather than `Link`s so a
   click goes through `navigateActive`.
 
-## The shell owns tabs, splits and every window shortcut
+## The shell owns tabs, side panels and every window shortcut
 
 - **Window shortcuts are menu items** (`app/src-tauri/src/menu.rs`): macOS
   gives the menu bar every ⌘-key before the app's webview sees it. They reach
@@ -72,16 +74,20 @@ to its page, ask before leaving a playing lecture.
   tab, and ⇧⌘T pops `tabStore`'s `closed` stack back to the old index. A
   browser tab is remembered by URL, recorded by `TopTabBar` *before* Rust
   destroys the page.
-- **⌥⌘T splits a tab.** `AppTab extends PaneState`: the main pane carries the
-  tab's id, and everything below a tab — router, peek, playing lecture, Recent
-  entry — is keyed by pane id. `tab.focus` is set in the capture phase, so it
-  has moved before the clicked thing reacts; `focusedPane` is what every shell
-  navigation resolves through. The focus marker sits on the seam, since a
-  native browser page covers anything drawn inside a pane.
+- **⌥⌘T and the strip's far-right button toggle the side panel**
+  (`toggleSide`). `AppTab extends PaneState`: the main pane carries the tab's
+  id, and everything below a tab — router, playing lecture, Recent entry — is
+  keyed by pane id. `tab.focus` (`"main"` / `"side"`) is set in the capture
+  phase, so it has moved before the clicked thing reacts; `focusedPane` is
+  what every shell navigation resolves through. ⌃Tab / ⌃⇧Tab are menu items
+  that cycle the side panel's items, only while it has focus; ⌘1–9, ⌘W and
+  ⇧⌘T always act on the strip.
 - **Strip tabs are fixed-width** (`TAB_W` down to `TAB_MIN_W`), and the column
   between them (`SEPARATOR_W`) always renders because the reorder maths counts it.
-- **The history arrows follow React Router's index** (`history.state`), not
-  `window.history.length`, which counts entries a reload left behind.
+- **The history arrows follow the focused pane's own history.** A memory
+  router has no `window.history` index, so `track` in `app/src/lib/tabRouters.ts`
+  keeps each router's location keys and a cursor for `canBack`/`canForward`;
+  on a browser tab they read Rust's snapshot (`can_back`/`can_forward`).
 - **Zoom is the webview's page zoom** (`setZoom` in `AppLayout`); on a browser
   tab ⌘=/⌘−/⌘0 zoom the page. `--app-zoom` exists for the traffic-light gap,
   whose height is `trafficLightPosition` in `app/src-tauri/tauri.conf.json` —
@@ -102,24 +108,55 @@ to its page, ask before leaving a playing lecture.
   pane settles, a row is a *thing* (`recentKey` — a subject's tabs are one row),
   and a listed page refreshes in place. Browser tabs, Home and `/new` stay out.
 
-## The side panel is docked, per pane, and opened from anywhere
+## The side panel is a stack of items beside the page
 
-`app/src/components/panel/SidePanel.tsx` is **docked, not overlaid**: the card
-is a flex row, so the page beside it is really narrower and `BrowserPage` can
-re-place its native view instead of hiding it. Contents are per pane; width is
-global.
+Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
+`app/src/lib/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. ⌥⌘T on a
+closed panel opens one on `/new`.
 
-- File and lecture bodies load lazily when first opened; the always-mounted
-  frame owns pane identity and the slide/width lifecycle while they load.
-- `open()` takes no pane id — background panes are `inert`, so a click can only
-  come from the front. A list re-fetching an open row calls `sync()`, which
-  names its pane.
-- **It unfolds on a count of `open` calls** (`opens`), so re-opening the item
-  already showing still unfolds a folded panel.
-- **Shell navigation closes it** (`navigateActive` → `closeActivePanel`).
-  Expand goes to the full page in the same tab, committed at the end of a width
-  sweep; the frame stays mounted at zero width so open and close animate.
-- ⌥⌘S/⌘B/⌥⌘B test `e.code`, because ⌥ rewrites the key's character on macOS.
+- **`openBeside` is what file rows, citations and lecture rows call**
+  (`openFileSmart`, `openCitation`, `LecturesPage`, `ContinueSection`): it
+  pushes onto the front tab's stack and focuses the panel. A plain `Link`
+  navigates its own pane; ⌘-click is still a new tab.
+- **A push names a thing, not a path**: an item with the same `recentKey` comes
+  to the front and is navigated, so re-citing an open PDF moves to the new
+  spot. The list is most recently *opened* first, and fronting an item doesn't
+  reorder it, so ⌃Tab walks a stable list; past the cap the least recently
+  *viewed* item goes.
+- **A cited spot rides in router state** (`{ locate }`), not the URL, since
+  quotes are long. `FilePage` hands it to `FileViewer`; its `seq` makes
+  re-citing the same spot jump again. A new tab carries it too:
+  `addTab(path, state)` seeds the first router entry (`AppTab.entryState`), so
+  ⌘-click on expand, a citation or a file chip keeps the cited spot. It is not
+  stored in `oculus-tabs`.
+- **The header is a switcher** — up to three stacked item icons, then `+N`,
+  opening a list with a × per item — then expand and ×, which closes the panel
+  and clears the stack. A page with its own top row (file, lecture, task,
+  project, chat thread) builds it on `PaneHeaderRow`
+  (`app/src/components/tabs/PaneHeader.tsx`), which in the side panel claims
+  the header slot `TabPane` provides and draws the switcher at the row's start
+  and expand and × after the page's buttons. Claims land in a layout effect,
+  so any other page — or one still on `LoadingFill` — shows the standalone
+  `SidePanelHeader` (switcher, front item's title, controls). In a claimed
+  row `PaneTrail` makes crumbs and title a sideways scroller with faded edges,
+  the subject crumb drops its icon, and every crumb but the subject (or, on a
+  task, the project) folds behind a "…" in place, which expands inline for
+  that page view. Expand
+  (`expandSide`) makes the front item the main page, or a new tab on ⌘-click,
+  and removes it with `handover`: a lecture it owned is claimed for the main
+  pane (or the new tab), so whatever comes to the panel's front next waits and
+  the expanded lecture plays on, and a browser page stays open.
+- **Only the front item is mounted**; the rest are a path and a router. A
+  lecture sent to the back pauses; a browser item sent to the back has its
+  native view taken down as it unmounts, and a removed one has its page
+  closed, or `useBrowserTabs` would adopt it as a strip tab.
+- **The width is per tab**: a new panel takes half (`SIDE_RATIO`), and a drag
+  of the seam is stored with the tab in `oculus-tabs`, beside the items' paths;
+  a stored `split` pane restores as a one-item panel.
+- **Nothing floats over a pane**: a native browser page covers anything drawn
+  above it, so the controls sit in the header and the focus marker on the seam.
+- **Shell navigation leaves the panel open**: the sidebar, ⌘K and crumbs go to
+  the focused pane.
 
 ## Search is one module behind two fields
 

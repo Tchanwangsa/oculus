@@ -4,8 +4,8 @@ import type { PaneSide } from "@/stores/tabStore";
 /**
  * Which pane a page renders in and whether its tab is in front. Every tab is
  * mounted at once, so on-screen-only work (polling, measuring) must check
- * `active`. `id` is the pane id (the tab's id when unsplit); `tabId` is the
- * strip tab, for closing or splitting it.
+ * `active`. `id` is the pane id (the tab's id for its main pane); `tabId` is
+ * the strip tab, for closing it or opening beside it.
  */
 export interface TabContextValue {
   id: number;
@@ -24,7 +24,8 @@ export function useTabId(): number {
   return useContext(TabContext).id;
 }
 
-/** The strip tab this pane belongs to, and which half of it this is. */
+/** The strip tab this pane belongs to, and whether this is its main pane or
+ *  its side panel. */
 export function usePaneTab(): { tabId: number; side: PaneSide } {
   const { tabId, side } = useContext(TabContext);
   return { tabId, side };

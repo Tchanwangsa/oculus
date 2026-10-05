@@ -3,7 +3,6 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import Sidebar from "@/components/sidebar/Sidebar";
 import TopTabBar from "@/components/tabs/TopTabBar";
 import TabPane from "@/components/tabs/TabPane";
-import { SidePanel } from "@/components/panel/SidePanel";
 import CommandPalette from "@/components/palette/CommandPalette";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LeaveLectureDialog } from "@/components/lectures/LeaveLectureDialog";
@@ -80,8 +79,8 @@ export default function AppLayout() {
     return () => document.removeEventListener("click", onClick, true);
   }, []);
 
-  /** ⌘= / ⌘− / ⌘0: on a browser tab (the focused half of a split) they zoom
-   *  the page; anywhere else, the window. */
+  /** ⌘= / ⌘− / ⌘0: with a browser page in the focused pane they zoom the
+   *  page; anywhere else, the window. */
   const zoomBy = useCallback((direction: 1 | -1 | 0) => {
     const page = browseId(activePane()?.path);
     if (page != null) {
@@ -165,7 +164,6 @@ export default function AppLayout() {
                 <TabPane key={tab.id} tab={tab} active={tab.id === activeId} />
               ))}
             </div>
-            <SidePanel />
           </main>
         </div>
         {/* Shell-level dialogs: each is raised from several places. */}

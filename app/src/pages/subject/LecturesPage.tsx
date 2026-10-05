@@ -25,45 +25,46 @@ import {
   type LectureData,
 } from "@/lib/db";
 import { useSubject } from "@/layouts/SubjectLayout";
-import { useSidePanelStore } from "@/stores/sidePanelStore";
-import { useTabId } from "@/components/tabs/TabContext";
+import { sideFront, useTabStore } from "@/stores/tabStore";
+import { usePaneTab } from "@/components/tabs/TabContext";
+import { openBeside } from "@/lib/tabRouters";
+import { LECTURE_PROGRESS_EVENT } from "@/lib/lecturePlayback";
 import { recordRecent } from "@/lib/recents";
 import {
   LECTURES_CHANGED_EVENT,
+  lecturePageId,
+  lecturePagePath,
 } from "@/lib/lectures";
 
-/** The subject's lectures. Selecting one opens the player in the side panel. */
+/** The subject's lectures. Selecting one opens its page in the side panel. */
 export default function SubjectLecturesPage() {
   const subject = useSubject();
   const [lectures, setLectures] = useState<Lecture[]>([]);
-  // What is open lives in the panel, so closing it un-highlights the row.
-  const tabId = useTabId();
-  const openInPanel = useSidePanelStore((s) => s.open);
-  const syncPanel = useSidePanelStore((s) => s.sync);
-  const openItem = useSidePanelStore((s) => s.items[tabId]);
-  const selectedId = openItem?.kind === "lecture" ? openItem.lecture.id : null;
+  // The row lit is the lecture in front of this tab's side panel, so sending
+  // it to the back or closing the panel un-highlights it.
+  const { tabId } = usePaneTab();
+  const selectedId = useTabStore((s) => {
+    const tab = s.tabs.find((t) => t.id === tabId);
+    return lecturePageId(tab && sideFront(tab)?.path);
+  });
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Lecture | null>(null);
 
   const refreshLectures = useCallback(async () => {
-    const rows = await getLectures(subject.id);
-    setLectures(rows);
-    // Hand the panel the fresh row for whatever it has open.
-    const open = useSidePanelStore.getState().items[tabId];
-    if (open?.kind === "lecture") {
-      const fresh = rows.find((r) => r.id === open.lecture.id);
-      if (fresh) syncPanel(tabId, { kind: "lecture", lecture: fresh });
-    }
-  }, [subject.id, tabId, syncPanel]);
+    setLectures(await getLectures(subject.id));
+  }, [subject.id]);
 
   useEffect(() => {
     refreshLectures();
   }, [refreshLectures]);
 
-  // The panel's player has no list to call back into, so it says so here; a
-  // download fires once the finished file is in the DB.
-  useWindowEvent([LECTURES_CHANGED_EVENT, LECTURE_DOWNLOADED_EVENT], () => refreshLectures());
+  // Re-read on any lecture write: a player beside the list (the side panel)
+  // saving progress, a download once the finished file is in the DB.
+  useWindowEvent(
+    [LECTURES_CHANGED_EVENT, LECTURE_DOWNLOADED_EVENT, LECTURE_PROGRESS_EVENT],
+    () => refreshLectures(),
+  );
 
   const handleDownload = useCallback((lec: Lecture) => {
     setSyncError(null);
@@ -100,9 +101,9 @@ export default function SubjectLecturesPage() {
   };
 
   const handleSelectLecture = useCallback((lec: Lecture) => {
-    openInPanel({ kind: "lecture", lecture: lec });
+    openBeside(lecturePagePath(lec));
     recordRecent(subject.id, { kind: "lecture", ref: lec.id, title: lec.title });
-  }, [openInPanel, subject.id]);
+  }, [subject.id]);
 
   return (
     <>

@@ -204,9 +204,9 @@ still update the picker.
   path or bare filename is a *tail*, rendered as code until one cached
   `LIKE '%/<tail>'` finds a unique row. A line of a parsed `.md` maps to its
   PDF page because the `.md` is the `.pages.json` pages joined with `\n\n`;
-  `openCitation` opens the side panel there and `PDFViewer` marks the line's
-  text in the text layer (`citation-hit`). Unmatched schemeless links render
-  as text.
+  `openCitation` opens the file there in the side panel and `PDFViewer` marks
+  the line's text in the text layer (`citation-hit`). Unmatched schemeless
+  links render as text.
 - **What an agent makes, it shows.** The brief sends pictures and HTML pages
   to `agents/outputs/` and has `![alt](outputs/x.html)` embed them;
   `OutputEmbed.tsx` draws a picture inline and a page in an

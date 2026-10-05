@@ -84,7 +84,7 @@ bias and eligibility rules at a construct's boundary.
 ## Every editor of a note shares one session
 
 Sessions (`app/src/lib/documentSessions.ts`) are keyed by row id, because
-tabs stay mounted, a note can be open in both panes of a split tab, and Fast
+tabs stay mounted, a note can be open in a page and its side panel at once, and Fast
 Refresh remounts editors. The session holds the text, the text on disk, the
 600 ms debounce and the one write in flight; writes loop until disk matches,
 and blur, ⌘S, the last editor leaving, `pagehide` and `beforeunload` flush.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ArrowsIn,
   ArrowsOut,
@@ -32,12 +32,19 @@ import {
   LECTURE_PROGRESS_EVENT,
   parkLectureVideos,
   playbackClaim,
+  releaseLecturePlayer,
   syncLectureSources,
   videoForSource,
-  type PlaybackHost,
   type SourcePlan,
 } from "@/lib/lecturePlayback";
-import { useTabActive, useTabId } from "@/components/tabs/TabContext";
+import {
+  claimPlayback,
+  mayAdopt,
+  playbackOwner,
+  subscribePlaybackOwner,
+} from "@/lib/playbackOwner";
+import { useActivePaneId } from "@/stores/tabStore";
+import { usePaneTab, useTabActive, useTabId } from "@/components/tabs/TabContext";
 import {
   parseVtt,
   spanAt,
@@ -366,25 +373,10 @@ interface LecturePlayerProps {
   lecture: Lecture;
   /** Fired after anything persisted changes (progress, downloads). */
   onRefresh: () => void;
-  /** Off in the peek panel: fullscreen is the window's, and a peek is a panel
-   *  over a page. Expand promotes it to a tab first. */
-  allowFullscreen?: boolean;
-  /** Off in the side panel, which is too small for a readable dock: no button,
-   *  no T key. The preference is untouched for the page route. */
-  allowDock?: boolean;
-  /** Which player this is. Navigating a tab strands the page's player but not
-   *  the peek; `lib/lecturePlayback.ts` holds it, `lib/tabRouters.ts` asks. */
-  host?: PlaybackHost;
 }
 
-/** The whole lecture player — video, controls, dock — for the peek and the page. */
-export function LecturePlayer({
-  lecture,
-  onRefresh,
-  allowFullscreen = true,
-  allowDock = true,
-  host = "page",
-}: LecturePlayerProps) {
+/** The whole lecture player — video, controls, dock — for the lecture page. */
+export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   const [cues, setCues] = useState<Cue[]>([]);
   const cueStarts = useMemo(() => cues.map((cue) => cue.start), [cues]);
   const [activeCueIdx, setActiveCueIdx] = useState(-1);
@@ -406,9 +398,13 @@ export function LecturePlayer({
 
   const speed = usePlayerPrefs((s) => s.speed);
   /** Every tab stays mounted and there is one `<video>` per source app-wide, so
-   *  only the on-screen player answers keys or claims the elements. */
+   *  only an on-screen player may adopt the elements (`lib/playbackOwner.ts`),
+   *  and only the focused pane's player answers keys. `tabId` is the pane. */
   const tabId = useTabId();
+  const { tabId: stripTab } = usePaneTab();
   const onScreen = useTabActive();
+  const focused = useActivePaneId() === tabId;
+  const owner = useSyncExternalStore(subscribePlaybackOwner, playbackOwner);
   const volume = usePlayerPrefs((s) => s.volume);
   const muted = usePlayerPrefs((s) => s.muted);
   const captionsEnabled = usePlayerPrefs((s) => s.captionsEnabled);
@@ -513,6 +509,23 @@ export function LecturePlayer({
   const otherSource: SourceNum = mainSource === 1 ? 2 : 1;
   const mainSrc = urls[mainSource];
 
+  /** This player may hold the elements; see `mayAdopt`. */
+  const adoptable = mayAdopt(owner, tabId, stripTab, lecture.id);
+  /** On screen while the other pane's player has the elements: this one shows
+   *  a still and touches nothing until the user plays here. */
+  const elsewhere = onScreen && !!mainSrc && !adoptable;
+  /** What the adoption does once a user action claims playback here. */
+  const startRef = useRef<{ at?: number } | null>(null);
+  const playHere = (at?: number) => {
+    startRef.current = { at };
+    claimPlayback(tabId, stripTab, lecture.id);
+  };
+  // Read by the key handler and the dock's seek, which subscribe once.
+  const elsewhereRef = useRef(elsewhere);
+  elsewhereRef.current = elsewhere;
+  const playHereRef = useRef(playHere);
+  playHereRef.current = playHere;
+
   // The frames always show both streams, so a pick in the second frame makes
   // the *other* stream the main one.
   const selectSource = (n: SourceNum) => setPrefs({ mainSource: n });
@@ -544,8 +557,8 @@ export function LecturePlayer({
 
   // ── Chapters ─────────────────────────────────────────────────────────────
 
-  // Read from SQLite, not the `lecture` row: in the side panel that row is a
-  // store snapshot a chaptering run outlives.
+  // Read from SQLite, not the `lecture` row: that row is a snapshot a
+  // chaptering run outlives.
   const chapterState = useLectureChapters(lecture.id);
   const chapterStarts = useMemo(
     () => chapterState.chapters.map((c) => c.start_seconds),
@@ -638,7 +651,6 @@ export function LecturePlayer({
   isFullscreenRef.current = isFullscreen;
 
   const handleToggleFullscreen = useCallback(async () => {
-    if (!allowFullscreen) return;
     const next = !isFullscreenRef.current;
     setIsFullscreen(next);
     if (!next) return;
@@ -648,7 +660,7 @@ export function LecturePlayer({
     } catch {
       /* not fatal — the overlay just covers a windowed app */
     }
-  }, [allowFullscreen]);
+  }, []);
 
   // Leaving window fullscreen another way (green button, ⌃⌘F) arrives as a
   // resize; only the leaving matters.
@@ -669,14 +681,24 @@ export function LecturePlayer({
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
 
+  // The focused pane's player only. Without the elements, Space plays here and
+  // Escape still leaves fullscreen; every other key waits for ownership.
   useEffect(() => {
-    if (!onScreen) return;
+    if (!focused) return;
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       // An open popover (speed, layout, source) owns its arrows and space bar.
       if (target?.closest('[data-slot="popover-content"]')) return;
+
+      if (elsewhereRef.current && e.key !== "Escape") {
+        if (e.key === " ") {
+          e.preventDefault();
+          playHereRef.current();
+        }
+        return;
+      }
 
       switch (e.key) {
         case " ":
@@ -724,7 +746,7 @@ export function LecturePlayer({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleToggleFullscreen, onScreen]);
+  }, [handleToggleFullscreen, focused]);
 
   // ── Downloads ────────────────────────────────────────────────────────────
 
@@ -753,7 +775,6 @@ export function LecturePlayer({
   // fetch one if the *preference* is the transcript tab (it outlives
   // `tabInFront` dropping that tab), otherwise show or hide the dock.
   const toggleTranscript = () => {
-    if (!allowDock) return;
     if (lecture.transcript_path && cues.length === 0) {
       loadTranscript(lecture.transcript_path);
     } else if (!lecture.transcript_path && dockTab === "transcript") {
@@ -799,8 +820,10 @@ export function LecturePlayer({
     setFollowing(true);
   }, []);
 
+  // A seek from the dock while the other pane has the video takes it over.
   const handleCueSeek = useCallback((seconds: number) => {
     if (videoRef.current) videoRef.current.currentTime = seconds;
+    else if (elsewhereRef.current) playHereRef.current(seconds);
   }, []);
 
   const togglePlay = () => {
@@ -847,9 +870,16 @@ export function LecturePlayer({
 
   useEffect(() => {
     const mainHost = mainHostRef.current;
-    // Behind another tab the elements stay with whoever has them; this player
-    // re-adopts them when its pane comes forward.
-    if (!mainHost || !mainSrc || !onScreen) {
+    // Behind another tab, or beside the player that has them, the elements
+    // stay where they are; this player adopts them once `mayAdopt` says so.
+    // Re-checked against the live owner: two players can both pass at render.
+    if (
+      !mainHost ||
+      !mainSrc ||
+      !onScreen ||
+      !adoptable ||
+      !mayAdopt(playbackOwner(), tabId, stripTab, lecture.id)
+    ) {
       videoRef.current = null;
       setLeaderEl(null);
       return;
@@ -863,7 +893,9 @@ export function LecturePlayer({
       plan.push({ source: otherSource, src: secondSrc, host: secondHost });
     }
 
-    const v = syncLectureSources(lecture, plan, { tab: tabId, host });
+    const start = startRef.current ?? undefined;
+    startRef.current = null;
+    const v = syncLectureSources(lecture, plan, tabId, stripTab, start);
     // Parking restores the elements only if still ours — another player (e.g.
     // expand-to-tab) may have taken them since.
     const claim = playbackClaim();
@@ -931,7 +963,10 @@ export function LecturePlayer({
       parkLectureVideos(claim);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lecture.id, urls[1], urls[2], layout, mainSource, onScreen, tabId, host]);
+  }, [lecture.id, urls[1], urls[2], layout, mainSource, onScreen, adoptable, tabId, stripTab]);
+
+  // Unmounting paused gives playback up, so the other pane's player can take it.
+  useEffect(() => () => releaseLecturePlayer(tabId), [tabId]);
 
   // Progress is saved by the module, even while nothing is mounted.
   useWindowEvent(LECTURE_PROGRESS_EVENT, () => onRefresh());
@@ -940,7 +975,7 @@ export function LecturePlayer({
 
   // The dock stays mounted so it can slide in and out.
   const hasTranscript = cues.length > 0;
-  const showDock = allowDock && transcriptVisible;
+  const showDock = transcriptVisible;
   /** The tab the dock is actually showing — what T shows or hides. */
   const frontTab = tabInFront(dockTab, hasTranscript);
 
@@ -1085,7 +1120,7 @@ export function LecturePlayer({
       ref={containerRef}
       className={cn(
         "flex overflow-hidden min-h-0 min-w-0 bg-background relative",
-        // Over the sidebar, the tab strip and the peek panel (z-20) alike.
+        // Over the sidebar and the tab strip alike.
         isFullscreen ? "fixed inset-0 z-50" : "flex-1",
         dock === "bottom" && "flex-col",
         dock === "top" && "flex-col-reverse",
@@ -1099,7 +1134,7 @@ export function LecturePlayer({
           ref={videoAreaRef}
           className={cn(
             "flex-1 bg-black flex flex-col min-h-0 relative overflow-hidden",
-            !controlsVisible && "cursor-none",
+            !controlsVisible && !elsewhere && "cursor-none",
           )}
           onPointerMove={revealControls}
           onPointerLeave={() => {
@@ -1223,7 +1258,25 @@ export function LecturePlayer({
               )}
             </div>
           )}
-          {captionsEnabled && activeCueIdx >= 0 && (
+          {elsewhere && (
+            // Over the frames, not instead of them: their hosts stay mounted
+            // for the moment the elements come back.
+            <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-black p-6 text-white/60">
+              <p className="max-w-full truncate text-sm font-medium text-white">{lecture.title}</p>
+              <p className="text-xs">
+                {owner.playing ? "Playing in the other pane" : "Paused in the other pane"}
+              </p>
+              <Button
+                size="sm"
+                className="gap-2 bg-white/10 hover:bg-white/20 hover:text-white text-white border-white/20"
+                variant="outline"
+                onClick={() => playHere()}
+              >
+                <Play size={14} weight="fill" /> Play here
+              </Button>
+            </div>
+          )}
+          {captionsEnabled && activeCueIdx >= 0 && !elsewhere && (
             <CaptionOverlay
               text={cues[activeCueIdx]?.text ?? ""}
               boundsRef={videoAreaRef}
@@ -1238,6 +1291,7 @@ export function LecturePlayer({
               "absolute inset-x-0 bottom-0 z-30 transition-opacity duration-200",
               controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none",
             )}
+            inert={elsewhere}
             onPointerEnter={() => {
               pointerOnControlsRef.current = true;
               revealControls();
@@ -1340,22 +1394,20 @@ export function LecturePlayer({
                 )}
 
                 {/* Labelled by the tab in front: it folds the whole dock. */}
-                {allowDock && (
-                  <ControlButton
-                    label={
-                      !lecture.transcript_path && dockTab === "transcript"
-                        ? "Download transcript"
-                        : `${showDock ? "Hide" : "Show"} ${DOCK_TAB_NOUN[frontTab]} (T)`
-                    }
-                    active={showDock}
-                    onClick={toggleTranscript}
-                  >
-                    <SidebarSimple
-                      size={16}
-                      className={cn("transition-transform", DOCK_ICON_FACING[dock])}
-                    />
-                  </ControlButton>
-                )}
+                <ControlButton
+                  label={
+                    !lecture.transcript_path && dockTab === "transcript"
+                      ? "Download transcript"
+                      : `${showDock ? "Hide" : "Show"} ${DOCK_TAB_NOUN[frontTab]} (T)`
+                  }
+                  active={showDock}
+                  onClick={toggleTranscript}
+                >
+                  <SidebarSimple
+                    size={16}
+                    className={cn("transition-transform", DOCK_ICON_FACING[dock])}
+                  />
+                </ControlButton>
 
                 <ControlButton
                   label={
@@ -1371,14 +1423,12 @@ export function LecturePlayer({
                   />
                 </ControlButton>
 
-                {allowFullscreen && (
-                  <ControlButton
-                    label={isFullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}
-                    onClick={handleToggleFullscreen}
-                  >
-                    {isFullscreen ? <ArrowsIn size={16} /> : <ArrowsOut size={16} />}
-                  </ControlButton>
-                )}
+                <ControlButton
+                  label={isFullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}
+                  onClick={handleToggleFullscreen}
+                >
+                  {isFullscreen ? <ArrowsIn size={16} /> : <ArrowsOut size={16} />}
+                </ControlButton>
               </div>
             </div>
           </div>
@@ -1391,35 +1441,29 @@ export function LecturePlayer({
         )}
       </div>
 
-      {/* The dock. Not rendered where disallowed, so its Chat tab does not load
-          a thread for every peeked lecture. */}
-      {allowDock && (
-        <>
-          {showDock && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
-          <TranscriptPanel
-            cues={cues}
-            activeCueIdx={activeCueIdx}
-            tab={dockTab}
-            onTabChange={handleDockTabChange}
-            chapters={chaptersProps}
-            reading={readingProps}
-            chat={chatProps}
-            dock={dock}
-            size={size}
-            open={showDock}
-            resizing={resizing}
-            onSeek={handleCueSeek}
-            onClose={handleDockClose}
-            onHeaderPointerDown={startDockDrag}
-            following={following}
-            onScrollAway={handleScrollAway}
-            onBackToLive={handleBackToLive}
-          />
+      {showDock && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
+      <TranscriptPanel
+        cues={cues}
+        activeCueIdx={activeCueIdx}
+        tab={dockTab}
+        onTabChange={handleDockTabChange}
+        chapters={chaptersProps}
+        reading={readingProps}
+        chat={chatProps}
+        dock={dock}
+        size={size}
+        open={showDock}
+        resizing={resizing}
+        onSeek={handleCueSeek}
+        onClose={handleDockClose}
+        onHeaderPointerDown={startDockDrag}
+        following={following}
+        onScrollAway={handleScrollAway}
+        onBackToLive={handleBackToLive}
+      />
 
-          {dropTarget && (
-            <DockDropPreview dock={dropTarget} height={height} width={width} />
-          )}
-        </>
+      {dropTarget && (
+        <DockDropPreview dock={dropTarget} height={height} width={width} />
       )}
     </div>
   );

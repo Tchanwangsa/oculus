@@ -1,6 +1,7 @@
 import { navigateActive } from "@/lib/tabRouters";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { useSubjects } from "@/hooks/useSubjects";
+import { TrailMore, useInSidePanel, useTrailCollapsed } from "@/components/tabs/PaneHeader";
 import { displayCode } from "@/lib/format";
 
 /** A subject tab as a crumb: path segment under the subject, and its label. */
@@ -34,14 +35,16 @@ export const fileCrumbTab = (category: string | null): CrumbTab | null =>
   (category && FILE_TAB[category]) || null;
 
 /**
- * The subject → tab trail for full pages outside `SubjectLayout` (a promoted
- * file or lecture); `ProjectCrumbs` is the other half. A Fragment, so it drops
+ * The subject → tab trail for full pages outside `SubjectLayout` (a file or
+ * lecture page); `ProjectCrumbs` is the other half. A Fragment, so it drops
  * into the page's own crumb row.
  *
  * Buttons with `data-tab-href`, not `Link`s: the click must go through
- * `navigateActive`, which runs the departure rules (a playing lecture, an open
- * peek) that the pane's own router skips; ⌘-click opens a new tab
+ * `navigateActive`, which runs the departure rule (a playing lecture) that
+ * the pane's own router skips; ⌘-click opens a new tab
  * (`app/src/lib/newTabClicks.ts`). Resolves the subject from the id itself.
+ * In the side panel the subject drops its icon (the switcher shows the
+ * item's) and the tab folds behind `TrailMore` (`PaneHeader.tsx`).
  */
 export function SubjectCrumbs({
   subjectId,
@@ -52,6 +55,8 @@ export function SubjectCrumbs({
 }) {
   const { subjects } = useSubjects();
   const subject = subjects.find((s) => s.id === subjectId) ?? null;
+  const inSide = useInSidePanel();
+  const folded = useTrailCollapsed();
 
   // Nothing rather than a placeholder; the leaf is already the title.
   if (!subject) return null;
@@ -64,11 +69,17 @@ export function SubjectCrumbs({
         onClick={() => navigateActive(`/subjects/${subject.id}`)}
         className="flex shrink-0 cursor-pointer items-center gap-1.5 transition-colors hover:text-foreground"
       >
-        <SubjectIcon code={subject.code} size={12} />
+        {!inSide && <SubjectIcon code={subject.code} size={12} />}
         {displayCode(subject.code)}
       </button>
       <Separator />
-      {tab && (
+      {tab && folded && (
+        <>
+          <TrailMore />
+          <Separator />
+        </>
+      )}
+      {tab && !folded && (
         <>
           <button
             type="button"

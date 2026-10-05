@@ -11,11 +11,11 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useStripReorder } from "@/hooks/usePointerDrag";
-import { focusedPane, useTabStore } from "@/stores/tabStore";
+import { focusedPane, panesOf, useTabStore } from "@/stores/tabStore";
 import { useBrowserStore } from "@/stores/browserStore";
 import { browser, browseId } from "@/lib/browser";
-import { useSubjects } from "@/hooks/useSubjects";
-import { tabInfo } from "@/components/tabs/tabInfo";
+import { useTabInfo } from "@/components/tabs/tabInfo";
+import { stepItem } from "@/lib/sideStack";
 import { goInActiveTab } from "@/lib/tabRouters";
 import {
   Tooltip,
@@ -55,19 +55,19 @@ export default function TopTabBar({
   sidebarCollapsed,
   onToggleSidebar,
 }: TopTabBarProps) {
-  const { tabs, activeId, addTab, setActive, closeTab, toggleSplit, reopenTab } =
+  const { tabs, activeId, addTab, setActive, closeTab, toggleSide, frontSide, reopenTab } =
     useTabStore(useShallow((s) => ({
       tabs: s.tabs,
       activeId: s.activeId,
       addTab: s.addTab,
       setActive: s.setActive,
       closeTab: s.closeTab,
-      toggleSplit: s.toggleSplit,
+      toggleSide: s.toggleSide,
+      frontSide: s.frontSide,
       reopenTab: s.reopenTab,
     })));
-  const { subjects } = useSubjects();
+  const tabInfo = useTabInfo();
   const browserTabs = useBrowserStore((s) => s.tabs);
-  const favicons = useBrowserStore((s) => s.favicons);
   const fullscreen = useWindowFullscreen();
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
@@ -107,7 +107,7 @@ export default function TopTabBar({
           ),
         );
 
-  // History arrows act on the focused half: a browser page's own history
+  // History arrows act on the focused pane: a browser page's own history
   // (Rust reports `can_back`/`can_forward` in its snapshot), else the pane's
   // memory-router index.
   const activeTab = tabs.find((t) => t.id === activeId);
@@ -137,7 +137,7 @@ export default function TopTabBar({
 
   // A browser tab closes through Rust, which owns its page; the strip hears
   // back through `browser-state` and drops the tab then.
-  const close = (id: number) => {
+  const shut = (id: number) => {
     const bid = browseId(tabs.find((t) => t.id === id)?.path);
     if (bid != null) {
       // Remember the URL now: by the time the snapshot closes the pane, Rust
@@ -148,18 +148,24 @@ export default function TopTabBar({
           index: tabs.findIndex((t) => t.id === id),
           path: null,
           url,
-          split: null,
+          side: null,
         });
       browser.close(bid).catch(() => {});
       return;
     }
-    // Closing the tab that owns lecture playback asks first.
-    if (ownsPlayback(id)) confirmLeavingLecture(() => closeTab(id));
-    else closeTab(id);
+    closeTab(id);
+  };
+
+  // Closing a tab whose page or side panel owns lecture playback asks first.
+  const close = (id: number) => {
+    const tab = tabs.find((t) => t.id === id);
+    if (tab && panesOf(tab).some((p) => ownsPlayback(p.id)))
+      confirmLeavingLecture(() => shut(id));
+    else shut(id);
   };
 
   const newTab = () => addTab(NEW_TAB_PATH);
-  const split = () => toggleSplit(activeId);
+  const side = () => toggleSide(activeId);
   // ⌘1…⌘8 past the end of the strip do nothing (not the nearest tab).
   const selectTab = (index: number) => {
     const tab = tabs[index];
@@ -170,27 +176,35 @@ export default function TopTabBar({
     const tab = tabs[tabs.length - 1];
     if (tab) switchTo(tab.id);
   };
-  const splitOpen = !!activeTab?.split;
+  const sideOpen = !!activeTab?.side;
+  // ⌃Tab / ⌃⇧Tab walk the side panel's list, only while it has focus: the
+  // strip's own keys are ⌘-keys.
+  const stepSide = (delta: 1 | -1) => {
+    if (!activeTab?.side || activeTab.focus !== "side") return;
+    frontSide(activeTab.id, stepItem(activeTab.side, delta));
+  };
 
   // Tab shortcuts arrive as menu events (`app/src-tauri/src/menu.rs`): macOS
   // gives the menu bar every ⌘-key first, which also makes them work while a
   // browser page's native WebView holds focus.
   const menuActions = useRef({
     newTab,
-    split,
+    side,
     reopenTab,
     closeActive: () => {},
     selectTab: (_: number) => {},
     selectLastTab: () => {},
     go: (_: 1 | -1) => {},
+    stepSide: (_: 1 | -1) => {},
   });
   menuActions.current = {
     newTab,
-    split,
+    side,
     go,
     reopenTab,
     selectTab,
     selectLastTab,
+    stepSide,
     closeActive: () => {
       const tab = tabs.find((t) => t.id === activeId);
       // Same rule as the ×: a sole app tab can't be closed.
@@ -208,7 +222,9 @@ export default function TopTabBar({
         menuActions.current.selectTab(e.payload),
       ),
       listen("menu-last-tab", () => menuActions.current.selectLastTab()),
-      listen("menu-split", () => menuActions.current.split()),
+      listen("menu-side-panel", () => menuActions.current.side()),
+      listen("menu-side-next", () => menuActions.current.stepSide(1)),
+      listen("menu-side-prev", () => menuActions.current.stepSide(-1)),
       listen("menu-back", () => menuActions.current.go(-1)),
       listen("menu-forward", () => menuActions.current.go(1)),
     ];
@@ -277,13 +293,7 @@ export default function TopTabBar({
         {tabs.map((tab, i) => {
           const active = tab.id === activeId;
           const hovered = tab.id === hoveredId;
-          const { title, icon } = tabInfo(
-            tab.path,
-            subjects,
-            browserTabs,
-            13,
-            favicons,
-          );
+          const { title, icon } = tabInfo(tab.path);
           // Separator only between two inactive, unhovered neighbours.
           const prev = tabs[i - 1];
           const showSeparator =
@@ -405,17 +415,17 @@ export default function TopTabBar({
         <div data-tauri-drag-region className="flex-1 h-full" />
       </div>
 
-      {/* Split toggle: at the far end, outside the measured strip — it acts on
-          the tab in front, not the strip. */}
+      {/* Side panel toggle: at the far end, outside the measured strip — it
+          acts on the tab in front, not the strip. */}
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            onClick={split}
-            aria-label={splitOpen ? "Close sidepanel" : "Open sidepanel"}
-            aria-pressed={splitOpen}
+            onClick={side}
+            aria-label={sideOpen ? "Close side panel" : "Open side panel"}
+            aria-pressed={sideOpen}
             className={cn(
               barButton,
-              splitOpen && "bg-sidebar-item-active text-foreground",
+              sideOpen && "bg-sidebar-item-active text-foreground",
             )}
           >
             {/* Mirrored sidebar glyph; a two-column icon reads as "pause". */}
@@ -426,7 +436,7 @@ export default function TopTabBar({
           side="bottom"
           className="flex flex-col items-start gap-0.5"
         >
-          {splitOpen ? "Close sidepanel" : "Open sidepanel"}
+          {sideOpen ? "Close side panel" : "Open side panel"}
           <span className="text-[11px] text-background/60">⌥⌘T</span>
         </TooltipContent>
       </Tooltip>

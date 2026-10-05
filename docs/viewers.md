@@ -88,11 +88,20 @@ picker and timeline are [harness.md](./harness.md).
   survives tab switches. Between players they park in a 480×270 off-screen
   host — `display: none` lets WebKit stop playback, and a tiny host decodes
   tiny. Progress saves every 5s and on pause, seek, end and `pagehide`.
-- **Only the player in front adopts the elements** and hears Space.
+- **One player owns the elements** (`app/src/lib/playbackOwner.ts`). A tab's
+  main page and its side panel can both be lecture pages; a player never takes
+  the elements on mount from an owner in its own tab — only a player in the tab
+  now in front, or any player once nobody owns them (a stop, or a paused owner
+  unmounting). A user action claims them (`claimPlayback`): Play here, Space,
+  or a seek from the dock; the claimed pane adopts once it shows that lecture.
+  A player without them draws a still over its frames — title, "Playing/Paused
+  in the other pane", a "Play here" pill — and never touches the elements; the
+  frames stay mounted under it so the elements are never detached.
+- **Only the focused pane's player hears keys.** Owning, every key works; not
+  owning, Space takes the video over and Escape leaves fullscreen.
 - **Leaving a playing lecture asks at the door** — the strip's × and
   `navigateActive` / `goInActiveTab` call `confirmLeavingLecture` — never
-  through a router blocker, which strands the pane when nobody answers. The
-  peek's body sits under a `TabContext.Provider` so it has an owning tab.
+  through a router blocker, which strands the pane when nobody answers.
 - **Two streams, one clock.** The main-frame source leads (audio, clock,
   progress); followers are rate-trimmed past `MAX_DRIFT` and seeked only past
   `SEEK_DRIFT`. `syncLectureSources` takes the whole plan, so only it can tell
@@ -100,7 +109,8 @@ picker and timeline are [harness.md](./harness.md).
   volume re-apply per leader element, since both reset on load.
 - **Fullscreen is the Tauri window plus a `fixed inset-0` overlay**: element
   fullscreen shows only its subtree, and the player's Radix popups portal
-  outside it. Fullscreen and the dock are off in the side panel.
+  outside it. A lecture in the side panel is the full lecture page, dock and
+  fullscreen included.
 - **Preferences are global** (`playerPrefsStore`); only the position is per
   lecture. The clock counts against the leader's duration, not the catalogue's.
 - **The dock is Chapters, Transcript and Chat** in a reorderable `ViewTabs`

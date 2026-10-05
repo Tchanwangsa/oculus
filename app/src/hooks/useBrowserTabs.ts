@@ -22,7 +22,7 @@ import { panesOf, useTabStore } from "@/stores/tabStore";
  * Reconciles the tab strip with Rust's browser tab list (Rust owns which
  * pages exist; the strip owns order and focus): a page no pane shows opens as
  * a tab in front, and a pane whose page is gone closes. Works per pane, so a
- * page held by a split half gets no tab of its own.
+ * page held by a side panel item, in front or not, gets no tab of its own.
  *
  * Also writes history from the snapshots — on **finished** loads only, since
  * a commit fires for every redirect hop. Mounted once, in AppLayout.
@@ -61,16 +61,18 @@ export function useBrowserTabs() {
       remember(snapshot);
       const live = new Set(snapshot.tabs.map((t) => t.id));
 
-      // Closed in Rust: close the tab, or fold just the split half.
+      // Closed in Rust: close the tab, or drop just the side panel item.
       for (const tab of useTabStore.getState().tabs) {
         const main = browseId(tab.path);
         if (main != null && !live.has(main)) {
           useTabStore.getState().closeTab(tab.id);
           continue;
         }
-        const split = browseId(tab.split?.path);
-        if (split != null && !live.has(split))
-          useTabStore.getState().closeSplit(tab.id);
+        for (const item of tab.side?.items ?? []) {
+          const page = browseId(item.path);
+          if (page != null && !live.has(page))
+            useTabStore.getState().removeSide(tab.id, item.id);
+        }
       }
 
       // Opened in Rust: a new tab in front, unless a pane already holds it.

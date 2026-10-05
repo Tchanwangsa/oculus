@@ -17,7 +17,7 @@ import {
 } from "@/lib/openFile";
 import { useHarnessStore } from "@/stores/harnessStore";
 import { chatHref } from "@/lib/harness";
-import { useSidePanelStore } from "@/stores/sidePanelStore";
+import { openBeside } from "@/lib/tabRouters";
 import { ROW, Section } from "./Section";
 import { useHomeSection } from "./useHomeSection";
 
@@ -114,7 +114,7 @@ function Row({
         <span className={progress.color}>{progress.text}</span>
       </>
     );
-    open = () => useSidePanelStore.getState().open({ kind: "lecture", lecture });
+    open = () => openBeside(lecturePagePath(lecture));
     tabHref = lecturePagePath(lecture);
   } else if (item.kind === "file") {
     const { file } = item;

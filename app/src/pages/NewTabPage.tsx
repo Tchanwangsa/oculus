@@ -18,12 +18,13 @@ import { useTabStore } from "@/stores/tabStore";
 const SHOWN = 6;
 
 /**
- * Where the + button, ⌘T and a fresh split land — deliberately not Home: a
- * search field (the ⌘K search inline, `lib/search.ts`), two doors and a trail.
+ * Where the + button, ⌘T and a fresh side panel land — deliberately not Home:
+ * a search field (the ⌘K search inline, `lib/search.ts`), two doors and a
+ * trail.
  *
  * Both doors and a picked web result consume this tab. A browser page is a
- * native WebView in its own tab, so in the main half this tab closes behind
- * it; in a split half `openUrlInFocusedPane` puts the page in this pane.
+ * native WebView in its own tab, so in the main pane this tab closes behind
+ * it; in the side panel `openUrlInFocusedPane` puts the page in this pane.
  */
 export default function NewTabPage() {
   const navigate = useNavigate();
@@ -51,7 +52,7 @@ export default function NewTabPage() {
   function pick(item: SearchItem, newTab: boolean) {
     openSearchItem(item, {
       newTab,
-      // This pane's own router, so a split half keeps what it picks.
+      // This pane's own router, so a side panel item keeps what it picks.
       navigate: (path) => navigate(path),
       addTab,
       openUrl: (url) => void openHere(url),

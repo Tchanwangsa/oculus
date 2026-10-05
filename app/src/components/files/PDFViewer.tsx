@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/tooltip";
 import { loadPdfjs, type Pdfjs } from "@/lib/pdfjs";
 import { centerIn, matchSpans } from "@/lib/locateQuote";
-import type { FileLocate } from "@/stores/sidePanelStore";
+import type { FileLocate } from "@/lib/openFile";
 import { useDataDir } from "@/hooks/useDataDir";
 import { loadParsedPages } from "@/lib/citations";
 import { libraryImageSrc } from "@/lib/libraryLinks";

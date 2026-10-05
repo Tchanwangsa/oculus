@@ -39,7 +39,8 @@ export const routes: RouteObject[] = [
       // An unfiled task: same page, with a null project and the default board.
       { path: "tasks/:taskId", lazy: page(() => import("@/pages/TaskPage")) },
       { path: "subjects", lazy: page(() => import("@/pages/SubjectsIndexPage")) },
-      // A peek expanded to a full page, outside SubjectLayout's tabs.
+      // A file or lecture as a whole page (a tab, or the side panel), outside
+      // SubjectLayout's tabs.
       { path: "subjects/:subjectId/file", lazy: page(() => import("@/pages/subject/FilePage")) },
       { path: "subjects/:subjectId/lecture", lazy: page(() => import("@/pages/subject/LecturePage")) },
       {

@@ -230,3 +230,10 @@ export function lecturePagePath(
 ): string {
   return `/subjects/${lec.subject_id}/lecture?id=${encodeURIComponent(lec.id)}&t=${encodeURIComponent(lec.title)}`;
 }
+
+/** The lecture id a `lecturePagePath` route names, or null for any other path. */
+export function lecturePageId(path: string | null | undefined): string | null {
+  const [pathname, search = ""] = (path ?? "").split("?");
+  if (!/^\/subjects\/\d+\/lecture$/.test(pathname)) return null;
+  return new URLSearchParams(search).get("id");
+}

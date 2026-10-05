@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import {
   ArrowClockwise,
   ArrowsClockwise,
@@ -14,6 +15,8 @@ import {
 } from "@phosphor-icons/react";
 import { browseId, hostOf, type BrowserTab } from "@/lib/browser";
 import { faviconFor } from "@/hooks/useBrowserTabs";
+import { useSubjects } from "@/hooks/useSubjects";
+import { useBrowserStore } from "@/stores/browserStore";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { displayCode, humanizeSlug } from "@/lib/format";
 import type { Subject } from "@/lib/db";
@@ -135,4 +138,16 @@ export function tabInfo(
   if (pathname.startsWith("/subjects"))
     return { title: "Subjects", icon: <BookOpen size={size} /> };
   return { title: "Oculus", icon: null };
+}
+
+/** `tabInfo` over the app's live subjects, browser pages and favicons: what
+ *  the tab strip and the side panel's header title their panes with. */
+export function useTabInfo(): (path: string, size?: number) => TabInfo {
+  const { subjects } = useSubjects();
+  const browserTabs = useBrowserStore((s) => s.tabs);
+  const favicons = useBrowserStore((s) => s.favicons);
+  return useCallback(
+    (path, size = 13) => tabInfo(path, subjects, browserTabs, size, favicons),
+    [subjects, browserTabs, favicons],
+  );
 }

@@ -143,8 +143,7 @@ export default function SubjectLayout() {
         </div>
       </header>
 
-      {/* Keyed so switching subjects remounts the tab. Not `relative`: peeks
-          inside must anchor to AppLayout's main to cover the whole page. */}
+      {/* Keyed so switching subjects remounts the tab. */}
       <div key={subject.id} className="flex-1 min-h-0 overflow-hidden">
         <Outlet context={subject satisfies Subject} />
       </div>

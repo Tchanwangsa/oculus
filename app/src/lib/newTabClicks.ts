@@ -11,7 +11,7 @@ import { useTabStore } from "@/stores/tabStore";
  *
  * The nearest carrier up the tree says where: an `href` (every `Link`), a
  * `data-tab-href` on button rows that must keep `navigateActive`'s plain-click
- * rules or open a side-panel peek, or `data-tab-skip` on a nested control
+ * rules or open beside the page, or `data-tab-skip` on a nested control
  * that keeps its own click.
  */
 const CARRIER = "a[href], [data-tab-href], [data-tab-skip]";

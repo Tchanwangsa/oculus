@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   DocumentControls,
   SUGGEST_IDLE,
@@ -12,8 +12,16 @@ import { FileViewer, PdfMdToggle, usePdfMd } from "@/components/files/FileViewer
 import { MarkdownUnavailable } from "@/components/files/ParseState";
 import { SubjectCrumbs, fileCrumbTab } from "@/components/subjects/SubjectCrumbs";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
-import { filePagePath, fileTitle, openFileSmart, recordFileAccess } from "@/lib/openFile";
+import {
+  filePagePath,
+  fileTitle,
+  openFileSmart,
+  recordFileAccess,
+  routeLocate,
+} from "@/lib/openFile";
+import { useLocateHighlight } from "@/hooks/useLocateHighlight";
 import { LoadingFill } from "@/components/ui/PageParts";
+import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { useDocumentPrefsStore } from "@/stores/documentPrefsStore";
 
 const DocumentEditor = lazy(() =>
@@ -21,9 +29,10 @@ const DocumentEditor = lazy(() =>
 );
 
 /**
- * A file as a full page (the peek's expand target). Standalone, not under
- * SubjectLayout; its breadcrumb stands in for the subject chrome. For a
- * student document this page is the editor (`DocumentEditor`).
+ * A file as a full page, in a tab or in the side panel (`openFileSmart`).
+ * Standalone, not under SubjectLayout; its breadcrumb stands in for the
+ * subject chrome. For a student document this page is the editor
+ * (`DocumentEditor`).
  */
 export default function SubjectFilePage() {
   const { subjectId } = useParams();
@@ -31,6 +40,10 @@ export default function SubjectFilePage() {
   const navigate = useNavigate();
   const relPath = searchParams.get("path");
   const id = Number(subjectId);
+  // A cited spot (`openCitation`), from router state: a page in the PDF, or a
+  // passage of markdown to highlight.
+  const { state: routeState } = useLocation();
+  const locate = useMemo(() => routeLocate(routeState), [routeState]);
 
   const { files, loading } = useSubjectFiles(Number.isFinite(id) ? id : null);
   const found = useMemo(
@@ -57,6 +70,17 @@ export default function SubjectFilePage() {
 
   const pdf = usePdfMd(file);
   const isDocument = file?.category === "document";
+
+  // A cited page is in the PDF, whichever face was showing.
+  const { setViewMode } = pdf;
+  useEffect(() => {
+    if (locate?.page) setViewMode("pdf");
+  }, [locate?.seq, locate?.page, setViewMode]);
+  // Not in a document: its editor draws only the lines in view, so the
+  // passage may not be in the DOM to find.
+  const [body, setBody] = useState<HTMLDivElement | null>(null);
+  useLocateHighlight(body, isDocument ? undefined : locate);
+
   const [mode, setMode] = useState<EditorMode>("live");
   const [status, setStatus] = useState<SaveStatus>({ state: "idle" });
   const suggestions = useDocumentPrefsStore((s) => s.suggestions);
@@ -100,16 +124,16 @@ export default function SubjectFilePage() {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="h-11 shrink-0 flex items-center gap-2.5 px-5 border-b border-border-subtle">
-        <nav
-          aria-label="Breadcrumb"
-          className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
-        >
-          <SubjectCrumbs subjectId={id} tab={fileCrumbTab(file.category)} />
-        </nav>
-        <h1 className="flex-1 min-w-0 text-[13px] font-semibold text-foreground truncate">
-          {fileTitle(file)}
-        </h1>
+      <PaneHeaderRow className="h-11 shrink-0 flex items-center gap-2.5 px-5 border-b border-border-subtle">
+        <PaneTrail>
+          <nav
+            aria-label="Breadcrumb"
+            className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
+          >
+            <SubjectCrumbs subjectId={id} tab={fileCrumbTab(file.category)} />
+          </nav>
+          <PaneTitle>{fileTitle(file)}</PaneTitle>
+        </PaneTrail>
         {/* A PDF without markdown says why rather than lacking the toggle. */}
         {isDocument ? (
           <DocumentControls
@@ -131,8 +155,8 @@ export default function SubjectFilePage() {
             <MarkdownUnavailable file={file} />
           ))
         )}
-      </div>
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+      </PaneHeaderRow>
+      <div ref={setBody} className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {isDocument ? (
           <Suspense fallback={<LoadingFill />}>
             <DocumentEditor
@@ -150,12 +174,13 @@ export default function SubjectFilePage() {
             />
           </Suspense>
         ) : (
-          /* In-document links open the linked file as a peek over this page. */
+          /* In-document links open the linked file beside this page. */
           <FileViewer
             file={file}
             files={files}
             onOpenFile={openFileSmart}
             pdfViewMode={pdf.viewMode}
+            locate={locate}
           />
         )}
       </div>

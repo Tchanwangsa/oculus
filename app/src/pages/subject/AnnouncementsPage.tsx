@@ -8,7 +8,7 @@ import { FileRecency } from "@/components/files/FileRecency";
 import { dateFromSlug, fmtShortDate, humanizeSlug } from "@/lib/format";
 import { ListCard } from "@/components/ui/PageParts";
 
-/** Every scraped announcement, newest first. Rows open in the peek. */
+/** Every scraped announcement, newest first. Rows open in the side panel. */
 export default function SubjectAnnouncementsPage() {
   const subject = useSubject();
   const { byCategory, loading } = useSubjectFiles(subject.id);

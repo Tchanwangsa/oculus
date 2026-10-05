@@ -538,7 +538,7 @@ html:root.dark {
 
 /* A cited passage: its text-layer spans in a PDF (`PDFViewer.tsx`, whose text
  * is transparent over the canvas, so the ground shows through) and the
- * markdown highlight (`FilePanel.tsx`). */
+ * markdown highlight (`useLocateHighlight.ts`). */
 .pdf-surface .textLayer .citation-hit {
   background-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
   border-radius: 2px;

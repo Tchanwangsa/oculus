@@ -1,8 +1,23 @@
 import { create } from "zustand";
 import { browser, browseId } from "@/lib/browser";
 import { ownsPlayback, stopLecturePlayback } from "@/lib/lecturePlayback";
-import { useSidePanelStore } from "@/stores/sidePanelStore";
-import { navigateInTab } from "@/lib/tabRouters";
+import { dropTabRouter, hasTabRouter, navigateInTab } from "@/lib/tabRouters";
+import {
+  clampRatio,
+  frontItem,
+  frontOf,
+  pushItem,
+  removeItem,
+  restoreClosedSide,
+  restoreFocus,
+  restoreSide,
+  retargetItem,
+  sideFromPaths,
+  storeSide,
+  type SideItem,
+  type SidePanel,
+  type StoredSide,
+} from "@/lib/sideStack";
 
 /**
  * The top tab strip. Each tab is a navigation context of its own (a router
@@ -10,20 +25,20 @@ import { navigateInTab } from "@/lib/tabRouters";
  * exist, their order, which is in front, and each pane's path and history
  * reach, as the panes report them.
  *
- * A tab can be split (⌥⌘T) into two panes. Everything below a tab — router,
- * side-panel peek, playing lecture, Recent entry — is keyed by **pane id**; a
- * tab's main pane carries the tab's own id, which is why `AppTab extends
- * PaneState`.
+ * A tab can have a side panel on its right half: a stack of panes, one in
+ * front (`app/src/lib/sideStack.ts`). Everything below a tab — router,
+ * playing lecture, Recent entry — is keyed by **pane id**; a tab's main pane
+ * carries the tab's own id, which is why `AppTab extends PaneState`.
  *
  * A browser tab's path is `/browse/<id>` and never changes: it stands for a
  * native WebView Rust holds (see `navigateActive` in
  * `app/src/lib/tabRouters.ts`).
  */
 
-/** Which half of a split tab. An unsplit tab is all `"main"`. */
-export type PaneSide = "main" | "split";
+/** Which part of a tab: its main pane, or its side panel. */
+export type PaneSide = "main" | "side";
 
-/** One mounted pane: a router, a page, and how far its history reaches. */
+/** One pane: a router, a page, and how far its history reaches. */
 export interface PaneState {
   /** Unique across every pane in the window, never reused. A tab's main pane
    *  carries the tab's own id. */
@@ -35,9 +50,13 @@ export interface PaneState {
 }
 
 export interface AppTab extends PaneState {
-  /** The pane beside the main one, or null when the tab is not split. */
-  split: PaneState | null;
-  /** The half the shell drives — sidebar rows, ⌘K, breadcrumbs, the strip's
+  /** Location state for the main pane router's first entry (a file's
+   *  `locate`), as `SideItem.entryState`. Never stored: a restored tab opens
+   *  on its path alone. */
+  entryState?: unknown;
+  /** The side panel, or null when it is closed. */
+  side: SidePanel | null;
+  /** The part the shell drives — sidebar rows, ⌘K, breadcrumbs, the strip's
    *  arrows. */
   focus: PaneSide;
 }
@@ -47,7 +66,7 @@ interface TabHistory {
   canForward: boolean;
 }
 
-/** The new-tab page: where the last closed tab and a fresh split land. */
+/** The new-tab page: where the last closed tab and a fresh side panel land. */
 const HOME = "/new";
 /** Where a first-run strip opens. */
 const FIRST = "/chat";
@@ -70,8 +89,8 @@ interface ClosedTab {
   /** The route its main pane held, or null for a browser tab. */
   path: string | null;
   url: string | null;
-  /** The split half's route. A split holding a browser page is dropped. */
-  split: string | null;
+  /** The side panel's routes in list order. Browser items are dropped. */
+  side: string[] | null;
 }
 
 interface StoredPane {
@@ -79,15 +98,21 @@ interface StoredPane {
   path: string;
 }
 
+/** Fields are read as untrusted: `restoreSide` validates them. */
 interface StoredTab extends StoredPane {
-  split?: StoredPane | null;
-  focus?: PaneSide;
+  side?: StoredSide | null;
+  /** A one-pane side panel, read when `side` is absent. */
+  split?: unknown;
+  focus?: unknown;
 }
+
+/** A stored closed tab, whose side panel may be a lone `split` path. */
+type StoredClosed = Partial<Record<keyof ClosedTab | "split", unknown>>;
 
 interface StoredStrip {
   tabs: StoredTab[];
   activeId: number;
-  closed?: ClosedTab[];
+  closed?: StoredClosed[];
 }
 
 function pane(id: number, path: string): PaneState {
@@ -100,7 +125,7 @@ function validPane<T extends StoredPane>(p: T | null | undefined): p is T {
   return !!p && Number.isInteger(p.id) && typeof p.path === "string";
 }
 
-function validClosed(e: Partial<ClosedTab> | null | undefined): boolean {
+function validClosed(e: StoredClosed | null | undefined): boolean {
   return (
     !!e &&
     Number.isInteger(e.index) &&
@@ -114,18 +139,14 @@ function restore(): { tabs: AppTab[]; activeId: number; closed: ClosedTab[] } {
     const raw = localStorage.getItem(STORE_KEY);
     const saved = raw ? (JSON.parse(raw) as StoredStrip) : null;
     closed = (saved?.closed ?? []).filter(validClosed).map((e) => ({
-      index: e.index,
+      index: e.index as number,
       path: typeof e.path === "string" ? e.path : null,
       url: typeof e.url === "string" ? e.url : null,
-      split: typeof e.split === "string" ? e.split : null,
+      side: restoreClosedSide(e.side, e.split),
     }));
-    const tabs = (saved?.tabs ?? []).filter(validPane).map((t) => {
-      const split = validPane(t.split) ? pane(t.split.id, t.split.path) : null;
-      return {
-        ...pane(t.id, t.path),
-        split,
-        focus: split && t.focus === "split" ? ("split" as const) : ("main" as const),
-      };
+    const tabs = (saved?.tabs ?? []).filter(validPane).map((t): AppTab => {
+      const side = restoreSide(t.side, t.split, t.id);
+      return { ...pane(t.id, t.path), side, focus: restoreFocus(t.focus, side) };
     });
     if (tabs.length > 0) {
       const activeId = tabs.some((t) => t.id === saved?.activeId)
@@ -137,7 +158,7 @@ function restore(): { tabs: AppTab[]; activeId: number; closed: ClosedTab[] } {
     /* corrupt or unavailable — a fresh strip is a fine fallback */
   }
   return {
-    tabs: [{ ...pane(1, FIRST), split: null, focus: "main" }],
+    tabs: [{ ...pane(1, FIRST), side: null, focus: "main" }],
     activeId: 1,
     closed,
   };
@@ -145,12 +166,12 @@ function restore(): { tabs: AppTab[]; activeId: number; closed: ClosedTab[] } {
 
 const initial = restore();
 
-/** Pane ids share one counter, so it has to clear both halves of every
- *  restored tab. */
+/** Pane ids share one counter, so it has to clear every restored pane, side
+ *  panel items included. */
 let nextId =
   Math.max(
     0,
-    ...initial.tabs.flatMap((t) => [t.id, t.split?.id ?? 0]),
+    ...initial.tabs.flatMap((t) => panesOf(t).map((p) => p.id)),
   ) + 1;
 
 interface TabState {
@@ -158,12 +179,14 @@ interface TabState {
   activeId: number;
   /** Closed tabs, newest last — the stack ⇧⌘T pops. */
   closed: ClosedTab[];
-  addTab: (path: string) => void;
+  /** Opens `path` in a new tab in front, its first entry carrying `state`.
+   *  Returns the new tab's id. */
+  addTab: (path: string, state?: unknown) => number;
   setActive: (id: number) => void;
   moveTab: (id: number, toIndex: number) => void;
   /** A pane reporting where its router landed. Addressed by **pane** id. */
   setPath: (paneId: number, path: string, history: TabHistory) => void;
-  /** Removes a tab and its split half. */
+  /** Removes a tab and its side panel. */
   closeTab: (id: number) => void;
   /** Pushes onto the reopen stack. A browser tab is remembered by the strip
    *  before Rust destroys the page, since its URL is gone by the time the
@@ -171,20 +194,61 @@ interface TabState {
   remember: (entry: ClosedTab) => void;
   /** ⇧⌘T. A browser tab reopens by URL; `useBrowserTabs` adopts the page. */
   reopenTab: () => void;
-  /** Splits `tabId` at `path`, or — already split — focuses the split. */
-  openSplit: (tabId: number, path?: string) => void;
-  closeSplit: (tabId: number) => void;
-  /** ⌥⌘T: split if whole, close the split if focused there, else focus it. */
-  toggleSplit: (tabId: number) => void;
+  /** Opens a side panel on `/new`, or — already open — focuses it. */
+  openSide: (tabId: number) => void;
+  /** Closes the side panel and clears its stack. */
+  closeSide: (tabId: number) => void;
+  /** ⌥⌘T and the strip button: open the side panel if closed, else close it. */
+  toggleSide: (tabId: number) => void;
+  /** Opens `path` in the side panel and focuses it (`pushItem`): a new item,
+   *  or the one naming the same thing, brought to the front and navigated
+   *  there with `state`. */
+  pushSide: (tabId: number, path: string, state?: unknown) => void;
+  /** Brings an item to the front, keeping its place in the list. */
+  frontSide: (tabId: number, itemId: number) => void;
+  /** Removes one item; the last one closes the side panel. `handover`: its
+   *  page continues in another pane, so a lecture keeps playing and a browser
+   *  page stays open. */
+  removeSide: (tabId: number, itemId: number, opts?: { handover?: boolean }) => void;
+  setSideRatio: (tabId: number, ratio: number) => void;
   focusPane: (tabId: number, side: PaneSide) => void;
 }
 
+/** The main pane and every side panel item, in front or not. */
 export function panesOf(tab: AppTab): PaneState[] {
-  return tab.split ? [tab, tab.split] : [tab];
+  return tab.side ? [tab, ...tab.side.items] : [tab];
+}
+
+/** The side panel item on show, or null with the side panel closed. */
+export function sideFront(tab: AppTab): SideItem | null {
+  return tab.side && frontOf(tab.side);
 }
 
 export function focusedPane(tab: AppTab): PaneState {
-  return tab.focus === "split" && tab.split ? tab.split : tab;
+  return (tab.focus === "side" && sideFront(tab)) || tab;
+}
+
+/** A side item that is going away: its router is dropped and, unless its page
+ *  is handed over to another pane, its lecture stops and its browser page
+ *  closes — left open, `useBrowserTabs` would adopt it as a new strip tab. */
+function releaseItem(item: PaneState, handover = false): void {
+  dropTabRouter(item.id);
+  if (handover) return;
+  if (ownsPlayback(item.id)) stopLecturePlayback();
+  const page = browseId(item.path);
+  if (page != null) browser.close(page).catch(() => {});
+}
+
+/** A lecture sent to the back of the side panel pauses: only the front item
+ *  is mounted to show it. */
+function leaveFront(side: SidePanel, next: SidePanel | null): void {
+  const was = side.front;
+  if (next?.front !== was && ownsPlayback(was)) stopLecturePlayback();
+}
+
+/** The store update replacing tab `tabId` with `fn` of it. */
+function withTab(s: { tabs: AppTab[] }, tabId: number, fn: (t: AppTab) => AppTab) {
+  return { tabs: s.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
 }
 
 export const useTabStore = create<TabState>((set, get) => ({
@@ -192,12 +256,12 @@ export const useTabStore = create<TabState>((set, get) => ({
   activeId: initial.activeId,
   closed: initial.closed,
 
-  addTab: (path) => {
+  addTab: (path, state) => {
     const id = nextId++;
-    set((s) => ({
-      tabs: [...s.tabs, { ...pane(id, path), split: null, focus: "main" }],
-      activeId: id,
-    }));
+    const tab: AppTab = { ...pane(id, path), side: null, focus: "main" };
+    if (state !== undefined) tab.entryState = state;
+    set((s) => ({ tabs: [...s.tabs, tab], activeId: id }));
+    return id;
   },
 
   setActive: (id) => set({ activeId: id }),
@@ -226,45 +290,90 @@ export const useTabStore = create<TabState>((set, get) => ({
         tabs: s.tabs.map((t) => {
           if (t !== tab) return t;
           if (t.id === paneId) return { ...t, path, ...history };
-          return { ...t, split: { ...t.split!, path, ...history } };
+          const side = t.side!;
+          return {
+            ...t,
+            side: {
+              ...side,
+              items: side.items.map((i) =>
+                i.id === paneId ? { ...i, path, ...history } : i,
+              ),
+            },
+          };
         }),
       };
     }),
 
-  openSplit: (tabId, path = HOME) =>
-    set((s) => ({
-      tabs: s.tabs.map((t) => {
-        if (t.id !== tabId) return t;
-        if (t.split) return { ...t, focus: "split" };
-        return { ...t, split: pane(nextId++, path), focus: "split" };
-      }),
-    })),
-
-  closeSplit: (tabId) => {
-    const tab = get().tabs.find((t) => t.id === tabId);
-    if (!tab?.split) return;
-    // Playback and peek are keyed by the pane id that is about to go away.
-    if (ownsPlayback(tab.split.id)) stopLecturePlayback();
-    useSidePanelStore.getState().close(tab.split.id);
-    set((s) => ({
-      tabs: s.tabs.map((t) =>
-        t.id === tabId ? { ...t, split: null, focus: "main" } : t,
-      ),
-    }));
-  },
-
-  toggleSplit: (tabId) => {
+  openSide: (tabId) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    if (!tab.split) get().openSplit(tabId);
-    else if (tab.focus === "main") get().focusPane(tabId, "split");
-    else get().closeSplit(tabId);
+    if (tab.side) get().focusPane(tabId, "side");
+    else get().pushSide(tabId, HOME);
+  },
+
+  closeSide: (tabId) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab?.side) return;
+    for (const item of tab.side.items) releaseItem(item);
+    set((s) => withTab(s, tabId, (t) => ({ ...t, side: null, focus: "main" })));
+  },
+
+  toggleSide: (tabId) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    if (tab.side) get().closeSide(tabId);
+    else get().openSide(tabId);
+  },
+
+  pushSide: (tabId, path, state) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    const { side, hit, dropped } = pushItem(tab.side, path, () => nextId++, state);
+    for (const item of dropped) releaseItem(item);
+    if (tab.side) leaveFront(tab.side, side);
+    // A hit with a router is navigated once the store holds it; one never
+    // mounted yet is pointed at `path` for when its router is built.
+    const live = hit != null && hasTabRouter(hit.id);
+    const next = hit && !live ? retargetItem(side, hit.id, path, state) : side;
+    set((s) => withTab(s, tabId, (t) => ({ ...t, side: next, focus: "side" })));
+    // `replace` when already there, so re-citing the same file doesn't pile
+    // up history.
+    if (live) navigateInTab(hit.id, path, { state, replace: hit.path === path });
+  },
+
+  frontSide: (tabId, itemId) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab?.side) return;
+    const side = frontItem(tab.side, itemId);
+    if (side === tab.side) return;
+    leaveFront(tab.side, side);
+    set((s) => withTab(s, tabId, (t) => ({ ...t, side })));
+  },
+
+  removeSide: (tabId, itemId, opts) => {
+    const tab = get().tabs.find((t) => t.id === tabId);
+    const item = tab?.side?.items.find((i) => i.id === itemId);
+    if (!tab?.side || !item) return;
+    releaseItem(item, opts?.handover);
+    const side = removeItem(tab.side, itemId);
+    set((s) =>
+      withTab(s, tabId, (t) => ({ ...t, side, focus: side ? t.focus : "main" })),
+    );
+  },
+
+  setSideRatio: (tabId, ratio) => {
+    const r = clampRatio(ratio);
+    const tab = get().tabs.find((t) => t.id === tabId);
+    if (!tab?.side || tab.side.ratio === r) return;
+    set((s) =>
+      withTab(s, tabId, (t) => (t.side ? { ...t, side: { ...t.side, ratio: r } } : t)),
+    );
   },
 
   focusPane: (tabId, side) =>
     set((s) => {
       const tab = s.tabs.find((t) => t.id === tabId);
-      if (!tab || tab.focus === side || (side === "split" && !tab.split)) return s;
+      if (!tab || tab.focus === side || (side === "side" && !tab.side)) return s;
       return { tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, focus: side } : t)) };
     }),
 
@@ -286,7 +395,7 @@ export const useTabStore = create<TabState>((set, get) => ({
     const id = nextId++;
     const tab: AppTab = {
       ...pane(id, entry.path),
-      split: entry.split != null ? pane(nextId++, entry.split) : null,
+      side: sideFromPaths(entry.side ?? [], () => nextId++),
       focus: "main",
     };
     set((s) => {
@@ -303,27 +412,33 @@ export const useTabStore = create<TabState>((set, get) => ({
     const tab = tabs[idx];
     // Browser tabs were remembered by the strip already; an empty new-tab page
     // is what ⌘T makes, so neither joins the stack.
-    if (browseId(tab.path) == null && !(tab.path === HOME && !tab.split)) {
-      const split = tab.split;
+    if (browseId(tab.path) == null && !(tab.path === HOME && !tab.side)) {
+      const side = (tab.side?.items ?? [])
+        .map((i) => i.path)
+        .filter((p) => browseId(p) == null);
       get().remember({
         index: idx,
         path: tab.path,
         url: null,
-        split: split && browseId(split.path) == null ? split.path : null,
+        side: side.length > 0 ? side : null,
       });
     }
     // A lecture keeps playing across tab switches, so closing its tab is what
     // stops it (the prompt was already answered — see `confirmLeavingLecture`).
     if (panesOf(tab).some((p) => ownsPlayback(p.id))) stopLecturePlayback();
-    for (const p of panesOf(tab)) useSidePanelStore.getState().close(p.id);
     // The last tab stays but goes back to the new-tab page — the one place
     // this store steers a router, since no neighbour comes forward.
     if (tabs.length <= 1) {
-      if (tab.split)
-        set({ tabs: [{ ...tab, split: null, focus: "main" }] });
+      if (tab.side) {
+        for (const item of tab.side.items) releaseItem(item);
+        set({ tabs: [{ ...tab, side: null, focus: "main" }] });
+      }
       if (tab.path !== HOME) navigateInTab(id, HOME);
       return;
     }
+    // The main pane's browser page is the strip's to close (`TopTabBar`).
+    dropTabRouter(tab.id);
+    for (const item of tab.side?.items ?? []) releaseItem(item);
     const next = tabs.filter((t) => t.id !== id);
     if (id !== activeId) {
       set({ tabs: next });
@@ -339,15 +454,14 @@ export function activeTab(): AppTab | undefined {
   return tabs.find((t) => t.id === activeId);
 }
 
-/** The focused half of the tab in front. Every navigation from outside a
+/** The focused pane of the tab in front. Every navigation from outside a
  *  router resolves through this. */
 export function activePane(): PaneState | undefined {
   const tab = activeTab();
   return tab && focusedPane(tab);
 }
 
-/** The pane a peek, a Recent entry or a playing lecture belongs to right now.
- *  `0` is no pane — the id no tab ever has. */
+/** `activePane`'s id, reactively. `0` is no pane — the id no tab ever has. */
 export function useActivePaneId(): number {
   return useTabStore((s) => {
     const tab = s.tabs.find((t) => t.id === s.activeId);
@@ -369,7 +483,7 @@ useTabStore.subscribe((s) => {
       tabs: s.tabs.map((t) => ({
         id: t.id,
         path: t.path,
-        split: t.split ? { id: t.split.id, path: t.split.path } : null,
+        side: t.side && storeSide(t.side),
         focus: t.focus,
       })),
       activeId: s.activeId,

@@ -4,14 +4,22 @@ import {
   type Lecture,
   type SourceNum,
 } from "@/lib/db";
+import {
+  clearPlaybackOwner,
+  markAdopted,
+  markPlaying,
+  playbackOwner,
+  releasePlayback,
+} from "@/lib/playbackOwner";
 
 /**
  * The app's `<video>` elements and progress writes, owned here rather than by
- * the player so a route change (tab switch, expanding the peek) hands them to
- * the next host without interrupting playback.
+ * the player so a route change (tab switch, the side panel's expand) hands
+ * them to the next player without interrupting playback.
  *
  * One element per Echo360 source (`docs/sync.md`). Exactly one is the
  * **leader** — audio, clock, progress writes; the others follow it, muted.
+ * Which player may adopt them is `lib/playbackOwner.ts`'s call.
  */
 
 /** Fired after a progress write so a mounted list can refresh its rows. */
@@ -37,14 +45,6 @@ const RATE_TRIM = 0.08;
 /** Seconds from the end that count as watched. */
 const COMPLETE_WITHIN = 30;
 
-/** Which player has the elements: the lecture page, or the peek beside a page. */
-export type PlaybackHost = "page" | "panel";
-
-export interface PlaybackOwner {
-  tab: number;
-  host: PlaybackHost;
-}
-
 export interface SourcePlan {
   source: SourceNum;
   /** Media-server URL for that source's file. */
@@ -63,13 +63,10 @@ let syncTicker: ReturnType<typeof setInterval> | null = null;
 let current: Lecture | null = null;
 /** Last second written, so a paused element doesn't rewrite the same row. */
 let lastWritten = -1;
-/** The player playback belongs to (see `ownsPlayback`). */
-let ownerTab: number | null = null;
-let ownerHost: PlaybackHost = "page";
 /**
- * Bumped on every claim. Two players can be mounted at once and the new one
- * adopts the elements before the old one unmounts; the token stops the old
- * one parking them after the handover.
+ * Bumped on every adoption. A player can adopt the elements before the one
+ * that had them lets go; the token stops the old one parking them after the
+ * handover.
  */
 let claim = 0;
 
@@ -115,10 +112,12 @@ function videoFor(source: SourceNum): HTMLVideoElement {
 // Pause/end/seek write immediately and re-align followers, which cannot infer
 // them from their own clock.
 const onLeaderPlay = () => {
+  markPlaying(true);
   startTickers();
   syncFollowers();
 };
 const onLeaderPause = () => {
+  markPlaying(false);
   stopTickers();
   void saveLectureProgress();
   syncFollowers();
@@ -208,10 +207,11 @@ function alignFollower(f: HTMLVideoElement, lead: HTMLVideoElement) {
   if (f.playbackRate !== rate) f.playbackRate = rate;
 }
 
-/** Seek an element to `at` — now if it can, otherwise the moment it can. */
-function joinAt(v: HTMLVideoElement, at: number, play: boolean) {
+/** Seek an element to `at` — now if it can, otherwise the moment it can.
+ *  Null leaves the position alone. */
+function joinAt(v: HTMLVideoElement, at: number | null, play: boolean) {
   const go = () => {
-    if (Number.isFinite(at) && at > 0) {
+    if (at != null && Number.isFinite(at) && at >= 0) {
       try {
         v.currentTime = at;
       } catch {
@@ -237,17 +237,20 @@ function release(source: SourceNum) {
 
 /**
  * Reconcile the elements to `lecture` laid out as `plan`, whose **first entry
- * is the leader**. Called by the on-screen player whenever what it wants
- * changes. A changed leader is a different decoder, so position and play state
- * are carried across by hand. Returns the leader element.
+ * is the leader**. Called by the player that may adopt them (`mayAdopt`)
+ * whenever what it wants changes; its pane, `paneId` in strip tab `tabId`,
+ * then owns playback. A changed leader is a different decoder, so position and
+ * play state are carried across by hand. `start` plays the leader, from `at`
+ * if given: a player taking playback over on a user action. Returns the
+ * leader element.
  */
 export function syncLectureSources(
   lecture: Lecture,
   plan: SourcePlan[],
-  owner: PlaybackOwner,
+  paneId: number,
+  tabId: number,
+  start?: { at?: number },
 ): HTMLVideoElement | null {
-  ownerTab = owner.tab;
-  ownerHost = owner.host;
   claim++;
 
   const lectureChanged = current?.id !== lecture.id;
@@ -283,8 +286,11 @@ export function syncLectureSources(
   if (lead && !leaderIsFresh && at != null && Math.abs(lead.currentTime - at) > MAX_DRIFT) {
     joinAt(lead, at, wasPlaying);
   }
+  if (lead && start) joinAt(lead, start.at ?? null, true);
   syncFollowers();
   if (lead && !lead.paused) startTickers();
+  markAdopted(paneId, tabId);
+  markPlaying(isLecturePlaying());
   return lead;
 }
 
@@ -302,18 +308,14 @@ export function playingLecture(): Lecture | null {
   return isLecturePlaying() ? current : null;
 }
 
-/**
- * Whether playback belongs to this tab (and, given `host`, to that player).
- * Omit the host for closing the tab; pass `"page"` for navigation within it,
- * which a peek survives.
- */
-export function ownsPlayback(tabId: number, host?: PlaybackHost): boolean {
-  return ownerTab === tabId && (host == null || ownerHost === host);
+/** Whether playback belongs to the player in this pane. */
+export function ownsPlayback(paneId: number): boolean {
+  return playbackOwner().pane === paneId;
 }
 
 /**
  * Park every element off screen, still playing if it was. With `forClaim`, a
- * no-op once another player has claimed them.
+ * no-op once another player has adopted them.
  */
 export function parkLectureVideos(forClaim?: number) {
   if (forClaim != null && forClaim !== claim) return;
@@ -322,15 +324,21 @@ export function parkLectureVideos(forClaim?: number) {
   for (const v of els.values()) parked().appendChild(v);
 }
 
+/** The player in `paneId` unmounted; a paused owner gives playback up
+ *  (`releasePlayback`). */
+export function releaseLecturePlayer(paneId: number) {
+  markPlaying(isLecturePlaying());
+  releasePlayback(paneId);
+}
+
 /** Stop for good: the lecture was closed, not navigated away from. */
 export function stopLecturePlayback() {
+  clearPlaybackOwner();
   if (!els.size) return;
   for (const v of els.values()) v.pause();
   stopTickers();
   void saveLectureProgress();
   parkLectureVideos();
-  ownerTab = null;
-  ownerHost = "page";
 }
 
 async function saveLectureProgress(): Promise<void> {

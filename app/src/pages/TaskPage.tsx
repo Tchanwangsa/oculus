@@ -11,6 +11,7 @@ import { DraftField } from "@/components/projects/DraftField";
 import { projectHref } from "@/components/projects/projectHref";
 import { ProjectCrumbs } from "@/components/projects/ProjectCrumbs";
 import { ProjectPicker } from "@/components/projects/ProjectPicker";
+import { PaneHeaderRow, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
 import { MentionInput, type MentionInputHandle } from "@/components/harness/MentionInput";
 import { MentionMenu } from "@/components/harness/MentionMenu";
 import { useMentionMenu } from "@/components/harness/useMentionMenu";
@@ -81,6 +82,7 @@ export default function TaskPage() {
   const id = Number(projectId);
   const tid = Number(taskId);
   const navigate = useNavigate();
+  const inSide = useInSidePanel();
 
   const project = useProjectsStore((s) =>
     filed ? s.projects.find((p) => p.id === id) ?? null : null,
@@ -194,37 +196,41 @@ export default function TaskPage() {
 
   const createdMs = sqliteUtcToMs(task.created_at);
 
-  return (
-    <div className="page-scroll">
-      <div className="mx-auto max-w-3xl px-6 py-6">
-        <nav
-          aria-label="Breadcrumb"
-          className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+  const crumbs = (
+    <nav
+      aria-label="Breadcrumb"
+      className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground"
+    >
+      {/* An unfiled task's trail is just the Tasks page. */}
+      {project ? (
+        <>
+          <ProjectCrumbs project={project} foldSubject />
+          <button
+            type="button"
+            data-tab-href={projectHref(project)}
+            onClick={() => navigateActive(projectHref(project))}
+            className="min-w-0 cursor-pointer truncate transition-colors hover:text-foreground"
+          >
+            {project.name}
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          data-tab-href="/tasks"
+          onClick={() => navigateActive("/tasks")}
+          className="shrink-0 cursor-pointer transition-colors hover:text-foreground"
         >
-          {/* An unfiled task's trail is just the Tasks page. */}
-          {project ? (
-            <>
-              <ProjectCrumbs project={project} />
-              <button
-                type="button"
-                data-tab-href={projectHref(project)}
-                onClick={() => navigateActive(projectHref(project))}
-                className="min-w-0 cursor-pointer truncate transition-colors hover:text-foreground"
-              >
-                {project.name}
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              data-tab-href="/tasks"
-              onClick={() => navigateActive("/tasks")}
-              className="shrink-0 cursor-pointer transition-colors hover:text-foreground"
-            >
-              Tasks
-            </button>
-          )}
-        </nav>
+          Tasks
+        </button>
+      )}
+    </nav>
+  );
+
+  const page = (
+    <div className={inSide ? "page-scroll min-h-0 flex-1" : "page-scroll"}>
+      <div className="mx-auto max-w-3xl px-6 py-6">
+        {!inSide && crumbs}
 
         <TaskTitle task={task} onRename={(title) => patch({ title })} />
 
@@ -387,6 +393,18 @@ export default function TaskPage() {
             .catch((e) => console.error("delete task failed", e));
         }}
       />
+    </div>
+  );
+
+  // In the side panel the trail leaves the scroll for a row of its own,
+  // which doubles as the panel's header; the title below stays the leaf.
+  if (!inSide) return page;
+  return (
+    <div className="flex h-full flex-col">
+      <PaneHeaderRow className="flex h-11 shrink-0 items-center gap-2.5 border-b border-border-subtle px-5">
+        <PaneTrail>{crumbs}</PaneTrail>
+      </PaneHeaderRow>
+      {page}
     </div>
   );
 }

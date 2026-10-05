@@ -12,7 +12,7 @@ interface Options {
 }
 
 /**
- * A side panel the user can drag wider and fold away, both remembered.
+ * A docked panel the user can drag wider and fold away, both remembered.
  * Collapsed is a state, not a width, so unfolding restores the last width.
  */
 export function useResizablePanel({

@@ -7,7 +7,9 @@ import { ThreadList } from "@/components/harness/ThreadList";
 import { ThreadMap } from "@/components/harness/ThreadMap";
 import { Timeline } from "@/components/harness/Timeline";
 import { useThreadActions } from "@/components/harness/useThreadActions";
+import { PaneHeaderRow, PaneTitle, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { DropOverlay } from "@/components/ui/DropOverlay";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { useWindowEvent } from "@/hooks/useEvents";
@@ -149,6 +151,7 @@ export default function ChatPage() {
   const historyScroll = useRef<HTMLDivElement>(null);
   useScrollFade(historyScroll, "y", history);
   const list = useResizablePanel(LIST);
+  const inSide = useInSidePanel();
   // Entering a thread unfolds the column; ⌘⌥B still folds it while there.
   const { setCollapsed } = list;
   useEffect(() => {
@@ -267,7 +270,11 @@ export default function ChatPage() {
       )}
 
       <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
+        {/* History keeps the side panel's own header: its row has no trail. */}
+        <PaneHeaderRow
+          standalone={history}
+          className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6"
+        >
           {/* Folded, the panel leaves nothing behind, so the way back is here. */}
           {!history && list.collapsed && (
             <Button
@@ -275,7 +282,7 @@ export default function ChatPage() {
               size="icon-xs"
               aria-label="Show conversations"
               title="Show conversations (⌘⌥B)"
-              className="-ml-2 shrink-0 text-muted-foreground"
+              className={cn("shrink-0 text-muted-foreground", !inSide && "-ml-2")}
               onClick={list.toggle}
             >
               <SidebarSimple size={14} />
@@ -284,7 +291,7 @@ export default function ChatPage() {
           {history ? (
             <h1 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">Chat</h1>
           ) : (
-            <>
+            <PaneTrail>
               <nav
                 aria-label="Breadcrumb"
                 className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
@@ -301,12 +308,10 @@ export default function ChatPage() {
                   /
                 </span>
               </nav>
-              <h1 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-                {thread ? thread.title?.trim() || "Untitled" : ""}
-              </h1>
-            </>
+              <PaneTitle>{thread ? thread.title?.trim() || "Untitled" : ""}</PaneTitle>
+            </PaneTrail>
           )}
-        </div>
+        </PaneHeaderRow>
 
         {history ? (
           <div ref={historyScroll} className="flex-1 overflow-y-auto px-6">

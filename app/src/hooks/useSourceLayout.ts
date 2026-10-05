@@ -26,8 +26,8 @@ type Drag =
 
 /**
  * Geometry for the two-source layouts (PIP box, stack split), stored as
- * fractions of the video area so it survives peek ↔ fullscreen. The PIP's
- * height is never stored: CSS `aspect-ratio` locks it.
+ * fractions of the video area so it survives side panel ↔ fullscreen. The
+ * PIP's height is never stored: CSS `aspect-ratio` locks it.
  */
 export function useSourceLayout(
   areaRef: RefObject<HTMLElement | null>,
@@ -161,7 +161,8 @@ export function useSourceLayout(
     },
   });
 
-  // Clamped here too, so a width stored fullscreen stays legible in a peek.
+  // Clamped here too, so a width stored fullscreen stays legible in the side
+  // panel.
   const boxW = clampWidth(pipW);
   const pipStyle: React.CSSProperties = {
     left: `${clampOffset(pipX, boxW) * 100}%`,

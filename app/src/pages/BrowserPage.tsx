@@ -106,8 +106,8 @@ export default function BrowserPage() {
   const params = useParams();
   const id = Number(params.id);
   const active = useTabActive();
-  // `active` is true for both halves of a split; menu shortcuts go only to
-  // the focused half.
+  // `active` is true for both the main pane and the side panel; menu
+  // shortcuts go only to the focused one.
   const paneId = useTabId();
   const focusedPaneId = useActivePaneId();
   const focused = active && paneId === focusedPaneId;

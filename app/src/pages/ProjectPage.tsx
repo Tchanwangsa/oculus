@@ -20,6 +20,7 @@ import { projectHref } from "@/components/projects/projectHref";
 import { ProjectCrumbs } from "@/components/projects/ProjectCrumbs";
 import { boardProgress, taskTree } from "@/components/projects/taskTree";
 import { useProjectActions } from "@/components/projects/useProjectActions";
+import { PaneHeaderRow, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
 import { cn } from "@/lib/utils";
 import { PROJECTS_UPDATED_EVENT, type DbProject } from "@/lib/projects";
 import { useProjectsStore } from "@/stores/projectsStore";
@@ -65,6 +66,7 @@ export default function ProjectPage() {
   const { projectId } = useParams();
   const id = Number(projectId);
   const navigate = useNavigate();
+  const inSide = useInSidePanel();
 
   const project = useProjectsStore((s) => s.projects.find((p) => p.id === id) ?? null);
   const tasks = useProjectsStore((s) => s.tasks);
@@ -155,14 +157,10 @@ export default function ProjectPage() {
     );
   }
 
-  return (
-    <div className="flex h-full flex-col">
-      {/* Tabs alone on the rule the active tab underlines. */}
-      <div className="shrink-0 flex items-end border-b border-border-subtle px-5 pt-4">
-        <ViewTabs tabs={TABS} value={tab} onChange={setTab} />
-      </div>
-
-      <div className="shrink-0 flex h-12 items-center gap-2.5 px-5">
+  // The title row; in the side panel it leads, as the panel's header.
+  const titleRow = (
+    <PaneHeaderRow className="shrink-0 flex h-12 items-center gap-2.5 px-5">
+      <PaneTrail>
         <nav
           aria-label="Breadcrumb"
           className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
@@ -176,36 +174,47 @@ export default function ProjectPage() {
             Archived
           </Badge>
         )}
+      </PaneTrail>
 
-        <span className="flex-1" />
+      {!inSide && <span className="flex-1" />}
 
-        {project.due_at && (
-          <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
-            Due <DueChip dueAt={project.due_at} />
-          </span>
-        )}
-        {/* Not on Overview, whose Properties list shows the same fraction. */}
-        {tab === "tasks" && (
-          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-            {progress.done}/{progress.total} done
-          </span>
-        )}
-        <ProjectMenu
-          project={project}
-          className="shrink-0"
-          onRename={(name) => actions.onRename(project, name)}
-          onArchive={() => {
-            // Archived or deleted, the board has nothing left to show.
-            actions.onArchive(project);
-            navigate("/projects");
-          }}
-          onUnarchive={() => actions.onUnarchive(project)}
-          onDelete={() => {
-            actions.onDelete(project);
-            navigate("/projects");
-          }}
-        />
+      {project.due_at && (
+        <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+          Due <DueChip dueAt={project.due_at} />
+        </span>
+      )}
+      {/* Not on Overview, whose Properties list shows the same fraction. */}
+      {tab === "tasks" && (
+        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          {progress.done}/{progress.total} done
+        </span>
+      )}
+      <ProjectMenu
+        project={project}
+        className="shrink-0"
+        onRename={(name) => actions.onRename(project, name)}
+        onArchive={() => {
+          // Archived or deleted, the board has nothing left to show.
+          actions.onArchive(project);
+          navigate("/projects");
+        }}
+        onUnarchive={() => actions.onUnarchive(project)}
+        onDelete={() => {
+          actions.onDelete(project);
+          navigate("/projects");
+        }}
+      />
+    </PaneHeaderRow>
+  );
+
+  return (
+    <div className="flex h-full flex-col">
+      {inSide && titleRow}
+      {/* Tabs alone on the rule the active tab underlines. */}
+      <div className="shrink-0 flex items-end border-b border-border-subtle px-5 pt-4">
+        <ViewTabs tabs={TABS} value={tab} onChange={setTab} />
       </div>
+      {!inSide && titleRow}
 
       {/* Own row, not beside the name, where they read as more crumbs. The
           timeline's zoom sits with the view it controls. */}
@@ -257,6 +266,7 @@ function ProjectTitle({
   onRename: (name: string) => void;
 }) {
   const navigate = useNavigate();
+  const inSide = useInSidePanel();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(project.name);
   const ref = useRef<HTMLInputElement>(null);
@@ -317,7 +327,12 @@ function ProjectTitle({
           setEditing(true);
         }
       }}
-      className={cn(shared, "cursor-text truncate rounded-md outline-none")}
+      // In the side panel the row's trail scrolls instead of truncating.
+      className={cn(
+        shared,
+        inSide ? "shrink-0 whitespace-nowrap" : "truncate",
+        "cursor-text rounded-md outline-none",
+      )}
     >
       {project.name}
     </span>

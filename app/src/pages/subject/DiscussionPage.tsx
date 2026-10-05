@@ -68,7 +68,7 @@ function parseThreadEntry(md: string, file: DbFile) {
 
 /**
  * The subject's Ed Discussion board, as scraped to `ed/NNNN-slug.md` — one
- * file per thread, replies included. Rows open in the peek.
+ * file per thread, replies included. Rows open in the side panel.
  */
 export default function SubjectDiscussionPage() {
   const subject = useSubject();

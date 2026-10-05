@@ -6,11 +6,10 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
 import { PDFViewer } from "@/components/files/PDFViewer";
 import { docPdfRelPath, isPdfBacked, parsedMdRelPath } from "@/lib/fileTypes";
-import { filePageHref } from "@/lib/openFile";
+import { filePageHref, type FileLocate } from "@/lib/openFile";
 import { libraryImageSrc, libraryLinkTarget } from "@/lib/libraryLinks";
 import { useDataDir } from "@/hooks/useDataDir";
 import type { DbFile } from "@/lib/db";
-import type { FileLocate } from "@/stores/sidePanelStore";
 import { courseFileHasContent } from "@/lib/courseFiles";
 import { FileMarkdown } from "@/components/files/FileMarkdown";
 
@@ -84,7 +83,7 @@ interface FileViewerProps {
   file: DbFile;
   /** All of the subject's files — used to resolve in-markdown `../` links. */
   files: DbFile[];
-  /** Follows a link inside the markdown to another file (same peek). */
+  /** Follows a link inside the markdown to another file. */
   onOpenFile: (file: DbFile) => void;
   /** From `usePdfMd` — which face of a parsed PDF to show. */
   pdfViewMode?: "pdf" | "markdown";
@@ -144,8 +143,8 @@ export function FileViewer({
 
 /**
  * `MD_COMPONENTS` for a library file: links to files we hold locally (`../`
- * paths and raw Canvas `/files/<id>` / `/pages/<slug>` URLs) open in the same
- * peek, others open externally, and relative images resolve against the
+ * paths and raw Canvas `/files/<id>` / `/pages/<slug>` URLs) go to
+ * `onOpenFile`, others open externally, and relative images resolve against the
  * file's directory (`app/src/lib/libraryLinks.ts`). Also draws a note's
  * saved versions (`HistoryPanel`).
  */
