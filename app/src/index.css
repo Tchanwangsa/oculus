@@ -289,6 +289,12 @@
     display: flex;
   }
 
+  /* Phosphor glyphs (256 viewBox) such as VideoCamera run flush to the box
+     edge; at fractional page zoom the SVG's default clip shaves that edge. */
+  svg[viewBox="0 0 256 256"] {
+    overflow: visible;
+  }
+
   p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
     user-select: text;
   }
