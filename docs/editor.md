@@ -28,6 +28,10 @@ for `rawMode.ts`: monospace source with line numbers, markdown and
 frontmatter YAML coloured with the `--color-syntax-*` tokens.
 Under the title, `DocumentMeta` shows subject, created (`first_seen_at`),
 last updated (`modified_at` or this mount's last save) and a word count.
+`write_document` writes a hidden
+`.<name>.md.<pid>-<nanos>.tmp` sibling, fsyncs and renames it over the
+note, so a reader never sees a truncated file; the `.tmp` suffix keeps a
+leftover out of `list_documents`.
 
 - **Fenced code is parsed in its own language**
   (`app/src/components/documents/editor/codeLanguages.ts`): the info string's

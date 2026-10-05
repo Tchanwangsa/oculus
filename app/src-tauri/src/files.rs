@@ -311,18 +311,37 @@ pub fn create_document(
     Ok(document_file(rel, size))
 }
 
+/// The hidden sibling a note's text is staged in. It ends in `.tmp`, never
+/// `.md`, so `is_document_rel` rejects a leftover and it never becomes a row.
+fn note_temp_path(note: &Path) -> Result<std::path::PathBuf, String> {
+    let dir = note.parent().ok_or_else(|| format!("{} has no folder", note.display()))?;
+    let name = note.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    Ok(dir.join(format!(".{name}.{}-{}.tmp", std::process::id(), crate::clock::now_nanos())))
+}
+
+/// Replace a note's text whole: a reader, or a crash, sees the old note or
+/// the new, never a truncated one. fsynced before the rename (in
+/// `atomic_write`), since a rename can otherwise land before the data does.
+fn write_note(note: &Path, content: &[u8]) -> Result<(), String> {
+    let tmp = note_temp_path(note)?;
+    if let Some(dir) = tmp.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    crate::atomic_write::write(note, &tmp, content)
+}
+
 /// Save a note's text; returns the byte count for `size_bytes`.
 #[tauri::command]
-pub fn write_document(
+pub async fn write_document(
     relative_path: String,
     content: String,
 ) -> Result<u64, String> {
     let path = document_path(&relative_path)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
-    Ok(content.len() as u64)
+    crate::blocking::run(move || {
+        write_note(&path, content.as_bytes())?;
+        Ok(content.len() as u64)
+    })
+    .await
 }
 
 /// Retitle (rename) a note; a title another note holds steps aside.
@@ -476,6 +495,23 @@ mod tests {
         assert!(!crate::paths::is_document_rel(
             "courses/MULT20015/documents/assets/20260922-101112-0a1b2c3d.png"
         ));
+    }
+
+    /// A save replaces the note whole and leaves no staging file; a leftover
+    /// staging name is never taken for a note.
+    #[test]
+    fn a_note_is_replaced_whole() {
+        let dir = crate::test_support::Scratch::new("note-write");
+        let note = dir.join("Week 3.md");
+        std::fs::write(&note, b"a much longer old text").unwrap();
+        write_note(&note, b"new").unwrap();
+        assert_eq!(std::fs::read(&note).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(&*dir).unwrap().count(), 1);
+
+        let tmp = note_temp_path(&note).unwrap();
+        let name = tmp.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with(".Week 3.md.") && name.ends_with(".tmp"), "{name}");
+        assert!(!crate::paths::is_document_rel(&format!("courses/X/documents/{name}")));
     }
 
     #[test]
