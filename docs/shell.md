@@ -8,11 +8,11 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Piece | Location |
 | --- | --- |
 | Route table | `app/src/routes.tsx` |
-| Shell: sidebar, tab strip, floating card, zoom | `app/src/layouts/AppLayout.tsx`, `app/src/components/sidebar/`, `app/src/components/tabs/TopTabBar.tsx` |
+| Shell: sidebar rail, tab strip, floating card, zoom | `app/src/layouts/AppLayout.tsx`, `app/src/components/sidebar/`, `app/src/components/tabs/TopTabBar.tsx` |
 | Tabs, side panels, per-pane routers, titles from paths | `app/src/stores/tabStore.ts`, `app/src/lib/sideStack.ts`, `app/src/components/tabs/TabPane.tsx`, `app/src/components/tabs/SidePanelHeader.tsx`, `app/src/components/tabs/PaneHeader.tsx`, `app/src/lib/tabRouters.ts`, `app/src/components/tabs/tabInfo.tsx` |
 | Window shortcuts (all menu items) | `app/src-tauri/src/menu.rs` |
 | ⌘-click → a new tab, app-wide | `app/src/lib/newTabClicks.ts` |
-| Search (⌘K and the new-tab field), Recent group | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
+| Search (⌘K and the new-tab field), the new-tab page's Recent list | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/openFile.ts`, `app/src/pages/subject/FilePage.tsx`, `app/src/hooks/useLocateHighlight.ts` |
 | ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/find.ts`, `app/src/hooks/useDomFind.ts`, `app/src/lib/findText.ts`, `app/src/components/ui/FindBar.tsx`, `app/src/components/ui/PageFind.tsx`, `app/src/components/documents/editor/useEditorFind.ts` |
 | Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/settingsSearch.ts` |
@@ -45,8 +45,8 @@ before leaving a playing lecture.
   history page ([harness.md](./harness.md#each-chat-tab-owns-its-conversation-in-its-route)).
 - **`/projects` and `/tasks` are one section**, switched by
   `app/src/components/projects/SectionHeader.tsx`, which *navigates* because
-  crumbs, ⌘-click, restored tabs and `tabInfo` all key off the path; `NavItem`'s
-  `match` lights one sidebar row for both. A project is top-level because it may
+  crumbs, ⌘-click, restored tabs and `tabInfo` all key off the path; `RailItem`'s
+  `match` lights one sidebar item for both. A project is top-level because it may
   have no subject; a filed task sits under its project, an unfiled one at
   `/tasks/:taskId`, so `tabInfo` tests the task route first. The model is
   [projects.md](./projects.md).
@@ -59,6 +59,18 @@ before leaving a playing lecture.
   `SubjectLayout`** so a document takes the whole card; `SubjectCrumbs` gives
   them a trail back, as buttons with `data-tab-href` rather than `Link`s so a
   click goes through `navigateActive`.
+
+## The sidebar is an icon rail
+
+`app/src/components/sidebar/Sidebar.tsx` is a 52px column of icon buttons,
+each named by a tooltip on its right: Search (opens ⌘K), then Home, Chat,
+Calendar, Tasks and Subjects, and Sync and Settings pinned to the foot under a
+short hairline. A `RailItem` is a button with `data-tab-href` that goes
+through `navigateActive`, since the sidebar sits outside every pane's router,
+and it lights on its path or anything under it. Background jobs show on their
+item's corner: a spinner on Chat while an agent turn runs, on Sync while
+indexing, and a brand dot on Subjects while any subject has never-opened files
+(`newFilesStore`). ⌘B and the title bar's button collapse it to zero width.
 
 ## Settings has its own nav column
 

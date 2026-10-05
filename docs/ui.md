@@ -22,10 +22,11 @@ Quiet and neutral: dead-grey whites (no warm or blue cast — anything else
 fights the accent), muted indigo `#5e6ad2` as the one colour, Manrope for
 headings and Inter for everything else, Notion-style layout.
 
-- **The shell frames a floating document.** Sidebar and tab strip sit on the
-  window's `background` with no fill or divider; content is an inset rounded
-  `card` with a hairline border (`app/src/layouts/AppLayout.tsx`). Tabs are
-  pills on that ground. A sidebar divider or a rule under the strip breaks the
+- **The shell frames a floating document.** The sidebar's icon rail and the
+  tab strip sit on the window's `background` with no fill or divider; content
+  is an inset rounded `card` with a hairline border
+  (`app/src/layouts/AppLayout.tsx`). Tabs and rail icons are pills and rounded
+  squares on that ground. A sidebar divider or a rule under the strip breaks the
   effect — the card's border is the separation.
 - **Buttons and chips are pills** (`rounded-full` in
   `app/src/components/ui/button.tsx`); rectangles are for segmented toolbars
@@ -81,7 +82,9 @@ headings and Inter for everything else, Notion-style layout.
 - **Subject tabs share `SubjectPage` for width and gutters**, `SubjectLoading` for skeleton rows and `SubjectEmpty` for the empty view. Per-tab content and actions stay with the page.
 - **View preferences use `useStoredState`**, with readers that own defaults and validation; `useStoredSet` keeps collapsed group keys. Storage failures leave the live view usable.
 - **No toasts, no bottom progress bars** — background jobs surface in the
-  sidebar only. No placeholder UI, section-header icons, stat cards or filler.
+  sidebar only, as a spinner or dot on their rail item
+  ([shell.md](./shell.md#the-sidebar-is-an-icon-rail)). No placeholder UI,
+  section-header icons, stat cards or filler.
 - Slugs display through `humanizeSlug`, Canvas codes through `displayCode`
   ("MULT20015", not "MULT20015_2026_SM2"), both in `app/src/lib/format.ts`.
 

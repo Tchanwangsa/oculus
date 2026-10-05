@@ -1,6 +1,6 @@
 /**
- * Count pill for never-opened files (sidebar rows, subject tabs); nothing at
- * zero. A quiet brand chip, not a solid fill, so it doesn't drown the nav.
+ * Count pill for never-opened files on subject tabs; nothing at zero. A
+ * quiet brand chip, not a solid fill, so it doesn't drown the nav.
  */
 export function NewCountBadge({ count }: { count: number }) {
   if (count <= 0) return null;

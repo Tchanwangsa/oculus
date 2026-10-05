@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
-/** Whether the ⌘K palette is up — a store because the sidebar's Search row
- *  opens it too. */
+/** Whether the ⌘K palette is up — a store because the sidebar's Search
+ *  button opens it too. */
 interface PaletteState {
   open: boolean;
   setOpen: (open: boolean) => void;

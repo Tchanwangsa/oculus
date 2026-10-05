@@ -56,7 +56,7 @@ export interface AppTab extends PaneState {
   entryState?: unknown;
   /** The side panel, or null when it is closed. */
   side: SidePanel | null;
-  /** The part the shell drives — sidebar rows, ⌘K, breadcrumbs, the strip's
+  /** The part the shell drives — the sidebar, ⌘K, breadcrumbs, the strip's
    *  arrows. */
   focus: PaneSide;
 }

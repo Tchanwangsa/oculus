@@ -5,9 +5,9 @@ import { getDb } from "@/lib/db";
 import { FILE_ACCESSED_EVENT } from "@/lib/openFile";
 
 /**
- * Counts of never-opened files per subject and category, for the sidebar and
- * subject-tab badges. Only categories with openable rows count: anything else
- * could never be cleared.
+ * Counts of never-opened files per subject and category, for the sidebar's
+ * Subjects dot and subject-tab badges. Only categories with openable rows
+ * count: anything else could never be cleared.
  */
 const COUNTED_CATEGORIES = ["file", "page", "announcement", "assignment", "quiz", "ed"];
 

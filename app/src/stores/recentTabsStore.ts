@@ -2,14 +2,14 @@ import { create } from "zustand";
 import { browseId } from "@/lib/browser";
 
 /**
- * The sidebar's Recent trail. A page joins only after `DWELL_MS` on it (so
+ * The new-tab page's Recent trail. A page joins only after `DWELL_MS` on it (so
  * pass-throughs and redirects don't count), and a page already listed never
  * moves — a revisit refreshes it in place; only new pages enter at the top.
  * Only the path is kept; title and icon are derived on render (`tabInfo`).
  */
 
 const KEY = "oculus-recent-tabs";
-/** Kept beyond what the sidebar shows, so closing one reveals the next. */
+/** Kept beyond what the new-tab page shows. */
 const LIMIT = 20;
 const DWELL_MS = 2_500;
 
@@ -80,7 +80,6 @@ function write(list: RecentTab[]): void {
 interface RecentTabsState {
   recents: RecentTab[];
   record: (path: string) => void;
-  forget: (key: string) => void;
 }
 
 export const useRecentTabsStore = create<RecentTabsState>((set, get) => ({
@@ -108,12 +107,6 @@ export const useRecentTabsStore = create<RecentTabsState>((set, get) => ({
         next = next.filter((_, i) => i !== stalest);
       }
     }
-    write(next);
-    set({ recents: next });
-  },
-
-  forget: (key) => {
-    const next = get().recents.filter((e) => e.key !== key);
     write(next);
     set({ recents: next });
   },

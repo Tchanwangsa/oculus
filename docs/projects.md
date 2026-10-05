@@ -20,7 +20,7 @@ repair a bad row.
 | Index, one project, one task, every task | `app/src/pages/ProjectsIndexPage.tsx`, `app/src/pages/ProjectPage.tsx`, `app/src/pages/TaskPage.tsx`, `app/src/pages/TasksPage.tsx` |
 | Index subject groups and collapsed preferences (shared with chat) | `app/src/lib/subjectGroups.ts`, `app/src/hooks/useCollapsedGroups.ts` |
 | A subject's Projects tab | `app/src/pages/subject/ProjectsPage.tsx` |
-| The Projects / Tasks strip and its sidebar row | `app/src/components/projects/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
+| The Projects / Tasks strip and its sidebar item | `app/src/components/projects/SectionHeader.tsx`, `app/src/components/sidebar/Sidebar.tsx` |
 | Overview, tags, pinned calendar event | `app/src/components/projects/ProjectOverview.tsx`, `app/src/components/projects/TagEditor.tsx`, `app/src/components/projects/EventLink.tsx` |
 | Board, table, timeline, and the shaping behind them | `app/src/components/projects/ProjectBoard.tsx`, `app/src/components/projects/ProjectTable.tsx`, `app/src/components/projects/ProjectTimeline.tsx`, `app/src/components/projects/taskTree.ts` |
 | The universal view: hook, filters, views, shared rules | `app/src/hooks/useTaskList.ts`, `app/src/components/projects/TaskFilters.tsx`, `app/src/components/projects/TasksBoard.tsx`, `app/src/components/projects/TasksTable.tsx`, `app/src/components/projects/universalTasks.ts` |
@@ -152,7 +152,7 @@ whose parent is missing rather than dropping it.
   board.
 - **`SectionHeader` navigates** between `/projects` and `/tasks` rather than
   swapping state, so both keep history, ⌘-click and tab restore. The sidebar
-  has one row, **Tasks**, leading to `/projects`.
+  has one item, **Tasks**, leading to `/projects`.
 - **`ProjectCrumbs`** starts at Projects and links the subject to its Projects
   tab. Segments are buttons with `data-tab-href` (`app/src/lib/newTabClicks.ts`)
   so ⌘-click opens a tab; it is a Fragment so it inherits each page's gap.

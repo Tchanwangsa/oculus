@@ -36,8 +36,9 @@ export interface TabInfo {
 }
 
 /**
- * A route's title and icon, shared by the tab strip and the sidebar's Recent
- * list. Derived from the path on every render, so renames follow on their own.
+ * A route's title and icon, shared by the tab strip and the new-tab page's
+ * Recent list. Derived from the path on every render, so renames follow on
+ * their own.
  */
 export function tabInfo(
   path: string,
