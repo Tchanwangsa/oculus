@@ -154,6 +154,14 @@ export function normaliseTags(tags: string[]): string[] {
 
 const MAX_TAGS = 24;
 
+/** The body write an edited description makes: trimmed, empty as `null`, and
+ *  `undefined` when it matches what is stored (nothing to write). */
+export function taskBodyEdit(text: string, stored: string | null): string | null | undefined {
+  const body = text.trim();
+  if (body === (stored ?? "")) return undefined;
+  return body || null;
+}
+
 // ── Change notification ──────────────────────────────────────────────────────
 
 /** Fired after any write here so open boards re-read — a window event,

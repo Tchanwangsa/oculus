@@ -120,8 +120,9 @@ export function ProjectOverview({
   );
 }
 
-/** Plain text, like `TaskPage`'s body. The draft re-syncs only when the
- *  brief itself changes, not on every `PROJECTS_UPDATED_EVENT`. */
+/** Plain text, saved as `TaskPage`'s body is (blur or ⌘↵; unchanged writes
+ *  nothing, empty writes `null`). The draft re-syncs only when the brief
+ *  itself changes, not on every `PROJECTS_UPDATED_EVENT`. */
 function Brief({
   project,
   onSave,

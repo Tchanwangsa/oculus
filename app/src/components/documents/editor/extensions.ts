@@ -47,7 +47,8 @@ const linkClicks = EditorView.domEventHandlers({
 });
 
 /** Everything a note editor carries. `onUpdate` sees every view update;
- *  `onPictures` takes pasted images and says whether it handled them. */
+ *  `onPictures` takes pasted images and says whether it handled them;
+ *  `placeholder` and `label` default to a note's. */
 export function noteExtensions(opts: {
   live: boolean;
   host: NoteHost;
@@ -55,6 +56,8 @@ export function noteExtensions(opts: {
   suggest: Extension;
   onUpdate: (update: ViewUpdate) => void;
   onPictures: (files: File[]) => boolean;
+  placeholder?: string;
+  label?: string;
 }): Extension {
   return [
     history(),
@@ -63,8 +66,8 @@ export function noteExtensions(opts: {
     dropCursor(),
     indentUnit.of("  "),
     EditorView.lineWrapping,
-    placeholder("Start writing…"),
-    EditorView.contentAttributes.of({ "aria-label": "Document text", spellcheck: "true" }),
+    placeholder(opts.placeholder ?? "Start writing…"),
+    EditorView.contentAttributes.of({ "aria-label": opts.label ?? "Document text", spellcheck: "true" }),
     noteMarkdown(),
     noteHighlight,
     noteTheme,

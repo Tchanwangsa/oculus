@@ -138,11 +138,12 @@ export async function attachDocumentFile(file: DbFile, path: string): Promise<st
   });
 }
 
-/** The native open panel for pictures to put in a note; `[]` if cancelled. */
-export async function pickDocumentImages(): Promise<string[]> {
+/** The native open panel for pictures to put in a note, or elsewhere under
+ *  its own `title`; `[]` if cancelled. */
+export async function pickDocumentImages(title = "Add pictures to this note"): Promise<string[]> {
   const picked = await open({
     multiple: true,
-    title: "Add pictures to this note",
+    title,
     filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }],
   });
   if (picked == null) return [];

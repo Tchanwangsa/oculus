@@ -89,10 +89,10 @@ export interface MentionMenuProps {
 }
 
 /**
- * The `@` machinery for every box with mentions (composer, task body); the
- * list itself is `./MentionMenu.tsx`. What the box does with its text is the
- * caller's. `keyDown` runs first at each call site and `preventDefault`s what
- * it claims, so the caller's Enter checks `defaultPrevented`.
+ * The `@` machinery for the composer's mention box; the list itself is
+ * `./MentionMenu.tsx`. What the box does with its text is the caller's.
+ * `keyDown` runs first in the box's key handler and `preventDefault`s what it
+ * claims, so the caller's Enter checks `defaultPrevented`.
  */
 export function useMentionMenu({
   subjectId,

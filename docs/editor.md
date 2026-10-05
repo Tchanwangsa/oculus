@@ -1,7 +1,8 @@
 # Note editor
 
 A student document is a markdown file edited in CodeMirror 6, in a Live
-(rendered) or Raw mode. A document's row and file are in
+(rendered) or Raw mode; the same editor is a form field for markdown kept in a
+database row. A document's row and file are in
 [frontend.md](./frontend.md#uploads-and-documents-are-ordinary-library-files);
 maths is [editor-maths.md](./editor-maths.md).
 
@@ -14,6 +15,7 @@ maths is [editor-maths.md](./editor-maths.md).
 | One session per note | `app/src/lib/documentSessions.ts` |
 | Find and replace | `app/src/components/documents/editor/find.ts`, `app/src/components/documents/editor/useEditorFind.ts` |
 | A note's versions and its History panel | `app/src/lib/documentVersions.ts`, `app/src/components/documents/HistoryPanel.tsx` |
+| The note editor as a form field (task body) | `app/src/components/documents/NoteField.tsx` |
 
 ## The note editor is CodeMirror 6 over the file's exact text
 
@@ -118,9 +120,9 @@ match the find selected counts as touched in Live mode even while the find
 bar holds focus, so its construct shows source (maths too, as TeX).
 
 Its bar is `useEditorFind`, a find target like any other
-([shell.md](./shell.md#f-reaches-one-registered-find)), used by
+([shell.md](./shell.md#f-reaches-one-registered-find)), shared by
 `DocumentEditor` (a row stuck under its `Toolbar`, rooted at the whole page,
-title included). ⌘F seeds the
+title included) and `NoteField` (a floating card in the field). ⌘F seeds the
 query from a one-line selection; ⌥⌘F, caught on the root since the menu
 doesn't own it, also unfolds replace, which a read-only editor never shows.
 Closing clears the highlights and focuses the editor with the last match
@@ -199,6 +201,20 @@ typing its front eats it, anything else drops it. Its keymap is
 are untouched. Blur, toggle-off and note switch call
 `document_suggest_cancel`. A failure is a red dot on the toggle until a
 request succeeds.
+
+## `NoteField` is the note editor as a form field
+
+`app/src/components/documents/NoteField.tsx` serves markdown kept in a
+database row — the task body ([projects.md](./projects.md)). Live mode
+only, with no session, title, Raw mode or AI suggestions; the caller
+supplies the `@` subject, picture resolution and picture writes. At rest it
+reads as prose; focus anywhere in its React tree — including the
+`Toolbar`'s portaled Select and table popover, whose focus events bubble
+through React — shows the brand border and the toolbar below the text. A
+blur is judged a tick later, and a window losing focus (the picture picker)
+is not leaving. Leaving, ⌘↵ and unmounting hand an edited doc to
+`onCommit`; a new `text` replaces an unedited doc, outside history.
+`noteExtensions` takes its placeholder and aria label.
 
 ## Gotchas
 

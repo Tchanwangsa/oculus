@@ -2,7 +2,6 @@ import { useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEv
 import { FileChip } from "@/components/markdown/FileChip";
 import { splitLibraryPaths } from "@/lib/openFile";
 import { imageFiles } from "@/lib/attachments";
-import { cn } from "@/lib/utils";
 
 /** Runs of text with atomic mentions (a mention is only its path). The DOM, not
  *  this model, is the truth while typing: React renders it once per structural
@@ -227,24 +226,18 @@ export interface MentionInputHandle {
   clear(): void;
   /** Put handed-back text in front of what is typed, mentions restored to chips. */
   prepend(text: string): void;
-  /** Text at the caret with no keystroke to ride in on — e.g. a pasted
-   *  picture's markdown after its async write (`app/src/pages/TaskPage.tsx`). */
-  insertText(text: string): void;
 }
 
 /**
  * A contenteditable whose `@` mentions are inline `contenteditable="false"`
  * chips. Drawn and sent text differ: `readEditor` turns each chip back into its
  * backticked library path, so the agent never sees a display name. Only
- * Shift+Enter and chip-eating Backspace/Delete are intercepted. Also the task
- * body editor (`app/src/pages/TaskPage.tsx`), hence `initialText`/`className`.
+ * Shift+Enter and chip-eating Backspace/Delete are intercepted.
  */
 export function MentionInput({
   ref,
   placeholder,
   initialText,
-  label = "Message",
-  className,
   autoFocus,
   onEdit,
   onFiles,
@@ -255,9 +248,6 @@ export function MentionInput({
   placeholder: string;
   /** Read once at mount; after that the DOM is the truth. */
   initialText?: string;
-  label?: string;
-  /** Merged with `cn` (tailwind-merge), so a `max-h-…` here replaces the default. */
-  className?: string;
   autoFocus?: boolean;
   onEdit: (text: string, caret: number) => void;
   /** Pasted pictures; they never enter the editor's nodes. */
@@ -363,33 +353,6 @@ export function MentionInput({
     clear() {
       commit([], 0);
     },
-    insertText(text) {
-      const el = box.current;
-      if (!el) return;
-      const r = readEditor(el, point(el));
-      const caret = r.caret ?? r.text.length;
-      let at = 0;
-      for (let i = 0; i < r.chunks.length; i++) {
-        const c = r.chunks[i];
-        const len = chunkText(c).length;
-        if (c.kind === "text" && caret <= at + len) {
-          const cut = domOffset(c.text, caret - at);
-          commit(
-            [
-              ...r.chunks.slice(0, i),
-              { kind: "text", text: c.text.slice(0, cut) + text + c.text.slice(cut) },
-              ...r.chunks.slice(i + 1),
-            ],
-            caret + text.length,
-            true,
-          );
-          return;
-        }
-        at += len;
-      }
-      // Empty box, or caret after a trailing chip: append.
-      commit([...r.chunks, { kind: "text", text }], r.text.length + text.length, true);
-    },
     prepend(text) {
       const el = box.current;
       if (!el) return;
@@ -482,15 +445,12 @@ export function MentionInput({
         suppressContentEditableWarning
         role="textbox"
         aria-multiline="true"
-        aria-label={label}
+        aria-label="Message"
         aria-placeholder={placeholder}
         // `select-text`: `index.css` hands selection back per tag, and a div isn't
         // one — without it WebKit can barely edit the box. `overflow-x-hidden`:
         // y=auto computes x to auto, and always-on scrollbars paint a bar across a one-line box.
-        className={cn(
-          "max-h-[160px] min-h-[16px] w-full overflow-x-hidden overflow-y-auto break-words whitespace-pre-wrap select-text text-[13px] leading-[16px] outline-none",
-          className,
-        )}
+        className="max-h-[160px] min-h-[16px] w-full overflow-x-hidden overflow-y-auto break-words whitespace-pre-wrap select-text text-[13px] leading-[16px] outline-none"
         onInput={sync}
         onKeyUp={sync}
         onClick={sync}

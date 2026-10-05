@@ -12,19 +12,17 @@ import { projectHref } from "@/components/projects/projectHref";
 import { ProjectCrumbs } from "@/components/projects/ProjectCrumbs";
 import { ProjectPicker } from "@/components/projects/ProjectPicker";
 import { PaneHeaderRow, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
-import { MentionInput, type MentionInputHandle } from "@/components/harness/MentionInput";
-import { MentionMenu } from "@/components/harness/MentionMenu";
-import { useMentionMenu } from "@/components/harness/useMentionMenu";
-import { CompactMd } from "@/components/markdown/MdComponents";
+import { NoteField } from "@/components/documents/NoteField";
 import {
-  imagePaths,
+  attachmentPath,
+  attachmentSrc,
   pendingFromFile,
   pendingFromPath,
   releaseAttachment,
   writeAttachment,
-  type PendingAttachment,
 } from "@/lib/attachments";
-import { useFileDrop } from "@/hooks/useFileDrop";
+import { useDataDir } from "@/hooks/useDataDir";
+import { libraryImageSrc } from "@/lib/libraryLinks";
 import { navigateActive } from "@/lib/tabRouters";
 import { taskHref } from "@/components/projects/taskHref";
 import {
@@ -39,6 +37,7 @@ import { useTaskList } from "@/hooks/useTaskList";
 import {
   boardOf,
   PROJECTS_UPDATED_EVENT,
+  taskBodyEdit,
   type DbProject,
   type DbProjectTask,
 } from "@/lib/projects";
@@ -341,7 +340,12 @@ export default function TaskPage() {
           </Row>
         </div>
 
-        <TaskBody task={task} project={project} onSave={(body) => patch({ body })} />
+        <TaskBody
+          key={task.id}
+          task={task}
+          project={project}
+          onSave={(body) => patch({ body })}
+        />
 
         {/* Subtasks are one level deep, so a subtask has no list. */}
         {task.parent_id == null && (
@@ -489,14 +493,11 @@ function TaskTitle({
 }
 
 /**
- * The description, in markdown: rendered by `CompactMd` (the chat timeline's
- * renderer, so backticked library paths become `FileChip`s and images render),
- * and edited in the composer's `MentionInput` with the shared `@` menu, scoped
- * to the project's subject or the whole library.
- *
- * ⌘↵ saves in place, blur saves, unchanged writes nothing, empty writes `null`.
- * The draft follows the row only when the row changes (see `DraftField`), and
- * the editor reads `initialText` once at mount.
+ * The description: markdown in a `NoteField`, so the note editor's live
+ * preview, maths, tables, shortcuts and toolbar; `@` searches the project's
+ * subject or the whole library. Pictures go to `agents/attachments/` on
+ * arrival. Blur and ⌘↵ save, unchanged writes nothing, empty writes `null`.
+ * Keyed by task (below), so leaving a task saves to that task.
  */
 function TaskBody({
   task,
@@ -507,147 +508,42 @@ function TaskBody({
   project: DbProject | null;
   onSave: (body: string | null) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(task.body ?? "");
-  useEffect(() => setDraft(task.body ?? ""), [task.id, task.body]);
-  // The editor holds its text in its own DOM, so another task closes it.
-  useEffect(() => setEditing(false), [task.id]);
+  const dataDir = useDataDir();
+  /** An attachment in either spelling, else a path from the data dir. */
+  const imageSrc = useCallback(
+    (src: string) => {
+      const picture = attachmentPath(src);
+      return picture ? attachmentSrc(dataDir, picture) : libraryImageSrc(src, "", dataDir);
+    },
+    [dataDir],
+  );
 
-  const [attachError, setAttachError] = useState<string | null>(null);
-  const input = useRef<MentionInputHandle>(null);
-  const mentions = useMentionMenu({ subjectId: project?.subject_id ?? null, input });
-  /** The drop target for a picture, and what `leave` asks about the focus. */
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  const save = () => {
-    const body = draft.trim();
-    if (body === (task.body ?? "")) return;
-    onSave(body || null);
-  };
-
-  /** Decided a tick later: picking a mention remounts `MentionInput` (a `key`
-   *  bump), whose removed node raises a blur even though focus comes straight
-   *  back. Where focus actually is next tick tells that from a real leave. */
-  const leave = () => {
-    mentions.close();
-    window.setTimeout(() => {
-      if (wrapRef.current?.contains(document.activeElement)) return;
-      save();
-      setEditing(false);
-    }, 0);
-  };
-
-  /** A picture is written the moment it arrives and inserted at the caret as a
-   *  markdown image — a body has no send to defer the write to, so a picture
-   *  later deleted from the text leaves its file in `agents/attachments/`. */
-  const embed = async (pending: PendingAttachment) => {
+  const writePicture = useCallback(async (source: File | string) => {
+    const pending = typeof source === "string" ? pendingFromPath(source) : pendingFromFile(source);
     try {
-      const path = await writeAttachment(pending);
-      // Brackets in the filename would close the alt text; the path is Rust's.
-      input.current?.insertText(`![${pending.name.replace(/[[\]()]/g, "")}](${path})`);
-      setAttachError(null);
-    } catch (e) {
-      setAttachError(String(e));
+      return await writeAttachment(pending);
     } finally {
       // No preview strip here, so the preview URL is dead once written.
       releaseAttachment(pending);
     }
-  };
-
-  /** Pasted pictures, one at a time so they land in paste order. */
-  const attach = async (files: File[]) => {
-    for (const f of files) await embed(pendingFromFile(f));
-  };
-
-  /** Dropped ones (`useFileDrop`). A non-image drop says so rather than
-   *  being ignored, as the composer does. */
-  const attachPaths = (paths: string[]) => {
-    if (!editing) return;
-    const pictures = imagePaths(paths);
-    if (!pictures.length) {
-      if (paths.length) setAttachError("Only images can go in a task body — use @ for a course file.");
-      return;
-    }
-    void (async () => {
-      for (const p of pictures) await embed(pendingFromPath(p));
-    })();
-  };
-
-  const dropping = useFileDrop(wrapRef, attachPaths);
-  const body = draft.trim();
+  }, []);
 
   return (
-    <div ref={wrapRef} className="mt-6">
-      <MentionMenu {...mentions.menu} />
-
-      {attachError && (
-        <div className="px-2 pb-1 text-[11px] text-destructive">{attachError}</div>
-      )}
-
-      {editing ? (
-        <div
-          className={cn(
-            "rounded-lg border border-brand/40 bg-card px-2 py-1.5 transition-colors",
-            dropping && "border-brand ring-[3px] ring-brand/25",
-          )}
-        >
-          <MentionInput
-            ref={input}
-            autoFocus
-            label="Description"
-            initialText={draft}
-            placeholder="Write what this actually involves…"
-            // Bounded so a long body scrolls inside and the rows below stay
-            // reachable.
-            className="max-h-[420px] min-h-24 leading-relaxed"
-            onEdit={(next, caret) => {
-              setDraft(next);
-              mentions.track(next, caret);
-            }}
-            onFiles={(files) => void attach(files)}
-            onBlur={leave}
-            onKeyDown={(e) => {
-              // The menu's keys first: Enter picks while the list is open.
-              mentions.keyDown(e);
-              if (e.defaultPrevented) return;
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                save();
-              }
-            }}
-          />
-        </div>
-      ) : (
-        <div
-          tabIndex={0}
-          onClick={(e) => {
-            // A chip, link or picture is its own control; don't also open
-            // the editor.
-            const hit = (e.target as HTMLElement).closest("a,button,img,[role=button]");
-            if (hit && hit !== e.currentTarget) return;
-            setEditing(true);
-          }}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter") return;
-            e.preventDefault();
-            setEditing(true);
-          }}
-          className={cn(
-            "min-h-24 cursor-text rounded-lg border border-transparent px-2 py-1.5 outline-none transition-colors",
-            "hover:border-border-subtle focus-visible:border-brand/40",
-          )}
-        >
-          {body ? (
-            // Outer margins off so the text sits where the editor's does.
-            <CompactMd text={body} className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0" />
-          ) : (
-            <span className="text-[13px] text-muted-foreground/60">
-              Write what this actually involves…
-            </span>
-          )}
-        </div>
-      )}
-    </div>
+    <NoteField
+      className="mt-6"
+      text={task.body ?? ""}
+      subjectId={project?.subject_id ?? null}
+      imageSrc={imageSrc}
+      writePicture={writePicture}
+      pickerTitle="Add pictures to this task"
+      notAPicture="Only images can go in a task body — use @ for a course file."
+      placeholder="Write what this actually involves…"
+      label="Description"
+      onCommit={(text) => {
+        const body = taskBodyEdit(text, task.body);
+        if (body !== undefined) onSave(body);
+      }}
+    />
   );
 }
 

@@ -420,8 +420,7 @@ not a sandbox; it appends the course folder and `agents/memories/<CODE>/`.
 **`@` inserts a library path**, not content — the path is what `oculus read`
 takes. Words are ANDed against filenames (`safe_filename` turns spaces into
 `_`); the token is bounded (no space after `@`, four words, 60 characters, a
-backtick ends it) and the menu opens only on a match. The menu is shared with
-the task body ([projects.md](./projects.md)).
+backtick ends it) and the menu opens only on a match.
 
 **A mention is a chip on screen and a path on the wire** (`FileChip`, built
 from the path alone), which is why `MentionInput.tsx` is a contenteditable:
@@ -430,7 +429,7 @@ structural changes (bumping `key`), and `revealCaret` scrolls the box because
 a contenteditable follows its caret only for edits it made. The menu anchors
 on a range over the `@` token, since a collapsed range's rect can be zeros in
 WebKit.
-A note's `@` (the note editor's own completion) writes the
+A note's or task body's `@` (the note editor's own completion) writes the
 same backticked path and draws the same chip
 ([editor.md](./editor.md#pictures-mentions-and-citations-resolve-to-library-files)).
 
@@ -443,7 +442,7 @@ before clearing the composer; a failed write keeps the draft and attachments.
 A CLI reads files, so a picture becomes one — in `agents/`, the one folder
 every CLI reads and writes. `harness_attach_image` (clipboard bytes) and
 `harness_attach_file` (dropped path) write it on send (a task body, having no
-send, writes on paste) and answer `./attachments/<name>`, appended fenced.
+send, writes on arrival) and answer `./attachments/<name>`, appended fenced.
 The claimed filename never reaches disk: bytes are sniffed, the stem is a
 timestamp, non-images are refused, 20 MB cap. `assetProtocol.scope` in
 `app/src-tauri/tauri.conf.json` must name `agents/` or every picture (and

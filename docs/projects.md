@@ -127,12 +127,20 @@ whose parent is missing rather than dropping it.
 - **Names ride in the query** (`?n=`, via `projectHref` / `taskHref`), because
   `tabInfo` titles a tab from the path alone. Renaming re-navigates to the new
   href so the tab re-titles.
-- **The task body is markdown** rendered by `CompactMd`
-  (`app/src/components/markdown/MdComponents.tsx`), edited with the chat
-  composer's `@` mention box (`app/src/components/harness/MentionInput.tsx`)
-  scoped to the project's subject or the whole library; see
-  [harness.md](./harness.md). ⌘↵ or blur writes, an unchanged body writes
-  nothing, an empty one writes `null`, and it goes through `updateTask`.
+- **The task body is markdown in the note editor**, through `NoteField`
+  (`app/src/components/documents/NoteField.tsx`; see
+  [editor.md](./editor.md#notefield-is-the-note-editor-as-a-form-field)):
+  always Live mode, so the preview is the read view, with the note's maths
+  tools, tables and shortcuts, and its formatting toolbar under the text
+  while it is edited. `@` searches the project's subject, or the whole
+  library for a task without one. A picture pasted, dropped or picked is
+  written to `agents/attachments/` on arrival (`writeAttachment`) and linked
+  as `![name](agents/attachments/…)`. Blur or ⌘↵ writes through
+  `updateTask`; `taskBodyEdit` makes an unchanged body write nothing and an
+  empty one write `null`. The page keys the body by task, so switching tasks
+  saves to the task left. A write from elsewhere (the agent through the CLI)
+  replaces the text while the field is at rest; while it is edited, the
+  user's text stands.
 - **Dates go through `DateTimeField`**, never a native input
   ([ui.md](./ui.md#gotchas)). A `Date` built from local parts is
   the instant meant and `toISOString()` is the only zone conversion. Picking a
