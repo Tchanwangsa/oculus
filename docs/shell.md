@@ -15,6 +15,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Search (⌘K and the new-tab field), Recent group | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/openFile.ts`, `app/src/pages/subject/FilePage.tsx`, `app/src/hooks/useLocateHighlight.ts` |
 | ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/find.ts`, `app/src/hooks/useDomFind.ts`, `app/src/lib/findText.ts`, `app/src/components/ui/FindBar.tsx`, `app/src/components/ui/PageFind.tsx`, `app/src/components/documents/editor/useEditorFind.ts` |
+| Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/settingsSearch.ts` |
 
 ## Each pane has its own router, and the path is its only state
 
@@ -58,6 +59,16 @@ before leaving a playing lecture.
   `SubjectLayout`** so a document takes the whole card; `SubjectCrumbs` gives
   them a trail back, as buttons with `data-tab-href` rather than `Link`s so a
   click goes through `navigateActive`.
+
+## Settings has its own nav column
+
+`/settings` is one route with a page per nav row; `SettingsLayout` puts
+`SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`. Its
+search reads a hand-kept list in `app/src/lib/settingsSearch.ts`, because the
+pages are lazy and unmounted: entry titles are the on-screen text, and each
+names the `Section` title it jumps to. Rename a section or row and update the
+list. A jump travels as router state, and the layout scrolls the section's id
+(`settingsSectionId`) into place once the page renders it.
 
 ## The shell owns tabs, side panels and every window shortcut
 

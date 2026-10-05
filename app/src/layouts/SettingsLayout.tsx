@@ -1,53 +1,69 @@
-import { NavLink, Outlet } from "react-router-dom";
-import { cn } from "@/lib/utils";
+import { useEffect, useRef } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 
-const TABS = [
-  { to: "canvas",  label: "Canvas" },
-  { to: "ai",      label: "AI" },
-  { to: "storage", label: "Storage" },
-  { to: "library", label: "Library" },
-  { to: "browser", label: "Browser" },
-  { to: "appearance", label: "Appearance" },
-] as const;
+import SettingsNav from "@/components/settings/SettingsNav";
+import type { SettingsJump } from "@/lib/settingsSearch";
+import { settingsSectionId } from "@/pages/settings/section";
 
-/** Everything under /settings: SubjectLayout's shell, a title over an
- *  underline tab strip in the same centered column as the content. */
+/** How long a jump waits for its section, and keeps it aligned while the page
+ *  above it fills in. */
+const JUMP_WINDOW_MS = 1000;
+/** Gap left above a section a jump lands on. */
+const JUMP_OFFSET = 16;
+
+/** Everything under /settings: the settings nav column beside the page. */
 export default function SettingsLayout() {
-  return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <header className="shrink-0 border-b border-border-subtle">
-        <div className="mx-auto max-w-5xl px-6">
-          <div className="pt-5 pb-3">
-            <h1 className="text-[22px] font-semibold tracking-tight text-foreground leading-none">
-              Settings
-            </h1>
-          </div>
+  const location = useLocation();
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const lastPath = useRef(location.pathname);
 
-          <nav className="flex items-center gap-1">
-            {TABS.map((tab) => (
-              <NavLink
-                key={tab.to}
-                to={tab.to}
-                className={({ isActive }) =>
-                  cn(
-                    // -mb-px puts the active underline on the header's border.
-                    "-mb-px border-b-2 px-2 pb-2 pt-1 text-[12px] font-medium transition-colors",
-                    isActive
-                      ? "border-primary text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground",
-                  )
-                }
-              >
-                {tab.label}
-              </NavLink>
-            ))}
-          </nav>
-        </div>
-      </header>
+  // A search result carries a section in `state` (not a hash: panes run memory
+  // routers). Pages are lazy and load their rows async, so poll for the section
+  // and re-align as content above it grows, until the window ends or the user scrolls.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const section = (location.state as SettingsJump | null)?.section;
+    const pageChanged = lastPath.current !== location.pathname;
+    lastPath.current = location.pathname;
+    if (!scroller) return;
+    if (pageChanged) scroller.scrollTop = 0;
+    if (!section) return;
+
+    const id = settingsSectionId(section);
+    const deadline = performance.now() + JUMP_WINDOW_MS;
+    let frame = 0;
+    let stopped = false;
+    const stop = () => {
+      stopped = true;
+      cancelAnimationFrame(frame);
+    };
+    const align = () => {
+      if (stopped) return;
+      const el = scroller.querySelector<HTMLElement>(`#${id}`);
+      if (el) {
+        const top =
+          el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+        scroller.scrollTop = Math.max(0, top - JUMP_OFFSET);
+      }
+      if (performance.now() < deadline) frame = requestAnimationFrame(align);
+    };
+    align();
+
+    const inputs = ["wheel", "pointerdown", "keydown", "touchstart"] as const;
+    for (const type of inputs) scroller.addEventListener(type, stop, { passive: true });
+    return () => {
+      stop();
+      for (const type of inputs) scroller.removeEventListener(type, stop);
+    };
+  }, [location]);
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      <SettingsNav />
 
       {/* `scroll`, not `auto` + `scrollbar-gutter`, which reserves nothing in WebKit. */}
-      <div className="flex-1 min-h-0 overflow-y-scroll">
-        <div className="mx-auto max-w-5xl px-6 py-6">
+      <div ref={scrollerRef} className="min-w-0 flex-1 overflow-y-scroll">
+        <div className="mx-auto max-w-3xl px-8 py-8">
           <Outlet />
         </div>
       </div>
