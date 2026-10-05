@@ -58,6 +58,9 @@ classes work even when there are no dollar delimiters.
   as both `ctrlKey` wheel and `gesture*` events; only the gesture zooms.
   - **Selection and cursor are pdf.js's own**: a drag selects text and the
     trackpad scrolls. `index.css` only recolours `::selection` to the accent.
+  - **The page box names the pages on screen** — a spread, or in continuous
+    scroll every page filling a fifth of the viewport or showing half of
+    itself (`shownPages`) — and takes a page number to jump to.
   - **`pdfjs-dist` is patched** (`app/patches/`): its text layer multiplies
     every font size by a 1px probe's measured height, which page zoom 1.15
     reads as 0.87, so the selectable text ran 13% short of the glyphs. The

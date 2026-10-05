@@ -16,6 +16,7 @@ import {
   Rows,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
@@ -70,6 +71,53 @@ interface Props {
 /** The class a cited passage's text-layer spans carry (`index.css`). */
 const HIT = "citation-hit";
 
+/** In continuous scroll, a page counts toward the toolbar's range when it
+ *  fills this share of the viewport — a sliver at an edge is not being read —
+ *  or shows this share of itself, which catches small pages when zoomed out. */
+const VIEWPORT_SHARE = 0.2;
+const PAGE_SHARE = 0.5;
+
+/** The pages the toolbar names: one page, a spread, or a scrolled range. */
+type Shown = { first: number; last: number };
+
+/** One entry of `PDFViewer._getVisiblePages()`, which pdf.js types as `Object`.
+ *  `visibleArea` is null when the page is wholly in view; its numbers are
+ *  offsets within the page, so page zoom does not skew them. */
+type VisiblePage = {
+  id: number;
+  visibleArea: { minY: number; maxY: number } | null;
+  view: { div: HTMLElement };
+};
+
+function shownPages(viewer: PdfjsViewer, mode: LayoutMode): Shown | null {
+  const count = viewer.pagesCount;
+  if (!count) return null;
+  if (mode !== "scroll") {
+    // `SpreadMode.ODD` pairs 1|2, 3|4, so a spread starts on an odd page.
+    const page = viewer.currentPageNumber;
+    const first = mode === "spread" && page % 2 === 0 ? page - 1 : page;
+    return { first, last: mode === "spread" ? Math.min(first + 1, count) : first };
+  }
+  const { views } = (
+    viewer as unknown as { _getVisiblePages(): { views: VisiblePage[] } }
+  )._getVisiblePages();
+  if (!views.length) return null;
+  const viewport = viewer.container.clientHeight;
+  let first = Infinity;
+  let last = -Infinity;
+  for (const { id, visibleArea, view } of views) {
+    const height = view.div.clientHeight;
+    const seen = visibleArea ? visibleArea.maxY - visibleArea.minY : height;
+    if (seen >= viewport * VIEWPORT_SHARE || seen >= height * PAGE_SHARE) {
+      first = Math.min(first, id);
+      last = Math.max(last, id);
+    }
+  }
+  // Sorted most-visible first, so this is the page that fills the most.
+  if (first === Infinity) first = last = views[0].id;
+  return { first, last };
+}
+
 type Engine = {
   pdfjs: Pdfjs;
   viewer: PdfjsViewer;
@@ -95,7 +143,11 @@ function applyLayout(viewer: PdfjsViewer, pdfjs: Pdfjs, mode: LayoutMode) {
  */
 export function PDFViewer({ src, locate }: Props) {
   const [numPages, setNumPages] = useState(0);
-  const [page, setPage] = useState(1);
+  const [shown, setShown] = useState<Shown>({ first: 1, last: 1 });
+  /** Mirrors `shown` so a scroll that leaves the range alone skips setState. */
+  const shownRef = useRef(shown);
+  /** The page box's text while it has focus; null shows the live range. */
+  const [pageDraft, setPageDraft] = useState<string | null>(null);
   /** pdf.js's absolute scale (1 is actual size), as of the last change to the
    *  displayed percentage or to whether it sits at an end stop. */
   const [scale, setScale] = useState(1);
@@ -118,6 +170,15 @@ export function PDFViewer({ src, locate }: Props) {
   /** Bumped on `pagesinit`, zeroed per document: pages can be scrolled to. */
   const [pagesReady, setPagesReady] = useState(0);
 
+  const syncShown = useCallback(() => {
+    const viewer = engineRef.current?.viewer;
+    const next = viewer && shownPages(viewer, modeRef.current);
+    const current = shownRef.current;
+    if (!next || (next.first === current.first && next.last === current.last))
+      return;
+    shownRef.current = next;
+    setShown(next);
+  }, []);
 
   // ── The viewer itself ────────────────────────────────────────────────────
 
@@ -150,12 +211,16 @@ export function PDFViewer({ src, locate }: Props) {
           applyLayout(viewer, pdfjs, modeRef.current);
           viewer.currentScaleValue = DEFAULT_FIT;
           setPagesReady((n) => n + 1);
+          syncShown();
         });
-        eventBus.on("pagechanging", (e: { pageNumber: number }) => {
-          // In scroll mode the toolbar doesn't show a current page. Avoid
-          // rerendering the React host as pdf.js scrolls through the document.
-          if (modeRef.current !== "scroll") setPage(e.pageNumber);
+        // The paged layouts name the current page or spread, which
+        // `pagechanging` reports even before the pages are laid out.
+        eventBus.on("pagechanging", () => {
+          if (modeRef.current !== "scroll") syncShown();
         });
+        // Continuous scroll names the pages on screen; this fires per scroll
+        // frame, and `syncShown` skips setState unless the range moved.
+        eventBus.on("updateviewarea", syncShown);
         eventBus.on("scalechanging", (e: { scale: number }) => {
           // The toolbar displays whole percentages and only uses the exact
           // scale to disable the end-stop buttons. Ignore finer changes.
@@ -182,7 +247,7 @@ export function PDFViewer({ src, locate }: Props) {
       engine?.viewer.setDocument(null as never);
       if (engineRef.current === engine) engineRef.current = null;
     };
-  }, []);
+  }, [syncShown]);
 
   // ── The document ─────────────────────────────────────────────────────────
 
@@ -194,7 +259,9 @@ export function PDFViewer({ src, locate }: Props) {
     setLoaded(false);
     setLoadError(null);
     setNumPages(0);
-    setPage(1);
+    shownRef.current = { first: 1, last: 1 };
+    setShown(shownRef.current);
+    setPageDraft(null);
     setPagesReady(0);
 
     let cancelled = false;
@@ -233,10 +300,8 @@ export function PDFViewer({ src, locate }: Props) {
     const engine = engineRef.current;
     if (!engine) return;
     applyLayout(engine.viewer, engine.pdfjs, mode);
-    // Scroll mode leaves `page` untouched; sync the toolbar when paging is
-    // enabled so it starts at the page pdf.js is already showing.
-    if (mode !== "scroll") setPage(engine.viewer.currentPageNumber);
-  }, [mode, engineReady]);
+    syncShown();
+  }, [mode, engineReady, syncShown]);
 
   // ── Citation locate ──────────────────────────────────────────────────────
   //
@@ -279,6 +344,19 @@ export function PDFViewer({ src, locate }: Props) {
 
   const prev = useCallback(() => engineRef.current?.viewer.previousPage(), []);
   const next = useCallback(() => engineRef.current?.viewer.nextPage(), []);
+
+  /** The page box's Enter. Setting `currentPageNumber` scrolls the page to the
+   *  top even when it is already current, and in a spread pdf.js shows the
+   *  spread holding it. Anything but a whole number just reverts. */
+  const jumpTo = (text: string) => {
+    const viewer = engineRef.current?.viewer;
+    const trimmed = text.trim();
+    if (!viewer?.pagesCount || !/^\d+$/.test(trimmed)) return;
+    viewer.currentPageNumber = Math.min(
+      Math.max(1, Number(trimmed)),
+      viewer.pagesCount,
+    );
+  };
 
   // Arrow keys page in paged layouts; in scroll layout the list scrolls
   // natively, so the keys are left alone.
@@ -421,9 +499,11 @@ export function PDFViewer({ src, locate }: Props) {
 
   // ── Chrome ───────────────────────────────────────────────────────────────
 
-  const lastPage = mode === "spread" ? Math.max(1, numPages - 1) : numPages;
-  const pageLabel =
-    mode === "spread" && page + 1 <= numPages ? `${page}–${page + 1}` : page;
+  const pageLabel = `${
+    shown.first === shown.last ? shown.first : `${shown.first}–${shown.last}`
+  } / ${numPages}`;
+  const pageText = pageDraft ?? pageLabel;
+  const paged = mode !== "scroll" && numPages > 1;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -448,35 +528,66 @@ export function PDFViewer({ src, locate }: Props) {
           </ModeItem>
         </ToggleGroup>
 
-        {mode !== "scroll" && numPages > 1 && (
+        {numPages > 0 && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              disabled={page <= 1}
-              onClick={prev}
-              aria-label="Previous page"
-            >
-              <CaretLeft size={13} />
-            </Button>
-            <span className="tabular-nums">
-              {pageLabel} / {numPages}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              disabled={page >= lastPage}
-              onClick={next}
-              aria-label="Next page"
-            >
-              <CaretRight size={13} />
-            </Button>
+            {paged && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                disabled={shown.first <= 1}
+                onClick={prev}
+                aria-label="Previous page"
+              >
+                <CaretLeft size={13} />
+              </Button>
+            )}
+            <Input
+              value={pageText}
+              aria-label="Page"
+              spellCheck={false}
+              autoComplete="off"
+              // Focus by hand so the click doesn't drop a caret into the
+              // selection `onFocus` makes.
+              onMouseDown={(e) => {
+                if (document.activeElement === e.currentTarget) return;
+                e.preventDefault();
+                e.currentTarget.focus();
+              }}
+              onFocus={(e) => {
+                setPageDraft(pageLabel);
+                e.currentTarget.select();
+              }}
+              onChange={(e) => setPageDraft(e.target.value)}
+              onBlur={() => setPageDraft(null)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  jumpTo(e.currentTarget.value);
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  e.stopPropagation();
+                  e.currentTarget.blur();
+                }
+              }}
+              // Sized to the text, never narrower than the label so typing
+              // doesn't shrink it; the extra 1rem is the horizontal padding.
+              style={{
+                width: `calc(${Math.max(pageText.length, pageLabel.length)}ch + 1rem)`,
+              }}
+              className="h-6 rounded-md px-2 py-0 text-center text-xs tabular-nums text-muted-foreground shadow-none focus-visible:text-foreground"
+            />
+            {paged && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                disabled={shown.last >= numPages}
+                onClick={next}
+                aria-label="Next page"
+              >
+                <CaretRight size={13} />
+              </Button>
+            )}
           </div>
-        )}
-        {mode === "scroll" && numPages > 0 && (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {numPages} pages
-          </span>
         )}
 
         <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
