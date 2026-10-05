@@ -295,8 +295,25 @@
     overflow: visible;
   }
 
-  p, h1, h2, h3, h4, h5, h6, span, li, td, th, input, textarea {
+  /* Text selects only on text tags inside a select scope — a pane's page,
+     a dialog, a popover — never in the shell, never on a control's label.
+     `lib/selectScope.ts` keeps a drag-select inside its scope. */
+  input, textarea {
     user-select: text;
+  }
+  :where([data-select-scope], [role="dialog"], [role="alertdialog"], [data-slot="popover-content"])
+    :is(p, h1, h2, h3, h4, h5, h6, span, li, td, th) {
+    user-select: text;
+  }
+  :where([data-select-scope], [role="dialog"], [role="alertdialog"], [data-slot="popover-content"])
+    :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"]) * {
+    user-select: none;
+  }
+  /* Important so it beats `select-text` and an editor's own rule. */
+  html[data-select-drag] :is([data-select-scope], [role="dialog"], [role="alertdialog"], [data-slot="popover-content"]):not([data-select-active]),
+  html[data-select-drag] :is([data-select-scope], [role="dialog"], [role="alertdialog"], [data-slot="popover-content"]):not([data-select-active]) * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
   }
 
   ::selection {

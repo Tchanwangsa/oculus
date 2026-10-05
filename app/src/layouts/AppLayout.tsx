@@ -18,6 +18,7 @@ import { useBrowserTabs } from "@/hooks/useBrowserTabs";
 import { useTauriEvent, useWindowEvent } from "@/hooks/useEvents";
 import { routeEdit, routeSelectAll } from "@/lib/editRouting";
 import { routeFind } from "@/lib/find";
+import { containSelection } from "@/lib/selectScope";
 import { useNewTabClicks } from "@/lib/newTabClicks";
 import { useBrowserStore } from "@/stores/browserStore";
 import { activePane, useTabStore } from "@/stores/tabStore";
@@ -63,6 +64,8 @@ export default function AppLayout() {
   useBrowserTabs();
 
   useNewTabClicks();
+
+  useEffect(() => containSelection(), []);
 
   // Capture-phase net: every external `<a href>` opens in an in-app browser
   // tab; ⌘-click hands it to the real browser.

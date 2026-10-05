@@ -8,6 +8,7 @@ Read this before any UI work.
 | Piece | Location |
 | --- | --- |
 | Tokens, base resets, utilities (`page-scroll`, scroll fades) | `app/src/index.css` |
+| Text selection scopes | `app/src/index.css`, `app/src/lib/selectScope.ts` |
 | shadcn primitives | `app/src/components/ui/` |
 | Persisted view state and collapsed groups | `app/src/hooks/useStoredState.ts` |
 | Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/PageParts.tsx` |
@@ -53,6 +54,15 @@ headings and Inter for everything else, Notion-style layout.
   today), `brand` is the *accent* (links, selection, in-flight progress,
   new-item chips) — split so the accent can be retuned without restyling every
   button.
+- **Only a pane's page selects, as in a native app.** The body is
+  `user-select: none`; text tags select again only inside a select scope — a
+  pane's root in `TabPane` (`data-select-scope`), a dialog, a popover — and
+  never inside a button or tab, so the sidebar, tab strip and side panel
+  header never highlight. A drag-select stays in the scope it starts in:
+  `app/src/lib/selectScope.ts` turns every other scope off while the button is
+  held, so a drag across the split divider stops at its own pane. Give a new
+  surface that renders outside a pane `data-select-scope` if its text should
+  be copyable.
 - **Dark mode is a `.dark` class on `<html>`** written only by `applyTheme`
   (`app/src/lib/theme.ts`); `@custom-variant dark` follows the class, not the OS.
 - **Full pages scroll through `page-scroll`**, which reserves the scrollbar

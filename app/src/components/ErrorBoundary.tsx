@@ -10,7 +10,7 @@ function text(error: unknown): string {
 /** What both boundaries render: what broke, and a way out of it. */
 function Fallback({ error, actions }: { error: unknown; actions: ReactNode }) {
   return (
-    <div className="flex h-full w-full items-center justify-center p-8">
+    <div data-select-scope className="flex h-full w-full items-center justify-center p-8">
       <div className="max-w-md">
         <h2 className="text-sm font-medium">Something broke here</h2>
         <p className="mt-1.5 text-[13px] whitespace-pre-wrap text-muted-foreground">

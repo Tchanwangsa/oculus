@@ -216,6 +216,8 @@ function Pane({
       // Capture phase, so focus moves before the clicked control reacts.
       onPointerDownCapture={onFocus && (() => onFocus(tabId, side))}
       onFocusCapture={onFocus && (() => onFocus(tabId, side))}
+      // The page's text selects; the side panel header and shell don't.
+      data-select-scope
       className="relative min-h-0 min-w-0 flex-1"
       style={style}
     >
