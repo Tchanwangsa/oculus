@@ -43,11 +43,11 @@ pub mod sync;
 #[cfg(test)]
 mod test_support;
 pub mod terms;
-pub mod voyage;
 pub mod transcribe;
+mod usage;
+pub mod voyage;
 
 use std::sync::{Arc, Mutex};
-mod usage;
 use tauri::{Emitter, Manager};
 
 use auth::{auth_flag_path, saved_session_probe, AuthProbe, AuthState};
@@ -66,13 +66,14 @@ pub fn run() {
         .manage(Echo360Cache(Arc::new(Mutex::new(std::collections::HashMap::new()))))
         .manage(lectures::DownloadCancels::default())
         .manage(ScrapeCancel::default())
+        .manage(scrape::VideoCancels::default())
         .manage(browser::BrowserState::default())
+        .manage(usage::UsageState::default())
         .setup(|app| {
             // Give the parse and embed seams a window to emit progress to;
             // headless (CLI) runs never bind, so their emits are no-ops.
             parse::events::bind(app.handle().clone());
             embed::events::bind(app.handle().clone());
-        .manage(usage::UsageState::default())
 
             // WebKit won't play <video> from the asset protocol (see media.rs).
             app.manage(media::start_media_server(paths::data_dir()));
@@ -89,20 +90,18 @@ pub fn run() {
             harness::app::reconcile(app.handle());
             // opencode servers left behind by an app that was killed, not quit.
             harness::app::sweep_strays();
-            // Clear `running` markers left by chapter/reading runs cut short.
+            // Clear `running` markers left by lecture job runs cut short.
             chapters::app::reconcile(app.handle());
             reading::app::reconcile(app.handle());
-
             lecture_end::app::reconcile(app.handle());
 
             // Open and active time per hour, from the window and the frontend's pings.
             usage::start(app.handle());
+
             // Session restore: replay the saved cookie with a server-side
             // ping. Rejected → try auto-recover, else sign out; unreachable →
             // stay optimistic, since offline is not expired.
             let app_handle = app.handle().clone();
-            // Open and active time per hour, from the window and the frontend's pings.
-            usage::start(app.handle());
 
             if auth_flag_path().exists() {
                 eprintln!("[oculus] auth flag found — verifying persisted session");
@@ -194,7 +193,8 @@ pub fn run() {
             subjects::get_subjects,
             scrape::scrape_content,
             scrape::cancel_scrape,
-            scrape::rescrape_file,
+            scrape::canvas_download_video,
+            scrape::canvas_cancel_video,
             scrape::parse_file,
             files::read_course_file,
             files::course_file_has_content,
@@ -217,17 +217,17 @@ pub fn run() {
             lectures::echo360_download_transcript,
             lectures::echo360_read_transcript,
             lectures::echo360_clear_transcripts,
-            media::media_server_info,
-            retrieval::embed_file,
-            retrieval::search_pages,
-            retrieval::embedding_stats,
-            mineru::mineru_set_api_key,
             transcribe::app::transcribe_video,
             transcribe::app::apple_speech_status,
             transcribe::app::whisper_models,
             transcribe::app::whisper_download_model,
             transcribe::app::whisper_cancel_download,
             transcribe::app::whisper_delete_model,
+            media::media_server_info,
+            retrieval::embed_file,
+            retrieval::search_pages,
+            retrieval::embedding_stats,
+            mineru::mineru_set_api_key,
             mineru::mineru_has_api_key,
             mineru::mineru_delete_api_key,
             embed::commands::embed_settings,
@@ -242,16 +242,18 @@ pub fn run() {
             voyage::voyage_set_api_key,
             voyage::voyage_has_api_key,
             voyage::voyage_delete_api_key,
+            groq::groq_set_api_key,
+            groq::groq_has_api_key,
+            groq::groq_delete_api_key,
             harness::app::harness_health,
             harness::app::harness_install_offer,
             harness::app::harness_install_run,
+            harness::app::harness_updates,
+            harness::app::harness_update_run,
             harness::app::harness_sign_in_status,
             harness::app::harness_sign_in_start,
             harness::app::harness_sign_in_code,
             harness::app::harness_sign_in_cancel,
-            groq::groq_set_api_key,
-            groq::groq_has_api_key,
-            groq::groq_delete_api_key,
             harness::app::harness_claude_models,
             harness::app::harness_codex_models,
             harness::app::harness_antigravity_models,
@@ -267,8 +269,6 @@ pub fn run() {
             harness::app::harness_refresh_rate_limits,
             harness::app::harness_send,
             harness::app::harness_edit_resend,
-            harness::app::harness_updates,
-            harness::app::harness_update_run,
             harness::app::harness_rewind,
             harness::app::harness_queued,
             harness::app::harness_unqueue,
@@ -281,11 +281,12 @@ pub fn run() {
             harness::attach::harness_attach_file,
             chapters::app::lecture_find_chapters,
             chapters::app::lecture_grab_frames,
-            reading::app::lecture_write_reading,
-            storage::storage_report,
             chapters::app::lecture_thumbnail,
-            browser::browser_open_url,
+            reading::app::lecture_write_reading,
             lecture_end::app::lecture_find_end,
+            storage::storage_report,
+            usage::usage_activity,
+            browser::browser_open_url,
             browser::browser_state,
             browser::browser_place,
             browser::browser_set_viewport,
@@ -309,4 +310,3 @@ pub fn run() {
             }
         });
 }
-            usage::usage_activity,

@@ -19,7 +19,9 @@ desktop app. Only `uploads/` and `documents/` are the student's own.
   ed/              Ed Discussion threads, NNNN-slug.md
   files/           downloads plus parsed siblings:
                      13.pdf  13.md  13.pages.json  13_images/
-  modules/         module pages, in course order
+  modules/         module pages, in course order; an item marked
+                   _(video <id>)_ links where the video lands once the
+                   student downloads it in the app — until then it is absent
   pages/           Canvas pages
   quizzes/         worksheets and quizzes
   images/          images referenced by the markdown above

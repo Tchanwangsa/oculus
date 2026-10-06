@@ -32,7 +32,11 @@ const OFFICE_TYPES: &[(&str, &str)] = &[
 const OFFICE_CONVERT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// Larger files are skipped rather than filling the disk with recordings.
+/// Videos are exempt: a sync never downloads them (see [`is_video`]).
 const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
+
+/// Extensions that mark an untyped upload as a video.
+const VIDEO_EXTS: &[&str] = &["mp4", "mov", "m4v", "webm"];
 
 const IMAGE_EXT: &[(&str, &str)] = &[
     ("image/png", "png"),
@@ -111,6 +115,18 @@ pub struct Subject {
 pub struct TaskDocs {
     assignments: HashMap<i64, String>,
     quizzes: HashMap<i64, String>,
+}
+
+/// What `fetch_file` did with one Canvas file.
+#[derive(Debug, Clone, PartialEq)]
+enum Fetched {
+    /// On disk at this `courses/CODE/…` path.
+    Saved(String),
+    /// A video, listed but not downloaded; `rel` is where
+    /// [`Engine::download_video`] puts it.
+    Video { rel: String, canvas_id: i64 },
+    /// Locked, unsupported, oversized or not served.
+    Skipped,
 }
 
 /// The per-course link crawl: every converted body queues the pages and files
@@ -754,22 +770,14 @@ impl Engine {
                     }
                     "File" => {
                         let Some(id) = item["content_id"].as_i64() else { continue };
-                        let mut saved = None;
+                        let mut fetched = Fetched::Skipped;
                         if crawl.seen_files.insert(id.to_string()) {
-                            match self.fetch_file(c, id, Some(title), false) {
-                                Ok(p) => saved = p,
+                            match self.fetch_file(c, id, Some(title)) {
+                                Ok(f) => fetched = f,
                                 Err(e) => self.reporter.log("warning", &c.code, &format!("file {id}: {e}")),
                             }
                         }
-                        // TOCs live in modules/, so links step up a level.
-                        toc.push(match saved {
-                            Some(path) => format!(
-                                "{indent}- [{}](../{})",
-                                escape_md(title),
-                                rel_within_course(&path)
-                            ),
-                            None => format!("{indent}- {} _(file)_", escape_md(title)),
-                        });
+                        toc.push(file_toc_line(&indent, title, &fetched));
                     }
                     "Assignment" | "Quiz" => {
                         let kind = if ty == "Quiz" { "quiz" } else { "assignment" };
@@ -833,7 +841,7 @@ impl Engine {
                 continue;
             }
             let Ok(fid) = id.parse::<i64>() else { continue };
-            if let Err(e) = self.fetch_file(c, fid, None, false) {
+            if let Err(e) = self.fetch_file(c, fid, None) {
                 self.reporter.log("warning", &c.code, &format!("file {id}: {e}"));
             }
         }
@@ -878,97 +886,91 @@ impl Engine {
         Ok(Some(links))
     }
 
-    /// Download one Canvas file if its type is allowlisted.
+    /// Download one Canvas file if its type is allowlisted. A video is only
+    /// recorded — a sync never downloads one ([`Engine::download_video`] does).
     fn fetch_file(
         &self,
         c: &Subject,
         file_id: i64,
         display: Option<&str>,
-        force: bool,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Fetched, String> {
         let r = self.canvas.get(&format!("/api/v1/files/{file_id}"))?;
         if !r.ok() {
-            return Ok(None);
+            return Ok(Fetched::Skipped);
         }
         let info = r.json()?;
-
-        let name = info["filename"]
-            .as_str()
-            .or_else(|| info["display_name"].as_str())
-            .or(display)
-            .unwrap_or("file.bin")
-            .replace(['/', '\\'], "_");
+        let name = file_name(&info, display);
 
         // Canvas serves some uploads as a generic binary (whatever the
         // uploader's browser claimed); those fall back to the extension.
         let ct = content_type_of(&info);
+        let video = is_video(&ct, &name);
         let office = office_ext(&ct).or_else(|| is_generic_binary(&ct).then(|| office_ext_of(&name)).flatten());
         let downloadable = DOWNLOADABLE_TYPES.contains(&ct.as_str())
             || (is_generic_binary(&ct) && name.to_ascii_lowercase().ends_with(".pdf"));
-        if !downloadable && office.is_none() {
-            return Ok(None);
+        if !video && !downloadable && office.is_none() {
+            return Ok(Fetched::Skipped);
         }
-        if info["size"].as_u64().unwrap_or(0) > MAX_FILE_BYTES {
+        if !video && info["size"].as_u64().unwrap_or(0) > MAX_FILE_BYTES {
             self.reporter.log("warning", &c.code, &format!("file {file_id}: over size cap, skipped"));
-            return Ok(None);
+            return Ok(Fetched::Skipped);
         }
-        // Canvas lists a release-dated file and answers its metadata but
-        // refuses the download; check explicitly, or it reads as an auth failure.
-        if info["locked_for_user"].as_bool().unwrap_or(false) {
+        if let Some(until) = locked_until(&info) {
             let name = info["display_name"].as_str().or(display).unwrap_or("file");
-            let until = info["lock_info"]["unlock_at"]
-                .as_str()
-                .or_else(|| info["unlock_at"].as_str())
-                .map(|d| format!(" until {}", &d[..10.min(d.len())]))
-                .unwrap_or_default();
             self.reporter.log("info", &c.code, &format!("{name}: locked{until}, skipped"));
-            return Ok(None);
+            return Ok(Fetched::Skipped);
         }
+        let Some(rel) = paths::course_rel_path(&c.code, &format!("files/{name}")) else {
+            return Ok(Fetched::Skipped);
+        };
 
         // Unchanged since last time and on disk (derived PDF too) → skip.
-        let modified = info["modified_at"]
-            .as_str()
-            .or_else(|| info["updated_at"].as_str())
-            .unwrap_or("")
-            .to_string();
+        let modified = modified_of(&info);
         let meta_size = info["size"].as_u64().unwrap_or(0);
-        if !force && !modified.is_empty() {
-            if let Some(rel) = paths::course_rel_path(&c.code, &format!("files/{name}")) {
-                let known = self
-                    .manifest
-                    .borrow()
-                    .get(&file_id.to_string())
-                    .is_some_and(|(m, s)| *m == modified && *s == meta_size);
-                let on_disk = self.data_dir.join(&rel).is_file()
-                    && paths::doc_pdf_rel(&rel)
-                        .map_or(true, |p| self.data_dir.join(p).is_file());
-                if known && on_disk {
-                    self.reporter.file(&FileEvent {
-                        subject_id: c.id,
-                        code: c.code.clone(),
-                        relative_path: rel.clone(),
-                        size_bytes: meta_size,
-                        category: paths::category_from_path(&format!("files/{name}")).to_string(),
-                        canvas_id: Some(file_id),
-                        source_url: None,
-                        action: "unchanged",
-                    });
-                    return Ok(Some(rel));
-                }
-            }
-        }
-
-        if let Some(rel) = paths::course_rel_path(&c.code, &format!("files/{name}")) {
-            self.reporter.file_start(&FileStart {
+        let known = !modified.is_empty()
+            && self
+                .manifest
+                .borrow()
+                .get(&file_id.to_string())
+                .is_some_and(|(m, s)| *m == modified && *s == meta_size);
+        let on_disk = self.data_dir.join(&rel).is_file()
+            && paths::doc_pdf_rel(&rel).map_or(true, |p| self.data_dir.join(p).is_file());
+        let unchanged = || {
+            self.reporter.file(&FileEvent {
                 subject_id: c.id,
                 code: c.code.clone(),
-                relative_path: rel,
-                filename: name.clone(),
-                size_bytes: info["size"].as_u64().unwrap_or(0),
+                relative_path: rel.clone(),
+                size_bytes: meta_size,
+                category: paths::category_from_path(&format!("files/{name}")).to_string(),
+                canvas_id: Some(file_id),
+                source_url: None,
+                action: "unchanged",
             });
+        };
+
+        if video {
+            // A copy Canvas has since changed is left as it is: the student
+            // chose to download it, and a sync never does.
+            if known && on_disk {
+                unchanged();
+            }
+            return Ok(Fetched::Video { rel, canvas_id: file_id });
         }
 
-        let Some(url) = self.download_url(&info, file_id)? else { return Ok(None) };
+        if known && on_disk {
+            unchanged();
+            return Ok(Fetched::Saved(rel));
+        }
+
+        self.reporter.file_start(&FileStart {
+            subject_id: c.id,
+            code: c.code.clone(),
+            relative_path: rel,
+            filename: name.clone(),
+            size_bytes: meta_size,
+        });
+
+        let Some(url) = self.download_url(&info, file_id)? else { return Ok(Fetched::Skipped) };
         let bytes = self.fetch_bytes(&url)?;
 
         // The original is the library file. Office documents get a derived
@@ -1000,14 +1002,99 @@ impl Engine {
                 .borrow_mut()
                 .insert(file_id.to_string(), (modified, meta_size));
         }
-        Ok(Some(rel))
+        Ok(Fetched::Saved(rel))
     }
 
-    /// Re-download one file, bypassing the unchanged-skip.
-    pub fn refetch_file(&self, c: &Subject, canvas_id: i64) -> Result<Option<String>, String> {
-        let rel = self.fetch_file(c, canvas_id, None, true)?;
-        self.save_manifest();
+    /// Download one module video on request, past the size cap a sync
+    /// applies. Progress is whole percents; `cancelled` is polled per chunk
+    /// and ends the download with [`crate::canvas::CANCELLED`].
+    pub fn download_video(
+        &self,
+        c: &Subject,
+        file_id: i64,
+        on_progress: &dyn Fn(u8),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<String, String> {
+        let r = self.canvas.get(&format!("/api/v1/files/{file_id}"))?;
+        if !r.ok() {
+            return Err(format!("Canvas answered HTTP {} for file {file_id}", r.status));
+        }
+        let info = r.json()?;
+        let name = file_name(&info, None);
+        if !is_video(&content_type_of(&info), &name) {
+            return Err(format!("{name} is not a video"));
+        }
+        if let Some(until) = locked_until(&info) {
+            return Err(format!("{name} is locked{until}"));
+        }
+        self.save_video(c, file_id, &info, &name, on_progress, cancelled)
+    }
+
+    /// Stream a video into `files/` through a `.part` sibling, renamed on
+    /// success and removed on any failure, so a cut-off download never looks
+    /// finished. Never buffered: lecture recordings run to hundreds of MB.
+    fn save_video(
+        &self,
+        c: &Subject,
+        file_id: i64,
+        info: &serde_json::Value,
+        name: &str,
+        on_progress: &dyn Fn(u8),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<String, String> {
+        let rel = paths::course_rel_path(&c.code, &format!("files/{name}"))
+            .ok_or_else(|| format!("invalid file name: {name}"))?;
+        let dest = self.data_dir.join(&rel);
+        let part = dest.with_file_name(format!(
+            "{}.part",
+            dest.file_name().and_then(|n| n.to_str()).unwrap_or("video")
+        ));
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let url = self
+            .download_url(info, file_id)?
+            .ok_or_else(|| "Canvas gave no download URL".to_string())?;
+
+        let existed = dest.is_file();
+        let size = self
+            .canvas
+            .download_to(&url, &part, on_progress, cancelled)
+            .and_then(|n| std::fs::rename(&part, &dest).map(|_| n).map_err(|e| e.to_string()))
+            .inspect_err(|_| {
+                let _ = std::fs::remove_file(&part);
+            })?;
+
+        self.reporter.file(&FileEvent {
+            subject_id: c.id,
+            code: c.code.clone(),
+            relative_path: rel.clone(),
+            size_bytes: size,
+            category: paths::category_from_path(&format!("files/{name}")).to_string(),
+            canvas_id: Some(file_id),
+            source_url: None,
+            action: if existed { "updated" } else { "new" },
+        });
+        let modified = modified_of(info);
+        if !modified.is_empty() {
+            self.record_manifest(file_id, (modified, info["size"].as_u64().unwrap_or(size)));
+        }
         Ok(rel)
+    }
+
+    /// Add one entry to `file-manifest.json` as it is on disk now: a download
+    /// runs for minutes, and a sync may have saved the manifest meanwhile.
+    fn record_manifest(&self, file_id: i64, entry: (String, u64)) {
+        let path = self.data_dir.join("file-manifest.json");
+        let mut on_disk: HashMap<String, (String, u64)> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        on_disk.insert(file_id.to_string(), entry.clone());
+        self.manifest.borrow_mut().insert(file_id.to_string(), entry);
+        if let Ok(json) = serde_json::to_string(&on_disk) {
+            let _ = std::fs::write(path, json);
+        }
     }
 
     /// Canvas file URLs redirect to a CDN that rejects our cookie, so prefer
@@ -1347,6 +1434,14 @@ fn is_generic_binary(ct: &str) -> bool {
     matches!(ct, "" | "application/octet-stream" | "binary/octet-stream")
 }
 
+/// Videos are listed in modules and downloaded only on request, by type or,
+/// for an untyped upload, by extension.
+fn is_video(ct: &str, name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    ct.starts_with("video/")
+        || (is_generic_binary(ct) && VIDEO_EXTS.iter().any(|e| lower.ends_with(&format!(".{e}"))))
+}
+
 /// The converter extension an untyped file's name claims, if known.
 pub(crate) fn office_ext_of(name: &str) -> Option<&'static str> {
     let lower = name.to_ascii_lowercase();
@@ -1460,6 +1555,55 @@ fn content_type_of(info: &serde_json::Value) -> String {
         .unwrap_or("")
         .trim()
         .to_string()
+}
+
+/// The name a Canvas file is stored under, before path sanitising.
+fn file_name(info: &serde_json::Value, display: Option<&str>) -> String {
+    info["filename"]
+        .as_str()
+        .or_else(|| info["display_name"].as_str())
+        .or(display)
+        .unwrap_or("file.bin")
+        .replace(['/', '\\'], "_")
+}
+
+/// `Some(" until 2026-08-01")` (or `Some("")`) when Canvas lists the file
+/// but refuses its download — checked explicitly, or it reads as an auth
+/// failure.
+fn locked_until(info: &serde_json::Value) -> Option<String> {
+    if !info["locked_for_user"].as_bool().unwrap_or(false) {
+        return None;
+    }
+    Some(
+        info["lock_info"]["unlock_at"]
+            .as_str()
+            .or_else(|| info["unlock_at"].as_str())
+            .map(|d| format!(" until {}", &d[..10.min(d.len())]))
+            .unwrap_or_default(),
+    )
+}
+
+fn modified_of(info: &serde_json::Value) -> String {
+    info["modified_at"]
+        .as_str()
+        .or_else(|| info["updated_at"].as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// One module-TOC line for a file item; TOCs live in `modules/`, so links
+/// step up a level. A video carries its Canvas id — `_(video <id>)_` — for
+/// the app's on-demand download, and links where that download lands.
+fn file_toc_line(indent: &str, title: &str, fetched: &Fetched) -> String {
+    match fetched {
+        Fetched::Saved(rel) => format!("{indent}- [{}](../{})", escape_md(title), rel_within_course(rel)),
+        Fetched::Video { rel, canvas_id } => format!(
+            "{indent}- [{}](../{}) _(video {canvas_id})_",
+            escape_md(title),
+            rel_within_course(rel)
+        ),
+        Fetched::Skipped => format!("{indent}- {} _(file)_", escape_md(title)),
+    }
 }
 
 /// `courses/CODE/files/x.pdf` → `files/x.pdf`.
@@ -1606,6 +1750,49 @@ mod tests {
         assert!(is_generic_binary(""));
         assert!(is_generic_binary("application/octet-stream"));
         assert!(!is_generic_binary("application/pdf"));
+    }
+
+    #[test]
+    fn videos_are_known_by_type_or_an_untyped_upload_s_extension() {
+        assert!(is_video("video/mp4", "Matrices Part 1.mp4"));
+        assert!(is_video("video/quicktime", "untitled"));
+        assert!(is_video("application/octet-stream", "Lecture 3.MP4"));
+        assert!(is_video("", "demo.webm"));
+        assert!(is_video("binary/octet-stream", "clip.m4v"));
+        // A typed file is what its type says, whatever its name.
+        assert!(!is_video("application/pdf", "slides.mp4"));
+        assert!(!is_video("application/octet-stream", "archive.mkv.zip"));
+        assert!(!is_video("audio/mpeg", "talk.mp3"));
+        // Never fed to the parse/embed pipeline.
+        assert!(paths::doc_pdf_rel("courses/X/files/a.mp4").is_none());
+    }
+
+    #[test]
+    fn a_module_video_lists_its_canvas_id_and_where_it_will_land() {
+        let video = Fetched::Video {
+            rel: "courses/MAST_2026/files/Matrices_Part_1.mp4".into(),
+            canvas_id: 12345,
+        };
+        assert_eq!(
+            file_toc_line("  ", "Matrices [Part 1]", &video),
+            "  - [Matrices \\[Part 1\\]](../files/Matrices_Part_1.mp4) _(video 12345)_"
+        );
+        let saved = Fetched::Saved("courses/MAST_2026/files/w1.pdf".into());
+        assert_eq!(file_toc_line("", "Week 1", &saved), "- [Week 1](../files/w1.pdf)");
+        assert_eq!(file_toc_line("", "Gone", &Fetched::Skipped), "- Gone _(file)_");
+    }
+
+    #[test]
+    fn a_locked_file_names_its_unlock_date() {
+        let open = serde_json::json!({ "locked_for_user": false });
+        let dated = serde_json::json!({
+            "locked_for_user": true,
+            "lock_info": { "unlock_at": "2026-08-01T00:00:00Z" },
+        });
+        let undated = serde_json::json!({ "locked_for_user": true });
+        assert_eq!(locked_until(&open), None);
+        assert_eq!(locked_until(&dated).as_deref(), Some(" until 2026-08-01"));
+        assert_eq!(locked_until(&undated).as_deref(), Some(""));
     }
 
     #[test]

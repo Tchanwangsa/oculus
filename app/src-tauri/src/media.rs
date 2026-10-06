@@ -105,6 +105,8 @@ fn handle(request: tiny_http::Request, data_dir: &PathBuf, token: &str) {
 
     let content_type = match path.extension().and_then(|e| e.to_str()) {
         Some("mp4") | Some("m4v") => "video/mp4",
+        Some("mov") => "video/quicktime",
+        Some("webm") => "video/webm",
         Some("m4a") => "audio/mp4",
         Some("mp3") => "audio/mpeg",
         Some("vtt") => "text/vtt",

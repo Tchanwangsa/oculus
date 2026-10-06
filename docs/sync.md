@@ -13,7 +13,7 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 | Ed Discussion: token, courses, threads, XML→md | `app/src-tauri/src/ed.rs` |
 | Echo360 core; its Tauri commands, session cache, downloads | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
 | Canvas HTML → Markdown | `app/src-tauri/src/md.rs` |
-| App-side entry: thread + `AppReporter` | `app/src-tauri/src/scrape.rs` |
+| App-side entry: thread + `AppReporter`; on-demand module videos | `app/src-tauri/src/scrape.rs` |
 | Headless DB writes, subject list state | `app/src-tauri/src/store.rs`, `app/src-tauri/src/subjects.rs` |
 | Chronological term ranking | `app/src-tauri/src/terms.rs` |
 | Agent docs written into the library | `app/src-tauri/src/agents.rs` |
@@ -67,12 +67,38 @@ cannot write it — see [cli.md](./cli.md).
 
 - `file-manifest.json` in the data dir maps Canvas file id → (`modified_at`,
   size); when the metadata call reports the same pair and the file is on disk,
-  nothing is downloaded. "Re-download" bypasses it.
+  nothing is downloaded.
 - Bodies (pages, announcements, tasks, Ed threads) are always re-fetched;
   the byte-compare in `paths::write_course_bytes` decides new/updated/unchanged.
 - An `updated` write purges the parse/embed artifacts
   (`paths::purge_parse_artifacts`) and the file's pages, so the parse re-runs.
-- An `application/octet-stream` upload is judged by extension (`office_ext_of`, an allowlist).
+- An `application/octet-stream` upload is judged by extension (`office_ext_of`, `is_video`; allowlists).
+- `MAX_FILE_BYTES` (100 MB) skips any larger file except a video, which a sync never downloads.
+
+## A sync lists module videos, and the student downloads them
+
+Lecture videos uploaded as Canvas files (`video/*`, or an untyped
+`.mp4/.mov/.m4v/.webm`) are ordinary library files fetched on request; they
+have nothing to do with Echo360 lectures.
+
+- `fetch_file` records a video without downloading it, and its module TOC line
+  carries the Canvas id and the path it will land at:
+  `- [title](../files/<name>.mp4) _(video <id>)_` (`file_toc_line`, parsed by
+  `app/src/lib/moduleToc.ts`). Locked videos skip like any file.
+- Once downloaded, a sync reports it `unchanged` while the manifest pair
+  matches. A copy Canvas has since changed is left as it is: only the
+  student downloads a video, through the Modules page.
+- `canvas_download_video` (`app/src-tauri/src/scrape.rs`) streams it with
+  `Canvas::download_to` into a `.part` sibling, renamed on success and removed
+  on any failure or cancel, then reports a `scrape-file` like a synced file, so
+  the frontend writes its `files` row. Progress is `canvas-video-progress`
+  (`canvasFileId`, `percent`, `phase`); `canvas_cancel_video` sets the
+  file's flag in `VideoCancels`, polled per chunk.
+- The cookie goes only to Canvas: `download_to` sets it for a Canvas URL, and
+  ureq strips `Cookie` on every redirect, so the signed file host a Canvas
+  download redirects to never sees it.
+- Videos never reach parse or embed: every pipeline gate is a PDF/Office
+  allowlist (`paths::doc_pdf_rel`, `isPdfBacked`, `PDF_BACKED_SQL_LIST`).
 
 ## Office documents are stored as themselves plus a derived PDF
 
@@ -131,4 +157,5 @@ already-parsed file with no page rows folds its `.pages.json` in.
 
 - An office file whose conversion fails (no LibreOffice) is still stored but kept out of `file-manifest.json`, so the next sync retries the conversion.
 - A delete cancels an in-flight download of the same lecture first, or the writer recreates the file just after it is removed.
+- A video download merges its entry into `file-manifest.json` as it is on disk (`record_manifest`), or it would drop what a sync saved during the download.
 - Don't add a parse deadline or worker pool here — concurrency and timeouts belong to the parse backend ([parsing.md](./parsing.md)).

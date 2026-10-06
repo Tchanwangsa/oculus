@@ -2,7 +2,7 @@
 //! retries, Link-header pagination. In Rust, not a WebView — see
 //! `docs/architecture.md`.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -30,6 +30,9 @@ impl Res {
 /// Nothing above this layer has a timeout, so this is what ends a wedged sync.
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 const RETRIES: u32 = 2;
+
+/// Returned by [`Canvas::download_to`] when its `cancelled` poll said stop.
+pub const CANCELLED: &str = "cancelled";
 
 pub struct Canvas {
     cookie: Mutex<String>,
@@ -138,6 +141,85 @@ impl Canvas {
             }
         }
         Err(format!("{url}: {last}"))
+    }
+
+    /// Stream a GET into `dest` without holding the body in memory, for files
+    /// too large to buffer. `TIMEOUT` bounds each read, not the whole transfer.
+    /// Only a Canvas URL gets the cookie, and ureq drops `Cookie` on every
+    /// redirect, so the signed file host a Canvas download redirects to never
+    /// sees it. Progress is whole percents; `cancelled` is polled per chunk.
+    pub fn download_to(
+        &self,
+        url_or_path: &str,
+        dest: &Path,
+        on_progress: &dyn Fn(u8),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<u64, String> {
+        let url = if url_or_path.starts_with("http") {
+            url_or_path.to_string()
+        } else {
+            format!("{CANVAS_BASE}{url_or_path}")
+        };
+        let canvas_host = |u: &str| u.starts_with(&format!("{CANVAS_BASE}/"));
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(std::time::Duration::from_secs(30))
+            .timeout_read(TIMEOUT)
+            .build();
+        let mut req = agent.get(&url);
+        if canvas_host(&url) {
+            let c = self.cookie();
+            if !c.is_empty() {
+                req = req.set("Cookie", &c);
+            }
+        }
+        let resp = match req.call() {
+            Ok(resp) => resp,
+            Err(ureq::Error::Status(code, _)) => return Err(format!("download HTTP {code}")),
+            Err(e) => return Err(format!("download failed: {e}")),
+        };
+        // Set-Cookie from the file host is not Canvas's to keep.
+        if canvas_host(resp.get_url()) {
+            self.absorb(&resp);
+        }
+        // A login page where a file should be means the session lapsed.
+        if resp.content_type().contains("text/html") {
+            return Err("got HTML instead of the file — session or URL problem".to_string());
+        }
+        let total = resp
+            .header("content-length")
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        let mut reader = resp.into_reader();
+        let mut file = std::fs::File::create(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
+        let mut buf = vec![0u8; 256 * 1024];
+        let mut done = 0u64;
+        let mut last_pct = u8::MAX;
+        loop {
+            if cancelled() {
+                return Err(CANCELLED.to_string());
+            }
+            let n = reader
+                .read(&mut buf)
+                .map_err(|e| format!("network read failed after {done} bytes: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            file.write_all(&buf[..n]).map_err(|e| format!("write failed after {done} bytes: {e}"))?;
+            done += n as u64;
+            if total > 0 {
+                let pct = (done * 100 / total).min(100) as u8;
+                if pct != last_pct {
+                    last_pct = pct;
+                    on_progress(pct);
+                }
+            }
+        }
+        if total > 0 && done != total {
+            return Err(format!("download incomplete: {done} of {total} bytes"));
+        }
+        file.sync_all().map_err(|e| e.to_string())?;
+        Ok(done)
     }
 
     pub fn get_json(&self, url_or_path: &str) -> Result<serde_json::Value, String> {
@@ -318,6 +400,56 @@ mod tests {
         // Session values are base64 ending in '='; split on the first '=' only.
         let out = merged_cookie_header("s=old", &sc(&["s=abc==; path=/"])).unwrap();
         assert_eq!(out, "s=abc==");
+    }
+
+    /// Serves one canned response on a loopback port; returns its URL.
+    fn serve_once(response: Vec<u8>) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut head = [0u8; 4096];
+            let _ = stream.read(&mut head);
+            let _ = stream.write_all(&response);
+        });
+        format!("http://{addr}/video.mp4")
+    }
+
+    fn signed_out() -> Canvas {
+        Canvas { cookie: Mutex::new(String::new()), cookie_path: PathBuf::new() }
+    }
+
+    #[test]
+    fn a_download_streams_to_disk_and_refuses_a_short_body() {
+        let dir = crate::test_support::Scratch::new("canvas-download");
+        let body = vec![7u8; 300_000];
+        let mut whole = format!("HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: {}\r\n\r\n", body.len())
+            .into_bytes();
+        whole.extend_from_slice(&body);
+        let seen = Mutex::new(Vec::new());
+        let dest = dir.join("whole.mp4");
+        let n = signed_out()
+            .download_to(&serve_once(whole), &dest, &|p| seen.lock().unwrap().push(p), &|| false)
+            .unwrap();
+        assert_eq!(n, 300_000);
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        assert_eq!(seen.lock().unwrap().last(), Some(&100));
+
+        let short = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nonly this".to_vec();
+        let err = signed_out()
+            .download_to(&serve_once(short), &dir.join("short.mp4"), &|_| {}, &|| false)
+            .unwrap_err();
+        assert_ne!(err, CANCELLED);
+    }
+
+    #[test]
+    fn a_cancelled_download_says_so() {
+        let dir = crate::test_support::Scratch::new("canvas-cancel");
+        let ok = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nmp4!".to_vec();
+        let err = signed_out()
+            .download_to(&serve_once(ok), &dir.join("x.mp4"), &|_| {}, &|| true)
+            .unwrap_err();
+        assert_eq!(err, CANCELLED);
     }
 
     #[test]
