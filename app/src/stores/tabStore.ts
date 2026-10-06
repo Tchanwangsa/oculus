@@ -68,7 +68,7 @@ interface TabHistory {
 }
 
 /** The new-tab page: where the last closed tab and a fresh side panel land. */
-const HOME = "/new";
+export const HOME = "/new";
 /** Where a first-run strip opens. */
 const FIRST = "/chat";
 

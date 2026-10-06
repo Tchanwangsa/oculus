@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
-import { AppWindow, ArrowsOutSimple, X } from "@phosphor-icons/react";
+import { AppWindow, ArrowsOutSimple, Plus, X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -12,7 +12,7 @@ import { useTabInfo } from "@/components/tabs/tabInfo";
 import { expandSide } from "@/lib/tabRouters";
 import { frontOf, type SidePanel } from "@/lib/sideStack";
 import { cn } from "@/lib/utils";
-import { useTabStore } from "@/stores/tabStore";
+import { HOME, useTabStore } from "@/stores/tabStore";
 
 /** How many item icons the switcher stacks before a `+N`. */
 const STACKED = 3;
@@ -112,6 +112,7 @@ function Switcher({
 }) {
   const frontSide = useTabStore((s) => s.frontSide);
   const removeSide = useTabStore((s) => s.removeSide);
+  const pushSide = useTabStore((s) => s.pushSide);
   const [open, setOpen] = useState(false);
 
   const front = frontOf(side);
@@ -127,12 +128,13 @@ function Switcher({
           className="flex h-6 shrink-0 items-center rounded-full px-1 text-muted-foreground transition-colors hover:text-foreground data-[state=open]:text-foreground"
         >
           {stacked.map((item, i) => (
-            // Chips ringed in the header's own background, so the overlap
-            // reads as a stack; the front one draws on top.
+            // Each chip is a bordered disc, ringed in the header's own
+            // background for a gap, so the overlap reads as a stack; the
+            // front one draws on top.
             <span
               key={item.id}
               className={cn(
-                "relative flex size-5 items-center justify-center rounded-full bg-card ring-2 ring-card",
+                "relative flex size-5 items-center justify-center rounded-full border border-border bg-card ring-2 ring-card",
                 i > 0 && "-ml-1.5",
               )}
               style={{ zIndex: stacked.length - i }}
@@ -145,7 +147,16 @@ function Switcher({
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 p-1">
+      <PopoverContent
+        align="start"
+        className="w-64 p-1"
+        // Focus the list, not its first row, which would open ringed; Tab
+        // still walks the rows, and the ring shows there.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          (e.target as HTMLElement).focus({ preventScroll: true });
+        }}
+      >
         {side.items.map((item) => {
           const { title, icon } = tabInfo(item.path);
           const isFront = item.id === front.id;
@@ -187,6 +198,19 @@ function Switcher({
             </div>
           );
         })}
+        <button
+          type="button"
+          onClick={() => {
+            pushSide(tabId, HOME);
+            setOpen(false);
+          }}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <span className="flex size-3.5 shrink-0 items-center justify-center">
+            <Plus size={13} />
+          </span>
+          New side tab
+        </button>
       </PopoverContent>
     </Popover>
   );

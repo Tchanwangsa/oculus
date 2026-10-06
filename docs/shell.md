@@ -214,8 +214,8 @@ closed panel opens one on `/new`.
   ⌘-click on expand, a citation or a file chip keeps the cited spot. It is not
   stored in `oculus-tabs`.
 - **The header is a switcher** — up to three stacked item icons, then `+N`,
-  opening a list with a × per item — then expand and ×, which closes the panel
-  and clears the stack. A page with its own top row (file, lecture, task,
+  opening a list with a × per item and a "New side tab" row that pushes `/new`
+  — then expand and ×, which closes the panel and clears the stack. A page with its own top row (file, lecture, task,
   project, chat thread) builds it on `PaneHeaderRow`
   (`app/src/components/tabs/PaneHeader.tsx`), which in the side panel claims
   the header slot `TabPane` provides and draws the switcher at the row's start
