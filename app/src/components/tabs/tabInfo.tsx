@@ -19,6 +19,7 @@ import { useSubjects } from "@/hooks/useSubjects";
 import { useBrowserStore } from "@/stores/browserStore";
 import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { displayCode, humanizeSlug } from "@/lib/format";
+import { SETTINGS_PAGES } from "@/lib/settingsSearch";
 import type { Subject } from "@/lib/db";
 
 const SECTION_LABELS: Record<string, string> = {
@@ -108,8 +109,12 @@ export function tabInfo(
     return { title: "Tasks", icon: <ListChecks size={size} /> };
   if (pathname.startsWith("/sync"))
     return { title: "Sync", icon: <ArrowsClockwise size={size} /> };
-  if (pathname.startsWith("/settings"))
-    return { title: "Settings", icon: <GearSix size={size} /> };
+  if (pathname.startsWith("/settings")) {
+    // Named for its page (`/settings/opencode` is "opencode"); the bare route,
+    // which redirects, stays "Settings".
+    const page = SETTINGS_PAGES.find((p) => p.id === pathname.split("/")[2]);
+    return { title: page?.label ?? "Settings", icon: <GearSix size={size} /> };
+  }
   const m = /^\/subjects\/(\d+)(?:\/([\w-]+))?/.exec(pathname);
   if (m) {
     const subject = subjects.find((s) => String(s.id) === m[1]);
