@@ -170,8 +170,14 @@ export default function BrowserPage() {
   // behind the list; `null` counts as settled.
   const listOpen = suggesting && suggestions.length > 0 && still !== undefined;
 
-  // One rule, three reasons — see the file header.
-  const hidden = !active || covered || listOpen;
+  // The page stays parked behind its still for as long as the field is being
+  // edited, not just while the list shows: `browser_place` focuses the native
+  // page, so re-placing it when the list closes (a backspace to empty) would
+  // steal the caret from the field.
+  const holding = editing && typeof still === "string";
+
+  // One rule, four reasons — see the file header.
+  const hidden = !active || covered || listOpen || holding;
 
   useEffect(() => {
     const slot = slotRef.current;
@@ -258,10 +264,10 @@ export default function BrowserPage() {
   }, [still]);
 
   // `listOpen` already shows the still in the render that opens the list;
-  // `standing` keeps it up after the list closes, until the live page is back.
+  // `standing` keeps it up after the field blurs, until the live page is back.
   useEffect(() => {
-    if (listOpen && typeof still === "string") setStanding(true);
-  }, [listOpen, still]);
+    if ((listOpen || holding) && typeof still === "string") setStanding(true);
+  }, [listOpen, holding, still]);
 
   // Autocomplete: a local query per keystroke, undebounced, with an ordering
   // guard against out-of-order answers.
