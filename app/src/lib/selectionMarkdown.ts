@@ -8,7 +8,8 @@ import type { ClipboardEvent, DragEvent } from "react";
  *   and the subtree is never descended into.
  * - A mermaid figure carries its fence source in `data-md` (`Mermaid.tsx`), as
  *   does an embedded picture or page (`OutputEmbed.tsx`) — inline, since it
- *   usually sits in a `<p>`.
+ *   usually sits in a `<p>` — and a sent pasted text card its `<pasted_text>`
+ *   block (`PastedText.tsx`).
  * - `data-copy-skip` marks chrome that happens to be selectable.
  */
 

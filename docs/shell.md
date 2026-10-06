@@ -44,8 +44,8 @@ before leaving a playing lecture.
   (`replace: true`) after a rename.
 - **`/chat` carries the thread, not just its name**: `?t=<id>&n=<title>`
   (`chatHref`). Every tab has its own router, so two Chat tabs hold two threads
-  and a restored tab or Recent row reopens its own; a bare `/chat` is the
-  history page ([harness.md](./harness.md#each-chat-tab-owns-its-conversation-in-its-route)).
+  and a restored tab or Recent row reopens its own; a bare `/chat` is a
+  new thread ([harness.md](./harness.md#each-chat-tab-owns-its-conversation-in-its-route)).
 - **`/projects` and `/tasks` are one section**, switched by
   `app/src/components/projects/SectionHeader.tsx`, which *navigates* because
   crumbs, ⌘-click, restored tabs and `tabInfo` all key off the path; `RailItem`'s

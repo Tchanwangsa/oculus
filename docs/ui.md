@@ -12,7 +12,7 @@ Read this before any UI work.
 | shadcn primitives | `app/src/components/ui/` |
 | Persisted view state and collapsed groups | `app/src/hooks/useStoredState.ts` |
 | Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/PageParts.tsx` |
-| A page's nav column (Settings, subjects) | `app/src/components/ui/SideNav.tsx` |
+| A page's nav column (Settings, subjects, Chat) | `app/src/components/ui/SideNav.tsx` |
 | Drag gestures | `app/src/hooks/usePointerDrag.ts`, `app/src/hooks/useCardDrag.ts`, `app/src/hooks/useFileDrop.ts` |
 | Subject grouping and persisted collapsed groups | `app/src/lib/subjectGroups.ts`, `app/src/hooks/useCollapsedGroups.ts` |
 | Table chrome | `app/src/components/ui/GridTable.tsx`, `app/src/components/ui/ViewTabs.tsx`, `app/src/components/ui/TablePagination.tsx` |

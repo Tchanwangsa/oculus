@@ -28,7 +28,8 @@ import { cn } from "@/lib/utils";
  * `app/src-tauri/src/harness/mod.rs`); Stop hands the queue back as `restore`.
  * Scope is chosen above the box, only while the thread is new. `@` mentions
  * insert library paths (drawn as chips by `MentionInput`), never file content.
- * Unsent text lives in `draftStore` under `draftKey`, so it outlives the box.
+ * Unsent text lives in `draftStore` under `draftKey`, so it outlives the box;
+ * so do long pastes, held as cards in the attachment strip.
  */
 export function Composer({
   draftKey,
@@ -91,14 +92,19 @@ export function Composer({
   const mentions = useMentionMenu({ subjectId, input: ref });
   /** The drop target for attachments: the whole box, not just the editor. */
   const wrapRef = useRef<HTMLDivElement>(null);
-  /** Pasted/dropped pictures, in memory until send writes them to the library. */
-  const att = useAttachments(dropRef ?? wrapRef);
+  /** Pasted/dropped pictures, in memory until send writes them to the library;
+   *  long pastes as text cards. */
+  const att = useAttachments(dropRef ?? wrapRef, draftKey);
   useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
 
-  // Restored text goes before anything typed since, because it was typed first.
+  // Restored text goes before anything typed since, because it was typed first;
+  // its pasted blocks go back to being cards.
+  const takeBackRef = useRef(att.takeBack);
+  takeBackRef.current = att.takeBack;
   useEffect(() => {
     if (!restore) return;
-    ref.current?.prepend(restore.text);
+    const rest = takeBackRef.current(restore.text);
+    if (rest) ref.current?.prepend(rest);
     onRestored?.();
   }, [restore, onRestored]);
 
@@ -123,7 +129,7 @@ export function Composer({
     onReasoning(pick.reasoning);
   }, [model, active, onModel, onReasoning]);
 
-  const ready = text.trim().length > 0 || att.items.length > 0;
+  const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
 
   /** Send or queue. Pictures are written first; if that fails the box is kept as is. */
   const send = async () => {
@@ -190,7 +196,15 @@ export function Composer({
         )}
       >
         <div className="flex flex-col gap-2">
-          <AttachmentStrip items={att.items} onDetach={att.detach} />
+          <AttachmentStrip
+            items={att.items}
+            onDetach={att.detach}
+            texts={att.texts}
+            onEditText={att.editText}
+            onDetachText={att.detachText}
+            onPutBack={(t) => ref.current?.append(t)}
+            subjectId={subjectId}
+          />
           {/* Keyed: the editor reads its text once, at mount. */}
           <MentionInput
             key={draftKey}
@@ -202,6 +216,7 @@ export function Composer({
               mentions.track(next, caret);
             }}
             onFiles={att.attach}
+            onPasteText={att.attachText}
             onBlur={mentions.close}
             onKeyDown={(e) => {
               // The menu's claimed keys come back prevented, so a pick never sends.

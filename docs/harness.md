@@ -23,7 +23,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Recorded provider output the bridge tests replay | `app/src-tauri/fixtures/harness/` |
 | Provider table (`PROVIDERS`), types, commands | `app/src/lib/harness.ts` |
 | Live state and event folding | `app/src/stores/harnessStore.ts`, `app/src/hooks/useBackendEvents.ts` |
-| Page, thread list, history list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` (history: `ChatHistory.tsx`) |
+| Page, thread list, recent list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` (recent list: `RecentThreads.tsx`) |
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/draftStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/ModelPicker.tsx`, `app/src/hooks/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/OpencodePage.tsx`, `app/src/components/settings/opencode/`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeCatalogue.ts` |
@@ -32,6 +32,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | `@` menu and mention input | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/SendControls.tsx` |
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/useAttachments.ts`, `app/src/hooks/useFileDrop.ts` |
+| Long pastes held as text cards: format, card, editor and viewer | `app/src/lib/attachments.ts`, `app/src/components/harness/PastedText.tsx`, `app/src/components/harness/PastedTextEditor.tsx` |
 | Library paths in rows and prose; copy as markdown | `app/src/lib/openFile.ts`, `app/src/lib/selectionMarkdown.ts` |
 | The lecture dock's chat | `app/src/components/lectures/LectureChatPanel.tsx`, `app/src/components/lectures/LectureChatComposer.tsx`, `lecture_grab_frames` in `app/src-tauri/src/chapters.rs` |
 
@@ -310,18 +311,15 @@ the name lands.
   empty timeline.
 - A route naming a thread missing from the list walks back to bare `/chat` —
   only after the list has loaded, or a restored tab drops its thread.
-- The conversations column (`ThreadList`) sits beside an open thread, not
-  the history page, threads grouped by subject; it resizes, ⌘⌥B folds it,
-  and entering a thread unfolds it again.
-- Bare `/chat` is the history page: an "Ask Oculus anything" header, the composer for a new
-  thread, then every loaded thread (`ChatHistory`) grouped by date
-  ("Recent", the default), subject or provider (the choice persists). Running
-  threads are pulled into a "Running" group above the rest. A row is provider
+- The conversations column (`ThreadList`) is a `SideNav`, the subject page's
+  column ([ui.md](./ui.md)): New thread on top, lit while no thread is open,
+  then threads grouped by subject. It resizes, and ⌘⌥B or its footer toggle
+  folds it to the rows' provider marks.
+- Bare `/chat` is a new thread: the composer docked at the bottom as in a
+  thread, and above it the three latest threads (`RecentThreads`) — provider
   mark, title, a chip naming its subject or General, age, and the last reply
-  flattened to one muted line (`getThreadPreviews`, one read for the list);
-  each group shows ten and pages by ten, and folds are remembered.
-- A thread's header is a breadcrumb: `Chat` pushes bare `/chat`, so back
-  returns to the thread.
+  flattened to one muted line (`getThreadPreviews`, one read for the list).
+  The list has its own scroller, since a thread's follows its bottom.
 
 Deleting a thread drops its retained live output, view holds and context-drift
 marker as well as rows and queue, so removed turns cannot leave the sidebar busy.
@@ -479,6 +477,8 @@ send, writes on arrival) and answer `./attachments/<name>`, appended fenced.
 The claimed filename never reaches disk: bytes are sniffed, the stem is a
 timestamp, non-images are refused, 20 MB cap. `assetProtocol.scope` in
 `app/src-tauri/tauri.conf.json` must name `agents/` or every picture (and
+A message reads: the typed text, each pasted text's block, then the pictures'
+paths, blank-line separated.
 every page an agent made) draws broken; a dropped file is scoped by Tauri on
 delivery.
 
@@ -490,6 +490,34 @@ page's conversation column and the lecture dock's Chat panel are the drop
 targets, not just the box: each passes its own ref as the composer's `dropRef`
 and draws `DropOverlay` (`app/src/components/ui/DropOverlay.tsx`) from
 `onDropping`.
+### Pasted text is a card, sent inline
+
+A plain-text paste of `LONG_PASTE` (1000 characters or 15 lines) or more
+becomes a card in `AttachmentStrip` instead of text in the box; a clipboard
+picture still wins. Cards are kept in `draftStore` under the draft key (a
+second map, `oculus.chatPastes`), so they outlive a thread switch and a
+relaunch like typed words; pictures stay in memory. Clicking one opens
+`PastedTextEditor`, the text as a markdown document on `NoteField` (read
+through its `onChange`, so the buttons never wait on a blur): Done keeps the
+edits (as do Escape and the overlay), Remove drops the card, and Put in
+message appends the text to the box after a blank line and drops the card.
+The editor loads on demand, since it brings CodeMirror to a page that
+otherwise has none.
+
+No file is written. On send each card becomes a block in the message —
+`<pasted_text>`, a newline, the text, a newline, `</pasted_text>` —
+built by `withPastedText` and read back by `splitPastedText`
+(`app/src/lib/attachments.ts`), which round-trip exactly: a block opens at the
+start or after a blank line and ends at the first closing tag alone on its
+line, and a text line that is exactly that tag is sent with a backslash in
+front. The question bubble lifts the blocks out as the same cards, in the
+row above the words ahead of the pictures, and only the remaining prose is
+measured and folded; a sent card opens `PastedTextViewer` (rendered markdown
+and Copy), and a copied selection across one takes its block (`data-md`).
+Words handed back by Stop or a rewind go through `useAttachments.takeBack`,
+so their blocks return as cards and only the rest lands in the box. The
+bubble's own edit box still shows the raw blocks, as it shows picture paths.
+
 
 - **The position is in points despite the `PhysicalPosition` type.** wry
   never applies the backing scale, so dividing by `devicePixelRatio` halves

@@ -1,19 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { SidebarSimple } from "@phosphor-icons/react";
-import { ChatHistory } from "@/components/harness/ChatHistory";
 import { Composer } from "@/components/harness/Composer";
+import { RecentThreads } from "@/components/harness/RecentThreads";
 import { ThreadList } from "@/components/harness/ThreadList";
 import { ThreadMap } from "@/components/harness/ThreadMap";
 import { Timeline } from "@/components/harness/Timeline";
 import { useThreadActions } from "@/components/harness/useThreadActions";
-import { PaneHeaderRow, PaneTitle, PaneTrail, useInSidePanel } from "@/components/tabs/PaneHeader";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { DropOverlay } from "@/components/ui/DropOverlay";
-import { ResizeHandle } from "@/components/ui/ResizeHandle";
-import { useWindowEvent } from "@/hooks/useEvents";
-import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { useScrollFade } from "@/hooks/useScrollFade";
 import {
@@ -27,15 +21,12 @@ import {
 import { itemsFor, useHarnessStore } from "@/stores/harnessStore";
 import { draftKey, useDraftStore } from "@/stores/draftStore";
 
-/** The conversations column's width bounds. */
-const LIST = { defaultWidth: 224, minWidth: 160, maxWidth: 420, storageKey: "oculus-chat-list-width" };
-
 /**
  * Chat with a CLI agent running from the library's `agents/` folder
- * (`docs/harness.md`): the conversations column beside a thread. Bare `/chat`
- * is the history page — a header, a composer for a new thread, then every
- * thread (`ChatHistory`); `?t=<id>` is that thread's timeline with the
- * composer docked at the bottom.
+ * (`docs/harness.md`): the conversations column (`ThreadList`) beside a thread.
+ * `?t=<id>` is that thread's timeline; bare `/chat` is a new thread, the
+ * recent threads (`RecentThreads`) filling its empty timeline. The composer is
+ * docked at the bottom of both.
  *
  * Subscribes slice by slice: `live` is written many times a second mid-turn,
  * so the streaming parts subscribe where they are drawn, not here.
@@ -108,7 +99,7 @@ export default function ChatPage() {
   }, [activeId, store]);
 
   // A route naming a thread the loaded list doesn't have (deleted here, in
-  // another tab, or before a restore) falls back to the history page.
+  // another tab, or before a restore) falls back to a new thread.
   const missing = threadsLoaded && activeId != null && thread == null;
   useEffect(() => {
     if (missing) navigate(chatHref(null), { replace: true });
@@ -145,27 +136,13 @@ export default function ChatPage() {
     [items],
   );
 
-  const history = activeId == null;
-  const scroll = useStickToBottom(activeId, !history);
-  useScrollFade(scroll.outer, "y", !history);
-  const historyScroll = useRef<HTMLDivElement>(null);
-  useScrollFade(historyScroll, "y", history);
-  const list = useResizablePanel(LIST);
-  const inSide = useInSidePanel();
-  // Entering a thread unfolds the column; ⌘⌥B still folds it while there.
-  const { setCollapsed } = list;
-  useEffect(() => {
-    if (!history) setCollapsed(false);
-  }, [history, setCollapsed]);
-
-  // ⌘⌥B folds the conversations column. `e.code`, not `e.key`: on macOS ⌥B
-  // arrives as `∫`.
-  useWindowEvent("keydown", (e) => {
-    const k = e as KeyboardEvent;
-    if (history || !k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
-    k.preventDefault();
-    list.toggle();
-  });
+  const fresh = activeId == null;
+  // Only a thread follows its bottom; the recent list is read from the top,
+  // so it has a scroller of its own.
+  const scroll = useStickToBottom(activeId, !fresh);
+  useScrollFade(scroll.outer, "y", !fresh);
+  const recentScroll = useRef<HTMLDivElement>(null);
+  useScrollFade(recentScroll, "y", fresh);
 
   const { send: sendTurn, onStop, onProvider, onModel, onReasoning, questions, pending } = useThreadActions({
     threadId: () => activeRef.current,
@@ -190,8 +167,6 @@ export default function ChatPage() {
     },
     [store, navigate],
   );
-  // Push, so back returns to the thread.
-  const onHistory = useCallback(() => navigate(chatHref(null)), [navigate]);
   const onNew = useCallback(
     (subject?: number | null) => {
       if (activeRef.current != null) navigate(chatHref(null));
@@ -205,7 +180,9 @@ export default function ChatPage() {
       harnessDeleteThread(id)
         .then(() => {
           store.getState().removed(id);
-          useDraftStore.getState().setDraft(draftKey(id, "chat"), "");
+          const drafts = useDraftStore.getState();
+          drafts.setDraft(draftKey(id, "chat"), "");
+          drafts.setPastes(draftKey(id, "chat"), []);
         })
         // Never swallow: a failed delete looks exactly like a lost click.
         .catch((e) => console.error("harness delete failed", e));
@@ -247,109 +224,50 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full">
-      {/* Only beside a thread: the history page already lists every one. */}
-      {!history && (
-        <>
-          <ThreadList
-            threads={threads}
-            subjects={subjects}
-            activeId={activeId}
-            runningIds={runningIds}
-            width={list.width}
-            restWidth={list.restWidth}
-            collapsed={list.collapsed}
-            animate={!list.dragging}
-            onToggle={list.toggle}
-            onOpen={onOpen}
-            onNew={onNew}
-            onDelete={onDelete}
-          />
-          {/* On the seam: negative margins cost no layout width. */}
-          <ResizeHandle onMouseDown={list.onMouseDown} dragging={list.dragging} className="-mx-0.5" />
-        </>
-      )}
+      <ThreadList
+        threads={threads}
+        subjects={subjects}
+        activeId={activeId}
+        runningIds={runningIds}
+        onOpen={onOpen}
+        onNew={onNew}
+        onDelete={onDelete}
+      />
 
       <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
-        {/* History keeps the side panel's own header: its row has no trail. */}
-        <PaneHeaderRow
-          standalone={history}
-          className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6"
-        >
-          {/* Folded, the panel leaves nothing behind, so the way back is here. */}
-          {!history && list.collapsed && (
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Show conversations"
-              title="Show conversations (⌘⌥B)"
-              className={cn("shrink-0 text-muted-foreground", !inSide && "-ml-2")}
-              onClick={list.toggle}
-            >
-              <SidebarSimple size={14} />
-            </Button>
-          )}
-          {history ? (
-            <h1 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">Chat</h1>
-          ) : (
-            <PaneTrail>
-              <nav
-                aria-label="Breadcrumb"
-                className="flex shrink-0 items-center gap-2.5 text-[11px] text-muted-foreground"
-              >
-                <button
-                  type="button"
-                  data-tab-href={chatHref(null)}
-                  onClick={onHistory}
-                  className="shrink-0 cursor-pointer transition-colors hover:text-foreground"
-                >
-                  Chat
-                </button>
-                <span aria-hidden className="shrink-0 text-border">
-                  /
-                </span>
-              </nav>
-              <PaneTitle>{thread ? thread.title?.trim() || "Untitled" : ""}</PaneTitle>
-            </PaneTrail>
-          )}
+        <PaneHeaderRow className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
+          <PaneTrail>
+            <PaneTitle>{fresh ? "New thread" : thread ? thread.title?.trim() || "Untitled" : ""}</PaneTitle>
+          </PaneTrail>
         </PaneHeaderRow>
 
-        {history ? (
-          <div ref={historyScroll} className="flex-1 overflow-y-auto px-6">
-            <div className="mx-auto flex w-full max-w-[760px] flex-col gap-6 py-8">
-              <h1 className="text-display text-foreground">Ask Oculus anything</h1>
-              <div className="w-full">{composer}</div>
-              <ChatHistory
-                threads={threads}
-                subjects={subjects}
-                runningIds={runningIds}
-                onOpen={onOpen}
-                onDelete={onDelete}
-              />
+        {fresh ? (
+          <div ref={recentScroll} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">
+            <div className="mx-auto w-full max-w-[760px]">
+              <RecentThreads threads={threads} subjects={subjects} runningIds={runningIds} onOpen={onOpen} />
             </div>
           </div>
         ) : (
-          <>
-            <div className="relative min-h-0 flex-1">
-              {/* `overflow-x-hidden` is load-bearing: `overflow-y: auto` makes x
-                  `auto` too, so one wide row would scroll the whole thread. */}
-              <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 py-6">
-                <div ref={scroll.inner} className="mx-auto w-full max-w-[760px]">
-                  <Timeline
-                    items={items}
-                    threadId={activeId}
-                    running={running}
-                    questions={questions}
-                    pending={pending}
-                  />
-                </div>
+          <div className="relative min-h-0 flex-1">
+            {/* `overflow-x-hidden` is load-bearing: `overflow-y: auto` makes x
+                `auto` too, so one wide row would scroll the whole thread. */}
+            <div ref={scroll.outer} className="h-full overflow-x-hidden overflow-y-auto px-6 py-6">
+              <div ref={scroll.inner} className="mx-auto w-full max-w-[760px]">
+                <Timeline
+                  items={items}
+                  threadId={activeId}
+                  running={running}
+                  questions={questions}
+                  pending={pending}
+                />
               </div>
-              <ThreadMap scrollRef={scroll.outer} contentRef={scroll.inner} markers={markers} />
             </div>
-            <div className="shrink-0 px-6 pb-4">
-              <div className="mx-auto max-w-[760px]">{composer}</div>
-            </div>
-          </>
+            <ThreadMap scrollRef={scroll.outer} contentRef={scroll.inner} markers={markers} />
+          </div>
         )}
+        <div className="shrink-0 px-6 pb-4">
+          <div className="mx-auto max-w-[760px]">{composer}</div>
+        </div>
 
         <DropOverlay show={dropping} label="Drop to attach a picture" />
       </div>

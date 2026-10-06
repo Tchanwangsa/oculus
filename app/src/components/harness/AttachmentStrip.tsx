@@ -1,28 +1,49 @@
-import { useState } from "react";
-import { X } from "@phosphor-icons/react";
+import { lazy, Suspense, useState } from "react";
 
+import { PastedTextCard, RemoveAttachment } from "@/components/harness/PastedText";
 import { ImageLightbox } from "@/components/ui/Lightbox";
-import { type PendingAttachment } from "@/lib/attachments";
+import { type PastedText, type PendingAttachment } from "@/lib/attachments";
 import { cn } from "@/lib/utils";
 
+/** On demand: it brings the note editor, which a chat page otherwise never loads. */
+const PastedTextEditor = lazy(() =>
+  import("@/components/harness/PastedTextEditor").then((m) => ({ default: m.PastedTextEditor })),
+);
+
 /**
- * Pending picture thumbnails above a composer; renders nothing when empty.
- * `object-cover` (unlike the thread's `object-contain`) because a thumbnail this
- * small is an identifier; click opens the full image. `compact` is the dock's.
+ * Pending pasted text cards and picture thumbnails above a composer, in the
+ * order the message will carry them; renders nothing when empty. `object-cover`
+ * (unlike the thread's `object-contain`) because a thumbnail this small is an
+ * identifier; click opens the full image. A text card opens
+ * `PastedTextEditor`. `compact` is the dock's.
  */
 export function AttachmentStrip({
   items,
   onDetach,
+  texts = [],
+  onEditText,
+  onDetachText,
+  onPutBack,
+  subjectId = null,
   compact,
   className,
 }: {
   items: PendingAttachment[];
   onDetach: (id: string) => void;
+  texts?: PastedText[];
+  onEditText?: (id: string, text: string) => void;
+  onDetachText?: (id: string) => void;
+  /** Puts a card's text into the message box; the strip then drops the card. */
+  onPutBack?: (text: string) => void;
+  /** The `@` scope inside an opened text card. */
+  subjectId?: number | null;
   compact?: boolean;
   className?: string;
 }) {
   const [shown, setShown] = useState<string | null>(null);
-  if (!items.length) return null;
+  const [openText, setOpenText] = useState<string | null>(null);
+  if (!items.length && !texts.length) return null;
+  const opened = texts.find((t) => t.id === openText);
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2", className)}>
@@ -32,6 +53,37 @@ export function AttachmentStrip({
         open={shown !== null}
         onOpenChange={(o) => !o && setShown(null)}
       />
+      {opened && (
+        <Suspense fallback={null}>
+          <PastedTextEditor
+            key={opened.id}
+            text={opened.text}
+            subjectId={subjectId}
+            onDone={(text) => {
+              if (text !== opened.text) onEditText?.(opened.id, text);
+              setOpenText(null);
+            }}
+            onRemove={() => {
+              onDetachText?.(opened.id);
+              setOpenText(null);
+            }}
+            onPutBack={(text) => {
+              onPutBack?.(text);
+              onDetachText?.(opened.id);
+              setOpenText(null);
+            }}
+          />
+        </Suspense>
+      )}
+      {texts.map((t) => (
+        <PastedTextCard
+          key={t.id}
+          text={t.text}
+          compact={compact}
+          onOpen={() => setOpenText(t.id)}
+          onRemove={() => onDetachText?.(t.id)}
+        />
+      ))}
       {items.map((a) => (
         <div key={a.id} className="group/att relative">
           <button
@@ -47,14 +99,7 @@ export function AttachmentStrip({
               className={cn("block object-cover", compact ? "h-10 w-10" : "h-14 w-14")}
             />
           </button>
-          <button
-            type="button"
-            aria-label={`Remove ${a.name}`}
-            onClick={() => onDetach(a.id)}
-            className="absolute -right-1.5 -top-1.5 flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 transition-opacity group-hover/att:opacity-100 hover:text-foreground focus-visible:opacity-100"
-          >
-            <X size={9} weight="bold" />
-          </button>
+          <RemoveAttachment label={`Remove ${a.name}`} onClick={() => onDetach(a.id)} />
         </div>
       ))}
     </div>

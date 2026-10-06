@@ -14,7 +14,7 @@ import type { Icon } from "@phosphor-icons/react";
 import { CompactMd } from "@/components/markdown/MdComponents";
 import { FileChip } from "@/components/markdown/FileChip";
 import { openCitation, splitLibraryPaths, type TextPart } from "@/lib/openFile";
-import { attachmentSrc } from "@/lib/attachments";
+import { attachmentSrc, splitPastedText } from "@/lib/attachments";
 import { ImageLightbox } from "@/components/ui/Lightbox";
 import { copyAsMarkdown, dragAsMarkdown } from "@/lib/selectionMarkdown";
 import { useDataDir } from "@/hooks/useDataDir";
@@ -35,6 +35,7 @@ import { useSignInStatus } from "@/hooks/useSignInStatus";
 import { useHarnessStore } from "@/stores/harnessStore";
 import { cn, copyText } from "@/lib/utils";
 import { ErrorRow, RowShell, ThinkingRow, ToolRow, TOOL_ICON } from "./WorkRow";
+import { PastedTextCard, PastedTextViewer } from "./PastedText";
 import { PermissionCard } from "./PermissionCard";
 import { SignInDialog, useSignIn } from "./SignInDialog";
 
@@ -299,11 +300,15 @@ function QuestionBubble({
   /** The picture open in the lightbox, as the src the card drew. */
   const [shown, setShown] = useState<string | null>(null);
   const dataDir = useDataDir();
-  const [body, long] = useOverflows(text, editing === null);
+  // Pasted text draws as cards beside the pictures, not in the words.
+  const { text: words, pasted } = useMemo(() => splitPastedText(text), [text]);
+  const [body, long] = useOverflows(words, editing === null);
   const box = useRef<HTMLTextAreaElement>(null);
+  /** The pasted text open in its viewer, by index. */
+  const [viewing, setViewing] = useState<number | null>(null);
   // Mentions draw as chips rather than the paths the agent was sent.
-  const parts = useMemo(() => splitLibraryPaths(text), [text]);
-  // Only the prose is measured and folded; pictures always show.
+  const parts = useMemo(() => splitLibraryPaths(words), [words]);
+  // Only the prose is measured and folded; cards and pictures always show.
   const [pictures, prose] = useMemo(() => liftPictures(parts), [parts]);
 
   useLayoutEffect(() => {
@@ -360,12 +365,19 @@ function QuestionBubble({
         open={shown !== null}
         onOpenChange={(o) => !o && setShown(null)}
       />
-      {/* What the rail measures: pictures and words, not the action row. */}
+      {viewing !== null && pasted[viewing] != null && (
+        <PastedTextViewer text={pasted[viewing]} onClose={() => setViewing(null)} />
+      )}
+      {/* What the rail measures: attachments and words, not the action row. */}
       <div data-msg-id={msgId} className="flex w-full flex-col items-end gap-1.5">
-        {pictures.length > 0 && (
-          // One picture at its own size; several in a three-across grid,
-          // letterboxed rather than cropped — they are usually screenshots.
-          <div className="flex max-w-[70%] flex-wrap justify-end gap-1.5">
+        {(pasted.length > 0 || pictures.length > 0) && (
+          // Pasted text cards first, in the order sent. One picture at its own
+          // size; several in a three-across grid, letterboxed rather than
+          // cropped — they are usually screenshots.
+          <div className="flex max-w-[70%] flex-wrap items-end justify-end gap-1.5">
+            {pasted.map((t, i) => (
+              <PastedTextCard key={`t${i}`} text={t} onOpen={() => setViewing(i)} />
+            ))}
             {pictures.map((p, i) => (
               <button
                 key={i}
@@ -393,7 +405,7 @@ function QuestionBubble({
             ))}
           </div>
         )}
-        {(prose.length > 0 || pictures.length === 0) && (
+        {(prose.length > 0 || (pictures.length === 0 && pasted.length === 0)) && (
           <div
             className={cn(
               "max-w-[70%] min-w-0 rounded-xl border px-3.5 py-2 text-[13px] leading-relaxed",
@@ -407,6 +419,7 @@ function QuestionBubble({
               // A mask, not a gradient: a queued bubble's ground is transparent.
               className={cn(
                 "whitespace-pre-wrap break-words",
+              data-selectable
                 long && !open && "overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-2.25rem),transparent)]",
               )}
               style={long && !open ? { maxHeight: QUESTION_MAX_H } : undefined}
@@ -419,7 +432,6 @@ function QuestionBubble({
                     key={i}
                     path={p.path}
                     cite={p.cite}
-              data-selectable
                     onClick={(newTab) => openCitation(p.cite, newTab)}
                   />
                 );

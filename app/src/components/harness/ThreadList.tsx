@@ -1,17 +1,38 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { CaretRight, CircleNotch, Plus, SidebarSimple, Trash, VideoCamera, X } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
+import { CaretRight, Chat, CircleNotch, Plus, Trash, VideoCamera, X } from "@phosphor-icons/react";
 import { ProviderMark } from "@/components/harness/ProviderMark";
-import type { HarnessThread } from "@/lib/harness";
+import { ResizeHandle } from "@/components/ui/ResizeHandle";
+import {
+  SIDE_NAV_COLLAPSED_WIDTH,
+  SIDE_NAV_FOLDS,
+  SIDE_NAV_ROW,
+  SIDE_NAV_ROW_ACTIVE,
+  SIDE_NAV_ROW_IDLE,
+  SideNav,
+  SideNavCollapseToggle,
+  SideNavTip,
+} from "@/components/ui/SideNav";
+import { chatHref, type HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
 import { groupBySubject } from "@/lib/subjectGroups";
 import { useCollapsedGroups } from "@/hooks/useCollapsedGroups";
+import { useWindowEvent } from "@/hooks/useEvents";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useStoredSet } from "@/hooks/useStoredState";
 import { cn } from "@/lib/utils";
 import { usePointerDrag } from "@/hooks/usePointerDrag";
 
 const COLLAPSED_KEY = "oculus-chat-groups-collapsed";
 const ORDER_KEY = "oculus-chat-groups-order";
+
+/** The column's width bounds; folded, it keeps its icons. */
+const PANEL = {
+  defaultWidth: 224,
+  minWidth: 168,
+  maxWidth: 420,
+  collapsedWidth: SIDE_NAV_COLLAPSED_WIDTH,
+  storageKey: "oculus-chat-list-width",
+};
 
 /** Threads a group shows at first, and how many each "Show more" adds. */
 const PAGE = 5;
@@ -25,21 +46,16 @@ function arrange<T extends { key: string }>(groups: T[], order: string[]): T[] {
 }
 
 /**
- * The conversations column, threads grouped by subject scope. Width is owned by
- * `ChatPage`'s `useResizablePanel`; folded means width 0, and the inner box keeps
- * `restWidth` so the fold clips rather than reflows. Titles come from
- * `Harness::name_thread`.
+ * Chat's nav column on `SideNav`, the subject page's column: New thread on top
+ * (lit while no thread is open), then threads grouped by subject scope. It
+ * owns its width and fold; ⌘⌥B or the footer toggle folds it to the rows'
+ * icons. Titles come from `Harness::name_thread`.
  */
 export const ThreadList = memo(function ThreadList({
   threads,
   subjects,
   activeId,
   runningIds,
-  width,
-  restWidth,
-  collapsed,
-  animate,
-  onToggle,
   onOpen,
   onNew,
   onDelete,
@@ -47,14 +63,6 @@ export const ThreadList = memo(function ThreadList({
   threads: HarnessThread[];
   subjects: Subject[];
   activeId: number | null;
-  /** Drawn width: 0 while folded. */
-  width: number;
-  /** The unfolded width the contents are laid out at. */
-  restWidth: number;
-  collapsed: boolean;
-  /** Off while resizing, so the width tracks the handle without lag. */
-  animate: boolean;
-  onToggle: () => void;
   /** Ids, not the store's live map, which changes on every streamed token. */
   runningIds: Set<number>;
   onOpen: (id: number) => void;
@@ -62,8 +70,10 @@ export const ThreadList = memo(function ThreadList({
   onNew: (subjectId?: number | null) => void;
   onDelete: (id: number) => void;
 }) {
+  const panel = useResizablePanel(PANEL);
+  const { collapsed } = panel;
   const [confirming, setConfirming] = useState<number | null>(null);
-  // Folded *groups* — not the panel's own `collapsed`.
+  // Folded *groups* — not the column's own `collapsed`.
   const { folded, setOpen: setGroupOpen } = useCollapsedGroups(COLLAPSED_KEY);
   // Per-group page expansion; not persisted.
   const [shown, setShown] = useState<Record<string, number>>({});
@@ -81,10 +91,19 @@ export const ThreadList = memo(function ThreadList({
     [threads, subjects, order],
   );
 
+  // ⌘⌥B folds the column. `e.code`, not `e.key`: on macOS ⌥B arrives as `∫`.
+  useWindowEvent("keydown", (e) => {
+    const k = e as KeyboardEvent;
+    if (!k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
+    k.preventDefault();
+    panel.toggle();
+  });
+
   // Header reorder on pointer events (see docs/ui.md). Groups
   // differ in height, so a drop line marks the gap instead of sliding boxes;
   // edges are measured once at lift.
   const onHeaderPointerDown = (e: React.PointerEvent<HTMLDivElement>, key: string) => {
+    if (collapsed) return;
     let edges: number[] = [];
     let latest: number | null = null;
     gesture.start(e, {
@@ -124,182 +143,250 @@ export const ThreadList = memo(function ThreadList({
   };
 
   return (
-    <aside
-      /* width/min/max move together so flexbox cannot clamp the box to its
-         min-content size mid-fold. */
-      style={{ width, minWidth: width, maxWidth: width }}
-      className={cn(
-        "flex shrink-0 grow-0 flex-col overflow-hidden",
-        !collapsed && "border-r border-border-subtle",
-        animate && "transition-[width,min-width,max-width] duration-200 ease-out",
-      )}
-    >
-      <div className="flex h-full flex-col" style={{ width: restWidth, minWidth: restWidth }}>
-        <div className="flex items-center gap-1 p-2">
-          <Button variant="ghost" size="xs" className="min-w-0 flex-1 justify-start" onClick={() => onNew()}>
-            <Plus size={13} /> New thread
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Hide conversations"
-            title="Hide conversations (⌘⌥B)"
-            className="shrink-0 text-muted-foreground"
-            onClick={onToggle}
-          >
-            <SidebarSimple size={14} />
-          </Button>
-        </div>
-        {/* `overflow-y: scroll`, not `auto`, reserves the gutter so rows don't jog
-            when the bar appears; `scrollbar-gutter: stable` is a no-op in WebKit. */}
-        <div className="flex flex-1 flex-col overflow-y-scroll px-2 pb-2">
-          {groups.map((g, gi) => {
-            const open = !folded.has(g.key);
-            const busy = g.items.some((t) => runningIds.has(t.id));
-            // The open thread is always drawn, however far down it sits.
-            const activeAt = g.items.findIndex((t) => t.id === activeId);
-            const limit = Math.max(shown[g.key] ?? PAGE, activeAt + 1);
-            const rest = g.items.length - limit;
-            return (
+    <>
+      <SideNav
+        aria-label="Conversations"
+        width={panel.width}
+        collapsed={collapsed}
+        animate={!panel.dragging}
+        footer={<SideNavCollapseToggle collapsed={collapsed} onToggle={panel.toggle} shortcut="⌘⌥B" />}
+        header={
+          <>
+            <div className="px-4 pt-4 pb-3">
+              <div className="-mx-2 flex items-center gap-2.5 px-2 py-1">
+                <Chat size={16} className="shrink-0 text-foreground" />
+                <h1
+                  className={cn(
+                    "min-w-0 flex-1 truncate font-display text-[16px] font-semibold leading-none tracking-tight text-foreground",
+                    SIDE_NAV_FOLDS,
+                  )}
+                >
+                  Chat
+                </h1>
+              </div>
+            </div>
+            <div className="px-2 pb-2">
+              <SideNavTip label="New thread">
+                <button
+                  type="button"
+                  aria-current={activeId == null ? "page" : undefined}
+                  onClick={() => onNew()}
+                  className={cn(SIDE_NAV_ROW, activeId == null ? SIDE_NAV_ROW_ACTIVE : SIDE_NAV_ROW_IDLE)}
+                >
+                  <Plus size={16} className="shrink-0" />
+                  <span className={cn("min-w-0 flex-1 truncate text-left", SIDE_NAV_FOLDS)}>New thread</span>
+                </button>
+              </SideNavTip>
+            </div>
+          </>
+        }
+      >
+        {groups.map((g, gi) => {
+          const open = !folded.has(g.key);
+          const busy = g.items.some((t) => runningIds.has(t.id));
+          // The open thread is always drawn, however far down it sits.
+          const activeAt = g.items.findIndex((t) => t.id === activeId);
+          const limit = Math.max(shown[g.key] ?? PAGE, activeAt + 1);
+          const rest = g.items.length - limit;
+          return (
+            <div
+              key={g.key}
+              ref={(el) => {
+                if (el) boxes.current.set(g.key, el);
+                else boxes.current.delete(g.key);
+              }}
+              className={cn("relative mb-3", drag?.key === g.key && "opacity-40")}
+            >
+              {/* Absolute on a neighbouring group, so no height changes mid-drag. */}
+              {drag?.at === gi && <DropLine className="-top-1.5" />}
+              {drag?.at === groups.length && gi === groups.length - 1 && (
+                <DropLine className="-bottom-1.5" />
+              )}
+              {/* Label + caret fold; the right slot shows the count until hover swaps in `+`.
+                  Folded, the column keeps the header's height so icons don't move. */}
               <div
-                key={g.key}
-                ref={(el) => {
-                  if (el) boxes.current.set(g.key, el);
-                  else boxes.current.delete(g.key);
-                }}
+                onPointerDown={(e) => onHeaderPointerDown(e, g.key)}
                 className={cn(
-                  "relative mb-1.5",
-                  drag?.key === g.key && "opacity-40",
+                  "group/head mb-0.5 flex select-none items-center gap-1 py-1 pr-1 pl-2",
+                  SIDE_NAV_FOLDS,
+                  "group-data-[collapsed=true]/nav:pointer-events-none",
                 )}
               >
-                {/* Absolute on a neighbouring group, so no height changes mid-drag. */}
-                {drag?.at === gi && <DropLine className="-top-1" />}
-                {drag?.at === groups.length && gi === groups.length - 1 && (
-                  <DropLine className="-bottom-1" />
-                )}
-                {/* Label + caret fold; the right slot shows the count until hover swaps in `+`. */}
-                <div
-                  onPointerDown={(e) => onHeaderPointerDown(e, g.key)}
-                  className="group/head flex select-none items-center gap-1 pl-2.5 pr-1 py-1">
+                <button
+                  type="button"
+                  title={g.title}
+                  aria-expanded={open}
+                  tabIndex={collapsed ? -1 : undefined}
+                  onClick={() => {
+                    if (gesture.didDrag()) return;
+                    setGroupOpenAndReset(g.key, !open);
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-0.5 text-left text-[11px] font-medium tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <span className="truncate">{g.label}</span>
+                  <CaretRight
+                    size={11}
+                    className={cn(
+                      "shrink-0 transition-[transform,opacity]",
+                      open ? "rotate-90 opacity-0 group-hover/head:opacity-100" : "opacity-60",
+                    )}
+                  />
+                </button>
+                <div className="relative flex size-4 shrink-0 items-center justify-center">
                   <button
                     type="button"
-                    title={g.title}
-                    aria-expanded={open}
+                    aria-label={`New thread in ${g.label}`}
+                    title={`New thread in ${g.label}`}
+                    tabIndex={collapsed ? -1 : undefined}
                     onClick={() => {
                       if (gesture.didDrag()) return;
-                      setGroupOpenAndReset(g.key, !open);
+                      setGroupOpen(g.key, true);
+                      onNew(g.subjectId);
                     }}
-                    className="flex min-w-0 flex-1 items-center gap-0.5 text-left text-[11px] font-medium tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+                    className="absolute inset-0 hidden items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground group-hover/head:flex"
                   >
-                    <span className="truncate">{g.label}</span>
-                    <CaretRight
-                      size={11}
-                      className={cn(
-                        "shrink-0 transition-[transform,opacity]",
-                        open ? "rotate-90 opacity-0 group-hover/head:opacity-100" : "opacity-60",
-                      )}
-                    />
+                    <Plus size={11} weight="bold" />
                   </button>
-                  <div className="relative flex size-4 shrink-0 items-center justify-center">
+                  {/* Folded, the rows' spinners are hidden, so the header shows one. */}
+                  {busy && !open ? (
+                    <CircleNotch size={11} className="animate-spin text-muted-foreground group-hover/head:hidden" />
+                  ) : (
+                    <span className="text-[10px] tabular-nums text-muted-foreground opacity-60 group-hover/head:hidden">
+                      {g.items.length}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {open && (
+                <div className="flex flex-col gap-0.5">
+                  {g.items.slice(0, limit).map((t) => (
+                    <ThreadRow
+                      key={t.id}
+                      thread={t}
+                      active={t.id === activeId}
+                      running={runningIds.has(t.id)}
+                      confirming={confirming === t.id}
+                      onOpen={onOpen}
+                      onArm={setConfirming}
+                      onDelete={onDelete}
+                    />
+                  ))}
+                  {rest > 0 && (
                     <button
                       type="button"
-                      aria-label={`New thread in ${g.label}`}
-                      title={`New thread in ${g.label}`}
-                      onClick={() => {
-                        if (gesture.didDrag()) return;
-                        setGroupOpen(g.key, true);
-                        onNew(g.subjectId);
-                      }}
-                      className="absolute inset-0 hidden items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground group-hover/head:flex"
+                      tabIndex={collapsed ? -1 : undefined}
+                      onClick={() => setShown((prev) => ({ ...prev, [g.key]: limit + PAGE }))}
+                      className={cn(
+                        SIDE_NAV_ROW,
+                        SIDE_NAV_ROW_IDLE,
+                        SIDE_NAV_FOLDS,
+                        "text-[11px] group-data-[collapsed=true]/nav:pointer-events-none",
+                      )}
                     >
-                      <Plus size={11} weight="bold" />
-                    </button>
-                    {/* Folded, the rows' spinners are hidden, so the header shows one. */}
-                    {busy && !open ? (
-                      <CircleNotch size={11} className="animate-spin text-muted-foreground group-hover/head:hidden" />
-                    ) : (
-                      <span className="text-[10px] tabular-nums text-muted-foreground opacity-60 group-hover/head:hidden">
-                        {g.items.length}
+                      {/* One child: the row's flex gap would split the words. */}
+                      <span>
+                        Show <span className="tabular-nums">{Math.min(PAGE, rest)}</span> more
                       </span>
-                    )}
-                  </div>
+                    </button>
+                  )}
                 </div>
-                {open && (
-                  <div className="flex flex-col gap-0.5">
-                    {g.items.slice(0, limit).map((t) => {
-                      const running = runningIds.has(t.id);
-                      const active = t.id === activeId;
-                      return (
-                        <div
-                          key={t.id}
-                          className={cn(
-                            "group/thread flex rounded-lg text-xs transition-colors",
-                            active
-                              ? "bg-accent text-foreground"
-                              : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                          )}
-                        >
-                          {/* Padding lives inside the button so the whole lit row is the hit target. */}
-                          <button
-                            type="button"
-                            onClick={() => onOpen(t.id)}
-                            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1.5 pl-2.5 text-left"
-                          >
-                            <ProviderMark provider={t.provider} className="size-3.5 shrink-0 opacity-70" />
-                            <span className="min-w-0 flex-1 truncate">{t.title || "Untitled"}</span>
-                            {t.lecture_id && (
-                              <VideoCamera
-                                size={11}
-                                className="shrink-0 opacity-60"
-                                aria-label="Lecture thread"
-                              />
-                            )}
-                          </button>
-                          <div className="flex shrink-0 items-center pl-1 pr-1.5">
-                            {running ? (
-                              <CircleNotch size={12} className="animate-spin text-muted-foreground" />
-                            ) : confirming === t.id ? (
-                              <ConfirmDelete
-                                label={"Yes"}
-                                onConfirm={() => {
-                                  setConfirming(null);
-                                  onDelete(t.id);
-                                }}
-                                onCancel={() => setConfirming(null)}
-                              />
-                            ) : (
-                              <button
-                                type="button"
-                                aria-label="Delete thread"
-                                onClick={() => setConfirming(t.id)}
-                                className="rounded p-0.5 opacity-0 transition-opacity hover:text-foreground group-hover/thread:opacity-100"
-                              >
-                                <Trash size={12} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {rest > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShown((prev) => ({ ...prev, [g.key]: limit + PAGE }))}
-                        className="rounded-lg py-1.5 pl-2.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      >
-                        Show {Math.min(PAGE, rest)} more
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </aside>
+              )}
+            </div>
+          );
+        })}
+      </SideNav>
+      {/* On the seam: negative margins cost no layout width. */}
+      <ResizeHandle
+        onMouseDown={panel.onMouseDown}
+        dragging={panel.dragging}
+        label="Resize conversations"
+        className="-mx-0.5"
+      />
+    </>
   );
 });
+
+/** A thread as a nav row: its provider's mark is the icon a fold leaves, and a
+ *  running thread marks that icon's corner while folded. */
+function ThreadRow({
+  thread: t,
+  active,
+  running,
+  confirming,
+  onOpen,
+  onArm,
+  onDelete,
+}: {
+  thread: HarnessThread;
+  active: boolean;
+  running: boolean;
+  confirming: boolean;
+  onOpen: (id: number) => void;
+  /** Arms this row's delete, or disarms with null. */
+  onArm: (id: number | null) => void;
+  onDelete: (id: number) => void;
+}) {
+  const title = t.title?.trim() || "Untitled";
+  return (
+    <div
+      className={cn(
+        SIDE_NAV_ROW,
+        "group/thread relative gap-0 overflow-hidden p-0",
+        active ? SIDE_NAV_ROW_ACTIVE : SIDE_NAV_ROW_IDLE,
+      )}
+    >
+      {/* Padding lives inside the button so the whole lit row is the hit target. */}
+      <SideNavTip label={title}>
+        <button
+          type="button"
+          // ⌘-click opens the thread in a new tab (`app/src/lib/newTabClicks.ts`).
+          data-tab-href={chatHref(t.id, t.title)}
+          onClick={() => onOpen(t.id)}
+          className="flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-left"
+        >
+          <ProviderMark provider={t.provider} className="size-4 shrink-0" />
+          <span className={cn("min-w-0 flex-1 truncate", SIDE_NAV_FOLDS)}>{title}</span>
+          {t.lecture_id && (
+            <VideoCamera
+              size={11}
+              className={cn("shrink-0 opacity-60", SIDE_NAV_FOLDS)}
+              aria-label="Lecture thread"
+            />
+          )}
+        </button>
+      </SideNavTip>
+      <div className={cn("flex shrink-0 items-center pr-1.5 pl-1", SIDE_NAV_FOLDS)}>
+        {running ? (
+          <CircleNotch size={12} className="animate-spin text-muted-foreground" aria-label="Running" />
+        ) : confirming ? (
+          <ConfirmDelete
+            label="Yes"
+            onConfirm={() => {
+              onArm(null);
+              onDelete(t.id);
+            }}
+            onCancel={() => onArm(null)}
+          />
+        ) : (
+          <button
+            type="button"
+            aria-label="Delete thread"
+            onClick={() => onArm(t.id)}
+            className="rounded p-0.5 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/thread:opacity-100 group-data-[collapsed=true]/nav:pointer-events-none"
+          >
+            <Trash size={12} />
+          </button>
+        )}
+      </div>
+      {running && (
+        <span
+          aria-hidden
+          className="absolute top-1 left-5 size-1.5 rounded-full bg-brand opacity-0 transition-opacity duration-150 group-data-[collapsed=true]/nav:opacity-100"
+        />
+      )}
+    </div>
+  );
+}
 
 function DropLine({ className }: { className: string }) {
   return (

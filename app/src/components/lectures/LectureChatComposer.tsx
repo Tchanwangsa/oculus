@@ -138,24 +138,44 @@ export function LectureChatComposer({
   const wrapRef = useRef<HTMLDivElement>(null);
   /** Pictures pasted or dropped in, written on send. No `@` menu here, so the
    *  refusal says to type a path. */
-  const att = useAttachments(dropRef ?? wrapRef, {
+  const att = useAttachments(dropRef ?? wrapRef, draftKey, {
     notAPicture: "Only images can be attached — type a path for a course file.",
   });
   useEffect(() => onDropping?.(att.dropping), [att.dropping, onDropping]);
 
-  /** Whether there is a message at all: words, pictures, or both. */
-  const ready = text.trim().length > 0 || att.items.length > 0;
+  /** Whether there is a message at all: words, pastes, pictures. */
+  const ready = text.trim().length > 0 || att.items.length > 0 || att.texts.length > 0;
 
-  // Put back before anything already typed, because it was typed first.
+  // Put back before anything already typed, because it was typed first; its
+  // pasted blocks go back to being cards.
+  const takeBackRef = useRef(att.takeBack);
+  takeBackRef.current = att.takeBack;
   useEffect(() => {
     if (!restore) return;
     const { drafts, setDraft } = useDraftStore.getState();
+    const rest = takeBackRef.current(restore.text);
     const t = drafts[keyRef.current] ?? "";
     setDraft(keyRef.current, [restore.text, t].filter(Boolean).join("\n\n"));
     ref.current?.focus();
   }, [restore]);
 
   // Autosize in a layout effect: in the change handler the textarea still holds
+  /** A text card's words back into the box, after what is typed. */
+  const putBack = (pasted: string) => {
+    const { drafts, setDraft } = useDraftStore.getState();
+    const typed = (drafts[keyRef.current] ?? "").trimEnd();
+    const next = typed.trim() ? `${typed}\n\n${pasted}` : pasted;
+    setDraft(keyRef.current, next);
+    // After the dialog's own focus handling, with the new value rendered.
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(next.length, next.length);
+      el.scrollTop = el.scrollHeight;
+    });
+  };
+
   // the old string. The card is held at its height while the field collapses to
   // measure: the thread above would grow, clamp its scroll and come unpinned.
   useLayoutEffect(() => {
@@ -190,7 +210,15 @@ export function LectureChatComposer({
           att.dropping && !dropRef && "border-brand ring-[3px] ring-brand/25",
         )}
       >
-        <AttachmentStrip items={att.items} onDetach={att.detach} compact />
+        <AttachmentStrip
+          items={att.items}
+          onDetach={att.detach}
+          texts={att.texts}
+          onEditText={att.editText}
+          onDetachText={att.detachText}
+          onPutBack={putBack}
+          compact
+        />
         {/* `overflow-x-hidden`: with classic scrollbars WebKit paints a
             horizontal bar across a one-line field. */}
         <Textarea
@@ -201,9 +229,12 @@ export function LectureChatComposer({
             // A picture on the clipboard wins over its text flavour; plain text
             // falls through to the native paste (keeps undo).
             const pictures = imageFiles(e.clipboardData.files);
-            if (!pictures.length) return;
-            e.preventDefault();
-            att.attach(pictures);
+            if (pictures.length) {
+              e.preventDefault();
+              att.attach(pictures);
+              return;
+            }
+            if (att.attachText(e.clipboardData.getData("text/plain"))) e.preventDefault();
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {

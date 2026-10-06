@@ -226,6 +226,8 @@ export interface MentionInputHandle {
   clear(): void;
   /** Put handed-back text in front of what is typed, mentions restored to chips. */
   prepend(text: string): void;
+  /** Put text after what is typed, a blank line between, as plain text. */
+  append(text: string): void;
 }
 
 /**
@@ -241,6 +243,7 @@ export function MentionInput({
   autoFocus,
   onEdit,
   onFiles,
+  onPasteText,
   onKeyDown,
   onBlur,
 }: {
@@ -252,6 +255,8 @@ export function MentionInput({
   onEdit: (text: string, caret: number) => void;
   /** Pasted pictures; they never enter the editor's nodes. */
   onFiles?: (files: File[]) => void;
+  /** Offered a plain-text paste first; true means it was taken (as a card). */
+  onPasteText?: (text: string) => boolean;
   /** Runs first; anything not `preventDefault`ed falls through to the editing keys. */
   onKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void;
   onBlur?: () => void;
@@ -364,6 +369,16 @@ export function MentionInput({
         true,
       );
     },
+    append(text) {
+      const el = box.current;
+      if (!el) return;
+      const kept = normalize(readEditor(el, null).chunks);
+      const last = kept[kept.length - 1];
+      if (last?.kind === "text") kept[kept.length - 1] = { kind: "text", text: last.text.trimEnd() };
+      const head = chunksText(kept).trim() ? [...kept, { kind: "text" as const, text: "\n\n" }] : [];
+      const next = normalize([...head, { kind: "text", text }]);
+      commit(next, chunksText(next).length, true);
+    },
   }));
 
   // Mount-time focus only (later focus is `commit`'s). WebKit focuses a
@@ -447,8 +462,8 @@ export function MentionInput({
         aria-multiline="true"
         aria-label="Message"
         aria-placeholder={placeholder}
-        // `select-text`: `index.css` hands selection back per tag, and a div isn't
-        // one — without it WebKit can barely edit the box. `overflow-x-hidden`:
+        // `select-text`: `index.css` turns selection off app-wide, and without it
+        // WebKit can barely edit the box. `overflow-x-hidden`:
         // y=auto computes x to auto, and always-on scrollbars paint a bar across a one-line box.
         className="max-h-[160px] min-h-[16px] w-full overflow-x-hidden overflow-y-auto break-words whitespace-pre-wrap select-text text-[13px] leading-[16px] outline-none"
         onInput={sync}
@@ -466,6 +481,7 @@ export function MentionInput({
             return;
           }
           const plain = e.clipboardData.getData("text/plain");
+          if (plain && onPasteText?.(plain)) return;
           if (plain) document.execCommand("insertText", false, plain);
           if (box.current) revealCaret(box.current);
           sync();
