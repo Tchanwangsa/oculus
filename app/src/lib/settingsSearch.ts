@@ -6,12 +6,12 @@ import {
   HardDrives,
   Lightning,
   PaintBrush,
-  Plugs,
   Robot,
   Waveform,
   type Icon,
 } from "@phosphor-icons/react";
 
+import { OpencodeIcon } from "@/components/icons/OpencodeIcon";
 import { JOBS } from "@/lib/db";
 
 /**
@@ -53,7 +53,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "browser", label: "Browser", icon: Globe, group: "General" },
   { id: "storage", label: "Storage", icon: HardDrives, group: "General" },
   { id: "agents", label: "Agents", icon: Robot, group: "AI" },
-  { id: "opencode", label: "opencode", icon: Plugs, group: "AI", fullBleed: true },
+  { id: "opencode", label: "opencode", icon: OpencodeIcon, group: "AI", fullBleed: true },
   { id: "jobs", label: "Jobs", icon: Lightning, group: "AI" },
   { id: "parsing", label: "Parsing", icon: FilePdf, group: "Library" },
   { id: "embeddings", label: "Embeddings", icon: Graph, group: "Library" },
