@@ -291,6 +291,10 @@ export const noteTheme = EditorView.theme({
     left: "50%",
     transform: "translate(-50%, -50%)",
     maxWidth: "90%",
+    // One tight line, so the box is the text and centring it on the empty
+    // row keeps it inside the field.
+    fontSize: "12px",
+    lineHeight: "1.2",
     padding: "0",
     backgroundColor: "transparent",
     overflow: "hidden",

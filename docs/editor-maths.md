@@ -238,9 +238,9 @@ on the block; once it leaves, empty rows at the block's end go
 (`dropEndRows`, `withoutEndRows`), so the rendering has no blank row under
 the formula for the caret beside it to rest on. Blank lines already in a
 block go when the field opens on it (`dropBlankLines`). Both cleanups stay
-outside the history. The empty-line hint sits at the height of the empty row's leading
-atom, two frames after the edit, since MathLive draws in a frame of its own
-and its hidden caret can lag.
+outside the history. The empty-line hint (12px, one tight line) sits at the height of the empty
+row's leading atom, clamped inside the field's box, two frames after the edit,
+since MathLive draws in a frame of its own and its hidden caret can lag.
 
 ## Typed shorthands expand inside maths
 

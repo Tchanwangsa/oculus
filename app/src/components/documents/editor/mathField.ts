@@ -1127,8 +1127,14 @@ export class FieldController {
       hint.hidden = true;
       return;
     }
-    if (line) hint.style.top = `${line.top + line.height / 2 - this.dom.getBoundingClientRect().top}px`;
     hint.hidden = false;
+    if (line) {
+      // The row's centre, kept so the hint stays inside the field's box.
+      const box = this.dom.getBoundingClientRect();
+      const half = hint.offsetHeight / 2;
+      const centre = line.top + line.height / 2 - box.top;
+      hint.style.top = `${Math.min(Math.max(centre, half), box.height - half)}px`;
+    }
   }
 
   /** The maths this field may write to, or null when it is gone or was
