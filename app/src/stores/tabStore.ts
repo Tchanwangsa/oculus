@@ -12,6 +12,7 @@ import {
   restoreFocus,
   restoreSide,
   retargetItem,
+  SIDE_RATIO,
   sideFromPaths,
   storeSide,
   type SideItem,
@@ -113,6 +114,7 @@ interface StoredStrip {
   tabs: StoredTab[];
   activeId: number;
   closed?: StoredClosed[];
+  sideRatio?: unknown;
 }
 
 function pane(id: number, path: string): PaneState {
@@ -133,11 +135,19 @@ function validClosed(e: StoredClosed | null | undefined): boolean {
   );
 }
 
-function restore(): { tabs: AppTab[]; activeId: number; closed: ClosedTab[] } {
+function restore(): {
+  tabs: AppTab[];
+  activeId: number;
+  closed: ClosedTab[];
+  sideRatio: number;
+} {
   let closed: ClosedTab[] = [];
+  let sideRatio = SIDE_RATIO;
   try {
     const raw = localStorage.getItem(STORE_KEY);
     const saved = raw ? (JSON.parse(raw) as StoredStrip) : null;
+    const r = saved?.sideRatio;
+    if (typeof r === "number" && Number.isFinite(r)) sideRatio = clampRatio(r);
     closed = (saved?.closed ?? []).filter(validClosed).map((e) => ({
       index: e.index as number,
       path: typeof e.path === "string" ? e.path : null,
@@ -152,7 +162,7 @@ function restore(): { tabs: AppTab[]; activeId: number; closed: ClosedTab[] } {
       const activeId = tabs.some((t) => t.id === saved?.activeId)
         ? saved!.activeId
         : tabs[0].id;
-      return { tabs, activeId, closed };
+      return { tabs, activeId, closed, sideRatio };
     }
   } catch {
     /* corrupt or unavailable — a fresh strip is a fine fallback */
@@ -161,6 +171,7 @@ function restore(): { tabs: AppTab[]; activeId: number; closed: ClosedTab[] } {
     tabs: [{ ...pane(1, FIRST), side: null, focus: "main" }],
     activeId: 1,
     closed,
+    sideRatio,
   };
 }
 
@@ -179,6 +190,8 @@ interface TabState {
   activeId: number;
   /** Closed tabs, newest last — the stack ⇧⌘T pops. */
   closed: ClosedTab[];
+  /** The ratio a new side panel opens at: the last drag of any tab's seam. */
+  sideRatio: number;
   /** Opens `path` in a new tab in front, its first entry carrying `state`.
    *  Returns the new tab's id. */
   addTab: (path: string, state?: unknown) => number;
@@ -255,6 +268,7 @@ export const useTabStore = create<TabState>((set, get) => ({
   tabs: initial.tabs,
   activeId: initial.activeId,
   closed: initial.closed,
+  sideRatio: initial.sideRatio,
 
   addTab: (path, state) => {
     const id = nextId++;
@@ -328,7 +342,13 @@ export const useTabStore = create<TabState>((set, get) => ({
   pushSide: (tabId, path, state) => {
     const tab = get().tabs.find((t) => t.id === tabId);
     if (!tab) return;
-    const { side, hit, dropped } = pushItem(tab.side, path, () => nextId++, state);
+    const { side, hit, dropped } = pushItem(
+      tab.side,
+      path,
+      () => nextId++,
+      state,
+      get().sideRatio,
+    );
     for (const item of dropped) releaseItem(item);
     if (tab.side) leaveFront(tab.side, side);
     // A hit with a router is navigated once the store holds it; one never
@@ -364,10 +384,11 @@ export const useTabStore = create<TabState>((set, get) => ({
   setSideRatio: (tabId, ratio) => {
     const r = clampRatio(ratio);
     const tab = get().tabs.find((t) => t.id === tabId);
-    if (!tab?.side || tab.side.ratio === r) return;
-    set((s) =>
-      withTab(s, tabId, (t) => (t.side ? { ...t, side: { ...t.side, ratio: r } } : t)),
-    );
+    if (!tab?.side || (tab.side.ratio === r && get().sideRatio === r)) return;
+    set((s) => ({
+      ...withTab(s, tabId, (t) => (t.side ? { ...t, side: { ...t.side, ratio: r } } : t)),
+      sideRatio: r,
+    }));
   },
 
   focusPane: (tabId, side) =>
@@ -395,7 +416,7 @@ export const useTabStore = create<TabState>((set, get) => ({
     const id = nextId++;
     const tab: AppTab = {
       ...pane(id, entry.path),
-      side: sideFromPaths(entry.side ?? [], () => nextId++),
+      side: sideFromPaths(entry.side ?? [], () => nextId++, get().sideRatio),
       focus: "main",
     };
     set((s) => {
@@ -488,6 +509,7 @@ useTabStore.subscribe((s) => {
       })),
       activeId: s.activeId,
       closed: s.closed,
+      sideRatio: s.sideRatio,
     };
     localStorage.setItem(STORE_KEY, JSON.stringify(strip));
   } catch {

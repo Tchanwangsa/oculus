@@ -56,7 +56,9 @@ before leaving a playing lecture.
 - **`SubjectLayout` resolves the subject once** and hands it down as outlet
   context; tab pages must not re-fetch it. Its nav column
   (`app/src/components/subjects/SubjectNav.tsx`) holds the icon picker, the
-  code as a switcher to another subject, and a row per tab. A switch
+  code as a switcher to another subject, a search over the subject, and a row
+  per tab. Tab rows and switcher rows carry the never-opened count
+  (`newFilesStore`); a switcher row's is the sum of its subject's tabs. A switch
   navigates the pane's router to the same top-level tab of the other subject;
   anything deeper lands on that tab's default. Files is one tab whose sub-tabs are
   routes (`files/downloads`, `files/uploads`, `files/documents`), and its
@@ -79,7 +81,9 @@ before leaving a playing lecture.
 `app/src/components/sidebar/Sidebar.tsx` is a 52px column of icon buttons,
 each named by a tooltip on its right: Search (opens ⌘K), then Home, Chat,
 Calendar, Tasks and Subjects, and Sync and Settings pinned to the foot under a
-short hairline. A `RailItem` is a button with `data-tab-href` that goes
+short hairline. The five sections drag into any order on `useStripReorder`'s
+vertical axis, and the order is kept in `localStorage` (`railOrderStore`); a
+section the stored order lacks is appended. A `RailItem` is a button with `data-tab-href` that goes
 through `navigateActive`, since the sidebar sits outside every pane's router,
 and it lights on its path or anything under it. Background jobs show on their
 item's corner: a spinner on Chat while an agent turn runs, on Sync while
@@ -282,7 +286,8 @@ pane — a tab's main page and its side panel's front item alike.
 
 ## Search is one module behind two fields
 
-`app/src/lib/search.ts` serves ⌘K and the new-tab field; it returns data and
+`app/src/lib/search.ts` serves ⌘K, the new-tab field and the subject nav's
+search; it returns data and
 `openSearchItem` dispatches, because the palette drives the shell from outside
 every router while the field drives its own pane. Titles match every typed word
 in any order. **Text inside documents is lexical**: `searchPageText` over the
@@ -292,6 +297,13 @@ offered as a URL or web search through `normalizeAddress`, shared with the
 address bar.
 
 `app/src/lib/searchFilters.ts` owns the filter catalogue, tokens and resolution
+**The subject nav's search is `runSearch` under an `in:` filter** for that
+subject, after any of its tabs whose name matches; while the field has text the
+results replace the tab rows, and Enter opens the first. A file or lecture
+opens beside the page (`openBeside`), as a file row does; anything else
+navigates the pane. Its field is `SideNavSearch`
+(`app/src/components/ui/SideNav.tsx`), shared with Settings.
+
 without database or navigation effects. ⌘K takes Discord-style filters: `in:<subject>` and `type:<kind>`. Typing
 the colon turns the key into a chip with the caret inside it, and the list shows
 only its values; picking one (or a space after an unambiguous value) fixes the
@@ -312,3 +324,6 @@ else the last chip. Chips scope the SQL (`SearchScope` in
   so listening for the menu does not load CodeMirror.
 - **`data-tauri-drag-region` needs `core:window:allow-start-dragging`**
   (`app/src-tauri/capabilities/default.json`) or it silently does nothing.
+  A bare attribute only fires on a click whose target is that very element, so
+  the top bar uses `="deep"` (its whole subtree; buttons still block) and each
+  tab sets `="false"`, since tabs reorder on pointerdown.

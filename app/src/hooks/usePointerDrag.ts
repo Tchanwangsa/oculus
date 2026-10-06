@@ -7,7 +7,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
  * captured element never hears because it unmounted, the owner unmounting —
  * runs the caller's `end` once. Not HTML5 DnD: see docs/ui.md,
  * "Gotchas". `useCardDrag` builds lists on it; `useStripReorder` below
- * builds tab strips.
+ * builds tab strips and the sidebar rail.
  */
 
 /** Pointer travel (px) before a press becomes a drag rather than a click. */
@@ -38,6 +38,8 @@ export function usePointerDrag(axis: "x" | "y" | "xy") {
   useEffect(() => () => teardown.current?.(), []);
 
   const start = (e: ReactPointerEvent<HTMLElement>, h: PointerDragHandlers) => {
+    // A gesture whose release never arrived must not outlive the next press.
+    teardown.current?.();
     moved.current = false;
     if (e.button !== 0) return;
     // Don't preventDefault the press — see docs/ui.md: it kills the click.
@@ -48,6 +50,9 @@ export function usePointerDrag(axis: "x" | "y" | "xy") {
 
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerId !== pointerId) return;
+      // The button is up but no release was heard: end rather than follow
+      // the bare pointer around.
+      if ((ev.buttons & 1) === 0) return end();
       const dx = ev.clientX - startX;
       const dy = ev.clientY - startY;
       if (!moved.current) {
@@ -94,46 +99,51 @@ export function usePointerDrag(axis: "x" | "y" | "xy") {
   };
 }
 
-/** A tab strip's live drag: the grabbed tab rides the pointer by `dx`, and the
- *  tabs between `from` and `target` slide by the hole it left. */
+/** A strip's live drag: the grabbed item rides the pointer by `delta` along
+ *  the strip's axis, and the items between `from` and `target` slide by the
+ *  hole it left. */
 export interface StripDrag<K> {
   key: K;
-  dx: number;
+  delta: number;
   from: number;
   target: number;
-  width: number;
+  size: number;
   gap: number;
 }
 
+/** One item's extent along the strip's axis. */
 interface Box {
-  left: number;
+  start: number;
   mid: number;
-  width: number;
+  size: number;
 }
 
 /**
- * Horizontal reorder for a strip of tabs, rects captured once at lift and the
- * order written only on drop. `swapOn` is deliberately per strip — see
+ * Reorder for a strip of tabs or rail icons, rects captured once at lift and
+ * the order written only on drop. `swapOn` is deliberately per strip — see
  * docs/ui.md: `ViewTabs` swaps on the leading edge, `TopTabBar` on the centre.
  */
 export function useStripReorder<K>({
   keys,
+  axis = "x",
   swapOn,
   gap: fixedGap,
   onDrop,
 }: {
   keys: readonly K[];
+  /** `x` for a row, `y` for a column (the sidebar rail). */
+  axis?: "x" | "y";
   swapOn: "edge" | "centre";
-  /** px between tabs; measured off the first pair when omitted. */
+  /** px between items; measured off the first pair when omitted. */
   gap?: number;
-  /** Only when the tab lands somewhere new; `order` is `keys` rearranged. */
+  /** Only when the item lands somewhere new; `order` is `keys` rearranged. */
   onDrop: (drop: { key: K; target: number; order: K[] }) => void;
 }) {
   const [drag, setDrag] = useState<StripDrag<K> | null>(null);
   const nodes = useRef(new Map<K, HTMLElement>());
   const latest = useRef({ keys, onDrop });
   latest.current = { keys, onDrop };
-  const gesture = usePointerDrag("x");
+  const gesture = usePointerDrag(axis);
 
   const itemRef = (key: K) => (node: HTMLElement | null) => {
     if (node) nodes.current.set(key, node);
@@ -154,33 +164,36 @@ export function useStripReorder<K>({
         if (measured.some((n) => !n)) return false;
         boxes = measured.map((node) => {
           const r = node!.getBoundingClientRect();
-          return { left: r.left, mid: r.left + r.width / 2, width: r.width };
+          const start = axis === "x" ? r.left : r.top;
+          const size = axis === "x" ? r.width : r.height;
+          return { start, mid: start + size / 2, size };
         });
         gap =
           fixedGap ??
-          (boxes.length > 1 ? boxes[1].left - (boxes[0].left + boxes[0].width) : 0);
+          (boxes.length > 1 ? boxes[1].start - (boxes[0].start + boxes[0].size) : 0);
         from = order.indexOf(key);
         return from !== -1;
       },
-      move: (_ev, travel) => {
+      move: (_ev, dx, dy) => {
+        const travel = axis === "x" ? dx : dy;
         const me = boxes[from];
         const last = boxes[boxes.length - 1];
-        const dx = Math.min(
-          Math.max(travel, boxes[0].left - me.left),
-          last.left + last.width - (me.left + me.width),
+        const delta = Math.min(
+          Math.max(travel, boxes[0].start - me.start),
+          last.start + last.size - (me.start + me.size),
         );
         target = from;
         if (swapOn === "edge") {
-          const lead = me.left + dx;
-          const trail = me.left + me.width + dx;
+          const lead = me.start + delta;
+          const trail = me.start + me.size + delta;
           for (let i = from - 1; i >= 0; i--) if (lead < boxes[i].mid) target = i;
           for (let i = from + 1; i < boxes.length; i++) if (trail > boxes[i].mid) target = i;
         } else {
-          const centre = me.mid + dx;
+          const centre = me.mid + delta;
           for (let i = from - 1; i >= 0; i--) if (centre < boxes[i].mid) target = i;
           for (let i = from + 1; i < boxes.length; i++) if (centre > boxes[i].mid) target = i;
         }
-        setDrag({ key, dx, from, target, width: me.width, gap });
+        setDrag({ key, delta, from, target, size: me.size, gap });
       },
       end: () => {
         if (from !== -1 && target !== -1 && target !== from) {
@@ -195,15 +208,16 @@ export function useStripReorder<K>({
     });
   };
 
-  /** The transform for the tab `key` at render `index`; none between gestures. */
+  /** The transform for the item `key` at render `index`; none between gestures. */
   const styleFor = (key: K, index: number): CSSProperties | undefined => {
     if (!drag) return undefined;
-    if (drag.key === key) return { transform: `translateX(${drag.dx}px)` };
-    const shift = drag.width + drag.gap;
+    const translate = axis === "x" ? "translateX" : "translateY";
+    if (drag.key === key) return { transform: `${translate}(${drag.delta}px)` };
+    const shift = drag.size + drag.gap;
     if (drag.from < index && index <= drag.target)
-      return { transform: `translateX(-${shift}px)` };
+      return { transform: `${translate}(-${shift}px)` };
     if (drag.target <= index && index < drag.from)
-      return { transform: `translateX(${shift}px)` };
+      return { transform: `${translate}(${shift}px)` };
     return undefined;
   };
 

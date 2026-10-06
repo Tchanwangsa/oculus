@@ -8,6 +8,8 @@ interface Options {
   side?: "left" | "right";
   /** Snap collapsed when dragged below this. Default = minWidth / 2. */
   collapseThreshold?: number;
+  /** Drawn width while collapsed: 0 hides the panel, more leaves a strip. */
+  collapsedWidth?: number;
   storageKey?: string;
 }
 
@@ -21,6 +23,7 @@ export function useResizablePanel({
   maxWidth,
   side = "left",
   collapseThreshold,
+  collapsedWidth = 0,
   storageKey,
 }: Options) {
   const threshold = collapseThreshold ?? Math.floor(minWidth / 2);
@@ -47,7 +50,7 @@ export function useResizablePanel({
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     // From the visual width, so a drag out of the fold tracks the pointer.
-    drag.current = { x: e.clientX, w: collapsed ? 0 : width };
+    drag.current = { x: e.clientX, w: collapsed ? collapsedWidth : width };
     setDragging(true);
     document.body.style.cursor = "col-resize";
     document.body.style.webkitUserSelect = "none";
@@ -93,8 +96,8 @@ export function useResizablePanel({
   const toggle = useCallback(() => setState((prev) => ({ ...prev, collapsed: !prev.collapsed })), []);
 
   return {
-    /** What to draw: 0 while collapsed. */
-    width: collapsed ? 0 : width,
+    /** What to draw: `collapsedWidth` while collapsed. */
+    width: collapsed ? collapsedWidth : width,
     /** What it unfolds back to; lay content out at this so a fold clips it. */
     restWidth: width,
     collapsed,

@@ -82,10 +82,17 @@ headings and Inter for everything else, Notion-style layout.
 - **Tables are full-bleed in `GridTable`**, header outside the scroller (or the
   bar runs down it). Alternate views are sibling `ViewTabs`/`PillTabs`, not a
   dropdown, over a fixed-height toolbar so switching never jolts the rows.
-- **Settings and subjects share one nav column**, `SideNav`: a 208px column
+- **Settings, subjects and Chat share one nav column**, `SideNav`: a 208px column
   on the window's `background` beside the page, a pinned header, rows with a
-  16px icon and the active row filled, never an underline strip. Rows that
-  are not links take its exported row classes.
+  16px icon and the active row filled, never an underline strip, and
+  `SideNavSearch`, the pill search field under the header. Rows that are not
+  links take its exported row classes. The subject and Chat columns are
+  drag-resizable and fold to a 48px strip (`useResizablePanel`, width and
+  fold remembered) from `SideNavCollapseToggle` in the footer or by dragging
+  it narrow.
+  Both states share one layout that the column clips, so icons hold their
+  place while the width eases: labels fade (`SIDE_NAV_FOLDS`), tooltips
+  name the icons, and a count becomes a dot.
 - **Subject tabs share `SubjectPage` for width and gutters** beside the
   subject's nav column, `SubjectLoading` for skeleton rows and `SubjectEmpty`
   for the empty view. Per-tab content and actions stay with the page.
@@ -108,7 +115,7 @@ mounts on open and loads through the same cache.
 ## Gotchas
 
 - **Drag in-window on pointer events via `usePointerDrag`** (tab strip,
-  `ViewTabs`, chat groups, boards and tables via `useCardDrag`); HTML5 DnD only
+  `ViewTabs`, the sidebar rail, chat groups, boards and tables via `useCardDrag`); HTML5 DnD only
   for leaving the window.
 - **HTML5 drag needs `dataTransfer.setData()`** or WebKit cancels it silently,
   and `preventDefault()` on `dragstart` cancels it outright — see the drag-out

@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MagnifyingGlass, X } from "@phosphor-icons/react";
 
 import {
   SIDE_NAV_ROW,
@@ -8,6 +7,7 @@ import {
   SideNav,
   SideNavGroupLabel,
   SideNavLink,
+  SideNavSearch,
 } from "@/components/ui/SideNav";
 import {
   SETTINGS_GROUPS,
@@ -48,39 +48,12 @@ export default function SettingsNav() {
             </h1>
           </div>
 
-          <div className="px-2 pb-2">
-            <div className="flex h-8 items-center gap-2 rounded-full border border-input bg-card px-3 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25">
-              <MagnifyingGlass size={13} className="shrink-0 text-muted-foreground" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape" && query) {
-                    e.preventDefault();
-                    setQuery("");
-                  } else if (e.key === "Enter" && results[0]) {
-                    e.preventDefault();
-                    open(results[0]);
-                  }
-                }}
-                placeholder="Search settings"
-                aria-label="Search settings"
-                spellCheck={false}
-                autoComplete="off"
-                className="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
-              />
-              {query && (
-                <button
-                  type="button"
-                  aria-label="Clear search"
-                  onClick={() => setQuery("")}
-                  className="-mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-sidebar-item-hover hover:text-foreground"
-                >
-                  <X size={11} weight="bold" />
-                </button>
-              )}
-            </div>
-          </div>
+          <SideNavSearch
+            value={query}
+            onChange={setQuery}
+            onEnter={() => results[0] && open(results[0])}
+            placeholder="Search settings"
+          />
         </>
       }
     >

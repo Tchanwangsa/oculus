@@ -14,7 +14,8 @@ import { recentKey } from "@/stores/recentTabsStore";
 
 /** How many items a side panel holds. */
 export const SIDE_CAP = 8;
-/** The main pane's share of the tab when a side panel opens. */
+/** The main pane's share of the tab when a side panel opens, until a drag of
+ *  the seam sets the strip's own (`tabStore`'s `sideRatio`). */
 export const SIDE_RATIO = 0.5;
 const RATIO_MIN = 0.25;
 const RATIO_MAX = 0.75;
@@ -67,15 +68,17 @@ export interface Push {
  * Opens `path` beside: the item whose path names the same thing (`recentKey`)
  * comes to the front and the head of the list, otherwise a new item does.
  * Retargeting a hit to `path` is the caller's job — it may have a router.
+ * A new panel takes `fresh` as its ratio.
  */
 export function pushItem(
   side: SidePanel | null,
   path: string,
   newId: () => number,
   entryState?: unknown,
+  fresh = SIDE_RATIO,
 ): Push {
   const items = side?.items ?? [];
-  const ratio = side?.ratio ?? SIDE_RATIO;
+  const ratio = side?.ratio ?? fresh;
   const viewed = nextStamp(items);
   // Null for `/new` and browser pages: those are never the same thing twice.
   const key = recentKey(path);
@@ -171,10 +174,14 @@ function fromPanes(
 }
 
 /** A side panel for ⇧⌘T: fresh ids, the first path in front. */
-export function sideFromPaths(paths: string[], newId: () => number): SidePanel | null {
+export function sideFromPaths(
+  paths: string[],
+  newId: () => number,
+  ratio = SIDE_RATIO,
+): SidePanel | null {
   if (paths.length === 0) return null;
   const panes = paths.slice(0, SIDE_CAP).map((path) => ({ id: newId(), path }));
-  return fromPanes(panes, panes[0].id, SIDE_RATIO);
+  return fromPanes(panes, panes[0].id, ratio);
 }
 
 export function storeSide(side: SidePanel): StoredSide {

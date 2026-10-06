@@ -237,8 +237,10 @@ export default function TopTabBar({
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-item-hover hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent transition-colors";
 
   return (
+    /* "deep": any empty spot in the bar drags the window — buttons block it
+       on their own, tabs opt out since they reorder on pointerdown. */
     <div
-      data-tauri-drag-region
+      data-tauri-drag-region="deep"
       className="h-11 shrink-0 flex items-center gap-1 pr-2"
       /* The native traffic lights sit at a fixed device-pixel position, so
          their gap divides out page zoom (none in fullscreen). Their vertical
@@ -324,6 +326,7 @@ export default function TopTabBar({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div
+                    data-tauri-drag-region="false"
                     ref={reorder.itemRef(tab.id)}
                     style={{ flex: "none", width: tabW, ...reorder.styleFor(tab.id, i) }}
                     className={cn(
@@ -410,9 +413,6 @@ export default function TopTabBar({
         <button onClick={newTab} aria-label="New tab" className={barButton}>
           <Plus size={15} />
         </button>
-
-        {/* Remaining space stays draggable. */}
-        <div data-tauri-drag-region className="flex-1 h-full" />
       </div>
 
       {/* Side panel toggle: at the far end, outside the measured strip — it

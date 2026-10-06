@@ -42,6 +42,13 @@ describe("pushing onto the side panel", () => {
     expect(next.front).toBe(8);
   });
 
+  test("a new panel takes the remembered ratio; an open one keeps its own", () => {
+    const side = pushItem(null, file(1), () => 7, undefined, 0.65).side;
+    expect(side.ratio).toBe(0.65);
+    expect(pushItem({ ...side, ratio: 0.4 }, file(2), () => 8, undefined, 0.65).side.ratio).toBe(0.4);
+    expect(sideFromPaths(["/a"], () => 9, 0.3)!.ratio).toBe(0.3);
+  });
+
   test("the same thing comes to the front and the head instead of duplicating", () => {
     const { side, newId } = pushed([file(1), file(2), file(3)]);
     const { side: next, hit } = pushItem(side, file(1), newId);
