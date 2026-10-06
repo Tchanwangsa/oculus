@@ -17,7 +17,7 @@ const KIND_LABEL: Record<CalEvent["kind"], string> = {
 };
 
 /**
- * One event as a list row, shared by Agenda and Home's Today list. The caller
+ * One event as a list row, shared by Agenda and Home's Upcoming card. The caller
  * owns `now`, so a list runs one minute timer rather than one per row.
  */
 export function EventRow({

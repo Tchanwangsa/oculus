@@ -16,6 +16,7 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/openFile.ts`, `app/src/pages/subject/FilePage.tsx`, `app/src/hooks/useLocateHighlight.ts` |
 | ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/find.ts`, `app/src/hooks/useDomFind.ts`, `app/src/lib/findText.ts`, `app/src/components/ui/FindBar.tsx`, `app/src/components/ui/PageFind.tsx`, `app/src/components/documents/editor/useEditorFind.ts` |
 | Subject page: the nav column, subject switcher and `/subjects` redirect | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx`, `app/src/pages/SubjectsRedirect.tsx` |
+| Home: sections, the Recent row's query, the Activity chart and its pings | `app/src/pages/HomePage.tsx`, `app/src/components/home/`, `app/src/lib/home.ts`, `app/src/lib/usage.ts`, `app/src/lib/usageContext.ts`, `app/src/hooks/useActivityPing.ts` |
 | Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/settingsSearch.ts` |
 
 ## Each pane has its own router, and the path is its only state
@@ -167,10 +168,33 @@ list. A jump travels as router state, and the layout scrolls the section's id
 
 Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
 `app/src/lib/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. ⌥⌘T on a
+- **Home is a dashboard with no state of its own.** Each section owns its read
+  and re-reads on its tab's front edge (`useHomeSection`). Top to bottom: the
+  date with the last completed sync and a Sync now pill (`SyncControl`, which
+  shows the run's progress and a refused start's reason inline); then two
+  columns. The left is Activity over a sideways row of the lectures, files and
+  threads last opened (`RecentRow`, from `loadRecent` — not the new-tab Recent
+  trail; absent when empty). The right is Upcoming — the first five calendar
+  rows from today, within the week, as `EventRow`s, with See more to the
+  calendar — over Lectures, the five most recently watched unfinished
+  lectures with their time left (`LecturesCard`).
+- **Activity is the last 30 days of app use**: four stat cards from
+  `usage_hours` (total active, today and the daily average, each against the
+  period before, then the streak and its highest), then one bar per day under
+  remembered Time · Subject · Type tabs. Time stacks active time under idle
+  open time; Subject and Type stack active time from `usage_context_hours` in
+  a fixed order — up to five subjects in their calendar colours (the rest fold
+  into Other subjects), or kinds folded into six groups in the chart tokens. Bars
+  are solid — tints mix with the card, so gridlines stop behind them — and a
+  hovered day opens a tooltip over its bar with each series' time. Rust counts the time
+  ([architecture.md](./architecture.md#rust-counts-app-usage-the-frontend-only-pings));
+  the frontend's part is `useActivityPing`, mounted once in `AppLayout`. A ping
+  raises no event, so the card polls every five minutes while its tab is in
+  front.
 closed panel opens one on `/new`.
 
 - **`openBeside` is what file rows, citations and lecture rows call**
-  (`openFileSmart`, `openCitation`, `LecturesPage`, `ContinueSection`): it
+  (`openFileSmart`, `openCitation`, `LecturesPage`, Home's `RecentRow`): it
   pushes onto the front tab's stack and focuses the panel. A plain `Link`
   navigates its own pane; ⌘-click is still a new tab.
 - **A push names a thing, not a path**: an item with the same `recentKey` comes
@@ -205,9 +229,11 @@ closed panel opens one on `/new`.
   lecture sent to the back pauses; a browser item sent to the back has its
   native view taken down as it unmounts, and a removed one has its page
   closed, or `useBrowserTabs` would adopt it as a strip tab.
-- **The width is per tab**: a new panel takes half (`SIDE_RATIO`), and a drag
-  of the seam is stored with the tab in `oculus-tabs`, beside the items' paths;
-  a stored `split` pane restores as a one-item panel.
+- **The width is per tab, and the last drag is the default**: a drag of the
+  seam is stored with the tab in `oculus-tabs`, beside the items' paths, and
+  becomes the strip's `sideRatio`, which every new or reopened panel takes
+  (half, `SIDE_RATIO`, before any drag). A stored `split` pane restores as a
+  one-item panel.
 - **Nothing floats over a pane**: a native browser page covers anything drawn
   above it, so the controls sit in the header and the focus marker on the seam.
 - **Shell navigation leaves the panel open**: the sidebar, ⌘K and crumbs go to

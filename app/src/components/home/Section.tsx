@@ -3,8 +3,9 @@ import { ListCard } from "@/components/ui/PageParts";
 
 /**
  * The "next few things" list shape — a plain label, then a bordered column of
- * hairline rows — shared by Home and `app/src/components/projects/ProjectOverview.tsx`
- * so they read as one list alongside Today's `EventRow`s.
+ * hairline rows — shared by `app/src/pages/NewTabPage.tsx` and
+ * `app/src/components/projects/ProjectOverview.tsx`. Rows match `EventRow`'s
+ * padding so they read as one list beside calendar rows.
  */
 export function Section({
   title,

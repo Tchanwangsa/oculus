@@ -93,7 +93,8 @@ headings and Inter for everything else, Notion-style layout.
 - **No toasts, no bottom progress bars** — background jobs surface in the
   sidebar only, as a spinner or dot on their rail item
   ([shell.md](./shell.md#the-sidebar-is-an-icon-rail)). No placeholder UI,
-  section-header icons, stat cards or filler.
+  section-header icons or filler; stat cards only where the figures are the
+  point (Home's Activity).
 - Slugs display through `humanizeSlug`, Canvas codes through `displayCode`
   ("MULT20015", not "MULT20015_2026_SM2"), both in `app/src/lib/format.ts`.
 
