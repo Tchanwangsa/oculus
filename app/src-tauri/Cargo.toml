@@ -47,8 +47,11 @@ half = "2"
 keyring = { version = "3", features = ["apple-native"] }
 
 # `sync` is the browser's: a WKWebView snapshot answers on a completion
-# block, and the command awaits a oneshot for it (see src/browser.rs).
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+# block, and the command awaits a oneshot for it (see src/browser.rs). `time`
+# is the usage ticker's interval (src/usage.rs).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+# Local time for the usage table's hour keys; already built for pdfium-render.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 scraper = "0.27"
 # wrap_help so `--help` and the generated agents/OCULUS-CLI.md wrap to a width
 # instead of emitting one very long line per option.

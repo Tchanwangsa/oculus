@@ -14,6 +14,7 @@ import {
   openExternal,
   stepZoom,
 } from "@/lib/browser";
+import { useActivityPing } from "@/hooks/useActivityPing";
 import { useBrowserTabs } from "@/hooks/useBrowserTabs";
 import { useTauriEvent, useWindowEvent } from "@/hooks/useEvents";
 import { routeEdit, routeSelectAll } from "@/lib/editRouting";
@@ -64,6 +65,8 @@ export default function AppLayout() {
   useBrowserTabs();
 
   useNewTabClicks();
+
+  useActivityPing();
 
   useEffect(() => containSelection(), []);
 

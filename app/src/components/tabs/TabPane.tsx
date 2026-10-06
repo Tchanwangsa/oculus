@@ -218,6 +218,8 @@ function Pane({
       onFocusCapture={onFocus && (() => onFocus(tabId, side))}
       // The page's text selects; the side panel header and shell don't.
       data-select-scope
+      // Lets a DOM event find its pane, as the usage pinger does for media.
+      data-pane-id={id}
       className="relative min-h-0 min-w-0 flex-1"
       style={style}
     >

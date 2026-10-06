@@ -26,6 +26,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Headless DB writes | `app/src-tauri/src/store.rs`, `app/src-tauri/src/projects.rs` |
 | File-pipeline event payload and bound channels | `app/src-tauri/src/pipeline_events.rs` |
 | Frontend DB access and event folding | `app/src/lib/db.ts`, `app/src/hooks/useBackendEvents.ts` |
+| App-usage ticker and its pinger | `app/src-tauri/src/usage.rs`, `app/src/hooks/useActivityPing.ts`, `app/src/lib/usageContext.ts` |
 | The CLI over the same engine | `app/src-tauri/src/bin/oculus/` |
 
 ## Oculus starts no child process for parsing or embedding
@@ -132,10 +133,50 @@ never creates the database, so a fresh machine opens the app once first.
 - Parse and embed settings are the `parse` and `embed` rows of `settings`, read
   by `parse_config` and `embed_config`. `store::edit_setting` preserves unknown
   keys when changing either object; malformed records start from defaults.
+- `usage_hours` and `usage_context_hours` are written only by Rust, as the
+  next section describes.
 
 ## The main window holds one webview per browser tab
 
 External links open as in-app browser tabs: each is a child webview of remote
+## Rust counts app usage; the frontend only pings
+
+`usage_hours` holds open and active seconds per local hour, keyed
+`YYYY-MM-DD HH`. A ticker in `app/src-tauri/src/usage.rs`, started in `setup`,
+reads the main window every 30 s and adds 30 to the current hour's row:
+
+- **Open**: the window is visible and not minimized.
+- **Active**: open, and either focused with an `input` ping in the last 120 s
+  or a `media` ping in the last 60 s — so a playing lecture counts without
+  focus or touch.
+
+The frontend calls `usage_activity` with `input` (throttled to one per 30 s)
+or `media` (every 30 s while a video plays). The command only stores the
+ping's wall-clock time and its context; the ticker owns every write, so a
+frozen or hidden WebView can't drop or double-count time. Pings use the wall
+clock because `Instant` pauses through macOS sleep and a pre-sleep ping would
+look fresh on wake.
+
+Each ping carries a context, `{ kind, subjectId }` from `usageContext` in
+`app/src/lib/usageContext.ts`: what sort of page it came from (lecture, file,
+document, course, chat, browser, planning, other) and the subject it belongs
+to. `useActivityPing` (`app/src/hooks/useActivityPing.ts`) sends the focused
+pane's context with input, and pings at once, past the throttle, whenever
+navigation, a tab switch or a focus move between main page and side panel
+changes it within a few seconds of real input — a tab restoring at launch is
+not use. A media beat carries the context of the pane hosting the element
+that started playing (found through the pane root's `data-pane-id`), fixed
+until playback stops, so a lecture playing while the user reads elsewhere is
+still credited to the lecture once input goes quiet. Rust keeps the latest
+context per ping kind; a ping without one leaves it alone, and an unknown kind
+is refused.
+
+An active tick adds its 30 s to `usage_context_hours` (hour, kind, subject —
+0 outside one) in the same transaction as `usage_hours`. It credits the input
+context when input made it active, which wins over media, else the media
+context; with none reported yet, it credits `other`. Ticks before the frontend
+has applied the migrations fail quietly and later ones retry.
+
 content stacked over the slot the `/browse/:id` route leaves in the content
 card ([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owned-by-rust)). The frontend reports that slot as window
 insets and Rust lays pages out from them, so a resize never waits on

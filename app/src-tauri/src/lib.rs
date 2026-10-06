@@ -43,6 +43,7 @@ pub mod terms;
 pub mod voyage;
 
 use std::sync::{Arc, Mutex};
+mod usage;
 use tauri::{Emitter, Manager};
 
 use auth::{auth_flag_path, saved_session_probe, AuthProbe, AuthState};
@@ -67,6 +68,7 @@ pub fn run() {
             // headless (CLI) runs never bind, so their emits are no-ops.
             parse::events::bind(app.handle().clone());
             embed::events::bind(app.handle().clone());
+        .manage(usage::UsageState::default())
 
             // WebKit won't play <video> from the asset protocol (see media.rs).
             app.manage(media::start_media_server(paths::data_dir()));
@@ -91,6 +93,8 @@ pub fn run() {
             // ping. Rejected → try auto-recover, else sign out; unreachable →
             // stay optimistic, since offline is not expired.
             let app_handle = app.handle().clone();
+            // Open and active time per hour, from the window and the frontend's pings.
+            usage::start(app.handle());
 
             if auth_flag_path().exists() {
                 eprintln!("[oculus] auth flag found — verifying persisted session");
@@ -277,3 +281,4 @@ pub fn run() {
             }
         });
 }
+            usage::usage_activity,

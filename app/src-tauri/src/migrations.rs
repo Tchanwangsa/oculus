@@ -734,11 +734,46 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_document_versions_number
                         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 40,
+            description: "usage: open and active seconds per local hour",
+            // Written only by the ticker in `usage.rs`; open vs active is defined there.
+            sql: r#"
+CREATE TABLE IF NOT EXISTS usage_hours (
+    hour           TEXT    PRIMARY KEY,           -- local time, 'YYYY-MM-DD HH'
+    open_seconds   INTEGER NOT NULL DEFAULT 0,
+    active_seconds INTEGER NOT NULL DEFAULT 0
+);
+                        "#,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 41,
+            description: "usage: active seconds per local hour, page kind and subject",
+            // Written only by the ticker in `usage.rs`, in the transaction that adds
+            // the same active seconds to `usage_hours`.
+            sql: r#"
+CREATE TABLE IF NOT EXISTS usage_context_hours (
+    hour           TEXT    NOT NULL,              -- local time, 'YYYY-MM-DD HH'
+    kind           TEXT    NOT NULL,              -- a UsageKind from app/src/lib/usageContext.ts
+    subject_id     INTEGER NOT NULL DEFAULT 0,    -- 0 outside a subject
+    active_seconds INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (hour, kind, subject_id)
+);
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn versions_strictly_increase() {
+        let versions: Vec<i64> = super::all().iter().map(|migration| migration.version).collect();
+        assert!(versions.windows(2).all(|pair| pair[0] < pair[1]), "{versions:?}");
+    }
+
     #[test]
     fn applied_task_rebuild_sql_keeps_its_checksum() {
         let migration = super::all().into_iter().find(|migration| migration.version == 37).unwrap();
