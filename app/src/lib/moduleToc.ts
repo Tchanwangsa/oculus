@@ -1,15 +1,18 @@
 /**
  * Parses the module TOC markdown `sync.rs` writes to `modules/NN-slug.md`:
  * `## ` for Canvas SubHeaders, `- [label](href) _(kind)_` for items, indented
- * two spaces per Canvas `indent` level.
+ * two spaces per Canvas `indent` level. A video is `_(video <canvas id>)_`,
+ * its href where the on-demand download lands (`file_toc_line`).
  */
 
 export interface ModuleItem {
   title: string;
   /** `../files/x.pdf` (in-app), an http(s) URL, or null when not downloaded. */
   href: string | null;
-  /** From the trailing `_(kind)_`: quiz | assignment | external | file. */
+  /** From the trailing `_(kind)_`: quiz | assignment | external | file | video. */
   kind: string | null;
+  /** The Canvas file id a `_(video <id>)_` item downloads; null otherwise. */
+  canvasFileId: number | null;
   indent: number;
 }
 
@@ -27,8 +30,10 @@ export interface ModuleToc {
 
 const HEADING = /^\s*##\s+(.*)$/;
 const BULLET = /^(\s*)-\s+(.*)$/;
-const LINK = /^\[(.+?)\]\((.*?)\)\s*(?:_\((\w+)\)_)?\s*$/;
-const BARE = /^(.*?)\s*(?:_\((\w+)\)_)?\s*$/;
+const LINK = /^\[(.+?)\]\((.*?)\)\s*(?:_\((\w+)(?:\s+(\d+))?\)_)?\s*$/;
+const BARE = /^(.*?)\s*(?:_\((\w+)(?:\s+(\d+))?\)_)?\s*$/;
+
+const idOf = (digits: string | undefined) => (digits ? Number(digits) : null);
 
 const unescapeMd = (s: string) => s.replace(/\\(.)/g, "$1");
 
@@ -73,6 +78,7 @@ export function parseModuleToc(md: string): ModuleToc {
         title: unescapeMd(link[1]),
         href: link[2] || null,
         kind: link[3] ?? null,
+        canvasFileId: idOf(link[4]),
         indent,
       });
       continue;
@@ -83,6 +89,7 @@ export function parseModuleToc(md: string): ModuleToc {
       title: unescapeMd(bare?.[1] ?? body),
       href: null,
       kind: bare?.[2] ?? null,
+      canvasFileId: idOf(bare?.[3]),
       indent,
     });
   }

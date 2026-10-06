@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   getLectures,
+  setLectureDone,
   upsertLectures,
   type Lecture,
   type LectureData,
@@ -29,6 +30,7 @@ import { sideFront, useTabStore } from "@/stores/tabStore";
 import { usePaneTab } from "@/components/tabs/TabContext";
 import { openBeside } from "@/lib/tabRouters";
 import { LECTURE_PROGRESS_EVENT } from "@/lib/lecturePlayback";
+import { findStartedLectureEnds, isWatched } from "@/lib/lectureEnd";
 import { recordRecent } from "@/lib/recents";
 import {
   LECTURES_CHANGED_EVENT,
@@ -52,7 +54,9 @@ export default function SubjectLecturesPage() {
   const [pendingDelete, setPendingDelete] = useState<Lecture | null>(null);
 
   const refreshLectures = useCallback(async () => {
-    setLectures(await getLectures(subject.id));
+    const rows = await getLectures(subject.id);
+    setLectures(rows);
+    findStartedLectureEnds(rows);
   }, [subject.id]);
 
   useEffect(() => {
@@ -83,6 +87,17 @@ export default function SubjectLecturesPage() {
       setSyncError(`Could not delete the download: ${e}`);
     }
   };
+
+  const handleToggleDone = useCallback(async (lec: Lecture) => {
+    setSyncError(null);
+    try {
+      const rewind = !!lec.completed && isWatched(lec, lec.progress_seconds, 0);
+      await setLectureDone(lec.id, !lec.completed, rewind);
+      window.dispatchEvent(new CustomEvent(LECTURES_CHANGED_EVENT));
+    } catch (e) {
+      setSyncError(`Could not update the lecture: ${e}`);
+    }
+  }, []);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -145,6 +160,7 @@ export default function SubjectLecturesPage() {
                 onSelect={handleSelectLecture}
                 onDownload={handleDownload}
                 onDelete={setPendingDelete}
+                onToggleDone={handleToggleDone}
               />
             ))}
           </ListCard>

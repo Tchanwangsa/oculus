@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { spanAt } from "../src/lib/lectures";
+import { spanAt } from "../src/lib/media";
 
 describe("chronological playback spans", () => {
   test("selects the last started entry, including exact boundaries and duplicate starts", () => {

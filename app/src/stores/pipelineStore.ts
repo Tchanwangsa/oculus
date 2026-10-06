@@ -116,8 +116,13 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   touch: (relativePath, subjectId, patch) =>
     set((s) => {
       const prev = s.items[relativePath] ?? newItem(relativePath, subjectId);
+      // A parse or embed event means the bytes are on disk, even when it is
+      // the first event this session saw for the file.
+      const onDisk =
+        prev.download === "pending" && (patch.parse !== undefined || patch.embed !== undefined);
       const next: PipelineItem = {
         ...prev,
+        ...(onDisk ? { download: "done" as const } : {}),
         ...patch,
         // Keep a subject id we already know over a missing one.
         subjectId: prev.subjectId || subjectId,

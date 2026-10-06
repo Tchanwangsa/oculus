@@ -5,13 +5,14 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
 import { PDFViewer } from "@/components/files/PDFViewer";
-import { docPdfRelPath, isPdfBacked, parsedMdRelPath } from "@/lib/fileTypes";
+import { docPdfRelPath, isPdfBacked, isVideoFile, parsedMdRelPath } from "@/lib/fileTypes";
 import { filePageHref, type FileLocate } from "@/lib/openFile";
 import { libraryImageSrc, libraryLinkTarget } from "@/lib/libraryLinks";
 import { useDataDir } from "@/hooks/useDataDir";
 import type { DbFile } from "@/lib/db";
 import { courseFileHasContent } from "@/lib/courseFiles";
 import { FileMarkdown } from "@/components/files/FileMarkdown";
+import { VideoFileViewer } from "@/components/files/VideoFileViewer";
 
 /**
  * PDF ↔ parsed-markdown toggle state, lifted out so the host renders the
@@ -92,7 +93,8 @@ interface FileViewerProps {
 }
 
 /**
- * Renders one scraped file: markdown pages/announcements, PDFs, and images.
+ * Renders one scraped file: markdown pages/announcements, PDFs, images, and
+ * videos (in the media player, `VideoFileViewer`).
  * Chrome-free — the host owns the header (title + PdfMdToggle).
  */
 export function FileViewer({
@@ -125,6 +127,8 @@ export function FileViewer({
       </div>
     );
   }
+
+  if (isVideoFile(file.filename)) return <VideoFileViewer file={file} />;
 
   if (pdfRelPath) {
     return (

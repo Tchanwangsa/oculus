@@ -224,7 +224,12 @@ export async function setSyncOptions(options: SyncOptions): Promise<void> {
 // JSON value, read back in Rust by `harness::jobs`, where the jobs run.
 
 /** Mirrors `Job` in `app/src-tauri/src/harness/jobs.rs`. */
-export type JobId = "lectureChapters" | "lectureReading" | "threadNaming" | "documentSuggestions";
+export type JobId =
+  | "lectureChapters"
+  | "lectureReading"
+  | "lectureEnd"
+  | "threadNaming"
+  | "documentSuggestions";
 
 /** `reasoningEffort` is null only for a model that takes no level. */
 export interface JobSelection {
@@ -250,6 +255,12 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
       "Rewrites the transcript as readable text — one sentence per line, pinned to its second, with spoken maths set as maths. One agent turn per ten minutes.",
   },
   {
+    id: "lectureEnd",
+    label: "Lecture end",
+    description:
+      "Finds where a lecture's content ends, so Done and Up Next don't wait for the Q&A. One short turn per lecture.",
+  },
+  {
     id: "threadNaming",
     label: "Chat thread names",
     description:
@@ -268,6 +279,7 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
 export const DEFAULT_JOB_MODELS: JobModels = {
   lectureChapters: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
   lectureReading: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" },
+  lectureEnd: { provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null },
   threadNaming: { provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null },
   documentSuggestions: { provider: "claude", model: "claude-sonnet-5-5", reasoningEffort: "medium" },
 };
@@ -1028,7 +1040,7 @@ export interface Lecture {
   transcript_path: string | null;
   progress_seconds: number;
   /** UTC `datetime('now')`, comparable with `files.last_accessed_at`; NULL
-   *  is never watched. Home's Continue ranks on it. */
+   *  is never watched. Home's Recent row ranks on it. */
   last_watched_at: string | null;
   completed: number;
   synced_at: string;
@@ -1042,6 +1054,14 @@ export interface Lecture {
   reading_status: string | null;
   reading_written_at: string | null;
   reading_error: string | null;
+  /** Where the lecture's planned content ends (`lecture_end`): the end of the
+   *  sign-off line, in seconds. Kept when a later run fails. */
+  content_end_seconds: number | null;
+  /** The words of the sign-off the end was found on. */
+  content_end_quote: string | null;
+  /** `null` (never run) | `running` | `ready` | `none` (cut off, no end) | `error`. */
+  content_end_status: string | null;
+  content_end_error: string | null;
 }
 
 export interface LectureData {
@@ -1151,6 +1171,54 @@ export async function markLectureComplete(id: string): Promise<void> {
      WHERE id = $1`,
     [id]
   );
+}
+
+/** The list's Done toggle. Marking keeps the position, since it may not have
+ *  been watched; unmarking a lecture watched to its end (`rewind`) starts it
+ *  over, or it would show nothing left and re-mark itself on the next save. */
+export async function setLectureDone(id: string, done: boolean, rewind = false): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE lectures SET completed = $1,
+                         progress_seconds = CASE WHEN $2 THEN 0 ELSE progress_seconds END
+     WHERE id = $3`,
+    [done ? 1 : 0, !done && rewind ? 1 : 0, id],
+  );
+}
+
+/** The lecture after `lec` in its subject, Done or not: the earliest strictly
+ *  later `date`, ties broken by title then id. What Up Next offers. */
+export async function getNextLecture(
+  lec: Pick<Lecture, "subject_id" | "date">,
+): Promise<(Lecture & { subject_code: string }) | null> {
+  const db = await getDb();
+  const rows = await db.select<(Lecture & { subject_code: string })[]>(
+    `SELECT l.*, s.code AS subject_code
+       FROM lectures l
+       JOIN subjects s ON s.id = l.subject_id
+      WHERE l.subject_id = $1 AND l.date > $2
+      ORDER BY l.date ASC, l.title ASC, l.id ASC
+      LIMIT 1`,
+    [lec.subject_id, lec.date],
+  );
+  return rows[0] ?? null;
+}
+
+/** The end job's columns and the transcript it reads. */
+export type LectureEndRow = Pick<
+  Lecture,
+  "transcript_path" | "content_end_seconds" | "content_end_status" | "content_end_error"
+>;
+
+/** Read on its own, as `getChapterStatus` is. */
+export async function getLectureEnd(lectureId: string): Promise<LectureEndRow | null> {
+  const db = await getDb();
+  const rows = await db.select<LectureEndRow[]>(
+    `SELECT transcript_path, content_end_seconds, content_end_status, content_end_error
+       FROM lectures WHERE id = $1`,
+    [lectureId],
+  );
+  return rows[0] ?? null;
 }
 
 // ── Lecture chapters ──────────────────────────────────────────────────────────
@@ -1307,10 +1375,10 @@ export async function getAllLectures(): Promise<
   );
 }
 
-// ── Recency (Home's "Continue where you left off") ───────────────────────────
+// ── Recency (Home's Recent row) ───────────────────────────────────────────────
 
 /** Lectures in progress, most recently watched first. The `> 5` must match
- *  the "started" threshold in `progressLabel` (lib/lectures.ts). */
+ *  the "started" threshold in `progressLabel` (lib/lectureEnd.ts). */
 export async function getRecentlyWatchedLectures(
   limit = 8,
 ): Promise<(Lecture & { subject_code: string })[]> {

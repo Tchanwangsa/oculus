@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { fmtClock, sqliteUtcToMs } from "@/lib/format";
-import { fmtClockSecs } from "@/lib/lectures";
+import { fmtClockSecs } from "@/lib/media";
 import {
   messageAt,
   parseErrorMeta,
@@ -175,7 +175,10 @@ function CopyAction({ text }: { text: string }) {
 }
 
 /** The row under a message: its time, then its actions. Its height is always
- *  taken and only the contents fade in on hover, so the thread never jumps. */
+ *  taken and only the contents fade in on hover, so the thread never jumps.
+ *  `will-change` keeps it on its own layer: WebKit otherwise drops and re-adds
+ *  the layer around each fade, re-snapping the icons half a pixel at a
+ *  fractional page zoom. */
 function MessageActions({
   when,
   at,
@@ -195,7 +198,7 @@ function MessageActions({
       // as them bolding and unbolding.
       data-copy-skip
       className={cn(
-        "-mt-0.5 flex select-none h-8 items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100",
+        "-mt-0.5 flex select-none h-8 items-center gap-1 text-[11px] text-muted-foreground opacity-0 transition-opacity will-change-[opacity] focus-within:opacity-100 group-hover/msg:opacity-100",
         side === "right" ? "justify-end" : "pl-1",
       )}
     >
@@ -299,13 +302,13 @@ function QuestionBubble({
   const [open, setOpen] = useState(false);
   /** The picture open in the lightbox, as the src the card drew. */
   const [shown, setShown] = useState<string | null>(null);
+  /** The pasted text open in its viewer, by index. */
+  const [viewing, setViewing] = useState<number | null>(null);
   const dataDir = useDataDir();
   // Pasted text draws as cards beside the pictures, not in the words.
   const { text: words, pasted } = useMemo(() => splitPastedText(text), [text]);
   const [body, long] = useOverflows(words, editing === null);
   const box = useRef<HTMLTextAreaElement>(null);
-  /** The pasted text open in its viewer, by index. */
-  const [viewing, setViewing] = useState<number | null>(null);
   // Mentions draw as chips rather than the paths the agent was sent.
   const parts = useMemo(() => splitLibraryPaths(words), [words]);
   // Only the prose is measured and folded; cards and pictures always show.
@@ -416,10 +419,10 @@ function QuestionBubble({
           >
             <div
               ref={body}
+              data-selectable
               // A mask, not a gradient: a queued bubble's ground is transparent.
               className={cn(
                 "whitespace-pre-wrap break-words",
-              data-selectable
                 long && !open && "overflow-hidden [mask-image:linear-gradient(to_bottom,#000_calc(100%-2.25rem),transparent)]",
               )}
               style={long && !open ? { maxHeight: QUESTION_MAX_H } : undefined}

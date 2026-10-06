@@ -55,6 +55,15 @@ export function isPdfBacked(filename: string): boolean {
   return ext(filename) === "pdf" || isOfficeFile(filename);
 }
 
+/** Video formats a library file can hold — module videos land as
+ *  `files/<name>.mp4`. Mirrors VIDEO_EXTS in sync.rs. */
+const VIDEO_EXTS = ["mp4", "mov", "m4v", "webm"];
+
+/** True for a video file. Videos never enter the parse/embed pipeline. */
+export function isVideoFile(filename: string): boolean {
+  return VIDEO_EXTS.includes(ext(filename));
+}
+
 /** The parser's markdown for a PDF-backed file: "a.pdf" → "a.md",
  *  "deck.pptx" → "deck.pptx.md". */
 export function parsedMdRelPath(file: { filename: string; relative_path: string }): string | null {
@@ -110,6 +119,7 @@ export function fileIconFor(filename: string): Icon {
     case "rar": return FileArchive;
     case "mp4":
     case "mov":
+    case "m4v":
     case "mkv":
     case "webm": return FileVideo;
     case "mp3":

@@ -3,20 +3,13 @@ import { CircleNotch } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { fmtClockSecs } from "@/lib/lectures";
+import { fmtClockSecs } from "@/lib/media";
 import { toolVerb, type ToolKind } from "@/lib/harness";
 import { useTabActive } from "@/components/tabs/TabContext";
 
 /** The pieces the chapter list and the reading copy share for an agent job:
- *  the empty state, the in-flight status, and the Regenerate footer. */
-
-export function PanelEmpty({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-1.5 px-4 py-6 text-center text-[11px] leading-relaxed">
-      {children}
-    </div>
-  );
-}
+ *  the in-flight status and the Regenerate footer. Their empty state is the
+ *  dock's `PanelEmpty` (`components/media/MediaDock.tsx`). */
 
 interface StepProgress {
   phase: string;

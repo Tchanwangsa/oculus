@@ -1,9 +1,5 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { invoke } from "@tauri-apps/api/core";
-import { ArrowsClockwise, CircleNotch, Paperclip } from "@phosphor-icons/react";
-import { cn } from "@/lib/utils";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Paperclip } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { SubjectLoading, SubjectPage, SubjectEmpty } from "@/components/subjects/SubjectPage";
 import { useSubjectFiles } from "@/hooks/useSubjectFiles";
@@ -29,45 +25,13 @@ export default function SubjectDownloadsPage() {
   const { byCategory, loading, reload } = useSubjectFiles(subject.id);
   const downloads = byCategory.file;
 
-  const [rescraping, setRescraping] = useState<Set<number>>(new Set());
-  const [rescrapeError, setRescrapeError] = useState<string | null>(null);
-
   useReconcileParseStatus(downloads);
 
   // The row is written by the app-level `scrape-file` handler in
-  // `useBackendEvents`, which raises FILE_SCRAPED_EVENT once it has; a
-  // rescrape's completion only refreshes the list and clears its spinner.
+  // `useBackendEvents`, which raises FILE_SCRAPED_EVENT once it has.
   useWindowEvent(FILE_SCRAPED_EVENT, (e) => {
-    const { subject_id, canvas_id } = (e as CustomEvent<FileScraped>).detail;
-    if (canvas_id != null) {
-      setRescraping((prev) => {
-        const s = new Set(prev);
-        s.delete(canvas_id);
-        return s;
-      });
-    }
-    if (subject_id === subject.id) reload();
+    if ((e as CustomEvent<FileScraped>).detail.subject_id === subject.id) reload();
   });
-
-  const rescrape = async (file: DbFile) => {
-    if (!file.canvas_id) return;
-    setRescrapeError(null);
-    setRescraping((prev) => new Set(prev).add(file.canvas_id!));
-    try {
-      await invoke("rescrape_file", {
-        subjectId: file.subject_id,
-        subjectCode: subject.code,
-        canvasId: file.canvas_id,
-      });
-    } catch (err) {
-      setRescraping((prev) => {
-        const s = new Set(prev);
-        s.delete(file.canvas_id!);
-        return s;
-      });
-      setRescrapeError(String(err));
-    }
-  };
 
   if (loading && downloads.length === 0) {
     return <SubjectLoading count={8} />;
@@ -89,39 +53,20 @@ export default function SubjectDownloadsPage() {
 
   return (
     <SubjectPage>
-      {rescrapeError && (
-        <Alert variant="destructive" className="mb-3 w-auto px-2.5 py-2">
-          <AlertDescription className="text-[11px] leading-snug">
-            {rescrapeError}
-          </AlertDescription>
-        </Alert>
-      )}
-
       <ListCard>
         {downloads.map((f) => (
-          <DownloadRow
-            key={f.id}
-            file={f}
-            rescraping={f.canvas_id != null && rescraping.has(f.canvas_id)}
-            onRescrape={() => rescrape(f)}
-          />
+          <DownloadRow key={f.id} file={f} />
         ))}
       </ListCard>
     </SubjectPage>
   );
 }
 
-function DownloadRow({
-  file, rescraping, onRescrape,
-}: {
-  file: DbFile;
-  rescraping: boolean;
-  onRescrape: () => void;
-}) {
+function DownloadRow({ file }: { file: DbFile }) {
   const Icon = fileIconFor(file.filename);
 
   return (
-    <div className="group flex items-center gap-3 px-3 py-2 hover:bg-surface transition-colors">
+    <div className="flex items-center gap-3 px-3 py-2 hover:bg-surface transition-colors">
       <button
         data-tab-href={filePageHref(file) ?? undefined}
         onClick={() => openFileSmart(file)}
@@ -131,11 +76,7 @@ function DownloadRow({
         <span className="text-[12px] text-foreground truncate flex-1">
           {file.filename}
         </span>
-        {/* Fixed-width columns so rows line up. A blank parse column means
-            "no parse", never "all is well". */}
-        <span className="shrink-0 w-20 flex items-center justify-end">
-          <ParseStateBadge file={file} />
-        </span>
+        {/* Fixed-width columns so rows line up. */}
         <span className="shrink-0 w-17 text-right text-[11px] text-muted-foreground tabular-nums">
           {fmtSize(file.size_bytes)}
         </span>
@@ -144,26 +85,10 @@ function DownloadRow({
         </span>
       </button>
 
-      {/* Always reserved so rows without a Canvas id keep the columns. */}
-      <span className="shrink-0 w-3 flex items-center justify-center">
-        {file.canvas_id != null && (
-          <button
-            onClick={onRescrape}
-            disabled={rescraping}
-            aria-label="Re-download from Canvas"
-            title="Re-download from Canvas"
-            className={cn(
-              "text-muted-foreground hover:text-foreground transition-[color,opacity]",
-              rescraping ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-            )}
-          >
-            {rescraping ? (
-              <CircleNotch size={12} className="animate-spin" />
-            ) : (
-              <ArrowsClockwise size={12} />
-            )}
-          </button>
-        )}
+      {/* Outside the row's button: a failed parse's icon is its own button.
+          A blank column means "no parse", never "all is well". */}
+      <span className="shrink-0 w-4 flex items-center justify-center">
+        <ParseStateBadge file={file} />
       </span>
     </div>
   );

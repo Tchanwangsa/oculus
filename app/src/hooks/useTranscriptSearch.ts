@@ -19,3 +19,5 @@ export function useTranscriptSearch(items: readonly { text: string }[], activeIn
   // The playing item may be missing from results; searching suspends following.
   return { query, setQuery, needle, searching, rows, followIdx: searching ? -1 : activeIndex };
 }
+
+export type TranscriptSearch = ReturnType<typeof useTranscriptSearch>;

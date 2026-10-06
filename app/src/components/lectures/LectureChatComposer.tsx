@@ -9,7 +9,7 @@ import { AttachmentStrip } from "@/components/harness/AttachmentStrip";
 import { useAttachments } from "@/hooks/useAttachments";
 import { imageFiles } from "@/lib/attachments";
 import type { Provider } from "@/lib/harness";
-import { fmtClockSecs } from "@/lib/lectures";
+import { fmtClockSecs } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { useDraftStore } from "@/stores/draftStore";
 import { useTabActive } from "@/components/tabs/TabContext";
@@ -78,7 +78,8 @@ function MomentChip({
  * (`useAttachments`, `AttachmentStrip`).
  *
  * Enter sends, Shift+Enter breaks a line. While a turn runs a send is queued by
- * Rust, so stop and send sit side by side. Unsent text lives in `draftStore`.
+ * Rust, so stop and send sit side by side. Unsent text lives in `draftStore`,
+ * and so do long pastes, held as cards in the attachment strip.
  */
 export function LectureChatComposer({
   draftKey,
@@ -152,14 +153,13 @@ export function LectureChatComposer({
   takeBackRef.current = att.takeBack;
   useEffect(() => {
     if (!restore) return;
-    const { drafts, setDraft } = useDraftStore.getState();
     const rest = takeBackRef.current(restore.text);
+    const { drafts, setDraft } = useDraftStore.getState();
     const t = drafts[keyRef.current] ?? "";
-    setDraft(keyRef.current, [restore.text, t].filter(Boolean).join("\n\n"));
+    setDraft(keyRef.current, [rest, t].filter(Boolean).join("\n\n"));
     ref.current?.focus();
   }, [restore]);
 
-  // Autosize in a layout effect: in the change handler the textarea still holds
   /** A text card's words back into the box, after what is typed. */
   const putBack = (pasted: string) => {
     const { drafts, setDraft } = useDraftStore.getState();
@@ -176,6 +176,7 @@ export function LectureChatComposer({
     });
   };
 
+  // Autosize in a layout effect: in the change handler the textarea still holds
   // the old string. The card is held at its height while the field collapses to
   // measure: the thread above would grow, clamp its scroll and come unpinned.
   useLayoutEffect(() => {
@@ -226,8 +227,9 @@ export function LectureChatComposer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
-            // A picture on the clipboard wins over its text flavour; plain text
-            // falls through to the native paste (keeps undo).
+            // A picture on the clipboard wins over its text flavour; a long
+            // text becomes a card; the rest falls through to the native paste
+            // (keeps undo).
             const pictures = imageFiles(e.clipboardData.files);
             if (pictures.length) {
               e.preventDefault();

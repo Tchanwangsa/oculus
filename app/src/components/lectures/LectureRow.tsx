@@ -1,7 +1,8 @@
 import { memo } from "react";
 import { CheckCircle, CircleNotch, Clock, DownloadSimple, Trash, X } from "@phosphor-icons/react";
 import { cancelLectureDownload, dlKey, isDownloading, useLectureDownloads } from "@/stores/lectureDownloadStore";
-import { fmtDurationSecs, fmtLectureDate, lecturePagePath, progressLabel } from "@/lib/lectures";
+import { fmtDurationSecs, fmtLectureDate, lecturePagePath } from "@/lib/lectures";
+import { progressLabel } from "@/lib/lectureEnd";
 import type { Lecture } from "@/lib/db";
 import { cn } from "@/lib/utils";
 
@@ -57,12 +58,14 @@ export const LectureRow = memo(function LectureRow({
   onSelect,
   onDownload,
   onDelete,
+  onToggleDone,
 }: {
   lecture: Lecture;
   active: boolean;
   onSelect: (lecture: Lecture) => void;
   onDownload: (lecture: Lecture) => void;
   onDelete: (lecture: Lecture) => void;
+  onToggleDone: (lecture: Lecture) => void;
 }) {
   const prog = useLectureDownloads((s) => s.progress[dlKey(lec.id)]);
   const downloading = useLectureDownloads((s) => isDownloading(s, lec.id));
@@ -78,18 +81,27 @@ export const LectureRow = memo(function LectureRow({
         active && "bg-surface-raised",
       )}
     >
-      <div className="shrink-0">
+      {/* The Done toggle; an open circle shows its tick on hover. Fixed
+          size, so a Done row's title lines up with the rest. */}
+      <RowAction
+        label={lec.completed ? "Mark as not done" : "Mark as done"}
+        onTrigger={() => onToggleDone(lec)}
+        className="group/done shrink-0 flex size-5.5 items-center justify-center"
+      >
         {lec.completed ? (
           <CheckCircle size={14} className="text-success" />
         ) : (
-          <div
-            className={cn(
-              "w-3 h-3 rounded-full border-2",
-              active ? "border-brand" : "border-muted-foreground/40",
-            )}
-          />
+          <>
+            <div
+              className={cn(
+                "w-3 h-3 rounded-full border-2 group-hover/done:hidden",
+                active ? "border-brand" : "border-muted-foreground/40",
+              )}
+            />
+            <CheckCircle size={14} className="hidden text-muted-foreground group-hover/done:block" />
+          </>
         )}
-      </div>
+      </RowAction>
       <div className="min-w-0 flex-1">
         <p className="text-[12px] font-medium text-foreground truncate leading-tight">
           {lec.title}

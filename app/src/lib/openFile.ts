@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTabStore } from "@/stores/tabStore";
 import { openBeside } from "@/lib/tabRouters";
 import { humanizeSlug } from "@/lib/format";
-import { isPdfBacked, parsedMdRelPath, parsedMdSource } from "@/lib/fileTypes";
+import { isPdfBacked, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/fileTypes";
 import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
 import { attachmentPath } from "@/lib/attachments";
 import { isWebUrl, openExternal } from "@/lib/browser";
@@ -56,14 +56,32 @@ export function routeLocate(state: unknown): FileLocate | undefined {
   };
 }
 
-/** How any list row opens a file: anything renderable (including Office
- *  documents, via their converted PDF) as its page in the side panel
- *  (`openBeside`), at `locate` if given, other binaries in the system
- *  viewer. */
+/** Opens a PDF's page with its parse details showing: a file row's failed
+ *  parse icon. The value is fresh per click, so a second click re-opens them. */
+export function openFileParseDetails(file: DbFile): void {
+  recordFileAccess(file);
+  openBeside(filePagePath(file.subject_id, file.relative_path), { parseDetails: Date.now() });
+}
+
+/** The `parseDetails` a file page was opened with, if any. */
+export function routeParseDetails(state: unknown): number | undefined {
+  const v = (state as { parseDetails?: unknown } | null)?.parseDetails;
+  return typeof v === "number" ? v : undefined;
+}
+
+/** A binary the app has no viewer for: it opens in the system viewer. PDFs,
+ *  Office documents (via their converted PDF) and videos render in-app. */
+function systemOnly(file: DbFile): boolean {
+  return !isPdfBacked(file.filename) && !isVideoFile(file.filename);
+}
+
+/** How any list row opens a file: anything renderable as its page in the
+ *  side panel (`openBeside`), at `locate` if given, other binaries in the
+ *  system viewer. */
 export function openFileSmart(file: DbFile, locate?: FileLocate): void {
   recordFileAccess(file);
   const binary = file.category === "file" || file.category === "upload";
-  if (binary && !isPdfBacked(file.filename)) {
+  if (binary && systemOnly(file)) {
     invoke("open_course_file", { relativePath: file.relative_path }).catch(
       console.error,
     );
@@ -82,7 +100,7 @@ export function filePagePath(subjectId: number, relativePath: string): string {
 /** A row's `data-tab-href` (`lib/newTabClicks.ts`): its ⌘-click route, or
  *  null for a binary that only opens in the system viewer. */
 export function filePageHref(file: DbFile): string | null {
-  if (file.category === "file" && !isPdfBacked(file.filename)) return null;
+  if (file.category === "file" && systemOnly(file)) return null;
   return filePagePath(file.subject_id, file.relative_path);
 }
 

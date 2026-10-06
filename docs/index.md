@@ -20,11 +20,11 @@ the root `CLAUDE.md` holds only the rules.
 | [harness.md](./harness.md) | Chat as a CLI agent: the four bridges, containment, the timeline |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [projects.md](./projects.md) | Projects and tasks: the Overview, board, table, timeline and the universal Tasks view |
-| [chapters.md](./chapters.md) | Lecture chapters and the reading copy: the detector and the two agent jobs |
+| [chapters.md](./chapters.md) | Lecture chapters, the reading copy and where a lecture ends: the detector and the three model jobs |
 | [frontend.md](./frontend.md) | The frontend's data side: backend events, settings, parse state, library files |
 | [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
 | [ui.md](./ui.md) | The UI system: design rules, and the WebKit and CSS traps |
-| [viewers.md](./viewers.md) | Markdown, PDFs, the lecture player and the in-app browser |
+| [viewers.md](./viewers.md) | Markdown, PDFs, the media player (lectures, Up Next and library videos), transcription and the in-app browser |
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
 | [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
 | [cli.md](./cli.md) | The `oculus` binary: what each command writes, and the agent docs it generates |

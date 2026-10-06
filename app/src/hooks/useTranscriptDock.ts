@@ -32,12 +32,15 @@ function nearestEdge(rect: DOMRect, x: number, y: number, sides: boolean): Dock 
 }
 
 /**
- * Dock side + size for the lecture player's panel: drag the header to an edge,
- * drag the divider to resize. Stored in `playerPrefsStore`.
+ * Dock side + size for the media player's panel: drag the header to an edge,
+ * drag the divider to resize. Stored in `playerPrefsStore`. `dockTab` is the
+ * tab whose floor applies.
  */
-export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>) {
+export function useTranscriptDock(
+  containerRef: RefObject<HTMLDivElement | null>,
+  dockTab: DockTab,
+) {
   const dock = usePlayerPrefs((s) => s.dock);
-  const dockTab = usePlayerPrefs((s) => s.dockTab);
   const height = usePlayerPrefs((s) => s.height);
   const width = usePlayerPrefs((s) => s.width);
   const setPrefs = usePlayerPrefs((s) => s.set);

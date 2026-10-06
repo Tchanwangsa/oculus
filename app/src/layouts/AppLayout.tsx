@@ -141,7 +141,7 @@ export default function AppLayout() {
   useWindowEvent("keydown", (ev) => {
     const e = ev as KeyboardEvent;
     if (e.defaultPrevented) return;
-    // Keeps ⌘⌥B (ChatPage's panel) from also toggling the sidebar.
+    // Keeps ⌘⌥B (Chat's conversations column) from also toggling the sidebar.
     if (e.altKey) return;
     if (!(e.metaKey || e.ctrlKey)) return;
     switch (e.key) {

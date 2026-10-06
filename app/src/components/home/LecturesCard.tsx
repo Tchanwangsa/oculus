@@ -3,7 +3,8 @@ import { SubjectIcon } from "@/components/subjects/SubjectIcon";
 import { lectureLabel } from "@/lib/calendar";
 import { getRecentlyWatchedLectures, type Lecture } from "@/lib/db";
 import { displayCode } from "@/lib/format";
-import { LECTURES_CHANGED_EVENT, lecturePagePath, progressLabel } from "@/lib/lectures";
+import { LECTURES_CHANGED_EVENT, lecturePagePath } from "@/lib/lectures";
+import { findStartedLectureEnds, progressLabel, watchedFraction } from "@/lib/lectureEnd";
 import { openBeside } from "@/lib/tabRouters";
 import { useHomeSection } from "./useHomeSection";
 
@@ -22,7 +23,10 @@ export function LecturesCard() {
 
   const reload = useCallback(() => {
     getRecentlyWatchedLectures(MAX_ROWS)
-      .then(setLectures)
+      .then((rows) => {
+        setLectures(rows);
+        findStartedLectureEnds(rows);
+      })
       .catch((e) => {
         console.error(e);
         setLectures([]);
@@ -40,9 +44,7 @@ export function LecturesCard() {
       <div className="divide-y divide-border-subtle">
         {lectures?.map((lecture) => {
           const path = lecturePagePath(lecture);
-          const watched = lecture.duration_seconds > 0
-            ? Math.min(1, lecture.progress_seconds / lecture.duration_seconds)
-            : 0;
+          const watched = watchedFraction(lecture);
           return (
             <button
               key={lecture.id}

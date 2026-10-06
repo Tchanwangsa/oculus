@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { fmtClockSecs } from "@/lib/lectures";
+import { fmtClockSecs } from "@/lib/media";
 
 /** Thumbnail width; the height follows the recording's own aspect ratio. */
 const THUMB_W = 168;

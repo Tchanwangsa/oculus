@@ -1,27 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import {
-  ArrowsIn,
-  ArrowsOut,
-  CircleNotch,
-  ClosedCaptioning,
-  DownloadSimple,
-  Pause,
-  Play,
-  SidebarSimple,
-} from "@phosphor-icons/react";
+import { CircleNotch, DownloadSimple, Play } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useNavigate } from "react-router-dom";
 import { useWindowEvent } from "@/hooks/useEvents";
 import { cn } from "@/lib/utils";
 import {
   dlKey,
   downloadLecture,
   isDownloading,
+  LECTURE_DOWNLOADED_EVENT,
   useLectureDownloads,
 } from "@/stores/lectureDownloadStore";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { mediaSrc } from "@/lib/media";
+import { mediaSrc, parseVtt, spanAt, fmtClockSecs, type Cue } from "@/lib/media";
 import {
   updateLectureTranscriptPath,
   videoPathFor,
@@ -30,36 +21,43 @@ import {
 } from "@/lib/db";
 import {
   LECTURE_PROGRESS_EVENT,
+  completeLecture,
   parkLectureVideos,
+  playOnAdopt,
   playbackClaim,
   releaseLecturePlayer,
   syncLectureSources,
   videoForSource,
   type SourcePlan,
 } from "@/lib/lecturePlayback";
+import { contentEnd, isWatched, upNextFrom } from "@/lib/lectureEnd";
 import {
   claimPlayback,
   mayAdopt,
   playbackOwner,
   subscribePlaybackOwner,
 } from "@/lib/playbackOwner";
-import { useActivePaneId } from "@/stores/tabStore";
 import { usePaneTab, useTabActive, useTabId } from "@/components/tabs/TabContext";
 import {
-  parseVtt,
-  spanAt,
+  LECTURES_CHANGED_EVENT,
   fmtDurationSecs,
-  fmtClockSecs,
   fmtLectureDate,
   lectureGrabFrames,
-  type Cue,
+  lecturePagePath,
 } from "@/lib/lectures";
 import { useLectureChapters } from "@/hooks/useLectureChapters";
+import { useLectureEnd } from "@/hooks/useLectureEnd";
 import { useLectureReading } from "@/hooks/useLectureReading";
+import {
+  TRANSCRIBED_EVENT,
+  settleTranscription,
+  useTranscription,
+  type TranscribedDetail,
+} from "@/hooks/useTranscription";
 import type { ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
 import type { ReadingListProps } from "@/components/lectures/ReadingList";
 import type { LectureChatPanelProps } from "@/components/lectures/LectureChatPanel";
-import { useTranscriptDock, type Dock } from "@/hooks/useTranscriptDock";
+import type { TranscribeEmptyProps } from "@/components/media/TranscribeEmpty";
 import { PIP_CORNERS, useSourceLayout, type PipCorner } from "@/hooks/useSourceLayout";
 import { usePlayerPrefs, type DockTab } from "@/stores/playerPrefsStore";
 import {
@@ -70,28 +68,12 @@ import {
   type SourceState,
   type SourceStates,
 } from "@/components/lectures/SourceControls";
-import { CaptionOverlay } from "@/components/lectures/CaptionOverlay";
-import { ScrubPreview } from "@/components/lectures/ScrubPreview";
-import { SpeedControl } from "@/components/lectures/SpeedControl";
-import { VolumeControl } from "@/components/lectures/VolumeControl";
-import {
-  DockDropPreview,
-  DockResizeHandle,
-  TranscriptPanel,
-  tabInFront,
-} from "@/components/lectures/TranscriptPanel";
+import { ControlButton, MediaPlayer, useMediaPlayer } from "@/components/media/MediaPlayer";
+import { TranscriptPanel, tabInFront } from "@/components/lectures/TranscriptPanel";
+import { UpNextCard, useEnded, useNextLecture } from "@/components/lectures/UpNext";
 
 /** Seconds of transcript before the playhead that a chat moment carries. */
 const MOMENT_TRANSCRIPT_S = 60;
-
-/** Turns `SidebarSimple` to face the dock's edge; the glyph's divider is on
- *  the left, so left is unrotated. */
-const DOCK_ICON_FACING: Record<Dock, string> = {
-  left: "",
-  right: "rotate-180",
-  top: "rotate-90",
-  bottom: "-rotate-90",
-};
 
 /** What the dock button calls the tab in front. */
 const DOCK_TAB_NOUN: Record<DockTab, string> = {
@@ -99,165 +81,6 @@ const DOCK_TAB_NOUN: Record<DockTab, string> = {
   transcript: "transcript",
   chat: "chat",
 };
-
-/** Is a popover open? Its dismissing click must not also play/pause or seek.
- *  Radix dismisses on `click` at `document`, so during the video's handler the
- *  panel is still `data-state=open`. */
-const panelOnScreen = () =>
-  !!document.querySelector('[data-slot="popover-content"][data-state="open"]');
-
-/** Video scrub bar. `offsetX / offsetWidth` keeps the maths in the element's
- *  own coordinates. Colours are fixed: it sits on the video scrim. */
-function SeekBar({
-  value,
-  max,
-  previewSrc,
-  chapters,
-  onSeek,
-}: {
-  value: number;
-  max: number;
-  /** Source for the hover thumbnail; `null` until the video is downloaded. */
-  previewSrc: string | null;
-  /** Chapter boundaries, in seconds — notched into the track. */
-  chapters: number[];
-  onSeek: (seconds: number) => void;
-}) {
-  const pct = Math.min(100, Math.max(0, (value / max) * 100));
-
-  // `armed` mounts the preview decoder on first hover; the position is kept
-  // while it fades out.
-  const [armed, setArmed] = useState(false);
-  const [hovering, setHovering] = useState(false);
-  const [preview, setPreview] = useState({ x: 0, t: 0, w: 1 });
-  /** Pointer inside the bar — a drag that ends outside it should not stick. */
-  const insideRef = useRef(false);
-
-  const trackFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const x = e.nativeEvent.offsetX;
-    const frac = Math.min(1, Math.max(0, x / el.offsetWidth));
-    setPreview({ x, t: frac * max, w: el.offsetWidth });
-    return frac * max;
-  };
-
-  return (
-    <div
-      role="slider"
-      aria-label="Seek"
-      aria-valuemin={0}
-      aria-valuemax={Math.floor(max)}
-      aria-valuenow={Math.floor(value)}
-      className="group/seek relative flex w-full items-center h-3.5 cursor-pointer touch-none select-none"
-      onPointerEnter={() => {
-        insideRef.current = true;
-        setArmed(true);
-        setHovering(true);
-      }}
-      onPointerLeave={(e) => {
-        insideRef.current = false;
-        // Mid-drag the pointer is still ours; the preview follows it out.
-        if (!e.currentTarget.hasPointerCapture(e.pointerId)) setHovering(false);
-      }}
-      onLostPointerCapture={() => {
-        if (!insideRef.current) setHovering(false);
-      }}
-      onPointerDown={(e) => {
-        // The click that closes a panel is not also a seek.
-        if (panelOnScreen()) return;
-        e.currentTarget.setPointerCapture(e.pointerId);
-        setHovering(true);
-        onSeek(trackFromEvent(e));
-      }}
-      onPointerMove={(e) => {
-        const t = trackFromEvent(e);
-        if (e.currentTarget.hasPointerCapture(e.pointerId)) onSeek(t);
-      }}
-    >
-      {armed && (
-        <ScrubPreview
-          src={previewSrc}
-          time={preview.t}
-          x={preview.x}
-          trackWidth={preview.w}
-          forceHours={max >= 3600}
-          visible={hovering}
-        />
-      )}
-
-      {/* pointer-events-none children keep `offsetX` relative to the root */}
-      <div
-        className={cn(
-          "pointer-events-none relative w-full overflow-hidden rounded-full bg-white/25",
-          "h-[3px] transition-[height] group-hover/seek:h-[5px]",
-        )}
-      >
-        <div className="absolute h-full bg-brand" style={{ width: `${pct}%` }} />
-        {/* Notches, not segments, so the track keeps its rounded ends and hover
-            growth. The boundary at second 0 is the left edge: not drawn. */}
-        {chapters.map((t) =>
-          t > 0 && t < max ? (
-            <span
-              key={t}
-              aria-hidden
-              className="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-black/55"
-              style={{ left: `${(t / max) * 100}%` }}
-            />
-          ) : null,
-        )}
-      </div>
-      <div
-        className={cn(
-          "pointer-events-none absolute size-3 -translate-x-1/2 rounded-full bg-brand shadow-sm",
-          "transition-transform group-hover/seek:scale-115",
-        )}
-        style={{ left: `${pct}%` }}
-      />
-    </div>
-  );
-}
-
-/** A control-bar button. Not shadcn `Button`: its ghost hover (`accent`)
- *  vanishes on video. */
-function ControlButton({
-  label,
-  onClick,
-  disabled,
-  active,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  active?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onClick}
-          disabled={disabled}
-          aria-label={label}
-          className={cn(
-            "relative inline-flex size-8 shrink-0 items-center justify-center rounded-full",
-            "transition-colors hover:bg-white/15 hover:text-white",
-            "disabled:pointer-events-none disabled:opacity-40",
-            active ? "text-white" : "text-white/85",
-          )}
-        >
-          {children}
-          {/* An "on" mark: on a frame a lit icon reads the same as an unlit one. */}
-          {active && (
-            <span className="absolute bottom-[3px] h-[2px] w-3.5 rounded-full bg-white" />
-          )}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
 
 /** One picture: the box a long-lived `<video>` is moved into
  *  (`lib/lecturePlayback.ts`), plus its source switcher. */
@@ -375,46 +198,28 @@ interface LecturePlayerProps {
   onRefresh: () => void;
 }
 
-/** The whole lecture player — video, controls, dock — for the lecture page. */
+/**
+ * The lecture page's player: `MediaPlayer` over the shared elements
+ * (`lib/lecturePlayback.ts`), with what only a lecture has — two sources, the
+ * pane that owns playback, chapters, the reading copy, chat and downloads.
+ */
 export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   const [cues, setCues] = useState<Cue[]>([]);
-  const cueStarts = useMemo(() => cues.map((cue) => cue.start), [cues]);
-  const [activeCueIdx, setActiveCueIdx] = useState(-1);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  /** The playhead for consumers that must not re-render with it: a prop would
-   *  break `TranscriptPanel`'s memo on every `timeupdate`. */
-  const atRef = useRef(0);
-  /** The file's own length — Echo360's catalogue duration can run short of the
-   *  recording. `lecture.duration_seconds` stands in until metadata arrives. */
-  const [fileDuration, setFileDuration] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** The dock's list is tracking playback. Shared by Transcript and Read, which
-   *  are never mounted together. */
-  const [following, setFollowing] = useState(true);
-  /** Controls are over the frame, so they fade out of the way while playing. */
-  const [controlsVisible, setControlsVisible] = useState(true);
 
-  const speed = usePlayerPrefs((s) => s.speed);
   /** Every tab stays mounted and there is one `<video>` per source app-wide, so
-   *  only an on-screen player may adopt the elements (`lib/playbackOwner.ts`),
-   *  and only the focused pane's player answers keys. `tabId` is the pane. */
+   *  only an on-screen player may adopt the elements (`lib/playbackOwner.ts`).
+   *  `tabId` is the pane. */
   const tabId = useTabId();
   const { tabId: stripTab } = usePaneTab();
   const onScreen = useTabActive();
-  const focused = useActivePaneId() === tabId;
   const owner = useSyncExternalStore(subscribePlaybackOwner, playbackOwner);
-  const volume = usePlayerPrefs((s) => s.volume);
-  const muted = usePlayerPrefs((s) => s.muted);
-  const captionsEnabled = usePlayerPrefs((s) => s.captionsEnabled);
   const transcriptVisible = usePlayerPrefs((s) => s.transcriptVisible);
   const dockTab = usePlayerPrefs((s) => s.dockTab);
   const layoutPref = usePlayerPrefs((s) => s.layout);
   const mainPref = usePlayerPrefs((s) => s.mainSource);
   const setPrefs = usePlayerPrefs((s) => s.set);
   const handleDockTabChange = useCallback((dockTab: DockTab) => setPrefs({ dockTab }), [setPrefs]);
-  const handleDockClose = useCallback(() => setPrefs({ transcriptVisible: false }), [setPrefs]);
 
   // Global: a download outlives this component (it runs in Rust).
   const downloading = useLectureDownloads((s) => isDownloading(s, lecture.id));
@@ -422,54 +227,24 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   const dlProgress = useLectureDownloads((s) => s.progress[dlKey(lecture.id, 1)] ?? null);
   const secondDlProgress = useLectureDownloads((s) => s.progress[dlKey(lecture.id, 2)] ?? null);
 
-  /** The leader element while this player has it; see lib/lecturePlayback.ts. */
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  /** The leader in state too, so the pref effects re-apply when a source switch
-   *  hands the audio to another decoder. */
-  const [leaderEl, setLeaderEl] = useState<HTMLVideoElement | null>(null);
   /** The boxes in the frames the elements are moved into. */
   const mainHostRef = useRef<HTMLDivElement>(null);
   const secondHostRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const videoAreaRef = useRef<HTMLDivElement>(null);
-  const togglePlayRef = useRef<() => void>(() => {});
-  // The key handler registers once and reaches actions through refs.
-  const toggleTranscriptRef = useRef<() => void>(() => {});
-  const toggleCaptionsRef = useRef<() => void>(() => {});
-  // `following` mirrored for pointer handlers, which must not re-subscribe.
-  const followingRef = useRef(true);
-  const hideControlsRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Three independent holds on the bar: pointer on it, a panel open, a volume
-  // drag that has left it.
-  const pointerOnControlsRef = useRef(false);
-  const panelOpenRef = useRef(false);
-  const volumeDraggingRef = useRef(false);
-  const controlsHeld = () =>
-    pointerOnControlsRef.current ||
-    panelOpenRef.current ||
-    volumeDraggingRef.current;
-
-  const {
-    dock,
-    height,
-    width,
-    size,
-    resizing,
-    dropTarget,
-    startDockDrag,
-    startResize,
-  } = useTranscriptDock(containerRef);
 
   // ── Sources ──────────────────────────────────────────────────────────────
 
   // Served over localhost HTTP, not convertFileSrc — WebKit's media stack
   // refuses custom-scheme (asset://) sources outright. See lib/media.ts.
-  const [urls, setUrls] = useState<Record<SourceNum, string | null>>({
+  // Tagged with their lecture: when the route moves on to another one, the
+  // last lecture's URLs must not be handed to the new one while these resolve.
+  const [resolved, setResolved] = useState<{ id: string } & Record<SourceNum, string | null>>({
+    id: lecture.id,
     1: null,
     2: null,
   });
   useEffect(() => {
     let stale = false;
+    const id = lecture.id;
     Promise.all(
       SOURCES.map(async (n) => {
         const path = videoPathFor(lecture, n);
@@ -477,13 +252,15 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
       }),
     ).then((pairs) => {
       if (!stale) {
-        setUrls({ 1: pairs[0][1], 2: pairs[1][1] });
+        setResolved({ id, 1: pairs[0][1], 2: pairs[1][1] });
       }
     });
     return () => {
       stale = true;
     };
-  }, [lecture.video_path, lecture.video2_path]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lecture.id, lecture.video_path, lecture.video2_path]); // eslint-disable-line react-hooks/exhaustive-deps
+  const urls: Record<SourceNum, string | null> =
+    resolved.id === lecture.id ? resolved : { 1: null, 2: null };
 
   /** Downloaded / downloading, per source, for the two source controls. */
   const sources: SourceStates = useMemo(() => {
@@ -520,11 +297,6 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
     startRef.current = { at };
     claimPlayback(tabId, stripTab, lecture.id);
   };
-  // Read by the key handler and the dock's seek, which subscribe once.
-  const elsewhereRef = useRef(elsewhere);
-  elsewhereRef.current = elsewhere;
-  const playHereRef = useRef(playHere);
-  playHereRef.current = playHere;
 
   // The frames always show both streams, so a pick in the second frame makes
   // the *other* stream the main one.
@@ -542,16 +314,6 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   /** The inset picture's own aspect, read in the reconcile effect below. */
   const [pipAspect, setPipAspect] = useState(16 / 9);
 
-  const {
-    pipStyle,
-    split,
-    pipDragging,
-    splitting,
-    startPipMove,
-    startPipResize,
-    startSplitDrag,
-  } = useSourceLayout(videoAreaRef, pipAspect);
-
   /** Which frame has its source pill open, so it stays put while it is. */
   const [openSwitcher, setOpenSwitcher] = useState<SourceNum | null>(null);
 
@@ -564,6 +326,12 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
     () => chapterState.chapters.map((c) => c.start_seconds),
     [chapterState.chapters],
   );
+
+  // ── Where the lecture ends ───────────────────────────────────────────────
+
+  // Found on first open; Done (`lib/lecturePlayback.ts`) and Up Next read it.
+  const end = useLectureEnd(lecture.id, lecture.transcript_path);
+  const endError = end.state?.status === "error" ? (end.state.error ?? "") : null;
 
   // ── Reading copy ─────────────────────────────────────────────────────────
 
@@ -585,169 +353,6 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
     }
   }, []);
 
-  // Reset per lecture: fresh transcript, restored progress position.
-  useEffect(() => {
-    setCues([]);
-    setActiveCueIdx(-1);
-    setCurrentTime(0);
-    setFileDuration(0);
-    setIsPlaying(false);
-    setError(null);
-    setFollowing(true);
-    followingRef.current = true;
-
-    if (lecture.transcript_path) loadTranscript(lecture.transcript_path);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lecture.id, lecture.transcript_path, lecture.video_path]);
-
-  // Where playback resumes is `lib/lecturePlayback.ts`'s call.
-  const handleLoadedMetadata = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    // A stream still being sized reports Infinity or NaN; keep the fallback.
-    if (Number.isFinite(v.duration) && v.duration > 0) setFileDuration(v.duration);
-  };
-
-  /** What every clock in the player counts against. */
-  const duration = fileDuration || lecture.duration_seconds;
-
-  // ── Controls visibility ──────────────────────────────────────────────────
-
-  // Playing, the bar fades after idle seconds; paused, it stays. The timer reads
-  // the element, not `isPlaying`, so it never needs re-arming.
-  const revealControls = useCallback(() => {
-    setControlsVisible(true);
-    if (hideControlsRef.current) clearTimeout(hideControlsRef.current);
-    hideControlsRef.current = setTimeout(() => {
-      if (controlsHeld()) return;
-      if (videoRef.current && !videoRef.current.paused) setControlsVisible(false);
-    }, 2200);
-  }, []);
-
-  useEffect(() => {
-    if (isPlaying) revealControls();
-    else {
-      if (hideControlsRef.current) clearTimeout(hideControlsRef.current);
-      setControlsVisible(true);
-    }
-  }, [isPlaying, revealControls]);
-
-  useEffect(
-    () => () => {
-      if (hideControlsRef.current) clearTimeout(hideControlsRef.current);
-    },
-    [],
-  );
-
-  // ── Fullscreen ───────────────────────────────────────────────────────────
-
-  // Not `requestFullscreen()`: WKWebView gates element fullscreen behind
-  // Tauri's `macos-private-api`, and even then shows only the element's subtree,
-  // cutting off every Radix popup portalled to `document.body`. So the player is
-  // a fixed overlay over a window-fullscreened app. Entering takes the window
-  // fullscreen too; leaving the overlay keeps the window's; leaving the
-  // window's fullscreen leaves both.
-  const isFullscreenRef = useRef(false);
-  isFullscreenRef.current = isFullscreen;
-
-  const handleToggleFullscreen = useCallback(async () => {
-    const next = !isFullscreenRef.current;
-    setIsFullscreen(next);
-    if (!next) return;
-    try {
-      const win = getCurrentWindow();
-      if (!(await win.isFullscreen())) await win.setFullscreen(true);
-    } catch {
-      /* not fatal — the overlay just covers a windowed app */
-    }
-  }, []);
-
-  // Leaving window fullscreen another way (green button, ⌃⌘F) arrives as a
-  // resize; only the leaving matters.
-  useEffect(() => {
-    const win = getCurrentWindow();
-    const unlisten = win.onResized(async () => {
-      if (!isFullscreenRef.current) return;
-      try {
-        if (!(await win.isFullscreen())) setIsFullscreen(false);
-      } catch {
-        /* ignore */
-      }
-    });
-    return () => {
-      unlisten.then((f) => f()).catch(() => {});
-    };
-  }, []);
-
-  // ── Keyboard shortcuts ───────────────────────────────────────────────────
-
-  // The focused pane's player only. Without the elements, Space plays here and
-  // Escape still leaves fullscreen; every other key waits for ownership.
-  useEffect(() => {
-    if (!focused) return;
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      // An open popover (speed, layout, source) owns its arrows and space bar.
-      if (target?.closest('[data-slot="popover-content"]')) return;
-
-      if (elsewhereRef.current && e.key !== "Escape") {
-        if (e.key === " ") {
-          e.preventDefault();
-          playHereRef.current();
-        }
-        return;
-      }
-
-      switch (e.key) {
-        case " ":
-          e.preventDefault();
-          togglePlayRef.current();
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          if (videoRef.current)
-            videoRef.current.currentTime = Math.max(
-              0,
-              videoRef.current.currentTime - 5,
-            );
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          if (videoRef.current) videoRef.current.currentTime += 5;
-          break;
-        case "f":
-          if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-            e.preventDefault();
-            handleToggleFullscreen();
-          }
-          break;
-        // Bare keys only: ⌘T opens a tab and ⌃C is a copy on some layouts.
-        case "c":
-          if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-            e.preventDefault();
-            toggleCaptionsRef.current();
-          }
-          break;
-        case "t":
-          if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-            e.preventDefault();
-            toggleTranscriptRef.current();
-          }
-          break;
-        case "Escape":
-          if (isFullscreenRef.current) {
-            e.preventDefault();
-            handleToggleFullscreen();
-          }
-          break;
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [handleToggleFullscreen, focused]);
-
   // ── Downloads ────────────────────────────────────────────────────────────
 
   // Downloads the transcript alongside the video; both land in the DB before
@@ -768,6 +373,8 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
       setPrefs({ transcriptVisible: true });
     } catch (e) {
       setError(`Transcript download failed: ${e}`);
+      // Echo360 has none: the Transcript tab offers Transcribe instead.
+      setPrefs({ transcriptVisible: true, dockTab: "transcript" });
     }
   };
 
@@ -783,90 +390,63 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
       setPrefs({ transcriptVisible: !transcriptVisible });
     }
   };
-  toggleTranscriptRef.current = toggleTranscript;
 
-  // Captions come from the cues: no transcript, nothing to toggle.
-  const toggleCaptions = () => {
-    if (!lecture.transcript_path) return;
-    setPrefs({ captionsEnabled: !captionsEnabled });
-  };
-  toggleCaptionsRef.current = toggleCaptions;
+  // ── The player ───────────────────────────────────────────────────────────
 
-  // ── Playback ─────────────────────────────────────────────────────────────
+  const player = useMediaPlayer({
+    cues,
+    resetKey: lecture.id,
+    // Echo360's catalogue length, until the file reports its own.
+    fallbackDuration: lecture.duration_seconds,
+    dockTab,
+    // Captions come from the cues: no transcript, nothing to toggle.
+    hasCaptions: !!lecture.transcript_path,
+    elsewhere,
+    onClaim: playHere,
+    onToggleDock: toggleTranscript,
+  });
+  const { attach, currentTime, atRef, duration, seek, following, onScrollAway, onBackToLive } =
+    player;
 
-  const handleTimeUpdate = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    const t = v.currentTime;
-    setCurrentTime(t);
-    atRef.current = t;
+  // Reset per lecture: fresh transcript; the player resets its own clock.
+  useEffect(() => {
+    setCues([]);
+    setError(null);
 
-    setActiveCueIdx(spanAt(cueStarts, t));
-  };
-
-  // ── Follow ───────────────────────────────────────────────────────────────
-
-  // `FollowList` does the scrolling; the player owns the flag and the ways back
-  // to live, shared by the Transcript and Read tabs.
-  const handleScrollAway = useCallback(() => {
-    if (!followingRef.current) return;
-    followingRef.current = false;
-    setFollowing(false);
-  }, []);
-
-  const handleBackToLive = useCallback(() => {
-    if (followingRef.current) return;
-    followingRef.current = true;
-    setFollowing(true);
-  }, []);
-
-  // A seek from the dock while the other pane has the video takes it over.
-  const handleCueSeek = useCallback((seconds: number) => {
-    if (videoRef.current) videoRef.current.currentTime = seconds;
-    else if (elsewhereRef.current) playHereRef.current(seconds);
-  }, []);
-
-  const togglePlay = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) {
-      v.play();
-      setIsPlaying(true);
-    } else {
-      v.pause();
-      setIsPlaying(false);
+    if (lecture.transcript_path) {
+      // A finished run waits, as a spinner, until its cues are read.
+      const video = lecture.video_path;
+      loadTranscript(lecture.transcript_path).finally(
+        () => video && settleTranscription(video),
+      );
     }
-  };
-  togglePlayRef.current = togglePlay;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lecture.id, lecture.transcript_path, lecture.video_path]);
 
-  // `playbackRate` resets when a new source loads, hence an effect.
-  useEffect(() => {
-    if (leaderEl) leaderEl.playbackRate = speed;
-  }, [speed, leaderEl]);
+  // ── Transcription ────────────────────────────────────────────────────────
 
-  // Per-element too; mute is independent of volume, so unmuting restores it.
-  useEffect(() => {
-    if (!leaderEl) return;
-    leaderEl.volume = volume;
-    leaderEl.muted = muted;
-  }, [volume, muted, leaderEl]);
+  /** Records a finished run's VTT as the transcript, as a download does;
+   *  it runs even if this player has unmounted by then. */
+  const lectureId = lecture.id;
+  const recordTranscript = useCallback(
+    async (vtt: string) => {
+      await updateLectureTranscriptPath(lectureId, vtt);
+      window.dispatchEvent(new CustomEvent(LECTURE_DOWNLOADED_EVENT, { detail: lectureId }));
+    },
+    [lectureId],
+  );
+
+  /** A finished run keeps the Transcript tab on its spinner until the cues
+   *  load, so the tab neither drops nor offers a second run. */
+  const { run: transcribeRun } = useTranscription(lecture.video_path);
+  const awaitingCues = transcribeRun?.phase === "done" && cues.length === 0;
+
+  useWindowEvent(TRANSCRIBED_EVENT, (e) => {
+    const { path } = (e as CustomEvent<TranscribedDetail>).detail;
+    if (path === lecture.video_path) onRefresh();
+  });
 
   // ── The shared element ───────────────────────────────────────────────────
-
-  // The element outlives this component (`lib/lecturePlayback.ts`), so it is
-  // adopted, not rendered; listeners reach the current handlers through a ref.
-  const mediaRef = useRef({
-    timeUpdate: handleTimeUpdate,
-    loadedMetadata: handleLoadedMetadata,
-    togglePlay,
-    backToLive: handleBackToLive,
-  });
-  mediaRef.current = {
-    timeUpdate: handleTimeUpdate,
-    loadedMetadata: handleLoadedMetadata,
-    togglePlay,
-    backToLive: handleBackToLive,
-  };
 
   useEffect(() => {
     const mainHost = mainHostRef.current;
@@ -880,8 +460,7 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
       !adoptable ||
       !mayAdopt(playbackOwner(), tabId, stripTab, lecture.id)
     ) {
-      videoRef.current = null;
-      setLeaderEl(null);
+      attach(null);
       return;
     }
 
@@ -900,8 +479,7 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
     // expand-to-tab) may have taken them since.
     const claim = playbackClaim();
     if (!v) return;
-    videoRef.current = v;
-    setLeaderEl(v);
+    const detach = attach(v);
 
     // Read here: the inset element exists only once the plan is reconciled.
     const inset = plan.length > 1 ? videoForSource(plan[1].source) : null;
@@ -913,51 +491,9 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
     readAspect();
     inset?.addEventListener("loadedmetadata", readAspect);
 
-    // A lecture that kept playing in the background: state follows the element.
-    setIsPlaying(!v.paused);
-    if (Number.isFinite(v.duration) && v.duration > 0) setFileDuration(v.duration);
-    mediaRef.current.timeUpdate();
-
-    const onTimeUpdate = () => mediaRef.current.timeUpdate();
-    const onLoadedMetadata = () => mediaRef.current.loadedMetadata();
-    const onClick = () => {
-      if (panelOnScreen()) return;
-      mediaRef.current.togglePlay();
-    };
-    const onPlay = () => {
-      setIsPlaying(true);
-      // Pressing play is a request to be back where the video is.
-      mediaRef.current.backToLive();
-    };
-    const onPause = () => setIsPlaying(false);
-    const onEnded = () => setIsPlaying(false);
-    const onError = () => {
-      const err = v.error;
-      setError(
-        `Video failed to load (code ${err?.code ?? "?"}: ${
-          err?.message || "unknown"
-        })`,
-      );
-    };
-
-    v.addEventListener("timeupdate", onTimeUpdate);
-    v.addEventListener("loadedmetadata", onLoadedMetadata);
-    v.addEventListener("click", onClick);
-    v.addEventListener("play", onPlay);
-    v.addEventListener("pause", onPause);
-    v.addEventListener("ended", onEnded);
-    v.addEventListener("error", onError);
-
     return () => {
-      v.removeEventListener("timeupdate", onTimeUpdate);
-      v.removeEventListener("loadedmetadata", onLoadedMetadata);
-      v.removeEventListener("click", onClick);
-      v.removeEventListener("play", onPlay);
-      v.removeEventListener("pause", onPause);
-      v.removeEventListener("ended", onEnded);
-      v.removeEventListener("error", onError);
+      detach();
       inset?.removeEventListener("loadedmetadata", readAspect);
-      videoRef.current = null;
       // Unmounting is a tab switch, not a stop: the elements go back to their
       // off-screen host and carry on. Closing the lecture is what stops them.
       parkLectureVideos(claim);
@@ -971,13 +507,24 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   // Progress is saved by the module, even while nothing is mounted.
   useWindowEvent(LECTURE_PROGRESS_EVENT, () => onRefresh());
 
+  const {
+    pipStyle,
+    split,
+    pipDragging,
+    splitting,
+    startPipMove,
+    startPipResize,
+    startSplitDrag,
+  } = useSourceLayout(player.videoAreaRef, pipAspect);
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   // The dock stays mounted so it can slide in and out.
-  const hasTranscript = cues.length > 0;
   const showDock = transcriptVisible;
+  /** A lecture without a transcript keeps the Transcript tab, for Transcribe. */
+  const hasTranscriptTab = cues.length > 0 || !lecture.transcript_path || awaitingCues;
   /** The tab the dock is actually showing — what T shows or hides. */
-  const frontTab = tabInFront(dockTab, hasTranscript);
+  const frontTab = tabInFront(dockTab, hasTranscriptTab);
 
   /** The chapter the playhead is in; its name sits above the scrub bar. */
   const activeChapterIdx = spanAt(chapterStarts, currentTime);
@@ -1001,8 +548,10 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
       progress: chapterState.progress,
       busy: chapterState.busy,
       downloaded: !!lecture.video_path,
-      onSeek: handleCueSeek,
+      onSeek: seek,
       onFind: chapterState.find,
+      endError,
+      onRetryEnd: end.retry,
     }),
     [
       chapterState.chapters,
@@ -1013,9 +562,12 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
       chapterState.busy,
       chapterState.find,
       activeChapterIdx,
+      atRef,
       duration,
       lecture.video_path,
-      handleCueSeek,
+      seek,
+      endError,
+      end.retry,
     ],
   );
 
@@ -1035,9 +587,9 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
       open: showDock,
       active: frontTab === "transcript",
       following,
-      onScrollAway: handleScrollAway,
-      onBackToLive: handleBackToLive,
-      onSeek: handleCueSeek,
+      onScrollAway,
+      onBackToLive,
+      onSeek: seek,
     }),
     [
       readingState.lines,
@@ -1052,10 +604,20 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
       showDock,
       frontTab,
       following,
-      handleScrollAway,
-      handleBackToLive,
-      handleCueSeek,
+      onScrollAway,
+      onBackToLive,
+      seek,
     ],
+  );
+
+  /** The Transcript tab while the lecture has no transcript: Transcribe runs
+   *  on the main recording. */
+  const transcribeProps: TranscribeEmptyProps | null = useMemo(
+    () =>
+      lecture.transcript_path && !awaitingCues
+        ? null
+        : { path: lecture.video_path, after: recordTranscript },
+    [lecture.transcript_path, awaitingCues, lecture.video_path, recordTranscript],
   );
 
   /**
@@ -1110,154 +672,95 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   // Stable across `timeupdate`: the playhead travels by ref.
   const chatProps: LectureChatPanelProps = useMemo(
     () => ({ lectureId: lecture.id, atRef, buildMoment }),
-    [lecture.id, buildMoment],
+    [lecture.id, atRef, buildMoment],
   );
 
+  const { controlsVisible } = player;
+  const { dock, size, resizing, startDockDrag } = player.dock;
+
+  // ── Up Next ──────────────────────────────────────────────────────────────
+
+  const navigate = useNavigate();
+  const next = useNextLecture(lecture);
+  const ended = useEnded(player.element, lecture.id);
+  /** × hides the card until the lecture is opened again. */
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const upNextAt = upNextFrom(lecture, duration);
+  const showUpNext =
+    !!next &&
+    !!player.element &&
+    !elsewhere &&
+    dismissed !== lecture.id &&
+    upNextAt != null &&
+    currentTime >= upNextAt;
+
+  /** Play: this lecture is Done, and this tab moves on to the next, playing. */
+  const leavingRef = useRef(false);
+  const playNext = async () => {
+    if (!next || leavingRef.current) return;
+    leavingRef.current = true;
+    try {
+      await completeLecture(lecture.id);
+      window.dispatchEvent(new CustomEvent(LECTURES_CHANGED_EVENT));
+      // One already watched starts over rather than at its end.
+      const over = !!next.completed || isWatched(next, next.progress_seconds, 0);
+      playOnAdopt(next.id, over ? 0 : undefined);
+      navigate(lecturePagePath(next), { replace: true });
+    } finally {
+      leavingRef.current = false;
+    }
+  };
+
   return (
-    // The dock side is a flex direction: `*-reverse` puts the panel before the
-    // video stack visually while leaving the divider between the two.
-    <div
-      ref={containerRef}
-      className={cn(
-        "flex overflow-hidden min-h-0 min-w-0 bg-background relative",
-        // Over the sidebar and the tab strip alike.
-        isFullscreen ? "fixed inset-0 z-50" : "flex-1",
-        dock === "bottom" && "flex-col",
-        dock === "top" && "flex-col-reverse",
-        dock === "right" && "flex-row",
-        dock === "left" && "flex-row-reverse",
-      )}
-    >
-      <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
-        {/* Video area — the controls live over the frame, YouTube-style */}
-        <div
-          ref={videoAreaRef}
-          className={cn(
-            "flex-1 bg-black flex flex-col min-h-0 relative overflow-hidden",
-            !controlsVisible && !elsewhere && "cursor-none",
-          )}
-          onPointerMove={revealControls}
-          onPointerLeave={() => {
-            pointerOnControlsRef.current = false;
-            if (controlsHeld()) return;
-            if (videoRef.current && !videoRef.current.paused) {
-              setControlsVisible(false);
-            }
-          }}
-        >
-          {mainSrc ? (
-            <>
-              {/* `flexGrow` on a zero basis, so the split divides what is left
-                  after the divider. */}
-              <VideoFrame
-                hostRef={mainHostRef}
-                source={mainSource}
-                sources={sources}
-                showSwitcher={hasSecondSource}
-                chromeVisible={controlsVisible}
-                pinned={openSwitcher === mainSource}
-                onSelectSource={selectSource}
-                onDownloadSource={handleDownloadSource}
-                onSwitcherOpenChange={(open) =>
-                  setOpenSwitcher(open ? mainSource : null)
-                }
-                className={layout === "stack" ? undefined : "flex-1"}
-                style={
-                  layout === "stack" ? { flexGrow: split, flexBasis: 0 } : undefined
-                }
-              />
-
-              {layout === "stack" && (
-                <>
-                  <StackDivider onPointerDown={startSplitDrag} dragging={splitting} />
-                  <VideoFrame
-                    hostRef={secondHostRef}
-                    source={otherSource}
-                    sources={sources}
-                    showSwitcher={hasSecondSource}
-                    chromeVisible={controlsVisible}
-                    pinned={openSwitcher === otherSource}
-                    onSelectSource={selectSecondSource}
-                    onDownloadSource={handleDownloadSource}
-                    onSwitcherOpenChange={(open) =>
-                      setOpenSwitcher(open ? otherSource : null)
-                    }
-                    style={{ flexGrow: 1 - split, flexBasis: 0 }}
-                  />
-                </>
-              )}
-
-              {layout === "pip" && (
-                <VideoFrame
-                  hostRef={secondHostRef}
-                  source={otherSource}
-                  sources={sources}
-                  showSwitcher={hasSecondSource}
-                  chromeVisible={controlsVisible}
-                  pinned={openSwitcher === otherSource}
-                  onSelectSource={selectSecondSource}
-                  onDownloadSource={handleDownloadSource}
-                  onSwitcherOpenChange={(open) =>
-                    setOpenSwitcher(open ? otherSource : null)
-                  }
-                  // Above the main picture, under the control bar (z-30).
-                  className={cn(
-                    "absolute z-20 touch-none rounded-lg border border-white/20 bg-black",
-                    "shadow-2xl shadow-black/60",
-                    pipDragging ? "cursor-grabbing" : "cursor-grab",
-                  )}
-                  style={pipStyle}
-                  onPointerDown={startPipMove}
-                >
-                  {/* Hidden with the bar like the switcher; pinned while dragging. */}
-                  {PIP_CORNERS.map((corner) => (
-                    <span
-                      key={corner}
-                      aria-hidden="true"
-                      onPointerDown={(e) => startPipResize(e, corner)}
-                      className={cn(
-                        "absolute z-10 size-5 touch-none transition-opacity",
-                        pipDragging
-                          ? "opacity-100"
-                          : controlsVisible
-                            ? "opacity-0 group-hover/frame:opacity-100"
-                            : "pointer-events-none opacity-0",
-                        CORNER_STYLE[corner],
-                      )}
-                    >
-                      <span className="absolute inset-1 rounded-[3px] bg-white/70" />
-                    </span>
-                  ))}
-                </VideoFrame>
-              )}
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-white/60 p-6">
-              <p className="text-sm font-medium text-white">{lecture.title}</p>
-              <p className="text-xs">
-                {fmtLectureDate(lecture.date)} · {fmtDurationSecs(lecture.duration_seconds)}
-              </p>
+    <MediaPlayer
+      player={player}
+      canPlay={!!mainSrc}
+      previewSrc={mainSrc}
+      chapters={chapterStarts}
+      endAt={contentEnd(lecture)}
+      error={error}
+      dockLabel={
+        !lecture.transcript_path && dockTab === "transcript"
+          ? "Download transcript"
+          : `${showDock ? "Hide" : "Show"} ${DOCK_TAB_NOUN[frontTab]} (T)`
+      }
+      aboveSeek={
+        // The playing chapter's name — the one thing the scrub bar cannot say.
+        activeChapter && (
+          <div className="select-none truncate pb-1 text-[11.5px] font-medium text-white/90">
+            {activeChapter.title}
+          </div>
+        )
+      }
+      controls={
+        <>
+          {!lecture.video_path && (
+            <ControlButton
+              label="Download video"
+              onClick={handleDownloadVideo}
+              disabled={downloading}
+            >
               {downloading ? (
-                <div className="flex items-center gap-2 text-sm">
-                  <CircleNotch size={16} className="animate-spin" />
-                  <span>
-                    {dlProgress?.phase === "trimming"
-                      ? "Trimming…"
-                      : `Downloading… ${dlProgress?.percent ?? 0}%`}
-                  </span>
-                </div>
+                <CircleNotch size={16} className="animate-spin" />
               ) : (
-                <Button
-                  size="sm"
-                  className="gap-2 bg-white/10 hover:bg-white/20 text-white border-white/20"
-                  variant="outline"
-                  onClick={handleDownloadVideo}
-                >
-                  <DownloadSimple size={14} /> Download video
-                </Button>
+                <DownloadSimple size={16} />
               )}
-            </div>
+            </ControlButton>
           )}
+
+          {hasSecondSource && (
+            <LayoutControl
+              layout={layout}
+              onChange={(l) => setPrefs({ layout: l })}
+              second={sources[2]}
+              onDownloadSecond={() => handleDownloadSource(2)}
+              onOpenChange={player.onPanelOpenChange}
+            />
+          )}
+        </>
+      }
+      overlay={
+        <>
           {elsewhere && (
             // Over the frames, not instead of them: their hosts stay mounted
             // for the moment the elements come back.
@@ -1276,195 +779,154 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
               </Button>
             </div>
           )}
-          {captionsEnabled && activeCueIdx >= 0 && !elsewhere && (
-            <CaptionOverlay
-              text={cues[activeCueIdx]?.text ?? ""}
-              boundsRef={videoAreaRef}
-              // Lift clear of the control bar while it shows.
-              lift={controlsVisible ? 44 : 0}
+          {showUpNext && next && (
+            <UpNextCard
+              key={next.id}
+              next={next}
+              ended={ended}
+              liftedAbove={controlsVisible}
+              onPlay={playNext}
+              onDismiss={() => setDismissed(lecture.id)}
             />
           )}
+        </>
+      }
+      dock={
+        <TranscriptPanel
+          cues={cues}
+          activeCueIdx={player.activeCueIdx}
+          tab={dockTab}
+          onTabChange={handleDockTabChange}
+          chapters={chaptersProps}
+          reading={readingProps}
+          chat={chatProps}
+          transcribe={transcribeProps}
+          dock={dock}
+          size={size}
+          open={showDock}
+          resizing={resizing}
+          onSeek={seek}
+          onClose={player.closeDock}
+          onHeaderPointerDown={startDockDrag}
+          following={following}
+          onScrollAway={onScrollAway}
+          onBackToLive={onBackToLive}
+        />
+      }
+    >
+      {mainSrc ? (
+        <>
+          {/* `flexGrow` on a zero basis, so the split divides what is left
+              after the divider. */}
+          <VideoFrame
+            hostRef={mainHostRef}
+            source={mainSource}
+            sources={sources}
+            showSwitcher={hasSecondSource}
+            chromeVisible={controlsVisible}
+            pinned={openSwitcher === mainSource}
+            onSelectSource={selectSource}
+            onDownloadSource={handleDownloadSource}
+            onSwitcherOpenChange={(open) =>
+              setOpenSwitcher(open ? mainSource : null)
+            }
+            className={layout === "stack" ? undefined : "flex-1"}
+            style={
+              layout === "stack" ? { flexGrow: split, flexBasis: 0 } : undefined
+            }
+          />
 
-          {/* Controls — one scrim, the scrub bar across the top of it */}
-          <div
-            className={cn(
-              "absolute inset-x-0 bottom-0 z-30 transition-opacity duration-200",
-              controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none",
-            )}
-            inert={elsewhere}
-            onPointerEnter={() => {
-              pointerOnControlsRef.current = true;
-              revealControls();
-            }}
-            onPointerLeave={() => {
-              pointerOnControlsRef.current = false;
-              revealControls();
-            }}
-          >
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/85 via-black/45 to-transparent" />
-
-            <div className="relative px-3 pb-1">
-              {/* The playing chapter's name — the one thing the scrub bar cannot say. */}
-              {activeChapter && (
-                <div className="select-none truncate pb-1 text-[11.5px] font-medium text-white/90">
-                  {activeChapter.title}
-                </div>
-              )}
-
-              <SeekBar
-                value={Math.min(currentTime, duration)}
-                max={duration || 1}
-                previewSrc={mainSrc}
-                chapters={chapterStarts}
-                onSeek={(v) => {
-                  setCurrentTime(v);
-                  if (videoRef.current) videoRef.current.currentTime = v;
-                }}
+          {layout === "stack" && (
+            <>
+              <StackDivider onPointerDown={startSplitDrag} dragging={splitting} />
+              <VideoFrame
+                hostRef={secondHostRef}
+                source={otherSource}
+                sources={sources}
+                showSwitcher={hasSecondSource}
+                chromeVisible={controlsVisible}
+                pinned={openSwitcher === otherSource}
+                onSelectSource={selectSecondSource}
+                onDownloadSource={handleDownloadSource}
+                onSwitcherOpenChange={(open) =>
+                  setOpenSwitcher(open ? otherSource : null)
+                }
+                style={{ flexGrow: 1 - split, flexBasis: 0 }}
               />
+            </>
+          )}
 
-              <div className="flex h-9 items-center gap-0.5">
-                <ControlButton
-                  label={isPlaying ? "Pause" : "Play"}
-                  onClick={togglePlay}
-                  disabled={!mainSrc}
-                >
-                  {isPlaying ? (
-                    <Pause size={16} weight="fill" />
-                  ) : (
-                    <Play size={16} weight="fill" />
+          {layout === "pip" && (
+            <VideoFrame
+              hostRef={secondHostRef}
+              source={otherSource}
+              sources={sources}
+              showSwitcher={hasSecondSource}
+              chromeVisible={controlsVisible}
+              pinned={openSwitcher === otherSource}
+              onSelectSource={selectSecondSource}
+              onDownloadSource={handleDownloadSource}
+              onSwitcherOpenChange={(open) =>
+                setOpenSwitcher(open ? otherSource : null)
+              }
+              // Above the main picture, under the control bar (z-30).
+              className={cn(
+                "absolute z-20 touch-none rounded-lg border border-white/20 bg-black",
+                "shadow-2xl shadow-black/60",
+                pipDragging ? "cursor-grabbing" : "cursor-grab",
+              )}
+              style={pipStyle}
+              onPointerDown={startPipMove}
+            >
+              {/* Hidden with the bar like the switcher; pinned while dragging. */}
+              {PIP_CORNERS.map((corner) => (
+                <span
+                  key={corner}
+                  aria-hidden="true"
+                  onPointerDown={(e) => startPipResize(e, corner)}
+                  className={cn(
+                    "absolute z-10 size-5 touch-none transition-opacity",
+                    pipDragging
+                      ? "opacity-100"
+                      : controlsVisible
+                        ? "opacity-0 group-hover/frame:opacity-100"
+                        : "pointer-events-none opacity-0",
+                    CORNER_STYLE[corner],
                   )}
-                </ControlButton>
-
-                <VolumeControl
-                  volume={volume}
-                  muted={muted}
-                  onChange={(v) =>
-                    // Dragging up from silence is a request to hear it.
-                    setPrefs({ volume: v, muted: muted && v === 0 })
-                  }
-                  onToggleMute={() => setPrefs({ muted: !muted })}
-                  onDraggingChange={(dragging) => {
-                    volumeDraggingRef.current = dragging;
-                    revealControls();
-                  }}
-                />
-
-                <span className="ml-1 select-none whitespace-nowrap text-[11.5px] tabular-nums text-white/85">
-                  {fmtClockSecs(Math.floor(currentTime), duration >= 3600)}{" "}
-                  <span className="text-white/45">/</span>{" "}
-                  {fmtClockSecs(duration)}
+                >
+                  <span className="absolute inset-1 rounded-[3px] bg-white/70" />
                 </span>
-
-                <div className="flex-1" />
-
-                <SpeedControl
-                  speed={speed}
-                  onChange={(s) => setPrefs({ speed: s })}
-                  onOpenChange={(open) => {
-                    panelOpenRef.current = open;
-                    revealControls();
-                  }}
-                />
-
-                {!lecture.video_path && (
-                  <ControlButton
-                    label="Download video"
-                    onClick={handleDownloadVideo}
-                    disabled={downloading}
-                  >
-                    {downloading ? (
-                      <CircleNotch size={16} className="animate-spin" />
-                    ) : (
-                      <DownloadSimple size={16} />
-                    )}
-                  </ControlButton>
-                )}
-
-                {hasSecondSource && (
-                  <LayoutControl
-                    layout={layout}
-                    onChange={(l) => setPrefs({ layout: l })}
-                    second={sources[2]}
-                    onDownloadSecond={() => handleDownloadSource(2)}
-                    onOpenChange={(open) => {
-                      panelOpenRef.current = open;
-                      revealControls();
-                    }}
-                  />
-                )}
-
-                {/* Labelled by the tab in front: it folds the whole dock. */}
-                <ControlButton
-                  label={
-                    !lecture.transcript_path && dockTab === "transcript"
-                      ? "Download transcript"
-                      : `${showDock ? "Hide" : "Show"} ${DOCK_TAB_NOUN[frontTab]} (T)`
-                  }
-                  active={showDock}
-                  onClick={toggleTranscript}
-                >
-                  <SidebarSimple
-                    size={16}
-                    className={cn("transition-transform", DOCK_ICON_FACING[dock])}
-                  />
-                </ControlButton>
-
-                <ControlButton
-                  label={
-                    captionsEnabled ? "Hide captions (C)" : "Show captions (C)"
-                  }
-                  active={captionsEnabled}
-                  disabled={!lecture.transcript_path}
-                  onClick={toggleCaptions}
-                >
-                  <ClosedCaptioning
-                    size={17}
-                    weight={captionsEnabled ? "fill" : "regular"}
-                  />
-                </ControlButton>
-
-                <ControlButton
-                  label={isFullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}
-                  onClick={handleToggleFullscreen}
-                >
-                  {isFullscreen ? <ArrowsIn size={16} /> : <ArrowsOut size={16} />}
-                </ControlButton>
-              </div>
+              ))}
+            </VideoFrame>
+          )}
+        </>
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-white/60 p-6">
+          <p className="text-sm font-medium text-white">{lecture.title}</p>
+          <p className="text-xs">
+            {fmtLectureDate(lecture.date)} · {fmtDurationSecs(lecture.duration_seconds)}
+          </p>
+          {downloading ? (
+            <div className="flex items-center gap-2 text-sm">
+              <CircleNotch size={16} className="animate-spin" />
+              <span>
+                {dlProgress?.phase === "trimming"
+                  ? "Trimming…"
+                  : `Downloading… ${dlProgress?.percent ?? 0}%`}
+              </span>
             </div>
-          </div>
+          ) : (
+            <Button
+              size="sm"
+              className="gap-2 bg-white/10 hover:bg-white/20 text-white border-white/20"
+              variant="outline"
+              onClick={handleDownloadVideo}
+            >
+              <DownloadSimple size={14} /> Download video
+            </Button>
+          )}
         </div>
-
-        {error && (
-          <div className="shrink-0 px-3 py-1.5 text-[11px] text-destructive border-t border-border bg-destructive/5 break-words">
-            {error}
-          </div>
-        )}
-      </div>
-
-      {showDock && <DockResizeHandle dock={dock} onPointerDown={startResize} />}
-      <TranscriptPanel
-        cues={cues}
-        activeCueIdx={activeCueIdx}
-        tab={dockTab}
-        onTabChange={handleDockTabChange}
-        chapters={chaptersProps}
-        reading={readingProps}
-        chat={chatProps}
-        dock={dock}
-        size={size}
-        open={showDock}
-        resizing={resizing}
-        onSeek={handleCueSeek}
-        onClose={handleDockClose}
-        onHeaderPointerDown={startDockDrag}
-        following={following}
-        onScrollAway={handleScrollAway}
-        onBackToLive={handleBackToLive}
-      />
-
-      {dropTarget && (
-        <DockDropPreview dock={dropTarget} height={height} width={width} />
       )}
-    </div>
+    </MediaPlayer>
   );
 }

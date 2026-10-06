@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import { CaretRight, FilePdf, Play } from "@phosphor-icons/react";
+import { CaretRight, Play } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,8 @@ import {
 } from "@/components/ui/tooltip";
 import { usePagedRows } from "@/components/ui/TablePagination";
 import { GridTable, HeaderLabels } from "@/components/ui/GridTable";
-import { fmtAgo, fmtClock } from "@/lib/format";
+import { displayCode, fmtAgo, fmtClock } from "@/lib/format";
+import { fileIconFor } from "@/lib/fileTypes";
 import {
   statusOf,
   usePipelineStore,
@@ -223,6 +224,7 @@ const Row = memo(function Row({
   const resumable = onResume && (s.phase === "paused" || s.phase === "failed" || embedNow);
   const percent =
     s.phase === "active" && s.percent != null ? Math.round(s.percent) : null;
+  const Icon = fileIconFor(item.filename);
 
   return (
     <div>
@@ -241,11 +243,11 @@ const Row = memo(function Row({
               expanded && "rotate-90",
             )}
           />
-          <FilePdf size={13} className="shrink-0 text-muted-foreground/70" />
+          <Icon size={13} className="shrink-0 text-muted-foreground/70" />
           <span className="text-xs text-foreground truncate">{item.filename}</span>
         </div>
 
-        <span className="text-[11px] text-muted-foreground truncate">{item.code}</span>
+        <span className="text-[11px] text-muted-foreground truncate">{displayCode(item.code)}</span>
 
         <StageDots item={item} embedStage={embedStage} />
 

@@ -4,13 +4,15 @@ import { cn } from "@/lib/utils";
 import { useTranscriptSearch } from "@/hooks/useTranscriptSearch";
 import type { ReadingLine } from "@/lib/db";
 import { InlineMd } from "@/components/markdown/MdComponents";
-import { FollowList, Highlight, SearchField } from "@/components/lectures/FollowList";
+import { FollowList, Highlight, SearchField } from "@/components/media/FollowList";
 import {
   TranscriptModePicker,
   type TranscriptModePickerProps,
 } from "@/components/lectures/TranscriptModePicker";
-import { PanelEmpty, RegenerateRow, RunStatus } from "@/components/lectures/RunStatus";
-import { READING_PHASE_LABEL, fmtClockSecs, type ReadingRunProgress } from "@/lib/lectures";
+import { RegenerateRow, RunStatus } from "@/components/lectures/RunStatus";
+import { PanelEmpty } from "@/components/media/MediaDock";
+import { READING_PHASE_LABEL, type ReadingRunProgress } from "@/lib/lectures";
+import { fmtClockSecs } from "@/lib/media";
 import type { ReadingStatus } from "@/hooks/useLectureReading";
 
 export interface ReadingListProps {

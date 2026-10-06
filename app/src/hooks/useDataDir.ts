@@ -6,7 +6,8 @@ import { appDataDir } from "@tauri-apps/api/path";
 let cached = "";
 let inflight: Promise<string> | null = null;
 
-function ask(): Promise<string> {
+/** The data dir outside React, e.g. to resolve a library-relative path. */
+export function loadDataDir(): Promise<string> {
   if (!inflight) {
     inflight = appDataDir()
       .then((d) => {
@@ -24,7 +25,7 @@ export function useDataDir() {
   useEffect(() => {
     if (cached) return;
     let live = true;
-    ask().then((d) => {
+    loadDataDir().then((d) => {
       if (live) setDataDir(d);
     });
     return () => {

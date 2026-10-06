@@ -5,13 +5,10 @@ import { Button } from "@/components/ui/button";
 import type { Chapter } from "@/lib/db";
 import { InlineMd } from "@/components/markdown/MdComponents";
 import { EntryProgress } from "@/components/lectures/EntryProgress";
-import { PanelEmpty, RegenerateRow, RunStatus } from "@/components/lectures/RunStatus";
-import {
-  CHAPTER_PHASE_LABEL,
-  chapterEnds,
-  fmtClockSecs,
-  type ChapterRunProgress,
-} from "@/lib/lectures";
+import { RegenerateRow, RunStatus } from "@/components/lectures/RunStatus";
+import { PanelEmpty } from "@/components/media/MediaDock";
+import { CHAPTER_PHASE_LABEL, chapterEnds, type ChapterRunProgress } from "@/lib/lectures";
+import { fmtClockSecs } from "@/lib/media";
 import type { ChapterStatus } from "@/hooks/useLectureChapters";
 
 /** A chapter's length to the minute — chapters are minutes long, and seconds
@@ -43,6 +40,9 @@ export interface ChaptersPanelProps {
   downloaded: boolean;
   onSeek: (seconds: number) => void;
   onFind: (force: boolean) => void;
+  /** The end job's error (`lib/lectureEnd.ts`), or null unless it failed. */
+  endError: string | null;
+  onRetryEnd: () => void;
 }
 
 /**
@@ -63,6 +63,8 @@ export const ChaptersPanel = memo(function ChaptersPanel({
   downloaded,
   onSeek,
   onFind,
+  endError,
+  onRetryEnd,
 }: ChaptersPanelProps) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
 
@@ -71,31 +73,36 @@ export const ChaptersPanel = memo(function ChaptersPanel({
     activeRef.current?.scrollIntoView({ block: "nearest" });
   }, [activeIdx]);
 
+  const endFailed = endError != null && <EndFailed error={endError} onRetry={onRetryEnd} />;
+
   if (chapters.length === 0) {
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        {!downloaded ? (
-          <PanelEmpty>
-            <p>Chapters are found by watching the recording.</p>
-            <p className="text-muted-foreground">Download it first.</p>
-          </PanelEmpty>
-        ) : status === "running" ? (
-          <PanelEmpty>
-            <ChapterRun since={since} progress={progress} />
-          </PanelEmpty>
-        ) : status === "error" ? (
-          <PanelEmpty>
-            <Failed error={error} busy={busy} onRetry={() => onFind(true)} />
-          </PanelEmpty>
-        ) : (
-          <PanelEmpty>
-            <Button size="xs" disabled={busy} onClick={() => onFind(false)}>
-              Find chapters
-            </Button>
-            <p className="text-muted-foreground">Takes 8–11 minutes.</p>
-          </PanelEmpty>
-        )}
-      </div>
+      <>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {!downloaded ? (
+            <PanelEmpty>
+              <p>Chapters are found by watching the recording.</p>
+              <p className="text-muted-foreground">Download it first.</p>
+            </PanelEmpty>
+          ) : status === "running" ? (
+            <PanelEmpty>
+              <ChapterRun since={since} progress={progress} />
+            </PanelEmpty>
+          ) : status === "error" ? (
+            <PanelEmpty>
+              <Failed error={error} busy={busy} onRetry={() => onFind(true)} />
+            </PanelEmpty>
+          ) : (
+            <PanelEmpty>
+              <Button size="xs" disabled={busy} onClick={() => onFind(false)}>
+                Find chapters
+              </Button>
+              <p className="text-muted-foreground">Takes 8–11 minutes.</p>
+            </PanelEmpty>
+          )}
+        </div>
+        {endFailed}
+      </>
     );
   }
 
@@ -174,9 +181,27 @@ export const ChaptersPanel = memo(function ChaptersPanel({
           />
         )}
       </div>
+      {endFailed}
     </>
   );
 });
+
+/** The end job failed: Done and Up Next fall back to the file's end until a
+ *  Retry finds it. One line, under the chapters, since this tab is where
+ *  lecture jobs show. */
+function EndFailed({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const text = `Couldn't find where this lecture ends — ${error || "the run failed"}`;
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-t border-border px-2 py-1.5">
+      <span className="min-w-0 flex-1 truncate text-[10px] text-destructive" title={text}>
+        {text}
+      </span>
+      <Button size="xs" variant="ghost" onClick={onRetry} className="-mr-1 text-muted-foreground">
+        Retry
+      </Button>
+    </div>
+  );
+}
 
 function ChapterRun({
   since,

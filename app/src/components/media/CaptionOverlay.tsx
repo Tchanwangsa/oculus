@@ -89,9 +89,9 @@ export function CaptionOverlay({
     const onUp = () => {
       grab.current = null;
       setDragging(false);
-      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
     };
-    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);

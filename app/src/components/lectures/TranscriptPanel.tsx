@@ -1,26 +1,20 @@
-import {
-  memo,
-  useCallback,
-  useMemo,
-  useRef,
-  type CSSProperties,
-} from "react";
-import { DotsSixVertical, X } from "@phosphor-icons/react";
-import { cn } from "@/lib/utils";
-import { useScrollFade } from "@/hooks/useScrollFade";
+import { memo, useCallback, useMemo, type ReactNode } from "react";
+import type { ViewTab } from "@/components/ui/ViewTabs";
 import { useTranscriptSearch } from "@/hooks/useTranscriptSearch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ViewTabs, type ViewTab } from "@/components/ui/ViewTabs";
 import {
-  isVertical,
   reorderDockTabs,
   usePlayerPrefs,
   type Dock,
   type DockTab,
   type TranscriptMode,
 } from "@/stores/playerPrefsStore";
-import { fmtClockSecs, type Cue } from "@/lib/lectures";
-import { FollowList, Highlight, SearchField } from "@/components/lectures/FollowList";
+import type { Cue } from "@/lib/media";
+import { MediaDock } from "@/components/media/MediaDock";
+import { TranscriptList } from "@/components/media/TranscriptList";
+import {
+  TranscribeEmpty,
+  type TranscribeEmptyProps,
+} from "@/components/media/TranscribeEmpty";
 import { ChaptersPanel, type ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
 import { ReadingList, type ReadingListProps } from "@/components/lectures/ReadingList";
 import {
@@ -31,14 +25,6 @@ import {
   LectureChatPanel,
   type LectureChatPanelProps,
 } from "@/components/lectures/LectureChatPanel";
-
-/** Border on the panel's inner edge — the side that faces the video. */
-const INNER_BORDER: Record<Dock, string> = {
-  bottom: "border-t",
-  top: "border-b",
-  left: "border-r",
-  right: "border-l",
-};
 
 /** The dock's tabs. Enhanced text is a register of the transcript (see
  *  `TranscriptModePicker`), not a tab of its own. */
@@ -79,6 +65,9 @@ interface TranscriptPanelProps {
   reading: Omit<ReadingListProps, "picker">;
   /** The Chat tab's bag, memoised likewise; the playhead arrives as a ref. */
   chat: LectureChatPanelProps;
+  /** The Transcript tab of a lecture without a transcript, memoised likewise;
+   *  null when it has one. */
+  transcribe: TranscribeEmptyProps | null;
   dock: Dock;
   size: number;
   /** Shown or hidden — the panel stays mounted either way and slides. */
@@ -100,8 +89,8 @@ interface TranscriptPanelProps {
 }
 
 /**
- * The dock: its box and slide, the header (drag handle and tab strip), and the
- * tab in front. The Transcript tab maps cue space to `FollowList` row space.
+ * The lecture's dock (`MediaDock`) and its three tabs: Chapters, the
+ * transcript in either register, and Chat.
  */
 export const TranscriptPanel = memo(function TranscriptPanel({
   cues,
@@ -111,6 +100,7 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   chapters,
   reading,
   chat,
+  transcribe,
   dock,
   size,
   open,
@@ -122,21 +112,9 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   onScrollAway,
   onBackToLive,
 }: TranscriptPanelProps) {
-  // The outer box animates one dimension to zero while the inner keeps its size,
-  // so content is clipped rather than reflowed.
-  const outer: CSSProperties = isVertical(dock)
-    ? { height: open ? size : 0, minHeight: open ? size : 0, maxHeight: open ? size : 0 }
-    : { width: open ? size : 0, minWidth: open ? size : 0, maxWidth: open ? size : 0 };
-  const inner: CSSProperties = isVertical(dock)
-    ? { height: size, minHeight: size }
-    : { width: size, minWidth: size };
-
-  // Not armed by an effect when `open` flips: that runs after the paint that
-  // already resized the box, so the panel would snap.
-  const sliding = !resizing;
-
-  // The Transcript tab is dropped when there are no cues; Chat never is.
-  const hasTranscript = cues.length > 0;
+  // The Transcript tab is dropped while a transcript on disk has no cues
+  // loaded; a lecture without one keeps it for Transcribe. Chat never is.
+  const hasTranscript = cues.length > 0 || transcribe != null;
   // `TABS` is the vocabulary; the order is the reader's. `orderDockTabs` appends
   // any tab missing from the stored order.
   const order = usePlayerPrefs((p) => p.dockTabOrder);
@@ -187,202 +165,45 @@ export const TranscriptPanel = memo(function TranscriptPanel({
     ],
   );
 
-  // ── The strip's own overflow ─────────────────────────────────────────────
+  // Held here, not in the list, so a query outlives a visit to another tab.
+  const search = useTranscriptSearch(cues, activeCueIdx);
 
-  // The strip scrolls sideways with no visible bar; fades show the overflow.
-  // Resizing, re-docking or losing a tab changes what fits; `live` re-hangs it.
-  const stripRef = useRef<HTMLDivElement>(null);
-  useScrollFade(stripRef, "x", open);
-
-  // ── Search ───────────────────────────────────────────────────────────────
-
-  const { query, setQuery, needle, searching, rows, followIdx } =
-    useTranscriptSearch(cues, activeCueIdx);
-  // The virtualizer keys its measurement memo by this function identity.
-  const getCueKey = useCallback((row: number) => rows[row], [rows]);
+  let body: ReactNode;
+  if (activeTab === "chat") body = <LectureChatPanel {...chat} />;
+  else if (activeTab === "chapters") body = <ChaptersPanel {...chapters} />;
+  else if (cues.length === 0 && transcribe) body = <TranscribeEmpty {...transcribe} />;
+  else if (mode === "enhanced") body = <ReadingList {...reading} picker={picker} />;
+  else {
+    body = (
+      <TranscriptList
+        cues={cues}
+        activeCueIdx={activeCueIdx}
+        search={search}
+        open={open}
+        active={activeTab === "transcript"}
+        onSeek={onSeek}
+        following={following}
+        onScrollAway={onScrollAway}
+        onBackToLive={onBackToLive}
+        tools={<TranscriptModePicker {...picker} />}
+      />
+    );
+  }
 
   return (
-    <div
-      style={outer}
-      aria-hidden={!open}
-      className={cn(
-        "shrink-0 grow-0 overflow-hidden bg-background border-border",
-        INNER_BORDER[dock],
-        !open && "border-0",
-        sliding &&
-          (isVertical(dock)
-            ? "transition-[height,min-height,max-height] duration-200 ease-out"
-            : "transition-[width,min-width,max-width] duration-200 ease-out"),
-      )}
+    <MediaDock
+      tabs={tabs}
+      value={activeTab}
+      onChange={onTabChange}
+      onReorder={onReorder}
+      dock={dock}
+      size={size}
+      open={open}
+      resizing={resizing}
+      onClose={onClose}
+      onHeaderPointerDown={onHeaderPointerDown}
     >
-      <div style={inner} className="flex h-full flex-col min-h-0 min-w-0">
-        {/* The tabs and close button stop pointerdown: the header's dock drag
-            captures the pointer, retargeting pointerup so a click never lands. */}
-        <div
-          onPointerDown={onHeaderPointerDown}
-          className="px-2 h-9 flex items-center gap-1.5 border-b border-border shrink-0 cursor-grab active:cursor-grabbing select-none"
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* Lifted to the tabs' text, which sits above centre by half the
-                  underline's padding. */}
-              <span className="mb-2 flex items-center text-muted-foreground hover:text-foreground transition-colors">
-                <DotsSixVertical size={12} className="opacity-50" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Drag to dock left, right, top or bottom</TooltipContent>
-          </Tooltip>
-          {/* No visible scrollbar (classic scrollbars here); the fades carry it. */}
-          <div className="min-w-0">
-            <div
-              ref={stripRef}
-              className="min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <ViewTabs
-                tabs={tabs}
-                value={activeTab}
-                onChange={onTabChange}
-                onReorder={onReorder}
-                className="w-max gap-3"
-              />
-            </div>
-          </div>
-          <button
-            type="button"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={onClose}
-            aria-label="Hide panel"
-            className="mb-2 ml-auto shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <X size={11} weight="bold" />
-          </button>
-        </div>
-
-        {activeTab === "chat" ? (
-          <LectureChatPanel {...chat} />
-        ) : activeTab === "chapters" ? (
-          <ChaptersPanel {...chapters} />
-        ) : mode === "enhanced" ? (
-          <ReadingList {...reading} picker={picker} />
-        ) : (
-          <>
-            {/* The picker shares the search row: the dock can be 220px wide. */}
-            <div className="flex shrink-0 items-center gap-1.5 px-1.5 pt-1.5">
-              <SearchField
-                value={query}
-                onChange={setQuery}
-                placeholder="Search"
-                count={searching ? rows.length : undefined}
-                className="min-w-0 flex-1 shrink p-0"
-              />
-              <TranscriptModePicker {...picker} />
-            </div>
-            <FollowList
-              count={rows.length}
-              followIdx={followIdx}
-              // Keyed by cue index so measured heights survive filtering.
-              getItemKey={getCueKey}
-              open={open}
-              active={activeTab === "transcript"}
-              following={following}
-              onScrollAway={onScrollAway}
-              onBackToLive={onBackToLive}
-              resetKey={needle}
-              overlay={searching && rows.length === 0 ? "No matches" : undefined}
-              renderRow={(row, item, measure) => {
-                const cueIdx = rows[row];
-                const cue = cues[cueIdx];
-                const active = cueIdx === activeCueIdx;
-                return (
-                  <button
-                    data-index={item.index}
-                    ref={measure}
-                    onClick={() => onSeek(cue.start)}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${item.start}px)`,
-                    }}
-                    className={cn(
-                      "text-left text-[11px] px-2 py-1 rounded flex gap-2 items-start",
-                      active
-                        ? "bg-brand/12 text-brand"
-                        : "text-muted-foreground hover:text-foreground hover:bg-surface",
-                    )}
-                  >
-                    <span className="tabular-nums text-[10px] shrink-0 pt-px w-10 opacity-60">
-                      {fmtClockSecs(Math.floor(cue.start))}
-                    </span>
-                    <span className="flex-1">
-                      <Highlight text={cue.text} needle={needle} />
-                    </span>
-                  </button>
-                );
-              }}
-            />
-          </>
-        )}
-      </div>
-    </div>
+      {body}
+    </MediaDock>
   );
 });
-
-/** The band the panel would land in, previewed mid-drag in the brand tint. */
-export function DockDropPreview({
-  dock,
-  height,
-  width,
-}: {
-  dock: Dock;
-  height: number;
-  width: number;
-}) {
-  const edge: Record<Dock, CSSProperties> = {
-    bottom: { left: 0, right: 0, bottom: 0, height },
-    top: { left: 0, right: 0, top: 0, height },
-    left: { top: 0, bottom: 0, left: 0, width },
-    right: { top: 0, bottom: 0, right: 0, width },
-  };
-
-  return (
-    <div className="absolute inset-0 z-40 pointer-events-none">
-      <div
-        style={edge[dock]}
-        className="absolute rounded-sm bg-brand/25 border border-brand/60 backdrop-blur-[1px] transition-all duration-100"
-      />
-    </div>
-  );
-}
-
-/** Divider between the video stack and the panel; drag to resize. */
-export function DockResizeHandle({
-  dock,
-  onPointerDown,
-}: {
-  dock: Dock;
-  onPointerDown: (e: React.PointerEvent) => void;
-}) {
-  const vertical = isVertical(dock);
-  return (
-    <div
-      role="separator"
-      aria-orientation={vertical ? "horizontal" : "vertical"}
-      onPointerDown={onPointerDown}
-      className={cn(
-        "shrink-0 relative z-20 hover:bg-brand/40 active:bg-brand/60 transition-colors",
-        vertical ? "h-px w-full cursor-row-resize" : "w-px h-full cursor-col-resize",
-      )}
-    >
-      {/* Wider invisible hit area than the hairline it draws. */}
-      <div
-        className={cn(
-          "absolute",
-          vertical ? "inset-x-0 -top-1.5 -bottom-1.5" : "inset-y-0 -left-1.5 -right-1.5",
-        )}
-      />
-    </div>
-  );
-}

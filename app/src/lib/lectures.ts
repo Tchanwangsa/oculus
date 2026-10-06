@@ -3,52 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Lecture, SourceNum } from "@/lib/db";
 import type { ToolKind } from "@/lib/harness";
 
-// ── VTT parsing ───────────────────────────────────────────────────────────────
-
-export interface Cue {
-  start: number;
-  end: number;
-  text: string;
-}
-
-export function parseVtt(vtt: string): Cue[] {
-  const cues: Cue[] = [];
-  const normalised = vtt.replace(/\r\n/g, "\n");
-  const blocks = normalised.split(/\n\n+/);
-  for (const block of blocks) {
-    const lines = block.trim().split("\n");
-    const timeLine = lines.find((l) => l.includes(" --> "));
-    if (!timeLine) continue;
-    const [startStr, endStr] = timeLine.split(" --> ");
-    const start = vttToSecs(startStr?.trim() ?? "");
-    const end = vttToSecs(endStr?.split(" ")[0]?.trim() ?? "");
-    const text = lines
-      .filter((l) => !l.includes(" --> "))
-      .map((l) =>
-        l
-          .replace(/NOTE CONF\s*\{[^}]*\}/g, "")
-          .replace(/<[^>]+>/g, "")
-          .trim(),
-      )
-      .join(" ")
-      .replace(/^\d+$/, "")
-      .trim();
-    if (text && start >= 0) cues.push({ start, end, text });
-  }
-  return cues;
-}
-
-function vttToSecs(s: string): number {
-  const parts = s.split(":");
-  if (parts.length === 3) {
-    return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]);
-  }
-  if (parts.length === 2) {
-    return Number(parts[0]) * 60 + Number(parts[1]);
-  }
-  return -1;
-}
-
 // ── Formatting ────────────────────────────────────────────────────────────────
 
 export function fmtDurationSecs(secs: number): string {
@@ -59,17 +13,6 @@ export function fmtDurationSecs(secs: number): string {
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
-/** `m:ss`, or `h:mm:ss` past the hour or with `forceHours`. */
-export function fmtClockSecs(secs: number, forceHours = false): string {
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = Math.floor(secs % 60);
-  if (h > 0 || forceHours) {
-    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  }
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
 export function fmtLectureDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString("en-AU", {
@@ -77,15 +20,6 @@ export function fmtLectureDate(iso: string): string {
     day: "numeric",
     month: "short",
   });
-}
-
-export function progressLabel(lec: Lecture): { text: string; color: string } {
-  if (lec.completed) return { text: "Done", color: "text-success" };
-  if (lec.progress_seconds > 5) {
-    const left = Math.max(0, lec.duration_seconds - lec.progress_seconds);
-    return { text: `${fmtClockSecs(left)} left`, color: "text-warning" };
-  }
-  return { text: "Not watched", color: "text-muted-foreground" };
 }
 
 // ── Download progress event payload ───────────────────────────────────────────
@@ -185,6 +119,29 @@ export function writeLectureReading(
   return invoke("lecture_write_reading", { lectureId, force, source });
 }
 
+// ── Where the content ends ───────────────────────────────────────────────────
+
+/** Tauri event from `lecture_end::app::LECTURE_END_EVENT`: a run finished. */
+export const LECTURE_END_EVENT = "lecture-end";
+
+/** `seconds` and `quote` are set only when `status` is `ready`. */
+export interface LectureEndFinished {
+  lectureId: string;
+  status: "ready" | "none" | "error";
+  seconds: number | null;
+  quote: string | null;
+  error: string | null;
+}
+
+/**
+ * Find where a lecture's content ends (the `lectureEnd` job, as `oculus
+ * lecture end`). Needs the transcript only. Returns once claimed; the end
+ * arrives as `LECTURE_END_EVENT`.
+ */
+export function findLectureEnd(lectureId: string, force = false): Promise<void> {
+  return invoke("lecture_find_end", { lectureId, force });
+}
+
 export interface MomentFrame {
   source: SourceNum;
   /** Relative to `agents/`, the thread's cwd. */
@@ -207,21 +164,6 @@ export function lectureGrabFrames(lectureId: string, seconds: number): Promise<M
  *  element's `duration`; Echo360's catalogue length runs short. */
 export function chapterEnds(starts: number[], duration: number): number[] {
   return starts.map((s, i) => Math.max(s, i + 1 < starts.length ? starts[i + 1] : duration));
-}
-
-/** Index of the span `t` falls in over ordered `starts` (chapters or reading
- *  lines), or -1 before the first. */
-export function spanAt(starts: number[], t: number): number {
-  if (Number.isNaN(t)) return -1;
-  // Starts are chronological; the upper bound also selects the last duplicate.
-  let low = 0;
-  let high = starts.length;
-  while (low < high) {
-    const middle = low + Math.floor((high - low) / 2);
-    if (starts[middle] <= t) low = middle + 1;
-    else high = middle;
-  }
-  return low - 1;
 }
 
 /** The full-page player route; `t` titles the tab. */

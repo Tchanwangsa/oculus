@@ -11,6 +11,8 @@ import {
   playbackOwner,
   releasePlayback,
 } from "@/lib/playbackOwner";
+import { pauseLibraryVideos } from "@/lib/media";
+import { isWatched } from "@/lib/lectureEnd";
 
 /**
  * The app's `<video>` elements and progress writes, owned here rather than by
@@ -42,9 +44,6 @@ const SEEK_DRIFT = 1.5;
 /** Fraction a trimmed follower's rate is nudged by. */
 const RATE_TRIM = 0.08;
 
-/** Seconds from the end that count as watched. */
-const COMPLETE_WITHIN = 30;
-
 export interface SourcePlan {
   source: SourceNum;
   /** Media-server URL for that source's file. */
@@ -63,6 +62,10 @@ let syncTicker: ReturnType<typeof setInterval> | null = null;
 let current: Lecture | null = null;
 /** Last second written, so a paused element doesn't rewrite the same row. */
 let lastWritten = -1;
+/** The progress writes, chained so they land in order and can be awaited. */
+let saving: Promise<void> = Promise.resolve();
+/** Up Next's Play: the lecture the next adoption starts, and from where. */
+let autoplay: { id: string; at?: number } | null = null;
 /**
  * Bumped on every adoption. A player can adopt the elements before the one
  * that had them lets go; the token stops the old one parking them after the
@@ -112,6 +115,8 @@ function videoFor(source: SourceNum): HTMLVideoElement {
 // Pause/end/seek write immediately and re-align followers, which cannot infer
 // them from their own clock.
 const onLeaderPlay = () => {
+  // One sound at a time: a library video playing in another pane stops.
+  pauseLibraryVideos();
   markPlaying(true);
   startTickers();
   syncFollowers();
@@ -257,6 +262,12 @@ export function syncLectureSources(
   if (lectureChanged && current) void saveLectureProgress();
   current = lecture;
   if (lectureChanged) lastWritten = -1;
+  // A start asked for before the route changed is spent on the next lecture.
+  let begin = start;
+  if (lectureChanged && autoplay) {
+    if (autoplay.id === lecture.id) begin ??= { at: autoplay.at };
+    autoplay = null;
+  }
 
   // Null for a fresh lecture, which starts from its saved progress.
   const outgoing = lectureChanged ? null : leaderVideo();
@@ -286,7 +297,7 @@ export function syncLectureSources(
   if (lead && !leaderIsFresh && at != null && Math.abs(lead.currentTime - at) > MAX_DRIFT) {
     joinAt(lead, at, wasPlaying);
   }
-  if (lead && start) joinAt(lead, start.at ?? null, true);
+  if (lead && begin) joinAt(lead, begin.at ?? null, true);
   syncFollowers();
   if (lead && !lead.paused) startTickers();
   markAdopted(paneId, tabId);
@@ -331,6 +342,13 @@ export function releaseLecturePlayer(paneId: number) {
   releasePlayback(paneId);
 }
 
+/** Pause the lecture, wherever its elements are — a library video started.
+ *  Followers follow through the leader's `pause`. */
+export function pauseLecturePlayback() {
+  const v = leaderVideo();
+  if (v && !v.paused) v.pause();
+}
+
 /** Stop for good: the lecture was closed, not navigated away from. */
 export function stopLecturePlayback() {
   clearPlaybackOwner();
@@ -341,31 +359,46 @@ export function stopLecturePlayback() {
   parkLectureVideos();
 }
 
-async function saveLectureProgress(): Promise<void> {
+function saveLectureProgress(): Promise<void> {
   const v = leaderVideo();
   const lecture = current;
-  if (!v || !lecture) return;
+  if (!v || !lecture) return saving;
   const seconds = Math.floor(v.currentTime);
-  if (seconds === lastWritten) return;
+  if (seconds === lastWritten) return saving;
   lastWritten = seconds;
+  // The file's length beats Echo360's catalogue duration, which runs short.
+  const fileDuration = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+  const watched = isWatched(lecture, v.currentTime, fileDuration);
+  saving = saving.then(() => writeProgress(lecture.id, seconds, watched));
+  return saving;
+}
+
+async function writeProgress(id: string, seconds: number, watched: boolean): Promise<void> {
   try {
-    await updateLectureProgress(lecture.id, seconds);
-    // The file's length beats Echo360's catalogue duration, which runs short.
-    const total =
-      Number.isFinite(v.duration) && v.duration > 0
-        ? v.duration
-        : lecture.duration_seconds;
-    if (total > 0 && v.currentTime >= total - COMPLETE_WITHIN) {
-      await markLectureComplete(lecture.id);
-    }
-    window.dispatchEvent(
-      new CustomEvent(LECTURE_PROGRESS_EVENT, {
-        detail: { id: lecture.id, seconds },
-      }),
-    );
+    await updateLectureProgress(id, seconds);
+    if (watched) await markLectureComplete(id);
+    window.dispatchEvent(new CustomEvent(LECTURE_PROGRESS_EVENT, { detail: { id, seconds } }));
   } catch {
     /* a lost position is not worth an error in the player */
   }
+}
+
+/**
+ * Mark the playing lecture Done for Up Next's Play. It is paused and its
+ * position written first, so no progress write for it can land after.
+ */
+export async function completeLecture(id: string): Promise<void> {
+  const v = leaderVideo();
+  if (current?.id === id && v && !v.paused) v.pause();
+  await saveLectureProgress();
+  saving = saving.then(() => markLectureComplete(id)).catch(() => {});
+  await saving;
+}
+
+/** The next adoption of `id` plays it, from `at` if given, else from its
+ *  saved position. Up Next sets it before replacing the route. */
+export function playOnAdopt(id: string, at?: number): void {
+  autoplay = { id, at };
 }
 
 // WebKit stops feeding a hidden page's video frames, so followers come back

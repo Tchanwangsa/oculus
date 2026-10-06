@@ -38,7 +38,7 @@ database, so it works offline.
   `automation`, and the card shows which. An edit leaves `source` alone.
 - The dialog is mounted once in `app/src/layouts/AppLayout.tsx` and raised
   through `eventEditorStore`, because its two openers — the page header and
-  `EventPopover`, which Home's Today list also renders — share no subtree.
+  `EventPopover`, which Home's Upcoming card also renders — share no subtree.
   Its date picker loads the first time a `DateTimeField` popover opens. Each
   opening has its own session, so a pending save refreshes calendars when it
   finishes but only closes its own form.
@@ -119,7 +119,7 @@ In `app/src/components/calendar/WeekView.tsx`:
 - Never add a date window to the Canvas fetch — the write deletes the subject's rows, so a window would erase everything outside it.
 - Never make `projects.event_id` a foreign key — the sync's delete-and-reinsert would cascade every pin to NULL even though the ids come back identical.
 - Never copy tasks into `local_events` — nothing cleans that table up.
-- `EventRow` takes `now` as a prop; a row calling `useNow()` puts a timer behind every line of Agenda and Home's Today list.
+- `EventRow` takes `now` as a prop; a row calling `useNow()` puts a timer behind every line of Agenda and Home's Upcoming card.
 - `MonthView` measures its chip capacity from the grid height; a constant clips the last chip with no "+N more".
 - The header's control group wraps rather than clipping under the page's `overflow-hidden`.
 - A wash mixed from `surface` is invisible — it is within a few percent of the background.

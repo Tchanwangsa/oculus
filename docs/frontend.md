@@ -9,7 +9,7 @@ library files; the rest of the frontend has its own pages:
 | --- | --- |
 | [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
 | [ui.md](./ui.md) | The design rules, and the WebKit and CSS traps |
-| [viewers.md](./viewers.md) | Markdown, PDFs, the lecture player and the in-app browser |
+| [viewers.md](./viewers.md) | Markdown, PDFs, the media player (lectures and library videos) and the in-app browser |
 | [editor.md](./editor.md) | The note editor: sessions, find, versions, code, tables, pictures, mentions, `NoteField` |
 | [editor-maths.md](./editor-maths.md) | Maths in the note editor: the visual field, the toolbox, shorthands |
 
@@ -22,10 +22,11 @@ library files; the rest of the frontend has its own pages:
 | Files tab: uploads and documents | `app/src/pages/subject/FilesPage.tsx`, `app/src/lib/uploads.ts`, `app/src/lib/documents.ts`, `app/src-tauri/src/files.rs` |
 | Tasks section (`/projects`, `/tasks`) | `app/src/components/projects/`, `app/src/pages/TasksPage.tsx`, `app/src/lib/projects.ts`, `app/src/stores/projectsStore.ts` |
 | Chat | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/`, `app/src/stores/harnessStore.ts` |
-| Settings → Parsing and Embeddings: parser, embedding, index run | `app/src/pages/settings/ParsingPage.tsx`, `app/src/components/settings/ParserSection.tsx`, `app/src/components/settings/EmbeddingSection.tsx`, `app/src/stores/indexStore.ts` |
+| Settings → Parsing, Embeddings, Transcription: parser, embedding, index run, transcription (the language, the engine order and switches, a dialog per engine: Groq key, local Whisper models, on-device speech) | `app/src/pages/settings/ParsingPage.tsx`, `app/src/components/settings/ParserSection.tsx`, `app/src/components/settings/EmbeddingSection.tsx`, `app/src/stores/indexStore.ts`, `app/src/components/settings/TranscriptionSection.tsx`, `app/src/components/settings/GroqDialog.tsx`, `app/src/components/settings/LocalWhisper.tsx`, `app/src/components/settings/OnDeviceSpeech.tsx` |
 | Parser and embedding engine selection UI | `app/src/components/settings/EngineSelect.tsx` |
 | Parse state, pipeline ledger, recovery sweep | `app/src/lib/parseState.ts`, `app/src/stores/parseStore.ts`, `app/src/stores/pipelineStore.ts`, `app/src/hooks/useQualitySweep.ts` |
 | Scraped document metadata loaders | `app/src/hooks/useCourseFileData.ts`, `app/src/hooks/useModuleTocs.ts` |
+| Module videos downloaded on demand | `app/src/pages/subject/ModulesPage.tsx`, `app/src/stores/videoDownloadStore.ts` |
 
 ## Backend events are the write path
 
@@ -139,6 +140,13 @@ library files; the rest of the frontend has its own pages:
   with the folder on mount, so a note written elsewhere just appears.
 
 The editor a document opens in is [editor.md](./editor.md).
+- **A module video downloads from its Modules row** (the backend side is in
+  [sync.md](./sync.md#a-sync-lists-module-videos-and-the-student-downloads-them)).
+  `videoDownloadStore` keys state by Canvas file id so a download outlives the
+  page, and subscribes to `canvas-video-progress` on its first download. The
+  row comes from the ordinary `scrape-file` handler, which can land after the
+  command resolves, so the store waits for `FILE_SCRAPED_EVENT` before the
+  row opens the file.
 
 ## Gotchas
 
