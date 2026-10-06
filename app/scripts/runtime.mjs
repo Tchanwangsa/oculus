@@ -1,6 +1,6 @@
 // Paths and cargo invocation shared by the development and bundle scripts.
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,13 +15,29 @@ export const cliBuildArgs = (profile = "release") => [
   "--manifest-path", manifest, "--bin", "oculus",
 ];
 
-/** Remove the previous binary so cargo must uplift the newly linked CLI. */
+/** Remove the previous binary so a build that produces none cannot pass on it. */
 export function buildCli(profile = "release") {
   const binary = cliPath(profile);
   rmSync(binary, { force: true });
   execFileSync("cargo", cliBuildArgs(profile), { stdio: "inherit" });
   if (!existsSync(binary)) throw new Error(`cargo reported success but ${binary} is not there`);
   return binary;
+}
+
+/** The `externalBin` copy of the CLI under `binaries/`. */
+export const cliSidecar = () => join(binaries, `oculus-${hostTriple()}${exe}`);
+
+/**
+ * Copy a built CLI over the sidecar. tauri-build copies the sidecar to
+ * `target/<profile>/oculus` whenever the app's build script runs, so a stale
+ * sidecar overwrites the CLI that was just built.
+ */
+export function stageCli(binary) {
+  const dest = cliSidecar();
+  mkdirSync(binaries, { recursive: true });
+  rmSync(dest, { force: true });
+  copyFileSync(binary, dest);
+  chmodSync(dest, 0o755);
 }
 
 /** Tauri sidecars must use rustc's exact host triple. */

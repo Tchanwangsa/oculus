@@ -3,7 +3,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { app, buildCli, cliPath } from "./runtime.mjs";
+import { app, buildCli, cliPath, stageCli } from "./runtime.mjs";
 
 const cli = cliPath("debug");
 
@@ -32,8 +32,10 @@ if (!existsSync(modules) || mtime(modules) < mtime(join(app, "bun.lock"))) {
   execFileSync("bun", ["install", "--frozen-lockfile"], { cwd: app, stdio: "inherit" });
 }
 
-// 2. The fetched natives. Both scripts no-op when the file is already there.
-for (const script of ["fetch-ffmpeg.mjs", "fetch-pdfium.mjs"]) {
+// 2. The native sidecars. Each script no-ops when its file is already current;
+//    the speech helper and whisper-cli are compiled, not fetched, and only on
+//    macOS.
+for (const script of ["fetch-ffmpeg.mjs", "fetch-pdfium.mjs", "build-speech.mjs", "build-whisper.mjs"]) {
   execFileSync(process.execPath, [join(app, "scripts", script)], { cwd: app, stdio: "inherit" });
 }
 
@@ -56,6 +58,10 @@ try {
   process.exit(1);
 }
 log(`${version} built in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+
+// tauri dev's own cargo run copies the sidecar over this build, so the sidecar
+// has to be this build too.
+stageCli(cli);
 
 // Regenerate the reference from this build, writing only changed help.
 try {

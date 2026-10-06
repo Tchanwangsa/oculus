@@ -1,10 +1,9 @@
 // Stage the CLI as a Tauri sidecar for the keep-alive LaunchAgent.
-import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { binaries, buildCli, cliPath, exe, hostTriple } from "./runtime.mjs";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { binaries, buildCli, cliPath, cliSidecar, stageCli } from "./runtime.mjs";
 
 const built = cliPath();
-const dest = join(binaries, `oculus-${hostTriple()}${exe}`);
+const dest = cliSidecar();
 
 mkdirSync(binaries, { recursive: true });
 
@@ -31,7 +30,6 @@ if (size < 1_000_000) {
   throw new Error(`suspiciously small CLI build (${size} bytes) — refusing to stage it`);
 }
 
-copyFileSync(built, dest);
-chmodSync(dest, 0o755);
+stageCli(built);
 
 console.log(`[cli] ${(size / 1e6).toFixed(1)} MB staged at ${dest}`);

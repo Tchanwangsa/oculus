@@ -8,7 +8,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | Piece | Location |
 | --- | --- |
 | Scripts (`predev`, `cli`, `cli:dev`, `cli:install`, `stage-cli`, `docs:cli`, …) | `app/package.json` |
-| `beforeDevCommand`, `beforeBuildCommand`, `externalBin` | `app/src-tauri/tauri.conf.json` |
+| `beforeDevCommand`, `beforeBuildCommand`, `externalBin` | `app/src-tauri/tauri.conf.json`; macOS's `externalBin` in `app/src-tauri/tauri.macos.conf.json` |
 | Cargo CLI build, target paths and host detection | `app/scripts/runtime.mjs`, `app/scripts/build-cli.mjs` |
 | Shared cached native download and installation | `app/scripts/native-binary.mjs` |
 | The dev preflight | `app/scripts/predev.mjs` |
@@ -96,22 +96,28 @@ Its floor is macOS 13.3, upstream's own. Like `apple-speech` it is a macOS-only
 `tauri dev` issues a bare `cargo run`, which builds the `app` bin and no other.
 Yet `target/debug/oculus` sits beside the running app, so `child_env` in
 `app/src-tauri/src/harness/discover.rs` puts it first on every agent thread's
-PATH. Three pieces keep it current:
+PATH. Four pieces keep it current:
 
 - `app/scripts/predev.mjs` builds it at each dev start, in the debug profile
   because those artifacts are already warm from the app build.
 - `app/scripts/watch-cli.mjs` rebuilds it on Rust changes through the session,
   since `tauri dev` never re-runs `beforeDevCommand`. Its debounce is longer
   than tauri's, so the app build takes cargo's lock first. It exits when the
-  vite port stops answering.
+  vite port (probed on `localhost`, which is `::1` on macOS) stops answering.
+- Both, and `bun run cli`/`cli:dev`, copy each build over the
+  `binaries/oculus-<triple>` sidecar. tauri-build copies every `externalBin`
+  into `target/<profile>/` whenever the app's build script runs, so `tauri
+  dev`, `cargo test` or any other build of the crate replaces
+  `target/<profile>/oculus` with whatever the sidecar holds.
 - `discover::warn_if_stale` logs in the dev terminal when a CLI under
   `target/` is older than the sources beside it.
 
-`runtime.mjs` owns CLI paths and cargo arguments. The preflight, bundle
-staging, watcher and `bun run cli`/`cli:dev` **delete the binary before
-building**: cargo can report "Finished" while leaving the previous binary in
-place. `oculus_cli` ranks every candidate it finds by mtime rather than
-trusting one, which covers the seconds when the dev path has no binary at all.
+`runtime.mjs` owns CLI paths, cargo arguments and the sidecar copy. The
+preflight, bundle staging, watcher and `bun run cli`/`cli:dev` **delete the
+binary before building**, so a build that leaves nothing behind fails loudly
+instead of passing on an old file. `oculus_cli` ranks every candidate it finds
+by mtime rather than trusting one, which covers the seconds when the dev path
+has no binary at all.
 
 `tauri build` runs `stage-cli` then `docs:cli` from `beforeBuildCommand`: the
 CLI ships inside the bundle because the keep-alive LaunchAgent runs it
@@ -193,7 +199,7 @@ variable.
 
 ## Gotchas
 
-- A cargo build can leave a stale `oculus` and say "Finished" — delete the binary first.
+- Any build of the crate copies the `binaries/` sidecar to `target/<profile>/oculus` — a stale sidecar means a stale CLI.
 - `tauri dev` alone never builds `oculus` — use `predev` or `bun run cli:dev`, or agents run an old CLI.
 - Anything under `app/src-tauri/` changing, templates included, rebuilds and relaunches the dev app.
 - A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).

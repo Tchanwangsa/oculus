@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { readFileSync, rmSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
-import { app, cliBuildArgs, cliPath, rust } from "./runtime.mjs";
+import { app, cliBuildArgs, cliPath, rust, stageCli } from "./runtime.mjs";
 
 const cli = cliPath("debug");
 const pidFile = join(rust, "target", ".oculus-cli-watch.pid");
@@ -66,8 +66,8 @@ function build() {
   }
   building = true;
   const started = Date.now();
-  // Same reason as predev: cargo will report success and leave the old binary
-  // in place rather than uplifting the new one.
+  // Same reason as predev: a build that leaves no binary must not pass on an
+  // old one.
   rmSync(cli, { force: true });
   execFile(
     "cargo",
@@ -81,7 +81,13 @@ function build() {
         log("build failed:");
         process.stderr.write(stderr);
       } else {
-        log(`oculus rebuilt in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+        // As in predev: the next app build copies the sidecar over this one.
+        try {
+          stageCli(cli);
+          log(`oculus rebuilt in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+        } catch (e) {
+          log(`oculus rebuilt but not staged as the sidecar: ${e.message}`);
+        }
       }
       if (again) {
         again = false;
@@ -120,7 +126,9 @@ let sawServer = false;
 let misses = 0;
 
 function probe() {
-  const sock = connect({ port: devPort, host: "127.0.0.1" });
+  // `localhost`, not 127.0.0.1: vite binds whichever family localhost resolves
+  // to, which on macOS is ::1.
+  const sock = connect({ port: devPort, host: "localhost" });
   let settled = false;
   const done = (up) => {
     // A timeout is routinely followed by an error on the same socket, and a
