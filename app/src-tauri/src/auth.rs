@@ -36,31 +36,45 @@ pub fn is_authenticated_url(url: &url::Url) -> bool {
 
 // ── Cookie snapshot / replay ────────────────────────────────────────────────
 
-/// Reads the Canvas cookies from a live webview (HttpOnly included) and writes
-/// the joined `name=value; ...` header to disk. Scoped with `cookies_for_url`:
-/// every webview shares one jar (`data_directory` is a no-op on WKWebView).
+/// Reads the Canvas and Okta cookies from a live webview (HttpOnly included)
+/// and writes each host's joined `name=value; ...` header to disk. Call it only
+/// once Canvas has signed the webview in: before that the jar holds the
+/// anonymous `canvas_session` Canvas hands every visitor.
 pub fn save_session_cookie(app: &AppHandle) {
-    let Ok(canvas) = crate::canvas::CANVAS_BASE.parse::<url::Url>() else {
+    let dir = crate::paths::data_dir();
+    snapshot_cookies(app, crate::canvas::CANVAS_BASE, &cookie_file_path());
+    snapshot_cookies(
+        app,
+        &format!("https://{}", crate::okta::SSO_HOST),
+        &crate::paths::sso_cookie_path(&dir),
+    );
+}
+
+/// Scoped with `cookies_for_url`: every webview shares one jar
+/// (`data_directory` is a no-op on WKWebView).
+fn snapshot_cookies(app: &AppHandle, base: &str, path: &std::path::Path) {
+    let Ok(base) = base.parse::<url::Url>() else {
         return;
     };
     // Same jar either way; fall back to an in-app browser tab when the login
     // window is gone.
     let cookies = match app.get_webview_window("canvas-auth") {
-        Some(win) => win.cookies_for_url(canvas),
+        Some(win) => win.cookies_for_url(base.clone()),
         None => match app
             .webviews()
             .into_iter()
             .find(|(label, _)| label.starts_with(crate::browser::LABEL_PREFIX))
         {
-            Some((_, webview)) => webview.cookies_for_url(canvas),
+            Some((_, webview)) => webview.cookies_for_url(base.clone()),
             None => return,
         },
     };
+    let host = base.host_str().unwrap_or_default();
     match cookies {
         Ok(cookies) => {
-            // One entry per name: the parent-domain cookies and the copies
-            // `browser::seed_canvas_session` puts on the Canvas host would
-            // otherwise both be replayed, growing the snapshot every load.
+            // One entry per name: parent-domain cookies and the host copies
+            // `browser::seed_sessions` writes would otherwise both be
+            // replayed, growing the snapshot every load.
             let mut seen = std::collections::HashSet::new();
             let header = cookies
                 .iter()
@@ -69,22 +83,28 @@ pub fn save_session_cookie(app: &AppHandle) {
                 .collect::<Vec<_>>()
                 .join("; ");
             if header.is_empty() {
-                eprintln!("[oculus] save_session_cookie: no cookies to save yet");
+                eprintln!("[oculus] save_session_cookie: no {host} cookies to save yet");
                 return;
             }
-            let path = cookie_file_path();
-            match std::fs::write(&path, &header) {
-                Ok(_) => eprintln!("[oculus] saved session cookie ({} bytes)", header.len()),
-                Err(e) => eprintln!("[oculus] save_session_cookie write failed: {e}"),
+            match crate::paths::write_private(path, &header) {
+                Ok(_) => eprintln!("[oculus] saved {host} cookies ({} bytes)", header.len()),
+                Err(e) => eprintln!("[oculus] save_session_cookie {host} write failed: {e}"),
             }
         }
-        Err(e) => eprintln!("[oculus] save_session_cookie: cookies() failed: {e}"),
+        Err(e) => eprintln!("[oculus] save_session_cookie {host}: cookies() failed: {e}"),
     }
 }
 
 /// The persisted cookie header, or empty if none saved.
 pub fn saved_cookie_header() -> String {
     std::fs::read_to_string(cookie_file_path()).unwrap_or_default()
+}
+
+/// The persisted Okta header, or empty: written by a headless sign-in or a
+/// signed-in browser page, read only by the in-app browser.
+pub fn saved_sso_cookie_header() -> String {
+    std::fs::read_to_string(crate::paths::sso_cookie_path(&crate::paths::data_dir()))
+        .unwrap_or_default()
 }
 
 /// Pings the Canvas API with the saved session cookie. Doubles as the

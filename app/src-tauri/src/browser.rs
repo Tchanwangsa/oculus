@@ -12,8 +12,9 @@
 //!   `with_webview` returns nothing, so answers are pushed as events.
 //!
 //! `canvas_session` is HttpOnly and session-scoped, so WebKit loses it on quit;
-//! `seed_canvas_session` restores it from the scraper's snapshot, and each
-//! Canvas page load re-snapshots it (see `docs/auth.md`).
+//! `seed_sessions` restores it and Okta's session from their snapshots before
+//! any `*.unimelb.edu.au` load, and each signed-in Canvas page re-snapshots
+//! both (see `docs/auth.md`).
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -110,6 +111,9 @@ struct Inner {
     next_id: u32,
     /// Absent until the page is first placed; a page is hidden until then.
     viewports: HashMap<u32, Viewport>,
+    /// Placed and not hidden since. A UniMelb page is created only once its
+    /// cookies are seeded, which can be after its slot mounted.
+    shown: HashSet<u32>,
     /// One favicon attempt per host per run, found or not; the frontend
     /// persists what was found.
     favicons_tried: HashSet<String>,
@@ -138,11 +142,53 @@ fn broadcast(app: &AppHandle) {
 
 // ── Cookie seeding ──────────────────────────────────────────────────────
 
-/// Copies the persisted Canvas session header (bare `name=value; …` pairs)
-/// into WebKit's cookie jar, scoped to the Canvas host. Safe to redo before
-/// each page: WebKit replaces same-name cookies.
+/// UniMelb's Okta sign-on fronts every service under this domain, so a page
+/// here loads only after the saved sessions are in WebKit's jar.
+fn wants_sessions(url: &url::Url) -> bool {
+    url.host_str()
+        .is_some_and(|h| h == "unimelb.edu.au" || h.ends_with(".unimelb.edu.au"))
+}
+
+/// The Okta snapshot's mtime when it was last seeded. While the app runs the
+/// browser's own Okta cookies are the freshest, so they are replaced only by a
+/// snapshot written since (a headless sign-in); otherwise a seed fills gaps.
+static SSO_SEEDED: Mutex<Option<std::time::SystemTime>> = Mutex::new(None);
+
+/// Each saved session as (host, bare `name=value; …` header, whether it
+/// replaces the jar's same-named cookies). The scraper keeps Canvas's fresh,
+/// so it always replaces.
+fn saved_sessions() -> Vec<(&'static str, String, bool)> {
+    let sso_path = crate::paths::sso_cookie_path(&crate::paths::data_dir());
+    let modified = std::fs::metadata(&sso_path).and_then(|m| m.modified()).ok();
+    let replace_sso = {
+        let mut seeded = SSO_SEEDED.lock().unwrap_or_else(|e| e.into_inner());
+        let changed = *seeded != modified;
+        *seeded = modified;
+        changed
+    };
+    [
+        (CANVAS_HOST, crate::auth::saved_cookie_header(), true),
+        (crate::okta::SSO_HOST, crate::auth::saved_sso_cookie_header(), replace_sso),
+    ]
+    .into_iter()
+    .filter(|(_, header, _)| !header.trim().is_empty())
+    .collect()
+}
+
+/// Copies the saved Canvas and Okta sessions into WebKit's shared jar, each
+/// scoped to its host, then runs `then` on the main thread. Loads go in
+/// `then`: `setCookies` is async, and a request sent before it lands meets
+/// Canvas anonymous.
+///
+/// Same-named cookies on those hosts are deleted first. WebKit will not let an
+/// API-set cookie replace an HttpOnly one a server set, so once Canvas hands
+/// out an anonymous `canvas_session`, a plain re-set is silently dropped.
 #[cfg(target_os = "macos")]
-pub fn seed_canvas_session(app: &AppHandle) {
+pub fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
+    use std::cell::Cell;
+    use std::ptr::NonNull;
+    use std::rc::Rc;
+
     use block2::RcBlock;
     use objc2::runtime::AnyObject;
     use objc2::MainThreadMarker;
@@ -152,26 +198,41 @@ pub fn seed_canvas_session(app: &AppHandle) {
     };
     use objc2_web_kit::WKWebsiteDataStore;
 
-    let header = crate::auth::saved_cookie_header();
-    if header.trim().is_empty() {
+    // Off the delegate callback that fires it, as `on_new_window` does.
+    let then: Box<dyn FnOnce() + Send> = Box::new(then);
+    let finish_app = app.clone();
+    let finish = move || {
+        std::thread::spawn(move || {
+            finish_app.run_on_main_thread(then).ok();
+        });
+    };
+
+    let sessions = saved_sessions();
+    if sessions.is_empty() {
+        finish();
         return;
     }
 
     // `defaultDataStore` is main-thread-only, and so is everything downstream.
-    app.run_on_main_thread(move || {
+    let result = app.run_on_main_thread(move || {
         let Some(mtm) = MainThreadMarker::new() else {
+            finish();
             return;
         };
-        let domain = NSString::from_str(CANVAS_HOST);
         let path = NSString::from_str("/");
         let secure = NSString::from_str("TRUE");
 
-        let cookies: Vec<_> = header
-            .split(';')
-            .filter_map(|pair| pair.trim().split_once('='))
-            .filter_map(|(name, value)| {
-                let name = NSString::from_str(name.trim());
-                let value = NSString::from_str(value.trim());
+        // (host, name, replaces, cookie)
+        let mut cookies = Vec::new();
+        for (host, header, replace) in &sessions {
+            let domain = NSString::from_str(host);
+            for (name, value) in header
+                .split(';')
+                .filter_map(|pair| pair.trim().split_once('='))
+            {
+                let (name, value) = (name.trim(), value.trim());
+                let ns_name = NSString::from_str(name);
+                let ns_value = NSString::from_str(value);
                 let keys: [&NSString; 5] = unsafe {
                     [
                         NSHTTPCookieName,
@@ -181,37 +242,157 @@ pub fn seed_canvas_session(app: &AppHandle) {
                         NSHTTPCookieSecure,
                     ]
                 };
-                let values: [&AnyObject; 5] = [&name, &value, &domain, &path, &secure];
+                let values: [&AnyObject; 5] = [&ns_name, &ns_value, &domain, &path, &secure];
                 let props = NSDictionary::from_slices(&keys, &values);
-                unsafe { NSHTTPCookie::cookieWithProperties(&props) }
-            })
-            .collect();
+                if let Some(cookie) = unsafe { NSHTTPCookie::cookieWithProperties(&props) } {
+                    cookies.push((host.to_string(), name.to_string(), *replace, cookie));
+                }
+            }
+        }
         if cookies.is_empty() {
+            finish();
             return;
         }
-        let count = cookies.len();
-        let array = NSArray::from_retained_slice(&cookies);
-        // Never pass a nil completion handler: WebKit invokes it anyway and
-        // the app segfaults later, far from here.
-        let done = RcBlock::new(|| {});
-        unsafe {
-            WKWebsiteDataStore::defaultDataStore(mtm)
-                .httpCookieStore()
-                .setCookies_completionHandler(&array, Some(&done));
+        let store = unsafe { WKWebsiteDataStore::defaultDataStore(mtm).httpCookieStore() };
+
+        let finish = Rc::new(Cell::new(Some(finish)));
+        let get_store = store.clone();
+        let got_all = RcBlock::new(move |all: NonNull<NSArray<NSHTTPCookie>>| {
+            let all = unsafe { all.as_ref() };
+            let key = |c: &NSHTTPCookie| {
+                let domain = c.domain().to_string();
+                (domain.trim_start_matches('.').to_string(), c.name().to_string())
+            };
+            let present: HashSet<_> = all.iter().map(|c| key(&c)).collect();
+            let replacing: HashSet<_> = cookies
+                .iter()
+                .filter(|(_, _, replace, _)| *replace)
+                .map(|(host, name, _, _)| (host.clone(), name.clone()))
+                .collect();
+            let stale: Vec<_> = all.iter().filter(|c| replacing.contains(&key(c))).collect();
+            let fresh: Vec<_> = cookies
+                .iter()
+                .filter(|(host, name, replace, _)| {
+                    *replace || !present.contains(&(host.clone(), name.clone()))
+                })
+                .map(|(_, _, _, cookie)| cookie.clone())
+                .collect();
+            let count = fresh.len();
+            let fresh = NSArray::from_retained_slice(&fresh);
+
+            // Never pass a nil completion handler: WebKit invokes it anyway
+            // and the app segfaults later, far from here.
+            let finish = finish.clone();
+            let done = RcBlock::new(move || {
+                if let Some(finish) = finish.take() {
+                    eprintln!("[oculus] browser: seeded {count} UniMelb cookies into WebKit");
+                    finish();
+                }
+            });
+            let set_store = store.clone();
+            let set_all = Rc::new(move || unsafe {
+                set_store.setCookies_completionHandler(&fresh, Some(&done));
+            });
+            if stale.is_empty() {
+                set_all();
+                return;
+            }
+            // Set only once every delete has landed.
+            let pending = Rc::new(Cell::new(stale.len()));
+            for cookie in &stale {
+                let pending = pending.clone();
+                let set_all = set_all.clone();
+                let deleted = RcBlock::new(move || {
+                    pending.set(pending.get() - 1);
+                    if pending.get() == 0 {
+                        set_all();
+                    }
+                });
+                unsafe { store.deleteCookie_completionHandler(cookie, Some(&deleted)) };
+            }
+        });
+        unsafe { get_store.getAllCookies(&got_all) };
+    });
+    if result.is_err() {
+        eprintln!("[oculus] browser: could not reach the main thread to seed cookies");
+    }
+}
+
+/// Okta's entry point for a SAML app (Canvas, DiBS, …). It renders the
+/// sign-in form when there is no Okta session, an auto-posting form when
+/// there is one.
+fn is_sso_app_entry(url: &url::Url) -> bool {
+    url.host_str() == Some(crate::okta::SSO_HOST)
+        && url.path().starts_with("/app/")
+        && url.path().ends_with("/sso/saml")
+}
+
+/// When the last headless sign-in for a browser page started; one per ten
+/// minutes, so a session Okta will not honour cannot loop sign-ins.
+static SSO_RECOVERED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// A page reached Okta's sign-in for a UniMelb app: if the browser holds no
+/// live Okta session, sign in headlessly (which saves Okta's cookies), seed
+/// them and reload. Asks Okta, not the page, whether a session exists.
+fn recover_sso(app: &AppHandle, id: u32) {
+    let Some(webview) = page(app, id) else {
+        return;
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let Ok(sso) = format!("https://{}", crate::okta::SSO_HOST).parse::<url::Url>() else {
+            return;
+        };
+        let header = webview
+            .cookies_for_url(sso)
+            .map(|cookies| {
+                cookies
+                    .iter()
+                    .map(|c| format!("{}={}", c.name(), c.value()))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })
+            .unwrap_or_default();
+        let me = format!("https://{}/api/v1/sessions/me", crate::okta::SSO_HOST);
+        let mut probe = ureq::get(&me)
+            .timeout(Duration::from_secs(20))
+            .set("Accept", "application/json");
+        if !header.is_empty() {
+            probe = probe.set("Cookie", &header);
         }
-        eprintln!("[oculus] browser: seeded {count} Canvas cookies into WebKit");
-    })
-    .ok();
+        match probe.call() {
+            Ok(_) => return,
+            Err(ureq::Error::Status(404 | 401 | 403, _)) => {}
+            // Unreachable: no verdict, so no sign-in attempt.
+            Err(_) => return,
+        }
+
+        {
+            let mut last = SSO_RECOVERED.lock().unwrap_or_else(|e| e.into_inner());
+            if last.is_some_and(|t| t.elapsed() < Duration::from_secs(600)) {
+                return;
+            }
+            *last = Some(std::time::Instant::now());
+        }
+        eprintln!("[oculus] browser: tab {id} reached Okta sign-in with no session; signing in");
+        if !crate::okta::try_auto_recover(&app) {
+            return;
+        }
+        let reload_app = app.clone();
+        seed_sessions(&app, move || reload_page(&reload_app, id, false));
+    });
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn seed_canvas_session(_app: &AppHandle) {}
+pub fn seed_sessions(_app: &AppHandle, then: impl FnOnce() + Send + 'static) {
+    then();
+}
 
 // ── Layout ──────────────────────────────────────────────────────────────
 
 /// Seeds the cookie jar and hooks the main window's resize. From `setup`.
 pub fn init(app: &AppHandle) {
-    seed_canvas_session(app);
+    seed_sessions(app, || {});
     let Some(window) = app.get_window(MAIN) else {
         eprintln!("[oculus] browser: no main window at setup; pages will not follow resizes");
         return;
@@ -343,9 +524,6 @@ fn layout_tab(app: &AppHandle, id: u32) {
 /// places it.
 fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     let window = app.get_window(MAIN).ok_or("no main window")?;
-    if url.host_str() == Some(CANVAS_HOST) {
-        seed_canvas_session(app);
-    }
 
     let load_app = app.clone();
     let title_app = app.clone();
@@ -373,9 +551,14 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
             // Both edges: asking twice covers a page that redirects on arrival.
             refresh_nav(&load_app, id);
             if !started {
-                // A Canvas load rolls the session forward; re-snapshot it.
-                if payload.url().host_str() == Some(CANVAS_HOST) {
+                // A signed-in Canvas load rolls the session forward;
+                // re-snapshot it. A signed-out one would save the anonymous
+                // cookie over the good one.
+                if crate::auth::is_authenticated_url(payload.url()) {
                     crate::auth::save_session_cookie(webview.app_handle());
+                }
+                if is_sso_app_entry(payload.url()) {
+                    recover_sso(&load_app, id);
                 }
                 ensure_favicon(&load_app, payload.url());
             }
@@ -408,12 +591,18 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
     let webview = window
         .add_child(builder, position, size)
         .map_err(|e| format!("failed to open page webview: {e}"))?;
-    webview.hide().ok();
     round_corners(&webview, radius);
+    if with_state(app, |s| s.shown.contains(&id)) {
+        webview.show().ok();
+        webview.set_focus().ok();
+    } else {
+        webview.hide().ok();
+    }
     Ok(())
 }
 
 fn hide_all(app: &AppHandle) {
+    with_state(app, |s| s.shown.clear());
     for page in pages(app) {
         page.hide().ok();
     }
@@ -427,6 +616,22 @@ pub fn open_tab(app: &AppHandle, url: url::Url) -> Result<u32, String> {
         s.next_id
     });
     eprintln!("[oculus] browser: opening tab {id} → {url}");
+    if wants_sessions(&url) {
+        broadcast(app);
+        let app = app.clone();
+        seed_sessions(&app.clone(), move || {
+            // Closed while the jar was being seeded.
+            if !with_state(&app, |s| s.tabs.iter().any(|t| t.id == id)) {
+                return;
+            }
+            if let Err(e) = create_page(&app, id, url) {
+                eprintln!("[oculus] browser: tab {id}: {e}");
+                with_state(&app, |s| s.tabs.retain(|t| t.id != id));
+                broadcast(&app);
+            }
+        });
+        return Ok(id);
+    }
     if let Err(e) = create_page(app, id, url) {
         with_state(app, |s| s.tabs.retain(|t| t.id != id));
         return Err(e);
@@ -595,7 +800,7 @@ fn find_string(app: &AppHandle, id: u32, query: String, backwards: bool) {
         }
         let reply_app = app.clone();
         let echo = query.clone();
-        // Never nil — see `seed_canvas_session`.
+        // Never nil — see `seed_sessions`.
         let done = RcBlock::new(move |result: std::ptr::NonNull<WKFindResult>| {
             let found = unsafe { result.as_ref().matchFound() };
             reply_app
@@ -903,6 +1108,7 @@ pub fn browser_state(app: AppHandle) -> Snapshot {
 pub fn browser_place(app: AppHandle, id: u32, viewport: Viewport) {
     with_state(&app, |s| {
         s.viewports.insert(id, viewport);
+        s.shown.insert(id);
     });
     layout_tab(&app, id);
     if let Some(page) = page(&app, id) {
@@ -923,6 +1129,7 @@ pub fn browser_set_viewport(app: AppHandle, id: u32, viewport: Viewport) {
 /// Hidden, not destroyed.
 #[tauri::command]
 pub fn browser_hide_tab(app: AppHandle, id: u32) {
+    with_state(&app, |s| s.shown.remove(&id));
     if let Some(page) = page(&app, id) {
         page.hide().ok();
     }
@@ -950,8 +1157,11 @@ pub fn browser_hide(app: AppHandle) {
 pub fn browser_navigate(app: AppHandle, id: u32, url: String) -> Result<(), String> {
     let target = parse(&url)?;
     let webview = page(&app, id).ok_or("no such tab")?;
-    if target.host_str() == Some(CANVAS_HOST) {
-        seed_canvas_session(&app);
+    if wants_sessions(&target) {
+        seed_sessions(&app, move || {
+            webview.navigate(target).ok();
+        });
+        return Ok(());
     }
     webview.navigate(target).map_err(|e| e.to_string())
 }
@@ -965,6 +1175,12 @@ pub fn browser_history(app: AppHandle, id: u32, delta: i32) {
 /// reload can keep serving a cached response.
 #[tauri::command]
 pub fn browser_reload(app: AppHandle, id: u32, hard: bool) {
+    let url = with_state(&app, |s| s.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone()));
+    if url.and_then(|u| u.parse().ok()).is_some_and(|u| wants_sessions(&u)) {
+        let reload_app = app.clone();
+        seed_sessions(&app, move || reload_page(&reload_app, id, hard));
+        return;
+    }
     reload_page(&app, id, hard);
 }
 
@@ -1030,6 +1246,7 @@ pub fn browser_close_tab(app: AppHandle, id: u32) {
     with_state(&app, |s| {
         s.tabs.retain(|t| t.id != id);
         s.viewports.remove(&id);
+        s.shown.remove(&id);
     });
     broadcast(&app);
 }

@@ -234,7 +234,7 @@ pub fn clear_password() -> Result<(), String> {
 
 // ── HTTP plumbing ────────────────────────────────────────────────────────────
 
-const SSO_HOST: &str = "sso.unimelb.edu.au";
+pub const SSO_HOST: &str = "sso.unimelb.edu.au";
 const IDX_MEDIA: &str = "application/ion+json; okta-version=1.0.0";
 /// Hygiene, not a known requirement: every leg here impersonates a browser.
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
@@ -788,6 +788,12 @@ pub fn sign_in(data_dir: &std::path::Path) -> Result<String, LoginError> {
     }
     std::fs::write(&path, &cookie)
         .map_err(|e| LoginError::Unexpected(format!("could not save the session cookie: {e}")))?;
+    // Okta's session too, so an in-app browser page that redirects to SSO
+    // passes straight through (`browser::seed_sessions`).
+    let sso = jar.header(SSO_HOST);
+    if !sso.is_empty() {
+        crate::paths::write_private(&crate::paths::sso_cookie_path(data_dir), &sso).ok();
+    }
     eprintln!("[oculus] automated sign-in succeeded — Canvas accepted the session as {name}");
     Ok(cookie)
 }

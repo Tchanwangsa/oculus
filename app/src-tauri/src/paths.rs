@@ -21,6 +21,23 @@ pub fn cookie_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("canvas-session.cookie")
 }
 
+/// Okta's cookies for `sso.unimelb.edu.au`, the same bare `name=value; …`
+/// header as the Canvas one. Only the in-app browser replays it.
+pub fn sso_cookie_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("sso-session.cookie")
+}
+
+/// Writes a session snapshot readable by this user only.
+pub fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
+    std::fs::write(path, body)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
 pub fn auth_flag_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("canvas-session").join("authenticated")
 }

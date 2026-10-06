@@ -9,7 +9,7 @@ cookie.
 | --- | --- |
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
 | Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
-| Cookie, auth-flag and keep-alive log paths | `app/src-tauri/src/paths.rs` |
+| Cookie (Canvas and Okta), auth-flag and keep-alive log paths | `app/src-tauri/src/paths.rs` |
 | Headless Okta sign-in, TOTP, stored credentials | `app/src-tauri/src/okta.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
@@ -40,15 +40,29 @@ is on the page either way; only its `disabled` attribute tells you.)
   probes the cookie: `Valid` confirms, `Rejected` clears the flag (keeping the
   SSO profile) and emits `canvas-auth-expired`, `Unreachable` stays connected.
 
-## The in-app browser is seeded with the same cookie
+## The in-app browser is seeded with the same sessions
 
 `canvas_session` is HttpOnly and session-scoped, so WebKit keeps it in memory
-only and the on-disk snapshot is the sole surviving copy.
-`browser::seed_canvas_session` writes it into WebKit's shared jar through
-`WKHTTPCookieStore` (Tauri has no cookie setter) at startup and before each
-Canvas page, re-scoping every bare `name=value` pair to the Canvas host.
-Browsing Canvas in-app rolls the session forward and re-snapshots it, deduped
-by name, so the scraper inherits the fresher cookie.
+only and the on-disk snapshot is the sole surviving copy. Okta's cookies for
+`sso.unimelb.edu.au` are snapshotted beside it (`sso-session.cookie`, written
+by a headless sign-in and by the browser), so a page that redirects to SSO
+passes straight through.
+
+- `browser::seed_sessions` writes both into WebKit's shared jar through
+  `WKHTTPCookieStore` (Tauri has no cookie setter) at startup and before any
+  `*.unimelb.edu.au` tab, navigation or reload, re-scoping every bare
+  `name=value` pair to its host. The load waits for the write to land.
+- Canvas cookies always replace the jar's; Okta's only fill gaps, unless the
+  snapshot changed since it was last seeded — while the app runs, the
+  browser's own Okta session is the freshest.
+- A page that lands on Okta's entry for any SAML app (`/app/…/sso/saml`, the
+  sign-in form when Okta has no session) asks `/api/v1/sessions/me` with the
+  browser's Okta cookies. On a 404 it runs the
+  [headless sign-in](#okta-sign-in-runs-headless-in-rust), seeds the Okta
+  session it saved and reloads the page — at most once per ten minutes.
+- A signed-in Canvas page (`auth::is_authenticated_url`) re-snapshots both,
+  deduped by name, so the scraper inherits the fresher cookie. A signed-out
+  page never does: it would save Canvas's anonymous cookie over the good one.
 
 ## Keep-alive runs in two layers
 
@@ -120,5 +134,6 @@ course's LTI external-tool form (see
 - A rejected password is cleared, or the keep-alive replays it every six hours until Okta locks the account.
 - A TOTP seed cannot be recovered from codes; getting it means re-enrolling the factor.
 - `setCookies:completionHandler:` must get a real block — nil segfaults the app seconds later from a WebKit-only stack.
+- WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Once Canvas hands the browser an anonymous `canvas_session`, re-seeding does nothing until the old cookie is deleted — so seeding deletes same-named cookies first.
 - `/login/session_token` answers 403 to a cookie session; it wants an access token, which is disabled here.
 - Ed's LTI redirect walk jars cookies per host; the Canvas cookie must never reach edstem.org.
