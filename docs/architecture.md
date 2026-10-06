@@ -26,9 +26,9 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | In-app browser | `app/src-tauri/src/browser.rs`, `app/src-tauri/capabilities/default.json` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/store.rs`, `app/src-tauri/src/projects.rs` |
+| App-usage ticker and its pinger | `app/src-tauri/src/usage.rs`, `app/src/hooks/useActivityPing.ts`, `app/src/lib/usageContext.ts` |
 | File-pipeline event payload and bound channels | `app/src-tauri/src/pipeline_events.rs` |
 | Frontend DB access and event folding | `app/src/lib/db.ts`, `app/src/hooks/useBackendEvents.ts` |
-| App-usage ticker and its pinger | `app/src-tauri/src/usage.rs`, `app/src/hooks/useActivityPing.ts`, `app/src/lib/usageContext.ts` |
 | The CLI over the same engine | `app/src-tauri/src/bin/oculus/` |
 
 ## Oculus starts no child process for parsing or embedding
@@ -54,7 +54,7 @@ its failure rules are in [parsing.md](./parsing.md).
   transcription run through `blocking::run`, so synchronous I/O cannot hold
   Tauri's command thread.
   Upload batches serialize their name allocation.
-- Credentials go keychain → in-process client. Neither key enters SQLite, the
+- Credentials go keychain → in-process client. No key enters SQLite, the
   WebView, a health response or a progress event. The local engine needs none.
 
 ## Scraping lives in Rust because hidden WebViews freeze
@@ -133,15 +133,12 @@ never creates the database, so a fresh machine opens the app once first.
   `app/src/lib/documentVersions.ts` ([editor.md](./editor.md#a-notes-versions-live-in-the-database-never-on-disk)).
 - `harness_threads`/`harness_items` are the chat timeline
   ([harness.md](./harness.md)).
+- `usage_hours` and `usage_context_hours` are written only by Rust, as the
+  next section describes.
 - Parse and embed settings are the `parse` and `embed` rows of `settings`, read
   by `parse_config` and `embed_config`. `store::edit_setting` preserves unknown
   keys when changing either object; malformed records start from defaults.
-- `usage_hours` and `usage_context_hours` are written only by Rust, as the
-  next section describes.
 
-## The main window holds one webview per browser tab
-
-External links open as in-app browser tabs: each is a child webview of remote
 ## Rust counts app usage; the frontend only pings
 
 `usage_hours` holds open and active seconds per local hour, keyed
@@ -180,6 +177,9 @@ context when input made it active, which wins over media, else the media
 context; with none reported yet, it credits `other`. Ticks before the frontend
 has applied the migrations fail quietly and later ones retry.
 
+## The main window holds one webview per browser tab
+
+External links open as in-app browser tabs: each is a child webview of remote
 content stacked over the slot the `/browse/:id` route leaves in the content
 card ([viewers.md](./viewers.md#the-in-app-browser-is-a-native-page-per-tab-owned-by-rust)). The frontend reports that slot as window
 insets and Rust lays pages out from them, so a resize never waits on

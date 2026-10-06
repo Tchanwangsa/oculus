@@ -293,7 +293,7 @@ Search the library by meaning (needs network and an API key).
 The query is embedded by the same vision model that embedded every page image, so this
 finds a slide about Lagrange multipliers when you ask for "constrained optimisation".
 Embedding happens in the cloud, so this needs a network connection and the Voyage key
-from Settings → Embeddings; without either, and over an index that is empty or built by a
+from Settings → Library; without either, and over an index that is empty or built by a
 retired model, it fails loudly and points at `oculus grep`, which searches the same text
 with no model at all.
 
@@ -1365,6 +1365,7 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+## `oculus docs`
 
 ```
 Write the agent-facing docs into the library

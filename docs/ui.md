@@ -52,6 +52,9 @@ headings and Inter for everything else, Notion-style layout.
   primitives from the unified `radix-ui` package). Add with
   `bunx shadcn@latest add <name>`, then swap `lucide-react` for
   `@phosphor-icons/react`.
+- **Icons are Phosphor.** One Phosphor lacks is drawn in
+  `app/src/components/icons/` on its `IconBase`, so it takes the same `size`
+  and `weight` props.
 - **Colours go through the semantic tokens in `app/src/index.css`.** In
   shadcn's vocabulary `accent` is the quiet hover surface, not the brand. The
   indigo has two tokens: `primary` is the *fill* (buttons, active underline,
@@ -138,6 +141,10 @@ mounts on open and loads through the same cache.
   one `text-[13px]`.
 - **Every base reset in `index.css` goes inside `@layer base`** — unlayered CSS
   beats every utility, killing `border-*` and `select-*` app-wide.
+- **WebKit only reads `-webkit-user-select`** — the unprefixed property is
+  ignored, and the dev server doesn't autoprefix (only the production build
+  does), so hand-written CSS writes both and inline styles set
+  `webkitUserSelect`. The `select-*` utilities already emit both.
 - **Page zoom, never CSS `zoom`** — in a CSS-zoomed subtree WebKit mixes visual
   pointer coords with layout rects, breaking popups and drags.
 - **No native date/time inputs** — segmented hover, an OS picker in Buddhist-era
@@ -145,11 +152,17 @@ mounts on open and loads through the same cache.
   `app/src/components/projects/DateTimeField.tsx`; bare `type="time"` is fine.
 - **`scrollbar-gutter` is a no-op in WebKit** — reserve the gutter with
   `overflow-y: scroll` (`page-scroll`, `GridTable`, the lightbox).
+- **Icons jitter half a pixel when a layer is promoted or dropped** — recurring.
+  At a fractional page zoom (1.1, 1.3) WebKit re-snaps content by half a device
+  pixel whenever an element gains or loses its own compositing layer, so icons
+  step on a hover, a fade or an expand while the text beside them stays put.
+  Two known triggers: a scroller that only starts to overflow after something
+  expands (`SwitcherList` in `SubjectNav.tsx`), and a row that fades with
+  `opacity-0 transition-opacity group-hover:opacity-100` (`MessageActions` in
+  `Timeline.tsx`). Both carry `will-change`, which keeps the layer on from the
+  start. Whole-pixel row heights do not help. Give any new hover-fade row or
+  growing scroller the same, and check it at zoom 1.1 and 1.3, not 1.0.
 - **Centre overflowing content with auto margins and `flex: none`**, not
   `justify-content: center`, which makes the start-edge overflow unreachable.
 - **Never nest a `<button>` in a row that is a button** — WebKit drops the inner
   clicks; use `RowAction` (`app/src/components/lectures/LectureRow.tsx`).
-- **WebKit only reads `-webkit-user-select`** — the unprefixed property is
-  ignored, and the dev server doesn't autoprefix (only the production build
-  does), so hand-written CSS writes both and inline styles set
-  `webkitUserSelect`. The `select-*` utilities already emit both.

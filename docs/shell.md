@@ -98,7 +98,10 @@ search reads a hand-kept list in `app/src/lib/settingsSearch.ts`, because the
 pages are lazy and unmounted: entry titles are the on-screen text, and each
 names the `Section` title it jumps to. Rename a section or row and update the
 list. A jump travels as router state, and the layout scrolls the section's id
-(`settingsSectionId`) into place once the page renders it.
+(`settingsSectionId`) into place once the page renders it. A `fullBleed` page
+(the opencode page's tables) skips the layout's centred scroller and scrolls
+its own rows, so a jump to it is the page's to handle: it picks the tab the
+section names.
 
 ## The shell owns tabs, side panels and every window shortcut
 
@@ -160,18 +163,11 @@ list. A jump travels as router state, and the layout scrolls the section's id
   `app/src/lib/openFile.ts`. Plain external links open in the in-app browser
   through a capture handler in `AppLayout` (`openExternal`).
 - **A new tab lands on `/new`**, not Home: a search field, a browser door, a
-  chat door and the Recent trail. **Home is a launcher with no state of its
-  own**; each section hides when empty and re-reads on its tab's front edge
-  (`useHomeSection`), and its composer always starts a new thread.
+  chat door and the Recent trail.
 - **Recent is a still list** (`recentTabsStore`): a visit lands only after the
   pane settles, a row is a *thing* (`recentKey` — a subject's tabs are one row),
   and a listed page refreshes in place. Browser tabs, Home, `/new` and the
   `/subjects` redirect stay out.
-
-## The side panel is a stack of items beside the page
-
-Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
-`app/src/lib/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. ⌥⌘T on a
 - **Home is a dashboard with no state of its own.** Each section owns its read
   and re-reads on its tab's front edge (`useHomeSection`). Top to bottom: the
   date with the last completed sync and a Sync now pill (`SyncControl`, which
@@ -195,6 +191,11 @@ Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
   the frontend's part is `useActivityPing`, mounted once in `AppLayout`. A ping
   raises no event, so the card polls every five minutes while its tab is in
   front.
+
+## The side panel is a stack of items beside the page
+
+Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
+`app/src/lib/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. ⌥⌘T on a
 closed panel opens one on `/new`.
 
 - **`openBeside` is what file rows, citations and lecture rows call**
@@ -296,7 +297,6 @@ semantic search stays in chat ([retrieval.md](./retrieval.md)). No match is
 offered as a URL or web search through `normalizeAddress`, shared with the
 address bar.
 
-`app/src/lib/searchFilters.ts` owns the filter catalogue, tokens and resolution
 **The subject nav's search is `runSearch` under an `in:` filter** for that
 subject, after any of its tabs whose name matches; while the field has text the
 results replace the tab rows, and Enter opens the first. A file or lecture
@@ -304,6 +304,7 @@ opens beside the page (`openBeside`), as a file row does; anything else
 navigates the pane. Its field is `SideNavSearch`
 (`app/src/components/ui/SideNav.tsx`), shared with Settings.
 
+`app/src/lib/searchFilters.ts` owns the filter catalogue, tokens and resolution
 without database or navigation effects. ⌘K takes Discord-style filters: `in:<subject>` and `type:<kind>`. Typing
 the colon turns the key into a chip with the caret inside it, and the list shows
 only its values; picking one (or a space after an unambiguous value) fixes the

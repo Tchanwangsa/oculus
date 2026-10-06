@@ -163,7 +163,6 @@ that land in `well_known_dirs`; no `sudo`, stdin on `/dev/null` so a question
 fails instead of hanging, and the webview names a provider, never a command
 string. macOS only.
 
-**Sign-in.** `signin::is_auth_failure` (via `HarnessEvent::error_for`) matches
 **Update.** Settings → Agents checks each installed CLI against its newest
 published version on every visit (`harness_updates`). The binary's
 canonical path gives its source: `Caskroom`/`Cellar` or the Homebrew prefix
@@ -195,6 +194,7 @@ when one fails. The webview names only a provider. A running chat keeps the
 binary it started with until its CLI process restarts — the process shapes
 are in the table under [Four dialects](#four-dialects-become-one-event-stream).
 
+**Sign-in.** `signin::is_auth_failure` (via `HarnessEvent::error_for`) matches
 whole clauses only — a false positive sends a student to re-authenticate over
 an unrelated error — and marks the error row's `meta` for a sign-in card.
 `ProviderInfo.signIn` is `"code"` (`claude auth login` blocks on a pasted
@@ -273,7 +273,7 @@ Naming, the editor's suggestions and the lecture-end job share
 `agy`'s first message; opencode takes it as a hidden agent's prompt
 (`oculus-namer`, `oculus-writer`, `oculus-lecture-end` in
 `agents/opencode.json`). Claude runs with `--tools ""`, no skills, no MCP and
-no persisted session, and Codex's thread is `ephemeral`; both opencode agents
+no persisted session, and Codex's thread is `ephemeral`; the opencode agents
 end on a `"*": "deny"`. Codex and `agy` cannot drop their tools, so the brief
 forbids them.
 
@@ -477,6 +477,8 @@ same backticked path and draws the same chip
 The page and lecture dock share `SendControls` for send/queue/stop controls
 and `useAttachments.prepare` for message assembly. Preparation writes pictures
 before clearing the composer; a failed write keeps the draft and attachments.
+A message reads: the typed text, each pasted text's block, then the pictures'
+paths, blank-line separated.
 
 A CLI reads files, so a picture becomes one — in `agents/`, the one folder
 every CLI reads and writes. `harness_attach_image` (clipboard bytes) and
@@ -485,19 +487,9 @@ send, writes on arrival) and answer `./attachments/<name>`, appended fenced.
 The claimed filename never reaches disk: bytes are sniffed, the stem is a
 timestamp, non-images are refused, 20 MB cap. `assetProtocol.scope` in
 `app/src-tauri/tauri.conf.json` must name `agents/` or every picture (and
-A message reads: the typed text, each pasted text's block, then the pictures'
-paths, blank-line separated.
 every page an agent made) draws broken; a dropped file is scoped by Tauri on
 delivery.
 
-### File drop
-
-Tauri's handler sits in front of the webview, so a Finder drop never reaches
-React; `useFileDrop` hit-tests Tauri's events against element rects. The Chat
-page's conversation column and the lecture dock's Chat panel are the drop
-targets, not just the box: each passes its own ref as the composer's `dropRef`
-and draws `DropOverlay` (`app/src/components/ui/DropOverlay.tsx`) from
-`onDropping`.
 ### Pasted text is a card, sent inline
 
 A plain-text paste of `LONG_PASTE` (1000 characters or 15 lines) or more
@@ -526,6 +518,14 @@ Words handed back by Stop or a rewind go through `useAttachments.takeBack`,
 so their blocks return as cards and only the rest lands in the box. The
 bubble's own edit box still shows the raw blocks, as it shows picture paths.
 
+### File drop
+
+Tauri's handler sits in front of the webview, so a Finder drop never reaches
+React; `useFileDrop` hit-tests Tauri's events against element rects. The Chat
+page's conversation column and the lecture dock's Chat panel are the drop
+targets, not just the box: each passes its own ref as the composer's `dropRef`
+and draws `DropOverlay` (`app/src/components/ui/DropOverlay.tsx`) from
+`onDropping`.
 
 - **The position is in points despite the `PhysicalPosition` type.** wry
   never applies the backing scale, so dividing by `devicePixelRatio` halves
