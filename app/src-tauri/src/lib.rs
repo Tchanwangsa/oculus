@@ -155,7 +155,14 @@ pub fn run() {
 
             Ok(())
         })
-        .plugin(tauri_plugin_opener::init())
+        // No click handler: it would be injected into browser pages too,
+        // cancel their `target=_blank` links and call IPC they cannot reach.
+        // The app's own links go through `AppLayout`'s capture-phase handler.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         // Native open panel: returns paths, so file bytes never cross IPC.
         .plugin(tauri_plugin_dialog::init())
         .plugin(

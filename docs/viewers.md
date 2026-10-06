@@ -159,3 +159,8 @@ refuses iframes).
   serve fallbacks, and an `initialization_script` reports a real
   `outerWidth`/`outerHeight` (a child view's are 0, which drops canvas renderers
   to minimum scale).
+- **Pages get every plugin's init script.** `tauri-plugin-opener` is built
+  with `open_js_links_on_click(false)`: its click handler would cancel a page's
+  `target=_blank` links and call IPC pages cannot reach, so only ⌘-clicks got
+  through. A `_blank` link reaches `on_new_window` and opens as a tab; the
+  app's own links go through `AppLayout`'s capture-phase handler.
