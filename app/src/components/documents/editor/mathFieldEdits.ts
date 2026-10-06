@@ -91,3 +91,24 @@ export function caretAfterChange(before: readonly string[], after: readonly stri
   while (p < max - s && before[p] === after[p]) p++;
   return Math.max(0, after.length - s - 1);
 }
+
+/** `latex` without blank lines at either end and never two in a row: they
+ *  would end the block's paragraph, and the field's empty rows (`\\` lines)
+ *  need none. */
+export function squeezeBlankLines(latex: string): string {
+  const out: string[] = [];
+  for (const line of latex.split("\n")) {
+    if (line.trim() || (out.length && out[out.length - 1].trim())) out.push(line);
+  }
+  while (out.length && !out[out.length - 1].trim()) out.pop();
+  return out.join("\n");
+}
+
+/** A block's LaTeX without empty rows at its end (`\\` lines past the last
+ *  formula, what Enter on the last row leaves), its trailing whitespace kept;
+ *  unchanged when nothing else would be left. */
+export function withoutEndRows(latex: string): string {
+  const body = latex.trimEnd();
+  const kept = body.replace(/(?:\s*\\\\(?:\[[^\]]*\])?)+$/, "");
+  return kept === body || !kept.trim() ? latex : kept + latex.slice(body.length);
+}

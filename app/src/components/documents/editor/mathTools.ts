@@ -224,11 +224,11 @@ function shapeToggle(state: EditorState, math: MathRange): "block" | "inline" | 
 
 /** The caret's maths as a block on lines of its own, or as inline maths
  *  (`shapeChange`). The caret lands at the end of the LaTeX. */
-function toggleShape(view: EditorView) {
+function toggleShape(view: EditorView, dollars = false) {
   // The field's last keystrokes reach the note first.
   activeMathField(view)?.flush();
   const tools = view.state.field(mathToolsField, false);
-  const change = tools?.math && shapeChange(view.state, tools.math);
+  const change = tools?.math && shapeChange(view.state, tools.math, dollars);
   if (!change) return;
   // The rewritten maths starts elsewhere; the popover moves onto it.
   const effects = tools.open ? openMathTools.of(tools.open.kind) : [];
@@ -236,17 +236,28 @@ function toggleShape(view: EditorView) {
   view.focus();
 }
 
+/** A second `$` in a bare inline pair (`$|$`, in the note or its empty
+ *  field): the pair becomes an empty block with the caret on its line. */
+export function emptyPairToBlock(view: EditorView): boolean {
+  const math = view.state.field(mathToolsField, false)?.math;
+  if (!math || math.display || math.from !== math.to || view.state.selection.ranges.length !== 1) return false;
+  toggleShape(view, true);
+  return true;
+}
+
 /** Rewrite maths as a block on lines of its own (splitting the text around
- *  it) or as inline maths, keeping `\(`/`\[` or `$` delimiters: the change,
+ *  it) or as inline maths, keeping `\(`/`\[` or `$` delimiters unless
+ *  `dollars` asks for `$` ones: the change,
  *  the end of the LaTeX (`caret`) and the new maths' span. Null when
  *  `shapeToggle` offers nothing. */
 function shapeChange(
   state: EditorState,
   math: MathRange,
+  dollars = false,
 ): { changes: { from: number; to: number; insert: string }; caret: number; start: number; end: number } | null {
   const shape = shapeToggle(state, math);
   if (!shape) return null;
-  const bracket = state.sliceDoc(math.nodeFrom, math.nodeFrom + 1) === "\\";
+  const bracket = !dollars && state.sliceDoc(math.nodeFrom, math.nodeFrom + 1) === "\\";
   const line = state.doc.lineAt(math.nodeFrom);
   const prefix = continuation(line.text);
   let from = math.nodeFrom;
@@ -789,6 +800,11 @@ function fieldKey(view: EditorView, e: KeyboardEvent, field: FieldController): b
   if (field.mf.mode === "latex") {
     if (open === "quick") close();
     return false;
+  }
+  // `$` in an empty inline field: `$$`, a block.
+  if (e.key === "$" && plain && !field.display && field.mf.mode === "math" && field.isEmpty()) {
+    if (open) close();
+    return emptyPairToBlock(view);
   }
   if (open === "quick") {
     if (MODIFIER_KEYS.has(e.key)) return false;

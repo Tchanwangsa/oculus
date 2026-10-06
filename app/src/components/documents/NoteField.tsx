@@ -40,6 +40,8 @@ const fieldTheme = Prec.highest(EditorView.theme({ ".cm-content": { minHeight: "
  * on unmount, but only if edited since `text` last landed. A new `text` (an
  * outside write) replaces the doc while the field is at rest and waits while
  * it is edited. Key the field by its row, so another row starts a fresh doc.
+ * `onChange` hears every change at once, for a caller whose buttons read the
+ * text (a dialog) and so can't wait for the blur.
  *
  * Pictures (pasted, dropped, picked) go through `writePicture` the moment
  * they arrive and are linked at the caret.
@@ -54,7 +56,9 @@ export function NoteField({
   placeholder,
   label,
   onCommit,
+  onChange,
   className,
+  scrollClassName,
 }: {
   /** The stored text; read at mount, then followed while at rest. */
   text: string;
@@ -71,8 +75,12 @@ export function NoteField({
   placeholder: string;
   label: string;
   onCommit: (text: string) => void;
+  /** The doc after each change, edits and outside writes alike. */
+  onChange?: (text: string) => void;
   /** Placement and margins, on the outermost element. */
   className?: string;
+  /** The text scroller's height bound, in place of 420px. */
+  scrollClassName?: string;
 }) {
   const [view, setView] = useState<EditorView | null>(null);
   const [formats, setFormats] = useState<ActiveFormats>(NO_FORMATS);
@@ -93,6 +101,8 @@ export function NoteField({
   textRef.current = text;
   const commitRef = useRef(onCommit);
   commitRef.current = onCommit;
+  const changeRef = useRef(onChange);
+  changeRef.current = onChange;
   const writeRef = useRef(writePicture);
   writeRef.current = writePicture;
 
@@ -170,6 +180,7 @@ export function NoteField({
   useEffect(() => {
     if (!editorRef.current) return;
     const onUpdate = (u: ViewUpdate) => {
+      if (u.docChanged) changeRef.current?.(u.state.doc.toString());
       if (u.docChanged || u.selectionSet || syntaxTree(u.state) !== syntaxTree(u.startState)) {
         const next = activeFormats(u.state);
         setFormats((prev) => (sameFormats(prev, next) ? prev : next));
@@ -291,7 +302,10 @@ export function NoteField({
         )}
       >
         {/* Bounded so a long text scrolls inside and what follows stays reachable. */}
-        <div ref={scrollRef} className="max-h-[420px] overflow-x-hidden overflow-y-auto px-2 py-1.5">
+        <div
+          ref={scrollRef}
+          className={cn("max-h-[420px] overflow-x-hidden overflow-y-auto px-2 py-1.5", scrollClassName)}
+        >
           <div ref={editorRef} />
         </div>
         {/* In the card, so focus in the bar still counts as editing. */}

@@ -54,14 +54,15 @@ function dollarMath(cx: InlineContext, next: number, pos: number): number {
   return -1;
 }
 
-/** `\(…\)` on one line. Runs before `Escape`, which would eat the `\(`. */
+/** `\(…\)` on one line, empty included: a `$` typed at a line's start
+ *  writes `\(\)` (`dollarTyping`). Runs before `Escape`, which would eat
+ *  the `\(`. */
 function parenMath(cx: InlineContext, next: number, pos: number): number {
   if (next !== BACKSLASH || cx.char(pos + 1) !== OPEN_PAREN) return -1;
   for (let i = pos + 2; i < cx.end - 1; i++) {
     const c = cx.char(i);
     if (c === NEWLINE) return -1;
     if (c === BACKSLASH && cx.char(i + 1) === CLOSE_PAREN) {
-      if (i === pos + 2) return -1;
       return cx.addElement(
         cx.elt("InlineMath", pos, i + 2, [
           cx.elt("MathMark", pos, pos + 2),

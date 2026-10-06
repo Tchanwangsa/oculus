@@ -8,6 +8,8 @@ import {
   caretAfterChange,
   minimalChange,
   selectionPastField,
+  squeezeBlankLines,
+  withoutEndRows,
   writableSpan,
   type FieldSpan,
 } from "../src/components/documents/editor/mathFieldEdits";
@@ -197,5 +199,28 @@ describe("caretAfterChange", () => {
   });
   test("an edit after the caret puts it at the edit", () => {
     expect(caretAfterChange(atoms("abcdX"), atoms("abcd"), 2)).toBe(4);
+  });
+});
+
+describe("squeezeBlankLines", () => {
+  test("drops blank lines at either end and collapses runs to one", () => {
+    expect(squeezeBlankLines("a \\\\\n\n\n  \n")).toBe("a \\\\");
+    expect(squeezeBlankLines("\n\na\n\n\n\nb")).toBe("a\n\nb");
+    expect(squeezeBlankLines("a\nb")).toBe("a\nb");
+    expect(squeezeBlankLines("\n \n")).toBe("");
+  });
+});
+
+describe("withoutEndRows", () => {
+  test("drops empty `\\` rows past the last formula, keeping the edges' whitespace", () => {
+    expect(withoutEndRows("\na=1 \\\\\nb=2 \\\\\n")).toBe("\na=1 \\\\\nb=2\n");
+    expect(withoutEndRows("\na \\\\\n \\\\\n \\\\[2pt]\n")).toBe("\na\n");
+  });
+
+  test("leaves an environment's rows, a block of only empty rows, and plain maths alone", () => {
+    const env = "\n\\begin{aligned}a \\\\ b \\\\\n\\end{aligned}\n";
+    expect(withoutEndRows(env)).toBe(env);
+    expect(withoutEndRows("\n \\\\\n")).toBe("\n \\\\\n");
+    expect(withoutEndRows("\nx\n")).toBe("\nx\n");
   });
 });

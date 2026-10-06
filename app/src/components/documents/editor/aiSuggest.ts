@@ -298,6 +298,7 @@ const ghostTheme = EditorView.theme({
     whiteSpace: "pre-wrap",
     pointerEvents: "none",
     userSelect: "none",
+    WebkitUserSelect: "none",
   },
 });
 

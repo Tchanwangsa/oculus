@@ -12,6 +12,7 @@ const { mathTools, mathToolsOpen, nextOpen, openMathTools } = await import(
   "../src/components/documents/editor/mathTools"
 );
 const { noteMarkdown } = await import("../src/components/documents/editor/language");
+const { mathAt } = await import("../src/components/documents/editor/mathContext");
 const { QUICK_PICKS, popularEntries, quickPicks, recordUse } = await import(
   "../src/components/documents/editor/mathUsage"
 );
@@ -54,6 +55,25 @@ describe("maths toolbox open state", () => {
     // Opening outside maths does nothing.
     state = state.update({ selection: { anchor: 0 }, effects: openMathTools.of("full") }).state;
     expect(mathToolsOpen(state)).toBeNull();
+  });
+});
+
+describe("empty inline pairs", () => {
+  const at = (doc: string, pos: number) =>
+    mathAt(EditorState.create({ doc, extensions: [noteMarkdown()], selection: { anchor: pos } }), pos);
+
+  test("`$$` mid-line and `\\(\\)` anywhere are empty inline maths", () => {
+    for (const [doc, pos, node] of [["a $$ b", 3, false], ["\\(\\)", 2, true], ["- \\(\\) b", 4, true]] as const) {
+      const ctx = at(doc, pos);
+      expect(ctx?.node != null).toBe(node);
+      expect(ctx?.display).toBe(false);
+      expect([ctx?.from, ctx?.to]).toEqual([pos, pos]);
+    }
+  });
+
+  test("a lone `$$` line opens a block, not inline maths", () => {
+    expect(at("Hello\n\n$$", 8)).toBeNull();
+    expect(at("$$\n\n$$", 3)?.display).toBe(true);
   });
 });
 

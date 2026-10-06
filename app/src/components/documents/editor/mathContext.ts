@@ -55,8 +55,9 @@ export function continuation(lineText: string): string {
   return markup.replace(/[-*+]|\d{1,9}[.)]/g, (m) => " ".repeat(m.length));
 }
 
-/** The caret between a lone `$$` pair — what Σ inserts mid-line — counts as
- *  empty inline maths, so the helpers work before the first character. */
+/** The caret between a lone `$$` pair mid-line — what a typed `$` and Σ
+ *  insert — counts as empty inline maths, so the helpers work before the
+ *  first character. */
 function emptyPair(state: EditorState, pos: number): MathContext | null {
   const { doc } = state;
   const at = (i: number) => (i >= 0 && i < doc.length ? doc.sliceString(i, i + 1).charCodeAt(0) : -1);

@@ -274,20 +274,42 @@ export const noteTheme = EditorView.theme({
   ".cm-math-field-block": { position: "relative", padding: "0.4em 0", contain: "inline-size" },
   ".cm-math-field-block math-field": { display: "block", width: "100%", boxSizing: "border-box" },
   ".cm-math-field-block math-field::part(content)": { justifyContent: "safe center" },
-  // An empty block's caret sits at its centre; the hint starts just past it.
+  // The empty-line hint (`FieldController.syncHint`): in flow after an
+  // inline field, inside its tint; in a block centred, at the line's `top`.
   ".cm-math-hint": {
-    position: "absolute",
-    top: "50%",
-    left: "calc(50% + 6px)",
-    maxWidth: "calc(50% - 6px)",
-    transform: "translateY(-50%)",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
+    padding: "0 2px",
+    borderRadius: "4px",
+    backgroundColor: `color-mix(in srgb, ${brand} 7%, transparent)`,
     whiteSpace: "nowrap",
     color: muted,
     pointerEvents: "none",
     userSelect: "none",
+    WebkitUserSelect: "none",
   },
+  ".cm-math-field-block .cm-math-hint": {
+    position: "absolute",
+    left: "50%",
+    transform: "translate(-50%, -50%)",
+    maxWidth: "90%",
+    padding: "0",
+    backgroundColor: "transparent",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  // On a block's empty line the caret is drawn just before the centred
+  // hint; MathLive's own would sit under it.
+  ".cm-math-field.cm-math-field-empty math-field": { "--caret-color": "transparent" },
+  ".cm-math-field-block .cm-math-hint::before": {
+    content: '""',
+    display: "inline-block",
+    width: "0",
+    height: "1.15em",
+    marginRight: "2px",
+    verticalAlign: "text-bottom",
+    borderLeft: `1.5px solid ${brand}`,
+    animation: "cm-math-blink 1.2s steps(1) infinite",
+  },
+  "@keyframes cm-math-blink": { "50%": { visibility: "hidden" } },
   ".cm-math-hint[hidden]": { display: "none" },
   // Until it renders, the field lies unseen over its static stand-in, still
   // focusable (`FieldController.mount`).

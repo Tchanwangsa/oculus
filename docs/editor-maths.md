@@ -69,7 +69,9 @@ in inline maths leave it;
 Enter or Shift+Enter in display maths adds a row (a block's own `\\` lines
 stay bare in the note; the field holds them in MathLive's `\displaylines`,
 which KaTeX lacks, since MathLive rejects a bare top-level `\\`, and centres
-its rows with a stylesheet adopted into the field's shadow root); Tab goes to the
+its rows with a stylesheet adopted into the field's shadow root), never a
+second empty one: on an empty row Enter does nothing (`onEmptyLine`); Tab
+goes to the
 next empty slot, else types `\qquad`; ⌘Backspace deletes the caret's line
 up to the caret (a block's row, or a cell of an environment's rows, through
 the structure the caret is in); Backspace in an empty field removes the
@@ -112,7 +114,13 @@ the spot before a block →/↓/Delete enter the field at its start, from the
 spot after it ←/↑/Backspace at its end; Shift+arrow selects the block;
 Enter adds a line there, typed or pasted text goes on its own line, and
 Backspace before a block (Delete after it) removes an empty line beyond or
-steps onto a line with text rather than joining it to a `$$`.
+steps onto a line with text rather than joining it to a `$$`. From the line
+beside a block, ← at its start or → at its end (and Backspace/Delete from a
+line with text) stop at those spots first, so two blocks that touch still
+take a line between them; ↑/↓ go straight into the field (`enterBlock` in
+`mathField.ts`). The browser has no text position at either spot and types
+at the nearest one it has, the next line or past a touching block, so input
+there goes to the editor's caret instead (`typedAt` in `livePreview.ts`).
 
 Pasted into
 the field, maths goes in at the caret and markdown with prose around maths
@@ -173,8 +181,29 @@ is typed as LaTeX (Space is a space), and the toolbox's cells insert
 `Prec.highest`, above the note's Tab. Inside maths, `\` plus a letter
 opens completion with KaTeX previews, whatever the toolbox is doing; it is
 the editor's one `autocompletion()` (`extensions.ts`), so other sources
-join its `override`. The caret between a lone `$$` pair (what Σ inserts
-mid-line) counts as empty maths, since `$$` never parses inline.
+join its `override`. The caret between a lone `$$` pair (what a typed `$`
+and Σ insert) counts as empty inline maths (`emptyPair` in `mathContext.ts`):
+mid-line `$$` never parses, and alone on a line it parses as an unclosed
+block opener, which `mathAt` reads as no maths.
+
+## Typing `$` opens maths
+
+In Live mode a typed `$` writes `$$` with the caret between, which is an
+empty inline field, ready to type in (`dollarTyping` in `livePreview.ts`,
+`Prec.high` so `mathShorthand`'s handler doesn't type into the pair first).
+At a line's start (container markup aside, or on the line it opens beside a
+block) it writes `\(\)` instead: `$$` there opens a display block in every
+Markdown reader, which would run to the next `$$` and take the text between.
+The parser takes an empty `\(\)` as inline maths (`parenMath`), and the
+field's first write turns it into `$…$` (`FieldController.flush`).
+A second `$` there — in the empty field (`fieldKey`) or in the note's source
+before MathLive is ready — turns the pair into an empty block with the caret
+on its line (`emptyPairToBlock`, which is `toggleShape`). A `$` stays a
+plain character after `\` or `$`, in code, before a word (`$5`) and with a
+selection; Raw mode never pairs. Inline maths left empty (`$$`, `$ $`,
+`\(\)`) is deleted, outside the history, once the field closes with the
+caret outside it (`dropEmptyInline` in `mathField.ts`); a caret still inside
+(TeX mode, the window losing focus) keeps it.
 
 ## In the visual field, Space opens quick picks at the caret
 
@@ -193,9 +222,25 @@ usual. Space inside `\text{}`, beside a text atom and in a `\command`
 being typed keeps MathLive's meaning. The full toolbox under the field
 drops the preview, its cells insert into the field (slots become MathLive
 placeholders) and its TeX control switches to TeX mode; there a Visual
-control switches back. Neither toolbox ever takes focus. An empty block's
-field says so beside its caret ("Press Space for maths tools",
-`syncHint` in `mathField.ts`).
+control switches back. Neither toolbox ever takes focus. The field says so
+on any empty line (`syncHint` in `mathField.ts`): an empty inline field
+shows "Space (␣) for math tools" in flow after it, inside its tint; an
+empty block, or one empty row of its lines, centres "Start typing or Space
+(␣) for math tools" on that line with the caret drawn just before it (the
+hint's `::before`; MathLive's own, centred under the hint, is hidden). It goes once the
+line has anything in it.
+
+A block's field writes its LaTeX with no blank line at either end and never
+two in a row (`squeezeBlankLines`, `mathFieldEdits.ts`), and the break after
+the opening `$$` and before the closing one is a single newline: an empty
+last row is kept as a trailing `\\`, not a blank line, while the field is
+on the block; once it leaves, empty rows at the block's end go
+(`dropEndRows`, `withoutEndRows`), so the rendering has no blank row under
+the formula for the caret beside it to rest on. Blank lines already in a
+block go when the field opens on it (`dropBlankLines`). Both cleanups stay
+outside the history. The empty-line hint sits at the height of the empty row's leading
+atom, two frames after the edit, since MathLive draws in a frame of its own
+and its hidden caret can lag.
 
 ## Typed shorthands expand inside maths
 

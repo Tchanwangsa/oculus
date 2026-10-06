@@ -24,9 +24,9 @@ import { findRevealed } from "./find";
 import { inlineCodeCitation } from "./mentionSyntax";
 import { noteHost } from "./host";
 import { focusedField, setFocused, trackFocus } from "./liveFocus";
-import { continuation, ownsLines } from "./mathContext";
+import { continuation, mathAt, ownsLines } from "./mathContext";
 import { BLOCK_MATH_TYPE, MathFieldWidget, mathField, touchedMath, visualMath, visualMathField, type ActiveMath } from "./mathField";
-import { offerShapeSwitch } from "./mathTools";
+import { emptyPairToBlock, offerShapeSwitch } from "./mathTools";
 import { enterTable, TableWidget } from "./table";
 import { parseTable } from "./tableModel";
 import { ancestorAt } from "./syntax";
@@ -487,9 +487,19 @@ function edgePadding(state: EditorState, pos: number): [string, string] | null {
   return null;
 }
 
+/** Where text typed at `from` goes: the caret, when it rests at a block's
+ *  edge. The browser has no text position there, so it types at the nearest
+ *  one, the next line's start or the far side of a block right beside. */
+function typedAt(state: EditorState, from: number): number {
+  const pos = caretOf(state);
+  return pos != null && edgePadding(state, pos) ? pos : from;
+}
+
 /** Typing beside a block; a cell's own writes are dispatched, not typed. */
-const edgeTyping = EditorView.inputHandler.of((view, from, to, text) => {
-  if (from !== to || view.composing || caretOf(view.state) !== from) return false;
+const edgeTyping = EditorView.inputHandler.of((view, typed, to, text) => {
+  if (typed !== to || view.composing) return false;
+  const from = typedAt(view.state, typed);
+  if (caretOf(view.state) !== from) return false;
   const pad = edgePadding(view.state, from);
   if (!pad) return false;
   view.dispatch({
@@ -500,6 +510,47 @@ const edgeTyping = EditorView.inputHandler.of((view, from, to, text) => {
   });
   return true;
 });
+
+/** Characters a typed `$` may sit before and still open maths: the line's
+ *  end, a space, or closing punctuation — not the middle of a word. */
+const BEFORE_PAIR = /^$|^[\s)\]}.,;:!?]/;
+
+/**
+ * `$` opens inline maths at once: `$|$` (`\(|\)` at a line's start), which
+ * Live mode draws as an empty field the caret is in. A `$` typed in that pair makes it a block. Not
+ * after `\` or `$`, in code, or before the text of a word, so a price or an
+ * escaped `\$` stays a character. Ahead of `mathShorthand`'s handler, which
+ * would type the `$` into the pair.
+ */
+const dollarTyping = Prec.high(EditorView.inputHandler.of((view, typed, to, text) => {
+  if (text !== "$" || typed !== to || view.composing || view.state.readOnly) return false;
+  const { state } = view;
+  const from = typedAt(state, typed);
+  if (state.selection.ranges.length !== 1 || caretOf(state) !== from) return false;
+  const ctx = mathAt(state, from);
+  if (ctx) return ctx.node == null && emptyPairToBlock(view);
+  // Beside a block the pair gets a line of its own, so the block's `$$`
+  // and the text past it are no neighbours.
+  const pad = edgePadding(state, from) ?? ["", ""];
+  const before = pad[0] ? "" : state.sliceDoc(from - 1, from);
+  if (before === "\\" || before === "$") return false;
+  if (!pad[1] && !BEFORE_PAIR.test(state.sliceDoc(from, from + 1))) return false;
+  if (ancestorAt(state, from, (n) => n.name === "InlineCode" || n.name === "FencedCode" || n.name === "CodeBlock")) {
+    return false;
+  }
+  // At a line's start `$$` opens a display block in every Markdown reader,
+  // which would run to the next `$$`; `\(\)` there is the empty pair, and
+  // the field writes it as `$…$` once it holds something (`FieldController.flush`).
+  const lineBefore = pad[0] ? "" : state.sliceDoc(state.doc.lineAt(from).from, from);
+  const pair = continuation(lineBefore).length === lineBefore.length ? "\\(\\)" : "$$";
+  view.dispatch({
+    changes: { from, insert: pad[0] + pair + pad[1] },
+    selection: { anchor: from + pad[0].length + pair.length / 2 },
+    scrollIntoView: true,
+    userEvent: "input.type",
+  });
+  return true;
+}));
 
 /** Pasting beside a block, which skips the input handler. */
 const edgePaste = EditorState.transactionFilter.of((tr) => {
@@ -820,6 +871,7 @@ export function livePreview(): Extension {
     tableField,
     mathBlockField,
     tableKeys,
+    dollarTyping,
     edgeTyping,
     edgePaste,
     fieldLatexPaste,

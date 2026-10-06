@@ -6,9 +6,9 @@ import {
   Prec,
   StateEffect,
   StateField,
+  Transaction,
   type ChangeSpec,
   type Extension,
-  type Transaction,
 } from "@codemirror/state";
 import { EditorView, ViewPlugin, WidgetType, keymap, type Command } from "@codemirror/view";
 import katex from "katex";
@@ -17,7 +17,16 @@ import type { InlineShortcutDefinitions, MathfieldElement } from "mathlive";
 import { noteHost } from "./host";
 import { liveFocused, mathFieldFocused, setFocused } from "./liveFocus";
 import { mathAt, mathContextOf, ownsLines, type MathContext } from "./mathContext";
-import { FIELD_INPUT, caretAfterChange, fieldWrite, minimalChange, selectionPastField, writableSpan } from "./mathFieldEdits";
+import {
+  FIELD_INPUT,
+  caretAfterChange,
+  fieldWrite,
+  minimalChange,
+  selectionPastField,
+  squeezeBlankLines,
+  withoutEndRows,
+  writableSpan,
+} from "./mathFieldEdits";
 import { GREEK, OPERATORS, POWERS } from "./mathShorthand";
 import { recordCommand } from "./mathUsage";
 import { ancestorAt } from "./syntax";
@@ -443,10 +452,13 @@ function blockBeside(state: EditorState, pos: number, up: boolean): VisualMath |
   return target && readsCleanly(state.sliceDoc(target.from, target.to).trim(), true) ? target : null;
 }
 
-/** Into a display block from the line beside it: ↑/↓ off the edge line, ←
- *  at a line's start or → at its end, and Backspace/Delete (`deleting`) from
- *  a line with text, which would otherwise join it onto the `$$`. Block
- *  widgets don't hold the caret, so vertical motion would step over them. */
+/** Up to a display block from the line beside it. ↑/↓ off the edge line go
+ *  into the field, since block widgets don't hold the caret and vertical
+ *  motion would step over them. ← at a line's start or → at its end, and
+ *  Backspace/Delete (`deleting`) from a line with text, which would join it
+ *  onto the `$$`, stop at the block's edge, beside its rendering, where
+ *  Enter or typing adds a line; the same key again enters the field
+ *  (`intoMathBlock` in `livePreview.ts`). */
 function enterBlock(dir: "up" | "down" | "left" | "right", deleting = false): Command {
   const back = dir === "up" || dir === "left";
   return (view) => {
@@ -463,7 +475,11 @@ function enterBlock(dir: "up" | "down" | "left" | "right", deleting = false): Co
     }
     const target = blockBeside(state, main.head, back);
     if (!target) return false;
-    view.dispatch({ selection: { anchor: back ? target.to : target.from }, scrollIntoView: true });
+    const anchor =
+      dir === "left" ? state.doc.lineAt(target.end).to
+      : dir === "right" ? target.start
+      : back ? target.to : target.from;
+    view.dispatch({ selection: { anchor }, scrollIntoView: true });
     return true;
   };
 }
@@ -660,6 +676,8 @@ interface MlAtom {
   leftSibling: MlAtom | undefined;
   environmentName?: string;
   hasChildren: boolean;
+  /** Alone in its branch: for a `first` atom, the branch is empty. */
+  hasNoSiblings: boolean;
   hasEmptyBranch(branch: string): boolean;
 }
 
@@ -855,8 +873,11 @@ export class FieldController {
   private dead = false;
   /** The maths drawn statically, holding the field's box until it renders. */
   private standIn: HTMLElement | null;
-  /** An empty block's prompt to Space for the toolbox, beside the caret. */
+  /** The prompt to Space for the toolbox on an empty line: centred on the
+   *  line in a block, whose caret is hidden then, after the empty field in
+   *  flow inline. The frame its placement waits for. */
   private hint: HTMLElement | null = null;
+  private hintFrame = 0;
 
   constructor(
     readonly view: EditorView,
@@ -884,13 +905,11 @@ export class FieldController {
       this.dom.append(this.standIn);
     }
     this.dom.append(mf);
-    if (block) {
-      this.hint = document.createElement("span");
-      this.hint.className = "cm-math-hint";
-      this.hint.textContent = "Press Space for maths tools";
-      this.hint.hidden = true;
-      this.dom.append(this.hint);
-    }
+    this.hint = document.createElement("span");
+    this.hint.className = "cm-math-hint";
+    this.hint.textContent = block ? "Start typing or Space (␣) for math tools" : "Space (␣) for math tools";
+    this.hint.hidden = true;
+    this.dom.append(this.hint);
 
     mf.addEventListener("input", (e) => {
       this.committed(e as InputEvent);
@@ -901,7 +920,10 @@ export class FieldController {
     mf.addEventListener("focusout", () => this.focusLeft());
     // MathLive's command list sits where the toolbox does; one at a time.
     mf.addEventListener("mode-change", () => this.modeChanged());
-    mf.addEventListener("selection-change", () => this.selectionChanged());
+    mf.addEventListener("selection-change", () => {
+      this.selectionChanged();
+      this.syncHint();
+    });
     // Capture, so these keys never reach MathLive's own handling.
     this.dom.addEventListener("keydown", (e) => this.key(e), true);
     // Undo from the Edit menu arrives as `beforeinput`, not a key.
@@ -953,6 +975,21 @@ export class FieldController {
       mf.position = target && sel.head <= target.from ? 0 : mf.lastOffset;
     }
     pressed = null;
+    if (this.block) this.dropBlankLines();
+  }
+
+  /** Blank lines in a block's LaTeX (an older note's, another editor's) go
+   *  as the field opens on it, the LaTeX itself untouched and outside the
+   *  history; the field's own writes never add them (`squeezeBlankLines`). */
+  private dropBlankLines() {
+    const target = this.target();
+    const current = target ? this.view.state.sliceDoc(target.from, target.to) : "";
+    if (!target || !current.includes("\n") || !current.trim()) return;
+    const tidied = `\n${squeezeBlankLines(current.trim())}\n`;
+    const change = minimalChange(current, tidied, target.from);
+    if (!change) return;
+    this.shown = tidied.trim();
+    this.view.dispatch({ changes: change, annotations: [fieldWrite.of(this.id), Transaction.addToHistory.of(false)] });
   }
 
   /** The field in flow, in place of its static stand-in. */
@@ -1047,10 +1084,51 @@ export class FieldController {
     this.syncHint();
   }
 
-  /** The hint shows while the block is empty and Space would open the toolbox. */
+  /** Nothing typed in the field (a bare `$$` inline pair, a fresh block). */
+  isEmpty(): boolean {
+    return this.mf.getValue("latex-without-placeholders") === "";
+  }
+
+  /** The caret is on a line holding nothing: the whole block when empty, or
+   *  one row of its lines (a root `lines` table, whose rows MathLive keeps
+   *  as branches of one array atom). */
+  private onEmptyLine(): boolean {
+    const model = modelOf(this.mf);
+    const at = this.mf.position;
+    const here = model?.at(at);
+    if (!model || !here || here.type !== "first") return false;
+    if (here.parent?.type !== "root" && here.parent?.environmentName !== "lines") return false;
+    // The row's own atoms, not the next offset's: that steps inside a
+    // leading `\left(` and would read a full row as empty.
+    return here.hasNoSiblings;
+  }
+
+  /** Show the hint on an empty line, hide it elsewhere. Two frames on, once
+   *  MathLive has drawn the edit (it draws in a frame of its own), a block's
+   *  goes at the height of the caret's line: its empty row's leading atom,
+   *  not the hidden caret, which can still be where it was. */
   private syncHint() {
-    if (!this.hint) return;
-    this.hint.hidden = this.mf.mode !== "math" || this.mf.getValue("latex-without-placeholders") !== "";
+    if (!this.hint || this.hintFrame) return;
+    this.hintFrame = requestAnimationFrame(() => {
+      this.hintFrame = requestAnimationFrame(() => {
+        this.hintFrame = 0;
+        this.placeHint();
+      });
+    });
+  }
+
+  private placeHint() {
+    const hint = this.hint;
+    if (!hint) return;
+    const live = !this.dead && this.dom.isConnected && this.mf.mode === "math" && this.onEmptyLine();
+    const line = live && this.block ? this.mf.getElementInfo(this.mf.position)?.bounds : null;
+    this.dom.classList.toggle("cm-math-field-empty", line != null);
+    if (!live || (this.block && !line)) {
+      hint.hidden = true;
+      return;
+    }
+    if (line) hint.style.top = `${line.top + line.height / 2 - this.dom.getBoundingClientRect().top}px`;
+    hint.hidden = false;
   }
 
   /** The maths this field may write to, or null when it is gone or was
@@ -1121,13 +1199,27 @@ export class FieldController {
     // being undone, and undo would only revert that.
     this.loaded = value;
     let latex = fromField(tidy(mf.getValue("latex-without-placeholders"), !target.display));
-    if (target.block) latex = layoutBlock(latex);
+    if (target.block) latex = squeezeBlankLines(layoutBlock(latex));
     const current = view.state.sliceDoc(target.from, target.to);
-    const lead = /^\s*/.exec(current)![0];
-    const trail = /\s*$/.exec(current.slice(lead.length))![0];
+    // A block's edges are one line break each, however many it had.
+    const edge = (ws: string) => (target.block && ws.includes("\n") ? "\n" : ws);
+    const lead = edge(/^\s*/.exec(current)![0]);
+    const trail = edge(/\s*$/.exec(current.slice(/^\s*/.exec(current)![0].length))![0]);
     let insert = lead + latex + trail;
     if (target.block && (latex.includes("\n") || !current.trim())) {
       insert = `${lead.includes("\n") ? lead : "\n"}${latex}${trail.includes("\n") ? trail : "\n"}`;
+    }
+    // An empty `\(\)` (a `$` typed at a line's start) becomes `$…$` once it
+    // holds something; the caret stays inside, so the field stays open.
+    if (!target.display && !current.trim() && latex && view.state.sliceDoc(target.start, target.from) === "\\(") {
+      this.shown = latex;
+      view.dispatch({
+        changes: { from: target.start, to: target.end, insert: `$${latex}$` },
+        selection: { anchor: target.start + 1 },
+        userEvent: FIELD_INPUT,
+        annotations: fieldWrite.of(this.id),
+      });
+      return;
     }
     const change = minimalChange(current, insert, target.from);
     this.shown = insert.trim();
@@ -1176,8 +1268,9 @@ export class FieldController {
       this.leave("forward");
     } else if (e.key === "Enter" && !typingCommand && !mod && !e.altKey) {
       stop();
-      if (this.display) this.newLine();
-      else this.leave("forward");
+      // Never a second empty line: Enter on an empty one does nothing.
+      if (!this.display) this.leave("forward");
+      else if (this.mf.mode !== "math" || !this.onEmptyLine()) this.newLine();
     } else if (
       mf.mode === "text" &&
       !mod &&
@@ -1394,6 +1487,7 @@ export class FieldController {
 
   destroy() {
     this.dead = true;
+    cancelAnimationFrame(this.hintFrame);
     if (fields.get(this.view) === this) fields.delete(this.view);
     this.view.dom.classList.remove("cm-math-command");
     // Removed while typing in it (a command elsewhere moved the selection):
@@ -1466,6 +1560,42 @@ const fieldSelection = EditorState.transactionFilter.of((tr) => {
 
 /** The visual-maths state, the loader and the keys into a field. Live mode
  *  only; the decorations are `livePreview.ts`'s. */
+/** A block the field leaves loses empty rows at its end (Enter past its last
+ *  line), which would draw as a blank line under the formula, where the
+ *  caret beside the block then rests. Outside the history, after the update
+ *  that closed the field. */
+const dropEndRows = EditorView.updateListener.of((u) => {
+  const left = visualMath(u.startState);
+  if (!left?.block || visualMath(u.state)?.id === left.id) return;
+  const start = u.changes.mapPos(left.start, 1);
+  queueMicrotask(() => {
+    const { state } = u.view;
+    const node = ancestorAt(state, start, (n) => n.name === "BlockMath", [1]);
+    const ctx = node && node.from === start ? mathContextOf(node) : null;
+    if (!ctx || visualMath(state)?.start === ctx.start) return;
+    const latex = state.sliceDoc(ctx.from, ctx.to);
+    const change = minimalChange(latex, withoutEndRows(latex), ctx.from);
+    if (change) u.view.dispatch({ changes: change, annotations: Transaction.addToHistory.of(false) });
+  });
+});
+
+/** Inline maths left empty (`$$`, `$ $`, `\(\)`) goes when the field closes
+ *  with the caret outside it, rather than staying as an invisible pair. A
+ *  caret still inside (TeX mode, the window losing focus) keeps it. Outside
+ *  the history, as `dropEndRows`. */
+const dropEmptyInline = EditorView.updateListener.of((u) => {
+  const left = visualMath(u.startState);
+  if (!left || left.block || visualMath(u.state)?.id === left.id) return;
+  const start = u.changes.mapPos(left.start, 1);
+  const end = u.changes.mapPos(left.end, -1);
+  queueMicrotask(() => {
+    const { state } = u.view;
+    if (end > state.doc.length || !/^(?:\$\s*\$|\\\(\s*\\\))$/.test(state.sliceDoc(start, end))) return;
+    if (state.selection.ranges.some((r) => r.to > start && r.from < end)) return;
+    u.view.dispatch({ changes: { from: start, to: end }, annotations: Transaction.addToHistory.of(false) });
+  });
+});
+
 export function mathField(): Extension {
-  return [visualMathField, loader, entryKeys, fieldSelection];
+  return [visualMathField, loader, entryKeys, fieldSelection, dropEndRows, dropEmptyInline];
 }

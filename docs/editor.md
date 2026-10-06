@@ -15,7 +15,7 @@ maths is [editor-maths.md](./editor-maths.md).
 | One session per note | `app/src/lib/documentSessions.ts` |
 | Find and replace | `app/src/components/documents/editor/find.ts`, `app/src/components/documents/editor/useEditorFind.ts` |
 | A note's versions and its History panel | `app/src/lib/documentVersions.ts`, `app/src/components/documents/HistoryPanel.tsx` |
-| The note editor as a form field (task body) | `app/src/components/documents/NoteField.tsx` |
+| The note editor as a form field (task body, a chat paste) | `app/src/components/documents/NoteField.tsx` |
 
 ## The note editor is CodeMirror 6 over the file's exact text
 
@@ -82,7 +82,7 @@ last updated (`modified_at` or the session's last save) and a word count.
   [editor-maths.md](./editor-maths.md#maths-has-a-toolbox-opened-on-demand)). ⌘-click opens a
   link — library files through `libraryLinkTarget` and `openFileSmart`, web
   URLs in the in-app browser; a plain click edits it. Maths is `$…$` (pandoc's
-  spacing rule), `\(…\)`, and `$$` / `\[` blocks on their own lines
+  spacing rule), `\(…\)` (empty included), and `$$` / `\[` blocks on their own lines
   (`app/src/components/documents/editor/mathSyntax.ts`).
 
 Editor commands, links, maths and completions share `ancestorAt` in
@@ -205,7 +205,8 @@ request succeeds.
 ## `NoteField` is the note editor as a form field
 
 `app/src/components/documents/NoteField.tsx` serves markdown kept in a
-database row — the task body ([projects.md](./projects.md)). Live mode
+database row — the task body ([projects.md](./projects.md)) — or a chat
+composer's pasted text, kept with its draft. Live mode
 only, with no session, title, Raw mode or AI suggestions; the caller
 supplies the `@` subject, picture resolution and picture writes. At rest it
 reads as prose; focus anywhere in its React tree — including the
@@ -214,7 +215,11 @@ through React — shows the brand border and the toolbar below the text. A
 blur is judged a tick later, and a window losing focus (the picture picker)
 is not leaving. Leaving, ⌘↵ and unmounting hand an edited doc to
 `onCommit`; a new `text` replaces an unedited doc, outside history.
-`noteExtensions` takes its placeholder and aria label.
+`noteExtensions` takes its placeholder and aria label. An optional `onChange`
+hears the doc on every change, for a caller whose buttons read the text and
+cannot wait on the blur (the chat's pasted text editor,
+[harness.md](./harness.md#pasted-text-is-a-card-sent-inline));
+`scrollClassName` replaces the text scroller's 420px bound.
 
 ## Gotchas
 
