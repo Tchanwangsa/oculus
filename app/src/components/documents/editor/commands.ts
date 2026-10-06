@@ -18,6 +18,7 @@ import type { SyntaxNode } from "@lezer/common";
  * selection is already formatted that way.
  */
 
+import { BOLD, CODE, ITALIC, LINK, STRIKE, trimmed, unwrapWithin, wrapWithin, type MarkKind } from "./inlineMarks";
 import { ancestorAt } from "./syntax";
 
 type Dispatch = (tr: Transaction) => void;
@@ -34,64 +35,47 @@ function enclosing(state: EditorState, range: SelectionRange, name: string): Syn
 
 // ── Inline marks ──────────────────────────────────────────────────────────
 
-function toggleInline(marker: string, nodeName: string, markName: string): StateCommand {
+/** Takes `kind` off the selected text only, when `range` sits inside one
+ *  (`unwrapWithin`); null when it does not. */
+function unmark(state: EditorState, range: SelectionRange, kind: MarkKind) {
+  const core = trimmed(state, range);
+  const node = enclosing(state, core, kind.node);
+  const wrap = node && kind.wrap(node);
+  if (!wrap) return null;
+  const changes = state.changes(unwrapWithin(state, core, wrap, kind.hugs));
+  return { changes, range: range.map(changes) };
+}
+
+function toggleInline(marker: string, kind: MarkKind): StateCommand {
   return ({ state, dispatch }) => {
     const tr = state.changeByRange((range) => {
-      const node = enclosing(state, range, nodeName);
-      if (node) {
-        const marks = node.getChildren(markName);
-        if (marks.length >= 2) {
-          const open = marks[0];
-          const close = marks[marks.length - 1];
-          const changes = state.changes([
-            { from: open.from, to: open.to },
-            { from: close.from, to: close.to },
-          ]);
-          return { changes, range: range.map(changes) };
-        }
-      }
+      const off = unmark(state, range, kind);
+      if (off) return off;
       if (range.empty) {
         return {
           changes: { from: range.from, insert: marker + marker },
           range: EditorSelection.cursor(range.from + marker.length),
         };
       }
-      // Emphasis cannot open or close on a space, so the marks hug the text.
-      const text = state.sliceDoc(range.from, range.to);
-      const from = range.from + (text.length - text.trimStart().length);
-      const to = range.to - (text.length - text.trimEnd().length);
-      if (from >= to) return { range };
-      return {
-        changes: [
-          { from, insert: marker },
-          { from: to, insert: marker },
-        ],
-        range: EditorSelection.range(from + marker.length, to + marker.length),
-      };
+      const changes = state.changes(wrapWithin(state, range, kind, marker));
+      return { changes, range: range.map(changes) };
     });
     dispatch(state.update(tr, { scrollIntoView: true, userEvent: "input" }));
     return true;
   };
 }
 
-export const toggleBold = toggleInline("**", "StrongEmphasis", "EmphasisMark");
-export const toggleItalic = toggleInline("*", "Emphasis", "EmphasisMark");
-export const toggleStrike = toggleInline("~~", "Strikethrough", "StrikethroughMark");
-export const toggleCode = toggleInline("`", "InlineCode", "CodeMark");
+export const toggleBold = toggleInline("**", BOLD);
+export const toggleItalic = toggleInline("*", ITALIC);
+export const toggleStrike = toggleInline("~~", STRIKE);
+export const toggleCode = toggleInline("`", CODE);
 
 /** `[sel](|)`, caret in the URL; an empty selection gets `[|]()`, a selected
- *  URL `[|](url)`. Inside a link, unwraps it to its text. */
+ *  URL `[|](url)`. Inside a link, unlinks the selected text. */
 export const toggleLink: StateCommand = ({ state, dispatch }) => {
   const tr = state.changeByRange((range) => {
-    const link = enclosing(state, range, "Link");
-    const marks = link?.getChildren("LinkMark") ?? [];
-    if (link && marks.length >= 2) {
-      const changes = state.changes([
-        { from: link.from, to: marks[0].to },
-        { from: marks[1].from, to: link.to },
-      ]);
-      return { changes, range: range.map(changes) };
-    }
+    const off = unmark(state, range, LINK);
+    if (off) return off;
     const text = state.sliceDoc(range.from, range.to);
     if (/^(https?:\/\/|www\.)\S+$/i.test(text)) {
       return {

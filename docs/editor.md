@@ -76,7 +76,14 @@ last updated (`modified_at` or the session's last save) and a word count.
   Properties card, revealing its source when touched.
 - **Toolbar buttons and shortcuts are plain CodeMirror commands**
   (`app/src/components/documents/editor/commands.ts`) that rewrite markdown
-  and unwrap when already applied, so they work in both modes; Σ is the
+  and unwrap when already applied, so they work in both modes. An inline mark
+  (bold, italic, strike, code, link) comes off only the selected text: the
+  span splits around it (`unwrapWithin` in `inlineMarks.ts`, one table of
+  mark kinds), widening to a nested mark's edge rather than crossing it; a
+  caret or a full selection drops the whole span. Whitespace at the selection's
+  ends is ignored throughout (`trimmed`): ` **a** ` selected is the span `a`. Applying a mark across spans
+  of the same mark merges them (`wrapWithin`): `**ac*hi*e**` with `hi*e`
+  selected italicises to `**ac*hie***`. Σ is the
   exception inside maths, where it opens or closes the maths toolbox
   (`toggleMathTools`,
   [editor-maths.md](./editor-maths.md#maths-has-a-toolbox-opened-on-demand)). ⌘-click opens a
