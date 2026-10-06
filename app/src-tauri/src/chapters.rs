@@ -56,6 +56,10 @@ const GRAB_WIDTH: u32 = 768;
 /// question may be about a whiteboard, so in practice the stream's own width.
 const LIVE_GRAB_WIDTH: u32 = 1536;
 
+/// Width of the Up Next card's thumbnail (`app::lecture_thumbnail`), drawn a
+/// little over 128 px wide.
+const THUMB_WIDTH: u32 = 320;
+
 /// How close to the most detailed probe a frame must be to be taken instead of
 /// it. Relative, because "detailed" depends on the deck.
 const GRAB_TOLERANCE: f32 = 0.95;
@@ -85,8 +89,52 @@ pub fn sample_diffs(
     video: &Path,
     mut on_frame: impl FnMut(u32),
 ) -> Result<Vec<(u32, f32)>, String> {
+    let mut previous = vec![0u8; FRAME_BYTES];
+    let mut diffs: Vec<(u32, f32)> = Vec::new();
+    each_frame(ffmpeg, video, "error", &[], |index, frame| {
+        if index > 0 {
+            diffs.push((index, mean_abs_diff(&previous, frame)));
+            on_frame(index);
+        }
+        previous.copy_from_slice(frame);
+    })?;
+    if diffs.is_empty() {
+        return Err("no video frames decoded".to_string());
+    }
+    Ok(diffs)
+}
+
+/// The mean brightness (0–255) of each second of the last `secs` seconds of
+/// `video`, from one decode of the tail alone (`-sseof`), and the file's own
+/// length from ffmpeg's log. ffmpeg ignores a seek before the start, so a
+/// shorter file is read whole.
+pub fn tail_luma(ffmpeg: &Path, video: &Path, secs: u32) -> Result<(Vec<f32>, Option<f64>), String> {
+    let seek = format!("-{secs}");
+    let mut luma: Vec<f32> = Vec::new();
+    let log = each_frame(ffmpeg, video, "info", &["-sseof", &seek], |_, frame| {
+        let total: u64 = frame.iter().map(|&b| u64::from(b)).sum();
+        luma.push(total as f32 / frame.len() as f32);
+    })?;
+    if luma.is_empty() {
+        return Err("no video frames decoded".to_string());
+    }
+    Ok((luma, crate::transcribe::audio::duration(&log)))
+}
+
+/// One `fps=1`, 160×90 greyscale decode of `video` to a pipe, each frame
+/// handed to `on_frame` with its index as it arrives; answers ffmpeg's log at
+/// `level`. `seek` goes before `-i`.
+fn each_frame(
+    ffmpeg: &Path,
+    video: &Path,
+    level: &str,
+    seek: &[&str],
+    mut on_frame: impl FnMut(u32, &[u8]),
+) -> Result<String, String> {
     let mut child = Command::new(ffmpeg)
-        .args(["-v", "error", "-nostdin", "-i"])
+        .args(["-v", level, "-nostdin", "-hide_banner", "-nostats"])
+        .args(seek)
+        .arg("-i")
         .arg(video)
         .args([
             "-vf",
@@ -110,9 +158,7 @@ pub fn sample_diffs(
     });
 
     let mut stdout = child.stdout.take().expect("piped stdout");
-    let mut previous = vec![0u8; FRAME_BYTES];
     let mut current = vec![0u8; FRAME_BYTES];
-    let mut diffs: Vec<(u32, f32)> = Vec::new();
     let mut index: u32 = 0;
 
     loop {
@@ -125,11 +171,7 @@ pub fn sample_diffs(
                 return Err(format!("reading frames: {e}"));
             }
         }
-        if index > 0 {
-            diffs.push((index, mean_abs_diff(&previous, &current)));
-            on_frame(index);
-        }
-        std::mem::swap(&mut previous, &mut current);
+        on_frame(index, &current);
         index += 1;
     }
 
@@ -139,10 +181,7 @@ pub fn sample_diffs(
         let detail = text.lines().last().unwrap_or("no detail").trim().to_string();
         return Err(format!("ffmpeg failed: {detail}"));
     }
-    if diffs.is_empty() {
-        return Err("no video frames decoded".to_string());
-    }
-    Ok(diffs)
+    Ok(text)
 }
 
 /// Fill `frame` completely, or report that the stream ended. A trailing
@@ -220,6 +259,12 @@ pub struct TranscriptCue {
 /// Parse WebVTT timing and text into plain cues. Identifiers and settings are
 /// ignored, tags stripped, and a malformed block skipped.
 pub fn parse_transcript(vtt: &str) -> Vec<TranscriptCue> {
+    parse_transcript_voiced(vtt).into_iter().map(|(cue, _)| cue).collect()
+}
+
+/// [`parse_transcript`], each cue paired with its speaker — the annotation of
+/// a leading `<v Speaker 0>` voice tag, which the plain text drops.
+pub fn parse_transcript_voiced(vtt: &str) -> Vec<(TranscriptCue, Option<String>)> {
     let normalised = vtt.replace("\r\n", "\n");
     normalised
         .split("\n\n")
@@ -235,13 +280,26 @@ pub fn parse_transcript(vtt: &str) -> Vec<TranscriptCue> {
             if start < 0.0 || end < start {
                 return None;
             }
-            let text = plain_text(&lines[timing_at + 1..].join(" "));
+            let raw = lines[timing_at + 1..].join(" ");
+            let text = plain_text(&raw);
             if text.is_empty() {
                 return None;
             }
-            Some(TranscriptCue { start, end, text })
+            Some((TranscriptCue { start, end, text }, voice(&raw)))
         })
         .collect()
+}
+
+/// The speaker of a cue's leading voice tag: `<v Speaker 0>` or
+/// `<v.loud Speaker 0>` gives `Speaker 0`.
+fn voice(raw: &str) -> Option<String> {
+    let tag = raw.trim_start().strip_prefix("<v")?;
+    if !tag.starts_with([' ', '.']) {
+        return None;
+    }
+    let tag = &tag[..tag.find('>')?];
+    let name = tag.split_once(' ').map(|(_, name)| name.trim())?;
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 fn plain_text(text: &str) -> String {
@@ -491,6 +549,17 @@ pub fn grab_frame(
         return Err(format!("no frame at {at}s"));
     }
     Ok(())
+}
+
+/// Which stream and second a lecture's thumbnail is grabbed from: source 1
+/// when it is downloaded, else source 2, a quarter of the way in — past the
+/// title card and the room's splash. `None` with nothing downloaded.
+pub fn thumbnail_pick(
+    streams: &[(crate::echo360::SourceNum, PathBuf)],
+    duration: u32,
+) -> Option<(PathBuf, u32)> {
+    let (_, video) = streams.iter().min_by_key(|(n, _)| *n)?;
+    Some((video.clone(), duration / 4))
 }
 
 /// Which second to actually grab `boundary`'s frame from. Earliest-good rather
@@ -1206,6 +1275,70 @@ pub mod app {
         Ok(())
     }
 
+    /// A lecture's downloaded streams, source 1 first, with what the frame
+    /// commands name and size them by.
+    struct Streams {
+        title: String,
+        /// Echo360's catalogue length.
+        duration: u32,
+        dir: PathBuf,
+        sources: Vec<(crate::echo360::SourceNum, PathBuf)>,
+    }
+
+    async fn downloaded_streams(lecture_id: &str) -> Result<Streams, String> {
+        let pool = crate::store::open_pool().await?;
+        let row: Option<(String, i64, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT title, duration_seconds, video_path, video2_path FROM lectures WHERE id = ?1",
+        )
+        .bind(lecture_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+        let (title, duration, first, second) =
+            row.ok_or_else(|| format!("no lecture {lecture_id}"))?;
+
+        let dir = crate::echo360::lecture_dir(&crate::paths::data_dir(), lecture_id);
+        // The column, else the stream's own path on disk (as `detect` does).
+        let sources = [(1, first), (2, second)]
+            .into_iter()
+            .map(|(n, column)| {
+                let path = column
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| crate::echo360::source_path(&dir, n));
+                (n, path)
+            })
+            .filter(|(_, path)| path.exists())
+            .collect();
+        Ok(Streams { title, duration: u32::try_from(duration).unwrap_or(0), dir, sources })
+    }
+
+    /// The Up Next card's thumbnail (`docs/viewers.md`): one frame a quarter
+    /// of the way in ([`thumbnail_pick`]), probed like a chapter's, cached at
+    /// `lectures/<id>/thumb.jpg`. Returns its path for the asset protocol, or
+    /// `None` while the lecture is not downloaded.
+    #[tauri::command]
+    pub async fn lecture_thumbnail(lecture_id: String) -> Result<Option<String>, String> {
+        let Streams { dir, duration, sources, .. } = downloaded_streams(&lecture_id).await?;
+        let Some((video, second)) = thumbnail_pick(&sources, duration) else {
+            return Ok(None);
+        };
+        let out = dir.join("thumb.jpg");
+        if out.exists() {
+            return Ok(Some(out.to_string_lossy().into_owned()));
+        }
+        let ffmpeg = crate::echo360::find_ffmpeg(None)
+            .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
+        crate::blocking::run(move || {
+            // Written aside and renamed, so a card never loads half a JPEG.
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            let part = dir.join("thumb.part.jpg");
+            grab_frame(&ffmpeg, &video, second, THUMB_WIDTH, &part)?;
+            std::fs::rename(&part, &out).map_err(|e| format!("{}: {e}", out.display()))?;
+            Ok(Some(out.to_string_lossy().into_owned()))
+        })
+        .await
+    }
+
     /// One stream's frame of the moment a dock message carries.
     #[derive(serde::Serialize, Clone)]
     pub struct MomentFrame {
@@ -1227,27 +1360,7 @@ pub mod app {
         lecture_id: String,
         seconds: u32,
     ) -> Result<Vec<MomentFrame>, String> {
-        let pool = crate::store::open_pool().await?;
-        let row: Option<(String, Option<String>, Option<String>)> =
-            sqlx::query_as("SELECT title, video_path, video2_path FROM lectures WHERE id = ?1")
-                .bind(&lecture_id)
-                .fetch_optional(&pool)
-                .await
-                .map_err(|e| e.to_string())?;
-        let (title, first, second) = row.ok_or_else(|| format!("no lecture {lecture_id}"))?;
-
-        let dir = crate::echo360::lecture_dir(&crate::paths::data_dir(), &lecture_id);
-        // The column, else the stream's own path on disk (as `detect` does).
-        let sources: Vec<(crate::echo360::SourceNum, PathBuf)> = [(1, first), (2, second)]
-            .into_iter()
-            .map(|(n, column)| {
-                let path = column
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| crate::echo360::source_path(&dir, n));
-                (n, path)
-            })
-            .filter(|(_, path)| path.exists())
-            .collect();
+        let Streams { title, dir, sources, .. } = downloaded_streams(&lecture_id).await?;
         if sources.is_empty() {
             return Err(format!(
                 "{title} is not downloaded — `oculus run -l --videos` fetches it"
@@ -1746,5 +1859,16 @@ mod tests {
         let vtt = "WEBVTT\r\n\r\n00:00.000 --> broken\r\nhello\r\n\r\n00:10.000 --> 00:12.000\r\nworld\r\n";
         // The broken end falls back to its own start.
         assert_eq!(cue_gaps(vtt), vec![(0, 0.0), (10, 10.0)]);
+    }
+
+    #[test]
+    fn thumbnail_takes_source_one_a_quarter_in() {
+        let one = PathBuf::from("/l/source1.mp4");
+        let two = PathBuf::from("/l/source2.mp4");
+        let both = [(2, two.clone()), (1, one.clone())];
+        assert_eq!(thumbnail_pick(&both, 4000), Some((one, 1000)));
+        // Only the camera is on disk: it stands in.
+        assert_eq!(thumbnail_pick(&[(2, two.clone())], 3001), Some((two, 750)));
+        assert_eq!(thumbnail_pick(&[], 4000), None);
     }
 }

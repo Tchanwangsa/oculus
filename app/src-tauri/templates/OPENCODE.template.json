@@ -63,6 +63,13 @@
       "description": "Completes the sentence at a note's caret",
       "prompt": "{{WRITER_PROMPT}}",
       "permission": { "*": "deny" }
+    },
+    "oculus-lecture-end": {
+      "mode": "primary",
+      "hidden": true,
+      "description": "Finds where a lecture recording's content ends",
+      "prompt": "{{LECTURE_END_PROMPT}}",
+      "permission": { "*": "deny" }
     }
   }
 }

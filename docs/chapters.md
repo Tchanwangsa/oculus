@@ -5,7 +5,8 @@ cut a lecture at its real topic boundaries and name each span, and the
 **reading copy** rewrites the transcript as readable text, one sentence per
 line, each pinned to its second. Both run from the CLI (`oculus lecture
 chapters`, `oculus lecture reading`) and from the player, through the same
-Rust `run`.
+Rust `run`. A third, much lighter job finds [where the lecture
+ends](#where-the-lecture-ends) before the Q&A (`oculus lecture end`).
 
 ## Where
 
@@ -15,15 +16,18 @@ Rust `run`.
 | The app commands and job-specific events | `chapters::app` in `app/src-tauri/src/chapters.rs`, `reading::app` in `app/src-tauri/src/reading.rs` |
 | Shared run inputs, recording checks, app progress and thread orchestration | `app/src-tauri/src/lecture_jobs.rs` |
 | Reading copy: segmentation, windows, prompt, validation, `para`, the job | `app/src-tauri/src/reading.rs` |
-| Row writes, status, claims, reconcile; the tables (migrations 29, 34) | `app/src-tauri/src/store.rs`; `app/src-tauri/src/migrations.rs` |
-| `oculus lecture candidates` / `chapters` / `reading` | `app/src-tauri/src/bin/oculus/lecture.rs` |
+| Row writes, status, claims, reconcile; the tables (migrations 29, 34, 42) | `app/src-tauri/src/store.rs`; `app/src-tauri/src/migrations.rs` |
+| Where the lecture ends: window, picture hint, brief, prompt, reply parser, validator, app command | `app/src-tauri/src/lecture_end.rs` |
+| `oculus lecture candidates` / `chapters` / `reading` / `end` | `app/src-tauri/src/bin/oculus/lecture.rs` |
 | Which agent, model and effort each job runs on | `app/src-tauri/src/harness/jobs.rs`, `app/src/pages/settings/JobsPage.tsx` |
 | Transcript search and stable source indexes | `app/src/hooks/useTranscriptSearch.ts` |
 | The one-turn headless run both use; ffmpeg lookup | `run_once` in `app/src-tauri/src/harness/mod.rs`; `app/src-tauri/src/echo360.rs` |
-| Frontend bindings, event names, `chapterEnds` / `spanAt`, the VTT parser | `app/src/lib/lectures.ts` |
+| Frontend bindings, event names, `chapterEnds`; `spanAt` and the VTT parser | `app/src/lib/lectures.ts`, `app/src/lib/media.ts` |
+| The hidden opencode agent the end job runs as | `app/src-tauri/templates/OPENCODE.template.json` |
+| The end in the player: first-open trigger, landed ends, `lectureEnd` | `app/src/lib/lectureEnd.ts`, `app/src/hooks/useLectureEnd.ts` |
 | Rows and job state; the job hooks | `app/src/lib/db.ts`; `app/src/hooks/useLectureJob.ts`, `app/src/hooks/useLectureChapters.ts`, `app/src/hooks/useLectureReading.ts` |
 | The dock's tab strip and register picker | `app/src/components/lectures/TranscriptPanel.tsx`, `app/src/components/lectures/TranscriptModePicker.tsx` |
-| Chapter list, enhanced list, shared run status, follow list | `app/src/components/lectures/ChaptersPanel.tsx`, `app/src/components/lectures/ReadingList.tsx`, `app/src/components/lectures/RunStatus.tsx`, `app/src/components/lectures/FollowList.tsx` |
+| Chapter list, enhanced list, shared run status, follow list | `app/src/components/lectures/ChaptersPanel.tsx`, `app/src/components/lectures/ReadingList.tsx`, `app/src/components/lectures/RunStatus.tsx`, `app/src/components/media/FollowList.tsx` |
 | Chapter name over the frame, scrub ticks, card progress line | `app/src/components/lectures/LecturePlayer.tsx`, `app/src/components/lectures/EntryProgress.tsx` |
 | Dock tab, tab order, transcript register | `app/src/stores/playerPrefsStore.ts` |
 | Tool verbs shared with the chat timeline; parser fixture | `toolVerb` in `app/src/lib/harness.ts`; `app/src-tauri/fixtures/chapters/sample.vtt` |
@@ -75,7 +79,8 @@ second.
 - `extract_frames` deletes `.jpg`s in its folder that this run will not
   rewrite, so a folder never mixes candidate sets or streams.
 - Chapters write `frames/`, the reading copy `frames/reading/`, the chat dock
-  `frames/live/`. They must stay separate: the jobs are claimed independently
+  `frames/live/`; Up Next's thumbnail is `thumb.jpg` beside them
+  ([viewers.md](./viewers.md#up-next-offers-the-subjects-next-lecture)). They must stay separate: the jobs are claimed independently
   and thin at different spacings, so a shared folder's sweep would delete the
   other job's frames mid-run.
 - `GRAB_WIDTH` (768 px, ~30 KB) keeps formulas legible across dozens of
@@ -195,11 +200,108 @@ the lecture and commits its output. The reading copy needs no chapter set; when
 one exists it reads `store::chapters` only to snap window edges and to name
 the enclosing chapter in each prompt.
 
+## Where the lecture ends
+
+Recordings run on after the lecturer signs off — students at the lectern,
+packing up, a black projector — so "watched to the last 30 s" may never
+happen. `lecture_end` finds the line the lecturer finishes on and stores
+`lectures.content_end_seconds`. Whether a line is the lecturer wrapping up or
+a student saying thanks mid-Q&A is a language judgement, so a model reads the
+transcript's tail; a phrase list both missed wordings and matched inside the
+Q&A.
+
+**It is one tool-less turn, not an agent session.** It runs through
+`Harness::one_turn` ([harness.md](./harness.md#one-off-turns)) on the
+`lectureEnd` job's model — no skills, no `AGENTS.md`, no files to open — with
+the brief in `lecture_end::INSTRUCTIONS` (opencode's `oculus-lecture-end`
+agent). The app passes its own harness; the CLI makes one per command. The
+default is Claude `claude-haiku-4-5-20251001` with no effort level. On 30
+hand-labelled recordings it and Codex `gpt-5.6-luna` at `low` each place 28
+ends within 15 s (a phrase list, 26), on a prompt of ~4k tokens.
+
+**The prompt carries the tail inline.** The window is every cue starting in
+the last `TAIL_SECS` (900 s) of the recording, whose length is the row's
+duration or the last cue's end, whichever is later. Each line is `second
+clock  Speaker N: text`, both columns for the reason the outline has them;
+the speaker comes from the cue's `<v Speaker N>` tag
+(`chapters::parse_transcript_voiced`) and is printed only where the voice
+changes — one label per cue doubled the prompt. Above the lines: title, course code and length.
+
+**The picture adds one hint, never a verdict.** With the recording on disk,
+`chapters::tail_luma` decodes only its last 900 s (`-sseof`) and `black_tail`
+looks for a run under luma 10 of at least 60 s that lasts to the end of the
+file, after at least 60 s of picture. Less picture than that is a dead
+capture, so source 2 is read instead, if downloaded. A run found becomes one
+prompt line, "The projector goes black from 48:45 (2925) to the end of the
+recording." Frames are aligned to the file's own length from ffmpeg's log,
+which can run seconds past the row's duration. A still picture is not a hint:
+the last slide is often held while the lecturer talks on. No video, no hint;
+the job needs only the transcript.
+
+**The reply cites a line and quotes it.** `{"ends_at": <second>, "quote":
+"<3–12 words>"}`, or both null for a recording cut off mid-lecture.
+`parse_reply` tolerates the wrapper as chapters' does (prose, fences, an
+envelope, a float, or a string such as `"1911 31:51"` whose first word is
+the second). `validate` does not tolerate the content:
+
+- `ends_at` must lie inside the transcript shown;
+- the quote — lowercased, punctuation to spaces, whitespace collapsed, matched
+  on word boundaries — must lie in a line starting within `NEAR_SECS` (30 s)
+  of it, or run across into the next line, since a sign-off often spans two
+  cues. The nearest such line wins: small models cite the line before the
+  one they quote, so the quote is the evidence and the second only says where
+  to look;
+- a quote found only further away is an error naming the line it is in; a
+  second with no quote, or a quote with no second, is an error.
+
+A rejected reply is asked again once with the reason appended; a second
+rejection is the run's error. A provider failure is not retried. The stored
+end is the **end** of the line the quote finishes in, not the cited start.
+
+**What is stored** (migration 42): `content_end_seconds`, `content_end_quote`,
+`content_end_status` (`NULL | running | ready | none | error`) and
+`content_end_error`. `store::claim_content_end` claims atomically — refused
+while `running`, and over `ready` or `none` unless forced; an `error` re-runs.
+`store::save_content_end` writes the result and, in the same transaction,
+marks the lecture Done when `progress_seconds` is already within 10 s of the
+end. A failed run keeps the previous end, as a failed regenerate keeps old
+chapters; `store::reconcile_content_end_status` sweeps a stale `running` at
+startup.
+
+**The app door** is `lecture_find_end`: it checks the transcript, claims,
+returns, and emits `lecture-end` (`{lectureId, status, seconds, quote,
+error}`) when the turn is done. No progress events — there is one turn and no
+tools.
+
+**The player runs it on first open.** `useLectureEnd` calls `openLectureEnd`
+(`app/src/lib/lectureEnd.ts`), which reads the columns from SQLite rather
+than the player's row and, when `content_end_status` is `NULL` and a
+transcript is on record, starts one run — once per lecture per session, a
+module-level set surviving remounts and StrictMode. Never on `running`,
+`ready`, `none` or `error`; a lecture without a transcript runs once one
+arrives. It shows nothing while running. The module keeps each lecture's
+latest state, from SQLite or the event, outside React, so Done and Up Next
+use an end that lands mid-viewing ([viewers.md](./viewers.md)).
+
+**A list runs it for lectures already started.** The subject's Lectures page
+and Home's Lectures card pass their rows to `findStartedLectureEnds`, which
+starts the same run for each one with a position past 5 s, not Done, a
+transcript and a `NULL` status — sharing the once-per-session set. A position
+already past the end it finds then marks the lecture Done with no reopening.
+
+**A failed run shows in the Chapters tab**, the dock's home for lecture jobs:
+one line under the list, "Couldn't find where this lecture ends — <error>",
+with Retry. Retry passes no `force` — the claim re-runs an `error`, and
+refuses rather than replace an end found meanwhile. An invoke that never
+claims (the transcript gone from disk) shows the same line.
+
 ## Reading them in the player
 
 Chapters appear three ways — the dock's chapter list, the name over the frame,
 and ticks on the scrub bar (2px cuts in the scrim's own black, fixed colours
-because the bar sits over the slide). The reading copy is the Transcript tab's
+because the bar sits over the slide). A found lecture end is a white flag on
+the same bar, standing proud of the track, with the stretch after it dimmed
+(`endAt` on `MediaPlayer`, from `contentEnd`). The reading copy is the Transcript tab's
 **Enhanced** register beside Standard.
 
 **The dock is Chapters / Transcript / Chat.** Transcript is offered only
@@ -249,6 +351,7 @@ run is in flight.
 - Keep both `second` and `timestamp` in the outline and the reading prompt; a model converting between them rounds and fails validation.
 - Don't let the model set `para`; `mark_paragraphs` knows the slide changes exactly.
 - Keep the startup reconciles, or a crashed run leaves the lecture `running` and every retry refused.
+- `oculus lecture end --dry-run` and `--print-prompt` must not touch the `content_end_*` columns: they run against databases without migration 42.
 - Don't listen on `lectures-changed` for a job's end; it fires on every progress save.
-- `cue_gaps`/`parse_transcript` must read timestamps the way `parseVtt` in `app/src/lib/lectures.ts` does (`HH:MM:SS.mmm` and `MM:SS.mmm`), or a boundary lands on a different second in each.
+- `cue_gaps`/`parse_transcript` must read timestamps the way `parseVtt` in `app/src/lib/media.ts` does (`HH:MM:SS.mmm` and `MM:SS.mmm`), or a boundary lands on a different second in each.
 - Don't use a `currentTime` prop in the dock panels; it breaks their memo — read `atRef`.

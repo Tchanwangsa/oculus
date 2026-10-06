@@ -337,6 +337,166 @@ impl Ctx {
         Ok(())
     }
 
+    /// `lecture_end` over one lecture or many, the job the app runs too; one
+    /// line (or JSON object) per lecture. `--dry-run` and `--print-prompt`
+    /// never touch the columns migration 42 adds.
+    pub(crate) fn lecture_end(&self, args: &LectureEndArgs) -> Result<(), String> {
+        use app_lib::lecture_end;
+
+        let pool = self.db().ok_or("lectures live in the database")?;
+        let ids: Vec<String> = if args.all {
+            let sql = if args.force || args.dry_run || args.print_prompt {
+                "SELECT id FROM lectures WHERE transcript_path IS NOT NULL ORDER BY date"
+            } else {
+                "SELECT id FROM lectures
+                  WHERE transcript_path IS NOT NULL AND content_end_status IS NULL ORDER BY date"
+            };
+            self.rt
+                .block_on(sqlx::query_scalar(sql).fetch_all(&pool))
+                .map_err(|e| e.to_string())?
+        } else {
+            args.ids
+                .iter()
+                .map(|id| self.one_lecture(&pool, id).map(|(id, ..)| id))
+                .collect::<Result<_, _>>()?
+        };
+
+        if args.print_prompt {
+            for id in &ids {
+                let lecture = self.rt.block_on(lecture_end::load(&pool, &self.data_dir, id))?;
+                let prepared = lecture_end::prepare(&lecture)?;
+                println!("{}\n\n---\n\n{}", lecture_end::INSTRUCTIONS, prepared.prompt);
+            }
+            return Ok(());
+        }
+        if ids.is_empty() {
+            if !self.json {
+                println!("{}", paint("no lecture is waiting for its end to be found", DIM));
+            }
+            return Ok(());
+        }
+
+        let selection = self.job_selection(
+            &pool,
+            jobs::Job::LectureEnd,
+            [&args.provider, &args.model, &args.effort],
+        )?;
+        // One harness for the whole run, so Codex and opencode start one server.
+        let harness = app_lib::harness::Harness::new(self.data_dir.clone());
+
+        #[derive(Serialize)]
+        struct Row {
+            id: String,
+            title: String,
+            duration: Option<u32>,
+            /// The stored end: the end of the line the quote finishes in.
+            ends_at: Option<u32>,
+            /// The start of the line the model cited.
+            cue_start: Option<u32>,
+            quote: Option<String>,
+            status: &'static str,
+            error: Option<String>,
+            black_from: Option<u32>,
+            window_cues: usize,
+            prompt_chars: usize,
+            elapsed_ms: u128,
+        }
+
+        let mut errors: Vec<String> = Vec::new();
+        for id in &ids {
+            let started = std::time::Instant::now();
+            let mut row = Row {
+                id: id.clone(),
+                title: id.clone(),
+                duration: None,
+                ends_at: None,
+                cue_start: None,
+                quote: None,
+                status: "error",
+                error: None,
+                black_from: None,
+                window_cues: 0,
+                prompt_chars: 0,
+                elapsed_ms: 0,
+            };
+            let mut marked_done = false;
+            let outcome = (|| -> Result<Option<lecture_end::Found>, String> {
+                let lecture = self.rt.block_on(lecture_end::load(&pool, &self.data_dir, id))?;
+                row.title = lecture.title.clone();
+                row.duration = Some(lecture.duration);
+                if !args.dry_run {
+                    self.rt.block_on(lecture_end::claim(&pool, &lecture, args.force, "`--force` re-runs it"))?;
+                }
+                let outcome = lecture_end::prepare(&lecture).and_then(|prepared| {
+                    row.duration = Some(prepared.length);
+                    row.black_from = prepared.black_from;
+                    row.window_cues = prepared.lines.len();
+                    row.prompt_chars = prepared.prompt.chars().count();
+                    lecture_end::find(&harness, &selection, &prepared)
+                });
+                if !args.dry_run {
+                    marked_done = self.rt.block_on(lecture_end::record(&pool, id, &outcome))?;
+                }
+                outcome
+            })();
+            row.elapsed_ms = started.elapsed().as_millis();
+            match outcome {
+                Ok(Some(found)) => {
+                    row.status = "ready";
+                    row.ends_at = Some(found.end);
+                    row.cue_start = Some(found.cue_start);
+                    row.quote = Some(found.quote);
+                }
+                Ok(None) => row.status = "none",
+                Err(e) => {
+                    row.error = Some(e.clone());
+                    errors.push(e);
+                }
+            }
+
+            if self.json {
+                println!("{}", serde_json::to_string(&row).map_err(|e| e.to_string())?);
+                continue;
+            }
+            // A lone lecture's error is the command's; `main` prints it.
+            if ids.len() == 1 && row.error.is_some() {
+                break;
+            }
+            let length = paint(&row.duration.map(clock).unwrap_or_default(), DIM);
+            let said = match (row.status, row.ends_at, &row.quote, &row.error) {
+                ("ready", Some(end), Some(quote), _) => {
+                    format!("ends {}  {}", paint(&clock(end), BOLD), paint(&format!("\"{quote}\""), DIM))
+                }
+                ("none", ..) => paint("no end — cut off mid-lecture", DIM),
+                (_, _, _, Some(e)) => format!("{} {e}", paint("error:", RED)),
+                _ => String::new(),
+            };
+            let mut notes: Vec<String> = Vec::new();
+            if let Some(at) = row.black_from {
+                notes.push(format!("black from {}", clock(at)));
+            }
+            if marked_done {
+                notes.push("marked done".into());
+            }
+            if args.dry_run {
+                notes.push("dry run".into());
+            }
+            notes.push(format!("{:.1}s", row.elapsed_ms as f64 / 1000.0));
+            println!(
+                "{}  {length}  {said}  {}",
+                paint(&row.title, BOLD),
+                paint(&notes.join(" · "), DIM)
+            );
+        }
+        harness.shutdown();
+
+        match errors.len() {
+            0 => Ok(()),
+            1 if ids.len() == 1 => Err(errors.remove(0)),
+            n => Err(format!("{n} of {} lecture(s) failed", ids.len())),
+        }
+    }
+
     /// The job's configured model, with `[provider, model, effort]` flags
     /// overriding what they name; the choice is printed unless `--json`.
     fn job_selection(

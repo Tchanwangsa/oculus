@@ -390,6 +390,18 @@ pub async fn reconcile_reading_status(pool: &SqlitePool) -> Result<u64, String> 
     .map_err(|e| e.to_string())
 }
 
+/// Lecture-end runs killed mid-job. The found end, if any, stays.
+pub async fn reconcile_content_end_status(pool: &SqlitePool) -> Result<u64, String> {
+    sqlx::query(
+        "UPDATE lectures SET content_end_status = NULL, content_end_error = NULL
+          WHERE content_end_status = 'running'",
+    )
+    .execute(pool)
+    .await
+    .map(|r| r.rows_affected())
+    .map_err(|e| e.to_string())
+}
+
 // ── Calendar ─────────────────────────────────────────────────────────────────
 
 /// Replace a subject's calendar rows with what Canvas just returned.
@@ -723,6 +735,117 @@ pub async fn reading(
         .collect())
 }
 
+// ── Where a lecture's content ends (`lecture_end`) ───────────────────────────
+
+/// What [`claim_content_end`] got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndClaim {
+    Claimed,
+    /// Another run holds it.
+    Running,
+    /// A `ready` or `none` result stands and `force` was not given.
+    Found,
+    NoLecture,
+}
+
+/// Atomically claim a lecture-end run: refused while one is `running`, and
+/// over a `ready` or `none` result unless `force`; an `error` re-runs freely.
+pub async fn claim_content_end(
+    pool: &SqlitePool,
+    lecture_id: &str,
+    force: bool,
+) -> Result<EndClaim, String> {
+    let claimed = sqlx::query(
+        "UPDATE lectures
+            SET content_end_status = 'running', content_end_error = NULL
+          WHERE id = ?1
+            AND (content_end_status IS NULL
+                 OR content_end_status = 'error'
+                 OR (?2 AND content_end_status <> 'running'))",
+    )
+    .bind(lecture_id)
+    .bind(force)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .rows_affected()
+        == 1;
+    if claimed {
+        return Ok(EndClaim::Claimed);
+    }
+    let status: Option<Option<String>> =
+        sqlx::query_scalar("SELECT content_end_status FROM lectures WHERE id = ?1")
+            .bind(lecture_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    Ok(match status {
+        None => EndClaim::NoLecture,
+        Some(Some(s)) if s == "running" => EndClaim::Running,
+        Some(_) => EndClaim::Found,
+    })
+}
+
+/// Write a found end (`None`: the recording has none, it was cut off) and, in
+/// the same transaction, mark the lecture Done if it was already watched to
+/// within 10 s of that end. Answers whether it did.
+pub async fn save_content_end(
+    pool: &SqlitePool,
+    lecture_id: &str,
+    end: Option<(u32, &str)>,
+) -> Result<bool, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query(
+        "UPDATE lectures
+            SET content_end_seconds = ?1,
+                content_end_quote   = ?2,
+                content_end_status  = ?3,
+                content_end_error   = NULL
+          WHERE id = ?4",
+    )
+    .bind(end.map(|(seconds, _)| i64::from(seconds)))
+    .bind(end.map(|(_, quote)| quote))
+    .bind(if end.is_some() { "ready" } else { "none" })
+    .bind(lecture_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut completed = false;
+    if let Some((seconds, _)) = end {
+        completed = sqlx::query(
+            "UPDATE lectures SET completed = 1
+              WHERE id = ?1 AND completed = 0 AND progress_seconds >= ?2 - 10",
+        )
+        .bind(lecture_id)
+        .bind(i64::from(seconds))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected()
+            == 1;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(completed)
+}
+
+/// A failed run. A previous end stays, as a failed chapter regenerate keeps
+/// the old set.
+pub async fn set_content_end_error(
+    pool: &SqlitePool,
+    lecture_id: &str,
+    error: &str,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE lectures SET content_end_status = 'error', content_end_error = ?1 WHERE id = ?2",
+    )
+    .bind(error)
+    .bind(lecture_id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub async fn lectures(pool: &SqlitePool, subject_id: i64) -> Result<Vec<LectureRow>, String> {
     let rows = sqlx::query(
         "SELECT id, title, date, duration_seconds, video_path, transcript_path
@@ -964,6 +1087,66 @@ mod tests {
         assert_eq!(row.get::<String, _>("reading_status"), "error");
         assert!(row.get::<Option<String>, _>("reading_written_at").is_some());
         assert_eq!(row.get::<String, _>("reading_error"), "bad window");
+    }
+
+    #[tokio::test]
+    async fn content_end_claims_saves_backfills_done_and_reconciles() {
+        let pool = migrated_pool().await;
+        sqlx::query("INSERT INTO subjects (id, code, name) VALUES (1, 'SUBJ', 'Subject')")
+            .execute(&pool).await.unwrap();
+        for (id, progress) in [("watched", 1910), ("early", 1000)] {
+            sqlx::query(
+                "INSERT INTO lectures (id, lesson_id, subject_id, title, date, duration_seconds, progress_seconds)
+                 VALUES (?1, ?1, 1, ?1, '2026-01-01', 2400, ?2)",
+            )
+            .bind(id).bind(progress).execute(&pool).await.unwrap();
+        }
+        let row = |id: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query(
+                    "SELECT content_end_seconds, content_end_quote, content_end_status, content_end_error, completed
+                       FROM lectures WHERE id = ?1",
+                )
+                .bind(id).fetch_one(&pool).await.unwrap()
+            }
+        };
+
+        let claim = |id: &'static str, force: bool| {
+            let pool = pool.clone();
+            async move { claim_content_end(&pool, id, force).await.unwrap() }
+        };
+        assert_eq!(claim("watched", false).await, EndClaim::Claimed);
+        assert_eq!(claim("watched", true).await, EndClaim::Running, "force never takes a running claim");
+        assert!(save_content_end(&pool, "watched", Some((1915, "see you tomorrow"))).await.unwrap(),
+            "1910 s watched is within 10 s of a 1915 s end");
+        let saved = row("watched").await;
+        assert_eq!(saved.get::<i64, _>("content_end_seconds"), 1915);
+        assert_eq!(saved.get::<String, _>("content_end_quote"), "see you tomorrow");
+        assert_eq!(saved.get::<String, _>("content_end_status"), "ready");
+        assert_eq!(saved.get::<i64, _>("completed"), 1);
+        assert_eq!(claim("watched", false).await, EndClaim::Found);
+        assert_eq!(claim("watched", true).await, EndClaim::Claimed);
+        assert_eq!(reconcile_content_end_status(&pool).await.unwrap(), 1);
+        let swept = row("watched").await;
+        assert_eq!(swept.get::<Option<String>, _>("content_end_status"), None);
+        assert_eq!(swept.get::<i64, _>("content_end_seconds"), 1915, "the found end survives a sweep");
+
+        assert_eq!(claim("early", false).await, EndClaim::Claimed);
+        assert!(!save_content_end(&pool, "early", Some((1915, "that's it"))).await.unwrap());
+        assert_eq!(row("early").await.get::<i64, _>("completed"), 0);
+        assert_eq!(claim("early", true).await, EndClaim::Claimed);
+        set_content_end_error(&pool, "early", "bad reply").await.unwrap();
+        let failed = row("early").await;
+        assert_eq!(failed.get::<String, _>("content_end_status"), "error");
+        assert_eq!(failed.get::<String, _>("content_end_error"), "bad reply");
+        assert_eq!(failed.get::<i64, _>("content_end_seconds"), 1915, "a failed re-run keeps the end");
+        assert_eq!(claim("early", false).await, EndClaim::Claimed, "an error re-runs without force");
+        assert!(!save_content_end(&pool, "early", None).await.unwrap());
+        let none = row("early").await;
+        assert_eq!(none.get::<String, _>("content_end_status"), "none");
+        assert_eq!(none.get::<Option<i64>, _>("content_end_seconds"), None);
+        assert_eq!(claim("missing", false).await, EndClaim::NoLecture);
     }
 
     // ── Page records ─────────────────────────────────────────────────────────

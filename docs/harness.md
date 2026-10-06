@@ -28,7 +28,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Model picker and its catalogue hook | `app/src/components/harness/ModelPicker.tsx`, `app/src/hooks/useProviderModels.ts` |
 | Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/OpencodePage.tsx`, `app/src/components/settings/opencode/`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeCatalogue.ts` |
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db.ts`, `app/src/pages/settings/JobsPage.tsx` |
-| One-off turns (`Harness::one_off`): thread names, the editor's inline suggestions (`document_suggest`) | `app/src-tauri/src/harness/mod.rs`, `app/src-tauri/src/harness/suggest.rs` |
+| One-off turns (`Harness::one_off`, `Harness::one_turn`): thread names, the editor's inline suggestions (`document_suggest`), where a lecture ends | `app/src-tauri/src/harness/mod.rs`, `app/src-tauri/src/harness/suggest.rs`, `app/src-tauri/src/lecture_end.rs` |
 | `@` menu and mention input | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
 | Send, queue and stop controls shared by both composers | `app/src/components/harness/SendControls.tsx` |
 | Pictures pasted or dropped into a composer | `app/src-tauri/src/harness/attach.rs`, `app/src/hooks/useAttachments.ts`, `app/src/hooks/useFileDrop.ts` |
@@ -266,15 +266,22 @@ and a failure never retries; `clean_title` rejects prose.
 
 ## One-off turns
 
-Naming and the editor's suggestions share `Harness::one_off`: a session outside
-any thread, no rows, no raw log, closed (an opencode session deleted) after its
-turn. Its brief is Claude's `--append-system-prompt`, Codex's
-`developerInstructions` or the head of `agy`'s first message; opencode takes it
-as a hidden agent's prompt (`oculus-namer`, `oculus-writer` in
+Naming, the editor's suggestions and the lecture-end job share
+`Harness::one_off`: a session outside any thread, no rows, no raw log, closed
+(an opencode session deleted) after its turn. Its brief is Claude's
+`--append-system-prompt`, Codex's `developerInstructions` or the head of
+`agy`'s first message; opencode takes it as a hidden agent's prompt
+(`oculus-namer`, `oculus-writer`, `oculus-lecture-end` in
 `agents/opencode.json`). Claude runs with `--tools ""`, no skills, no MCP and
 no persisted session, and Codex's thread is `ephemeral`; both opencode agents
 end on a `"*": "deny"`. Codex and `agy` cannot drop their tools, so the brief
 forbids them.
+
+`Harness::one_turn` is the plain shape — prompt in, reply text out, no
+timeout — for a job whose prompt carries everything inline. The app passes
+its own harness, so Codex and opencode reuse the running server; the CLI makes
+one per command and shuts it down after. Naming keeps its own 90-second
+timeout.
 
 **Suggestions** (`document_suggest`, the `documentSuggestions` job) are one
 short turn per pause in typing. The prompt carries the note's path, up to
@@ -424,8 +431,9 @@ provider-verified model (Meta's Muse Spark) fails once in the timeline.
 
 ## Per-job models
 
-Chaptering, the reading copy, thread naming and document suggestions each name
-their agent, model and level in a Settings → Jobs row using `ModelPicker`. The registry is one
+Chaptering, the reading copy, the lecture end, thread naming and document
+suggestions each name their agent, model and level in a Settings → Jobs row
+using `ModelPicker`. The registry is one
 `settings` value, `job_models`, read by `jobs.rs` and written by `db.ts`; both
 carry the defaults and must agree (a new job is a `Job` variant plus entries in
 `JOBS` and `DEFAULT_JOB_MODELS`). A bad value costs the configuration, not the

@@ -80,11 +80,11 @@ allowed set.
 
 ## What not to run to answer a question
 
-`oculus lecture chapters` and `oculus lecture reading` **generate** things —
-they drive a model, cost quota, take minutes to an hour, and leave an existing
-result alone unless given `--force`. They are not lookups. Reach for them only
-when asked to produce chapters or a reading copy, never to find out what was
-said.
+`oculus lecture chapters`, `oculus lecture reading` and `oculus lecture end`
+**generate** things — they drive a model, cost quota (chapters and a reading
+copy take minutes to an hour), and leave an existing result alone unless given
+`--force`. They are not lookups. Reach for them only when asked to produce
+chapters, a reading copy or a lecture's end, never to find out what was said.
 
 `oculus lecture candidates` is free and writes nothing, but it returns
 boundary moments with no words attached — `outline.md` already has those

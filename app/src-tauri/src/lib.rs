@@ -18,6 +18,7 @@ pub mod harness;
 pub mod keepalive;
 #[cfg(target_os = "macos")]
 mod keys;
+pub mod lecture_end;
 pub(crate) mod lecture_jobs;
 mod lectures;
 pub mod md;
@@ -92,6 +93,10 @@ pub fn run() {
             chapters::app::reconcile(app.handle());
             reading::app::reconcile(app.handle());
 
+            lecture_end::app::reconcile(app.handle());
+
+            // Open and active time per hour, from the window and the frontend's pings.
+            usage::start(app.handle());
             // Session restore: replay the saved cookie with a server-side
             // ping. Rejected → try auto-recover, else sign out; unreachable →
             // stay optimistic, since offline is not expired.
@@ -278,7 +283,9 @@ pub fn run() {
             chapters::app::lecture_grab_frames,
             reading::app::lecture_write_reading,
             storage::storage_report,
+            chapters::app::lecture_thumbnail,
             browser::browser_open_url,
+            lecture_end::app::lecture_find_end,
             browser::browser_state,
             browser::browser_place,
             browser::browser_set_viewport,

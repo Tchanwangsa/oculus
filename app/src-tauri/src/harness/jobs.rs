@@ -21,6 +21,8 @@ pub enum Job {
     LectureChapters,
     /// `oculus lecture reading` / `lecture_write_reading`.
     LectureReading,
+    /// `oculus lecture end` / `lecture_find_end`: one tool-less turn.
+    LectureEnd,
     /// The one-line naming turn after a thread's first exchange.
     ThreadNaming,
     /// The document editor's inline completion (`document_suggest`).
@@ -33,6 +35,7 @@ impl Job {
         match self {
             Job::LectureChapters => "lectureChapters",
             Job::LectureReading => "lectureReading",
+            Job::LectureEnd => "lectureEnd",
             Job::ThreadNaming => "threadNaming",
             Job::DocumentSuggestions => "documentSuggestions",
         }
@@ -66,6 +69,12 @@ pub fn default_selection(job: Job) -> JobSelection {
             provider: Provider::Codex,
             model: "gpt-5.6-luna".into(),
             reasoning_effort: Some("medium".into()),
+        },
+        Job::LectureEnd => JobSelection {
+            provider: Provider::Claude,
+            // Provisional, until the lecture-end eval picks the default.
+            model: "claude-haiku-4-5-20251001".into(),
+            reasoning_effort: None,
         },
         Job::ThreadNaming => JobSelection {
             provider: Provider::Claude,
@@ -180,6 +189,12 @@ mod tests {
             (r.provider, r.model.as_str(), r.effort()),
             (Provider::Codex, "gpt-5.6-luna", Some("medium"))
         );
+        let e = default_selection(Job::LectureEnd);
+        assert_eq!(
+            (e.provider, e.model.as_str(), e.effort()),
+            (Provider::Claude, "claude-haiku-4-5-20251001", None)
+        );
+        assert_eq!(Job::LectureEnd.key(), "lectureEnd");
         let d = default_selection(Job::DocumentSuggestions);
         assert_eq!(
             (d.provider, d.model.as_str(), d.effort()),

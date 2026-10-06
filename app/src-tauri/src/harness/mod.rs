@@ -673,6 +673,7 @@ impl Harness {
             &opencode::OneOffPrompts {
                 naming: NAMING_INSTRUCTIONS,
                 writer: suggest::INSTRUCTIONS,
+                lecture_end: crate::lecture_end::INSTRUCTIONS,
             },
         )?;
         let server = OpencodeServer::spawn(OpencodeSpawn {
@@ -933,6 +934,28 @@ impl Harness {
             (Some(t), _) => Ok(t),
             (None, Some(e)) => Err(e.clone()),
             (None, None) => Err(format!("no usable name in the reply: {text:?}")),
+        }
+    }
+
+    /// One tool-less turn outside any thread ([`Harness::one_off`]): `prompt`
+    /// in, the reply's text out, the session closed after. No timeout: a job's
+    /// stale `running` is swept at startup instead.
+    pub fn one_turn(
+        &self,
+        sel: &jobs::JobSelection,
+        instructions: &str,
+        agent: &'static str,
+        prompt: &str,
+    ) -> Result<String, String> {
+        let turn = self.one_off(sel, instructions, agent)?;
+        let answer = turn.handle.send(prompt).map(|()| turn.wait(None, "answering"));
+        turn.close();
+        let answer = answer?;
+        let text = answer.message_or_streamed();
+        match &answer.failed {
+            Some(e) if text.trim().is_empty() => Err(e.clone()),
+            None if text.trim().is_empty() => Err("the agent replied with nothing".to_string()),
+            _ => Ok(text.to_string()),
         }
     }
 
@@ -1449,29 +1472,6 @@ pub mod app {
         .await
     }
 
-    /// Whether a provider has credentials, asked of the CLI every time (see
-    /// `signin.rs` for why this is never cached).
-    #[tauri::command]
-    pub async fn harness_sign_in_status(provider: Provider) -> signin::SignInStatus {
-        tokio::task::spawn_blocking(move || signin::status(provider))
-            .await
-            .unwrap_or_else(|e| signin::SignInStatus {
-                provider,
-                signed_in: None,
-                account: None,
-                error: Some(e.to_string()),
-            })
-    }
-
-    /// Run the provider's own login flow. Output streams on
-    /// `signin::SIGNIN_EVENT`; the first URL opens in the *system* browser,
-    /// where the student is already signed in, and rides the event too so
-    /// the dialog can offer it to copy.
-    #[tauri::command]
-    pub async fn harness_sign_in_start(app: AppHandle, provider: Provider) -> Result<(), String> {
-        blocking(move || {
-            let emitter = app.clone();
-            signin::start(provider, move |line| {
     /// Each installed CLI's version against its newest published one. The
     /// registry answers are cached in Rust; `recheck` drops them.
     #[tauri::command]
@@ -1499,6 +1499,29 @@ pub mod app {
         .await
     }
 
+    /// Whether a provider has credentials, asked of the CLI every time (see
+    /// `signin.rs` for why this is never cached).
+    #[tauri::command]
+    pub async fn harness_sign_in_status(provider: Provider) -> signin::SignInStatus {
+        tokio::task::spawn_blocking(move || signin::status(provider))
+            .await
+            .unwrap_or_else(|e| signin::SignInStatus {
+                provider,
+                signed_in: None,
+                account: None,
+                error: Some(e.to_string()),
+            })
+    }
+
+    /// Run the provider's own login flow. Output streams on
+    /// `signin::SIGNIN_EVENT`; the first URL opens in the *system* browser,
+    /// where the student is already signed in, and rides the event too so
+    /// the dialog can offer it to copy.
+    #[tauri::command]
+    pub async fn harness_sign_in_start(app: AppHandle, provider: Provider) -> Result<(), String> {
+        blocking(move || {
+            let emitter = app.clone();
+            signin::start(provider, move |line| {
                 if let Some(url) = line.url.as_deref() {
                     tauri_plugin_opener::open_url(url, None::<&str>).ok();
                 }

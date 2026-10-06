@@ -1147,6 +1147,7 @@ Commands:
   candidates  Find where a recording plausibly changes topic
   chapters    Name a recording's chapters with a CLI agent, and store them
   reading     Write a recording's reading copy with a CLI agent
+  end         Find where a recording's lecture ends, before its Q&A and dead air
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -1272,7 +1273,57 @@ Options:
           Print help (see a summary with '-h')
 ```
 
-## `oculus docs`
+### `oculus lecture end`
+
+```
+Find where a recording's lecture ends, before its Q&A and dead air
+
+Recordings run on after the lecturer signs off — students at the lectern, packing up, a
+black projector — and the microphone keeps transcribing. This hands the last 15 minutes
+of the transcript to a model in one short turn with no tools, and asks which line the
+lecturer finishes on. The model cites that line's second and quotes it; both are checked
+against the transcript, and a reply that fails is asked again once with the reason. A
+recording cut off mid-lecture has no end, and is stored as such.
+
+If the recording is downloaded, its last 15 minutes are decoded too: a projector that
+goes black for good is mentioned to the model as a hint, never applied on its own. Only
+the transcript is required.
+
+The end stored is the end of the line the quote finishes in. A lecture already watched
+to within 10 seconds of it is marked done.
+
+Usage: oculus lecture end [OPTIONS] <LECTURE_ID|--all>
+
+Arguments:
+  [LECTURE_ID]...
+          Lecture ids, as `oculus list -l` prints them; a unique prefix is enough
+
+Options:
+      --all
+          Every lecture with a transcript whose end has not been looked for (with
+          --force, every lecture with a transcript)
+
+  -p, --provider <PROVIDER>
+          Which CLI to drive (default: the configured one)
+
+          [possible values: claude, codex, opencode]
+
+  -m, --model <MODEL>
+          Model to request (default: the configured one)
+
+      --effort <EFFORT>
+          Reasoning effort — low, medium, high, xhigh, max (default: the configured one)
+
+      --force
+          Re-run over a lecture whose end is already found, replacing it
+
+      --dry-run
+          Ask and print, but write nothing — not the end, not the status, not done
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ## `oculus transcribe`
 
 ```

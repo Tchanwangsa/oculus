@@ -763,6 +763,19 @@ CREATE TABLE IF NOT EXISTS usage_context_hours (
                         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 42,
+            description: "lectures: where the planned content ends",
+            // Written only by `lecture_end` through `store`; status is
+            // NULL | running | ready | none | error, as docs/chapters.md says.
+            sql: r#"
+ALTER TABLE lectures ADD COLUMN content_end_seconds INTEGER;
+ALTER TABLE lectures ADD COLUMN content_end_quote TEXT;
+ALTER TABLE lectures ADD COLUMN content_end_status TEXT;
+ALTER TABLE lectures ADD COLUMN content_end_error TEXT;
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

@@ -81,6 +81,7 @@ fn main() {
             LectureAction::Candidates(a) => ctx.lecture_candidates(&a),
             LectureAction::Chapters(a) => ctx.lecture_chapters(&a),
             LectureAction::Reading(a) => ctx.lecture_reading(&a),
+            LectureAction::End(a) => ctx.lecture_end(&a),
         },
         Some(Command::Memory { action }) => match action {
             MemoryAction::List(a) => ctx.memory_list(&a),
@@ -91,8 +92,8 @@ fn main() {
             MemoryAction::Reindex(a) => ctx.memory_reindex(&a),
             MemoryAction::Promote(a) => ctx.memory_promote(&a),
         },
-        Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Transcribe(args)) => ctx.transcribe(&args),
+        Some(Command::Docs(args)) => ctx.docs(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
     };
 

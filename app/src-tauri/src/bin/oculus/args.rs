@@ -639,6 +639,7 @@ pub(crate) enum LectureAction {
     Candidates(LectureCandidatesArgs),
     Chapters(LectureChaptersArgs),
     Reading(LectureReadingArgs),
+    End(LectureEndArgs),
 }
 
 /// Find where a recording plausibly changes topic
@@ -742,7 +743,54 @@ pub(crate) struct LectureReadingArgs {
     pub(crate) source: Option<u8>,
 }
 
-// ── memory ──────────────────────────────────────────────────────────────────
+/// Find where a recording's lecture ends, before its Q&A and dead air
+///
+/// Recordings run on after the lecturer signs off — students at the lectern,
+/// packing up, a black projector — and the microphone keeps transcribing.
+/// This hands the last 15 minutes of the transcript to a model in one short
+/// turn with no tools, and asks which line the lecturer finishes on. The
+/// model cites that line's second and quotes it; both are checked against the
+/// transcript, and a reply that fails is asked again once with the reason. A
+/// recording cut off mid-lecture has no end, and is stored as such.
+///
+/// If the recording is downloaded, its last 15 minutes are decoded too: a
+/// projector that goes black for good is mentioned to the model as a hint,
+/// never applied on its own. Only the transcript is required.
+///
+/// The end stored is the end of the line the quote finishes in. A lecture
+/// already watched to within 10 seconds of it is marked done.
+#[derive(Args)]
+#[command(group(clap::ArgGroup::new("which").required(true).args(["ids", "all"])))]
+pub(crate) struct LectureEndArgs {
+    /// Lecture ids, as `oculus list -l` prints them; a unique prefix is enough
+    #[arg(value_name = "LECTURE_ID")]
+    pub(crate) ids: Vec<String>,
+    /// Every lecture with a transcript whose end has not been looked for
+    /// (with --force, every lecture with a transcript)
+    #[arg(long)]
+    pub(crate) all: bool,
+    // As for chapters: flags override the job's configured selection.
+    /// Which CLI to drive (default: the configured one)
+    #[arg(short, long, value_parser = ["claude", "codex", "opencode"])]
+    pub(crate) provider: Option<String>,
+    /// Model to request (default: the configured one)
+    #[arg(short, long)]
+    pub(crate) model: Option<String>,
+    /// Reasoning effort — low, medium, high, xhigh, max (default: the
+    /// configured one)
+    #[arg(long)]
+    pub(crate) effort: Option<String>,
+    /// Re-run over a lecture whose end is already found, replacing it
+    #[arg(long)]
+    pub(crate) force: bool,
+    /// Ask and print, but write nothing — not the end, not the status, not done
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+    /// Print the brief and the prompt each lecture would send, and stop there
+    #[arg(long, hide = true)]
+    pub(crate) print_prompt: bool,
+}
+
 // ── transcribe ──────────────────────────────────────────────────────────────
 
 /// Transcribe a video that has no captions, on Groq or on this Mac
@@ -778,6 +826,7 @@ pub(crate) struct TranscribeArgs {
     pub(crate) force: bool,
 }
 
+// ── memory ──────────────────────────────────────────────────────────────────
 
 #[derive(Subcommand)]
 pub(crate) enum MemoryAction {

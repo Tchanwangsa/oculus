@@ -52,6 +52,7 @@ pub const AGENT: &str = "oculus";
 /// and the turn's brief as the whole prompt.
 pub const NAMING_AGENT: &str = "oculus-namer";
 pub const WRITER_AGENT: &str = "oculus-writer";
+pub const LECTURE_END_AGENT: &str = "oculus-lecture-end";
 
 const CONFIG_TEMPLATE: &str = include_str!("../../templates/OPENCODE.template.json");
 pub const CONFIG_NAME: &str = "opencode.json";
@@ -75,7 +76,7 @@ pub struct OpencodeSessionOpts {
     pub variant: Option<String>,
     /// The per-thread part of the brief, sent ahead of the first message.
     pub brief: String,
-    /// [`AGENT`], [`NAMING_AGENT`] or [`WRITER_AGENT`].
+    /// [`AGENT`], [`NAMING_AGENT`], [`WRITER_AGENT`] or [`LECTURE_END_AGENT`].
     pub agent: &'static str,
 }
 
@@ -97,7 +98,6 @@ pub struct ModelInfo {
     pub tool_call: bool,
     pub text_input: bool,
     pub text_output: bool,
-}
     /// What Settings → opencode's model table shows.
     pub facts: ModelFacts,
 }
@@ -127,6 +127,7 @@ pub struct ModelCost {
     pub output: Option<f64>,
     pub cache_read: Option<f64>,
     pub cache_write: Option<f64>,
+}
 
 /// One row of Settings → AI's provider list, in the shape
 /// `app/src/lib/opencodeAuth.ts` reads.
@@ -952,10 +953,12 @@ fn ps_field<'a>(rest: &mut &'a str) -> Option<&'a str> {
 
 // ── The config document ──────────────────────────────────────────────────────
 
-/// The hidden agents' prompts, one per [`NAMING_AGENT`] and [`WRITER_AGENT`].
+/// The hidden agents' prompts, one per [`NAMING_AGENT`], [`WRITER_AGENT`] and
+/// [`LECTURE_END_AGENT`].
 pub struct OneOffPrompts<'a> {
     pub naming: &'a str,
     pub writer: &'a str,
+    pub lecture_end: &'a str,
 }
 
 /// Write `agents/opencode.json`: the permissions and the system prompts.
@@ -982,6 +985,7 @@ fn render_config(library: &Path, prompt: &str, one_off: &OneOffPrompts) -> Strin
         .replace("\"{{PROMPT}}\"", &json_string(prompt))
         .replace("\"{{NAMING_PROMPT}}\"", &json_string(one_off.naming))
         .replace("\"{{WRITER_PROMPT}}\"", &json_string(one_off.writer))
+        .replace("\"{{LECTURE_END_PROMPT}}\"", &json_string(one_off.lecture_end))
 }
 
 fn json_string(s: &str) -> String {
@@ -1231,18 +1235,14 @@ fn parse_models(v: &Value) -> Result<Vec<ModelInfo>, String> {
                 tool_call: flag(&caps["toolcall"]),
                 text_input: flag(&caps["input"]["text"]),
                 text_output: flag(&caps["output"]["text"]),
+                facts: facts(m),
             });
         }
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
-                facts: facts(m),
     Ok(out)
 }
 
-/// A model's reasoning levels: an object keyed by id, or an array of `{id}`.
-fn variant_ids(v: &Value) -> Vec<String> {
-    if let Some(a) = v.as_array() {
-        return a.iter().filter_map(|x| x["id"].as_str().map(String::from)).collect();
 /// The table's columns off one catalogue row. Absent stays `None`, never 0.
 fn facts(m: &Value) -> ModelFacts {
     let caps = &m["capabilities"];
@@ -1269,6 +1269,10 @@ fn facts(m: &Value) -> ModelFacts {
     }
 }
 
+/// A model's reasoning levels: an object keyed by id, or an array of `{id}`.
+fn variant_ids(v: &Value) -> Vec<String> {
+    if let Some(a) = v.as_array() {
+        return a.iter().filter_map(|x| x["id"].as_str().map(String::from)).collect();
     }
     match v.as_object() {
         Some(o) => o.keys().cloned().collect(),
@@ -2025,10 +2029,6 @@ mod tests {
         );
     }
 
-    /// `OpencodeModel` in `app/src/lib/harness.ts` reads these names; a rename
-    /// is a silently empty model list, not a type error.
-    #[test]
-    fn a_model_row_is_spelled_the_way_the_picker_reads_it() {
     #[test]
     fn a_model_s_facts_come_off_the_row_and_an_unpriced_row_is_unknown_not_free() {
         let v = json!({
@@ -2075,6 +2075,10 @@ mod tests {
         assert_eq!(cost, ["cacheRead", "cacheWrite", "input", "output"]);
     }
 
+    /// `OpencodeModel` in `app/src/lib/harness.ts` reads these names; a rename
+    /// is a silently empty model list, not a type error.
+    #[test]
+    fn a_model_row_is_spelled_the_way_the_picker_reads_it() {
         let json = serde_json::to_value(ModelInfo {
             id: "anthropic/claude-opus-4-5".into(),
             display_name: "Claude Opus 4.5 (latest)".into(),
@@ -2085,22 +2089,22 @@ mod tests {
             tool_call: true,
             text_input: true,
             text_output: true,
+            facts: ModelFacts::default(),
         })
         .unwrap();
         let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(|k| k.as_str()).collect();
         keys.sort_unstable();
-            facts: ModelFacts::default(),
         assert_eq!(
             keys,
             [
                 "defaultVariant",
                 "description",
                 "displayName",
+                "facts",
                 "id",
                 "isDefault",
                 "textInput",
                 "textOutput",
-                "facts",
                 "toolCall",
                 "variants"
             ]
@@ -2143,6 +2147,7 @@ mod tests {
             &OneOffPrompts {
                 naming: "You name conversations.",
                 writer: "You complete \"notes\".",
+                lecture_end: "You find where lectures end.",
             },
         );
         let v: Value = serde_json::from_str(&rendered).expect("the template renders valid JSON");
@@ -2178,7 +2183,11 @@ mod tests {
             .contains("\"quoted\" \\ backslash"));
         // The one-off agents are hidden, tool-less (a trailing `*` deny is the
         // last rule for every tool) and carry their own prompt.
-        for (agent, prompt) in [(NAMING_AGENT, "You name conversations."), (WRITER_AGENT, "You complete \"notes\".")] {
+        for (agent, prompt) in [
+            (NAMING_AGENT, "You name conversations."),
+            (WRITER_AGENT, "You complete \"notes\"."),
+            (LECTURE_END_AGENT, "You find where lectures end."),
+        ] {
             assert_eq!(v["agent"][agent]["hidden"], true, "{agent}");
             assert_eq!(v["agent"][agent]["permission"]["*"], "deny", "{agent}");
             assert_eq!(v["agent"][agent]["prompt"], prompt, "{agent}");
@@ -2466,6 +2475,7 @@ mod tests {
             &OneOffPrompts {
                 naming: "You name conversations.",
                 writer: "You complete notes.",
+                lecture_end: "You find where lectures end.",
             },
         )
         .expect("the agent config");
