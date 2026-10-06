@@ -123,6 +123,14 @@ around by reading the raw file. It is fixed by `oculus index <SUBJECT_CODE>`,
 which takes minutes per file and is the student's call, not a thing to launch
 mid-answer.
 
+**A video's words are in `<video>.vtt` beside it**, when there is one. A video
+without it has no transcript yet; `oculus transcribe <video>` makes one with
+the first engine, in the order the student set in Settings, that can take it:
+Groq when they saved a key, which spends their free-tier allowance; Whisper
+run locally on a model downloaded in Settings; or the Mac's on-device speech
+recognition, which takes about a minute an hour of audio. Run it only when
+asked to.
+
 ## `oculus read` — the text of one file
 
 ```bash

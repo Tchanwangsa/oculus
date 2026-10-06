@@ -2,6 +2,7 @@ pub mod agents;
 mod atomic_write;
 mod auth;
 mod blocking;
+mod bundled;
 pub mod browser;
 pub mod calendar;
 pub mod canvas;
@@ -12,6 +13,7 @@ pub mod echo360;
 pub mod ed;
 pub mod embed;
 mod files;
+pub mod groq;
 pub mod harness;
 pub mod keepalive;
 #[cfg(target_os = "macos")]
@@ -41,6 +43,7 @@ pub mod sync;
 mod test_support;
 pub mod terms;
 pub mod voyage;
+pub mod transcribe;
 
 use std::sync::{Arc, Mutex};
 mod usage;
@@ -214,6 +217,12 @@ pub fn run() {
             retrieval::search_pages,
             retrieval::embedding_stats,
             mineru::mineru_set_api_key,
+            transcribe::app::transcribe_video,
+            transcribe::app::apple_speech_status,
+            transcribe::app::whisper_models,
+            transcribe::app::whisper_download_model,
+            transcribe::app::whisper_cancel_download,
+            transcribe::app::whisper_delete_model,
             mineru::mineru_has_api_key,
             mineru::mineru_delete_api_key,
             embed::commands::embed_settings,
@@ -235,6 +244,9 @@ pub fn run() {
             harness::app::harness_sign_in_start,
             harness::app::harness_sign_in_code,
             harness::app::harness_sign_in_cancel,
+            groq::groq_set_api_key,
+            groq::groq_has_api_key,
+            groq::groq_delete_api_key,
             harness::app::harness_claude_models,
             harness::app::harness_codex_models,
             harness::app::harness_antigravity_models,

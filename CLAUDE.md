@@ -18,8 +18,9 @@ source. This file is only the rules; the reasons behind them live in `docs/`.
 
 ## Don't re-add
 
-- A Python process, `uv` step or bundled local inference. The local MinerU
-  engine is the user's own server over HTTP, not ours. Rust comments citing
+- A Python process or `uv` step. Native inference helpers are fine
+  (`apple-speech`, `whisper-cli`); the local MinerU engine is the user's own
+  server over HTTP, not ours. Rust comments citing
   `sidecar/*.py` point at commit `f875bb1`.
 - A BYOK API layer (opencode is the API path), or automations/the Inbox (last
   at `d64dc11`).

@@ -19,8 +19,10 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Shared parse/embed event payload and channels | `app/src-tauri/src/pipeline_events.rs` |
 | Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
-| Credential storage (keychain only); provider probes | `app/src-tauri/src/credentials.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/okta.rs` |
+| Credential storage (keychain only); provider probes | `app/src-tauri/src/credentials.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
 | Lecture video server | `app/src-tauri/src/media.rs` |
+| Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
+| Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
 | In-app browser | `app/src-tauri/src/browser.rs`, `app/src-tauri/capabilities/default.json` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
 | Headless DB writes | `app/src-tauri/src/store.rs`, `app/src-tauri/src/projects.rs` |
@@ -48,8 +50,9 @@ its failure rules are in [parsing.md](./parsing.md).
   `setup`, instead of threading it through the call path. The CLI never binds,
   so the same parse and embed code runs headless and its emits are no-ops.
 - Library text reads, bulk parse-artifact scans, upload import/conversion,
-  Canvas calendar sync and Echo360's HTTP, downloads and ffmpeg run through
-  `blocking::run`, so synchronous I/O cannot hold Tauri's command thread.
+  Canvas calendar sync, Echo360's HTTP, downloads and ffmpeg, and video
+  transcription run through `blocking::run`, so synchronous I/O cannot hold
+  Tauri's command thread.
   Upload batches serialize their name allocation.
 - Credentials go keychain → in-process client. Neither key enters SQLite, the
   WebView, a health response or a progress event. The local engine needs none.

@@ -15,6 +15,10 @@ lightbox) and PDFs, a lecture recording, and a web page.
 ## One markdown renderer serves every surface
 
 `app/src/lib/mathMarkdown.ts` owns delimiter detection and source normalization.
+| Transcription of videos without captions | `app/src-tauri/src/transcribe/`, `app/src-tauri/src/groq.rs`, `app/src/lib/transcribe.ts` |
+| Settings → Transcription: the language, the engine list and each engine's dialog | `app/src/components/settings/TranscriptionSection.tsx`, `app/src/components/settings/GroqDialog.tsx`, `app/src/components/settings/OnDeviceSpeech.tsx`, `app/src/components/settings/LocalWhisper.tsx` |
+| The on-device speech helper | `app/src-tauri/speech/main.swift`, `app/scripts/build-speech.mjs`, `app/src-tauri/src/transcribe/apple.rs` |
+| Local Whisper: the engine, its model files | `app/src-tauri/src/transcribe/whisper.rs`, `app/src-tauri/src/transcribe/whisper_models.rs`, `app/scripts/build-whisper.mjs` |
 Library file rendering always applies KaTeX so math fences and HTML math
 classes work even when there are no dollar delimiters.
 

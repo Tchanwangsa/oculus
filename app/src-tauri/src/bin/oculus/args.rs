@@ -62,6 +62,7 @@ pub(crate) enum Command {
         #[command(subcommand)]
         action: LectureAction,
     },
+    Transcribe(TranscribeArgs),
     Docs(DocsArgs),
     Agent(AgentArgs),
 }
@@ -742,6 +743,41 @@ pub(crate) struct LectureReadingArgs {
 }
 
 // ── memory ──────────────────────────────────────────────────────────────────
+// ── transcribe ──────────────────────────────────────────────────────────────
+
+/// Transcribe a video that has no captions, on Groq or on this Mac
+///
+/// Extracts the video's audio, transcribes it, and writes the timed text
+/// beside the video as `<video>.vtt` — `Week 1.mp4` gets `Week 1.mp4.vtt`.
+/// Three engines, tried in the order set in Settings → Transcription —
+/// Groq, local Whisper, then on-device speech unless changed there — and one
+/// switched off there is skipped. Whisper on Groq's free tier needs a Groq
+/// API key saved in Settings (the audio is uploaded, split into parts by time
+/// when it is too large for one upload); local Whisper needs a model
+/// downloaded there; Apple's on-device speech recognition needs macOS 26 or
+/// later. Both local engines are free and keep the audio on this Mac. Every
+/// engine transcribes in the language set there, English by default.
+///
+/// Groq's free tier caps how many seconds of audio it takes an hour and a
+/// day; past that the run moves on to the next engine, or, with no engine
+/// left, fails and says when to try again. Any other failure ends the run.
+/// Nothing is written unless every part comes back, and nothing is recorded
+/// in the database.
+#[derive(Args)]
+pub(crate) struct TranscribeArgs {
+    /// A video inside the library: absolute, relative to this directory, or
+    /// relative to the library root
+    #[arg(value_name = "VIDEO")]
+    pub(crate) video: String,
+    /// Use only this engine, with no fallback (default: the first in the
+    /// Settings order that answers)
+    #[arg(long, value_parser = ["groq", "whisper", "apple"])]
+    pub(crate) engine: Option<String>,
+    /// Transcribe again when the `.vtt` already exists, replacing it
+    #[arg(long)]
+    pub(crate) force: bool,
+}
+
 
 #[derive(Subcommand)]
 pub(crate) enum MemoryAction {

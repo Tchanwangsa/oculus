@@ -8,6 +8,7 @@ import {
   PaintBrush,
   Plugs,
   Robot,
+  Waveform,
   type Icon,
 } from "@phosphor-icons/react";
 
@@ -29,7 +30,8 @@ export type SettingsPageId =
   | "opencode"
   | "jobs"
   | "parsing"
-  | "embeddings";
+  | "embeddings"
+  | "transcription";
 
 export interface SettingsPage {
   /** Route segment under `/settings`. */
@@ -55,6 +57,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "jobs", label: "Jobs", icon: Lightning, group: "AI" },
   { id: "parsing", label: "Parsing", icon: FilePdf, group: "Library" },
   { id: "embeddings", label: "Embeddings", icon: Graph, group: "Library" },
+  { id: "transcription", label: "Transcription", icon: Waveform, group: "Library" },
 ];
 
 const PAGE_BY_ID = new Map(SETTINGS_PAGES.map((p) => [p.id, p]));
@@ -153,6 +156,16 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Build the index"],
   ]),
 ];
+
+  page("transcription", ["library", "captions", "subtitles", "video", "speech to text"]),
+  ...rows("transcription", "Transcription", [
+    ["Language", ["locale", "english", "accent", "auto-detect"]],
+    ["Engines", ["order", "fallback", "priority", "reorder", "transcription engines"]],
+    ["Groq", ["groq api key", "cloud", "free tier", "whisper"]],
+    ["Local Whisper", ["whisper", "whisper.cpp", "local", "offline", "gpu", "metal"]],
+    ["Whisper model", ["whisper", "model", "download", "large", "turbo", "memory", "ram"]],
+    ["On-device speech", ["apple", "offline", "local", "mac"]],
+  ]),
 
 /**
  * Entries matching `query` (case-insensitive substring of title, keywords or

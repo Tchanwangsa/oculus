@@ -28,6 +28,7 @@ mod output;
 mod planning;
 mod query;
 mod run;
+mod transcribe;
 
 use args::*;
 use output::*;
@@ -91,6 +92,7 @@ fn main() {
             MemoryAction::Promote(a) => ctx.memory_promote(&a),
         },
         Some(Command::Docs(args)) => ctx.docs(&args),
+        Some(Command::Transcribe(args)) => ctx.transcribe(&args),
         Some(Command::Agent(args)) => ctx.agent(&args),
     };
 

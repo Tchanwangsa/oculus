@@ -14,6 +14,8 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | The dev preflight | `app/scripts/predev.mjs` |
 | Keeps the dev CLI current through a session | `app/scripts/watch-cli.mjs` |
 | Native binary fetchers | `app/scripts/fetch-pdfium.mjs`, `app/scripts/fetch-ffmpeg.mjs` |
+| Compiles the on-device speech helper | `app/scripts/build-speech.mjs`, `app/src-tauri/speech/main.swift` |
+| Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
 | How an agent thread finds `oculus` | `app/src-tauri/src/harness/discover.rs` |
@@ -34,13 +36,16 @@ bun run cli:install   # release build, symlink into ~/.local/bin, then `oculus d
 bun run docs:cli      # regenerate docs/cli-reference.md from the binary's help
 bun run pdfium        # fetch libpdfium into app/src-tauri/binaries/
 bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
+bun run speech        # compile the on-device speech helper there (macOS)
+bun run whisper       # build whisper.cpp's whisper-cli there (macOS, needs cmake)
 ```
 
 ## `predev` is the whole preflight, and it is idempotent
 
 It is bun's lifecycle hook for `dev`, and `beforeDevCommand` is
 `OCULUS_CLI_WATCH=1 bun run dev`, so every `tauri dev` runs it. In order it
-runs `bun install`, fetches ffmpeg and pdfium, builds the debug `oculus`,
+runs `bun install`, fetches ffmpeg and pdfium, compiles the speech helper and
+`whisper-cli`, builds the debug `oculus`,
 regenerates [cli-reference.md](./cli-reference.md) (written only when the help
 changed), and runs `oculus docs` to refresh the library's agent docs. The last
 two are non-fatal: a machine whose app has never run has no library to fill.
@@ -51,7 +56,40 @@ both native fetchers reject failed HTTP responses and truncated downloads before
 installing anything. Pdfium extracts into a private temporary directory per run.
 
 `cargo test` and `bun run cli` go through neither Tauri nor `predev`, so on a
-fresh checkout run `bun run pdfium` and `bun run ffmpeg` yourself.
+fresh checkout run `bun run pdfium`, `bun run ffmpeg` and (on macOS)
+`bun run speech` and `bun run whisper` yourself.
+
+## The speech helper is compiled, not fetched
+
+`apple-speech` wraps macOS 26's on-device recogniser for transcription
+([viewers.md](./viewers.md#on-device-speech-a-swift-helper)). `bun run speech`
+compiles `app/src-tauri/speech/main.swift` with `swiftc` into
+`binaries/apple-speech-<host triple>`, skipping when the binary is newer than
+the source; it needs Xcode or its command-line tools with the macOS 26 SDK,
+and fails loudly without them. Elsewhere it logs and does nothing.
+
+It is an `externalBin` on macOS only, through `tauri.macos.conf.json`, which
+Tauri merges over `tauri.conf.json` as a JSON Merge Patch — arrays are
+replaced, so that file lists ffmpeg and oculus again. tauri-build reads the
+merged list, so on a Mac `cargo check` refuses to run until the helper exists,
+exactly as for ffmpeg.
+
+## whisper-cli is built from a pinned release
+
+`bun run whisper` downloads the whisper.cpp release tarball named by `VERSION`
+in `app/scripts/build-whisper.mjs`, refuses it unless it matches `SHA256`, and
+builds only the `whisper-cli` target with cmake (`brew install cmake`; CI
+runners have it) into `binaries/whisper-cli-<host triple>`. Source and build
+tree are cached in `app/node_modules/.cache/whisper.cpp/`, outside the
+`src-tauri` tree that `tauri dev` watches. It skips while the installed binary's
+`--version` names the pinned release; `--force` rebuilds. To upgrade, change
+`VERSION` and `SHA256` together.
+
+The build is static with Metal's shaders embedded, generic rather than tuned
+to the building CPU, and without OpenMP, so the binary links only system
+libraries and frameworks; the script checks `otool -L` and fails otherwise.
+Its floor is macOS 13.3, upstream's own. Like `apple-speech` it is a macOS-only
+`externalBin` through `tauri.macos.conf.json`.
 
 ## The dev CLI is built by the preflight, not by `tauri dev`
 
@@ -84,7 +122,7 @@ current release binary is guaranteed to exist.
 
 `ci.yml` runs on every push to `master` and every pull request, on a macOS
 runner with nothing cached but crates: `bun run test`, `bun run build`, the
-two native fetches, `stage-cli`, `cargo test --release --locked`, then
+two native fetches, the speech helper and `whisper-cli`, `stage-cli`, `cargo test --release --locked`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
 reference fails. `stage-cli` comes before any cargo call because tauri-build
 refuses to compile until every `externalBin` exists, and it is what writes the
@@ -95,7 +133,8 @@ CLI build, so the tests reuse its artifacts. sccache is installed because
 `release.yml` is `workflow_dispatch` only. To cut a release, bump `version` in
 `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` together, push,
 then run **Release** from the Actions tab. `tauri-apps/tauri-action` runs
-`tauri build` (so `beforeBuildCommand` fetches natives and stages the CLI),
+`tauri build` (so `beforeBuildCommand` fetches natives, compiles the speech
+helper and stages the CLI),
 creates tag `v<version>` on that commit, and attaches the `.dmg` and `.app` to
 a draft prerelease; the same files are kept as workflow artifacts. Publishing
 the draft is a manual step on GitHub.

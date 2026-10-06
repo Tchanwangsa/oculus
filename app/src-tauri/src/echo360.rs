@@ -404,30 +404,8 @@ fn is_runnable(path: &Path) -> bool {
 
 /// The ffmpeg we ship, else a system install. The CLI passes `None`.
 pub fn find_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
-    let name = format!("ffmpeg{}", std::env::consts::EXE_SUFFIX);
-    let mut candidates: Vec<PathBuf> = Vec::new();
-
-    // Bundled app: Tauri copies externalBin next to the main executable.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join(&name));
-        }
-    }
-    if let Some(res) = resource_dir {
-        candidates.push(res.join(&name));
-    }
-
-    // Dev: `bun run ffmpeg` writes binaries/ffmpeg-<target-triple>.
-    let dev_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
-    if let Ok(entries) = std::fs::read_dir(&dev_dir) {
-        for entry in entries.flatten() {
-            let file = entry.file_name();
-            let file = file.to_string_lossy();
-            if file.starts_with("ffmpeg-") && !file.ends_with(".part") {
-                candidates.push(entry.path());
-            }
-        }
-    }
+    // The shipped copy, or the one `bun run ffmpeg` writes in dev.
+    let mut candidates = crate::bundled::candidates("ffmpeg", resource_dir);
 
     const SYSTEM: &[&str] = &[
         "ffmpeg",

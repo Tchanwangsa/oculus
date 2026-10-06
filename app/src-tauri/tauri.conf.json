@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "OCULUS_CLI_WATCH=1 bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run ffmpeg && bun run pdfium && bun run stage-cli && bun run docs:cli && bun run build",
+    "beforeBuildCommand": "bun run ffmpeg && bun run pdfium && bun run speech && bun run whisper && bun run stage-cli && bun run docs:cli && bun run build",
     "frontendDist": "../dist"
   },
   "app": {

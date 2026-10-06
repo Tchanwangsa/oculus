@@ -13,6 +13,7 @@ agent queries and plans through. Flags are in
 | Query commands, category filter, file lookup | `app/src-tauri/src/bin/oculus/query.rs` |
 | `project` and `task` | `app/src-tauri/src/bin/oculus/planning.rs`, `app/src-tauri/src/projects.rs` |
 | `lecture` | `app/src-tauri/src/bin/oculus/lecture.rs` |
+| `transcribe` | `app/src-tauri/src/bin/oculus/transcribe.rs`, `app/src-tauri/src/transcribe/` |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/docs.rs`, `app/src-tauri/src/agents.rs` |
 | The memory store | `app/src-tauri/src/memory.rs` |
 | Headless writes to the scrape tables | `app/src-tauri/src/store.rs` |

@@ -12,6 +12,8 @@
     "preview": "vite preview",
     "ffmpeg": "node scripts/fetch-ffmpeg.mjs",
     "pdfium": "node scripts/fetch-pdfium.mjs",
+    "speech": "node scripts/build-speech.mjs",
+    "whisper": "node scripts/build-whisper.mjs",
     "tauri": "tauri",
     "cli": "bun scripts/build-cli.mjs",
     "cli:dev": "bun scripts/build-cli.mjs --debug",

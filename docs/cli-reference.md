@@ -12,24 +12,25 @@ Sync Canvas subjects and lectures into your local Oculus library
 Usage: oculus [OPTIONS] [COMMAND]
 
 Commands:
-  status    Session, library and parse status
-  auth      Sign in to Canvas, or sign out
-  list      List subjects or lectures
-  run       Scrape Canvas content or sync lectures
-  index     Re-parse and re-embed PDFs already on record
-  search    Search the library by meaning (needs network and an API key)
-  grep      Search the library by pattern (offline, no model)
-  read      Print the text of one library file
-  files     List the files in the library
-  calendar  Class times and assignment due dates
-  project   Plan work: projects, their boards, and what is on them
-  task      Add, move, refile, finish and delete tasks, on a board or on none
-  memory    Read and write the memory store the agents keep in the library
-  lecture   Look inside a downloaded lecture recording
-  docs      Write the agent-facing docs into the library
-  agent     Run one prompt through a CLI agent (Claude Code, Codex, opencode or
-            Antigravity)
-  help      Print this message or the help of the given subcommand(s)
+  status      Session, library and parse status
+  auth        Sign in to Canvas, or sign out
+  list        List subjects or lectures
+  run         Scrape Canvas content or sync lectures
+  index       Re-parse and re-embed PDFs already on record
+  search      Search the library by meaning (needs network and an API key)
+  grep        Search the library by pattern (offline, no model)
+  read        Print the text of one library file
+  files       List the files in the library
+  calendar    Class times and assignment due dates
+  project     Plan work: projects, their boards, and what is on them
+  task        Add, move, refile, finish and delete tasks, on a board or on none
+  memory      Read and write the memory store the agents keep in the library
+  lecture     Look inside a downloaded lecture recording
+  transcribe  Transcribe a video that has no captions, on Groq or on this Mac
+  docs        Write the agent-facing docs into the library
+  agent       Run one prompt through a CLI agent (Claude Code, Codex, opencode or
+              Antigravity)
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --json
@@ -1272,6 +1273,47 @@ Options:
 ```
 
 ## `oculus docs`
+## `oculus transcribe`
+
+```
+Transcribe a video that has no captions, on Groq or on this Mac
+
+Extracts the video's audio, transcribes it, and writes the timed text beside the video
+as `<video>.vtt` — `Week 1.mp4` gets `Week 1.mp4.vtt`. Three engines, tried in the order
+set in Settings → Transcription — Groq, local Whisper, then on-device speech unless
+changed there — and one switched off there is skipped. Whisper on Groq's free tier needs
+a Groq API key saved in Settings (the audio is uploaded, split into parts by time when
+it is too large for one upload); local Whisper needs a model downloaded there; Apple's
+on-device speech recognition needs macOS 26 or later. Both local engines are free and
+keep the audio on this Mac. Every engine transcribes in the language set there, English
+by default.
+
+Groq's free tier caps how many seconds of audio it takes an hour and a day; past that
+the run moves on to the next engine, or, with no engine left, fails and says when to try
+again. Any other failure ends the run. Nothing is written unless every part comes back,
+and nothing is recorded in the database.
+
+Usage: oculus transcribe [OPTIONS] <VIDEO>
+
+Arguments:
+  <VIDEO>
+          A video inside the library: absolute, relative to this directory, or relative
+          to the library root
+
+Options:
+      --engine <ENGINE>
+          Use only this engine, with no fallback (default: the first in the Settings
+          order that answers)
+
+          [possible values: groq, whisper, apple]
+
+      --force
+          Transcribe again when the `.vtt` already exists, replacing it
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 
 ```
 Write the agent-facing docs into the library

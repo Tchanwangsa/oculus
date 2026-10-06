@@ -44,7 +44,7 @@ jobs:
         working-directory: app
         run: bun install --frozen-lockfile
 
-      # beforeBuildCommand fetches ffmpeg and pdfium and stages the CLI.
+      # beforeBuildCommand fetches and builds the native sidecars and stages the CLI.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

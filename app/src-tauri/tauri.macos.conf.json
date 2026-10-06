@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/ffmpeg",
+      "binaries/oculus",
+      "binaries/apple-speech",
+      "binaries/whisper-cli"
+    ]
+  }
+}
