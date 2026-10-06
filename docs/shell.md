@@ -121,7 +121,9 @@ list. A jump travels as router state, and the layout scrolls the section's id
   table's cell block take; a maths field's `select()`), else a focused input's
   contents, else the dialog or popover holding focus, else the target ⌘F
   would search (`currentFindTarget` in `app/src/lib/find.ts`) — never the
-  whole window.
+  whole window. Within that, `selectContents` spans only its first to last
+  `data-selectable` block (`ui.md`), since WebKit paints a scripted selection
+  over `user-select: none` text; a page with no content selects nothing.
 - **⌘1–⌘8 are strip positions** (a missing slot is a no-op), ⌘9 is the last
   tab, and ⇧⌘T pops `tabStore`'s `closed` stack back to the old index. A
   browser tab is remembered by URL, recorded by `TopTabBar` *before* Rust

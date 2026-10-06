@@ -509,7 +509,7 @@ const VersionPreview = memo(function VersionPreview({
     return <p className="text-[12px] text-muted-foreground">This version is empty.</p>;
   }
   return (
-    <article className="md-compact" onCopy={copyAsMarkdown} onDragStart={dragAsMarkdown}>
+    <article data-selectable className="md-compact" onCopy={copyAsMarkdown} onDragStart={dragAsMarkdown}>
       <ReactMarkdown {...fileMarkdownPlugins(source)} components={components}>
         {hasMath(source) ? normalizeMath(source) : source}
       </ReactMarkdown>

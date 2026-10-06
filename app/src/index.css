@@ -281,6 +281,7 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-optical-sizing: auto;
+    -webkit-user-select: none;
     user-select: none;
   }
 
@@ -295,18 +296,18 @@
     overflow: visible;
   }
 
-  /* Text selects only on text tags inside a select scope — a pane's page,
-     a dialog, a popover — never in the shell, never on a control's label.
-     `lib/selectScope.ts` keeps a drag-select inside its scope. */
-  input, textarea {
+  /* Only content selects — a `data-selectable` block (a document, a chat
+     message, code, an error) — never the chrome around it, never a control's
+     label. `lib/selectScope.ts` keeps a drag-select inside its scope. */
+  input, textarea, :where([data-selectable]) {
+    -webkit-user-select: text;
     user-select: text;
   }
-  :where([data-select-scope], [role="dialog"], [role="alertdialog"], [data-slot="popover-content"])
-    :is(p, h1, h2, h3, h4, h5, h6, span, li, td, th) {
-    user-select: text;
-  }
-  :where([data-select-scope], [role="dialog"], [role="alertdialog"], [data-slot="popover-content"])
+  :where([data-selectable])
+    :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"]),
+  :where([data-selectable])
     :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"]) * {
+    -webkit-user-select: none;
     user-select: none;
   }
   /* Important so it beats `select-text` and an editor's own rule. */
@@ -441,6 +442,7 @@
 .diagram-figure {
   margin-block: 0.75rem;
   /* A pan must not select the reply's text around it. */
+  -webkit-user-select: none;
   user-select: none;
 }
 .diagram {

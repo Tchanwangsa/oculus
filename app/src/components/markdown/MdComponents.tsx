@@ -25,6 +25,7 @@ export function CodeText({ className, ...p }: React.ComponentProps<"pre">) {
   return (
     <pre
       className={cn("whitespace-pre-wrap break-words font-mono text-[12px] leading-[1.5] text-foreground", className)}
+      data-selectable
       {...p}
     />
   );
@@ -234,7 +235,7 @@ const INLINE_COMPONENTS: Components = {
 export const CompactMd = memo(function CompactMd({ text, className }: { text: string; className?: string }) {
   const math = hasMath(text);
   return (
-    <div className={cn("md-compact min-w-0", className)}>
+    <div data-selectable className={cn("md-compact min-w-0", className)}>
       <ReactMarkdown
         remarkPlugins={math ? WITH_MATH : PLAIN}
         rehypePlugins={math ? KATEX : NO_PLUGINS}

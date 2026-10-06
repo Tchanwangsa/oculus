@@ -1,6 +1,6 @@
 /**
- * A drag-select stays in the scope it starts in. Text selects only inside a
- * select scope (`index.css`): a pane's page (`TabPane`), a dialog, a popover.
+ * A drag-select stays in the scope it starts in: a pane's page (`TabPane`), a
+ * dialog, a popover. (What selects at all is `data-selectable`, `index.css`.)
  * Once the pointer moves with the button held, every other scope stops
  * selecting until release, so a drag across the split divider never takes
  * the other pane's text. Engaged on move, not press, so a click restyles

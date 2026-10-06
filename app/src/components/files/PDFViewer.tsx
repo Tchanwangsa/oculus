@@ -784,7 +784,7 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
           onDragStart={(e) => pagesRef.current && dragPdfAsMarkdown(e, e.currentTarget, pagesRef.current, resolveImage)}
           className="pdf-surface absolute inset-0 overflow-auto"
         >
-          <div ref={viewerElRef} className="pdfViewer" />
+          <div ref={viewerElRef} data-selectable className="pdfViewer" />
         </div>
 
         {loadError ? (

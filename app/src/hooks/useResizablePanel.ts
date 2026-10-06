@@ -50,8 +50,8 @@ export function useResizablePanel({
     drag.current = { x: e.clientX, w: collapsed ? 0 : width };
     setDragging(true);
     document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }, [collapsed, width]);
+    document.body.style.webkitUserSelect = "none";
+  }, [collapsed, collapsedWidth, width]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -70,7 +70,7 @@ export function useResizablePanel({
       drag.current = null;
       setDragging(false);
       document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);

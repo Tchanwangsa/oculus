@@ -65,7 +65,7 @@ const TabPane = memo(function TabPane({
     e.preventDefault();
     setDragging(true);
     document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
     let latest: number | null = null;
     const onMove = (ev: MouseEvent) => {
       const box = stackRef.current?.getBoundingClientRect();
@@ -77,7 +77,7 @@ const TabPane = memo(function TabPane({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", end);
       document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
       if (latest != null) setSideRatio(tabId, latest);
       setDragRatio(null);
       setDragging(false);

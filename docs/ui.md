@@ -56,15 +56,17 @@ headings and Inter for everything else, Notion-style layout.
   today), `brand` is the *accent* (links, selection, in-flight progress,
   new-item chips) — split so the accent can be retuned without restyling every
   button.
-- **Only a pane's page selects, as in a native app.** The body is
-  `user-select: none`; text tags select again only inside a select scope — a
-  pane's root in `TabPane` (`data-select-scope`), a dialog, a popover — and
-  never inside a button or tab, so the sidebar, tab strip and side panel
-  header never highlight. A drag-select stays in the scope it starts in:
-  `app/src/lib/selectScope.ts` turns every other scope off while the button is
-  held, so a drag across the split divider stops at its own pane. Give a new
-  surface that renders outside a pane `data-select-scope` if its text should
-  be copyable.
+- **Only content selects, as in a native app.** The body is
+  `user-select: none`; text selects again only inside a `data-selectable`
+  block — a file's Markdown or PDF pages, a chat message (`CompactMd`, the
+  question bubble, thinking), `CodeText`, a document version, an error's
+  detail — and never on a button or tab inside one. Page chrome (titles,
+  cards, lists, tables, the sidebar) never highlights. Mark a new surface
+  `data-selectable` only if its text is worth copying. A drag-select stays in
+  the scope it starts in — a pane's root in `TabPane` (`data-select-scope`), a
+  dialog, a popover: `app/src/lib/selectScope.ts` turns every other scope off
+  while the button is held, so a drag across the split divider stops at its
+  own pane.
 - **Dark mode is a `.dark` class on `<html>`** written only by `applyTheme`
   (`app/src/lib/theme.ts`); `@custom-variant dark` follows the class, not the OS.
 - **Full pages scroll through `page-scroll`**, which reserves the scrollbar
@@ -137,3 +139,7 @@ mounts on open and loads through the same cache.
   `justify-content: center`, which makes the start-edge overflow unreachable.
 - **Never nest a `<button>` in a row that is a button** — WebKit drops the inner
   clicks; use `RowAction` (`app/src/components/lectures/LectureRow.tsx`).
+- **WebKit only reads `-webkit-user-select`** — the unprefixed property is
+  ignored, and the dev server doesn't autoprefix (only the production build
+  does), so hand-written CSS writes both and inline styles set
+  `webkitUserSelect`. The `select-*` utilities already emit both.

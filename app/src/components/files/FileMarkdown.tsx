@@ -60,6 +60,7 @@ export const FileMarkdown = memo(function FileMarkdown({
   return (
     <div className="flex-1 overflow-y-auto">
       <article
+        data-selectable
         className="markdown-body mx-auto w-full max-w-4xl px-6 py-5"
         onCopy={copyAsMarkdown}
         onDragStart={dragAsMarkdown}

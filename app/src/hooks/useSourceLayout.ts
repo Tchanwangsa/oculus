@@ -91,7 +91,7 @@ export function useSourceLayout(
     e.stopPropagation();
     drag.current = next;
     setDragKind(next.kind);
-    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
     return true;
   };
 
@@ -157,7 +157,7 @@ export function useSourceLayout(
       drag.current = null;
       setDragKind(null);
       document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
     },
   });
 

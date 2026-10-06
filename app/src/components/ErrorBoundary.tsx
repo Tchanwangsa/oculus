@@ -13,7 +13,7 @@ function Fallback({ error, actions }: { error: unknown; actions: ReactNode }) {
     <div data-select-scope className="flex h-full w-full items-center justify-center p-8">
       <div className="max-w-md">
         <h2 className="text-sm font-medium">Something broke here</h2>
-        <p className="mt-1.5 text-[13px] whitespace-pre-wrap text-muted-foreground">
+        <p data-selectable className="mt-1.5 text-[13px] whitespace-pre-wrap text-muted-foreground">
           {text(error)}
         </p>
         <div className="mt-4 flex gap-2">{actions}</div>

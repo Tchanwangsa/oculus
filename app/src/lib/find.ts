@@ -187,9 +187,26 @@ export function currentFindTarget(pane: number | undefined): FindTarget | undefi
   );
 }
 
-/** Selects everything inside `el`, and nothing outside it. */
+/** Selects the content inside `el` — from its first `data-selectable` block to
+ *  its last — and nothing outside it. WebKit paints a scripted selection over
+ *  `user-select: none` text, so a page with no content selects nothing. */
 export function selectContents(el: Node): void {
-  window.getSelection()?.selectAllChildren(el);
+  const selection = window.getSelection();
+  if (!selection) return;
+  const blocks =
+    el instanceof Element && el.matches("[data-selectable]")
+      ? [el]
+      : el instanceof Element || el instanceof Document
+        ? [...el.querySelectorAll("[data-selectable]")]
+        : [];
+  if (blocks.length === 0) return void selection.removeAllRanges();
+  // The outermost last block, so code inside a reply doesn't cut its tail.
+  const last = blocks[blocks.length - 1].closest("[data-selectable]:not([data-selectable] *)")!;
+  const range = document.createRange();
+  range.setStart(blocks[0], 0);
+  range.setEnd(last, last.childNodes.length);
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 /** Sends a find menu event to one target. */

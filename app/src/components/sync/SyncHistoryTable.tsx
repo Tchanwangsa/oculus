@@ -207,7 +207,7 @@ function RunDetail({ run }: { run: SyncRunSummary }) {
   return (
     <div className="px-12 pb-3 pt-1">
       {run.error && (
-        <p className="text-xs text-destructive py-1.5">{run.error}</p>
+        <p data-selectable className="text-xs text-destructive py-1.5">{run.error}</p>
       )}
 
       <SubjectChips codes={runSubjectCodes(run, files)} />

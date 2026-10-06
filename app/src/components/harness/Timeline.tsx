@@ -419,6 +419,7 @@ function QuestionBubble({
                     key={i}
                     path={p.path}
                     cite={p.cite}
+              data-selectable
                     onClick={(newTab) => openCitation(p.cite, newTab)}
                   />
                 );

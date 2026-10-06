@@ -95,7 +95,7 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
       resize.current = { dock: drawnDock, x: e.clientX, y: e.clientY, size: drawn };
       setResizing(true);
       document.body.style.cursor = vertical ? "row-resize" : "col-resize";
-      document.body.style.userSelect = "none";
+      document.body.style.webkitUserSelect = "none";
     },
     [drawnDock, vertical, drawn],
   );
@@ -136,7 +136,7 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
         if (!drag.current.moved) {
           drag.current.moved = true;
           document.body.style.cursor = "grabbing";
-          document.body.style.userSelect = "none";
+          document.body.style.webkitUserSelect = "none";
         }
         const target = nearestEdge(rect, e.clientX, e.clientY, fitsBeside);
         dropTargetRef.current = target;
@@ -157,7 +157,7 @@ export function useTranscriptDock(containerRef: RefObject<HTMLDivElement | null>
         drag.current = null;
       }
       document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
     },
   });
 

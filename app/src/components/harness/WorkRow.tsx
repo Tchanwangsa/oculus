@@ -233,7 +233,7 @@ export const ThinkingRow = memo(function ThinkingRow({
       expandable={text.trim().length > 0}
       trailing={live ? <CircleNotch size={12} className="shrink-0 animate-spin" /> : null}
     >
-      <div className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-l border-border pl-3 text-[11.5px] leading-relaxed text-muted-foreground">
+      <div data-selectable className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-l border-border pl-3 text-[11.5px] leading-relaxed text-muted-foreground">
         {text}
       </div>
     </RowShell>
