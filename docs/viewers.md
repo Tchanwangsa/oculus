@@ -80,9 +80,10 @@ classes work even when there are no dollar delimiters.
   - **Find is pdf.js's `PDFFindController` behind `ui/FindBar.tsx`**; each
     viewer is a find target, and which one ⌘F reaches is
     [find routing](./shell.md#f-reaches-one-registered-find).
-  - **The page box names the pages on screen** — a spread, or in continuous
-    scroll every page filling a fifth of the viewport or showing half of
-    itself (`shownPages`) — and takes a page number to jump to.
+  - **The page box names the pages on screen** (`shownPages`: a spread, or in
+    continuous scroll every page filling a fifth of the viewport or showing
+    half of itself) beside a fixed "/ total". Focused, it holds only the first
+    page: digits only, Enter jumps, a range is never typed.
   - **`pdfjs-dist` is patched** (`app/patches/`): its text layer multiplies
     every font size by a 1px probe's measured height, which page zoom 1.15
     reads as 0.87, so the selectable text ran 13% short of the glyphs. The

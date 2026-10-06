@@ -17,7 +17,6 @@ import {
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { FindBar } from "@/components/ui/FindBar";
-import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
@@ -638,9 +637,10 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
 
   // ── Chrome ───────────────────────────────────────────────────────────────
 
-  const pageLabel = `${
-    shown.first === shown.last ? shown.first : `${shown.first}–${shown.last}`
-  } / ${numPages}`;
+  // Idle, the box names every page on screen; focused, it holds just the first
+  // page to edit. The total is fixed text beside it.
+  const pageLabel =
+    shown.first === shown.last ? String(shown.first) : `${shown.first}–${shown.last}`;
   const pageText = pageDraft ?? pageLabel;
   const paged = mode !== "scroll" && numPages > 1;
 
@@ -680,41 +680,44 @@ export function PDFViewer({ src, locate, markdownPath }: Props) {
                 <CaretLeft size={13} />
               </Button>
             )}
-            <Input
-              value={pageText}
-              aria-label="Page"
-              spellCheck={false}
-              autoComplete="off"
-              // Focus by hand so the click doesn't drop a caret into the
-              // selection `onFocus` makes.
-              onMouseDown={(e) => {
-                if (document.activeElement === e.currentTarget) return;
-                e.preventDefault();
-                e.currentTarget.focus();
-              }}
-              onFocus={(e) => {
-                setPageDraft(pageLabel);
-                e.currentTarget.select();
-              }}
-              onChange={(e) => setPageDraft(e.target.value)}
-              onBlur={() => setPageDraft(null)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
+            <label className="flex h-6 cursor-text items-center gap-1 rounded-md border border-input px-2 text-xs tabular-nums text-muted-foreground shadow-none transition-[color,box-shadow] focus-within:border-ring focus-within:text-foreground focus-within:ring-[3px] focus-within:ring-ring/25 dark:bg-input/30">
+              <input
+                value={pageText}
+                aria-label="Page"
+                inputMode="numeric"
+                spellCheck={false}
+                autoComplete="off"
+                // Focus by hand so the click doesn't drop a caret into the
+                // selection `onFocus` makes.
+                onMouseDown={(e) => {
+                  if (document.activeElement === e.currentTarget) return;
                   e.preventDefault();
-                  jumpTo(e.currentTarget.value);
-                  e.currentTarget.blur();
-                } else if (e.key === "Escape") {
-                  e.stopPropagation();
-                  e.currentTarget.blur();
-                }
-              }}
-              // Sized to the text, never narrower than the label so typing
-              // doesn't shrink it; the extra 1rem is the horizontal padding.
-              style={{
-                width: `calc(${Math.max(pageText.length, pageLabel.length)}ch + 1rem)`,
-              }}
-              className="h-6 rounded-md px-2 py-0 text-center text-xs tabular-nums text-muted-foreground shadow-none focus-visible:text-foreground"
-            />
+                  e.currentTarget.focus();
+                }}
+                onFocus={(e) => {
+                  setPageDraft(String(shown.first));
+                  e.currentTarget.select();
+                }}
+                onChange={(e) => setPageDraft(e.target.value.replace(/\D/g, ""))}
+                onBlur={() => setPageDraft(null)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    jumpTo(e.currentTarget.value);
+                    e.currentTarget.blur();
+                  } else if (e.key === "Escape") {
+                    e.stopPropagation();
+                    e.currentTarget.blur();
+                  }
+                }}
+                // Sized to the idle label so focusing doesn't resize it.
+                style={{
+                  width: `${Math.max(pageText.length, pageLabel.length)}ch`,
+                }}
+                className="bg-transparent p-0 text-center outline-none"
+              />
+              <span aria-hidden>/ {numPages}</span>
+            </label>
             {paged && (
               <Button
                 variant="ghost"
