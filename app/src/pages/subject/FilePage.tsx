@@ -18,6 +18,7 @@ import {
   openFileSmart,
   recordFileAccess,
   routeLocate,
+  routeParseDetails,
 } from "@/lib/openFile";
 import { useLocateHighlight } from "@/hooks/useLocateHighlight";
 import { LoadingFill } from "@/components/ui/PageParts";
@@ -44,6 +45,7 @@ export default function SubjectFilePage() {
   // passage of markdown to highlight.
   const { state: routeState } = useLocation();
   const locate = useMemo(() => routeLocate(routeState), [routeState]);
+  const parseDetails = routeParseDetails(routeState);
 
   const { files, loading } = useSubjectFiles(Number.isFinite(id) ? id : null);
   const found = useMemo(
@@ -152,7 +154,7 @@ export default function SubjectFilePage() {
           (pdf.mdExists ? (
             <PdfMdToggle value={pdf.viewMode} onChange={pdf.setViewMode} />
           ) : (
-            <MarkdownUnavailable file={file} />
+            <MarkdownUnavailable file={file} openSeq={parseDetails} />
           ))
         )}
       </PaneHeaderRow>

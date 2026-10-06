@@ -20,11 +20,13 @@ type ParseStateKind =
 
 export interface ParseState {
   kind: ParseStateKind;
-  /** The one word a file row shows. */
+  /** One word for the state; a file row's icon is labelled with it. */
   label: string;
   title: string;
-  /** The backend's own sentence whenever it gave one. */
+  /** The backend's own sentence, or empty: the title says the rest. */
   detail: string;
+  /** A few words for a file row's tooltip; `detail` is shown on the file. */
+  summary: string;
   /** Only a genuine failure is `bad`; "not parsed yet" is not one. */
   tone: "quiet" | "progress" | "good" | "bad" | "hold";
   /** Settings → Parsing can fix it (a missing or rejected token). */
@@ -45,6 +47,23 @@ export function tokenish(kind: string | undefined, message: string): boolean {
   return /token/i.test(message);
 }
 
+/** The row tooltip's line for a failure, by `ParseError::kind` in
+ *  `parse/mod.rs`. Empty when the kind is unknown (a previous session's). */
+function summaryOf(kind: string | undefined): string {
+  switch (kind) {
+    case "offline": return "Couldn't reach MinerU.";
+    case "io": return "Couldn't save the parsed output.";
+    case "not_ready": return "The parser isn't ready yet.";
+    case "document": return "MinerU couldn't read this PDF.";
+    case "too_large": return "Too large for MinerU.";
+    case "quota_exhausted": return "Daily quota used up. Resumes on its own.";
+    case "missing_credentials": return "No MinerU token saved.";
+    case "rejected_credentials": return "MinerU rejected the token.";
+    case "version_mismatch": return "Parser version mismatch.";
+    default: return "";
+  }
+}
+
 /** `status` is the live/DB word; `failure` is set only if this session saw
  *  the file fail; `latch` is the app-wide condition in force. */
 export function parseStateOf(
@@ -58,7 +77,8 @@ export function parseStateOf(
       kind: "parsed",
       label: "parsed",
       title: "Parsed",
-      detail: "This PDF has markdown, so it is searchable and can be mentioned in chat.",
+      detail: "",
+      summary: "",
       tone: "good",
       fixInSettings: false,
     };
@@ -67,8 +87,9 @@ export function parseStateOf(
     return {
       kind: "running",
       label: "parsing",
-      title: "Parsing now",
-      detail: "MinerU is reading this PDF. The Markdown view appears when it finishes.",
+      title: "Parsing",
+      detail: "",
+      summary: "",
       tone: "progress",
       fixInSettings: false,
     };
@@ -77,8 +98,9 @@ export function parseStateOf(
     return {
       kind: "queued",
       label: "queued",
-      title: "Queued to parse",
-      detail: "This PDF is in line to be parsed. The Markdown view appears when it finishes.",
+      title: "Queued",
+      detail: "",
+      summary: "",
       tone: "progress",
       fixInSettings: false,
     };
@@ -89,8 +111,9 @@ export function parseStateOf(
       return {
         kind: "blocked",
         label: "on hold",
-        title: "Parsing is unavailable",
+        title: "Parsing unavailable",
         detail: failure.message,
+        summary: summaryOf(failure.kind),
         tone: "hold",
         fixInSettings: tokenish(failure.kind, failure.message),
       };
@@ -99,9 +122,9 @@ export function parseStateOf(
       return {
         kind: "permanent",
         label: "can't parse",
-        title: "This PDF cannot be parsed",
-        // No PARSE_SWEEP_NOTE: the sweep never re-kicks this file.
-        detail: `${failure.message} It will not be tried again.`,
+        title: "Can't parse this file",
+        detail: failure.message,
+        summary: summaryOf(failure.kind),
         tone: "bad",
         fixInSettings: false,
       };
@@ -110,7 +133,8 @@ export function parseStateOf(
       kind: "failed",
       label: "failed",
       title: "Parse failed",
-      detail: latch ? failure.message : `${failure.message} ${PARSE_SWEEP_NOTE}`,
+      detail: failure.message,
+      summary: summaryOf(failure.kind),
       tone: "bad",
       fixInSettings: false,
     };
@@ -122,9 +146,8 @@ export function parseStateOf(
       kind: "failed",
       label: "failed",
       title: "Parse failed",
-      detail: latch
-        ? "An earlier attempt to parse this PDF failed, and parsing is currently unavailable."
-        : `An earlier attempt to parse this PDF failed, so it has no markdown. ${PARSE_SWEEP_NOTE}`,
+      detail: "",
+      summary: "",
       tone: "bad",
       fixInSettings: false,
     };
@@ -135,8 +158,9 @@ export function parseStateOf(
     return {
       kind: "blocked",
       label: "on hold",
-      title: "Parsing is unavailable",
+      title: "Parsing unavailable",
       detail: latch.message,
+      summary: summaryOf(latch.kind),
       tone: "hold",
       fixInSettings: tokenish(latch.kind, latch.message),
     };
@@ -146,13 +170,14 @@ export function parseStateOf(
     kind: "unparsed",
     label: "not parsed",
     title: "Not parsed yet",
-    detail: `This PDF has no markdown yet, so it is not searchable and cannot be mentioned in chat. ${PARSE_SWEEP_NOTE}`,
+    detail: "",
+    summary: "",
     tone: "quiet",
     fixInSettings: false,
   };
 }
 
-/** Tailwind colour for a state's word. */
+/** Tailwind colour for a state's icon. */
 export const PARSE_TONE_CLASS: Record<ParseState["tone"], string> = {
   quiet: "text-muted-foreground/70",
   progress: "text-brand",

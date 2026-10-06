@@ -1,5 +1,15 @@
-import { useState } from "react";
-import { CircleNotch, Info, WarningCircle } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
+import {
+  CheckCircle,
+  CircleDashed,
+  CircleNotch,
+  Clock,
+  Info,
+  PauseCircle,
+  Prohibit,
+  WarningCircle,
+  type Icon as PhosphorIcon,
+} from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -7,6 +17,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { PARSE_TONE_CLASS, parseStateOf, type ParseState } from "@/lib/parseState";
 import { isPdfBacked } from "@/lib/fileTypes";
 import { navigateActive } from "@/lib/tabRouters";
+import { openFileParseDetails } from "@/lib/openFile";
+import { parseFile } from "@/lib/courseFiles";
 import { useParseStore } from "@/stores/parseStore";
 import type { DbFile } from "@/lib/db";
 
@@ -29,7 +41,70 @@ function useFileParseState(file: DbFile | null): ParseState | null {
   return parseStateOf(live ?? file.parse_status ?? undefined, failure, latch);
 }
 
-/** The parse word on a file row, with the reason on hover. */
+const STATE_ICON: Record<ParseState["kind"], PhosphorIcon> = {
+  parsed: CheckCircle,
+  running: CircleNotch,
+  queued: Clock,
+  unparsed: CircleDashed,
+  failed: WarningCircle,
+  permanent: Prohibit,
+  blocked: PauseCircle,
+};
+
+/** What clicking a state does: re-kick this file's parse, or open Settings
+ *  when the fix is there. A latched or permanent failure has nothing to retry. */
+type ParseAction = { hint: string; run: () => void };
+
+/** A file row's click: a failure opens the file, whose header shows the
+ *  backend's whole message and the retry; everything else as on the file. */
+function rowActionOf(
+  state: ParseState,
+  file: DbFile,
+  latched: boolean,
+): ParseAction | null {
+  if (!state.fixInSettings && (state.kind === "failed" || state.kind === "permanent")) {
+    return {
+      hint: state.kind === "failed" ? "Click to see why and retry" : "Click to see why",
+      run: () => openFileParseDetails(file),
+    };
+  }
+  return parseActionOf(state, file, latched);
+}
+
+function parseActionOf(
+  state: ParseState,
+  file: DbFile,
+  latched: boolean,
+): ParseAction | null {
+  if (state.fixInSettings) {
+    return {
+      hint: "Click to open Parsing settings",
+      run: () => navigateActive("/settings/parsing"),
+    };
+  }
+  if (!latched && (state.kind === "failed" || state.kind === "unparsed")) {
+    return {
+      hint: state.kind === "failed" ? "Click to retry" : "Click to parse now",
+      run: () => reparse(file),
+    };
+  }
+  return null;
+}
+
+/** Shows the file as queued at once; the backend's `parse-status` events
+ *  take over from there. */
+function reparse(file: DbFile) {
+  const { update } = useParseStore.getState();
+  const ev = { relative_path: file.relative_path, subject_id: file.subject_id };
+  update({ ...ev, status: "queued" });
+  // `parse_file` ignores the subject code.
+  parseFile(file.subject_id, "", file.relative_path).catch((e) =>
+    update({ ...ev, status: "error", error: String(e) }),
+  );
+}
+
+/** The parse icon on a file row: the state and a short reason on hover, and
+ *  a click that acts on it. Sits outside the row's own button. */
 export function ParseStateBadge({
   file,
   className,
@@ -38,24 +113,40 @@ export function ParseStateBadge({
   className?: string;
 }) {
   const state = useFileParseState(file);
-  const word = (
-    <span
-      className={cn(
-        "text-[10px] uppercase tracking-wide",
-        state ? PARSE_TONE_CLASS[state.tone] : undefined,
-        className,
-      )}
-    >
-      {state?.label ?? ""}
-    </span>
+  const latched = useParseStore((s) => s.latch != null);
+  if (!state) return null;
+  const Icon = STATE_ICON[state.kind];
+  const action = rowActionOf(state, file, latched);
+  const icon = (
+    <Icon
+      size={13}
+      weight={state.kind === "parsed" ? "fill" : "regular"}
+      className={state.kind === "running" ? "animate-spin" : undefined}
+    />
   );
-  if (!state || state.kind === "parsed") return word;
+  const tone = PARSE_TONE_CLASS[state.tone];
   return (
     <Tooltip>
-      {/* asChild keeps this a span: the whole row is already a button. */}
-      <TooltipTrigger asChild>{word}</TooltipTrigger>
+      <TooltipTrigger asChild>
+        {action ? (
+          <button
+            type="button"
+            aria-label={`${state.title}. ${action.hint}`}
+            onClick={action.run}
+            className={cn("inline-flex rounded-sm hover:opacity-70", tone, className)}
+          >
+            {icon}
+          </button>
+        ) : (
+          <span aria-label={state.title} className={cn("inline-flex", tone, className)}>
+            {icon}
+          </span>
+        )}
+      </TooltipTrigger>
       <TooltipContent side="top" className="max-w-64 text-[11px] leading-snug">
-        {state.detail}
+        <span className="font-medium">{state.title}</span>
+        {state.summary && <span className="block opacity-70">{state.summary}</span>}
+        {action && <span className="block opacity-70">{action.hint}</span>}
       </TooltipContent>
     </Tooltip>
   );
@@ -64,27 +155,38 @@ export function ParseStateBadge({
 const MISSING_ARTIFACT: ParseState = {
   kind: "failed",
   label: "failed",
-  title: "No Markdown for this file",
-  detail:
-    "This file is recorded as parsed, but its markdown could not be read from disk.",
+  title: "Markdown missing",
+  detail: "Recorded as parsed, but the markdown isn't on disk.",
+  summary: "",
   tone: "bad",
   fixInSettings: false,
 };
 
 /**
  * Stands in for the PDF ↔ Markdown toggle when there is no markdown: says
- * why (queued, failed, parsing down) and links to Settings when the fix is
- * there.
+ * why (queued, failed, parsing down) and offers the state's action.
  */
-export function MarkdownUnavailable({ file }: { file: DbFile }) {
+export function MarkdownUnavailable({
+  file,
+  openSeq,
+}: {
+  file: DbFile;
+  /** Set when the page was opened for its parse details (a row's icon). */
+  openSeq?: number;
+}) {
   const live = useFileParseState(file);
-  const [open, setOpen] = useState(false);
+  const latched = useParseStore((s) => s.latch != null);
+  const [open, setOpen] = useState(openSeq != null);
+  useEffect(() => {
+    if (openSeq != null) setOpen(true);
+  }, [openSeq]);
 
   // Only rendered when the markdown is missing on disk, so `parsed` here
   // means the record and the disk disagree.
   const state: ParseState =
     !live || live.kind === "parsed" ? MISSING_ARTIFACT : live;
 
+  const action = parseActionOf(state, file, latched);
   const moving = state.kind === "queued" || state.kind === "running";
   const Icon = moving ? CircleNotch : state.tone === "quiet" ? Info : WarningCircle;
 
@@ -107,21 +209,23 @@ export function MarkdownUnavailable({ file }: { file: DbFile }) {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-3.5">
         <p className="text-[13px] font-medium text-foreground">{state.title}</p>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          {state.detail}
-        </p>
-        {state.fixInSettings && (
+        {state.detail && (
+          <p data-selectable className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {state.detail}
+          </p>
+        )}
+        {action && (
           <Button
             variant="secondary"
             size="xs"
             className="mt-3"
-            data-tab-href="/settings/parsing"
+            data-tab-href={state.fixInSettings ? "/settings/parsing" : undefined}
             onClick={() => {
               setOpen(false);
-              navigateActive("/settings/parsing");
+              action.run();
             }}
           >
-            Open Parsing settings
+            {state.fixInSettings ? "Open Parsing settings" : state.kind === "failed" ? "Retry" : "Parse now"}
           </Button>
         )}
       </PopoverContent>

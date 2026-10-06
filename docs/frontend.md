@@ -91,6 +91,12 @@ library files; the rest of the frontend has its own pages:
   `queued`, `not parsed` (quiet — not a failure), `failed`, `can't parse`
   (`retryable: false`) and `on hold` (a latching cause that condemns the whole
   library). Unknown discriminants stay their own case.
+- **A file row shows the state as an icon** (`components/files/ParseState.tsx`),
+  its title and a few words by failure `kind` on hover — never the backend's
+  message, which can run to a TLS chain. Clicking `failed` or `can't parse`
+  opens the file with its header's parse popover open: the whole message and,
+  for `failed`, Retry. `not parsed` re-kicks `parse_file`; a token cause opens
+  Settings → Parsing; `on hold` has nothing to do.
 - **`"quality"` is the terminal parse success, not a tier** — every parsed row
   stores it and Rust's skip check reads it. `embed-status` uses `"done"`.
 - **The pipeline is `download → parse → embed`**, the third stage drawn only
@@ -134,12 +140,6 @@ library files; the rest of the frontend has its own pages:
   replace a newer subject or refresh. File-access and document-change events
   carry their subject id, so unrelated mounted file lists do not requery;
   events without an id refresh every list.
-- **A document is `courses/<code>/documents/<title>.md`** with a
-  `category = 'document'` row. The title is the filename (`fileTitle`); a rename
-  moves the file and keeps the row id. `reconcileDocuments` brings rows in line
-  with the folder on mount, so a note written elsewhere just appears.
-
-The editor a document opens in is [editor.md](./editor.md).
 - **A module video downloads from its Modules row** (the backend side is in
   [sync.md](./sync.md#a-sync-lists-module-videos-and-the-student-downloads-them)).
   `videoDownloadStore` keys state by Canvas file id so a download outlives the
@@ -147,6 +147,12 @@ The editor a document opens in is [editor.md](./editor.md).
   row comes from the ordinary `scrape-file` handler, which can land after the
   command resolves, so the store waits for `FILE_SCRAPED_EVENT` before the
   row opens the file.
+- **A document is `courses/<code>/documents/<title>.md`** with a
+  `category = 'document'` row. The title is the filename (`fileTitle`); a rename
+  moves the file and keeps the row id. `reconcileDocuments` brings rows in line
+  with the folder on mount, so a note written elsewhere just appears.
+
+The editor a document opens in is [editor.md](./editor.md).
 
 ## Gotchas
 
