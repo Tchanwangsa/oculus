@@ -11,13 +11,15 @@ let cached: BridgeHealth[] | null = null;
 let inFlight: Promise<BridgeHealth[]> | null = null;
 const listeners = new Set<(rows: BridgeHealth[]) => void>();
 
-function read(recheck: boolean): Promise<BridgeHealth[]> {
-  if (!recheck) {
+/** `cached` answers from here when it can; `refresh` asks Rust, which keeps
+ *  its own cache; `recheck` has Rust drop its cache too. */
+function read(mode: "cached" | "refresh" | "recheck"): Promise<BridgeHealth[]> {
+  if (mode === "cached") {
     if (cached) return Promise.resolve(cached);
     if (inFlight) return inFlight;
   }
   // A failed check reads as `unknown`, not as missing.
-  const p = harnessHealth(recheck)
+  const p = harnessHealth(mode === "recheck")
     .catch(() => [] as BridgeHealth[])
     .then((rows) => {
       cached = rows;
@@ -27,6 +29,12 @@ function read(recheck: boolean): Promise<BridgeHealth[]> {
     });
   inFlight = p;
   return p;
+}
+
+/** Re-read Rust's answer without dropping its cache, for after an update
+ *  dropped one provider's version. */
+export async function refreshBridgeHealth(): Promise<void> {
+  await read("refresh");
 }
 
 export function providerHealth(rows: BridgeHealth[] | null, provider: Provider): ProviderHealth {
@@ -40,7 +48,7 @@ export function providerHealth(rows: BridgeHealth[] | null, provider: Provider):
 export function useBridgeHealth(): {
   health: BridgeHealth[] | null;
   /** Settings' Recheck button only: Rust drops its cached lookups. */
-  recheck: () => void;
+  recheck: () => Promise<void>;
   checking: boolean;
 } {
   const [health, setHealth] = useState<BridgeHealth[] | null>(cached);
@@ -49,7 +57,7 @@ export function useBridgeHealth(): {
   useEffect(() => {
     listeners.add(setHealth);
     let live = true;
-    void read(false).then((rows) => {
+    void read("cached").then((rows) => {
       if (live) setHealth(rows);
     });
     return () => {
@@ -58,9 +66,9 @@ export function useBridgeHealth(): {
     };
   }, []);
 
-  const recheck = useCallback(() => {
+  const recheck = useCallback(async () => {
     setChecking(true);
-    void read(true).finally(() => setChecking(false));
+    await read("recheck").finally(() => setChecking(false));
   }, []);
 
   return { health, recheck, checking };

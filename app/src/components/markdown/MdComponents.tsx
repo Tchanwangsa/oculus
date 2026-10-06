@@ -18,16 +18,53 @@ import { cn } from "@/lib/utils";
 // keeps its own metrics over Tailwind's layers.
 import "katex/dist/katex.min.css";
 
+import { visibleLines, type AnsiSpan } from "@/lib/ansi";
 import { hasMath, normalizeMath } from "@/lib/mathMarkdown";
 
 /** Code outside markdown. The app's only `font-mono` lives in this file. */
 export function CodeText({ className, ...p }: React.ComponentProps<"pre">) {
   return (
     <pre
-      className={cn("whitespace-pre-wrap break-words font-mono text-[12px] leading-[1.5] text-foreground", className)}
       data-selectable
+      className={cn("whitespace-pre-wrap break-words font-mono text-[12px] leading-[1.5] text-foreground", className)}
       {...p}
     />
+  );
+}
+
+const AnsiSpans = ({ spans }: { spans: AnsiSpan[] }) =>
+  spans.map((s, i) => (
+    <span key={i} className={s.className} style={s.style}>
+      {s.text}
+    </span>
+  ));
+
+/** A command's output, its colours kept. */
+export function AnsiText({ lines, className }: { lines: string[]; className?: string }) {
+  return (
+    <CodeText className={className}>
+      {visibleLines(lines).map((spans, i) => (
+        <div key={i} className="min-h-[1.5em]">
+          <AnsiSpans spans={spans} />
+        </div>
+      ))}
+    </CodeText>
+  );
+}
+
+/** The newest line of a running command in a one-line terminal block. */
+export function TerminalLine({ lines, className }: { lines: string[]; className?: string }) {
+  const spans = visibleLines(lines).filter((l) => l.length > 0).pop();
+  if (!spans) return null;
+  return (
+    <div
+      className={cn(
+        "truncate rounded-md border border-border-subtle bg-surface px-2 py-1 font-mono text-[11px] leading-none text-foreground",
+        className,
+      )}
+    >
+      <AnsiSpans spans={spans} />
+    </div>
   );
 }
 

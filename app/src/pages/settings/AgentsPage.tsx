@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowsClockwise, CircleNotch } from "@phosphor-icons/react";
+import { ArrowCircleUp, ArrowsClockwise, CircleNotch } from "@phosphor-icons/react";
 import {
   harnessAntigravityRevoke,
   harnessAntigravityRules,
@@ -10,10 +10,13 @@ import { useBridgeHealth } from "@/hooks/useBridgeHealth";
 import { signInAccount, signInState, useSignInStatus } from "@/hooks/useSignInStatus";
 import { SignInDialog, useSignIn } from "@/components/harness/SignInDialog";
 import { Button } from "@/components/ui/button";
+import { TerminalLine } from "@/components/markdown/MdComponents";
+import { ProviderMark } from "@/components/harness/ProviderMark";
 import {
   InstallAgentDialog,
   useAgentInstall,
 } from "@/components/settings/InstallAgentDialog";
+import { UpdateOutputDialog, useAgentUpdates } from "@/components/settings/UpdateAgents";
 import { Section } from "./section";
 
 /**
@@ -25,21 +28,36 @@ import { Section } from "./section";
  * A missing CLI offers *Install* (`InstallAgentDialog`). The run is held here,
  * not in the dialog, so closing it mid-install keeps the output and the
  * recheck its finish fires. opencode's sign-in is per provider, so its row
- * shows none (`signedIn: null`); the Providers page is the answer.
+ * shows none (`signedIn: null`); the opencode page is the answer.
+ *
+ * An installed CLI with a newer published version offers *Update*
+ * (`useAgentUpdates`); updates queue and run one at a time, and a failed one
+ * keeps its command and output behind *Output*.
  */
 function CliAgentsSection() {
   const { health, recheck, checking } = useBridgeHealth();
   const { statuses, recheck: recheckSignIn, checking: checkingSignIn } = useSignInStatus();
+  const updates = useAgentUpdates();
+  const recheckUpdates = updates.recheck;
   const recheckAll = useCallback(() => {
-    recheck();
     recheckSignIn();
-  }, [recheck, recheckSignIn]);
+    // Versions first, so the update check compares the fresh ones.
+    void recheck().then(recheckUpdates);
+  }, [recheck, recheckSignIn, recheckUpdates]);
+  const rechecking = checking || checkingSignIn || updates.checking;
 
   const install = useAgentInstall(recheck);
   const signIn = useSignIn(recheckSignIn);
   /** Which row's dialog is open; the run outlives the dialog. */
   const [openFor, setOpenFor] = useState<{ provider: Provider; label: string } | null>(null);
   const [signInFor, setSignInFor] = useState<Provider | null>(null);
+  const [outputFor, setOutputFor] = useState<{ provider: Provider; label: string } | null>(null);
+  const outputRun = outputFor ? updates.runs[outputFor.provider] : undefined;
+
+  /** Available and not yet queued or running — what *Update all* enqueues. */
+  const pending = (updates.updates ?? [])
+    .filter((u) => u.available && updates.stateOf(u.provider) === null)
+    .map((u) => u.provider);
 
   return (
     <Section
@@ -51,10 +69,18 @@ function CliAgentsSection() {
           // `unknown` (not probed yet, or opencode) draws nothing.
           const state = h.path ? signInState(statuses, h.provider) : "unknown";
           const account = signInAccount(statuses, h.provider);
+          const update = h.path ? updates.updates?.find((u) => u.provider === h.provider) : undefined;
+          const run = updates.runs[h.provider];
+          const updating = updates.stateOf(h.provider);
+          const liveLines = run && !run.result && !run.error ? run.lines : undefined;
+          const failed = !!run && (run.error !== null || run.result?.ok === false);
           return (
             <div key={h.provider} className="flex items-start justify-between gap-4 py-2.5">
               <div className="min-w-0">
-                <div className="text-[13px] text-foreground">{h.label}</div>
+                <div className="flex items-center gap-2 text-[13px] text-foreground">
+                  <ProviderMark provider={h.provider} className="size-4 shrink-0" />
+                  {h.label}
+                </div>
                 <div className="mt-0.5 truncate text-xs text-muted-foreground">
                   {h.path ?? (
                     <>
@@ -68,8 +94,47 @@ function CliAgentsSection() {
                   </div>
                 )}
                 {h.error && h.path && <div className="mt-0.5 text-xs text-destructive">{h.error}</div>}
+                {liveLines && <TerminalLine lines={liveLines} className="mt-1.5 max-w-full" />}
+                {failed && (
+                  <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs">
+                    <span className="truncate text-destructive">
+                      {run.error ?? `Update ${run.result?.status ?? "failed"}`}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="shrink-0"
+                      onClick={() => setOutputFor({ provider: h.provider, label: h.label })}
+                    >
+                      Output
+                    </Button>
+                  </div>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {update?.available && (
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    disabled={updating === "queued"}
+                    onClick={() =>
+                      updating === "running"
+                        ? setOutputFor({ provider: h.provider, label: h.label })
+                        : updates.enqueue([h.provider])
+                    }
+                  >
+                    {updating === "running" ? (
+                      <>
+                        <CircleNotch size={12} className="animate-spin" />
+                        Updating…
+                      </>
+                    ) : updating === "queued" ? (
+                      "Queued"
+                    ) : (
+                      `Update to v${update.latest}`
+                    )}
+                  </Button>
+                )}
                 <span className="text-xs tabular-nums text-muted-foreground">
                   {h.version ? `v${h.version}` : h.path ? "—" : "missing"}
                 </span>
@@ -109,20 +174,21 @@ function CliAgentsSection() {
           <div className="py-2.5 text-xs text-muted-foreground">Checking…</div>
         )}
       </div>
-      <Button
-        variant="ghost"
-        size="xs"
-        className="mt-2"
-        onClick={recheckAll}
-        disabled={checking || checkingSignIn}
-      >
-        {checking || checkingSignIn ? (
-          <CircleNotch size={12} className="animate-spin" />
-        ) : (
-          <ArrowsClockwise size={12} />
+      <div className="mt-2 flex items-center gap-1">
+        <Button variant="ghost" size="xs" onClick={recheckAll} disabled={rechecking}>
+          {rechecking ? <CircleNotch size={12} className="animate-spin" /> : <ArrowsClockwise size={12} />}
+          Recheck
+        </Button>
+        {pending.length > 0 && (
+          <Button variant="ghost" size="xs" onClick={() => updates.enqueue(pending)}>
+            <ArrowCircleUp size={12} />
+            {pending.length > 1 ? `Update all (${pending.length})` : "Update all"}
+          </Button>
         )}
-        Recheck
-      </Button>
+      </div>
+      {outputFor && outputRun && (
+        <UpdateOutputDialog label={outputFor.label} run={outputRun} onClose={() => setOutputFor(null)} />
+      )}
       {openFor && (
         <InstallAgentDialog
           provider={openFor.provider}

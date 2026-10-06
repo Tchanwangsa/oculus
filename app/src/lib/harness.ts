@@ -53,6 +53,30 @@ export interface HarnessModel {
   toolCall?: boolean;
   textInput?: boolean;
   textOutput?: boolean;
+  /** opencode rows only: what Settings → opencode's model table shows. */
+  facts?: ModelFacts;
+}
+
+/** One model's price, limits and capabilities off opencode's catalogue — a
+ *  free local read, never a probe. A field the catalogue omits is null:
+ *  unknown, which a price column must not draw as zero. */
+export interface ModelFacts {
+  /** USD per million tokens. */
+  cost: {
+    input: number | null;
+    output: number | null;
+    cacheRead: number | null;
+    cacheWrite: number | null;
+  } | null;
+  context: number | null;
+  maxOutput: number | null;
+  reasoning: boolean;
+  attachment: boolean;
+  /** Input modalities besides text: `image`, `audio`, `video`, `pdf`. */
+  inputs: string[];
+  /** `YYYY-MM-DD`. */
+  releaseDate: string | null;
+  family: string | null;
 }
 
 /** Whether a provider's CLI is available to model pickers. */
@@ -87,7 +111,7 @@ export interface ProviderInfo {
   fetchModels?: () => Promise<HarnessModel[]>;
   /** How the CLI's sign-in ends: `"code"` blocks on a pasted code (Claude),
    *  `"callback"` finishes via a loopback server (Codex). `null`: nothing to
-   *  drive here — opencode signs in per provider in Settings → Providers. */
+   *  drive here — opencode signs in per provider in Settings → opencode. */
   signIn: "code" | "callback" | null;
   /** What the picker says when an installed CLI's list is empty because of a
    *  step the student can take. */
@@ -129,8 +153,8 @@ export const PROVIDERS: ProviderInfo[] = [
       return filterOffered(models, await loadCatalogue());
     },
     signIn: null,
-    emptyNote: "Sign in to a provider in Settings → Providers to get models here.",
-    emptyNotePage: "providers",
+    emptyNote: "Sign in to a provider in Settings → opencode to get models here.",
+    emptyNotePage: "opencode",
     rewind: true,
   },
   {
@@ -436,6 +460,7 @@ export interface OpencodeModel {
   toolCall?: boolean;
   textInput?: boolean;
   textOutput?: boolean;
+  facts?: ModelFacts;
 }
 
 export function opencodeAsModels(models: OpencodeModel[]): HarnessModel[] {
@@ -451,6 +476,7 @@ export function opencodeAsModels(models: OpencodeModel[]): HarnessModel[] {
       toolCall: m.toolCall,
       textInput: m.textInput,
       textOutput: m.textOutput,
+      facts: m.facts,
     };
   });
 }
@@ -675,6 +701,34 @@ export function harnessDeleteThread(threadId: number): Promise<void> {
  *  (a login shell per provider) — Settings' Recheck button only. */
 export function harnessHealth(recheck = false): Promise<BridgeHealth[]> {
   return invoke<BridgeHealth[]>("harness_health", { recheck });
+}
+
+/** How a CLI was installed, read from its binary's real path in Rust. */
+export type UpdateSource = "brew" | "npm" | "bun" | "selfManaged";
+
+/** One installed CLI against its newest published version. `available` is
+ *  never true when the check failed (`error`). */
+export interface UpdateInfo {
+  provider: Provider;
+  installed: string | null;
+  latest: string | null;
+  available: boolean;
+  source: UpdateSource;
+  /** The literal command `harnessUpdateRun` runs, shown with Copy. */
+  command: string;
+  error: string | null;
+}
+
+/** Missing CLIs are left out. Rust caches the registry answers for hours;
+ *  `recheck` drops them. */
+export function harnessUpdates(recheck = false): Promise<UpdateInfo[]> {
+  return invoke<UpdateInfo[]>("harness_updates", { recheck });
+}
+
+/** Output streams on `harness-update`; one update runs at a time, so a second
+ *  call while one runs rejects. */
+export function harnessUpdateRun(provider: Provider): Promise<void> {
+  return invoke<void>("harness_update_run", { provider });
 }
 
 /** The answer arrives as a `rate_limits` event. Claude ignores it. */

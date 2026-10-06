@@ -27,6 +27,7 @@ mod protected;
 pub mod signin;
 pub mod store;
 mod suggest;
+pub mod update;
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -1471,6 +1472,33 @@ pub mod app {
         blocking(move || {
             let emitter = app.clone();
             signin::start(provider, move |line| {
+    /// Each installed CLI's version against its newest published one. The
+    /// registry answers are cached in Rust; `recheck` drops them.
+    #[tauri::command]
+    pub async fn harness_updates(recheck: bool) -> Vec<update::UpdateInfo> {
+        tokio::task::spawn_blocking(move || {
+            if recheck {
+                update::forget();
+            }
+            update::check_all()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    /// Update one CLI with the command `harness_updates` showed. Output
+    /// streams on `update::UPDATE_EVENT`; one update runs at a time.
+    #[tauri::command]
+    pub async fn harness_update_run(app: AppHandle, provider: Provider) -> Result<(), String> {
+        blocking(move || {
+            let emitter = app.clone();
+            update::start(provider, move |line| {
+                emitter.emit(update::UPDATE_EVENT, line).ok();
+            })
+        })
+        .await
+    }
+
                 if let Some(url) = line.url.as_deref() {
                     tauri_plugin_opener::open_url(url, None::<&str>).ok();
                 }

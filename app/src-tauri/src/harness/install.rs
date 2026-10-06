@@ -286,7 +286,7 @@ where
         running().lock().unwrap().remove(&p);
     };
 
-    match run_command(command, move |line| {
+    match run_command(command, "installed", move |line| {
         let done = line.done;
         emit(InstallLine {
             provider,
@@ -317,10 +317,10 @@ pub struct Line {
     pub status: Option<String>,
 }
 
-/// Spawn `$SHELL -lc "<command>"` and stream it. stdin is `/dev/null`, so
-/// anything that asks a question (a `sudo` password, a prompt) fails at once
-/// instead of hanging.
-fn run_command<F>(command: &str, emit: F) -> Result<(), String>
+/// Spawn `$SHELL -lc "<command>"` and stream it, `success` being the status
+/// of a zero exit. stdin is `/dev/null`, so anything that asks a question (a
+/// `sudo` password, a prompt) fails at once instead of hanging.
+pub(super) fn run_command<F>(command: &str, success: &'static str, emit: F) -> Result<(), String>
 where
     F: Fn(Line) + Send + 'static,
 {
@@ -350,7 +350,7 @@ where
             })
         });
         let (ok, status) = match child.wait() {
-            Ok(s) if s.success() => (true, "installed".to_string()),
+            Ok(s) if s.success() => (true, success.to_string()),
             Ok(s) => (false, exit_text(s)),
             Err(e) => (false, format!("could not be waited for: {e}")),
         };
@@ -536,7 +536,7 @@ mod tests {
     #[test]
     fn runner_streams_then_reports_the_exit() {
         let (tx, rx) = mpsc::channel::<Line>();
-        run_command("echo hello; echo trouble 1>&2; exit 3", move |l| {
+        run_command("echo hello; echo trouble 1>&2; exit 3", "installed", move |l| {
             let _ = tx.send(l);
         })
         .unwrap();
@@ -553,6 +553,6 @@ mod tests {
 
     #[test]
     fn runner_refuses_sudo() {
-        assert!(run_command("sudo make me a sandwich", |_| {}).is_err());
+        assert!(run_command("sudo make me a sandwich", "installed", |_| {}).is_err());
     }
 }

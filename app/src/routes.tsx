@@ -88,7 +88,7 @@ export const routes: RouteObject[] = [
           { path: "browser", lazy: page(() => import("@/pages/settings/BrowserPage")) },
           { path: "storage", lazy: page(() => import("@/pages/settings/StoragePage")) },
           { path: "agents", lazy: page(() => import("@/pages/settings/AgentsPage")) },
-          { path: "providers", lazy: page(() => import("@/pages/settings/ProvidersPage")) },
+          { path: "opencode", lazy: page(() => import("@/pages/settings/OpencodePage")) },
           { path: "jobs", lazy: page(() => import("@/pages/settings/JobsPage")) },
           { path: "parsing", lazy: page(() => import("@/pages/settings/ParsingPage")) },
           { path: "embeddings", lazy: page(() => import("@/pages/settings/EmbeddingsPage")) },
@@ -96,6 +96,7 @@ export const routes: RouteObject[] = [
           { path: "ai", element: <Navigate to="../agents" replace /> },
           { path: "library", element: <Navigate to="../parsing" replace /> },
         ],
+          { path: "providers", element: <Navigate to="../opencode" replace /> },
       },
       // Legacy path with no subject.
       { path: "lectures", element: <Navigate to="/subjects" replace /> },

@@ -250,6 +250,8 @@ pub fn run() {
             harness::app::harness_refresh_rate_limits,
             harness::app::harness_send,
             harness::app::harness_edit_resend,
+            harness::app::harness_updates,
+            harness::app::harness_update_run,
             harness::app::harness_rewind,
             harness::app::harness_queued,
             harness::app::harness_unqueue,

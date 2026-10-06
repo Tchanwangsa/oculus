@@ -15,8 +15,8 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | The event enum and tool classification (`classify`) | `app/src-tauri/src/harness/event.rs` |
 | Bridges: Claude (`claude -p`), Codex (`app-server`), opencode (`serve`), Antigravity (`agy --print=`) | `app/src-tauri/src/harness/claude.rs`, `app/src-tauri/src/harness/codex.rs`, `app/src-tauri/src/harness/opencode.rs`, `app/src-tauri/src/harness/antigravity.rs` |
 | Paths no agent may write; opencode's ruleset; agy's rules | `app/src-tauri/src/harness/protected.rs`, `app/src-tauri/templates/OPENCODE.template.json`, `app/src-tauri/src/harness/antigravity_rules.rs` |
-| Finding, installing and signing in the CLIs | `app/src-tauri/src/harness/discover.rs`, `app/src-tauri/src/harness/install.rs`, `app/src-tauri/src/harness/signin.rs` |
-| …their frontend | `app/src/hooks/useBridgeHealth.ts`, `app/src/hooks/useSignInStatus.ts`, `app/src/components/settings/InstallAgentDialog.tsx`, `app/src/components/harness/SignInDialog.tsx` |
+| Finding, installing, updating and signing in the CLIs | `app/src-tauri/src/harness/discover.rs`, `app/src-tauri/src/harness/install.rs`, `app/src-tauri/src/harness/update.rs`, `app/src-tauri/src/harness/signin.rs` |
+| …their frontend | `app/src/hooks/useBridgeHealth.ts`, `app/src/hooks/useSignInStatus.ts`, `app/src/components/settings/InstallAgentDialog.tsx`, `app/src/components/settings/UpdateAgents.tsx`, `app/src/components/harness/SignInDialog.tsx`, `app/src/pages/settings/AgentsPage.tsx` |
 | Process pipes, JSON lines and terminal turn failures shared by the bridges | `app/src-tauri/src/harness/child.rs` |
 | Thread and timeline rows | `app/src-tauri/src/harness/store.rs` |
 | The brief appended to each prompt; `AGENTS.md`; skills | `app/src-tauri/templates/HARNESS.template.md`, `app/src-tauri/templates/AGENTS.template.md`, `app/src-tauri/templates/skills/`, `app/src-tauri/src/agents.rs` |
@@ -26,7 +26,7 @@ bridge per provider, one event stream, a timeline that only sees the stream.
 | Page, thread list, history list, timeline, rows, composer | `app/src/pages/ChatPage.tsx`, `app/src/components/harness/` (history: `ChatHistory.tsx`) |
 | Unsent text per thread (and per new-thread box), kept across switches and relaunches | `app/src/stores/draftStore.ts` |
 | Model picker and its catalogue hook | `app/src/components/harness/ModelPicker.tsx`, `app/src/hooks/useProviderModels.ts` |
-| opencode providers and the offered-model gate | `app/src/components/settings/OpencodeCatalogDialog.tsx`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeCatalogue.ts` |
+| Settings → opencode: the provider and model tables, the connect flow, the offered-model gate | `app/src/pages/settings/OpencodePage.tsx`, `app/src/components/settings/opencode/`, `app/src/components/settings/OpencodeConnectDialog.tsx`, `app/src/lib/opencodeCatalogue.ts` |
 | Per-job models | `app/src-tauri/src/harness/jobs.rs`, `JOBS` in `app/src/lib/db.ts`, `app/src/pages/settings/JobsPage.tsx` |
 | One-off turns (`Harness::one_off`): thread names, the editor's inline suggestions (`document_suggest`) | `app/src-tauri/src/harness/mod.rs`, `app/src-tauri/src/harness/suggest.rs` |
 | `@` menu and mention input | `app/src/components/harness/useMentionMenu.ts`, `app/src/components/harness/MentionInput.tsx`, `app/src/components/markdown/FileChip.tsx` |
@@ -149,7 +149,7 @@ system prompt, so the brief is the `oculus` agent's prompt in
 `$CODEX_HOME/skills`, which every project shares. The set stays small: every
 CLI puts the skill index in every turn, headless jobs included.
 
-## Finding, installing and signing in the CLIs
+## Finding, installing, updating and signing in the CLIs
 
 A Dock-launched app has launchd's PATH, so `discover.rs` tries
 `OCULUS_{CLAUDE,CODEX,OPENCODE,ANTIGRAVITY}_BIN`, PATH, `well_known_dirs`, then
@@ -163,6 +163,37 @@ fails instead of hanging, and the webview names a provider, never a command
 string. macOS only.
 
 **Sign-in.** `signin::is_auth_failure` (via `HarnessEvent::error_for`) matches
+**Update.** Settings → Agents checks each installed CLI against its newest
+published version on every visit (`harness_updates`). The binary's
+canonical path gives its source: `Caskroom`/`Cellar` or the Homebrew prefix
+is Homebrew, a `node_modules` under `~/.bun` is bun, any other
+`node_modules` is npm, anything else updates itself (the vendor script or
+native installer). Source picks both the command and the endpoint, all free
+and unauthenticated:
+
+| Source | Command | Newest version from |
+| --- | --- | --- |
+| Homebrew | `brew upgrade --cask claude-code` / `--cask codex` / `brew upgrade anomalyco/tap/opencode` | `formulae.brew.sh/api/cask/<name>.json`; opencode's tap isn't served there, so npm's `opencode-ai` |
+| npm | `npm install -g <pkg>@latest` (`@anthropic-ai/claude-code`, `@openai/codex`, `opencode-ai`) | `registry.npmjs.org/<pkg>/latest` |
+| bun (opencode only) | `bun install -g opencode-ai@latest` | npm's `opencode-ai` |
+| Self-managed | `'<binary path>' update` (`upgrade` for opencode) | Claude: `downloads.claude.ai/claude-code-releases/<channel>` (`stable` when `~/.claude/settings.json` sets `autoUpdatesChannel`, else `latest`); Codex, opencode: npm; Antigravity: its updater's `manifests/darwin_<arch>.json` |
+
+Any other pairing (Antigravity outside its script, Claude under bun) falls
+back to the CLI's own subcommand and is compared against what that installs.
+A brew install compares against brew because the cask can trail npm by a
+release, and comparing it to npm would offer an update that changes nothing.
+Versions compare by their numeric dot parts (a `-`/`+` suffix is ignored);
+only a strictly newer one offers *Update*, and a failed check offers none.
+Registry answers are cached for 6 hours (a failure for 10 minutes); Recheck
+drops them with `discover::forget`.
+
+Updates run one at a time across all four CLIs — brew and npm hold global
+locks — through the install runner, so the same login shell, `/dev/null`
+stdin and `sudo` refusal apply, with the literal command behind *Output*
+when one fails. The webview names only a provider. A running chat keeps the
+binary it started with until its CLI process restarts — the process shapes
+are in the table under [Four dialects](#four-dialects-become-one-event-stream).
+
 whole clauses only — a false positive sends a student to re-authenticate over
 an unrelated error — and marks the error row's `meta` for a sign-in card.
 `ProviderInfo.signIn` is `"code"` (`claude auth login` blocks on a pasted
@@ -362,8 +393,11 @@ compile without one.
 /auth/{id}` and the OAuth pair, so Settings drives credentials over the
 bridge's connection into opencode's own store (shared with the student's
 terminal). A method spec is data rendered by one dialog; providers declaring
-nothing take an API key. Opening Settings does not start opencode — the
-*Manage providers* click does.
+nothing take an API key. Opening the opencode page starts it; Settings opens
+on another page, so opening Settings alone does not. The page is two tables,
+Providers and Models, the second one row per model with opencode's own price,
+limits and capabilities (`ModelFacts`, a free catalogue read; a missing figure
+draws "—", never $0).
 
 - **`connected` goes stale** after `PUT /auth` until `POST /instance/dispose`,
   which is skipped while a turn is open.
@@ -387,8 +421,7 @@ almost everything it would learn is free:
 An opencode model is offered when `unusableReason` finds nothing (absent flags
 mean capable), it is not Zen, and neither it nor its provider is hidden (one
 `settings` value, `opencode_catalogue`). `filterOffered` is the composer's
-only path and Settings counts through it; Settings summarises *hidden* models,
-since counting offered ones means starting the CLI. A stale key or a
+only path and the opencode page counts through it. A stale key or a
 provider-verified model (Meta's Muse Spark) fails once in the timeline.
 
 ## Per-job models
@@ -495,7 +528,7 @@ chapter list inline — rebuilt on every send and before any spawn.
 - Never pass `agy` `--dangerously-skip-permissions` — its file tools then write outside the library.
 - Never put an `Edit` deny on `oculus.db*` in Claude's settings — it cancels the write grant and every board write fails readonly.
 - Never grant the library folder instead of the three database files — it exposes the session cookie and Ed token.
-- Never let Settings start opencode or make a billed call — see [No model is ever probed](#no-model-is-ever-probed).
+- Never let Settings make a billed call, or start opencode anywhere but its own page — see [No model is ever probed](#no-model-is-ever-probed).
 - Read opencode models from `/config/providers`, never `/api/model` — the latter lists the instance's providers, not the signed-in ones.
 - Every opencode call carries `?directory=<agents>` except `/auth/{id}` — unscoped, it binds to the server's launch cwd and another instance.
 - Never drive opencode's v2 API (`/api/*`) — on 1.18.31 a prompt on an `auth.json` provider fails with no event.

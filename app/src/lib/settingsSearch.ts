@@ -26,7 +26,7 @@ export type SettingsPageId =
   | "browser"
   | "storage"
   | "agents"
-  | "providers"
+  | "opencode"
   | "jobs"
   | "parsing"
   | "embeddings";
@@ -39,6 +39,9 @@ export interface SettingsPage {
   group: (typeof SETTINGS_GROUPS)[number];
 }
 
+  /** The page fills the content area and scrolls its own table, instead of
+   *  sitting in the layout's centred scroller (`SettingsLayout`). */
+  fullBleed?: boolean;
 export const SETTINGS_GROUPS = ["General", "AI", "Library"] as const;
 
 /** In nav order within each group. */
@@ -48,7 +51,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "browser", label: "Browser", icon: Globe, group: "General" },
   { id: "storage", label: "Storage", icon: HardDrives, group: "General" },
   { id: "agents", label: "Agents", icon: Robot, group: "AI" },
-  { id: "providers", label: "Providers", icon: Plugs, group: "AI" },
+  { id: "opencode", label: "opencode", icon: Plugs, group: "AI", fullBleed: true },
   { id: "jobs", label: "Jobs", icon: Lightning, group: "AI" },
   { id: "parsing", label: "Parsing", icon: FilePdf, group: "Library" },
   { id: "embeddings", label: "Embeddings", icon: Graph, group: "Library" },
@@ -117,11 +120,13 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   ...rows("storage", "Storage", [["Largest files"]]),
 
   page("agents", ["ai", "cli"]),
-  ...section("agents", "CLI agents", ["claude code", "codex", "opencode", "antigravity", "install", "sign in"]),
+  ...section("agents", "CLI agents", ["claude code", "codex", "opencode", "antigravity", "install", "sign in", "update", "upgrade", "version"]),
   ...section("agents", "Antigravity approvals", ["permissions", "revoke"]),
 
-  page("providers", ["ai", "models"]),
-  ...section("providers", "opencode providers", ["manage providers", "models", "hidden"]),
+  page("opencode", ["ai", "models", "providers"]),
+  // The page's two tabs; it switches to the one a result names.
+  ...section("opencode", "Providers", ["sign in", "connect", "disconnect", "api key", "oauth"]),
+  ...section("opencode", "Models", ["offered", "hidden", "picker", "price", "context", "capabilities"]),
 
   page("jobs", ["ai", "model", "reasoning"]),
   ...rows("jobs", "Jobs", JOBS.map((job) => [job.label] as const)),

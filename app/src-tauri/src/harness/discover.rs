@@ -166,11 +166,18 @@ pub fn tool(name: &str) -> Option<PathBuf> {
     found
 }
 
-/// Drop cached lookups and health, for a recheck after an install.
+/// Drop cached lookups, health and newest versions, for a recheck after an
+/// install.
 pub fn forget() {
     cache().lock().unwrap().clear();
     health_cache().lock().unwrap().clear();
     tool_cache().lock().unwrap().clear();
+    super::update::forget();
+}
+
+/// Drop one provider's cached `--version`, after an update replaced it.
+pub fn forget_health(provider: Provider) {
+    health_cache().lock().unwrap().remove(&provider);
 }
 
 /// The `oculus` binary the child should find on its PATH: the app's sibling in a

@@ -38,10 +38,12 @@ headings and Inter for everything else, Notion-style layout.
   `tooltip.tsx` adds `max-w-64` and `break-words` so a long page title or file
   name wraps. Call sites don't override these — don't restore what
   `shadcn add` generates.
-- **Monospace is for code only** — the one `font-mono` is
+- **Monospace is for code and terminal output only** — the one `font-mono` file is
   `app/src/components/markdown/MdComponents.tsx`; the note editor's theme
   (`app/src/components/documents/editor/theme.ts`) gives `--font-mono` to code
-  and LaTeX source. Timestamps, counts, IDs and badges take the body font,
+  and LaTeX source. A command's output (`AnsiText`, the one-line
+  `TerminalLine` on a running install or update) keeps its colours via
+  `lib/ansi.ts`, which drops every escape but SGR. Timestamps, counts, IDs and badges take the body font,
   with `tabular-nums` when digits hold a column.
 - Headings get Manrope from an `h1–h4` rule in `@layer base`; a title that
   isn't a heading element takes `font-display`. A reply's headings

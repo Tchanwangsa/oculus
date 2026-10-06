@@ -98,6 +98,35 @@ pub struct ModelInfo {
     pub text_input: bool,
     pub text_output: bool,
 }
+    /// What Settings → opencode's model table shows.
+    pub facts: ModelFacts,
+}
+
+/// A model's price, limits and capabilities as the catalogue states them —
+/// `ModelFacts` in `app/src/lib/harness.ts`. An absent field is `None`:
+/// unknown, which a price column must not draw as zero.
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelFacts {
+    pub cost: Option<ModelCost>,
+    pub context: Option<u64>,
+    pub max_output: Option<u64>,
+    pub reasoning: bool,
+    pub attachment: bool,
+    /// Input modalities besides text, in a fixed order.
+    pub inputs: Vec<String>,
+    pub release_date: Option<String>,
+    pub family: Option<String>,
+}
+
+/// USD per million tokens.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCost {
+    pub input: Option<f64>,
+    pub output: Option<f64>,
+    pub cache_read: Option<f64>,
+    pub cache_write: Option<f64>,
 
 /// One row of Settings → AI's provider list, in the shape
 /// `app/src/lib/opencodeAuth.ts` reads.
@@ -1206,6 +1235,7 @@ fn parse_models(v: &Value) -> Result<Vec<ModelInfo>, String> {
         }
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
+                facts: facts(m),
     Ok(out)
 }
 
@@ -1213,6 +1243,32 @@ fn parse_models(v: &Value) -> Result<Vec<ModelInfo>, String> {
 fn variant_ids(v: &Value) -> Vec<String> {
     if let Some(a) = v.as_array() {
         return a.iter().filter_map(|x| x["id"].as_str().map(String::from)).collect();
+/// The table's columns off one catalogue row. Absent stays `None`, never 0.
+fn facts(m: &Value) -> ModelFacts {
+    let caps = &m["capabilities"];
+    let cost = m["cost"].as_object().map(|c| ModelCost {
+        input: c.get("input").and_then(Value::as_f64),
+        output: c.get("output").and_then(Value::as_f64),
+        cache_read: m["cost"]["cache"]["read"].as_f64(),
+        cache_write: m["cost"]["cache"]["write"].as_f64(),
+    });
+    let text = |v: &Value| v.as_str().filter(|s| !s.is_empty()).map(String::from);
+    ModelFacts {
+        cost,
+        context: m["limit"]["context"].as_u64(),
+        max_output: m["limit"]["output"].as_u64(),
+        reasoning: caps["reasoning"].as_bool() == Some(true),
+        attachment: caps["attachment"].as_bool() == Some(true),
+        inputs: ["image", "pdf", "audio", "video"]
+            .into_iter()
+            .filter(|k| caps["input"][*k].as_bool() == Some(true))
+            .map(String::from)
+            .collect(),
+        release_date: text(&m["release_date"]),
+        family: text(&m["family"]),
+    }
+}
+
     }
     match v.as_object() {
         Some(o) => o.keys().cloned().collect(),
@@ -1973,6 +2029,52 @@ mod tests {
     /// is a silently empty model list, not a type error.
     #[test]
     fn a_model_row_is_spelled_the_way_the_picker_reads_it() {
+    #[test]
+    fn a_model_s_facts_come_off_the_row_and_an_unpriced_row_is_unknown_not_free() {
+        let v = json!({
+            "providers": [{ "id": "openrouter", "models": {
+                "a": { "id": "a", "name": "A", "family": "qwen", "release_date": "2026-05-21",
+                    "cost": { "input": 1.475, "output": 4.425, "cache": { "read": 0.1 } },
+                    "limit": { "context": 1000000, "output": 131072 },
+                    "capabilities": { "reasoning": true, "attachment": true,
+                        "input": { "text": true, "image": true, "pdf": true, "audio": false } } },
+                "b": { "id": "b", "name": "B", "cost": { "input": 0, "output": 0 } },
+                "c": { "id": "c", "name": "C", "family": "" }
+            }}]
+        });
+        let models = parse_models(&v).unwrap();
+        let a = &models[0].facts;
+        let cost = a.cost.as_ref().unwrap();
+        assert_eq!((cost.input, cost.output), (Some(1.475), Some(4.425)));
+        assert_eq!((cost.cache_read, cost.cache_write), (Some(0.1), None));
+        assert_eq!((a.context, a.max_output), (Some(1_000_000), Some(131_072)));
+        assert!(a.reasoning && a.attachment);
+        assert_eq!(a.inputs, ["image", "pdf"]);
+        assert_eq!(a.release_date.as_deref(), Some("2026-05-21"));
+        assert_eq!(a.family.as_deref(), Some("qwen"));
+        assert_eq!(models[1].facts.cost.as_ref().unwrap().input, Some(0.0), "b: a stated zero is zero");
+        assert_eq!(models[2].facts, ModelFacts::default(), "c: nothing stated is all unknown");
+    }
+
+    /// `ModelFacts` in `app/src/lib/harness.ts` reads these names.
+    #[test]
+    fn a_model_s_facts_are_spelled_the_way_the_table_reads_them() {
+        let json = serde_json::to_value(ModelFacts {
+            cost: Some(ModelCost { input: None, output: None, cache_read: None, cache_write: None }),
+            ..ModelFacts::default()
+        })
+        .unwrap();
+        let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["attachment", "context", "cost", "family", "inputs", "maxOutput", "reasoning", "releaseDate"]
+        );
+        let mut cost: Vec<&str> = json["cost"].as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        cost.sort_unstable();
+        assert_eq!(cost, ["cacheRead", "cacheWrite", "input", "output"]);
+    }
+
         let json = serde_json::to_value(ModelInfo {
             id: "anthropic/claude-opus-4-5".into(),
             display_name: "Claude Opus 4.5 (latest)".into(),
@@ -1987,6 +2089,7 @@ mod tests {
         .unwrap();
         let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(|k| k.as_str()).collect();
         keys.sort_unstable();
+            facts: ModelFacts::default(),
         assert_eq!(
             keys,
             [
@@ -1997,6 +2100,7 @@ mod tests {
                 "isDefault",
                 "textInput",
                 "textOutput",
+                "facts",
                 "toolCall",
                 "variants"
             ]

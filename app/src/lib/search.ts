@@ -104,7 +104,7 @@ const PLACES: { label: string; path: string; icon: PhosphorIcon }[] = [
   { label: "Settings · Browser", path: "/settings/browser", icon: GearSix },
   { label: "Settings · Storage", path: "/settings/storage", icon: GearSix },
   { label: "Settings · Agents", path: "/settings/agents", icon: GearSix },
-  { label: "Settings · Providers", path: "/settings/providers", icon: GearSix },
+  { label: "Settings · opencode", path: "/settings/opencode", icon: GearSix },
   { label: "Settings · Jobs", path: "/settings/jobs", icon: GearSix },
   { label: "Settings · Parsing", path: "/settings/parsing", icon: GearSix },
   { label: "Settings · Embeddings", path: "/settings/embeddings", icon: GearSix },

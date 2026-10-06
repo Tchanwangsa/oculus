@@ -6,7 +6,7 @@ import type { Provider } from "@/lib/harness";
 import { copyText } from "@/lib/utils";
 import { useTauriEvent } from "@/hooks/useEvents";
 import { Button } from "@/components/ui/button";
-import { CodeText } from "@/components/markdown/MdComponents";
+import { AnsiText, CodeText } from "@/components/markdown/MdComponents";
 import {
   Dialog,
   DialogContent,
@@ -215,7 +215,7 @@ export function InstallAgentDialog({
                   <span>Starting…</span>
                 </div>
               ) : (
-                <CodeText>{run.lines.join("\n")}</CodeText>
+                <AnsiText lines={run.lines} />
               )}
             </div>
             {run.result && (
