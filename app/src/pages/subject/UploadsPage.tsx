@@ -208,7 +208,7 @@ function UploadRow({
           onClick={onDelete}
           aria-label={`Remove ${file.filename}`}
           title="Remove from this subject"
-          className="text-muted-foreground opacity-0 transition-[color,opacity] group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100"
+          className="text-muted-foreground opacity-0 transition-[color,opacity] will-change-[opacity] group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100"
         >
           <Trash size={12} aria-hidden />
         </button>

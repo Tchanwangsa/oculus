@@ -612,7 +612,7 @@ function Subtasks({
                 }
                 onClick={() => target && onToggle(child, target)}
                 className={cn(
-                  "shrink-0 rounded-full p-0.5 transition-opacity",
+                  "shrink-0 rounded-full p-0.5 transition-opacity will-change-[opacity]",
                   target == null ? "cursor-not-allowed opacity-30" : "cursor-pointer hover:opacity-70",
                 )}
               >

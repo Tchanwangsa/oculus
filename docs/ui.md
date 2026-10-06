@@ -156,12 +156,15 @@ mounts on open and loads through the same cache.
   At a fractional page zoom (1.1, 1.3) WebKit re-snaps content by half a device
   pixel whenever an element gains or loses its own compositing layer, so icons
   step on a hover, a fade or an expand while the text beside them stays put.
-  Two known triggers: a scroller that only starts to overflow after something
-  expands (`SwitcherList` in `SubjectNav.tsx`), and a row that fades with
-  `opacity-0 transition-opacity group-hover:opacity-100` (`MessageActions` in
-  `Timeline.tsx`). Both carry `will-change`, which keeps the layer on from the
-  start. Whole-pixel row heights do not help. Give any new hover-fade row or
-  growing scroller the same, and check it at zoom 1.1 and 1.3, not 1.0.
+  Known triggers: a scroller that only starts to overflow after something
+  expands (`SwitcherList` in `SubjectNav.tsx`), and anything that transitions
+  `opacity` or `transform` — a hover-reveal button (`MessageActions` in
+  `Timeline.tsx`, `ThreadRow`'s delete), a caret that fades and rotates, the
+  label fade `SIDE_NAV_FOLDS`. All carry `will-change`, which keeps the layer on
+  from the start. Whole-pixel row heights do not help. **Every new
+  `transition-opacity` / `transition-transform` on an icon, or on a row holding
+  one, gets `will-change-[opacity]` (or `[opacity,transform]`)** — grep for
+  `transition-` before finishing UI work, and check at zoom 1.1 and 1.3, not 1.0.
 - **Centre overflowing content with auto margins and `flex: none`**, not
   `justify-content: center`, which makes the start-edge overflow unreachable.
 - **Never nest a `<button>` in a row that is a button** — WebKit drops the inner

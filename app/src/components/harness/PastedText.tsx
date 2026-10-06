@@ -23,7 +23,7 @@ export function RemoveAttachment({ label, onClick }: { label: string; onClick: (
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="absolute -right-1.5 -top-1.5 flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 transition-opacity group-hover/att:opacity-100 hover:text-foreground focus-visible:opacity-100"
+      className="absolute -right-1.5 -top-1.5 flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 transition-opacity will-change-[opacity] group-hover/att:opacity-100 hover:text-foreground focus-visible:opacity-100"
     >
       <X size={9} weight="bold" />
     </button>

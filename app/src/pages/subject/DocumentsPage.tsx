@@ -170,7 +170,7 @@ function DocumentRow({ file, onDelete }: { file: DbFile; onDelete: () => void })
           onClick={onDelete}
           aria-label={`Delete ${fileTitle(file)}`}
           title="Delete this document"
-          className="text-muted-foreground opacity-0 transition-[color,opacity] group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100"
+          className="text-muted-foreground opacity-0 transition-[color,opacity] will-change-[opacity] group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100"
         >
           <Trash size={12} aria-hidden />
         </button>

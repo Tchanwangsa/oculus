@@ -349,7 +349,7 @@ export function FollowList({
       {/* Scrolled away from the playing row — offer the way back. */}
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center transition-opacity duration-200",
+          "pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center transition-opacity will-change-[opacity] duration-200",
           showBackToLive ? "opacity-100" : "opacity-0",
         )}
       >

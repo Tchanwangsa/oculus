@@ -129,7 +129,7 @@ function VideoFrame({
       {showSwitcher && (
         <div
           className={cn(
-            "absolute left-2 top-2 z-20 transition-opacity duration-150",
+            "absolute left-2 top-2 z-20 transition-opacity will-change-[opacity] duration-150",
             pinned
               ? "opacity-100"
               : chromeVisible
@@ -185,7 +185,7 @@ function StackDivider({
       <span
         className={cn(
           "pointer-events-none absolute left-1/2 top-1/2 h-[2px] w-8 -translate-x-1/2 -translate-y-1/2",
-          "rounded-full bg-white/50 opacity-0 transition-opacity group-hover/split:opacity-100",
+          "rounded-full bg-white/50 opacity-0 transition-opacity will-change-[opacity] group-hover/split:opacity-100",
         )}
       />
     </div>
@@ -885,7 +885,7 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
                   aria-hidden="true"
                   onPointerDown={(e) => startPipResize(e, corner)}
                   className={cn(
-                    "absolute z-10 size-5 touch-none transition-opacity",
+                    "absolute z-10 size-5 touch-none transition-opacity will-change-[opacity]",
                     pipDragging
                       ? "opacity-100"
                       : controlsVisible

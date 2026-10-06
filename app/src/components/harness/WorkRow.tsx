@@ -78,7 +78,7 @@ export function RowShell({
         ? "text-foreground"
         : "text-muted-foreground";
   return (
-    <div className={cn("min-w-0 transition-opacity", dim && !open && "opacity-40 hover:opacity-100")}>
+    <div className={cn("min-w-0 transition-opacity will-change-[opacity]", dim && !open && "opacity-40 hover:opacity-100")}>
       {/* Sibling controls, not nested buttons: the path link and the disclosure. */}
       <div
         className={cn(
@@ -136,7 +136,7 @@ export function RowShell({
             <CaretRight
               size={11}
               className={cn(
-                "transition-[opacity,transform] duration-150",
+                "transition-[opacity,transform] will-change-[opacity,transform] duration-150",
                 open ? "rotate-90 opacity-60" : "opacity-0 group-hover/row:opacity-60",
               )}
             />

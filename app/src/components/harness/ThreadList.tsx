@@ -227,7 +227,7 @@ export const ThreadList = memo(function ThreadList({
                   <CaretRight
                     size={11}
                     className={cn(
-                      "shrink-0 transition-[transform,opacity]",
+                      "shrink-0 transition-[transform,opacity] will-change-[opacity,transform]",
                       open ? "rotate-90 opacity-0 group-hover/head:opacity-100" : "opacity-60",
                     )}
                   />
@@ -372,7 +372,7 @@ function ThreadRow({
             type="button"
             aria-label="Delete thread"
             onClick={() => onArm(t.id)}
-            className="rounded p-0.5 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/thread:opacity-100 group-data-[collapsed=true]/nav:pointer-events-none"
+            className="rounded p-0.5 opacity-0 transition-opacity will-change-[opacity] hover:text-foreground focus-visible:opacity-100 group-hover/thread:opacity-100 group-data-[collapsed=true]/nav:pointer-events-none"
           >
             <Trash size={12} />
           </button>
@@ -381,7 +381,7 @@ function ThreadRow({
       {running && (
         <span
           aria-hidden
-          className="absolute top-1 left-5 size-1.5 rounded-full bg-brand opacity-0 transition-opacity duration-150 group-data-[collapsed=true]/nav:opacity-100"
+          className="absolute top-1 left-5 size-1.5 rounded-full bg-brand opacity-0 transition-opacity will-change-[opacity] duration-150 group-data-[collapsed=true]/nav:opacity-100"
         />
       )}
     </div>

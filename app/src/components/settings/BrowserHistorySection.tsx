@@ -158,7 +158,7 @@ export function BrowserHistorySection() {
                       type="button"
                       onClick={() => void forget(entry.url)}
                       aria-label={`Forget ${entry.url}`}
-                      className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-item-active hover:text-foreground group-hover:opacity-100"
+                      className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity will-change-[opacity] hover:bg-sidebar-item-active hover:text-foreground group-hover:opacity-100"
                     >
                       <X size={11} />
                     </button>

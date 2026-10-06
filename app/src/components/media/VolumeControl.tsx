@@ -91,7 +91,7 @@ export function VolumeControl({
           squeezed. */}
       <div
         className={cn(
-          "overflow-hidden transition-[width,opacity] duration-150 ease-out",
+          "overflow-hidden transition-[width,opacity] will-change-[opacity] duration-150 ease-out",
           "w-0 opacity-0",
           "group-hover/volume:w-[74px] group-hover/volume:opacity-100",
           "group-focus-within/volume:w-[74px] group-focus-within/volume:opacity-100",

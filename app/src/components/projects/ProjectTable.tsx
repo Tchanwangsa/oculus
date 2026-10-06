@@ -70,7 +70,7 @@ function AddSubtaskButton({
       aria-label="Add subtask"
       onClick={onClick}
       className={cn(
-        "shrink-0 rounded p-0.5 text-muted-foreground transition-opacity",
+        "shrink-0 rounded p-0.5 text-muted-foreground transition-opacity will-change-[opacity]",
         disabled
           ? "cursor-not-allowed opacity-30"
           : "cursor-pointer opacity-0 hover:text-foreground group-hover/row:opacity-100",
@@ -145,7 +145,7 @@ function TaskRow({
       <div className="relative flex items-center">
         <span
           className={cn(
-            "text-[11px] tabular-nums text-muted-foreground/60 transition-opacity",
+            "text-[11px] tabular-nums text-muted-foreground/60 transition-opacity will-change-[opacity]",
             numbersHidden ? "opacity-0" : "group-hover/row:opacity-0",
           )}
         >
@@ -155,7 +155,7 @@ function TaskRow({
           aria-hidden
           onPointerDown={onGrab}
           className={cn(
-            "absolute inset-0 flex items-center text-muted-foreground/70 transition-opacity",
+            "absolute inset-0 flex items-center text-muted-foreground/70 transition-opacity will-change-[opacity]",
             // Not preventDefault on press — see docs/ui.md (WebKit click).
             DRAG_SURFACE,
             // Set here, not via `:active`: the grip holds pointer capture, so

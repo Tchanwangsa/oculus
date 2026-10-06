@@ -807,7 +807,7 @@ export function MediaPlayer({
           {/* Controls — one scrim, the scrub bar across the top of it */}
           <div
             className={cn(
-              "absolute inset-x-0 bottom-0 z-30 transition-opacity duration-200",
+              "absolute inset-x-0 bottom-0 z-30 transition-opacity will-change-[opacity] duration-200",
               controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none",
             )}
             inert={elsewhere}

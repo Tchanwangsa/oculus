@@ -84,7 +84,7 @@ export function Mermaid({
                 onClick={() => setOpen(true)}
                 aria-label="Open diagram"
                 // The only way into the lightbox: a press on the picture pans.
-                className="absolute top-1.5 right-1.5 cursor-pointer rounded-full border border-border bg-card/90 p-1.5 text-muted-foreground opacity-0 shadow-xs backdrop-blur-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                className="absolute top-1.5 right-1.5 cursor-pointer rounded-full border border-border bg-card/90 p-1.5 text-muted-foreground opacity-0 shadow-xs backdrop-blur-sm transition-opacity will-change-[opacity] hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <ArrowsOutSimple size={13} />
               </button>

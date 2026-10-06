@@ -85,7 +85,7 @@ function ProjectRow({
             onDelete={() => actions.onDelete(project)}
             /* Faded, not `hidden`, so it stays tabbable and anchors its
                open popover. */
-            className="opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+            className="opacity-0 transition-opacity will-change-[opacity] group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
           />
         </span>
       )}

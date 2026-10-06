@@ -382,7 +382,7 @@ export default function TopTabBar({
                          stays soft since the title mask already fades the text. */
                       <span
                         className={cn(
-                          "absolute flex items-center pl-6 opacity-0 group-hover:opacity-100 transition-opacity",
+                          "absolute flex items-center pl-6 opacity-0 group-hover:opacity-100 transition-opacity will-change-[opacity]",
                           active
                             ? "inset-y-px right-px pr-1.5 rounded-r-lg bg-gradient-to-l from-card from-40% via-card/70 via-75% to-transparent"
                             : "inset-y-0 right-0 pr-1.5 rounded-r-lg bg-gradient-to-l from-sidebar-item-hover from-40% via-sidebar-item-hover/70 via-75% to-transparent",

@@ -22,7 +22,7 @@ export const SIDE_NAV_COLLAPSED_WIDTH = 48;
 /** Fades a label out while the column is collapsed. The layout is the same in
  *  both states and the column clips it, so icons never move as it folds. */
 export const SIDE_NAV_FOLDS =
-  "transition-opacity duration-150 group-data-[collapsed=true]/nav:opacity-0";
+  "transition-opacity will-change-[opacity] duration-150 group-data-[collapsed=true]/nav:opacity-0";
 
 /**
  * A page's own nav column beside its content: `header` and `footer` stay
@@ -182,7 +182,7 @@ function RowLink({
       {dot && (
         <span
           aria-hidden
-          className="absolute top-1 left-5 size-1.5 rounded-full bg-brand opacity-0 transition-opacity duration-150 group-data-[collapsed=true]/nav:opacity-100"
+          className="absolute top-1 left-5 size-1.5 rounded-full bg-brand opacity-0 transition-opacity will-change-[opacity] duration-150 group-data-[collapsed=true]/nav:opacity-100"
         />
       )}
     </NavLink>
@@ -212,7 +212,7 @@ export function SideNavSearch({
     <div className="relative px-2 pb-2">
       <div
         className={cn(
-          "flex h-8 items-center gap-2 rounded-full border border-input bg-card px-3 transition-[color,box-shadow,opacity] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
+          "flex h-8 items-center gap-2 rounded-full border border-input bg-card px-3 transition-[color,box-shadow,opacity] will-change-[opacity] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25",
           collapsed && "pointer-events-none opacity-0",
         )}
       >
@@ -256,7 +256,7 @@ export function SideNavSearch({
             tabIndex={collapsed ? undefined : -1}
             onClick={onExpand}
             className={cn(
-              "absolute top-0 left-2 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,opacity] hover:bg-sidebar-item-hover hover:text-foreground",
+              "absolute top-0 left-2 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,opacity] will-change-[opacity] hover:bg-sidebar-item-hover hover:text-foreground",
               !collapsed && "pointer-events-none opacity-0",
             )}
           >
