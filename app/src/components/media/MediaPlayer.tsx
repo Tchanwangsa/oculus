@@ -767,6 +767,18 @@ export function MediaPlayer({
   const setPrefs = usePlayerPrefs((s) => s.set);
   const shownError = error ?? player.error;
 
+  // The bar's real height (the chapter title above the seek bar makes it taller
+  // than its buttons), so the caption rides exactly clear of it.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barHeight, setBarHeight] = useState(0);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setBarHeight(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     // The dock side is a flex direction: `*-reverse` puts the panel before the
     // video stack visually while leaving the divider between the two.
@@ -800,12 +812,13 @@ export function MediaPlayer({
               text={cues[activeCueIdx]?.text ?? ""}
               boundsRef={videoAreaRef}
               // Lift clear of the control bar while it shows.
-              lift={controlsVisible ? 44 : 0}
+              lift={controlsVisible ? barHeight : 0}
             />
           )}
 
           {/* Controls — one scrim, the scrub bar across the top of it */}
           <div
+            ref={barRef}
             className={cn(
               "absolute inset-x-0 bottom-0 z-30 transition-opacity will-change-[opacity] duration-200",
               controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none",

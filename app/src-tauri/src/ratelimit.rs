@@ -55,6 +55,12 @@ impl TokenBucket {
     /// Take `cost`, waiting for the refill if short. `cost` is clamped to the
     /// capacity: a bucket that can never hold it would deadlock.
     pub fn acquire_n(&self, cost: f64) {
+        self.acquire_n_reporting(cost, &mut |_| {});
+    }
+
+    /// `acquire_n`, telling `on_wait` how long the refill should take each
+    /// time it is about to block. Called under the bucket's lock: keep it cheap.
+    pub fn acquire_n_reporting(&self, cost: f64, on_wait: &mut dyn FnMut(Duration)) {
         let mut state = hold(&self.state);
         loop {
             let now = Instant::now();
@@ -67,10 +73,21 @@ impl TokenBucket {
                 state.tokens -= want;
                 return;
             }
-            let short_by = want - state.tokens;
-            let wait = Duration::from_secs_f64((short_by / state.rate).clamp(0.001, 60.0));
+            let refill = (want - state.tokens) / state.rate;
+            on_wait(Duration::from_secs_f64(refill));
+            let wait = Duration::from_secs_f64(refill.clamp(0.001, 60.0));
             state = self.wake.wait_timeout(state, wait).unwrap_or_else(PoisonError::into_inner).0;
         }
+    }
+
+    /// How long `acquire_n(cost)` would block if called now, ignoring other
+    /// waiters. Takes nothing.
+    pub fn shortfall(&self, cost: f64) -> Duration {
+        let state = hold(&self.state);
+        let elapsed = state.updated.elapsed().as_secs_f64();
+        let tokens = state.capacity.min(state.tokens + elapsed * state.rate);
+        let want = cost.max(0.0).min(state.capacity);
+        Duration::from_secs_f64(((want - tokens) / state.rate).max(0.0))
     }
 
     /// Move the ceiling. `drain` empties the bucket, so the burst that earned a
@@ -210,6 +227,21 @@ mod tests {
         bucket.acquire_n(100.0);
         // Drained: even a token has to be waited for.
         assert!(start.elapsed() >= Duration::from_millis(500), "{:?}", start.elapsed());
+    }
+
+    #[test]
+    fn a_blocked_acquire_says_how_long_the_refill_takes_before_it_blocks() {
+        let bucket = TokenBucket::new(6_000.0);
+        assert_eq!(bucket.shortfall(100.0), Duration::ZERO, "a full bucket owes nothing");
+        bucket.retune(6_000.0, true);
+        // 100 a second: 50 tokens is half a second away.
+        let owed = bucket.shortfall(50.0);
+        assert!(owed > Duration::from_millis(400) && owed <= Duration::from_millis(500), "{owed:?}");
+
+        let mut told = Vec::new();
+        bucket.acquire_n_reporting(50.0, &mut |wait| told.push(wait));
+        assert!(!told.is_empty());
+        assert!(told[0] > Duration::from_millis(300), "{told:?}");
     }
 
     #[test]

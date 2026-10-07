@@ -1,5 +1,7 @@
 //! `embed-status`: queued → running → done/error. Uses the same file-pipeline
 //! wire payload as parsing, while keeping embed errors and success distinct.
+//! A `running` event may also carry `waiting_until_ms` / `waiting_reason`
+//! while a rate limit holds the document.
 
 use tauri::AppHandle;
 
@@ -17,9 +19,15 @@ pub fn queued(relative_path: &str, subject_id: i64) {
     CHANNEL.emit(Status::new(relative_path, subject_id, "queued"));
 }
 
+/// Carries the rate-limit wait while there is one; the next event without it
+/// tells the row the document is moving again.
 pub fn running(relative_path: &str, subject_id: i64, progress: Progress) {
-    CHANNEL.emit(Status::new(relative_path, subject_id, "running")
-        .progress(progress.pages_done, progress.total_pages));
+    let mut status = Status::new(relative_path, subject_id, "running")
+        .progress(progress.pages_done, progress.total_pages);
+    if let Some(wait) = progress.waiting {
+        status = status.waiting(wait.until_ms, wait.limiter.describe());
+    }
+    CHANNEL.emit(status);
 }
 
 /// `pages` is the exact number that landed in the table.

@@ -39,11 +39,11 @@ export interface SettingsPage {
   label: string;
   icon: Icon;
   group: (typeof SETTINGS_GROUPS)[number];
-}
-
   /** The page fills the content area and scrolls its own table, instead of
    *  sitting in the layout's centred scroller (`SettingsLayout`). */
   fullBleed?: boolean;
+}
+
 export const SETTINGS_GROUPS = ["General", "AI", "Library"] as const;
 
 /** In nav order within each group. */
@@ -139,6 +139,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   ...section("parsing", "PDF processing", ["mineru", "parse", "pdf"], [
     ["Parser", ["engine"]],
     ["MinerU API token"],
+    ["Accept an expired download certificate", ["certificate", "tls", "ssl"]],
     ["Server address", ["url", "local"]],
     ["Server status"],
   ]),
@@ -155,7 +156,6 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Free allowance", ["stop indexing", "limit", "budget"]],
     ["Build the index"],
   ]),
-];
 
   page("transcription", ["library", "captions", "subtitles", "video", "speech to text"]),
   ...rows("transcription", "Transcription", [
@@ -166,6 +166,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     ["Whisper model", ["whisper", "model", "download", "large", "turbo", "memory", "ram"]],
     ["On-device speech", ["apple", "offline", "local", "mac"]],
   ]),
+];
 
 /**
  * Entries matching `query` (case-insensitive substring of title, keywords or

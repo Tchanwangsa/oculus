@@ -35,6 +35,9 @@ serde_json = { version = "1", features = ["raw_value"] }
 tiny_http = "0.12"
 url = "2"
 ureq = { version = "2", features = ["cookies"] }
+# The rustls and roots ureq already uses, for `parse::mineru::result_tls`.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "0.26"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 # Retrieval reads embedding BLOBs directly. Same sqlx version tauri-plugin-sql
 # pulls in, so cargo unifies on one libsqlite3-sys rather than linking two

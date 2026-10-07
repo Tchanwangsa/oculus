@@ -8,6 +8,7 @@ pub mod client;
 pub mod ledger;
 pub mod local;
 pub mod render;
+pub mod result_tls;
 
 use std::fs;
 use std::path::{Path, PathBuf};

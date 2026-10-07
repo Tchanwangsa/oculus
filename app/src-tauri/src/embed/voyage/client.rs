@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use crate::embed::raster::{self, RenderedPage};
 use crate::embed::{
     embed_config, pack_vector, unpack_vector, EmbedConfig, EmbedError, EmbedOutput, Embedder,
-    Health, Progress, EMBED_DIM, EMBED_MODEL,
+    Health, Limiter, Progress, Wait, EMBED_DIM, EMBED_MODEL,
 };
 
 use crate::ratelimit::{nap, transport_detail, Retry};
@@ -45,6 +45,41 @@ const API_TIMEOUT: Duration = Duration::from_secs(300);
 /// `RateLimited`. Minutes of 429s are routine, but a zero limit or a proxy
 /// answering 429 to everything must not park a thread for ever.
 const THROTTLE_DEADLINE: Duration = Duration::from_secs(30 * 60);
+
+/// A pacing wait shorter than this is not reported: the row is still moving.
+/// A 429's wait is always reported.
+const REPORTED_WAIT: Duration = Duration::from_secs(2);
+
+/// What one request has said about its waits, so the same wait seen twice
+/// (the 429's nap, then the gate's pause it set) is one event, not two.
+struct WaitNotice<'a> {
+    on_wait: &'a dyn Fn(Option<Wait>),
+    shown_until_ms: Option<u64>,
+}
+
+impl<'a> WaitNotice<'a> {
+    fn new(on_wait: &'a dyn Fn(Option<Wait>)) -> Self {
+        Self { on_wait, shown_until_ms: None }
+    }
+
+    /// Reported unless it ends within the threshold of the one already shown.
+    fn show(&mut self, wait: Wait) {
+        let threshold = REPORTED_WAIT.as_millis() as u64;
+        if let Some(shown) = self.shown_until_ms {
+            if shown.abs_diff(wait.until_ms) <= threshold {
+                return;
+            }
+        }
+        self.shown_until_ms = Some(wait.until_ms);
+        (self.on_wait)(Some(wait));
+    }
+
+    fn clear(&mut self) {
+        if self.shown_until_ms.take().is_some() {
+            (self.on_wait)(None);
+        }
+    }
+}
 
 /// What one request is about to cost, reserved before it is sent.
 #[derive(Debug, Clone, Copy, Default)]
@@ -130,12 +165,15 @@ impl VoyageCloud {
 
     /// Send one request and hand back one vector per input: reserve, wait for
     /// the gate, send, and on a 429 learn the tier and go round again.
+    /// `on_wait` hears of each rate-limit wait long enough to look like a
+    /// stall, and `None` once the request is admitted.
     fn send(
         &self,
         inputs: Value,
         input_type: &str,
         expected: usize,
         cost: Cost,
+        on_wait: &dyn Fn(Option<Wait>),
     ) -> Result<Vec<Vec<f32>>, SendFailure> {
         let url = format!("{}{}", self.base_url, EMBED_PATH);
         let body = json!({
@@ -157,9 +195,15 @@ impl VoyageCloud {
         // Reported by the deadline's error.
         #[allow(unused_assignments)]
         let mut last_retry_after: Option<u64> = None;
+        let mut notice = WaitNotice::new(on_wait);
 
         while retry.attempts_left() {
-            self.gate.admit(cost.tokens);
+            self.gate.admit_reporting(cost.tokens, &mut |wait, limiter| {
+                if wait > REPORTED_WAIT {
+                    notice.show(Wait::after(wait, limiter));
+                }
+            });
+            notice.clear();
             let sent = ureq::post(&url)
                 .timeout(API_TIMEOUT)
                 .set("Authorization", &format!("Bearer {}", self.key))
@@ -192,6 +236,11 @@ impl VoyageCloud {
                             }
                             .into());
                         }
+                        // The gate's pause and drained buckets may outlast the nap.
+                        let resume = wait
+                            .mul_f64(self.time_scale)
+                            .max(self.gate.expected_wait(cost.tokens));
+                        notice.show(Wait::after(resume, Limiter::Throttled));
                         nap(wait, self.time_scale);
                         continue;
                     }
@@ -352,7 +401,11 @@ impl RequestRun for VoyageCloud {
     /// Embed a group of pages in as many requests as the current ceiling
     /// allows. Usually one; the loop covers a first request packed before a 429
     /// taught the tier.
-    fn run(&self, pages: &[RenderedPage]) -> Result<Vec<Vec<f32>>, EmbedError> {
+    fn run(
+        &self,
+        pages: &[RenderedPage],
+        on_wait: &dyn Fn(Option<Wait>),
+    ) -> Result<Vec<Vec<f32>>, EmbedError> {
         let costs: Vec<u64> =
             pages.iter().map(|page| batch::tokens_for(page.width, page.height)).collect();
         let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(pages.len());
@@ -377,7 +430,7 @@ impl RequestRun for VoyageCloud {
             let chunk = &pages[offset..end];
             let cost =
                 Cost { tokens: spent, pixels: chunk.iter().map(batch::billed_pixels).sum() };
-            match self.send(image_inputs(chunk), INPUT_TYPE_DOCUMENT, chunk.len(), cost) {
+            match self.send(image_inputs(chunk), INPUT_TYPE_DOCUMENT, chunk.len(), cost, on_wait) {
                 Ok(part) => {
                     vectors.extend(part);
                     offset = end;
@@ -430,7 +483,7 @@ impl Embedder for VoyageCloud {
         // `usage.total_tokens` settles it.
         let cost = Cost { tokens: (text.len() as u64 / 4) + 1, pixels: 0 };
         let inputs = json!([{ "content": [{ "type": "text", "text": text }] }]);
-        let vectors = self.send(inputs, INPUT_TYPE_QUERY, 1, cost).map_err(|failure| {
+        let vectors = self.send(inputs, INPUT_TYPE_QUERY, 1, cost, &|_| {}).map_err(|failure| {
             match failure {
                 SendFailure::Embed(error) => error,
                 // Unreachable: `send` only resizes multi-input requests.
@@ -536,7 +589,7 @@ mod tests {
             RenderedPage { page_no: 1, width: 100, height: 100, png: b"\x89PNGone".to_vec() },
             RenderedPage { page_no: 2, width: 100, height: 100, png: b"\x89PNGtwo".to_vec() },
         ];
-        let vectors = client.run(&pages).unwrap();
+        let vectors = client.run(&pages, &|_| {}).unwrap();
         assert_eq!(vectors.len(), 2);
         assert_eq!(vectors[0].len(), EMBED_DIM);
 
@@ -723,6 +776,42 @@ mod tests {
         assert_eq!(tier.tpm, FREE_TPM);
         // Persisted for the next run.
         assert_eq!(ledger.tier().tpm, FREE_TPM);
+    }
+
+    #[test]
+    fn a_429_reports_its_wait_and_clears_it_once_the_request_is_admitted() {
+        let fake = FakeServer::start(|hit| {
+            if hit.index == 0 {
+                Reply::status(429, json!({ "detail": LIVE_FREE_TIER_429 }))
+                    .with_header("Retry-After", "30")
+            } else {
+                ok_response(1)
+            }
+        });
+        let scratch = Scratch::new("voyage-wait-notice");
+        let client = client(&fake, &scratch);
+        let pages =
+            vec![RenderedPage { page_no: 1, width: 100, height: 100, png: b"\x89PNG".to_vec() }];
+
+        let before = Wait::after(Duration::ZERO, Limiter::Throttled).until_ms;
+        let told = Mutex::new(Vec::new());
+        client.run(&pages, &|wait| hold(&told).push(wait)).unwrap();
+        let told = hold(&told).clone();
+
+        assert_eq!(told.len(), 2, "one wait, then its end: {told:?}");
+        let wait = told[0].expect("the 429's wait");
+        assert_eq!(wait.limiter, Limiter::Throttled);
+        assert!(wait.until_ms >= before, "{wait:?}");
+        assert_eq!(told[1], None);
+        assert_eq!(Limiter::Throttled.describe(), "rate-limited by Voyage");
+        assert_eq!(
+            Limiter::Requests { per_minute: 3 }.describe(),
+            "pacing to Voyage's 3 requests/min limit"
+        );
+        assert_eq!(
+            Limiter::Tokens { per_minute: 10_000 }.describe(),
+            "pacing to Voyage's 10K tokens/min limit"
+        );
     }
 
     #[test]

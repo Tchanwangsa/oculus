@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 import { embedReady, getUnembeddedPdfs } from "@/lib/retrieval";
 import { Progress } from "@/components/ui/progress";
 import { useIndexStore, type IndexProgress } from "@/stores/indexStore";
+import { fmtResume, usePipelineStore } from "@/stores/pipelineStore";
+import { useNow } from "@/hooks/useNow";
 import { Section, StatRow } from "@/pages/settings/section";
 import { ReindexConfirmDialog, type ReindexPrompt } from "./ReindexConfirmDialog";
 
@@ -678,6 +680,19 @@ function IndexRunRow({
   const error = useIndexStore((state) => state.error);
   const start = useIndexStore((state) => state.start);
   const stop = useIndexStore((state) => state.stop);
+  // The run's file held by a rate limit, from its pipeline row: without it a
+  // paced run reads as stuck on one page.
+  const held = usePipelineStore((state) =>
+    running && progress?.filename
+      ? Object.values(state.items).find(
+          (it) =>
+            it.filename === progress.filename &&
+            it.embed === "active" &&
+            it.embedWaitingUntil != null,
+        )
+      : undefined,
+  );
+  const now = useNow(held ? 1_000 : 60_000).getTime();
 
   return (
     <div className="pt-2">
@@ -689,6 +704,10 @@ function IndexRunRow({
               ? progress
                 ? `${runLabel(progress)}${
                     progress.filename ? ` · ${progress.filename}` : ""
+                  }${
+                    held?.embedWaitingUntil != null
+                      ? ` · ${held.embedWaitingReason ?? "rate-limited"}, ${fmtResume(held.embedWaitingUntil, now)}`
+                      : ""
                   }`
                 : "Working out what is outstanding…"
               : outstanding == null

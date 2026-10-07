@@ -1,4 +1,4 @@
-import { useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { FileChip } from "@/components/markdown/FileChip";
 import { splitLibraryPaths } from "@/lib/openFile";
 import { imageFiles } from "@/lib/attachments";
@@ -216,6 +216,19 @@ function revealCaret(el: HTMLElement) {
   else if (rect.top < view.top) el.scrollTop -= view.top - rect.top;
 }
 
+/** Sets the selection again once the frame has settled. Two line breaks in
+ *  quick succession can leave the first caret painted beside the second;
+ *  WebKit repaints the caret when the selection is set. */
+function repaintCaret(el: HTMLElement): number {
+  return requestAnimationFrame(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.focusNode || !el.contains(sel.focusNode)) return;
+    const range = sel.getRangeAt(0).cloneRange();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+}
+
 type Landing = { chunk: number; offset: number; focus: boolean };
 
 /** The structural edits. Typing, caret, selection and undo stay the browser's;
@@ -269,6 +282,9 @@ export function MentionInput({
   /** Placeholder flag — `:empty` can't do it, WebKit's trailing `<br>` isn't empty. */
   const [blank, setBlank] = useState(!(initialText ?? "").trim());
   const landing = useRef<Landing | null>(null);
+  /** The pending `repaintCaret`; one is enough for a burst of line breaks. */
+  const repaint = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(repaint.current), []);
 
   function point(el: HTMLElement): Point | null {
     const sel = window.getSelection();
@@ -439,6 +455,8 @@ export function MentionInput({
       }
       revealCaret(el);
       sync();
+      cancelAnimationFrame(repaint.current);
+      repaint.current = repaintCaret(el);
       return;
     }
     if (e.key === "Backspace" || e.key === "Delete") {

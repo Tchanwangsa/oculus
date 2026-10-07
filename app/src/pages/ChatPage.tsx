@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Composer } from "@/components/harness/Composer";
 import { RecentThreads } from "@/components/harness/RecentThreads";
-import { ThreadList } from "@/components/harness/ThreadList";
+import { THREAD_LIST_PANEL, ThreadList } from "@/components/harness/ThreadList";
 import { ThreadMap } from "@/components/harness/ThreadMap";
 import { Timeline } from "@/components/harness/Timeline";
 import { useThreadActions } from "@/components/harness/useThreadActions";
 import { PaneHeaderRow, PaneTitle, PaneTrail } from "@/components/tabs/PaneHeader";
 import { DropOverlay } from "@/components/ui/DropOverlay";
+import { SideNavCollapseToggle } from "@/components/ui/SideNav";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { useScrollFade } from "@/hooks/useScrollFade";
 import {
@@ -33,6 +35,7 @@ import { draftKey, useDraftStore } from "@/stores/draftStore";
  */
 export default function ChatPage() {
   const store = useHarnessStore;
+  const listPanel = useResizablePanel(THREAD_LIST_PANEL);
   const navigate = useNavigate();
   const here = useLocation();
   // The conversation this tab is showing, read off this tab's own route —
@@ -225,6 +228,7 @@ export default function ChatPage() {
   return (
     <div className="flex h-full">
       <ThreadList
+        panel={listPanel}
         threads={threads}
         subjects={subjects}
         activeId={activeId}
@@ -236,6 +240,7 @@ export default function ChatPage() {
 
       <div ref={columnRef} className="relative flex h-full min-w-0 flex-1 flex-col">
         <PaneHeaderRow className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border-subtle px-6">
+          <SideNavCollapseToggle collapsed={listPanel.collapsed} onToggle={listPanel.toggle} shortcut="⌘⌥B" />
           <PaneTrail>
             <PaneTitle>{fresh ? "New thread" : thread ? thread.title?.trim() || "Untitled" : ""}</PaneTitle>
           </PaneTrail>

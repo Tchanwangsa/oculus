@@ -7,9 +7,12 @@
 //! the version that marks a file done, the error vocabulary the failure UI
 //! reads, and the order the artifacts hit the disk. See `docs/parsing.md`.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Condvar, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -123,17 +126,81 @@ impl ParseOutput {
     /// finished, so it lands last and atomically (temp file, fsync, rename).
     pub fn write(&self, pdf: &Path, images: ImageStaging) -> Result<(), ParseError> {
         images.commit()?;
-
-        let md = md_path(pdf);
-        fs::write(&md, self.document_markdown())
-            .map_err(|e| ParseError::Io(format!("write {}: {e}", md.display())))?;
+        self.write_markdown(pdf)?;
 
         // serde_json leaves non-ASCII unescaped, as the existing records are.
+        // The temp name is unique per write, so two writers never share one.
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let final_path = pages_path(pdf);
         let body = serde_json::to_vec(self)
             .map_err(|e| ParseError::Io(format!("encode {}: {e}", final_path.display())))?;
-        let tmp = final_path.with_extension(format!("json.tmp{}", std::process::id()));
+        let tmp = final_path.with_extension(format!(
+            "json.tmp{}-{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
         crate::atomic_write::write(&final_path, &tmp, &body).map_err(ParseError::Io)
+    }
+
+    /// `<stem>.md`, derived from the record.
+    fn write_markdown(&self, pdf: &Path) -> Result<(), ParseError> {
+        let md = md_path(pdf);
+        fs::write(&md, self.document_markdown())
+            .map_err(|e| ParseError::Io(format!("write {}: {e}", md.display())))
+    }
+
+    /// Re-derive a missing `<stem>.md` from this record; true when written.
+    /// The record is the evidence of the parse, so nothing is re-parsed.
+    pub fn restore_markdown(&self, pdf: &Path) -> Result<bool, ParseError> {
+        if md_path(pdf).is_file() {
+            return Ok(false);
+        }
+        self.write_markdown(pdf).map(|()| true)
+    }
+}
+
+// ── One parse per PDF at a time ──────────────────────────────────────────────
+
+/// PDFs with a parse running in this process. A sync, the sweep and "Parse
+/// now" can ask for the same file at once; a second caller waits here for the
+/// first, then finds the record and skips. No timeout: a parse takes minutes.
+pub struct InFlight {
+    running: Mutex<BTreeSet<PathBuf>>,
+    freed: Condvar,
+}
+
+/// Held for one parse; dropping it (unwinding included) frees the PDF.
+pub struct InFlightClaim<'a> {
+    owner: &'a InFlight,
+    pdf: PathBuf,
+}
+
+impl InFlight {
+    pub const fn new() -> Self {
+        Self { running: Mutex::new(BTreeSet::new()), freed: Condvar::new() }
+    }
+
+    /// The process-wide set every parse goes through.
+    pub fn shared() -> &'static InFlight {
+        static SHARED: InFlight = InFlight::new();
+        &SHARED
+    }
+
+    /// Block until no other parse holds `pdf`, then hold it.
+    pub fn claim(&self, pdf: &Path) -> InFlightClaim<'_> {
+        let mut running = self.running.lock().unwrap_or_else(|p| p.into_inner());
+        while running.contains(pdf) {
+            running = self.freed.wait(running).unwrap_or_else(|p| p.into_inner());
+        }
+        running.insert(pdf.to_path_buf());
+        InFlightClaim { owner: self, pdf: pdf.to_path_buf() }
+    }
+}
+
+impl Drop for InFlightClaim<'_> {
+    fn drop(&mut self) {
+        self.owner.running.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.pdf);
+        self.owner.freed.notify_all();
     }
 }
 
@@ -258,6 +325,10 @@ pub trait Parser: Send + Sync {
 
 // ── Failure ──────────────────────────────────────────────────────────────────
 
+/// The `Document` code for an Office file LibreOffice could not convert: there
+/// is no PDF, so nothing was sent to any parser.
+pub const CONVERSION_FAILED: &str = "office-conversion";
+
 /// Why a parse did not happen. Nothing falls back (see `docs/parsing.md`), so the
 /// variants keep "wait", "retry" and "fix a setting" distinguishable.
 ///
@@ -367,6 +438,11 @@ impl fmt::Display for ParseError {
                 megabytes(*bytes),
                 megabytes(*limit_bytes)
             ),
+            ParseError::Document { code } if code == CONVERSION_FAILED => write!(
+                f,
+                "This file could not be converted to PDF, so there is nothing to parse. The \
+                 next sync tries the conversion again."
+            ),
             ParseError::Document { code } => write!(
                 f,
                 "MinerU could not read this PDF (error {code}). Other files are unaffected."
@@ -467,6 +543,9 @@ pub struct ParseConfig {
     /// API root for the chosen engine, overridable from the settings blob.
     pub base_url: String,
     pub credentials: CredentialSource,
+    /// Download results through the CDN's expired certificate (see
+    /// `mineru::result_tls`). Defaults to on.
+    pub accept_expired_result_cert: bool,
 }
 
 /// MinerU's published API root.
@@ -484,6 +563,7 @@ struct StoredParseSettings {
     /// A string, not `Engine`: a stale value costs this field, not the row.
     engine: Option<String>,
     engine_url: Option<String>,
+    accept_expired_result_cert: Option<bool>,
 }
 
 /// The backend selection from the `parse` settings row. Unreadable, missing
@@ -499,7 +579,8 @@ pub fn parse_config() -> ParseConfig {
         Engine::Cloud => CredentialSource::Keychain,
         Engine::Local => CredentialSource::None,
     };
-    ParseConfig { engine, base_url, credentials }
+    let accept_expired_result_cert = stored.accept_expired_result_cert.unwrap_or(true);
+    ParseConfig { engine, base_url, credentials, accept_expired_result_cert }
 }
 
 /// The parser this install is configured for; every caller about to parse
@@ -691,6 +772,78 @@ mod tests {
         // Done regardless of the version that wrote it.
         fs::write(pages_path(&pdf), r#"{"mode":"quality","parser_version":1}"#).unwrap();
         assert_eq!(parse_mode(&pdf), Some("quality"));
+    }
+
+    #[test]
+    fn a_second_parse_of_the_same_pdf_waits_for_the_first() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let in_flight: &'static InFlight = Box::leak(Box::new(InFlight::new()));
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let threads: Vec<_> = (0..3)
+            .map(|_| {
+                let (live, peak) = (live.clone(), peak.clone());
+                std::thread::spawn(move || {
+                    let _claim = in_flight.claim(Path::new("/library/a.pdf"));
+                    let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(50));
+                    live.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(peak.load(Ordering::SeqCst), 1);
+
+        // Another PDF is not held up, and a panicking holder still frees its PDF.
+        let _a = in_flight.claim(Path::new("/library/a.pdf"));
+        let _b = in_flight.claim(Path::new("/library/b.pdf"));
+        let crashed = std::thread::spawn(move || {
+            let _claim = in_flight.claim(Path::new("/library/c.pdf"));
+            panic!("parser crashed");
+        });
+        assert!(crashed.join().is_err());
+        let _c = in_flight.claim(Path::new("/library/c.pdf"));
+    }
+
+    #[test]
+    fn a_lost_markdown_is_rebuilt_from_the_record() {
+        let dir = scratch("restore-md");
+        let pdf = sample_pdf(&dir);
+        let out = ParseOutput::new(
+            &pdf,
+            2,
+            vec![
+                ParsePage { page_no: 1, markdown: "one".into() },
+                ParsePage { page_no: 2, markdown: "two".into() },
+            ],
+            None,
+            0,
+        );
+        out.write(&pdf, ImageStaging::begin(&pdf).unwrap()).unwrap();
+        fs::remove_file(md_path(&pdf)).unwrap();
+
+        let record = read_record(&pdf).unwrap();
+        assert!(record.restore_markdown(&pdf).unwrap());
+        assert_eq!(fs::read_to_string(md_path(&pdf)).unwrap(), "one\n\ntwo");
+        // Present already: left alone.
+        fs::write(md_path(&pdf), "edited").unwrap();
+        assert!(!record.restore_markdown(&pdf).unwrap());
+        assert_eq!(fs::read_to_string(md_path(&pdf)).unwrap(), "edited");
+    }
+
+    #[test]
+    fn a_failed_conversion_is_a_document_failure_that_does_not_blame_mineru() {
+        let error = ParseError::Document { code: CONVERSION_FAILED.into() };
+        assert_eq!(error.kind(), "document");
+        assert!(!error.retryable());
+        assert!(!error.latching());
+        assert!(!error.to_string().contains("MinerU"), "{error}");
     }
 
     #[test]

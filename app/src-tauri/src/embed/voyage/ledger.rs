@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::now_secs;
-use crate::embed::EmbedError;
+use crate::embed::{EmbedError, Limiter};
 use crate::ratelimit::{hold, TokenBucket};
 
 // ── The limits on each programme ─────────────────────────────────────────────
@@ -455,6 +455,12 @@ impl RateGate {
     /// Block until this request may go out, spending one request and `tokens`
     /// tokens of the minute's budget.
     pub fn admit(&self, tokens: u64) {
+        self.admit_reporting(tokens, &mut |_, _| {});
+    }
+
+    /// `admit`, telling `on_wait` before each block how long it expects to
+    /// last and which limit imposes it. Called under a lock: keep it cheap.
+    pub fn admit_reporting(&self, tokens: u64, on_wait: &mut dyn FnMut(Duration, Limiter)) {
         loop {
             let mut state = hold(&self.inner);
             let Some(until) = state.paused_until else { break };
@@ -463,10 +469,32 @@ impl RateGate {
                 state.paused_until = None;
                 break;
             }
+            // The buckets were drained by the 429 and refill during the pause,
+            // so the request goes out at whichever ends later.
+            on_wait((until - now).max(self.refill(tokens)), Limiter::Throttled);
             let _ = self.resume.wait_timeout(state, until - now);
         }
-        self.requests.acquire();
-        self.tokens.acquire_n(tokens as f64);
+        let tier = self.tier();
+        self.requests.acquire_n_reporting(1.0, &mut |wait| {
+            on_wait(wait, Limiter::Requests { per_minute: tier.rpm.round() as u32 })
+        });
+        self.tokens.acquire_n_reporting(tokens as f64, &mut |wait| {
+            on_wait(wait, Limiter::Tokens { per_minute: tier.tpm.round() as u32 })
+        });
+    }
+
+    /// Roughly how long `admit(tokens)` would block if called now: the pause,
+    /// or the slower bucket's refill. Other waiters are not counted.
+    pub fn expected_wait(&self, tokens: u64) -> Duration {
+        let paused = hold(&self.inner)
+            .paused_until
+            .map(|until| until.saturating_duration_since(Instant::now()))
+            .unwrap_or_default();
+        paused.max(self.refill(tokens))
+    }
+
+    fn refill(&self, tokens: u64) -> Duration {
+        self.requests.shortfall(1.0).max(self.tokens.shortfall(tokens as f64))
     }
 
     /// Voyage said 429 — routine, not a failure. Returns the wait decided on.

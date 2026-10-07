@@ -228,6 +228,10 @@ still update the picker.
 - **A row decides what truncates** (`RowShell` in `WorkRow.tsx`) — it draws at
   760px and in the dock's 300px. Both scrollers carry `overflow-x-hidden`:
   `overflow-y: auto` makes x `auto` too, and one wide row slides the thread.
+- **A Read of a picture expands to the picture** (`ReadPicture` in
+  `WorkRow.tsx`), click for the lightbox. It loads over the asset protocol, so
+  only `courses/`, `lectures/` and `agents/` under the data dir show; any other
+  path fails to load and the row falls back to its args.
 - **A citation opens the file at the cited spot.** One grammar
   (`app/src/lib/citations.ts`) reads an inline code span, a link's href or a
   bare path in prose: `courses/…`, `../courses/…`, `agents/…`, `lectures/…`,
@@ -320,8 +324,10 @@ the name lands.
   only after the list has loaded, or a restored tab drops its thread.
 - The conversations column (`ThreadList`) is a `SideNav`, the subject page's
   column ([ui.md](./ui.md)): New thread on top, lit while no thread is open,
-  then threads grouped by subject. It resizes, and ⌘⌥B or its footer toggle
-  folds it to the rows' provider marks.
+  then threads grouped by subject. It resizes, and ⌘⌥B or the toggle in the
+  page header beside the title (`ChatPage` owns the panel state) folds it
+  away entirely. Its resize handle goes with it, so it can't clash with a
+  side panel's; the toggle or ⌘⌥B brings it back.
 - Bare `/chat` is a new thread: the composer docked at the bottom as in a
   thread, and above it the three latest threads (`RecentThreads`) — provider
   mark, title, a chip naming its subject or General, age, and the last reply
@@ -361,7 +367,7 @@ rewinds first, resuming an exited session without a turn:
 
 | | Call | Names |
 | --- | --- | --- |
-| Claude | `control_request` / `rewind_conversation` | the user message's uuid |
+| Claude | `control_request` / `rewind_conversation` | the user message's uuid, plus the newest question's as `last_seen_user_message_uuid` (without it the CLI refuses past any later turn: `stale_target`) |
 | Codex | `thread/revert` | the turn to revert before |
 | opencode | `POST /session/{id}/revert` | the message to drop, inclusive; lands on the next prompt |
 

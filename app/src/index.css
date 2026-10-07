@@ -436,6 +436,71 @@
   padding-block: 2px;
 }
 
+/* Rendered maths selects as one unit (`watchMathSelection`): no native
+ * highlight on KaTeX's glyphs, one fill over a formula the selection touches
+ * — inline like a word, a display block whole, as in the note editor. */
+.katex::selection,
+.katex ::selection {
+  background-color: transparent;
+}
+.katex[data-math-selected],
+.katex-display[data-math-selected] {
+  background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+  border-radius: 4px;
+}
+
+/* A pressed formula's read-only MathLive field (`mathSelect.ts`), in place of
+ * KaTeX's drawing and tinted as the note editor's field is (`theme.ts`). */
+/* A step more specific than KaTeX's own `.katex-display > .katex > .katex-html`. */
+.katex-display[data-math-open] > .katex > .katex-html,
+.katex[data-math-open] > .katex-html {
+  display: none;
+}
+.md-math-field {
+  display: inline-block;
+  vertical-align: baseline;
+  line-height: 1.2;
+  color: inherit;
+  background-color: color-mix(in srgb, var(--color-brand) 7%, transparent);
+  border: 0;
+  border-radius: 4px;
+  outline: none;
+  padding: 0 2px;
+  --caret-color: transparent;
+  --selection-color: var(--color-foreground);
+  --selection-background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+  --contains-highlight-background-color: color-mix(in srgb, var(--color-brand) 9%, transparent);
+  --smart-fence-color: var(--color-muted-foreground);
+  --text-font-family: KaTeX_Main;
+}
+.md-math-field::part(container) {
+  min-height: 0;
+  padding: 0;
+  --_selection-color: var(--color-foreground);
+  --_selection-background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+  --_contains-highlight-background-color: color-mix(in srgb, var(--color-brand) 9%, transparent);
+  --_smart-fence-color: var(--color-muted-foreground);
+}
+.md-math-field::part(content) {
+  padding: 0;
+}
+/* MathLive clips its content box, which cuts an inline field's subscripts. */
+.md-math-field:not(.md-math-field-block)::part(content) {
+  overflow: visible;
+}
+.md-math-field::part(menu-toggle),
+.md-math-field::part(virtual-keyboard-toggle) {
+  display: none;
+}
+.md-math-field-block {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+}
+.md-math-field-block::part(content) {
+  justify-content: safe center;
+}
+
 /* A rendered ```mermaid fence: the `<figure>` and its scroller. The label size
  * is bounded, not the box — `--diagram-min`/`--diagram-max` come from
  * `Mermaid.tsx`, and past the minimum the diagram overflows. Unlayered. */

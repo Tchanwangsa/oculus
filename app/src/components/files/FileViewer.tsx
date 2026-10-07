@@ -13,12 +13,14 @@ import type { DbFile } from "@/lib/db";
 import { courseFileHasContent } from "@/lib/courseFiles";
 import { FileMarkdown } from "@/components/files/FileMarkdown";
 import { VideoFileViewer } from "@/components/files/VideoFileViewer";
+import { useParseStore } from "@/stores/parseStore";
 
 /**
  * PDF ↔ parsed-markdown toggle state, lifted out so the host renders the
  * toggle in its own header. Also the "is there markdown?" probe: `mdChecked`
  * holds both controls back until it answers, or `MarkdownUnavailable` would
- * flash on every parsed file.
+ * flash on every parsed file. A live parse-status change re-asks, so a parse
+ * that lands while the page is open shows its markdown.
  */
 export function usePdfMd(file: DbFile | null) {
   const isPdf = file != null && isPdfBacked(file.filename);
@@ -26,11 +28,16 @@ export function usePdfMd(file: DbFile | null) {
   const [viewMode, setViewMode] = useState<"pdf" | "markdown">("pdf");
   const [mdExists, setMdExists] = useState(false);
   const [mdChecked, setMdChecked] = useState(false);
+  const parseStatus = useParseStore((s) => (file ? s.statuses[file.relative_path] : undefined));
 
   useEffect(() => {
     setViewMode("pdf");
     setMdExists(false);
     setMdChecked(false);
+  }, [file?.id, mdRelPath]);
+
+  // Separate from the reset, so a re-check keeps the last answer on screen.
+  useEffect(() => {
     if (!mdRelPath) return;
     let live = true;
     courseFileHasContent(mdRelPath)
@@ -40,7 +47,7 @@ export function usePdfMd(file: DbFile | null) {
     return () => {
       live = false;
     };
-  }, [file?.id, mdRelPath]);
+  }, [file?.id, mdRelPath, parseStatus]);
 
   return { isPdf, mdExists, mdChecked, viewMode, setViewMode };
 }

@@ -71,15 +71,18 @@ library files; the rest of the frontend has its own pages:
 - **`EngineSelect` and `CredentialField` share the settings controls** (`app/src/components/settings/EngineSelect.tsx`, `app/src/components/settings/CredentialField.tsx`); each section owns validation, switching and destructive confirmation.
 - **Changing the embedding engine is destructive on purpose** — two models'
   vectors share a table and no geometry. `embed_set_engine` clears the
-  `.emb.json` records, the vectors and `embed_status`, then writes the setting
-  **last**; `ReindexConfirmDialog` shows the loss first. See
+  `.emb.json` records, the vectors and every `embed_status` but `'queued'`
+  (the persisted queue carries over into the new space), then writes the
+  setting **last**; `ReindexConfirmDialog` shows the loss first. See
   [retrieval.md](./retrieval.md).
 - **`indexStore` is a queue with one worker** — the backend paces against the
   per-minute ceiling — fed by the Index button, a finished parse and a row's
   retry. The queue is a module-level array so the worker sees files appended
   mid-run. Stopping lands between files. Nothing queues until `ready`
   (`credentials_ready` and the engine's `available`), and a finished parse
-  never enumerates the backlog — that is the Index button's job.
+  never enumerates the backlog — that is the Index button's job. Queued rows
+  are marked in `files.embed_status` and re-enqueued once at boot
+  ([retrieval.md](./retrieval.md#ingest-follows-a-parse-through-one-queue)).
 - `embed_estimate` is its own command because it runs pdfium over the library,
   one sweep at a time (pdfium is one session per process). The spend guard is
   enforced in Rust (`UsageLedger::budget`), never on this page.
@@ -103,13 +106,41 @@ library files; the rest of the frontend has its own pages:
   when `embedStage` is set. Embed progress comes from page coverage
   (`getEmbedCoverage`), never `files.embed_status`, which can't tell which
   model wrote the vectors; that column is read only for a failure.
+- **A rate-limited embed stays `active`** (`embedWaitingUntil` and
+  `embedWaitingReason` on the row, from `embed-status`; any embed event
+  without them clears them). `statusOf` keeps the phase, so the row keeps its
+  place, and words it as a "Rate-limited" warning pill with a per-second
+  countdown where the percentage was ("resuming…" once past due) and the
+  reason on hover and in the timeline. Settings → Embeddings appends the same
+  wait to the index run's line.
 - **The Sync page's pipeline rows keep their immutable item identity**
   (`app/src/components/sync/PipelineTable.tsx`), so one progress tick renders
   only its changed row.
+- **Live events and the DB seed share each row, and neither may strand it.**
+  A sync's `unchanged` file only settles an existing row's download — it
+  never creates one, since no parse event follows. `updated` resets parse and
+  embed, because Rust purged the artifacts. An embed event marks the parse
+  done only on a row's first sighting, or a re-parse behind an old embed
+  would lose its progress. A skip-path `quality` (already parsed) neither
+  restamps `parsedAt` nor re-queues an embedded file.
+- **The seed merges and prunes, and runs on every activation and after every
+  sync run** (`SyncPage.tsx`, `pipelineStore.seed`): an idle row advances to
+  the DB's state where the DB is further along, a row touched in the last
+  minute is left to its events, and a row whose file left the DB is dropped.
+  "Clear finished" removes completed rows only and remembers them, so a
+  re-seed doesn't bring them back.
+- **Rows sort by their latest stage completion, never `updatedAt`**, which
+  every progress tick bumps — live rows would swap places and jump pages.
+  Retry is offered only where it can work: not on a failed download (the next
+  sync fetches it), a non-retryable error, or a latching one.
 - **`useQualitySweep` is the recovery path, with two gates**: never re-kick
   `retryable === false`, and stand down on a latching failure until a parse
   progresses or `LATCH_PROBE_AFTER_MS` allows one probe. Without them one bad
   token marches the library through the same error every sweep.
+  Files already kicked this session go to the back of the line, so a file
+  that fails every time cannot take the whole budget. Only a `running`, or a
+  `quality` after a live `queued`, lifts the latch — a skip-path `quality`
+  proves nothing about the engine.
 
 ## Uploads and documents are ordinary library files
 

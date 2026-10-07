@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { CredentialField } from "./CredentialField";
 import { EngineSelect, type EngineOption } from "./EngineSelect";
 import { tokenish } from "@/lib/parseState";
+import { expiryDate, resultCertState, type ResultCertState } from "@/lib/resultCert";
 import { useParseStore } from "@/stores/parseStore";
 import { Section, StatRow } from "@/pages/settings/section";
 
@@ -19,6 +21,8 @@ interface ParseSettings {
   /** The version *this app* writes, for the handshake below. */
   parser_version: number;
   credentials_ready: boolean;
+  /** Download results through MinerU's expired CDN certificate. */
+  accept_expired_result_cert: boolean;
   engines: EngineOption[];
 }
 
@@ -55,6 +59,10 @@ export function ParserSection() {
   const [urlDraft, setUrlDraft] = useState("");
   const [urlNote, setUrlNote] = useState<string | null>(null);
   const [savingUrl, setSavingUrl] = useState(false);
+
+  const [cert, setCert] = useState<ResultCertState | null>(null);
+  const [savingCert, setSavingCert] = useState(false);
+  const [certError, setCertError] = useState<string | null>(null);
 
   const [probe, setProbe] = useState<LocalProbe | null>(null);
   const [probing, setProbing] = useState(false);
@@ -137,6 +145,20 @@ export function ParserSection() {
     void runProbe();
   }, [settings?.engine, runProbe]);
 
+  // A bare handshake with the result CDN, so the warning is current on open.
+  useEffect(() => {
+    if (settings?.engine !== "cloud") return;
+    let cancelled = false;
+    resultCertState(true)
+      .then((next) => {
+        if (!cancelled) setCert(next);
+      })
+      .catch((cause) => console.error("result certificate probe failed", cause));
+    return () => {
+      cancelled = true;
+    };
+  }, [settings?.engine, settings?.accept_expired_result_cert]);
+
   const selected = settings?.engines.find((engine) => engine.id === settings.engine) ?? null;
   const unavailable = settings?.engines.filter((engine) => !engine.available) ?? [];
 
@@ -189,6 +211,21 @@ export function ParserSection() {
       setTokenNote({ kind: "error", text: String(cause) });
     } finally {
       setCheckingToken(false);
+    }
+  };
+
+  const setAcceptExpired = async (accept: boolean) => {
+    setSavingCert(true);
+    setCertError(null);
+    try {
+      applySettings(
+        await invoke<ParseSettings>("parse_set_accept_expired_result_cert", { accept }),
+      );
+    } catch (cause) {
+      console.error("result certificate setting failed", cause);
+      setCertError(String(cause));
+    } finally {
+      setSavingCert(false);
     }
   };
 
@@ -270,6 +307,37 @@ export function ParserSection() {
               </p>
             ) : null}
           </CredentialField>
+        ) : null}
+
+        {isCloud ? (
+          <div className="py-2">
+            <div className="flex items-center justify-between gap-4">
+              <label htmlFor="accept-expired-cert">
+                <p className="text-xs text-foreground">Accept an expired download certificate</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Only for MinerU's result server, and only while its certificate has expired.
+                  Everything else about it is still checked.
+                </p>
+              </label>
+              <Switch
+                id="accept-expired-cert"
+                checked={settings?.accept_expired_result_cert ?? true}
+                disabled={!settings || savingCert}
+                onCheckedChange={(checked) => void setAcceptExpired(checked)}
+                className="shrink-0"
+              />
+            </div>
+            {cert?.certificate === "expired" ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-warning">
+                {cert.bypassing
+                  ? `MinerU's download server certificate expired ${expiryDate(cert)}. Parse results are downloading anyway; this stops on its own once MinerU renews it.`
+                  : `MinerU's download server certificate expired ${expiryDate(cert)}. Every parse will fail until MinerU renews it or this is turned on.`}
+              </p>
+            ) : null}
+            {certError ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-destructive">{certError}</p>
+            ) : null}
+          </div>
         ) : null}
 
         {isLocal ? (

@@ -390,6 +390,19 @@ pub async fn user_item(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Resul
     })
 }
 
+/// The anchor of the thread's newest question — the last turn the timeline
+/// has seen, which Claude needs before it will rewind past later turns.
+pub async fn newest_anchor(pool: &SqlitePool, thread_id: i64) -> Result<Option<String>, String> {
+    sqlx::query_scalar(
+        "SELECT anchor FROM harness_items WHERE thread_id = ?1 AND kind = 'user' ORDER BY id DESC LIMIT 1",
+    )
+    .bind(thread_id)
+    .fetch_optional(pool)
+    .await
+    .map(Option::flatten)
+    .map_err(|e| e.to_string())
+}
+
 /// Delete this row and everything after it — the local half of a rewind
 /// (`Harness::rewind` rewinds the provider's session).
 pub async fn truncate_from(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Result<u64, String> {

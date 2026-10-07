@@ -321,10 +321,10 @@ pub async fn pdf_files(
         .collect())
 }
 
-/// Derive parse status from what the parser left on disk. `None` clears the
-/// row: `parse_status` also holds transient states (`queued`, `running`,
-/// `error`) that a killed run leaves behind, and the artifacts on disk are the
-/// only durable truth. Same reconciliation as `reconcile_chapter_status`.
+/// Derive parse status from what the parser left on disk: a record is
+/// `quality`. Without one, the transient `queued`/`running` a killed run
+/// leaves behind (and a `quality` whose record is gone) are cleared, but
+/// `error` stays — it is the only trace of a failure from an earlier run.
 pub async fn reconcile_parse_status(pool: &SqlitePool, data_dir: &Path) -> Result<u64, String> {
     let rows = sqlx::query("SELECT relative_path FROM files")
         .fetch_all(pool)
@@ -352,7 +352,8 @@ pub async fn reconcile_parse_status(pool: &SqlitePool, data_dir: &Path) -> Resul
             None => {
                 sqlx::query(
                     "UPDATE files SET parse_status = NULL, parsed_at = NULL
-                     WHERE relative_path = ?1 AND parse_status IS NOT NULL",
+                     WHERE relative_path = ?1 AND parse_status IS NOT NULL
+                       AND parse_status != 'error'",
                 )
                 .bind(&rel)
                 .execute(pool)
@@ -962,6 +963,53 @@ mod tests {
             assert_eq!(setting(&pool, "embed").await.unwrap().as_deref(),
                 Some(r#"{"engine":"cloud"}"#));
         }
+    }
+
+    #[tokio::test]
+    async fn reconciling_parse_status_keeps_failures_and_clears_stale_runs() {
+        let pool = migrated_pool().await;
+        let dir = crate::test_support::Scratch::new("reconcile-parse");
+        sqlx::query("INSERT INTO subjects (id, code, name) VALUES (1, 'SUBJ', 'Subject')")
+            .execute(&pool).await.unwrap();
+        let rows = [
+            ("courses/SUBJ/files/failed.pdf", "error"),
+            ("courses/SUBJ/files/queued.pdf", "queued"),
+            ("courses/SUBJ/files/running.pdf", "running"),
+            ("courses/SUBJ/files/gone.pdf", "quality"),
+            ("courses/SUBJ/files/done.pdf", "error"),
+        ];
+        for (rel, status) in rows {
+            sqlx::query(
+                "INSERT INTO files (subject_id, filename, relative_path, file_type, parse_status)
+                 VALUES (1, ?1, ?2, 'pdf', ?3)",
+            )
+            .bind(rel.rsplit('/').next().unwrap())
+            .bind(rel)
+            .bind(status)
+            .execute(&pool).await.unwrap();
+        }
+        // Only `done.pdf` has a record on disk.
+        let done = dir.join("courses/SUBJ/files/done.pdf");
+        std::fs::create_dir_all(done.parent().unwrap()).unwrap();
+        std::fs::write(crate::parse::pages_path(&done), r#"{"mode":"quality"}"#).unwrap();
+
+        reconcile_parse_status(&pool, &dir).await.unwrap();
+
+        let status = |rel: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT parse_status FROM files WHERE relative_path = ?1",
+                )
+                .bind(rel)
+                .fetch_one(&pool).await.unwrap()
+            }
+        };
+        assert_eq!(status("courses/SUBJ/files/failed.pdf").await.as_deref(), Some("error"));
+        assert_eq!(status("courses/SUBJ/files/queued.pdf").await, None);
+        assert_eq!(status("courses/SUBJ/files/running.pdf").await, None);
+        assert_eq!(status("courses/SUBJ/files/gone.pdf").await, None);
+        assert_eq!(status("courses/SUBJ/files/done.pdf").await.as_deref(), Some("quality"));
     }
 
     #[tokio::test]

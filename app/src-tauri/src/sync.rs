@@ -85,11 +85,22 @@ pub struct FileStart {
     pub size_bytes: u64,
 }
 
+/// The terminal event for a [`FileStart`] whose download or save failed, so
+/// the file is not left "downloading" until the run ends. `error` is a short
+/// sentence for the UI — never a URL, which for a download is signed.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FileFailed {
+    pub subject_id: i64,
+    pub relative_path: String,
+    pub error: String,
+}
+
 /// Where a run's side effects go. Default methods are no-ops.
 pub trait Reporter: Send + Sync {
     fn progress(&self, _p: &Progress) {}
     fn file_start(&self, _f: &FileStart) {}
     fn file(&self, _f: &FileEvent) {}
+    fn file_failed(&self, _f: &FileFailed) {}
     fn log(&self, _level: &str, _course: &str, _message: &str) {}
     /// Checked between items; a run stops at the next boundary once true.
     fn cancelled(&self) -> bool {
@@ -907,7 +918,7 @@ impl Engine {
         let video = is_video(&ct, &name);
         let office = office_ext(&ct).or_else(|| is_generic_binary(&ct).then(|| office_ext_of(&name)).flatten());
         let downloadable = DOWNLOADABLE_TYPES.contains(&ct.as_str())
-            || (is_generic_binary(&ct) && name.to_ascii_lowercase().ends_with(".pdf"));
+            || (is_generic_binary(&ct) && paths::is_pdf(&name));
         if !video && !downloadable && office.is_none() {
             return Ok(Fetched::Skipped);
         }
@@ -962,20 +973,33 @@ impl Engine {
             return Ok(Fetched::Saved(rel));
         }
 
+        // Resolved before the announcement: no URL means nothing to download,
+        // and a file announced as downloading must end in an event.
+        let Some(url) = self.download_url(&info, file_id)? else { return Ok(Fetched::Skipped) };
+
         self.reporter.file_start(&FileStart {
             subject_id: c.id,
             code: c.code.clone(),
-            relative_path: rel,
+            relative_path: rel.clone(),
             filename: name.clone(),
             size_bytes: meta_size,
         });
+        let failed = |error: String| {
+            self.reporter.file_failed(&FileFailed {
+                subject_id: c.id,
+                relative_path: rel.clone(),
+                error: error.clone(),
+            });
+            error
+        };
 
-        let Some(url) = self.download_url(&info, file_id)? else { return Ok(Fetched::Skipped) };
-        let bytes = self.fetch_bytes(&url)?;
+        let bytes = self.fetch_bytes(&url).map_err(|e| failed(format!("Download failed: {e}.")))?;
 
         // The original is the library file. Office documents get a derived
         // "deck.pptx.pdf" beside them — never announced, never a database row.
-        let rel = self.write(c, &format!("files/{name}"), &bytes, Some(file_id))?;
+        let (rel, action) = self
+            .store(c, &format!("files/{name}"), &bytes, Some(file_id), None)
+            .map_err(|e| failed(format!("Could not save the file: {e}.")))?;
 
         // A failed Office conversion stays out of the manifest so it retries.
         let mut complete = true;
@@ -994,6 +1018,7 @@ impl Engine {
                         &c.code,
                         &format!("{name}: PDF conversion failed — stored original only ({e})"),
                     );
+                    self.conversion_failed(&rel, action, c.id);
                 }
             }
         }
@@ -1113,10 +1138,12 @@ impl Engine {
         Ok(info["url"].as_str().filter(|u| !u.is_empty()).map(str::to_string))
     }
 
+    /// Errors never carry the URL: a download URL is signed, and these
+    /// sentences reach the log and the UI.
     fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, String> {
-        let r = self.canvas.get(url)?;
+        let r = self.canvas.get(url).map_err(|_| "could not reach the file server".to_string())?;
         if !r.ok() {
-            return Err(format!("download HTTP {}", r.status));
+            return Err(format!("the file server answered HTTP {}", r.status));
         }
         // A login page where a file should be means the session lapsed
         // mid-run; saving it would quietly corrupt the library.
@@ -1218,6 +1245,18 @@ impl Engine {
         canvas_id: Option<i64>,
         source_url: Option<String>,
     ) -> Result<String, String> {
+        self.store(c, rel_path, data, canvas_id, source_url).map(|(rel, _)| rel)
+    }
+
+    /// `write_from`, also saying what the write did to the file on disk.
+    fn store(
+        &self,
+        c: &Subject,
+        rel_path: &str,
+        data: &[u8],
+        canvas_id: Option<i64>,
+        source_url: Option<String>,
+    ) -> Result<(String, paths::WriteAction), String> {
         let (rel, size, action) = paths::write_course_bytes(&self.data_dir, &c.code, rel_path, data)?;
         // Purge the stale parse before the trigger below, or its skip check
         // would keep serving the old markdown and vectors.
@@ -1235,10 +1274,28 @@ impl Engine {
             action: action.as_str(),
         });
 
-        if self.parse_pdfs && rel_path.ends_with(".pdf") {
+        if self.parse_pdfs && paths::is_pdf(rel_path) {
             self.trigger_parse(&rel, c.id);
         }
-        Ok(rel)
+        Ok((rel, action))
+    }
+
+    /// An Office original whose conversion failed has no PDF to parse. A
+    /// derived PDF from older bytes is deleted with its artifacts, or it would
+    /// be parsed as current; the failure is the row's terminal parse status.
+    /// Identical bytes keep a sibling that is still theirs.
+    fn conversion_failed(&self, rel: &str, action: paths::WriteAction, subject_id: i64) {
+        let Some(pdf_rel) = paths::doc_pdf_rel(rel) else { return };
+        let derived = self.data_dir.join(&pdf_rel);
+        if action == paths::WriteAction::Unchanged && derived.is_file() {
+            return;
+        }
+        paths::purge_parse_artifacts(&self.data_dir, rel);
+        let _ = std::fs::remove_file(&derived);
+        if self.parse_pdfs {
+            let error = parse::ParseError::Document { code: parse::CONVERSION_FAILED.into() };
+            parse::events::failed(rel, subject_id, &error);
+        }
     }
 
     /// Start the parse without waiting for it. One detached thread per PDF,
@@ -1298,13 +1355,23 @@ pub fn parse_pdf(
 
 /// `parse_pdf` plus a progress callback, for the CLI (the app reads the
 /// `parse-status` events).
+///
+/// One parse per PDF at a time (`parse::InFlight`): a second caller waits,
+/// then takes the already-parsed path. A panic becomes this file's `error`,
+/// or its row would wait on a status that never comes.
 pub fn parse_pdf_reporting(
     data_dir: &Path,
     rel_path: &str,
     subject_id: i64,
     on_progress: &dyn Fn(parse::Progress),
 ) -> Result<ParseSummary, parse::ParseError> {
-    match run_parse(data_dir, rel_path, subject_id, on_progress) {
+    let key = data_dir.join(paths::doc_pdf_rel(rel_path).unwrap_or_else(|| rel_path.to_string()));
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _claim = parse::InFlight::shared().claim(&key);
+        run_parse(data_dir, rel_path, subject_id, on_progress)
+    }))
+    .unwrap_or_else(|_| Err(parse::ParseError::Io("the parser crashed on this file".into())));
+    match outcome {
         Ok(summary) => Ok(summary),
         Err(error) => {
             parse::events::failed(rel_path, subject_id, &error);
@@ -1332,6 +1399,10 @@ fn run_parse(
     if parse::parse_mode(&pdf).is_some() {
         // An artifact on disk is no promise its page rows exist; backfill.
         let record = parse::read_record(&pdf);
+        // The `.md` is derived from the record, so a lost one is rebuilt here.
+        if let Some(record) = &record {
+            record.restore_markdown(&pdf)?;
+        }
         let pages = record.as_ref().map(|r| r.page_count).unwrap_or(0);
         let pages_recorded = match record {
             Some(record) => backfill_pages(data_dir, rel_path, subject_id, &record)
@@ -1735,6 +1806,14 @@ mod tests {
         assert_eq!(convert_target("docx"), "pdf");
         assert!(convert_target("xlsx").contains("SinglePageSheets"));
         assert!(convert_target("xls").starts_with("pdf:calc_pdf_Export:"));
+    }
+
+    #[test]
+    fn every_converted_type_is_a_pdf_backed_extension() {
+        for (_, ext) in OFFICE_TYPES {
+            assert!(paths::OFFICE_EXTS.contains(&format!(".{ext}").as_str()), "{ext}");
+        }
+        assert_eq!(OFFICE_TYPES.len(), paths::OFFICE_EXTS.len());
     }
 
     #[test]

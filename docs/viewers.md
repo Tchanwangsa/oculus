@@ -42,6 +42,15 @@ classes work even when there are no dollar delimiters.
   (`app/src/lib/libraryLinks.ts`, shared with the note editor). A selection
   in its rendered markdown copies or drags out as markdown, maths as TeX
   (`app/src/lib/selectionMarkdown.ts`, shared with the chat timeline).
+  Rendered maths is one unit to a selection from the prose around it, as in
+  the note editor: an end inside a formula copies the whole formula, and
+  `watchMathSelection` paints it as one fill (`data-math-selected` in
+  `index.css`) instead of KaTeX's per-glyph highlight. A press on a formula
+  swaps it for a read-only MathLive field (`app/src/lib/mathSelect.ts`), so
+  a drag selects by structure — a cell, a matrix, a run of atoms — and copies
+  that part's LaTeX, through the editor's own hit-test, widening and copy
+  (`mathField.ts`); a press outside it, Esc or focus leaving puts the KaTeX
+  back. MathLive loads as the pointer first reaches a formula.
 - **A ```mermaid fence is caught at `pre`** (`Mermaid.tsx`), and the original
   `<pre>` shows until it renders or if it never parses. Config and drawing are
   `mermaidRender.ts`:

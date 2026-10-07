@@ -96,8 +96,8 @@ export const routes: RouteObject[] = [
           // Legacy paths that restored tabs and Recent entries may carry.
           { path: "ai", element: <Navigate to="../agents" replace /> },
           { path: "library", element: <Navigate to="../parsing" replace /> },
-        ],
           { path: "providers", element: <Navigate to="../opencode" replace /> },
+        ],
       },
       // Legacy path with no subject.
       { path: "lectures", element: <Navigate to="/subjects" replace /> },

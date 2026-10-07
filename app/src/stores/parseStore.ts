@@ -81,9 +81,13 @@ export const useParseStore = create<ParseState>((set) => ({
           latch = { message: ev.error ?? "Parsing is unavailable", kind: ev.kind, at: Date.now() };
         }
       } else {
-        // Any progress clears this file's failure and proves the latch lifted.
+        // Any progress clears this file's failure.
         delete failures[ev.relative_path];
-        latch = null;
+        // Only real parse work proves the latch lifted: `queued` precedes the
+        // preflight, and a bare `quality` is an already-parsed skip. A cloud
+        // parse can finish without a `running`, hence `quality` after `queued`.
+        const parsed = ev.status === "quality" && state.jobs[ev.relative_path] != null;
+        if (ev.status === "running" || parsed) latch = null;
       }
 
       return { statuses, jobs, failures, latch };

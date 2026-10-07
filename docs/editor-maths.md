@@ -13,6 +13,7 @@ LaTeX. The delimiters and the rest of the editor are [editor.md](./editor.md).
 | Rendered maths, atomic ranges, edge keys | `app/src/components/documents/editor/widgets.ts`, `app/src/components/documents/editor/livePreview.ts` |
 | Toolbox, palette, quick picks, usage | `app/src/components/documents/editor/mathTools.ts`, `app/src/components/documents/editor/mathPalette.ts`, `app/src/components/documents/editor/mathUsage.ts` |
 | Shorthands | `app/src/components/documents/editor/mathShorthand.ts` |
+| Typing matrices | `app/src/components/documents/editor/mathMatrix.ts`, `app/src/components/documents/editor/mathMatrixField.ts` |
 
 ## Live mode edits maths visually
 
@@ -219,7 +220,8 @@ little history (`quickPicks`), numbered, and a ⌄ button.
 the full toolbox; Esc closes the strip and a second Esc leaves the field;
 any other key, or a caret move in the field, closes it and goes on as
 usual. Space inside `\text{}`, beside a text atom and in a `\command`
-being typed keeps MathLive's meaning. The full toolbox under the field
+being typed keeps MathLive's meaning, and after a term in a matrix or
+bracket group it starts a cell (below). The full toolbox under the field
 drops the preview, its cells insert into the field (slots become MathLive
 placeholders) and its TeX control switches to TeX mode; there a Visual
 control switches back. Neither toolbox ever takes focus. The field says so
@@ -241,6 +243,47 @@ block go when the field opens on it (`dropBlankLines`). Both cleanups stay
 outside the history. The empty-line hint (12px, one tight line) sits at the height of the empty
 row's leading atom, clamped inside the field's box, two frames after the edit,
 since MathLive draws in a frame of its own and its hidden caret can lag.
+
+## Matrices are typed as in MATLAB
+
+In the visual field `[a b; c d]` types a matrix
+(`mathMatrix.ts`, pure; `mathMatrixField.ts` reads MathLive's atoms and
+writes back). The caret's grid is the structure it is directly in: a cell of
+a `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix` or
+`smallmatrix` (not `array`, `cases`, `aligned`), or a bracket group whose
+delimiters match one (`(`, `[`, `\{`, `|`, `\|`; the right one typed or
+still MathLive's ghost), which is one cell and becomes that matrix at its
+first new cell or row. Maths mode only; `FieldController.key` runs these
+keys after the toolbox's, and `spaceFree` keeps the quick picks off a Space
+they take.
+
+- **Space** after a term ends the cell: into the next cell when the caret is
+  at the cell's end and that cell is empty, else into a new column (what
+  followed the caret moves into it). In an empty cell, at a cell's start and
+  after an operator, relation, punctuation, opening or `\sin`-like operator
+  it opens the quick picks as anywhere else. A cell holding only a binary
+  operator or relation rejoins the cell before it on Space (MATLAB's
+  `[a + b]`): its column goes when nothing else is in it, else the row's
+  later cells shift left. So `(a + b)` typed with spaces stays plain
+  brackets, while `[1 -1]` is two cells.
+- **`;`** goes to the start of the next row: a new empty row, unless the
+  next row is already empty. In a bracket group the `;` is typed first and
+  written as its own undo step, so ⌘Z after the matrix appears gives back
+  `f(x;`; inside a matrix it is never typed.
+- **Backspace** at the start of an empty cell, in a grid of more than one,
+  removes its column when all empty, else its row when all empty, else steps
+  back to the end of the cell before. One cell left turns back into its
+  bracket group, ghost and all, so `)` still closes it.
+- **The closing bracket** (`)`, `]`, `}`, `|`) typed in a matrix's cell drops
+  trailing empty rows and columns and puts the caret after the matrix; one
+  cell left becomes a closed bracket group.
+
+Rows are padded to the widest before any edit, so `[a b; c d e f g]` comes
+out with empty cells after `b`; a row stops at MathLive's ten columns. New
+cells are placeholders, which Tab reaches and the note never stores. Each
+edit replaces the whole structure (its scripts kept, `^T`) and is one undo
+step: pending keystrokes are written first, then the edit with
+`isolateHistory` (`flush(true)`).
 
 ## Typed shorthands expand inside maths
 

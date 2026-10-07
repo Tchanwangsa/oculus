@@ -3,21 +3,18 @@ import { CaretRight, Chat, CircleNotch, Plus, Trash, VideoCamera, X } from "@pho
 import { ProviderMark } from "@/components/harness/ProviderMark";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import {
-  SIDE_NAV_COLLAPSED_WIDTH,
   SIDE_NAV_FOLDS,
   SIDE_NAV_ROW,
   SIDE_NAV_ROW_ACTIVE,
   SIDE_NAV_ROW_IDLE,
   SideNav,
-  SideNavCollapseToggle,
-  SideNavTip,
 } from "@/components/ui/SideNav";
 import { chatHref, type HarnessThread } from "@/lib/harness";
 import type { Subject } from "@/lib/db";
 import { groupBySubject } from "@/lib/subjectGroups";
 import { useCollapsedGroups } from "@/hooks/useCollapsedGroups";
 import { useWindowEvent } from "@/hooks/useEvents";
-import { useResizablePanel } from "@/hooks/useResizablePanel";
+import type { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useStoredSet } from "@/hooks/useStoredState";
 import { cn } from "@/lib/utils";
 import { usePointerDrag } from "@/hooks/usePointerDrag";
@@ -25,12 +22,13 @@ import { usePointerDrag } from "@/hooks/usePointerDrag";
 const COLLAPSED_KEY = "oculus-chat-groups-collapsed";
 const ORDER_KEY = "oculus-chat-groups-order";
 
-/** The column's width bounds; folded, it keeps its icons. */
-const PANEL = {
+/** The column's width bounds; folded, it is gone entirely. `ChatPage` owns the
+ *  panel so its header can hold the fold toggle. */
+export const THREAD_LIST_PANEL = {
   defaultWidth: 224,
   minWidth: 168,
   maxWidth: 420,
-  collapsedWidth: SIDE_NAV_COLLAPSED_WIDTH,
+  collapsedWidth: 0,
   storageKey: "oculus-chat-list-width",
 };
 
@@ -48,10 +46,12 @@ function arrange<T extends { key: string }>(groups: T[], order: string[]): T[] {
 /**
  * Chat's nav column on `SideNav`, the subject page's column: New thread on top
  * (lit while no thread is open), then threads grouped by subject scope. It
- * owns its width and fold; ⌘⌥B or the footer toggle folds it to the rows'
- * icons. Titles come from `Harness::name_thread`.
+ * takes its width and fold from `panel` (`ChatPage` owns it); ⌘⌥B or the
+ * page header's toggle folds it away completely. Titles come from
+ * `Harness::name_thread`.
  */
 export const ThreadList = memo(function ThreadList({
+  panel,
   threads,
   subjects,
   activeId,
@@ -60,6 +60,7 @@ export const ThreadList = memo(function ThreadList({
   onNew,
   onDelete,
 }: {
+  panel: ReturnType<typeof useResizablePanel>;
   threads: HarnessThread[];
   subjects: Subject[];
   activeId: number | null;
@@ -70,7 +71,6 @@ export const ThreadList = memo(function ThreadList({
   onNew: (subjectId?: number | null) => void;
   onDelete: (id: number) => void;
 }) {
-  const panel = useResizablePanel(PANEL);
   const { collapsed } = panel;
   const [confirming, setConfirming] = useState<number | null>(null);
   // Folded *groups* — not the column's own `collapsed`.
@@ -149,7 +149,6 @@ export const ThreadList = memo(function ThreadList({
         width={panel.width}
         collapsed={collapsed}
         animate={!panel.dragging}
-        footer={<SideNavCollapseToggle collapsed={collapsed} onToggle={panel.toggle} shortcut="⌘⌥B" />}
         header={
           <>
             <div className="px-4 pt-4 pb-3">
@@ -166,17 +165,15 @@ export const ThreadList = memo(function ThreadList({
               </div>
             </div>
             <div className="px-2 pb-2">
-              <SideNavTip label="New thread">
-                <button
-                  type="button"
-                  aria-current={activeId == null ? "page" : undefined}
-                  onClick={() => onNew()}
-                  className={cn(SIDE_NAV_ROW, activeId == null ? SIDE_NAV_ROW_ACTIVE : SIDE_NAV_ROW_IDLE)}
-                >
-                  <Plus size={16} className="shrink-0" />
-                  <span className={cn("min-w-0 flex-1 truncate text-left", SIDE_NAV_FOLDS)}>New thread</span>
-                </button>
-              </SideNavTip>
+              <button
+                type="button"
+                aria-current={activeId == null ? "page" : undefined}
+                onClick={() => onNew()}
+                className={cn(SIDE_NAV_ROW, activeId == null ? SIDE_NAV_ROW_ACTIVE : SIDE_NAV_ROW_IDLE)}
+              >
+                <Plus size={16} className="shrink-0" />
+                <span className={cn("min-w-0 flex-1 truncate text-left", SIDE_NAV_FOLDS)}>New thread</span>
+              </button>
             </div>
           </>
         }
@@ -197,8 +194,10 @@ export const ThreadList = memo(function ThreadList({
               }}
               className={cn("relative mb-3", drag?.key === g.key && "opacity-40")}
             >
-              {/* Absolute on a neighbouring group, so no height changes mid-drag. */}
-              {drag?.at === gi && <DropLine className="-top-1.5" />}
+              {/* Absolute on a neighbouring group, so no height changes mid-drag. The
+                  first group's line sits inside its box: above it is the scroller's
+                  padding, which clips. */}
+              {drag?.at === gi && <DropLine className={gi === 0 ? "top-0" : "-top-1.5"} />}
               {drag?.at === groups.length && gi === groups.length - 1 && (
                 <DropLine className="-bottom-1.5" />
               )}
@@ -295,13 +294,16 @@ export const ThreadList = memo(function ThreadList({
           );
         })}
       </SideNav>
-      {/* On the seam: negative margins cost no layout width. */}
-      <ResizeHandle
-        onMouseDown={panel.onMouseDown}
-        dragging={panel.dragging}
-        label="Resize conversations"
-        className="-mx-0.5"
-      />
+      {/* On the seam: negative margins cost no layout width. Folded away the
+          seam is the page's own left edge, where a side panel's handle lives. */}
+      {!collapsed && (
+        <ResizeHandle
+          onMouseDown={panel.onMouseDown}
+          dragging={panel.dragging}
+          label="Resize conversations"
+          className="-mx-0.5"
+        />
+      )}
     </>
   );
 });
@@ -336,25 +338,23 @@ function ThreadRow({
       )}
     >
       {/* Padding lives inside the button so the whole lit row is the hit target. */}
-      <SideNavTip label={title}>
-        <button
-          type="button"
-          // ⌘-click opens the thread in a new tab (`app/src/lib/newTabClicks.ts`).
-          data-tab-href={chatHref(t.id, t.title)}
-          onClick={() => onOpen(t.id)}
-          className="flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-left"
-        >
-          <ProviderMark provider={t.provider} className="size-4 shrink-0" />
-          <span className={cn("min-w-0 flex-1 truncate", SIDE_NAV_FOLDS)}>{title}</span>
-          {t.lecture_id && (
-            <VideoCamera
-              size={11}
-              className={cn("shrink-0 opacity-60", SIDE_NAV_FOLDS)}
-              aria-label="Lecture thread"
-            />
-          )}
-        </button>
-      </SideNavTip>
+      <button
+        type="button"
+        // ⌘-click opens the thread in a new tab (`app/src/lib/newTabClicks.ts`).
+        data-tab-href={chatHref(t.id, t.title)}
+        onClick={() => onOpen(t.id)}
+        className="flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-left"
+      >
+        <ProviderMark provider={t.provider} className="size-4 shrink-0" />
+        <span className={cn("min-w-0 flex-1 truncate", SIDE_NAV_FOLDS)}>{title}</span>
+        {t.lecture_id && (
+          <VideoCamera
+            size={11}
+            className={cn("shrink-0 opacity-60", SIDE_NAV_FOLDS)}
+            aria-label="Lecture thread"
+          />
+        )}
+      </button>
       <div className={cn("flex shrink-0 items-center pr-1.5 pl-1", SIDE_NAV_FOLDS)}>
         {running ? (
           <CircleNotch size={12} className="animate-spin text-muted-foreground" aria-label="Running" />

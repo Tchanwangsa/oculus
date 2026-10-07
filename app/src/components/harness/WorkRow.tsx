@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   Brain,
   BookOpen,
@@ -18,6 +19,8 @@ import {
 import type { Icon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { CodeText } from "@/components/markdown/MdComponents";
+import { ImageLightbox } from "@/components/ui/Lightbox";
+import { isImagePath } from "@/lib/attachments";
 import {
   parseToolMeta,
   providerLabel,
@@ -159,6 +162,31 @@ function args(input: unknown): [string, string][] {
     });
 }
 
+/** A Read of a picture shows the picture. Only paths under the asset scope
+ *  (`tauri.conf.json`) load; anything else fails and falls back to the args. */
+function ReadPicture({ path, onFail }: { path: string; onFail: () => void }) {
+  const [open, setOpen] = useState(false);
+  const src = convertFileSrc(path);
+  return (
+    <>
+      <ImageLightbox src={src} alt={path} open={open} onOpenChange={setOpen} />
+      <button
+        type="button"
+        aria-label="Open the picture"
+        onClick={() => setOpen(true)}
+        className="block max-w-full cursor-zoom-in overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-ring"
+      >
+        <img
+          src={src}
+          alt={path}
+          onError={onFail}
+          className="block max-h-72 w-auto max-w-full"
+        />
+      </button>
+    </>
+  );
+}
+
 export const ToolRow = memo(function ToolRow({
   item,
   liveOutput,
@@ -179,6 +207,10 @@ export const ToolRow = memo(function ToolRow({
   const command = isCommand
     ? entries.find(([k]) => k === "command")?.[1]
     : undefined;
+  const [pictureFailed, setPictureFailed] = useState(false);
+  const readPath =
+    kind === "read" ? entries.find(([k]) => k === "file_path" || k === "path")?.[1] : undefined;
+  const picture = readPath && !pictureFailed && isImagePath(readPath) ? readPath : null;
   return (
     <RowShell
       icon={TOOL_ICON[kind]}
@@ -194,6 +226,9 @@ export const ToolRow = memo(function ToolRow({
         ) : null
       }
     >
+      {picture ? (
+        <ReadPicture path={picture} onFail={() => setPictureFailed(true)} />
+      ) : (
       <div className="overflow-hidden rounded-lg border border-border bg-card">
         <div className="max-h-72 overflow-auto px-3 py-2">
           {command ? (
@@ -212,6 +247,7 @@ export const ToolRow = memo(function ToolRow({
           )}
         </div>
       </div>
+      )}
     </RowShell>
   );
 });

@@ -48,6 +48,7 @@ import {
   type PipelineItem,
 } from "@/stores/pipelineStore";
 import { PipelineTable } from "@/components/sync/PipelineTable";
+import { ResultCertWarning } from "@/components/sync/ResultCertWarning";
 import { SyncHistoryTable } from "@/components/sync/SyncHistoryTable";
 import { SubjectPicker } from "@/components/sync/SubjectPicker";
 import { SyncSettings } from "@/components/sync/SyncSettings";
@@ -61,6 +62,8 @@ const PHASE_LABEL: Record<string, string> = {
 
 type ActivityView = "history" | "pipeline";
 const VIEW_KEY = "oculus-sync-view";
+/** How long a failed pipeline seed waits before trying again. */
+const SEED_RETRY_MS = 5_000;
 
 /** The page's two tables, as sibling tabs. */
 const VIEWS = [
@@ -71,7 +74,6 @@ const VIEWS = [
 export default function SyncPage() {
   const { status: authStatus, connect } = useAuth();
   const active = useTabActive();
-  const pipelineSeeded = useRef(false);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [loadingSubjects, setLoadingSubjects] = useState(false);
@@ -123,54 +125,92 @@ export default function SyncPage() {
   // Backfill the pipeline table with every PDF on record. The DB's
   // parse_status can lag disk (e.g. CLI parses), so disk is consulted for
   // anything not fully parsed and the DB patched to match.
-  useEffect(() => {
-    if (!active || pipelineSeeded.current) return;
-    pipelineSeeded.current = true;
-    (async () => {
-      try {
-        const rows = await getPdfPipelineRows();
-        const byPath = new Map(rows.map((r) => [r.relative_path, r]));
+  const seedFromDb = useCallback(async () => {
+    const rows = await getPdfPipelineRows();
+    const byPath = new Map(rows.map((r) => [r.relative_path, r]));
 
-        // Seed embed from page coverage in the *current* space, never
-        // `files.embed_status`, which doesn't know which model wrote the
-        // vectors (same question as `getUnembeddedPdfs`).
-        const { model, dim } = await embeddingStats();
-        const coverage = new Map(
-          (await getEmbedCoverage(model, dim)).map((c) => [c.relative_path, c]),
-        );
+    // Seed embed from page coverage in the *current* space, never
+    // `files.embed_status`, which doesn't know which model wrote the
+    // vectors (same question as `getUnembeddedPdfs`).
+    const { model, dim } = await embeddingStats();
+    const coverage = new Map(
+      (await getEmbedCoverage(model, dim)).map((c) => [c.relative_path, c]),
+    );
 
-        const unsure = rows
-          .filter((r) => r.parse_status !== "quality")
-          .map((r) => r.relative_path);
-        let disk: Record<string, string> = {};
-        if (unsure.length > 0) {
-          const scanned = await scanParsedFiles(unsure);
-          disk = Object.fromEntries(scanned);
-          const fixes = scanned.filter(
-            ([p, mode]) => mode !== (byPath.get(p)?.parse_status ?? ""),
-          );
-          if (fixes.length > 0) await setParseStatusByPath(fixes);
+    const unsure = rows
+      .filter((r) => r.parse_status !== "quality")
+      .map((r) => r.relative_path);
+    let disk: Record<string, string> = {};
+    if (unsure.length > 0) {
+      const scanned = await scanParsedFiles(unsure);
+      disk = Object.fromEntries(scanned);
+      const fixes = scanned.filter(
+        ([p, mode]) => mode !== (byPath.get(p)?.parse_status ?? ""),
+      );
+      if (fixes.length > 0) await setParseStatusByPath(fixes);
+    }
+
+    seedPipeline(
+      rows.map((r) => ({
+        relativePath: r.relative_path,
+        subjectId: r.subject_id,
+        parseStatus: disk[r.relative_path] ?? r.parse_status,
+        embedStatus: r.embed_status,
+        pagesTotal: coverage.get(r.relative_path)?.pages_total ?? 0,
+        pagesCurrent: coverage.get(r.relative_path)?.pages_current ?? 0,
+        // `scraped_at` moves on every sync, changed bytes or not.
+        downloadedAt: sqliteUtcToMs(
+          r.content_changed_at ?? r.first_seen_at ?? r.scraped_at,
+        ),
+        parsedAt: sqliteUtcToMs(r.parsed_at),
+        embeddedAt: sqliteUtcToMs(r.embedded_at),
+      })),
+    );
+  }, [seedPipeline]);
+
+  // Re-seeded on every activation and after every sync run, since the CLI,
+  // deletes and renames change the DB without a live event. One seed at a
+  // time: a request while one runs queues a single rerun.
+  const seedRun = useRef({ running: false, again: false });
+  const seedRetry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
+  const requestSeed = useCallback(function request() {
+    const run = seedRun.current;
+    if (run.running) {
+      run.again = true;
+      return;
+    }
+    run.running = true;
+    if (seedRetry.current) clearTimeout(seedRetry.current);
+    seedRetry.current = null;
+    seedFromDb()
+      .then(
+        () => false,
+        (e) => {
+          console.error("pipeline seed failed", e);
+          return true;
+        },
+      )
+      .then((failed) => {
+        run.running = false;
+        if (run.again) {
+          run.again = false;
+          request();
+        } else if (failed && activeRef.current) {
+          seedRetry.current = setTimeout(request, SEED_RETRY_MS);
         }
+      });
+  }, [seedFromDb]);
 
-        seedPipeline(
-          rows.map((r) => ({
-            relativePath: r.relative_path,
-            subjectId: r.subject_id,
-            parseStatus: disk[r.relative_path] ?? r.parse_status,
-            embedStatus: r.embed_status,
-            pagesTotal: coverage.get(r.relative_path)?.pages_total ?? 0,
-            pagesCurrent: coverage.get(r.relative_path)?.pages_current ?? 0,
-            downloadedAt: sqliteUtcToMs(r.scraped_at),
-            parsedAt: sqliteUtcToMs(r.parsed_at),
-            embeddedAt: sqliteUtcToMs(r.embedded_at),
-          })),
-        );
-      } catch (e) {
-        pipelineSeeded.current = false;
-        console.error("pipeline seed failed", e);
-      }
-    })();
-  }, [active, seedPipeline]);
+  useEffect(() => {
+    if (active) requestSeed();
+  }, [active, requestSeed]);
+
+  useEffect(() => () => {
+    if (seedRetry.current) clearTimeout(seedRetry.current);
+  }, []);
 
   // ── Derived pipeline counts ───────────────────────────────────────────────
 
@@ -226,6 +266,16 @@ export default function SyncPage() {
     loadFromDb();
   }, [completedAt, syncError, loadFromDb]);
 
+  // A run that ends (or fails partway) has written file rows. Only a run
+  // ending after mount: activation already seeds, and the store's count
+  // outlives the page.
+  const seenCompletion = useRef(completedAt);
+  useEffect(() => {
+    if (completedAt === seenCompletion.current) return;
+    seenCompletion.current = completedAt;
+    if (activeRef.current) requestSeed();
+  }, [completedAt, requestSeed]);
+
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleRefetchSubjects = async () => {
@@ -271,6 +321,9 @@ export default function SyncPage() {
    *  Rust, so resume = retry; the stage picks which call, since re-parsing a
    *  parsed file would leave the pending embed untouched. */
   const resumeItem = useCallback(async (it: PipelineItem) => {
+    // Not on disk, so neither call has anything to work on; the next sync
+    // downloads it again.
+    if (it.download === "error") return;
     const { touch } = usePipelineStore.getState();
     const embedding = it.parse === "done";
 
@@ -332,8 +385,10 @@ export default function SyncPage() {
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const phase = progress?.phase ? (PHASE_LABEL[progress.phase] ?? progress.phase) : null;
+  // What "Clear finished" removes: completed rows only, so a failure stays
+  // in view until it is retried or the file goes.
   const finishedCount = items.filter(
-    (it) => isComplete(it, embedStage) || hasFailed(it),
+    (it) => isComplete(it, embedStage) && !hasFailed(it, embedStage),
   ).length;
   const lastCompleted = runs.find((r) => r.status === "completed" && r.finished_at);
   const needsAuth = authStatus !== "connected";
@@ -455,6 +510,8 @@ export default function SyncPage() {
             </div>
 
             <span className="flex-1" />
+
+            <ResultCertWarning />
 
             {counts.paused > 0 && (
               <Button

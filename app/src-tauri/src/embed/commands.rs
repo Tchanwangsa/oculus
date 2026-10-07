@@ -263,8 +263,12 @@ pub async fn embed_set_engine(engine: String) -> Result<EmbedSettings, String> {
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("could not clear the page vectors: {e}"))?;
-    // The page markdown stays; it is independent of the model.
-    sqlx::query("UPDATE files SET embed_status = NULL, embedded_at = NULL WHERE embed_status IS NOT NULL")
+    // The page markdown stays; it is independent of the model. A 'queued'
+    // row is the persisted embed queue, which must survive into the new space.
+    sqlx::query(
+        "UPDATE files SET embed_status = NULL, embedded_at = NULL
+          WHERE embed_status IS NOT NULL AND embed_status != 'queued'",
+    )
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("could not reset the index state: {e}"))?;
@@ -281,13 +285,11 @@ pub async fn embed_set_engine(engine: String) -> Result<EmbedSettings, String> {
 /// Every library file that could have a `.emb.json` beside it — PDFs and
 /// Office documents with a PDF sibling; the index queue's predicate.
 async fn embeddable_paths(db: &sqlx::SqlitePool) -> Result<Vec<String>, String> {
-    let rows = sqlx::query(
-        "SELECT relative_path FROM files
-          WHERE lower(file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')",
-    )
-    .fetch_all(db)
-    .await
-    .map_err(|e| e.to_string())?;
+    let sql = format!(
+        "SELECT relative_path FROM files WHERE lower(file_type) IN {}",
+        crate::paths::pdf_backed_sql_list()
+    );
+    let rows = sqlx::query(&sql).fetch_all(db).await.map_err(|e| e.to_string())?;
     Ok(rows.iter().filter_map(|row| row.try_get::<String, _>("relative_path").ok()).collect())
 }
 

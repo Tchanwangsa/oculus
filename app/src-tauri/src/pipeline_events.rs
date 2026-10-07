@@ -47,6 +47,12 @@ pub(crate) struct Status {
     retryable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     latching: Option<bool>,
+    /// While a rate limit holds the work: epoch ms it expects to resume, and
+    /// why. Absent on any other event, which is what clears it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    waiting_until_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    waiting_reason: Option<String>,
 }
 
 impl Status {
@@ -55,6 +61,7 @@ impl Status {
             relative_path: relative_path.to_string(), subject_id, status,
             pages_done: None, total_pages: None, error: None,
             kind: None, retryable: None, latching: None,
+            waiting_until_ms: None, waiting_reason: None,
         }
     }
 
@@ -76,6 +83,12 @@ impl Status {
         self.kind = kind;
         self.retryable = retryable;
         self.latching = latching;
+        self
+    }
+
+    pub(crate) fn waiting(mut self, until_ms: u64, reason: String) -> Self {
+        self.waiting_until_ms = Some(until_ms);
+        self.waiting_reason = Some(reason);
         self
     }
 
@@ -108,6 +121,18 @@ mod tests {
         assert!(running.get("total_pages").is_none());
         let done = to_value(Status::new("a.pdf", 4, "done").completed(0)).unwrap();
         assert_eq!(done["total_pages"], 0);
+    }
+
+    #[test]
+    fn a_wait_rides_on_running_and_is_otherwise_absent() {
+        let plain = to_value(Status::new("a.pdf", 4, "running").progress(3, 9)).unwrap();
+        assert!(plain.get("waiting_until_ms").is_none());
+        assert!(plain.get("waiting_reason").is_none());
+        let held = to_value(Status::new("a.pdf", 4, "running").progress(3, 9)
+            .waiting(1_700_000_000_000, "rate-limited by Voyage".into())).unwrap();
+        assert_eq!(held["waiting_until_ms"], 1_700_000_000_000u64);
+        assert_eq!(held["waiting_reason"], "rate-limited by Voyage");
+        assert_eq!(held["pages_done"], 3);
     }
 
     #[test]

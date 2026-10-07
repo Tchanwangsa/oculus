@@ -306,7 +306,7 @@ export function NoteField({
           ref={scrollRef}
           className={cn("max-h-[420px] overflow-x-hidden overflow-y-auto px-2 py-1.5", scrollClassName)}
         >
-          <div ref={editorRef} />
+          <div ref={editorRef} data-selectable />
         </div>
         {/* In the card, so focus in the bar still counts as editing. */}
         {find.open && <FindBar {...find.bar} variant="floating" placeholder="Find in note" />}

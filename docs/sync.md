@@ -24,7 +24,10 @@ inside the app (on a plain thread, reporting through Tauri events) and in the
 The engine is plain Rust on a thread because a hidden WebView is suspended by
 macOS (see [architecture.md](./architecture.md)). Progress leaves through the
 `Reporter` trait in `app/src-tauri/src/sync.rs`: `app/src-tauri/src/scrape.rs`
-emits Tauri events, the CLI prints. `app/src-tauri/src/canvas.rs` is the
+emits Tauri events, the CLI prints. A file announced as downloading
+(`scrape-file-start`) always ends in `scrape-file` or, when its download or
+save fails, `scrape-file-failed` (`{ subject_id, relative_path, error }`, a
+sentence that never carries the signed URL). `app/src-tauri/src/canvas.rs` is the
 entire Canvas HTTP surface — cookie, retry policy and Link-header pagination
 live only there, and both scraping and auth probing go through it.
 
@@ -155,7 +158,7 @@ already-parsed file with no page rows folds its `.pages.json` in.
 
 ## Gotchas
 
-- An office file whose conversion fails (no LibreOffice) is still stored but kept out of `file-manifest.json`, so the next sync retries the conversion.
+- An office file whose conversion fails (no LibreOffice) is still stored but kept out of `file-manifest.json`, so the next sync retries the conversion. A derived PDF from older bytes is deleted with its parse artifacts, and the row gets a `document` parse failure (`parse::CONVERSION_FAILED`), not an endless "waiting to parse".
 - A delete cancels an in-flight download of the same lecture first, or the writer recreates the file just after it is removed.
 - A video download merges its entry into `file-manifest.json` as it is on disk (`record_manifest`), or it would drop what a sync saved during the download.
 - Don't add a parse deadline or worker pool here — concurrency and timeouts belong to the parse backend ([parsing.md](./parsing.md)).

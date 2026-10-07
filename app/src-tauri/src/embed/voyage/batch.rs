@@ -6,17 +6,19 @@
 //!
 //! * Both per-request ceilings apply (inputs and tokens), with tokens computed
 //!   from each page's real pixels, never a page count.
-//! * Progress is summed from finished requests.
+//! * Progress is summed from finished requests. A request held back by a
+//!   rate limit reports the wait, so a paced run is not mistaken for a hang.
 //! * Nothing partial escapes: a document that did not embed every page is an
 //!   error and no record is written.
 
+use std::collections::BTreeMap;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use crate::embed::raster::{self, RasterError, RenderedPage};
-use crate::embed::{EmbedError, EmbedPage, Progress};
-use crate::ratelimit::{hold, Permits};
+use crate::embed::{EmbedError, EmbedPage, Progress, Wait};
+use crate::ratelimit::hold;
 
 // ── The documented ceilings ──────────────────────────────────────────────────
 
@@ -112,8 +114,13 @@ pub fn plan(costs: &[u64], max_inputs: usize, max_tokens: u64) -> Vec<Vec<usize>
 /// What embeds a request; a trait so packing and concurrency test without a
 /// server.
 pub trait RequestRun: Send + Sync {
-    /// One vector per page, in the order the pages were given.
-    fn run(&self, pages: &[RenderedPage]) -> Result<Vec<Vec<f32>>, EmbedError>;
+    /// One vector per page, in the order the pages were given. `on_wait`
+    /// hears of a rate-limit wait as it starts, and `None` when it ends.
+    fn run(
+        &self,
+        pages: &[RenderedPage],
+        on_wait: &dyn Fn(Option<Wait>),
+    ) -> Result<Vec<Vec<f32>>, EmbedError>;
 
     /// The largest request this backend can currently get accepted. A request
     /// over the account's TPM is refused whatever the pace, so this is re-read
@@ -148,27 +155,53 @@ struct RunState {
     done: u32,
     in_flight: usize,
     failure: Option<EmbedError>,
+    /// Each held-back request's wait, keyed by its dispatch number.
+    waits: BTreeMap<usize, Wait>,
+}
+
+impl RunState {
+    /// What the row should show: the wait that ends first, since that is when
+    /// the document next moves.
+    fn waiting(&self) -> Option<Wait> {
+        self.waits.values().min_by_key(|wait| wait.until_ms).copied()
+    }
 }
 
 struct DocumentRun {
-    total: u32,
     state: Mutex<RunState>,
     changed: Condvar,
-    permits: Permits,
+    /// Requests allowed out at once.
+    in_flight: usize,
 }
 
 impl DocumentRun {
-    fn new(total: u32, in_flight: usize) -> Self {
+    fn new(in_flight: usize) -> Self {
         Self {
-            total,
             state: Mutex::new(RunState {
                 pages: Vec::new(),
                 done: 0,
                 in_flight: 0,
                 failure: None,
+                waits: BTreeMap::new(),
             }),
             changed: Condvar::new(),
-            permits: Permits::new(in_flight.max(1)),
+            in_flight: in_flight.max(1),
+        }
+    }
+
+    fn wait_for_change<'a>(&self, state: MutexGuard<'a, RunState>) -> MutexGuard<'a, RunState> {
+        self.changed.wait(state).unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn set_wait(&self, request: usize, wait: Option<Wait>) {
+        let mut state = hold(&self.state);
+        let changed = match wait {
+            Some(wait) => state.waits.insert(request, wait) != Some(wait),
+            None => state.waits.remove(&request).is_some(),
+        };
+        drop(state);
+        if changed {
+            self.changed.notify_all();
         }
     }
 
@@ -199,15 +232,46 @@ impl DocumentRun {
         state.in_flight = state.in_flight.saturating_sub(1);
         drop(state);
         self.changed.notify_all();
-        self.permits.release();
+    }
+}
+
+/// Reports for the run, from the calling thread: `on_progress` is neither
+/// `Send` nor `'static`, so workers record numbers behind the lock and this
+/// says them, once each time the page count or the wait changes.
+struct Narrator<'a> {
+    on_progress: &'a dyn Fn(Progress),
+    total: u32,
+    last: Option<(u32, Option<Wait>)>,
+}
+
+impl<'a> Narrator<'a> {
+    /// Something not yet said, read under the lock and said after it.
+    fn news(&self, state: &RunState) -> Option<(u32, Option<Wait>)> {
+        let now = (state.done, state.waiting());
+        (self.last != Some(now)).then_some(now)
+    }
+
+    fn tell(&mut self, (pages_done, waiting): (u32, Option<Wait>)) {
+        self.last = Some((pages_done, waiting));
+        (self.on_progress)(Progress {
+            pages_done,
+            total_pages: self.total,
+            backend: super::client::BACKEND,
+            waiting,
+        });
+    }
+
+    fn catch_up(&mut self, run: &DocumentRun) {
+        let news = self.news(&hold(&run.state));
+        if let Some(news) = news {
+            self.tell(news);
+        }
     }
 }
 
 /// Render `pdf`, pack it into requests, embed them with bounded concurrency,
-/// and hand back one `EmbedPage` per page — or fail.
-///
-/// `on_progress` is neither `Send` nor `'static`, so workers record numbers
-/// behind the lock and this thread reports them.
+/// and hand back one `EmbedPage` per page — or fail. Progress is reported
+/// through a `Narrator`.
 pub fn run_document(
     pdf: &Path,
     expected_pages: u32,
@@ -215,12 +279,12 @@ pub fn run_document(
     limits: Limits,
     on_progress: &dyn Fn(Progress),
 ) -> Result<Vec<EmbedPage>, EmbedError> {
-    let run = Arc::new(DocumentRun::new(expected_pages, limits.in_flight));
+    let run = Arc::new(DocumentRun::new(limits.in_flight));
     let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
     let mut batch: Vec<RenderedPage> = Vec::new();
     let mut spent: u64 = 0;
-    // The last number reported, shared by both passes so neither repeats.
-    let mut reported = u32::MAX;
+    // Shared by both passes so neither repeats the other.
+    let mut narrator = Narrator { on_progress, total: expected_pages, last: None };
     // `render_pages` stops only on a `RasterError`; the real reason is parked
     // here and the sentinel discarded.
     let mut stop: Option<EmbedError> = None;
@@ -242,18 +306,10 @@ pub fn run_document(
         // Re-read every page: see `RequestRun::max_tokens`.
         let ceiling = limits.max_tokens.min(runner.max_tokens());
         if !batch.is_empty() && (batch.len() >= limits.max_inputs || spent + cost > ceiling) {
-            dispatch(&run, &runner, std::mem::take(&mut batch), &mut workers);
+            dispatch(&run, &runner, std::mem::take(&mut batch), &mut workers, &mut narrator);
             spent = 0;
             // Reported while rendering too: rendering and embedding overlap.
-            let done = hold(&run.state).done;
-            if done != reported {
-                reported = done;
-                on_progress(Progress {
-                    pages_done: done,
-                    total_pages: expected_pages,
-                    backend: super::client::BACKEND,
-                });
-            }
+            narrator.catch_up(&run);
         }
         spent += cost;
         batch.push(page);
@@ -262,7 +318,7 @@ pub fn run_document(
 
     let outcome: Result<u32, EmbedError> = match rendered {
         Ok(count) => {
-            dispatch(&run, &runner, std::mem::take(&mut batch), &mut workers);
+            dispatch(&run, &runner, std::mem::take(&mut batch), &mut workers, &mut narrator);
             Ok(count)
         }
         Err(error) => Err(match stop.take() {
@@ -275,21 +331,16 @@ pub fn run_document(
     // failed, since requests in flight are paid for and must finish.
     let mut state = hold(&run.state);
     loop {
-        if state.done != reported {
-            reported = state.done;
+        if let Some(news) = narrator.news(&state) {
             drop(state);
-            on_progress(Progress {
-                pages_done: reported,
-                total_pages: run.total,
-                backend: super::client::BACKEND,
-            });
+            narrator.tell(news);
             state = hold(&run.state);
             continue;
         }
         if state.in_flight == 0 {
             break;
         }
-        state = run.changed.wait(state).unwrap_or_else(std::sync::PoisonError::into_inner);
+        state = run.wait_for_change(state);
     }
     let failure = state.failure.clone();
     let pages = std::mem::take(&mut state.pages);
@@ -314,28 +365,49 @@ pub fn run_document(
     Ok(pages)
 }
 
-/// Hand one request to a worker. The permit is taken on the calling thread
+/// Hand one request to a worker. The slot is taken on the calling thread
 /// before the spawn: that is the backpressure, and it bounds memory to
-/// `in_flight` requests' worth of PNGs.
+/// `in_flight` requests' worth of PNGs. A paced run spends most of its time
+/// blocked here, so it keeps reporting while it waits.
 fn dispatch(
     run: &Arc<DocumentRun>,
     runner: &Arc<dyn RequestRun>,
     pages: Vec<RenderedPage>,
     workers: &mut Vec<std::thread::JoinHandle<()>>,
+    narrator: &mut Narrator,
 ) {
     if pages.is_empty() {
         return;
     }
-    run.permits.acquire();
-    hold(&run.state).in_flight += 1;
+    let mut state = hold(&run.state);
+    loop {
+        if let Some(news) = narrator.news(&state) {
+            drop(state);
+            narrator.tell(news);
+            state = hold(&run.state);
+            continue;
+        }
+        if state.in_flight < run.in_flight {
+            break;
+        }
+        state = run.wait_for_change(state);
+    }
+    state.in_flight += 1;
+    drop(state);
 
+    // Unique among this run's requests: a failed spawn never reports a wait.
+    let request = workers.len();
     let worker_run = run.clone();
     let runner = runner.clone();
     let spawned = std::thread::Builder::new()
         .name("voyage-embed-request".into())
         .spawn(move || {
             let numbers: Vec<u32> = pages.iter().map(|page| page.page_no).collect();
-            let result = std::panic::catch_unwind(AssertUnwindSafe(|| runner.run(&pages)));
+            let on_wait = |wait: Option<Wait>| worker_run.set_wait(request, wait);
+            let result =
+                std::panic::catch_unwind(AssertUnwindSafe(|| runner.run(&pages, &on_wait)));
+            // An error or panic mid-wait must not leave the row counting down.
+            worker_run.set_wait(request, None);
             drop(pages);
             match result {
                 Ok(Ok(vectors)) if vectors.len() == numbers.len() => {
@@ -401,6 +473,7 @@ impl From<RasterError> for EmbedError {
 mod tests {
     use super::*;
     use crate::embed::EMBED_DIM;
+    use crate::ratelimit::Permits;
 
     /// A landscape A4 slide at `RENDER_DPI`.
     const A4_LANDSCAPE: (u32, u32) = (2339, 1653);

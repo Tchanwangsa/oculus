@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { getDb } from "@/lib/db";
 import { PDF_BACKED_SQL_LIST } from "@/lib/fileTypes";
 import { useParseStore } from "@/stores/parseStore";
+import { usePipelineStore } from "@/stores/pipelineStore";
 import { parseFile } from "@/lib/courseFiles";
 
 /**
@@ -27,6 +28,10 @@ const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 const MAX_KICKS_PER_SWEEP = 8;
 /** How long a latch silences the sweep before one probe file. */
 const LATCH_PROBE_AFTER_MS = 6 * 60 * 60 * 1000;
+
+/** Paths kicked this session. Untried files go first, so a file that fails
+ *  every time cannot take the whole budget sweep after sweep. */
+const attempted = new Set<string>();
 
 async function sweep(): Promise<void> {
   const { statuses: live, failures, latch } = useParseStore.getState();
@@ -63,16 +68,33 @@ async function sweep(): Promise<void> {
     return true;
   });
   if (outstanding.length === 0) return;
+  // Stable, so each group keeps the newest-first order.
+  outstanding.sort(
+    (a, b) => Number(attempted.has(a.relative_path)) - Number(attempted.has(b.relative_path)),
+  );
 
   const kicking = Math.min(outstanding.length, budget);
   console.info(
     `[parse-sweep] ${outstanding.length} file(s) unparsed, kicking ${kicking}${latch ? " (probe)" : ""}`,
   );
   for (const r of outstanding.slice(0, budget)) {
+    attempted.add(r.relative_path);
     try {
       await parseFile(r.subject_id, r.code, r.relative_path);
     } catch (e) {
+      // A refused request (e.g. the file is not on disk) may emit no event.
+      // A row already failed keeps that failure's richer discriminants.
       console.warn(`[parse-sweep] ${r.relative_path}: ${e}`);
+      const { items, touch } = usePipelineStore.getState();
+      if (items[r.relative_path]?.parse !== "error") {
+        touch(r.relative_path, r.subject_id, {
+          parse: "error",
+          error: String(e),
+          errorKind: undefined,
+          errorRetryable: undefined,
+          errorLatching: undefined,
+        });
+      }
     }
   }
 }

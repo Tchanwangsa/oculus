@@ -23,6 +23,9 @@ const IMAGE_EXT = new RegExp(`\\.(${IMAGE_EXTENSIONS.join("|")})$`, "i");
 let seq = 0;
 const nextId = () => `att-${Date.now()}-${seq++}`;
 
+/** Whether a path names a picture, by extension. */
+export const isImagePath = (path: string) => IMAGE_EXT.test(path);
+
 /** Every image in a clipboard or drop payload, in order. */
 export function imageFiles(list: FileList | null | undefined): File[] {
   if (!list) return [];
@@ -31,7 +34,7 @@ export function imageFiles(list: FileList | null | undefined): File[] {
 
 /** The same filter for a native drop, which hands over paths. */
 export function imagePaths(paths: string[]): string[] {
-  return paths.filter((p) => IMAGE_EXT.test(p));
+  return paths.filter(isImagePath);
 }
 
 export function pendingFromFile(file: File): PendingAttachment {

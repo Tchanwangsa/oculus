@@ -57,10 +57,13 @@ export function SideNav({
     <nav
       aria-label={ariaLabel}
       data-collapsed={collapsed}
+      // A zero-width column is gone: no seam border, nothing to tab into.
+      inert={width === 0}
       style={width == null ? undefined : { width }}
       className={cn(
         "group/nav flex h-full shrink-0 flex-col overflow-hidden border-r border-border-subtle bg-background",
         width == null && "w-52",
+        width === 0 && "border-r-0",
         animate && "transition-[width] duration-200 ease-out",
       )}
     >
@@ -100,8 +103,8 @@ export function SideNavTip({
   );
 }
 
-/** Folds or unfolds the column; it sits in the footer in both states, so
- *  the way back is where the way out was. */
+/** Folds or unfolds the column; it stays in one place in both states, so
+ *  the way back is where the way out was (the footer, or Chat's page header). */
 export function SideNavCollapseToggle({
   collapsed,
   onToggle,

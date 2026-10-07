@@ -31,7 +31,7 @@ use super::ledger::{
     poll_bucket, submit_bucket, UsageLedger, MAX_FILES_PER_BATCH, MAX_FILE_BYTES,
     MAX_PAGES_PER_TASK,
 };
-use super::{render, WorkDir};
+use super::{render, result_tls, WorkDir};
 
 /// The `backend` stamped into every record this client writes.
 pub const BACKEND: &str = "mineru-cloud";
@@ -64,6 +64,9 @@ pub struct CloudDocument {
 #[derive(Default)]
 struct DocumentState {
     total_pages: u32,
+    /// The PDF's page count once read, kept apart from `total_pages` so
+    /// counting early reports no progress before the batch runs.
+    counted_pages: Option<u32>,
     /// data_id → pages MinerU says it has extracted for that task.
     task_pages: HashMap<String, u32>,
     /// The content-list items of every finished task, rebased to absolute
@@ -134,6 +137,17 @@ impl CloudDocument {
         }
         drop(state);
         self.changed.notify_all();
+    }
+
+    /// Read the PDF's page count once. The caller's thread does it before
+    /// submitting, so a PDF that crashes `lopdf` fails alone, not its batch.
+    fn count_pages(&self) -> Result<u32, ParseError> {
+        if let Some(pages) = hold(&self.state).counted_pages {
+            return Ok(pages);
+        }
+        let pages = page_count(&self.pdf)?;
+        hold(&self.state).counted_pages = Some(pages);
+        Ok(pages)
     }
 
     fn set_total_pages(&self, pages: u32) {
@@ -426,7 +440,8 @@ impl MinerUCloud {
         check_transfer_url(url, "result")?;
         let mut last = ParseError::Offline("result download failed".into());
         for attempt in 0..3u32 {
-            let attempted = ureq::get(url).timeout(DOWNLOAD_TIMEOUT).call().and_then(|response| {
+            let agent = result_tls::agent(parse_config().accept_expired_result_cert);
+            let attempted = agent.get(url).timeout(DOWNLOAD_TIMEOUT).call().and_then(|response| {
                 Ok((response.status(), response.into_reader()))
             });
             match attempted {
@@ -462,7 +477,7 @@ impl MinerUCloud {
         let path = document.path().to_path_buf();
         check_size(&path, MAX_FILE_BYTES)?;
 
-        let total = page_count(&path)?;
+        let total = document.count_pages()?;
         document.set_total_pages(total);
 
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -824,6 +839,7 @@ impl Parser for MinerUCloud {
         check_size(pdf, MAX_FILE_BYTES)?;
 
         let document = CloudDocument::new(pdf, images_dir, images_rel);
+        document.count_pages()?;
         let runner: Arc<dyn BatchRun> = Arc::new(self.clone());
         let output =
             Batcher::shared().submit(self.batch_key(), document, runner, on_progress)?;

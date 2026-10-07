@@ -174,6 +174,11 @@ impl Reporter for TermReporter {
         self.written.lock().unwrap().push(f.clone());
     }
 
+    fn file_failed(&self, f: &sync::FileFailed) {
+        let short = f.relative_path.splitn(3, '/').nth(2).unwrap_or(&f.relative_path);
+        eprintln!("  {} {short}: {}", paint("error", RED), f.error);
+    }
+
     fn log(&self, level: &str, course: &str, message: &str) {
         let tag = match level {
             "error" => paint("error", RED),

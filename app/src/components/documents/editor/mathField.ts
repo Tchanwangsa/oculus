@@ -1,4 +1,4 @@
-import { redo, undo } from "@codemirror/commands";
+import { isolateHistory, redo, undo } from "@codemirror/commands";
 import {
   EditorSelection,
   EditorState,
@@ -27,6 +27,7 @@ import {
   withoutEndRows,
   writableSpan,
 } from "./mathFieldEdits";
+import { applyGridEdit, gridKey, type GridStep } from "./mathMatrixField";
 import { GREEK, OPERATORS, POWERS } from "./mathShorthand";
 import { recordCommand } from "./mathUsage";
 import { ancestorAt } from "./syntax";
@@ -41,6 +42,8 @@ import { ancestorAt } from "./syntax";
  * MathLive is imported on first use. It also draws the maths the field isn't
  * on (`staticMath`), so opening the field doesn't move it; until it arrives,
  * if it fails, or for LaTeX it can't read, maths renders as KaTeX.
+ * Rendered markdown's read-only field (`lib/mathSelect.ts`) reuses the
+ * loader, hit-test, widening and copy helpers exported here.
  */
 
 type MathLive = typeof import("mathlive");
@@ -55,7 +58,7 @@ let loading: Promise<void> | null = null;
 const waiting = new Set<EditorView>();
 const mathLiveSettled = StateEffect.define<LoadState>();
 
-function loadMathLive(): Promise<void> {
+export function loadMathLive(): Promise<void> {
   loading ??= Promise.all([import("mathlive"), import("mathlive/static.css?raw")]).then(
     ([m, css]) => {
       configure(m);
@@ -309,7 +312,7 @@ const cleanCache = new Map<string, boolean>();
 
 /** MathLive reads it without errors and KaTeX renders it: only then does the
  *  field, whose output KaTeX must draw afterwards, get to edit it. */
-function readsCleanly(source: string, display: boolean): boolean {
+export function readsCleanly(source: string, display: boolean): boolean {
   if (!lib) return false;
   const key = `${display ? "D" : "I"}${source}`;
   let ok = cleanCache.get(key);
@@ -519,7 +522,7 @@ export function noteMathPress(x: number, y: number, rendered: HTMLElement) {
 /** LaTeX as the note keeps it: placeholders already gone, `\operatorname`
  *  without MathLive's inner `\mathrm`, and nothing that would end inline
  *  maths early (`x\ $` reads as an escaped space before the `$`). */
-function tidy(latex: string, inline: boolean): string {
+export function tidy(latex: string, inline: boolean): string {
   const out = latex
     .replace(/\\operatorname(\*?)\{\\mathrm\{([^{}]*)\}\}/g, "\\operatorname$1{$2}")
     .trimStart()
@@ -576,7 +579,7 @@ function rowsOf(latex: string): { open: string; rows: string[]; seps: string[]; 
 
 /** A display block one row per line, so Raw mode and diffs read it: an
  *  environment's rows, or the block's own top-level `\\` lines. */
-function layoutBlock(latex: string): string {
+export function layoutBlock(latex: string): string {
   const join = (rows: string[], seps: string[]) =>
     rows.map((row, i) => (i < seps.length ? `${row} ${seps[i]}` : row)).join("\n");
   const env = rowsOf(latex);
@@ -590,13 +593,13 @@ const WHOLE_ENV = /^\\begin\{([a-zA-Z]+\*?)\}[\s\S]*\\end\{\1\}$/;
 /** Display LaTeX as the field holds it: top-level `\\` lines, which KaTeX
  *  draws but MathLive rejects bare, go inside MathLive's `\displaylines`.
  *  `fromField` takes the wrapper off again, so the note keeps bare lines. */
-function toField(source: string, display: boolean): string {
+export function toField(source: string, display: boolean): string {
   if (!display || WHOLE_ENV.test(source)) return source;
   const top = splitRows(source);
   return top && top.rows.length > 1 ? `\\displaylines{${source}}` : source;
 }
 
-function fromField(latex: string): string {
+export function fromField(latex: string): string {
   return latex.startsWith("\\displaylines{") && latex.endsWith("}") ? latex.slice(14, -1).trim() : latex;
 }
 
@@ -650,7 +653,7 @@ let rowSheet: CSSStyleSheet | null = null;
 /** Centres `\displaylines` rows, as KaTeX centres a display block's bare
  *  `\\` lines: MathLive left-aligns its root `lines` table (the one root
  *  table with a lone left column), in the shadow root `::part` can't reach. */
-function centredRows(mf: MathfieldElement) {
+export function centredRows(mf: MathfieldElement) {
   const root = mf.shadowRoot;
   if (!root || !("adoptedStyleSheets" in root)) return;
   if (!rowSheet) {
@@ -664,8 +667,9 @@ function centredRows(mf: MathfieldElement) {
 }
 
 /** The slice of MathLive's internal model `caretAt`, `wholeStructures`,
- *  `dropEmptyScript` and `atomsOf` read. */
-interface MlAtom {
+ *  `dropEmptyScript`, `atomsOf` and the matrix keys (`mathMatrixField.ts`)
+ *  read. */
+export interface MlAtom {
   type: string;
   command: string;
   value: string | undefined;
@@ -674,19 +678,29 @@ interface MlAtom {
   parentBranch: unknown;
   captureSelection: boolean;
   leftSibling: MlAtom | undefined;
+  rightSibling: MlAtom | undefined;
   environmentName?: string;
+  /** A `leftright` atom's delimiters; `?` is a right one not yet typed. */
+  leftDelim?: string;
+  rightDelim?: string;
+  /** An array's cells, row by row, each its atoms from a `first`. */
+  rows?: (MlAtom[] | undefined)[][];
+  body?: MlAtom[];
+  /** Set, drops the cached LaTeX of the atom and its ancestors. */
+  isDirty: boolean;
   hasChildren: boolean;
   /** Alone in its branch: for a `first` atom, the branch is empty. */
   hasNoSiblings: boolean;
   hasEmptyBranch(branch: string): boolean;
+  branch(name: string): MlAtom[] | undefined;
 }
 
-interface MlModel {
+export interface MlModel {
   at(offset: number): MlAtom | undefined;
   offsetOf(atom: MlAtom): number;
 }
 
-function modelOf(mf: MathfieldElement): MlModel | null {
+export function modelOf(mf: MathfieldElement): MlModel | null {
   const model = (mf as unknown as { _mathfield?: { model?: MlModel } })._mathfield?.model;
   return model && typeof model.at === "function" ? model : null;
 }
@@ -752,7 +766,7 @@ interface Slot extends Box {
  * beside one-line maths, or inside a matrix but in no cell, keeps MathLive's
  * (its row logic, the field's two ends).
  */
-function caretAt(mf: MathfieldElement, x: number, y: number): number | null {
+export function caretAt(mf: MathfieldElement, x: number, y: number): number | null {
   const model = modelOf(mf);
   if (!model) return null;
   const slots = new Map<MlAtom, Map<string, Slot>>();
@@ -816,7 +830,7 @@ function caretAt(mf: MathfieldElement, x: number, y: number): number | null {
  * beside one into a cell selects the cells but not the matrix. Ends in two
  * cells take the whole matrix. Null when the ends already share a branch.
  */
-function wholeStructures(model: MlModel, start: number, end: number): [number, number] | null {
+export function wholeStructures(model: MlModel, start: number, end: number): [number, number] | null {
   const chain = (atom: MlAtom | undefined) => {
     const out: MlAtom[] = [];
     for (let a = atom; a?.parent; a = a.parent) out.push(a);
@@ -1079,7 +1093,9 @@ export class FieldController {
     this.loaded = toField(source, this.display);
     const at = this.mf.position;
     const before = atomsOf(this.mf);
-    this.mf.setValue(this.loaded, { silenceNotifications: true });
+    // Without a mode MathLive takes the caret's: in `\text` it would insert
+    // the LaTeX as literal text instead of replacing the value.
+    this.mf.setValue(this.loaded, { silenceNotifications: true, mode: "math" });
     if (this.dom.isConnected) this.mf.position = Math.min(caretAfterChange(before, atomsOf(this.mf), at), this.mf.lastOffset);
     this.syncHint();
   }
@@ -1193,8 +1209,9 @@ export class FieldController {
   }
 
   /** Write the field's LaTeX into the note. MathLive reports edits a tick
-   *  late (`input` from a timeout), so leaving the field flushes first. */
-  flush() {
+   *  late (`input` from a timeout), so leaving the field flushes first.
+   *  `isolate` makes the write an undo step of its own (a matrix edit). */
+  flush(isolate = false) {
     const { view, mf } = this;
     const target = this.target();
     const value = mf.getValue("latex");
@@ -1212,6 +1229,7 @@ export class FieldController {
     const lead = edge(/^\s*/.exec(current)![0]);
     const trail = edge(/\s*$/.exec(current.slice(/^\s*/.exec(current)![0].length))![0]);
     let insert = lead + latex + trail;
+    const annotations = isolate ? [fieldWrite.of(this.id), isolateHistory.of("full")] : fieldWrite.of(this.id);
     if (target.block && (latex.includes("\n") || !current.trim())) {
       insert = `${lead.includes("\n") ? lead : "\n"}${latex}${trail.includes("\n") ? trail : "\n"}`;
     }
@@ -1223,7 +1241,7 @@ export class FieldController {
         changes: { from: target.start, to: target.end, insert: `$${latex}$` },
         selection: { anchor: target.start + 1 },
         userEvent: FIELD_INPUT,
-        annotations: fieldWrite.of(this.id),
+        annotations,
       });
       return;
     }
@@ -1234,7 +1252,7 @@ export class FieldController {
       changes: change,
       selection: { anchor: target.from },
       userEvent: FIELD_INPUT,
-      annotations: fieldWrite.of(this.id),
+      annotations,
     });
   }
 
@@ -1255,9 +1273,9 @@ export class FieldController {
     this.history(e.inputType === "historyRedo");
   }
 
-  /** Our keys: the toolbox's first (`fieldKeys`), then leave, new line, Tab
-   *  between slots, toggle to TeX, delete the maths when empty, the note's
-   *  undo and redo. Commands being typed (`\lam…`) keep MathLive's. */
+  /** Our keys: the toolbox's first (`fieldKeys`), then the matrix keys, leave,
+   *  new line, Tab between slots, toggle to TeX, delete the maths when empty,
+   *  the note's undo and redo. Commands being typed (`\lam…`) keep MathLive's. */
   private key(e: KeyboardEvent) {
     if (e.isComposing) return;
     const mf = this.mf;
@@ -1269,6 +1287,14 @@ export class FieldController {
     };
     if (this.view.state.facet(fieldKeys).some((take) => take(this.view, e, this))) {
       stop();
+      return;
+    }
+    // Space, `;` and Backspace unshifted; the closing brackets are shifted keys.
+    const plain = !mod && !e.altKey && (!e.shiftKey || !/^(?: |;|Backspace)$/.test(e.key));
+    const grid = plain ? this.gridStep(e.key) : null;
+    if (grid) {
+      stop();
+      this.editGrid(grid, e.key === ";");
     } else if (e.key === "Escape" && !typingCommand) {
       stop();
       this.leave("forward");
@@ -1447,13 +1473,41 @@ export class FieldController {
   }
 
   /** Space is free for the toolbox: MathLive ignores it in maths, but types
-   *  it in `\text{}` and beside a text atom, and ends a `\command`. */
+   *  it in `\text{}` and beside a text atom, and ends a `\command`; in a
+   *  matrix or bracket group it may end a cell (`gridStep`). */
   spaceFree(): boolean {
     const model = modelOf(this.mf);
     const at = this.mf.position;
     return (
-      this.mf.mode === "math" && model != null && model.at(at - 1)?.mode !== "text" && model.at(at + 1)?.mode !== "text"
+      this.mf.mode === "math" &&
+      model != null &&
+      model.at(at - 1)?.mode !== "text" &&
+      model.at(at + 1)?.mode !== "text" &&
+      !this.gridStep(" ")
     );
+  }
+
+  /** What a key does in the matrix or bracket group at the caret
+   *  (`mathMatrixField.ts`), or null when it does nothing special there. */
+  private gridStep(key: string): GridStep | null {
+    const model = modelOf(this.mf);
+    return model ? gridKey(this.mf, model, key) : null;
+  }
+
+  /** A matrix key's edit, an undo step of its own: pending keystrokes go in
+   *  first. A `;` turning a bracket group into a matrix is first typed as a
+   *  step of its own, so ⌘Z gives back `f(x;` for maths that meant it. */
+  private editGrid(step: GridStep, semicolon: boolean) {
+    const model = modelOf(this.mf);
+    if (!model) return;
+    this.flush();
+    if (semicolon && step.at.group) {
+      this.mf.insert(";", { format: "latex", mode: "math" });
+      this.flush(true);
+    }
+    applyGridEdit(this.mf, model, step.at, step.edit);
+    this.flush(true);
+    this.syncHint();
   }
 
   /** Where the field's caret is drawn, or the selection's end when there is

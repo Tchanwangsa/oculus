@@ -5,7 +5,9 @@ import type { ClipboardEvent, DragEvent } from "react";
  * walked back into markdown (a whole message copies its source instead).
  * Special cases:
  * - KaTeX renders twice (MathML + spans); the TeX comes from its `<annotation>`
- *   and the subtree is never descended into.
+ *   and the subtree is never descended into. Rendered maths is one unit, as
+ *   in the note editor: an end inside a formula takes the whole formula, and
+ *   `watchMathSelection` paints it whole.
  * - A mermaid figure carries its fence source in `data-md` (`Mermaid.tsx`), as
  *   does an embedded picture or page (`OutputEmbed.tsx`) — inline, since it
  *   usually sits in a `<p>` — and a sent pasted text card its `<pasted_text>`
@@ -268,10 +270,29 @@ function block(el: Element, range: Range): string[] {
   }
 }
 
+/** The rendered formula `node` sits in — a display block's outer box — or
+ *  null. The note editor's own KaTeX (`.cm-editor`) is its business. */
+export function mathAround(node: Node): Element | null {
+  const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+  const math = el?.closest(".katex-display") ?? el?.closest(".katex");
+  return math && !math.closest(".cm-editor") ? math : null;
+}
+
+/** `range` with each end that lands inside a formula moved out past it. */
+function wholeMath(range: Range): Range {
+  const start = mathAround(range.startContainer);
+  const end = mathAround(range.endContainer);
+  if (!start && !end) return range;
+  const out = range.cloneRange();
+  if (start) out.setStartBefore(start);
+  if (end) out.setEndAfter(end);
+  return out;
+}
+
 /** The selection as markdown, or "" to leave the browser's copy alone. */
 export function selectionMarkdown(selection: Selection | null): string {
   if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return "";
-  const range = selection.getRangeAt(0);
+  const range = wholeMath(selection.getRangeAt(0));
   const root = range.commonAncestorContainer;
   if (root.nodeType === Node.TEXT_NODE) return tidy(clipText(root as Text, range));
   if (root.nodeType !== Node.ELEMENT_NODE) return "";
@@ -287,12 +308,42 @@ export function elementMarkdown(el: Element): string {
 }
 
 /** The selection under `target` as markdown, or "" — a selection inside a
- *  field belongs to the field, and it is already text. */
+ *  field (an open formula's too, `mathSelect.ts`) belongs to the field. */
 function markdownFor(target: EventTarget | null): string {
-  if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) {
+  if (target instanceof Element && target.closest("input, textarea, [contenteditable='true'], math-field")) {
     return "";
   }
   return selectionMarkdown(window.getSelection());
+}
+
+const MATH_SELECTED = "data-math-selected";
+
+/**
+ * Paints each rendered formula a selection touches as one highlight
+ * (`index.css`), since the native one leaves gaps between KaTeX's glyph boxes
+ * and hides that the copy takes the formula whole. Installed once, app-wide.
+ */
+export function watchMathSelection() {
+  let marked: Element[] = [];
+  document.addEventListener("selectionchange", () => {
+    const selection = window.getSelection();
+    const next: Element[] = [];
+    if (selection && selection.rangeCount && !selection.isCollapsed) {
+      const range = selection.getRangeAt(0);
+      const inside = mathAround(range.commonAncestorContainer);
+      if (inside) next.push(inside);
+      else {
+        const root = range.commonAncestorContainer;
+        const scope = root.nodeType === Node.ELEMENT_NODE ? (root as Element) : root.parentElement;
+        for (const el of Array.from(scope?.querySelectorAll(".katex-display, .katex") ?? [])) {
+          if (mathAround(el) === el && intersects(el, range)) next.push(el);
+        }
+      }
+    }
+    for (const el of marked) if (!next.includes(el)) el.removeAttribute(MATH_SELECTED);
+    for (const el of next) el.setAttribute(MATH_SELECTED, "");
+    marked = next;
+  });
 }
 
 /** `onCopy` for rendered markdown: the selection goes out as `text/plain`

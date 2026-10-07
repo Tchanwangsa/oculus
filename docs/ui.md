@@ -64,7 +64,8 @@ headings and Inter for everything else, Notion-style layout.
 - **Only content selects, as in a native app.** The body is
   `user-select: none`; text selects again only inside a `data-selectable`
   block — a file's Markdown or PDF pages, a chat message (`CompactMd`, the
-  question bubble, thinking), `CodeText`, a document version, an error's
+  question bubble, thinking), `CodeText`, a note's editor (maths fields
+  included), a document version, an error's
   detail — and never on a button or tab inside one. Page chrome (titles,
   cards, lists, tables, the sidebar) never highlights. Mark a new surface
   `data-selectable` only if its text is worth copying. A drag-select stays in
@@ -92,9 +93,10 @@ headings and Inter for everything else, Notion-style layout.
   16px icon and the active row filled, never an underline strip, and
   `SideNavSearch`, the pill search field under the header. Rows that are not
   links take its exported row classes. The subject and Chat columns are
-  drag-resizable and fold to a 48px strip (`useResizablePanel`, width and
-  fold remembered) from `SideNavCollapseToggle` in the footer or by dragging
-  it narrow.
+  drag-resizable and fold (`useResizablePanel`, width and fold remembered) —
+  the subject column to a 48px strip, Chat's to nothing — from
+  `SideNavCollapseToggle` (the subject column's footer, Chat's page header
+  beside the title) or by dragging it narrow.
   Both states share one layout that the column clips, so icons hold their
   place while the width eases: labels fade (`SIDE_NAV_FOLDS`), tooltips
   name the icons, and a count becomes a dot.

@@ -238,6 +238,8 @@ pub fn run() {
             parse::commands::parse_settings,
             parse::commands::parse_set_engine,
             parse::commands::parse_set_engine_url,
+            parse::commands::parse_set_accept_expired_result_cert,
+            parse::commands::parse_result_cert,
             parse::commands::parse_probe_local,
             voyage::voyage_set_api_key,
             voyage::voyage_has_api_key,

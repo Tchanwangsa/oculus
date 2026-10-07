@@ -182,16 +182,18 @@ struct Outstanding {
 /// vectors, since `files.embed_status` does not record which space set it.
 async fn backlog(db_file: &Path) -> Result<Vec<Outstanding>, String> {
     let db = crate::store::pool(db_file).await?;
-    let rows = sqlx::query(
+    let sql = format!(
         r#"SELECT f.relative_path, lower(f.file_type) AS kind FROM files f
-           WHERE lower(f.file_type) IN ('pdf', 'pptx', 'docx', 'ppt', 'doc')
+           WHERE lower(f.file_type) IN {}
              AND f.parse_status = 'quality'
              AND (SELECT COUNT(*) FROM pages p
                    WHERE p.file_id = f.id AND p.embedding IS NOT NULL
                      AND p.embed_model = ?1 AND p.embed_dim = ?2)
                  < max((SELECT COUNT(*) FROM pages p2 WHERE p2.file_id = f.id), 1)
            ORDER BY f.relative_path ASC"#,
-    )
+        crate::paths::pdf_backed_sql_list()
+    );
+    let rows = sqlx::query(&sql)
     .bind(EMBED_MODEL)
     .bind(EMBED_DIM as i64)
     .fetch_all(&db)

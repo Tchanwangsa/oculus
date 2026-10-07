@@ -120,6 +120,19 @@ The call site owes an honest page counter instead: `ingest_reporting`'s
 `ProgressSink`, emitted by the app as `embed-status` (the shared pipeline payload)
 *around* `ingest`, because `ingest` is also the CLI's path.
 
+**A wait is reported, so a paced run doesn't read as a hang.** Before a request
+blocks for a rate limit, the client tells its document run
+(`RequestRun::run`'s `on_wait`): always for a 429's backoff, and for the gate's
+own pacing (`RateGate::admit_reporting`) only past 2 s (`REPORTED_WAIT`). The
+same wait seen twice — the 429's nap, then the pause it set — is one report.
+`batch::run_document` keeps each request's wait and reports the one that ends
+first, from the calling thread, including while it is blocked handing out the
+next request. The `running` event then carries `waiting_until_ms` (epoch ms)
+and `waiting_reason`, which names the limit: "rate-limited by Voyage" for a 429,
+"pacing to Voyage's 3 requests/min limit" or "… 10K tokens/min limit" for the
+gate's buckets (`embed::Limiter`). The next `running` event without them —
+sent once the request is admitted — clears the wait; the CLI ignores it.
+
 ## The ledger and the spend guard
 
 `voyage-usage.json` in the data dir holds reservations, the latched quota, the
@@ -167,10 +180,26 @@ discipline as `mineru-usage.json`.
   mid-file abort re-pays its pages). After a failure it asks `embed_blocked`
   whether the ledger has latched (spent allowance or spend limit) and stops,
   rather than reporting one fact as a hundred errors.
+- **The queue is drawn in File Activity**: Rust says `queued` only when the
+  worker reaches a file, so `enqueue` marks the rest itself, and every way out
+  of the queue unrun (Stop, a latch, a thrown run) hands them back as pending.
+  An enqueue during a stop is refused, never a new run behind the user's back;
+  removing the Voyage key stops the run.
 - **A terminal `parse-status` enqueues that file** (`useBackendEvents.ts`),
   gated on `embedReady` — a stored key and an available engine. The backlog is
   never swept up automatically: it is hours of metered work, and the Settings
   estimate exists to be read first.
+- **The queue survives a restart as `files.embed_status = 'queued'`**
+  (`markEmbedQueued` / `clearEmbedQueued` in `db.ts`). Enqueue marks a row;
+  leaving the queue unrun clears it, as does a run that ended without its
+  `done`/`error` write; a clear touches only a row still saying `queued`.
+  Quitting leaves the marks, and `restoreIndexQueue` re-enqueues them once at
+  boot (`App.tsx`), in parse order, if `embedReady` holds then. It never runs
+  from Settings, so saving a key there starts nothing, and unmarked backlog is
+  never treated as queued. A mark on a row that is no longer a parsed PDF, or
+  is fully embedded in the current space, is cleared instead. The column is
+  model-blind, so seeding reads it only for a failure; a restored row shows
+  Queued because `enqueue` touches the table.
 
 ## Two indexes over `pages`, never merged
 

@@ -12,6 +12,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::mineru::local::{self, LocalHealth};
+use super::mineru::result_tls::{self, CertState};
 use super::{parse_config, Engine, LOCAL_BASE_URL, PARSER_VERSION};
 use crate::store::{db_path, edit_setting, pool};
 
@@ -48,6 +49,9 @@ pub struct ParseSettings {
     pub parser_version: u32,
     /// Cloud: a token is in the keychain. Local: always true.
     pub credentials_ready: bool,
+    /// Download results through MinerU's expired CDN certificate (on unless
+    /// turned off); see `mineru::result_tls`.
+    pub accept_expired_result_cert: bool,
     pub engines: Vec<EngineOption>,
 }
 
@@ -98,6 +102,7 @@ fn view() -> ParseSettings {
             Engine::Cloud => crate::mineru::stored_api_key().is_some(),
             Engine::Local => true,
         },
+        accept_expired_result_cert: config.accept_expired_result_cert,
         engines: engines(),
     }
 }
@@ -165,6 +170,30 @@ pub async fn parse_set_engine_url(url: String) -> Result<ParseSettings, String> 
     result?;
 
     Ok(view())
+}
+
+/// Allow or refuse result downloads through the CDN's expired certificate.
+#[tauri::command]
+pub async fn parse_set_accept_expired_result_cert(accept: bool) -> Result<ParseSettings, String> {
+    let db = pool(&db_path()).await?;
+    let result = edit_setting(&db, SETTINGS_KEY, |object| {
+        object.insert("acceptExpiredResultCert".into(), Value::Bool(accept));
+    })
+    .await;
+    db.close().await;
+    result?;
+    Ok(view())
+}
+
+/// What the result CDN's certificate looked like at the last download. With
+/// `probe`, a bare TLS handshake first — no API call, so nothing is billed.
+#[tauri::command]
+pub async fn parse_result_cert(probe: Option<bool>) -> Result<CertState, String> {
+    let accept = parse_config().accept_expired_result_cert;
+    if !probe.unwrap_or(false) {
+        return Ok(result_tls::state(accept));
+    }
+    tokio::task::spawn_blocking(move || result_tls::probe(accept)).await.map_err(|e| e.to_string())
 }
 
 /// Ask what is listening, at `url` (so the field is testable before it is

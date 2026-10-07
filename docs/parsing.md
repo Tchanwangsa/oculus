@@ -16,6 +16,7 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | Result content-list loading; page rendering (shared by both engines) | `app/src-tauri/src/parse/mineru/mod.rs`, `app/src-tauri/src/parse/mineru/render.rs` |
 | Cloud submission queue (window, in-flight cap) | `app/src-tauri/src/parse/mineru/batch.rs` |
 | Cloud daily allowance + the two rate limiters | `app/src-tauri/src/parse/mineru/ledger.rs` |
+| Result-download TLS: the expired-certificate exception and its state | `app/src-tauri/src/parse/mineru/result_tls.rs`, `app/src/lib/resultCert.ts`, `app/src/components/sync/ResultCertWarning.tsx` |
 | Token bucket, semaphore, retry ladder (shared with Voyage) | `app/src-tauri/src/ratelimit.rs` |
 | The `parse-status` event and shared wire payload | `app/src-tauri/src/parse/events.rs`, `app/src-tauri/src/pipeline_events.rs` |
 | Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync.rs` |
@@ -25,7 +26,19 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | Failure vocabulary, rendered | `app/src/lib/parseState.ts` |
 | Live job state, per-file failures, the app-wide latch | `app/src/stores/parseStore.ts` |
 | Background recovery sweep | `app/src/hooks/useQualitySweep.ts` |
-| Settings UI (engine, token, endpoint, server status) | `app/src/components/settings/ParserSection.tsx` |
+| Settings UI (engine, token, expired-certificate switch, endpoint, server status) | `app/src/components/settings/ParserSection.tsx` |
+
+## MinerU's result CDN and its expired certificate
+
+Results download from `cdn-mineru.openxlab.org.cn`, whose certificate has
+expired. With Settings → Parsing's "Accept an expired download certificate"
+on (the default), `result_tls` re-verifies that host's expired certificate as
+of its last valid second: chain, signatures and host name are still checked,
+only the clock is excused. Any other host or certificate error is refused, and
+a renewed certificate passes the ordinary check, so the exception lapses on its
+own. Each handshake records what it found; while the exception is in use the
+Sync pipeline shows a warning icon (`ResultCertWarning`) and Settings says so.
+Turned off, downloads fail as `Offline` with "certificate expired".
 
 ## Nothing falls back, so a failed parse must surface
 
@@ -55,6 +68,8 @@ must say so. `ParseError` keeps the answers distinguishable:
 - **The sweep reads the same discriminants**: `retryable === false` is never
   re-kicked, and a latch stands it down (one probe file after
   `LATCH_PROBE_AFTER_MS`).
+- **An Office file LibreOffice could not convert is `Document`** with code
+  `parse::CONVERSION_FAILED`, whose sentence names the conversion, not MinerU.
 - **`NotReady` is retryable and non-latching on purpose**: a local server that
   is stopped or still loading must not mark any file permanently broken.
 - **`Offline` names its cause**: `ratelimit::transport_detail` keeps ureq's
@@ -79,8 +94,21 @@ was still progressing.
 per PDF. Cloud threads park on the batcher's condvar until their window
 closes. The local client holds one permit (`PARSE_GATE`) because `mineru-api`
 reports `max_concurrent_requests: 1` — a second request would only queue
-inside that server on a socket of ours. A gate in `sync.rs` would keep cloud
-files out of the window they are meant to share.
+inside that server on a socket of ours. It is taken before the first progress
+report, so a file waiting for it still reads as queued. A gate in `sync.rs`
+would keep cloud files out of the window they are meant to share.
+
+**One parse per PDF.** A sync, the sweep and "Parse now" can ask for the same
+file at once. `parse::InFlight` holds each PDF path while its parse runs; a
+second caller waits (no timeout) and then takes the already-parsed path, which
+emits `quality` without a second billed call.
+
+**Every parse ends in `quality` or `error`.** `parse_pdf_reporting` catches a
+panic on the parse thread (`lopdf`, rendering, writing) as `Io` "the parser
+crashed on this file". The cloud client counts pages on the caller's thread
+before submitting, so a PDF that crashes `lopdf` fails alone rather than
+through its batch. `parse_file` reports its own refusals (not a parseable
+file, not on disk) as `Io` too, so a sweep kick never vanishes.
 
 ## `.pages.json` is the only evidence a parse finished
 
@@ -94,10 +122,18 @@ assume the cloud. Beside each PDF:
 - `<stem>_images/` — its *name* is the link prefix written into the markdown,
   so both are computed in `parse/mod.rs`, never by a backend.
 
-**The record is written last, via temp+rename**, so an interrupted parse
-cannot look finished. `parse_mode` reads only `mode`: `"quality"` means done,
+**The record is written last, via temp+rename** (a temp name unique per
+write), so an interrupted parse cannot look finished. `parse_mode` reads only `mode`: `"quality"` means done,
 anything else (missing, unreadable, another mode) means parse it. The string
 is frozen, and there is one tier.
+
+The `.md` is derived from the record: the already-parsed path rebuilds a
+missing one (`ParseOutput::restore_markdown`) before it emits `quality`, with
+no re-parse.
+
+`oculus index` reconciles `files.parse_status` with the disk
+(`store::reconcile_parse_status`): a record means `quality`; without one a
+stale `queued`/`running`/`quality` is cleared, but `error` stays.
 
 `PARSER_VERSION` moves only when the artifacts change shape. `parse_mode` does
 **not** check it, so a bump never re-parses the library; it is enforced by the

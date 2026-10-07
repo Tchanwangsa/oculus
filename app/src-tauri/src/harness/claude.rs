@@ -166,9 +166,10 @@ impl ClaudeSession {
 
     /// Drop a question and everything after it from the CLI's own session.
     /// `target_message_uuid` never appears on stdout; it comes from the
-    /// transcript ([`anchor_for`]). Waits for the answer, because the rows are
-    /// deleted on the strength of it.
-    pub fn rewind(&self, target_message_uuid: &str) -> Result<(), String> {
+    /// transcript ([`anchor_for`]). `last_seen` is the newest question's: with
+    /// it missing the CLI refuses (`stale_target`) to cut past any later turn.
+    /// Waits for the answer, because the rows are deleted on the strength of it.
+    pub fn rewind(&self, target_message_uuid: &str, last_seen: Option<&str>) -> Result<(), String> {
         let id = format!("oculus-{}", self.request_ids.fetch_add(1, Ordering::SeqCst));
         let (tx, rx) = mpsc::channel();
         self.pending.lock().unwrap().insert(id.clone(), tx);
@@ -178,6 +179,7 @@ impl ClaudeSession {
             "request": {
                 "subtype": "rewind_conversation",
                 "target_message_uuid": target_message_uuid,
+                "last_seen_user_message_uuid": last_seen,
                 // The manager only rewinds between turns.
                 "interrupt_if_running": false,
             },

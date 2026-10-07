@@ -508,7 +508,7 @@ export function DocumentEditor({
                 />
               )}
             </div>
-            <div ref={editorRef} className="mt-4" />
+            <div ref={editorRef} data-selectable className="mt-4" />
           </div>
         </div>
 

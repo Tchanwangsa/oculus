@@ -47,8 +47,9 @@ const COPY_CHUNK: usize = 1024 * 1024;
 /// **One local parse at a time.** `sync.rs` spawns a thread per PDF; on the
 /// cloud `Batcher` absorbs that, here nothing would, and a full sync would
 /// park a socket per PDF on a server that serves one request at a time
-/// (`mineru-api` reports `max_concurrent_requests: 1`). Poisoning is stepped
-/// over so one panicked parse cannot disable the engine.
+/// (`mineru-api` reports `max_concurrent_requests: 1`). Taken before the first
+/// progress report, so a file waiting here still reads as queued. Poisoning is
+/// stepped over so one panicked parse cannot disable the engine.
 static PARSE_GATE: Mutex<()> = Mutex::new(());
 
 /// The form fields: `backend`/`lang_list` are the cloud's
@@ -81,7 +82,7 @@ impl MinerULocal {
 
     /// One multipart POST, streamed. `ureq` 2 has no multipart, so the head,
     /// the open file and the closing boundary are chained into one reader with
-    /// an explicit length (no chunked encoding).
+    /// an explicit length (no chunked encoding). The caller holds `PARSE_GATE`.
     fn post_file_parse(&self, pdf: &Path, destination: &Path) -> Result<(), ParseError> {
         let file = fs::File::open(pdf)
             .map_err(|e| ParseError::Io(format!("open {}: {e}", pdf.display())))?;
@@ -90,9 +91,6 @@ impl MinerULocal {
             .map_err(|e| ParseError::Io(format!("stat {}: {e}", pdf.display())))?
             .len();
         let name = pdf.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-
-        // Held to the end: the result ZIP is read off the same socket.
-        let _permit = PARSE_GATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let boundary = boundary();
         let (head, tail) = envelope(&boundary, &name);
@@ -144,14 +142,17 @@ impl Parser for MinerULocal {
         // From the PDF, not the content list: a blank last page has no item.
         let total = page_count(pdf)?;
 
-        // `/file_parse` blocks with nothing to subscribe to, so progress is the
-        // page count and then the finish — never an estimate in between.
-        on_progress(Progress { pages_done: 0, total_pages: total, backend: BACKEND });
-
         let scratch = WorkDir::new(format!("mineru-local-{}", boundary()))?;
         let archive = scratch.path().join("result.zip");
         let extracted = scratch.path().join("result");
-        self.post_file_parse(pdf, &archive)?;
+        {
+            // Held until the result ZIP is read off the socket.
+            let _permit = PARSE_GATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            // `/file_parse` blocks with nothing to subscribe to, so progress is
+            // the page count and then the finish — never an estimate between.
+            on_progress(Progress { pages_done: 0, total_pages: total, backend: BACKEND });
+            self.post_file_parse(pdf, &archive)?;
+        }
         safe_extract(&archive, &extracted)?;
 
         let (content_path, items) = super::content_list(&extracted)?;
@@ -571,6 +572,35 @@ mod tests {
         served.join().ok();
 
         assert_eq!(peak.load(Ordering::SeqCst), 1, "both parses were in flight at once");
+    }
+
+    /// A file waiting for the gate has reported nothing, so it still reads as
+    /// queued rather than "Parsing 0/N" behind another file.
+    #[test]
+    fn a_waiting_parse_reports_no_progress_until_it_has_the_gate() {
+        let dir = Scratch::new("local-gate-progress");
+        let pdf = dir.join("Doc.pdf");
+        write_pdf(&pdf, 2);
+        let zip = result_zip("Doc", json!([]));
+        let server = FakeServer::start(move |_| (200, zip.clone()));
+
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let held = PARSE_GATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let parse = {
+            let (origin, seen, root) = (server.origin(), seen.clone(), dir.to_path_buf());
+            std::thread::spawn(move || {
+                MinerULocal::new(&origin)
+                    .parse(&root.join("Doc.pdf"), &root.join("images"), "images", &|progress| {
+                        seen.lock().unwrap().push(progress.pages_done);
+                    })
+                    .unwrap();
+            })
+        };
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(seen.lock().unwrap().is_empty(), "progress before the gate");
+        drop(held);
+        parse.join().unwrap();
+        assert_eq!(*seen.lock().unwrap(), vec![0, 2]);
     }
 
     // ── The real thing ───────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useQualitySweep } from "@/hooks/useQualitySweep";
 import { watchNewFiles } from "@/stores/newFilesStore";
 import { watchLectureDownloads } from "@/stores/lectureDownloadStore";
+import { restoreIndexQueue } from "@/stores/indexStore";
 import AppLayout from "@/layouts/AppLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
@@ -13,6 +14,8 @@ function EventBridge() {
   useQualitySweep();
   useEffect(() => watchNewFiles(), []);
   useEffect(() => watchLectureDownloads(), []);
+  // Boot only: Settings re-checks the key but must never restart metered work.
+  useEffect(() => void restoreIndexQueue(), []);
   return null;
 }
 

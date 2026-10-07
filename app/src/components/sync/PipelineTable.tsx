@@ -12,7 +12,9 @@ import { usePagedRows } from "@/components/ui/TablePagination";
 import { GridTable, HeaderLabels } from "@/components/ui/GridTable";
 import { displayCode, fmtAgo, fmtClock } from "@/lib/format";
 import { fileIconFor } from "@/lib/fileTypes";
+import { useNow } from "@/hooks/useNow";
 import {
+  fmtWait,
   statusOf,
   usePipelineStore,
   type PipelineItem,
@@ -113,7 +115,12 @@ interface TimelineStep {
   detail?: string;
 }
 
-function timelineSteps(item: PipelineItem, embedStage: boolean): TimelineStep[] {
+/** An active embed held by a rate limit; its countdown ticks by the second. */
+function isRateLimited(item: PipelineItem): boolean {
+  return item.embed === "active" && item.embedWaitingUntil != null;
+}
+
+function timelineSteps(item: PipelineItem, embedStage: boolean, now: number): TimelineStep[] {
   const parseDetail =
     item.parse === "active"
       ? item.totalPages > 0
@@ -130,9 +137,11 @@ function timelineSteps(item: PipelineItem, embedStage: boolean): TimelineStep[] 
           : undefined;
 
   // Embed shows a page fraction — the only thing that moves during one long
-  // blocking call (see docs/retrieval.md: an embed blocks for minutes).
-  const embedDetail =
-    item.embed === "active"
+  // blocking call (see docs/retrieval.md: an embed blocks for minutes) — or,
+  // while a rate limit holds it, why and for how long.
+  const embedDetail = isRateLimited(item)
+    ? statusOf(item, embedStage, now).label
+    : item.embed === "active"
       ? item.embedTotalPages > 0
         ? `${item.embedPagesDone}/${item.embedTotalPages} pages · ${Math.round((item.embedPagesDone / item.embedTotalPages) * 100)}%`
         : "in progress"
@@ -142,8 +151,20 @@ function timelineSteps(item: PipelineItem, embedStage: boolean): TimelineStep[] 
           ? item.error
           : undefined;
 
+  // Nothing to retry by hand: the file isn't on disk, and the next sync
+  // fetches it again.
+  const downloadDetail =
+    item.download === "error"
+      ? `${item.error ?? "Failed"} · the next sync retries it`
+      : undefined;
+
   const steps: TimelineStep[] = [
-    { label: "Downloaded", state: item.download, time: item.downloadedAt },
+    {
+      label: "Downloaded",
+      state: item.download,
+      time: item.downloadedAt,
+      detail: downloadDetail,
+    },
     { label: "Parse", state: item.parse, time: item.parsedAt, detail: parseDetail },
   ];
   if (embedStage) {
@@ -158,7 +179,8 @@ function timelineSteps(item: PipelineItem, embedStage: boolean): TimelineStep[] 
 }
 
 function Timeline({ item, embedStage }: { item: PipelineItem; embedStage: boolean }) {
-  const steps = timelineSteps(item, embedStage);
+  const now = useNow(isRateLimited(item) ? 1_000 : 60_000).getTime();
+  const steps = timelineSteps(item, embedStage, now);
   return (
     <div className="px-9 pb-3 pt-1">
       <div className="ml-[3px]">
@@ -204,16 +226,43 @@ function Timeline({ item, embedStage }: { item: PipelineItem; embedStage: boolea
 
 // ── Rows ──────────────────────────────────────────────────────────────────────
 
+/** The status cell while a rate limit holds the embed: a countdown and the
+ *  pill, with the reason on hover. Ticks by itself, so only this row
+ *  re-renders each second. */
+function RateLimitedStatus({ item, embedStage }: { item: PipelineItem; embedStage: boolean }) {
+  const now = useNow(1_000).getTime();
+  const s = statusOf(item, embedStage, now);
+  const left =
+    s.resumesAt != null && s.resumesAt > now ? fmtWait(s.resumesAt - now) : "resuming…";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground tabular-nums">{left}</span>
+          <Badge variant="warning" className="text-[11px]">
+            {s.short}
+          </Badge>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>{s.label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 const Row = memo(function Row({
   item,
   embedStage,
   expanded,
+  now,
   onToggle,
   onResume,
 }: {
   item: PipelineItem;
   embedStage: boolean;
   expanded: boolean;
+  /** The table's ticking clock; a new value re-renders the memoised row so
+   *  its relative time doesn't go stale. */
+  now: number;
   onToggle: (path: string) => void;
   onResume?: (item: PipelineItem) => void;
 }) {
@@ -221,9 +270,23 @@ const Row = memo(function Row({
   // A parsed-but-unembedded file gets ▶ too: the backlog isn't swept
   // automatically, so this embeds one file without committing the library.
   const embedNow = embedStage && item.parse === "done" && item.embed === "pending";
-  const resumable = onResume && (s.phase === "paused" || s.phase === "failed" || embedNow);
+  // No Retry where it can't help: a failed download isn't on disk (the next
+  // sync fetches it), a non-retryable error never clears, and a latching one
+  // holds every file until its cause is fixed.
+  const retryable =
+    s.phase === "failed" &&
+    item.download !== "error" &&
+    item.errorRetryable !== false &&
+    !item.errorLatching;
+  // Already queued: the embed queue dedups, so ▶ would do nothing.
+  const resumable =
+    onResume &&
+    item.embed !== "queued" &&
+    (s.phase === "paused" || retryable || embedNow);
+  // A held embed shows its countdown where the percentage would be.
+  const rateLimited = s.resumesAt != null;
   const percent =
-    s.phase === "active" && s.percent != null ? Math.round(s.percent) : null;
+    s.phase === "active" && s.percent != null && !rateLimited ? Math.round(s.percent) : null;
   const Icon = fileIconFor(item.filename);
 
   return (
@@ -251,7 +314,7 @@ const Row = memo(function Row({
 
         <StageDots item={item} embedStage={embedStage} />
 
-        <StageDates item={item} />
+        <StageDates item={item} now={now} />
 
         <div className="flex items-center gap-1.5 justify-self-end">
           {percent != null && (
@@ -282,9 +345,13 @@ const Row = memo(function Row({
               </TooltipContent>
             </Tooltip>
           )}
-          <Badge variant={BADGE_VARIANT[s.phase]} className="text-[11px]">
-            {s.short}
-          </Badge>
+          {rateLimited ? (
+            <RateLimitedStatus item={item} embedStage={embedStage} />
+          ) : (
+            <Badge variant={BADGE_VARIANT[s.phase]} className="text-[11px]">
+              {s.short}
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -293,9 +360,15 @@ const Row = memo(function Row({
   );
 });
 
-/** Most recent stage timestamp; the full breakdown is in the timeline. */
-function StageDates({ item }: { item: PipelineItem }) {
-  const latest = Math.max(item.downloadedAt ?? 0, item.parsedAt ?? 0);
+/** When a stage last completed, or 0 when none has. */
+function latestStageAt(item: PipelineItem): number {
+  return Math.max(item.downloadedAt ?? 0, item.parsedAt ?? 0, item.embeddedAt ?? 0);
+}
+
+/** Most recent stage timestamp; the full breakdown is in the timeline.
+ *  `fmtAgo` reads the clock itself; `now` is what re-renders it. */
+function StageDates({ item }: { item: PipelineItem; now: number }) {
+  const latest = latestStageAt(item);
   if (!latest) return <span className="text-[11px] text-muted-foreground/60">—</span>;
   return (
     <span className="text-[11px] text-muted-foreground tabular-nums">{fmtAgo(latest)}</span>
@@ -303,7 +376,9 @@ function StageDates({ item }: { item: PipelineItem }) {
 }
 
 /** Sort: running work first, then the queue, then paused, then failures;
- *  done last; freshest first within each group. */
+ *  done last. Within a group, the latest stage completion first — not
+ *  `updatedAt`, which every progress event bumps, so live rows would swap
+ *  places and jump pages. */
 const PHASE_RANK: Record<PipelinePhase, number> = {
   active: 0,
   waiting: 1,
@@ -317,7 +392,10 @@ function byActivity(embedStage: boolean) {
     const ra = PHASE_RANK[statusOf(a, embedStage).phase];
     const rb = PHASE_RANK[statusOf(b, embedStage).phase];
     if (ra !== rb) return ra - rb;
-    return b.updatedAt - a.updatedAt;
+    const ta = latestStageAt(a) || a.startedAt;
+    const tb = latestStageAt(b) || b.startedAt;
+    if (ta !== tb) return tb - ta;
+    return a.relativePath.localeCompare(b.relativePath);
   };
 }
 
@@ -333,6 +411,7 @@ export const PipelineTable = memo(function PipelineTable({
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const embedStage = usePipelineStore((s) => s.embedStage);
+  const now = useNow(30_000).getTime();
 
   const toggle = useCallback((path: string) =>
     setExpanded((prev) => {
@@ -361,6 +440,7 @@ export const PipelineTable = memo(function PipelineTable({
             item={it}
             embedStage={embedStage}
             expanded={expanded.has(it.relativePath)}
+            now={now}
             onToggle={toggle}
             onResume={onResume}
           />

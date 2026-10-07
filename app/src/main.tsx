@@ -6,6 +6,8 @@ import "./index.css";
 import App from "./App";
 import { loadIconCatalogue } from "./components/subjects/SubjectIcon";
 import { useSubjectIconStore } from "./stores/subjectIconStore";
+import { watchMathSelection } from "./lib/selectionMarkdown";
+import { watchMathPress } from "./lib/mathSelect";
 
 // A release webview has no console, so paint uncaught errors over the window.
 // Escape dismisses; a later error replaces the box rather than stacking.
@@ -40,6 +42,9 @@ window.addEventListener("unhandledrejection", (ev) => paint("unhandled rejection
 window.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") document.querySelector(`[${OVERLAY_ATTR}]`)?.remove();
 });
+
+watchMathSelection();
+watchMathPress();
 
 function render() {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

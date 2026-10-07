@@ -473,9 +473,9 @@ impl Handle {
     }
 
     /// Antigravity refuses: its protocol has no way back to an earlier message.
-    fn rewind(&self, anchor: &str) -> Result<(), String> {
+    fn rewind(&self, anchor: &str, last_seen: Option<&str>) -> Result<(), String> {
         match self {
-            Handle::Claude(s) => s.rewind(anchor),
+            Handle::Claude(s) => s.rewind(anchor, last_seen),
             Handle::Codex(server, tid, _) => server.revert(tid, anchor),
             Handle::Opencode(server, ses) => server.revert(ses, anchor),
             Handle::Antigravity(s) => s.rewind(anchor),
@@ -767,8 +767,10 @@ impl Harness {
 
     /// Take a question and everything after it out of the provider's own
     /// session, so the agent's context matches the timeline. `anchor` is the
-    /// provider's handle for that question, kept on its row. A thread whose
-    /// process has gone is resumed for this without starting a turn.
+    /// provider's handle for that question, kept on its row; `last_seen` the
+    /// newest question's, so Claude knows which later turns the timeline holds.
+    /// A thread whose process has gone is resumed for this without starting a
+    /// turn.
     pub fn rewind(
         &self,
         thread_id: i64,
@@ -776,6 +778,7 @@ impl Harness {
         resume: Option<&str>,
         opts: &SendOptions,
         anchor: &str,
+        last_seen: Option<&str>,
         sink: Sink,
     ) -> Result<(), String> {
         // Rewound outside the lock: it waits on the CLI, and holding the map
@@ -789,7 +792,7 @@ impl Harness {
             }
             live.get(&thread_id).ok_or("no session")?.handle.clone()
         };
-        handle.rewind(anchor)
+        handle.rewind(anchor, last_seen)
     }
 
     /// Make sure this thread has a session that can be talked to, spawning or
@@ -1856,6 +1859,7 @@ pub mod app {
         let Some(resume) = row.provider_session_id.clone() else {
             return false;
         };
+        let last_seen = store::newest_anchor(pool, thread_id).await.ok().flatten();
         let (h, provider) = (state.harness.clone(), row.provider);
         let sink = state.sink(thread_id, provider);
         // A rewind may respawn the session, which binds the brief.
@@ -1865,7 +1869,9 @@ pub mod app {
             lecture: lecture_brief(pool, row).await,
             ..opts.clone()
         };
-        blocking(move || h.rewind(thread_id, provider, Some(&resume), &opts, &anchor, sink))
+        blocking(move || {
+            h.rewind(thread_id, provider, Some(&resume), &opts, &anchor, last_seen.as_deref(), sink)
+        })
             .await
             .is_ok()
     }

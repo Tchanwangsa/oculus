@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter};
 
-use crate::sync::{Engine, FileEvent, FileStart, Progress, Reporter, Subject, SyncOptions};
+use crate::sync::{Engine, FileEvent, FileFailed, FileStart, Progress, Reporter, Subject, SyncOptions};
 
 #[derive(serde::Deserialize)]
 pub struct ScrapeSubject {
@@ -99,6 +99,11 @@ impl Reporter for AppReporter {
         self.app.emit("scrape-file", f).ok();
     }
 
+    fn file_failed(&self, f: &FileFailed) {
+        eprintln!("[oculus] download failed: {}: {}", f.relative_path, f.error);
+        self.app.emit("scrape-file-failed", f).ok();
+    }
+
     fn log(&self, level: &str, course: &str, message: &str) {
         self.app
             .emit(
@@ -114,7 +119,8 @@ impl Reporter for AppReporter {
 }
 
 /// Parse one already-downloaded PDF (a no-op if already parsed).
-/// Fire-and-forget: progress arrives as `parse-status` events.
+/// Fire-and-forget: progress arrives as `parse-status` events. A refusal is
+/// also an `error` status, or a sweep would re-kick the row unseen.
 #[tauri::command]
 pub fn parse_file(
     subject_id: i64,
@@ -122,11 +128,17 @@ pub fn parse_file(
     relative_path: String,
 ) -> Result<(), String> {
     let data_dir = crate::paths::data_dir();
+    let refuse = |detail: String| {
+        // `Io`, as `sync::run_parse` reports the same checks.
+        let error = crate::parse::ParseError::Io(detail.clone());
+        crate::parse::events::failed(&relative_path, subject_id, &error);
+        detail
+    };
     // For Office files this is the derived sibling PDF.
     let pdf_rel = crate::paths::doc_pdf_rel(&relative_path)
-        .ok_or_else(|| format!("{relative_path}: not a parseable file"))?;
+        .ok_or_else(|| refuse(format!("{relative_path}: not a parseable file")))?;
     if !data_dir.join(&pdf_rel).is_file() {
-        return Err(format!("not on disk: {pdf_rel}"));
+        return Err(refuse(format!("not on disk: {pdf_rel}")));
     }
     // Unused, but the frontend sends it.
     let _ = subject_code;
