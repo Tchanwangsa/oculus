@@ -389,7 +389,8 @@ compile without one.
 
 - **Catalogues are the CLIs' own**, and every turn names model and level: Codex `model/list`; Claude the
   `initialize` response of a throwaway `claude -p` (no API call), cached on the
-  binary's path and mtime and dropped on sign-in. Aliases are stored as the
+  binary's path and mtime and dropped on sign-in. A mounted picker re-asks when
+  its CLI's path or version changes (an update from Settings → Agents). Aliases are stored as the
   concrete model, since an alias changes meaning next release.
 - **Levels belong to the model.** Haiku declares none (no `--effort`);
   opencode's are variants; `agy` bakes them into the slug (`parse_models`
