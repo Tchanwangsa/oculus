@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   ArrowsClockwise,
   BookOpen,
@@ -7,6 +7,8 @@ import {
   CircleNotch,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
+import { useScrollFade } from "@/hooks/useScrollFade";
+import { compareTermsNewestFirst } from "@/lib/terms";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -90,7 +92,7 @@ export function SubjectPicker({
           </Button>
         </div>
 
-        <div className="max-h-96 overflow-y-auto p-2">
+        <FadingList>
           {subjects.length === 0 ? (
             <div className="py-6 text-center">
               <BookOpen size={24} className="text-muted-foreground/40 mx-auto mb-2" />
@@ -135,7 +137,7 @@ export function SubjectPicker({
                   </CollapsibleTrigger>
                   <CollapsibleContent className="space-y-2 pt-1">
                     {Object.entries(pastBySemester)
-                      .sort(([a], [b]) => b.localeCompare(a))
+                      .sort(([a], [b]) => compareTermsNewestFirst(a, b))
                       .map(([term, courses]) => (
                         <div key={term}>
                           <p className="text-[11px] text-muted-foreground mb-1 px-1">
@@ -159,8 +161,23 @@ export function SubjectPicker({
               )}
             </div>
           )}
-        </div>
+        </FadingList>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** Its own component so the fade hook runs when the popover opens, not when
+ *  the picker mounts with the popover still closed. `will-change` keeps the
+ *  scroller on its own layer from the start, so the mask doesn't re-snap icons
+ *  by half a pixel at fractional page zoom (`docs/ui.md` Gotchas). */
+function FadingList({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useScrollFade(ref);
+  return (
+    <div ref={ref} className="max-h-96 overflow-y-auto p-2 will-change-transform">
+      {/* One wrapper: the fade's ResizeObserver watches the first child. */}
+      <div>{children}</div>
+    </div>
   );
 }
