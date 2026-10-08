@@ -326,7 +326,8 @@ the name lands.
   column ([ui.md](./ui.md)): New thread on top, lit while no thread is open,
   then threads grouped by subject. It resizes, and ⌘⌥B or the toggle in the
   page header beside the title (`ChatPage` owns the panel state) folds it
-  away entirely. Its resize handle goes with it, so it can't clash with a
+  away entirely. The chord acts only in the tab in front, since the subject
+  column answers it too. Its resize handle goes with it, so it can't clash with a
   side panel's; the toggle or ⌘⌥B brings it back.
 - Bare `/chat` is a new thread: the composer docked at the bottom as in a
   thread, and above it the three latest threads (`RecentThreads`) — provider
