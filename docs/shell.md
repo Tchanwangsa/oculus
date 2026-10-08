@@ -57,7 +57,8 @@ before leaving a playing lecture.
   context; tab pages must not re-fetch it. Its nav column
   (`app/src/components/subjects/SubjectNav.tsx`) holds the icon picker, the
   code as a switcher to another subject, a search over the subject, and a row
-  per tab. Tab rows and switcher rows carry the never-opened count
+  per tab; above the tab a header row, shaped like Chat's, holds the column's
+  toggle, the subject crumb and the tab's name (`subjectTabLabel`). Tab rows and switcher rows carry the never-opened count
   (`newFilesStore`); a switcher row's is the sum of its subject's tabs. A switch
   navigates the pane's router to the same top-level tab of the other subject;
   anything deeper lands on that tab's default. Files is one tab whose sub-tabs are
