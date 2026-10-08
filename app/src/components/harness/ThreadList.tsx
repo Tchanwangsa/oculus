@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { CaretRight, Chat, CircleNotch, Plus, Trash, VideoCamera, X } from "@phosphor-icons/react";
 import { ProviderMark } from "@/components/harness/ProviderMark";
+import { useTabActive } from "@/components/tabs/TabContext";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import {
   SIDE_NAV_FOLDS,
@@ -91,10 +92,13 @@ export const ThreadList = memo(function ThreadList({
     [threads, subjects, order],
   );
 
-  // ⌘⌥B folds the column. `e.code`, not `e.key`: on macOS ⌥B arrives as `∫`.
+  // ⌘⌥B folds the column, in the tab in front only: every tab stays mounted,
+  // and the subject column answers the same chord. `e.code`, not `e.key`: on
+  // macOS ⌥B arrives as `∫`.
+  const active = useTabActive();
   useWindowEvent("keydown", (e) => {
     const k = e as KeyboardEvent;
-    if (!k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
+    if (!active || !k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
     k.preventDefault();
     panel.toggle();
   });
