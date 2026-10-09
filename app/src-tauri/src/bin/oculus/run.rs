@@ -420,9 +420,16 @@ impl Ctx {
             // Rewrite the line in place; `\x1b[K` clears the longer previous count.
             let outcome =
                 app_lib::sync::parse_pdf_reporting(&self.data_dir, rel, *subject_id, &|p| {
-                    let seen = match p.total_pages {
-                        0 => format!("{} pages", p.pages_done),
-                        total => format!("{}/{total} pages", p.pages_done),
+                    let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+                    let seen = match (p.phase, p.total_pages) {
+                        (app_lib::parse::Phase::UploadWait, _) => {
+                            format!("waiting to upload {:.1} MB", mb(p.bytes_total))
+                        }
+                        (app_lib::parse::Phase::Uploading, _) => format!(
+                            "uploading {:.1}/{:.1} MB", mb(p.bytes_done), mb(p.bytes_total)
+                        ),
+                        (_, 0) => format!("{} pages", p.pages_done),
+                        (_, total) => format!("{}/{total} pages", p.pages_done),
                     };
                     print!("\r{label}{}\x1b[K", paint(&seen, DIM));
                     let _ = std::io::stdout().flush();

@@ -7,6 +7,7 @@ import {
   Info,
   PauseCircle,
   Prohibit,
+  SkipForwardCircle,
   WarningCircle,
   type Icon as PhosphorIcon,
 } from "@phosphor-icons/react";
@@ -18,8 +19,9 @@ import { PARSE_TONE_CLASS, parseStateOf, type ParseState } from "@/lib/parseStat
 import { isPdfBacked } from "@/lib/fileTypes";
 import { navigateActive } from "@/lib/tabRouters";
 import { openFileParseDetails } from "@/lib/openFile";
-import { parseFile } from "@/lib/courseFiles";
+import { parseFile, parseSkipped } from "@/lib/courseFiles";
 import { useParseStore } from "@/stores/parseStore";
+import { usePipelineStore } from "@/stores/pipelineStore";
 import type { DbFile } from "@/lib/db";
 
 /**
@@ -45,6 +47,7 @@ const STATE_ICON: Record<ParseState["kind"], PhosphorIcon> = {
   parsed: CheckCircle,
   running: CircleNotch,
   queued: Clock,
+  skipped: SkipForwardCircle,
   unparsed: CircleDashed,
   failed: WarningCircle,
   permanent: Prohibit,
@@ -82,23 +85,28 @@ function parseActionOf(
       run: () => navigateActive("/settings/parsing"),
     };
   }
-  if (!latched && (state.kind === "failed" || state.kind === "unparsed")) {
+  if (!latched && (state.kind === "failed" || state.kind === "unparsed" || state.kind === "skipped")) {
     return {
       hint: state.kind === "failed" ? "Click to retry" : "Click to parse now",
-      run: () => reparse(file),
+      run: () => reparse(file, state.kind === "skipped"),
     };
   }
   return null;
 }
 
 /** Shows the file as queued at once; the backend's `parse-status` events
- *  take over from there. */
-function reparse(file: DbFile) {
+ *  take over from there. A skipped file has its mark lifted first. */
+function reparse(file: DbFile, skipped: boolean) {
   const { update } = useParseStore.getState();
   const ev = { relative_path: file.relative_path, subject_id: file.subject_id };
   update({ ...ev, status: "queued" });
+  // The pipeline row too, or its skip would swallow the parse's events.
+  const pipeline = usePipelineStore.getState();
+  if (skipped && pipeline.items[file.relative_path]) {
+    pipeline.touch(file.relative_path, file.subject_id, { parse: "queued", skippedAt: undefined });
+  }
   // `parse_file` ignores the subject code.
-  parseFile(file.subject_id, "", file.relative_path).catch((e) =>
+  (skipped ? parseSkipped : parseFile)(file.subject_id, "", file.relative_path).catch((e) =>
     update({ ...ev, status: "error", error: String(e) }),
   );
 }
@@ -209,10 +217,14 @@ export function MarkdownUnavailable({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-3.5">
         <p className="text-[13px] font-medium text-foreground">{state.title}</p>
-        {state.detail && (
+        {state.detail ? (
           <p data-selectable className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {state.detail}
           </p>
+        ) : (
+          state.kind === "skipped" && (
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{state.summary}</p>
+          )
         )}
         {action && (
           <Button

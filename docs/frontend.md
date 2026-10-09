@@ -90,32 +90,59 @@ library files; the rest of the frontend has its own pages:
 ## Every surface shows parse state from one function
 
 - **`app/src/lib/parseState.ts` maps a status and the failure discriminants
-  (`kind`, `retryable`, `latching`) to seven states**: `parsed`, `parsing`,
-  `queued`, `not parsed` (quiet — not a failure), `failed`, `can't parse`
+  (`kind`, `retryable`, `latching`) to eight states**: `parsed`, `parsing`,
+  `queued`, `skipped` (the user's choice — quiet, never a failure),
+  `not parsed` (quiet — not a failure), `failed`, `can't parse`
   (`retryable: false`) and `on hold` (a latching cause that condemns the whole
   library). Unknown discriminants stay their own case.
 - **A file row shows the state as an icon** (`components/files/ParseState.tsx`),
   its title and a few words by failure `kind` on hover — never the backend's
   message, which can run to a TLS chain. Clicking `failed` or `can't parse`
   opens the file with its header's parse popover open: the whole message and,
-  for `failed`, Retry. `not parsed` re-kicks `parse_file`; a token cause opens
+  for `failed`, Retry. `not parsed` re-kicks `parse_file`; `skipped` lifts
+  the mark (`parse_skip` with `skip: false`) and then parses, and its file
+  page's popover offers the same as Parse now; a token cause opens
   Settings → Parsing; `on hold` has nothing to do.
 - **`"quality"` is the terminal parse success, not a tier** — every parsed row
   stores it and Rust's skip check reads it. `embed-status` uses `"done"`.
+- **`"skipped"` is the user's skip, stored in `files.parse_status`** through
+  the same writer. It is settled, never a failure or a latch: the sweep's query
+  leaves it out, and a late `running` heartbeat or the cancelled parse's
+  `error` is dropped while a file is skipped. Only Parse now takes it back,
+  setting both stores to queued before it calls Rust. New bytes from a sync
+  reset it with the rest of the pipeline.
 - **The pipeline is `download → parse → embed`**, the third stage drawn only
-  when `embedStage` is set. Embed progress comes from page coverage
+  when `embedStage` is set. A running cloud parse carries a `phase` —
+  `upload_wait` (its batch is in, another file uploads first), `uploading`
+  with bytes, `processing` — which the row keeps with the first and latest
+  upload samples; `uploadEta` gives a time left only after 10 s of them, and
+  `fmtEta` rounds it coarser as it grows. Embed progress comes from page coverage
   (`getEmbedCoverage`), never `files.embed_status`, which can't tell which
   model wrote the vectors; that column is read only for a failure.
 - **A rate-limited embed stays `active`** (`embedWaitingUntil` and
   `embedWaitingReason` on the row, from `embed-status`; any embed event
   without them clears them). `statusOf` keeps the phase, so the row keeps its
-  place, and words it as a "Rate-limited" warning pill with a per-second
-  countdown where the percentage was ("resuming…" once past due) and the
-  reason on hover and in the timeline. Settings → Embeddings appends the same
-  wait to the index run's line.
+  place, and words it as a "Rate-limited" warning pill with the reason on
+  hover, over a caption with the reason and a per-second countdown
+  ("resuming…" once past due). Settings → Embeddings appends the same wait to
+  the index run's line.
 - **The Sync page's pipeline rows keep their immutable item identity**
   (`app/src/components/sync/PipelineTable.tsx`), so one progress tick renders
   only its changed row.
+- **A File Activity row says each fact once**: the file (name, subject code),
+  one segmented track — a segment per stage, done filled green, the moving one
+  filled to its percent in brand (pulsing when no percent is known), a held one
+  (waiting for its upload turn, rate-limited) unanimated, skipped hatched,
+  failed red — with one caption beside it (`statusOf`'s label, an upload's
+  time left, or a failure's short cause), when the file last moved, and the
+  status pill. Clicking the name opens the file beside the page (⌘-click a new
+  tab, via `data-tab-href`); clicking elsewhere expands it. Row actions
+  (▶ resume, retry, embed or parse a skipped file; Skip; Open beside) take the
+  time's place on hover or keyboard focus. Skip is offered until the parse
+  finishes and needs no confirmation — Parse now undoes it. The expanded row
+  holds only what the row leaves out: each step with its clock time (and the
+  upload's size), the whole error sentence or what a wait means, the path, and
+  the actions as labelled buttons.
 - **Live events and the DB seed share each row, and neither may strand it.**
   A sync's `unchanged` file only settles an existing row's download — it
   never creates one, since no parse event follows. `updated` resets parse and
@@ -127,13 +154,15 @@ library files; the rest of the frontend has its own pages:
   sync run** (`SyncPage.tsx`, `pipelineStore.seed`): an idle row advances to
   the DB's state where the DB is further along, a row touched in the last
   minute is left to its events, and a row whose file left the DB is dropped.
-  "Clear finished" removes completed rows only and remembers them, so a
-  re-seed doesn't bring them back.
+  "Clear finished" removes completed and skipped rows (`isComplete` counts a
+  skip as settled) and remembers them, so a re-seed doesn't bring them back.
 - **Rows sort by their latest stage completion, never `updatedAt`**, which
   every progress tick bumps — live rows would swap places and jump pages.
-  Retry is offered only where it can work: not on a failed download (the next
-  sync fetches it), a non-retryable error, or a latching one.
-- **`useQualitySweep` is the recovery path, with two gates**: never re-kick
+  Phases rank active, waiting, paused, failed, skipped, done. Retry is offered
+  only where it can work: not on a failed download (the next sync fetches it),
+  a non-retryable error, or a latching one.
+- **`useQualitySweep` is the recovery path, with two gates** (and it never
+  touches a skipped file): never re-kick
   `retryable === false`, and stand down on a latching failure until a parse
   progresses or `LATCH_PROBE_AFTER_MS` allows one probe. Without them one bad
   token marches the library through the same error every sweep.

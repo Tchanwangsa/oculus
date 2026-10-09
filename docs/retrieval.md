@@ -185,7 +185,7 @@ discipline as `mineru-usage.json`.
   of the queue unrun (Stop, a latch, a thrown run) hands them back as pending.
   An enqueue during a stop is refused, never a new run behind the user's back;
   removing the Voyage key stops the run.
-- **A terminal `parse-status` enqueues that file** (`useBackendEvents.ts`),
+- **A finished parse (`quality`) enqueues that file** (`useBackendEvents.ts`),
   gated on `embedReady` — a stored key and an available engine. The backlog is
   never swept up automatically: it is hours of metered work, and the Settings
   estimate exists to be read first.

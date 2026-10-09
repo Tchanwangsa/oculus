@@ -17,6 +17,18 @@ export function parseFile(subjectId: number, subjectCode: string, relativePath: 
   return invoke("parse_file", { subjectId, subjectCode, relativePath });
 }
 
+/** Marks a file skipped (cancelling a parse in flight; Rust emits `skipped`)
+ *  or clears the mark. Clearing parses nothing: `parseSkipped` does both. */
+export function parseSkip(subjectId: number, relativePath: string, skip: boolean) {
+  return invoke("parse_skip", { relativePath, subjectId, skip });
+}
+
+/** "Parse now" on a skipped file: lift the mark, then queue the parse. */
+export async function parseSkipped(subjectId: number, subjectCode: string, relativePath: string) {
+  await parseSkip(subjectId, relativePath, false);
+  await parseFile(subjectId, subjectCode, relativePath);
+}
+
 /** `[relativePath, parse mode]` for each file whose markdown is on disk. */
 export function scanParsedFiles(relativePaths: string[]): Promise<[string, string][]> {
   return invoke<[string, string][]>("scan_parsed_files", { relativePaths });

@@ -1,5 +1,5 @@
-import { memo, useCallback, useMemo, useState } from "react";
-import { CaretRight, Play } from "@phosphor-icons/react";
+import { memo, useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { CaretRight, Play, SidebarSimple, SkipForward } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,264 +9,110 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { usePagedRows } from "@/components/ui/TablePagination";
-import { GridTable, HeaderLabels } from "@/components/ui/GridTable";
+import { GridTable } from "@/components/ui/GridTable";
 import { displayCode, fmtAgo, fmtClock } from "@/lib/format";
 import { fileIconFor } from "@/lib/fileTypes";
+import { getFileByRelativePath } from "@/lib/db";
+import { filePagePath, openFileSmart } from "@/lib/openFile";
+import { openBeside } from "@/lib/tabRouters";
+import { summaryOf } from "@/lib/parseState";
 import { useNow } from "@/hooks/useNow";
 import {
-  fmtWait,
+  fmtEta,
+  fmtMb,
   statusOf,
+  uploadEta,
   usePipelineStore,
   type PipelineItem,
   type PipelinePhase,
   type StageState,
+  type StatusView,
 } from "@/stores/pipelineStore";
 
 /**
  * The ingest ledger: one row per PDF through Download → Parse → Embed, live
- * work ranked first; a row expands into a step timeline. With no Voyage key
- * the embed dot isn't drawn (`embedStage` in `pipelineStore`, set from
- * `indexStore`), so a parsed file is done at two dots rather than stalled.
+ * work ranked first. A row is the file, one segmented track with a caption
+ * saying what is happening, when the file last moved, and its status pill;
+ * actions take the time's place on hover. It expands into the facts the row
+ * leaves out. With no Voyage key the embed segment isn't drawn (`embedStage`
+ * in `pipelineStore`, set from `indexStore`), so a parsed file is done at two.
  */
 
-const DOWNLOAD_PARSE = [
-  { key: "download", label: "Download" },
-  { key: "parse", label: "Parse" },
-] as const;
+type StageKey = "download" | "parse" | "embed";
 
-const EMBED_STAGE = { key: "embed", label: "Embed" } as const;
-
-type Stage = (typeof DOWNLOAD_PARSE)[number] | typeof EMBED_STAGE;
-
-function stages(embedStage: boolean): readonly Stage[] {
-  return embedStage ? [...DOWNLOAD_PARSE, EMBED_STAGE] : DOWNLOAD_PARSE;
-}
-
-const DOT: Record<StageState, string> = {
-  pending: "bg-muted-foreground/25",
-  queued: "bg-warning",
-  active: "bg-brand animate-pulse",
-  done: "bg-success",
-  error: "bg-destructive",
+const STAGE_LABEL: Record<StageKey, string> = {
+  download: "Download",
+  parse: "Parse",
+  embed: "Embed",
 };
 
-const STAGE_STATE_LABEL: Record<StageState, string> = {
-  pending: "waiting",
+function stageKeys(embedStage: boolean): StageKey[] {
+  return embedStage ? ["download", "parse", "embed"] : ["download", "parse"];
+}
+
+const STATE_WORD: Record<StageState, string> = {
+  pending: "not started",
   queued: "queued",
   active: "in progress",
   done: "done",
   error: "failed",
+  skipped: "skipped",
 };
 
-const BADGE_VARIANT: Record<
-  PipelinePhase,
-  "default" | "secondary" | "success" | "destructive" | "warning"
-> = {
-  active: "default",
-  waiting: "secondary",
-  paused: "warning",
-  done: "success",
-  failed: "destructive",
-};
-
-/** Shared by header and rows; stages column is sized to its header word. */
+/** Shared by header and rows. The time column also holds the hover actions
+ *  (three `icon-xs` buttons); the status column fits "Rate-limited". */
 const COLS =
-  "grid grid-cols-[minmax(0,1fr)_100px_60px_80px_minmax(120px,160px)] items-center gap-4 px-5";
+  "grid grid-cols-[minmax(0,1fr)_minmax(200px,300px)_80px_92px] items-center gap-4 px-5";
 
-function StageDots({ item, embedStage }: { item: PipelineItem; embedStage: boolean }) {
-  const STAGES = stages(embedStage);
-  return (
-    <div className="flex items-center">
-      {STAGES.map((s, i) => {
-        const state = item[s.key];
-        return (
-          <div key={s.key} className="flex items-center">
-            {i > 0 && (
-              <span
-                className={cn(
-                  "w-3.5 h-px",
-                  item[STAGES[i - 1].key] === "done" ? "bg-success/50" : "bg-border",
-                )}
-              />
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className={cn("w-2 h-2 rounded-full shrink-0", DOT[state])} />
-              </TooltipTrigger>
-              <TooltipContent>
-                {s.label} — {STAGE_STATE_LABEL[state]}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+/** Diagonal stripes: a stage the user skipped, distinct from one not reached. */
+const HATCH: CSSProperties = {
+  backgroundImage:
+    "repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-muted-foreground) 45%, transparent) 0 1.5px, transparent 1.5px 4px)",
+};
 
-// ── Expanded timeline ─────────────────────────────────────────────────────────
-
-interface TimelineStep {
-  label: string;
-  state: StageState;
-  /** Completion wall-clock time, when the step is done. */
-  time?: number;
-  /** Live detail for a step still moving (pages, queue position, error). */
-  detail?: string;
-}
+// ── Derived row facts ─────────────────────────────────────────────────────────
 
 /** An active embed held by a rate limit; its countdown ticks by the second. */
 function isRateLimited(item: PipelineItem): boolean {
   return item.embed === "active" && item.embedWaitingUntil != null;
 }
 
-function timelineSteps(item: PipelineItem, embedStage: boolean, now: number): TimelineStep[] {
-  const parseDetail =
-    item.parse === "active"
-      ? item.totalPages > 0
-        ? `${item.pagesDone}/${item.totalPages} pages · ${Math.round((item.pagesDone / item.totalPages) * 100)}%`
-        : "in progress"
-      : item.parse === "queued"
-        ? item.parseQueuePos
-          ? item.parseQueuePos === 1
-            ? "next up"
-            : `#${item.parseQueuePos} in line`
-          : "queued"
-        : item.parse === "error"
-          ? item.error
-          : undefined;
-
-  // Embed shows a page fraction — the only thing that moves during one long
-  // blocking call (see docs/retrieval.md: an embed blocks for minutes) — or,
-  // while a rate limit holds it, why and for how long.
-  const embedDetail = isRateLimited(item)
-    ? statusOf(item, embedStage, now).label
-    : item.embed === "active"
-      ? item.embedTotalPages > 0
-        ? `${item.embedPagesDone}/${item.embedTotalPages} pages · ${Math.round((item.embedPagesDone / item.embedTotalPages) * 100)}%`
-        : "in progress"
-      : item.embed === "queued"
-        ? "queued"
-        : item.embed === "error"
-          ? item.error
-          : undefined;
-
-  // Nothing to retry by hand: the file isn't on disk, and the next sync
-  // fetches it again.
-  const downloadDetail =
-    item.download === "error"
-      ? `${item.error ?? "Failed"} · the next sync retries it`
-      : undefined;
-
-  const steps: TimelineStep[] = [
-    {
-      label: "Downloaded",
-      state: item.download,
-      time: item.downloadedAt,
-      detail: downloadDetail,
-    },
-    { label: "Parse", state: item.parse, time: item.parsedAt, detail: parseDetail },
-  ];
-  if (embedStage) {
-    steps.push({
-      label: "Embed",
-      state: item.embed,
-      time: item.embeddedAt,
-      detail: embedDetail,
-    });
-  }
-  return steps;
+/** Parse is in its batch but another file is uploading: not moving itself. */
+function uploadWaiting(item: PipelineItem): boolean {
+  return item.parse === "active" && item.parsePhase === "upload_wait";
 }
 
-function Timeline({ item, embedStage }: { item: PipelineItem; embedStage: boolean }) {
-  const now = useNow(isRateLimited(item) ? 1_000 : 60_000).getTime();
-  const steps = timelineSteps(item, embedStage, now);
-  return (
-    <div className="px-9 pb-3 pt-1">
-      <div className="ml-[3px]">
-        {steps.map((step, i) => {
-          const last = i === steps.length - 1;
-          const meta =
-            step.state === "done"
-              ? step.time
-                ? fmtClock(step.time)
-                : "done"
-              : (step.detail ?? STAGE_STATE_LABEL[step.state]);
-          return (
-            <div key={step.label} className="flex gap-3">
-              <div className="flex flex-col items-center">
-                <span className={cn("w-2 h-2 rounded-full shrink-0 mt-[5px]", DOT[step.state])} />
-                {!last && <span className="w-px flex-1 min-h-3 bg-border" />}
-              </div>
-              <div className={cn("flex-1 flex items-baseline justify-between gap-3", !last && "pb-2.5")}>
-                <span
-                  className={cn(
-                    "text-xs",
-                    step.state === "pending" ? "text-muted-foreground/60" : "text-foreground",
-                  )}
-                >
-                  {step.label}
-                </span>
-                <span
-                  className={cn(
-                    "text-[11px] tabular-nums text-right",
-                    step.state === "error" ? "text-destructive" : "text-muted-foreground",
-                  )}
-                >
-                  {meta}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+/** When the file last moved: the latest stage that finished, or was skipped. */
+function latestStageAt(item: PipelineItem): number {
+  return Math.max(
+    item.downloadedAt ?? 0,
+    item.uploadedAt ?? 0,
+    item.parsedAt ?? 0,
+    item.embeddedAt ?? 0,
+    item.skippedAt ?? 0,
   );
 }
 
-// ── Rows ──────────────────────────────────────────────────────────────────────
-
-/** The status cell while a rate limit holds the embed: a countdown and the
- *  pill, with the reason on hover. Ticks by itself, so only this row
- *  re-renders each second. */
-function RateLimitedStatus({ item, embedStage }: { item: PipelineItem; embedStage: boolean }) {
-  const now = useNow(1_000).getTime();
-  const s = statusOf(item, embedStage, now);
-  const left =
-    s.resumesAt != null && s.resumesAt > now ? fmtWait(s.resumesAt - now) : "resuming…";
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground tabular-nums">{left}</span>
-          <Badge variant="warning" className="text-[11px]">
-            {s.short}
-          </Badge>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent>{s.label}</TooltipContent>
-    </Tooltip>
-  );
+/** The stage whose failure the row's error belongs to. */
+function failedStage(item: PipelineItem): StageKey {
+  if (item.download === "error") return "download";
+  if (item.parse === "error") return "parse";
+  return "embed";
 }
 
-const Row = memo(function Row({
-  item,
-  embedStage,
-  expanded,
-  now,
-  onToggle,
-  onResume,
-}: {
-  item: PipelineItem;
-  embedStage: boolean;
-  expanded: boolean;
-  /** The table's ticking clock; a new value re-renders the memoised row so
-   *  its relative time doesn't go stale. */
-  now: number;
-  onToggle: (path: string) => void;
-  onResume?: (item: PipelineItem) => void;
-}) {
-  const s = statusOf(item, embedStage);
+interface RowActions {
+  /** ▶: resume, retry, embed or parse a skipped file. */
+  run?: { label: string; hint: string };
+  skip: boolean;
+}
+
+function actionsOf(
+  item: PipelineItem,
+  s: StatusView,
+  embedStage: boolean,
+  canRun: boolean,
+  canSkip: boolean,
+): RowActions {
   // A parsed-but-unembedded file gets ▶ too: the backlog isn't swept
   // automatically, so this embeds one file without committing the library.
   const embedNow = embedStage && item.parse === "done" && item.embed === "pending";
@@ -278,15 +124,443 @@ const Row = memo(function Row({
     item.download !== "error" &&
     item.errorRetryable !== false &&
     !item.errorLatching;
+  let run: RowActions["run"];
   // Already queued: the embed queue dedups, so ▶ would do nothing.
-  const resumable =
-    onResume &&
-    item.embed !== "queued" &&
-    (s.phase === "paused" || retryable || embedNow);
-  // A held embed shows its countdown where the percentage would be.
-  const rateLimited = s.resumesAt != null;
-  const percent =
-    s.phase === "active" && s.percent != null && !rateLimited ? Math.round(s.percent) : null;
+  if (canRun && item.embed !== "queued") {
+    if (s.phase === "skipped") run = { label: "Parse now", hint: "Parse this file now" };
+    else if (retryable) run = { label: "Retry", hint: "Try this file again" };
+    else if (s.phase === "paused") run = { label: "Resume", hint: "Resume where it left off" };
+    else if (embedNow) run = { label: "Embed", hint: "Embed this file now" };
+  }
+  // Anything short of a finished parse, once the bytes are on disk.
+  const skip =
+    canSkip &&
+    item.download === "done" &&
+    (item.parse === "pending" ||
+      item.parse === "queued" ||
+      item.parse === "active" ||
+      item.parse === "error");
+  return { run, skip };
+}
+
+const SKIP_HINT = "Skip — stops this file's parse. You can parse it later.";
+
+/** Opens the file beside the page; through its row when there is one, so
+ *  the visit is recorded like any file row's. */
+function openItem(item: PipelineItem) {
+  const beside = () => openBeside(filePagePath(item.subjectId, item.relativePath));
+  getFileByRelativePath(item.relativePath)
+    .then((file) => (file ? openFileSmart(file) : beside()))
+    .catch(beside);
+}
+
+// ── Progress track ────────────────────────────────────────────────────────────
+
+/** How a segment draws: the stage's state, with the live stage's percent. */
+function Segment({
+  state,
+  percent,
+  held,
+  label,
+}: {
+  state: StageState;
+  /** Only for the moving stage; null draws an indeterminate pulse. */
+  percent: number | null;
+  /** In flight but not moving (waiting for its upload turn, rate-limited). */
+  held: boolean;
+  label: string;
+}) {
+  let fill: ReactNode = null;
+  let track = "bg-secondary";
+  if (state === "done") fill = <span className="absolute inset-0 bg-success/80" />;
+  else if (state === "error") fill = <span className="absolute inset-0 bg-destructive" />;
+  else if (state === "queued") track = "bg-brand/20";
+  else if (state === "active" && percent != null) {
+    track = "bg-brand/20";
+    fill = (
+      <span
+        className={cn(
+          "absolute inset-y-0 left-0 transition-[width] duration-500",
+          held ? "bg-warning/70" : "bg-brand",
+        )}
+        style={{ width: `${Math.max(4, Math.min(100, percent))}%` }}
+      />
+    );
+  } else if (state === "active") {
+    track = held ? "bg-brand/20" : "bg-brand/40 animate-pulse will-change-[opacity]";
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* The padding is the hover target; the bar itself is 6px. */}
+        <span className="flex-1 py-1.5">
+          <span
+            className={cn("relative block h-1.5 overflow-hidden rounded-full", track)}
+            style={state === "skipped" ? HATCH : undefined}
+          >
+            {fill}
+          </span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function Track({
+  item,
+  s,
+  embedStage,
+}: {
+  item: PipelineItem;
+  s: StatusView;
+  embedStage: boolean;
+}) {
+  const held = uploadWaiting(item) || isRateLimited(item);
+  return (
+    <div className="flex w-24 shrink-0 items-center gap-[3px]">
+      {stageKeys(embedStage).map((key) => {
+        const state = item[key];
+        const moving = state === "active" && s.phase === "active";
+        const word =
+          key === "parse" && state === "active" && item.parsePhase === "uploading"
+            ? "uploading"
+            : key === "parse" && uploadWaiting(item)
+              ? "waiting for upload"
+              : STATE_WORD[state];
+        return (
+          <Segment
+            key={key}
+            state={state}
+            percent={moving ? s.percent : null}
+            held={moving && held}
+            label={`${STAGE_LABEL[key]} — ${word}`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** What is happening, in one line: `statusOf`'s label, with an upload's
+ *  time left or a failure's short cause. */
+function captionOf(item: PipelineItem, s: StatusView): string {
+  if (s.phase === "failed") {
+    const stage = failedStage(item);
+    if (stage === "download") return "Download failed — the next sync retries it";
+    const why = summaryOf(item.errorKind).replace(/\.$/, "");
+    return `${STAGE_LABEL[stage]} failed${why ? ` — ${why}` : ""}`;
+  }
+  const eta = uploadEta(item);
+  return eta != null ? `${s.label} · ${fmtEta(eta)}` : s.label;
+}
+
+/** A held embed's caption counts down by the second; only this row ticks. */
+function RateLimitedCaption({ item, embedStage }: { item: PipelineItem; embedStage: boolean }) {
+  const now = useNow(1_000).getTime();
+  return <CaptionText text={statusOf(item, embedStage, now).label} />;
+}
+
+function CaptionText({ text, tone }: { text: string; tone?: "bad" }) {
+  return (
+    <span
+      className={cn(
+        "min-w-0 truncate text-[11px] tabular-nums",
+        tone === "bad" ? "text-destructive" : "text-muted-foreground",
+      )}
+    >
+      {text}
+    </span>
+  );
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+
+function IconAction({
+  hint,
+  onClick,
+  children,
+}: {
+  hint: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={hint}
+          data-tab-skip
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick();
+          }}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{hint}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// ── Status pill ───────────────────────────────────────────────────────────────
+
+const BADGE_VARIANT: Record<
+  PipelinePhase,
+  "default" | "secondary" | "success" | "destructive" | "warning" | "outline"
+> = {
+  active: "default",
+  waiting: "secondary",
+  paused: "warning",
+  failed: "destructive",
+  skipped: "outline",
+  done: "success",
+};
+
+function StatusPill({ item, s }: { item: PipelineItem; s: StatusView }) {
+  // A file waiting for its upload turn reads as waiting, not as work.
+  const variant = isRateLimited(item)
+    ? "warning"
+    : uploadWaiting(item)
+      ? "secondary"
+      : BADGE_VARIANT[s.phase];
+  const pill = (
+    <Badge
+      variant={variant}
+      className={cn("text-[11px]", s.phase === "skipped" && "text-muted-foreground")}
+    >
+      {s.short}
+    </Badge>
+  );
+  if (!isRateLimited(item)) return pill;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{pill}</TooltipTrigger>
+      <TooltipContent>{item.embedWaitingReason || "Rate-limited"}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// ── Expanded detail ───────────────────────────────────────────────────────────
+
+const DOT: Record<StageState, string> = {
+  pending: "bg-muted-foreground/25",
+  queued: "bg-brand/40",
+  active: "bg-brand",
+  done: "bg-success",
+  error: "bg-destructive",
+  skipped: "bg-muted-foreground/50",
+};
+
+interface Step {
+  key: string;
+  label: string;
+  state: StageState;
+  /** Only what the collapsed row doesn't already say. */
+  value?: string;
+}
+
+/** The upload as its own step, for a cloud parse that reported one. */
+function uploadStep(item: PipelineItem): Step | null {
+  if (item.bytesTotal == null) return null;
+  const size = `${fmtMb(item.bytesTotal)} MB`;
+  if (item.parse === "active" && item.parsePhase === "upload_wait") {
+    return { key: "upload", label: "Upload", state: "queued", value: `${size}, waiting its turn` };
+  }
+  if (item.parse === "active" && item.parsePhase === "uploading") {
+    const since = item.uploadFirstAt ? `started ${fmtClock(item.uploadFirstAt)}` : undefined;
+    return { key: "upload", label: "Uploading", state: "active", value: since };
+  }
+  if (item.uploadedAt != null || item.parse === "done") {
+    const at = fmtClock(item.uploadedAt);
+    return { key: "upload", label: "Uploaded", state: "done", value: at ? `${size} · ${at}` : size };
+  }
+  return { key: "upload", label: "Upload", state: "pending" };
+}
+
+function detailSteps(item: PipelineItem, embedStage: boolean): Step[] {
+  const steps: Step[] = [];
+  const d = item.download;
+  steps.push({
+    key: "download",
+    label: d === "done" ? "Downloaded" : d === "active" ? "Downloading" : d === "error" ? "Download failed" : "Download",
+    state: d,
+    value: d === "done" ? fmtClock(item.downloadedAt) || undefined : undefined,
+  });
+
+  const upload = uploadStep(item);
+  if (upload) steps.push(upload);
+
+  const p = item.parse;
+  // While its upload runs, the parse itself has not started.
+  const uploadingNow = p === "active" && item.parsePhase !== undefined && item.parsePhase !== "processing";
+  const parseState: StageState = uploadingNow ? "pending" : p;
+  const parseLabel =
+    parseState === "done"
+      ? "Parsed"
+      : parseState === "active"
+        ? "Parsing"
+        : parseState === "error"
+          ? "Parse failed"
+          : parseState === "skipped"
+            ? "Skipped"
+            : "Parse";
+  const parseValue =
+    parseState === "done"
+      ? fmtClock(item.parsedAt) || undefined
+      : parseState === "active"
+        ? item.uploadedAt
+          ? `started ${fmtClock(item.uploadedAt)}`
+          : undefined
+        : parseState === "skipped"
+          ? fmtClock(item.skippedAt) || undefined
+          : undefined;
+  steps.push({ key: "parse", label: parseLabel, state: parseState, value: parseValue });
+
+  if (embedStage) {
+    const e = item.embed;
+    steps.push({
+      key: "embed",
+      label: e === "done" ? "Embedded" : e === "active" ? "Embedding" : e === "error" ? "Embed failed" : "Embed",
+      state: e,
+      value: e === "done" ? fmtClock(item.embeddedAt) || undefined : undefined,
+    });
+  }
+  return steps;
+}
+
+/** One plain sentence about why the row is where it is, when that isn't
+ *  obvious from the row: an error's whole message, or what a wait means. */
+function noteOf(item: PipelineItem): { text: string; bad: boolean } | null {
+  if (item.download === "error") {
+    return { text: `${item.error ?? "Download failed"}. The next sync downloads it again.`, bad: true };
+  }
+  if (item.parse === "error" || item.embed === "error") {
+    const text = item.errorLatching
+      ? `${item.error ?? "Failed"} — this holds every file until it is fixed.`
+      : (item.error ?? "Failed");
+    return { text, bad: true };
+  }
+  if (uploadWaiting(item)) {
+    return {
+      text: "Another file in the same upload batch is still uploading; this one goes up after it.",
+      bad: false,
+    };
+  }
+  if (item.parse === "skipped") {
+    return { text: "It stays without Markdown, search or embeddings until you parse it.", bad: false };
+  }
+  return null;
+}
+
+function Detail({
+  item,
+  embedStage,
+  actions,
+  onRun,
+  onSkip,
+}: {
+  item: PipelineItem;
+  embedStage: boolean;
+  actions: RowActions;
+  onRun?: () => void;
+  onSkip?: () => void;
+}) {
+  const steps = detailSteps(item, embedStage);
+  const note = noteOf(item);
+  return (
+    // Indented to the filename: px-5, the caret, the file icon and their gaps.
+    <div className="pb-3.5 pl-[58px] pr-5">
+      <div className="grid w-fit grid-cols-[6px_auto_auto] items-center gap-x-2.5 gap-y-1">
+        {steps.map((st) => (
+          <div key={st.key} className="contents">
+            <span
+              className={cn("size-1.5 rounded-full", DOT[st.state])}
+              style={st.state === "skipped" ? HATCH : undefined}
+            />
+            <span
+              className={cn(
+                "text-xs",
+                st.state === "pending" ? "text-muted-foreground/60" : "text-foreground",
+              )}
+            >
+              {st.label}
+            </span>
+            <span className="text-[11px] tabular-nums text-muted-foreground">{st.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {note && (
+        <p
+          data-selectable={note.bad || undefined}
+          className={cn(
+            "mt-2 max-w-prose text-xs leading-relaxed",
+            note.bad ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {note.text}
+        </p>
+      )}
+
+      <div className="mt-2.5 flex items-center gap-1.5">
+        <span className="mr-auto min-w-0 truncate text-[11px] text-muted-foreground/70">
+          {item.relativePath}
+        </span>
+        {actions.run && onRun && (
+          <Button variant="secondary" size="xs" data-tab-skip onClick={onRun}>
+            <Play weight="fill" /> {actions.run.label}
+          </Button>
+        )}
+        {actions.skip && onSkip && (
+          <Button variant="secondary" size="xs" data-tab-skip onClick={onSkip}>
+            <SkipForward /> Skip
+          </Button>
+        )}
+        <Button
+          variant="secondary"
+          size="xs"
+          data-tab-href={filePagePath(item.subjectId, item.relativePath)}
+          onClick={() => openItem(item)}
+        >
+          <SidebarSimple className="scale-x-[-1]" /> Open beside
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Rows ──────────────────────────────────────────────────────────────────────
+
+const Row = memo(function Row({
+  item,
+  embedStage,
+  expanded,
+  now,
+  onToggle,
+  onResume,
+  onSkip,
+}: {
+  item: PipelineItem;
+  embedStage: boolean;
+  expanded: boolean;
+  /** The table's ticking clock; a new value re-renders the memoised row so
+   *  its relative time and upload estimate don't go stale. */
+  now: number;
+  onToggle: (path: string) => void;
+  onResume?: (item: PipelineItem) => void;
+  onSkip?: (item: PipelineItem) => void;
+}) {
+  const s = statusOf(item, embedStage, now);
+  const actions = actionsOf(item, s, embedStage, !!onResume, !!onSkip);
+  const run = onResume && (() => onResume(item));
+  const skip = onSkip && (() => onSkip(item));
+  const latest = latestStageAt(item);
+  const href = filePagePath(item.subjectId, item.relativePath);
   const Icon = fileIconFor(item.filename);
 
   return (
@@ -294,97 +568,101 @@ const Row = memo(function Row({
       <div
         role="button"
         tabIndex={0}
+        aria-expanded={expanded}
         onClick={() => onToggle(item.relativePath)}
-        onKeyDown={(e) => e.key === "Enter" && onToggle(item.relativePath)}
-        className={cn(COLS, "py-2.5 cursor-pointer hover:bg-surface/60 transition-colors")}
+        onKeyDown={(e) => {
+          // Keys on the controls inside are theirs.
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle(item.relativePath);
+          }
+        }}
+        className={cn(COLS, "group/row cursor-pointer py-2 transition-colors hover:bg-surface/60")}
       >
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
           <CaretRight
             size={9}
             className={cn(
-              "shrink-0 text-muted-foreground/50 transition-transform",
+              "shrink-0 text-muted-foreground/50 transition-transform will-change-transform",
               expanded && "rotate-90",
             )}
           />
           <Icon size={13} className="shrink-0 text-muted-foreground/70" />
-          <span className="text-xs text-foreground truncate">{item.filename}</span>
+          <button
+            type="button"
+            data-tab-href={href}
+            onClick={(e) => {
+              e.stopPropagation();
+              openItem(item);
+            }}
+            className="min-w-0 truncate rounded-sm text-left text-xs text-foreground decoration-muted-foreground/50 underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            {item.filename}
+          </button>
+          {item.code && (
+            <span className="shrink-0 text-[11px] text-muted-foreground/70">
+              {displayCode(item.code)}
+            </span>
+          )}
         </div>
 
-        <span className="text-[11px] text-muted-foreground truncate">{displayCode(item.code)}</span>
-
-        <StageDots item={item} embedStage={embedStage} />
-
-        <StageDates item={item} now={now} />
-
-        <div className="flex items-center gap-1.5 justify-self-end">
-          {percent != null && (
-            <span className="text-[11px] text-muted-foreground tabular-nums">{percent}%</span>
-          )}
-          {resumable && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={s.phase === "failed" ? "Retry" : embedNow ? "Embed" : "Resume"}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onResume(item);
-                  }}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <Play size={11} weight="fill" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {s.phase === "failed"
-                  ? "Try this file again"
-                  : embedNow
-                    ? "Embed this file now"
-                    : "Resume where it left off"}
-              </TooltipContent>
-            </Tooltip>
-          )}
-          {rateLimited ? (
-            <RateLimitedStatus item={item} embedStage={embedStage} />
+        <div className="flex min-w-0 items-center gap-3">
+          <Track item={item} s={s} embedStage={embedStage} />
+          {isRateLimited(item) ? (
+            <RateLimitedCaption item={item} embedStage={embedStage} />
           ) : (
-            <Badge variant={BADGE_VARIANT[s.phase]} className="text-[11px]">
-              {s.short}
-            </Badge>
+            <CaptionText text={captionOf(item, s)} tone={s.phase === "failed" ? "bad" : undefined} />
           )}
+        </div>
+
+        {/* The time, and on hover or keyboard focus the row's actions in its place. */}
+        <div className="relative flex h-6 items-center justify-end">
+          <span
+            className="text-[11px] tabular-nums text-muted-foreground transition-opacity will-change-[opacity] group-focus-within/row:opacity-0 group-hover/row:opacity-0"
+          >
+            {latest ? fmtAgo(latest) : "—"}
+          </span>
+          <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 opacity-0 transition-opacity will-change-[opacity] group-focus-within/row:opacity-100 group-hover/row:opacity-100">
+            {actions.run && run && (
+              <IconAction hint={actions.run.hint} onClick={run}>
+                <Play size={11} weight="fill" />
+              </IconAction>
+            )}
+            {actions.skip && skip && (
+              <IconAction hint={SKIP_HINT} onClick={skip}>
+                <SkipForward size={12} />
+              </IconAction>
+            )}
+            <IconAction hint="Open beside" onClick={() => openItem(item)}>
+              <SidebarSimple size={12} className="scale-x-[-1]" />
+            </IconAction>
+          </div>
+        </div>
+
+        <div className="justify-self-end">
+          <StatusPill item={item} s={s} />
         </div>
       </div>
 
-      {expanded && <Timeline item={item} embedStage={embedStage} />}
+      {expanded && (
+        <Detail item={item} embedStage={embedStage} actions={actions} onRun={run} onSkip={skip} />
+      )}
     </div>
   );
 });
 
-/** When a stage last completed, or 0 when none has. */
-function latestStageAt(item: PipelineItem): number {
-  return Math.max(item.downloadedAt ?? 0, item.parsedAt ?? 0, item.embeddedAt ?? 0);
-}
-
-/** Most recent stage timestamp; the full breakdown is in the timeline.
- *  `fmtAgo` reads the clock itself; `now` is what re-renders it. */
-function StageDates({ item }: { item: PipelineItem; now: number }) {
-  const latest = latestStageAt(item);
-  if (!latest) return <span className="text-[11px] text-muted-foreground/60">—</span>;
-  return (
-    <span className="text-[11px] text-muted-foreground tabular-nums">{fmtAgo(latest)}</span>
-  );
-}
-
-/** Sort: running work first, then the queue, then paused, then failures;
- *  done last. Within a group, the latest stage completion first — not
- *  `updatedAt`, which every progress event bumps, so live rows would swap
- *  places and jump pages. */
+/** Sort: running work first, then the queue, then paused, then failures,
+ *  then skips; done last. Within a group, the latest stage completion first
+ *  — not `updatedAt`, which every progress event bumps, so live rows would
+ *  swap places and jump pages. */
 const PHASE_RANK: Record<PipelinePhase, number> = {
   active: 0,
   waiting: 1,
   paused: 2,
   failed: 3,
-  done: 4,
+  skipped: 4,
+  done: 5,
 };
 
 function byActivity(embedStage: boolean) {
@@ -402,12 +680,23 @@ function byActivity(embedStage: boolean) {
 /** Files per page; caps how many live rows animate. */
 const PAGE_SIZE = 50;
 
+const HEADER = (
+  <>
+    <span className="text-[11px] font-medium text-muted-foreground">File</span>
+    <span className="text-[11px] font-medium text-muted-foreground">Progress</span>
+    <span className="justify-self-end text-[11px] font-medium text-muted-foreground">Updated</span>
+    <span className="justify-self-end text-[11px] font-medium text-muted-foreground">Status</span>
+  </>
+);
+
 export const PipelineTable = memo(function PipelineTable({
   items,
   onResume,
+  onSkip,
 }: {
   items: PipelineItem[];
   onResume?: (item: PipelineItem) => void;
+  onSkip?: (item: PipelineItem) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const embedStage = usePipelineStore((s) => s.embedStage);
@@ -429,7 +718,7 @@ export const PipelineTable = memo(function PipelineTable({
   return (
     <GridTable
       cols={COLS}
-      header={<HeaderLabels labels={["File", "Subject", "Stages", "Updated", "Status"]} endLast />}
+      header={HEADER}
       empty={sorted.length === 0 && "Nothing in the pipeline — run a sync to pull new files."}
       pagination={{ page, pageCount, onPage: setPage, total: sorted.length, unit: "file" }}
     >
@@ -443,6 +732,7 @@ export const PipelineTable = memo(function PipelineTable({
             now={now}
             onToggle={toggle}
             onResume={onResume}
+            onSkip={onSkip}
           />
         ))}
       </div>
