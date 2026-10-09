@@ -139,8 +139,9 @@ keyd core's tests with every feature and keyd's with and without `dev`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
 reference fails. A second job, `keyd-linux`, checks and tests keyd core and
 checks keyd on Ubuntu, where only the unsupported adapter exists
-([below](#keyds-os-code-lives-in-one-adapter)). `stage-cli` comes before any cargo call because tauri-build
-refuses to compile until every `externalBin` exists, and it is what writes the
+([below](#keyds-os-code-lives-in-one-adapter)); keyd's own tests bind a socket
+through the macOS adapter, so they run only in the first job. `stage-cli`
+comes before any cargo call because tauri-build refuses to compile until every `externalBin` exists, and it is what writes the
 placeholder sidecar on a clean tree. The release profile is shared with that
 CLI build, so the tests reuse its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
