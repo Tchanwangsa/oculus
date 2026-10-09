@@ -1,223 +1,113 @@
-# Oculus
+<div align="center">
 
-A macOS desktop app that turns a UniMelb student's coursework into a
-searchable knowledge base — and then lets a coding agent answer questions
-against it.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.svg">
+  <img src=".github/assets/banner-light.svg" alt="Oculus" width="720">
+</picture>
 
-Oculus signs in to Canvas the way you do, scrapes your subjects (pages, files,
-assignments, modules), pulls Ed Discussion threads and Echo360 lecture
-recordings, parses every PDF to markdown, embeds each page as an *image*, and
-retrieves the right pages on demand. Chat is not a chatbot bolted on: it is
-Claude Code, Codex, opencode or Antigravity, run as a subprocess inside your
-library, with the `oculus` CLI as its tool surface.
+<p>
+  <a href="#run-it"><strong>Run it</strong></a>
+  &nbsp;·&nbsp;
+  <a href="docs/index.md"><strong>Docs</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Tchanwangsa/oculus/issues/new"><strong>Report a bug</strong></a>
+</p>
 
-There's no Oculus server and no Oculus account. Sync talks only to the
-university's own systems, over the session cookie you're already signed in
-with. But **PDF parsing and page-image embedding are cloud calls** — every
-PDF goes to MinerU (their service, or a MinerU server you install and run
-yourself) and every page image goes to Voyage for embedding, in-process from
-Rust, no local model or fallback of either kind left in this repo. If that's
-not the trade you want, run MinerU yourself and know the images still leave
-the machine for Voyage — there's no local embedder here to switch to instead.
+<p>
+  <img alt="macOS" src="https://img.shields.io/badge/macos-000000?style=for-the-badge&logo=apple&logoColor=white">&nbsp;
+  <a href="https://tauri.app/"><img alt="Tauri" src="https://img.shields.io/badge/tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white"></a>&nbsp;
+  <a href="https://www.rust-lang.org/"><img alt="Rust" src="https://img.shields.io/badge/rust-000000?style=for-the-badge&logo=rust&logoColor=white"></a>&nbsp;
+  <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/typescript-3178C6?style=for-the-badge&logo=typescript&logoColor=white"></a>&nbsp;
+  <a href="https://bun.sh/"><img alt="Bun" src="https://img.shields.io/badge/bun-000000?style=for-the-badge&logo=bun&logoColor=white"></a>
+</p>
 
----
+</div>
 
-## What it does
+## About
 
-**Sync.** Canvas is scraped from Rust over your session cookie — the
-university blocks self-service API tokens, so the cookie is the only auth
-path. Ed Discussion threads and Echo360 recordings come along with it, keyed
-to the same subjects. Incremental: unchanged files cost one metadata call, not
-a download. → [docs/sync.md](docs/sync.md)
+Your whole degree in one app. Oculus signs in to Canvas as you, brings in your
+subjects, Ed threads and lecture recordings, and puts an AI assistant right
+next to all of it.
 
-**Sign-in that stays signed in.** Canvas SSO runs through Okta. With your
-password and a TOTP seed in the keychain, Oculus rebuilds a dead session
-headlessly, and a LaunchAgent keeps it warm every six hours while the app is
-closed. → [docs/auth.md](docs/auth.md)
+<img src=".github/assets/overview.svg" alt="Canvas, Ed Discussion and Echo360 flow into Oculus, and your agent — Claude Code, Codex, opencode or Antigravity — works inside it" width="100%">
 
-**PDF parsing, no fallback.** Every PDF is read by MinerU — its cloud service,
-or a MinerU server you install and run yourself, reached over loopback —
-chosen once in Settings → Library. Both are plain HTTP calls made in-process
-from Rust; neither is a process Oculus starts, supervises or ships. There is
-no fast tier and no second engine to catch a failure: a PDF either gets
-markdown or it doesn't, and the UI says which. → [docs/parsing.md](docs/parsing.md)
+## Your subjects, in one place
 
-**Retrieval over page images.** Each page is rasterised with pdfium and
-embedded by Voyage's `voyage-multimodal-3.5` as a 512-dim vector — not
-extracted text. Measured, not aesthetic: image embeddings roughly double
-recall on formula and diagram pages, and averaging image with text scored
-worse than image alone. A brute-force scan over a degree's worth of pages
-costs single-digit megabytes and milliseconds — no vector index. Alongside it,
-a local FTS5 index over the same parsed text answers a keystroke instantly and
-for free, so ⌘K can search inside your documents without a cloud round trip.
-→ [docs/retrieval.md](docs/retrieval.md)
+Pages, files, modules, assignments, announcements, Ed Discussion threads and
+lecture recordings, all synced per subject and kept up to date. Every PDF is
+turned into Markdown, so you and your agent can actually read it.
 
-**Chat as a CLI agent.** Claude Code, Codex, opencode or Antigravity, driven
-as a subprocess from the library's `agents/` folder, contained to it, with its
-work surfaced as a timeline rather than a spinner. Claude Code, Codex and
-Antigravity ride your existing subscription — the whole reason to drive them
-rather than an API; opencode is the odd one out and spends per token against
-whatever provider key you've connected, earning its place by reaching every
-provider at once instead of being free. → [docs/harness.md](docs/harness.md)
+<img src=".github/assets/subject.svg" alt="A subject in Oculus with its Ed Discussion threads open" width="100%">
 
-**Bring your own files.** A tutor's handout, an old exam, anything not on
-Canvas — add it to any subject and it's parsed, embedded and searchable
-exactly like a scraped file. It's the one folder a sync never touches, which
-is what makes it the one folder you can delete from freely.
+## Chat with your coursework
 
-**Lectures.** Echo360 recordings download and play in-app. Chapter boundaries
-are detected and named by a CLI agent, shown as a dock list, a
-current-chapter strip and ticks on the scrub bar.
-→ [docs/chapters.md](docs/chapters.md)
+Use the coding agent you already have — Claude Code, Codex, opencode or
+Antigravity. It runs inside your library with the `oculus` CLI as its tool, and
+you can see every step it takes.
 
-**Projects.** An assignment broken into tasks: an Overview with a brief, tags
-and a pinned deadline; the tasks on a board, a table or a timeline; a page per
-task. A second tab holds a universal view across every project at once,
-filtered by status, subject or due date, for the tasks that belong to no
-project at all. All of it writable by the agent through the CLI.
-→ [docs/projects.md](docs/projects.md)
+<img src=".github/assets/chat.svg" alt="A chat thread: a question about the week 6 quiz, the agent's search and read steps, and its answer" width="100%">
 
-**Calendar.** Class times, due dates and recordings on one grid.
-→ [docs/calendar.md](docs/calendar.md)
+## An assistant in every lecture
 
-**An in-app browser.** External links open as tabs in Oculus's own strip,
-already signed in to Canvas, with the site's own favicon, honest back/forward,
-page zoom and find in page.
+Recordings download and play in-app, with the chat open beside them. Ask about
+the bit you just missed and it answers from the lecture itself.
 
-**A headless CLI.** The same engine without the window: `oculus run` to
-scrape, `oculus search` and `oculus grep` to find, `oculus auth` to sign in,
-plus the `project`/`task` commands the agent plans through, and `oculus agent`
-to drive any of the four bridges from a terminal.
-→ [docs/cli.md](docs/cli.md), [docs/cli-reference.md](docs/cli-reference.md)
+<img src=".github/assets/lecture.svg" alt="A lecture recording playing with the chat panel open beside it" width="100%">
 
----
+## Projects and calendar
 
-## Two processes
+Break an assignment into tasks on a board, table or timeline, and see classes
+and due dates on one calendar. Your agent can plan with you there too.
 
-| Process | Lives in | Does |
-| --- | --- | --- |
-| **Frontend** | `app/src/` | React 19, Vite, Tailwind v4, shadcn/ui |
-| **Rust core** | `app/src-tauri/` | Tauri commands, the scrape engine, PDF parsing and page embedding (both in-process, over HTTPS to MinerU and Voyage), retrieval, the CLI-agent bridges, the `oculus` CLI |
+<img src=".github/assets/projects.svg" alt="An assignment's tasks on a board, with its due date on the week's calendar" width="100%">
 
-All scraping lives in Rust for a specific reason: macOS suspends an off-screen
-WKWebView's content process, so background work in a hidden WebView silently
-freezes. → [docs/architecture.md](docs/architecture.md)
+### Also
 
----
+- Drop in your own files — old exams, handouts — and they work like synced ones
+- An in-app browser that's already signed in to Canvas
+- A headless `oculus` CLI with the same engine
 
-## Setup
+### Where your data goes
 
-### Prerequisites
+No Oculus server, no Oculus account — your library stays on your Mac. Only
+two things leave it: PDFs, if you parse with MinerU's cloud rather than a MinerU
+you run yourself, and page images, if you turn on embedding (Voyage).
 
-- **[bun](https://bun.sh)** — never npm/yarn/pnpm. `app/bun.lock` is the only
-  lockfile, and Tauri itself shells out to `bun run`.
-- **Rust** (stable, via [rustup](https://rustup.rs))
-- **[sccache](https://github.com/mozilla/sccache)** —
-  `brew install sccache`. Not optional: `app/src-tauri/.cargo/config.toml` sets
-  `rustc-wrapper = "sccache"`, and cargo fails outright if the wrapper is
-  missing (`could not execute process sccache ... (never executed)`).
-- **macOS.** The keep-alive LaunchAgent, the window chrome and the WebView
-  behaviour notes are all macOS-specific.
+## Platform
 
-### First run
+Mac first for now. Windows support is a main priority.
 
-```sh
+## Run it
+
+Downloads are coming soon. Until then you can run it from source — you'll
+need [bun](https://bun.sh), [Rust](https://rustup.rs) and
+[sccache](https://github.com/mozilla/sccache) (`brew install sccache`).
+
+```bash
 cd app
 bun install
-bun run predev      # ffmpeg, libpdfium and the debug `oculus` CLI, in one step
+bun run tauri dev
 ```
 
-`predev` is the whole preflight, is idempotent, and is also what `bun run dev`
-and `bun run tauri dev` run first on their own — you rarely need to call it by
-hand. `OCULUS_SKIP_PREDEV=1` skips it when you only want vite.
+The first build is slow (a few hundred crates); after that it's quick.
+[docs/development.md](docs/development.md) has the rest.
 
-### Running
+## Docs
 
-```sh
-cd app
-bun run tauri dev       # the app
-bun run tauri build     # release build → .app bundle
-bun run cli             # the headless `oculus` binary, release profile
-bun run cli:install     # + symlink into ~/.local/bin
-```
+[docs/index.md](docs/index.md) is the map — what lives where and why.
 
-The first Rust build is cold and slow — several hundred crates. After that
-sccache makes rebuilds quick.
+## License
 
-→ [docs/development.md](docs/development.md) for the full command list, the
-dev-CLI staleness guard, environment overrides, and the test/benchmark
-commands.
+Not picked yet. The plan is to open the source up for non-commercial use, with
+credit. Until a license lands, all rights are reserved.
 
-### Installing it properly
+## Use it sensibly
 
-`tauri dev` binaries live under `target/`, which build caches routinely clear.
-Since the keep-alive LaunchAgent stores an absolute path to the CLI, a
-`cargo clean` can silently disable it — launchd keeps running the job, finds
-nothing, and exits 0. For daily use, `bun run tauri build`, copy the `.app` to
-`/Applications`, and sign in once from there so the agent points inside the
-bundle.
+Oculus isn't affiliated with or endorsed by the University of Melbourne. It
+signs in as you, to material you already have access to, and your session stays
+on your own machine.
 
----
-
-## Where your data lives
-
-```
-~/Library/Application Support/com.tchan.oculus/
-├── oculus.db                  # subjects, files, pages + embeddings, projects, chat threads
-├── courses/<CODE>/            # files/, pages/, modules/, ed/, assignments/, images/, uploads/
-├── agents/                    # the CLI agent's workspace
-├── canvas-session.cookie      # replayed on every Canvas request
-├── canvas-session/authenticated
-├── mineru-usage.json          # daily parse allowance + quota latch
-├── voyage-usage.json          # embedding allowance, rate-limit tier, the spend guard
-└── file-manifest.json         # what's downloaded, for incremental syncs
-```
-
-Deleting that directory is a full reset, auth included. Canvas-derived content
-re-syncs; a subject's own uploads, chats, projects and settings do not.
-Credentials live in the macOS keychain (Canvas SSO, the MinerU token, the
-Voyage API key) separately from all of the above — no model weights sit on
-disk anywhere, since neither cloud client downloads one.
-
----
-
-## Repo layout
-
-| Path | What it is |
-| --- | --- |
-| `app/src/` | React frontend — routes, layouts, stores, the UI system |
-| `app/src-tauri/src/` | Rust — commands, `sync.rs`, `okta.rs`, `retrieval.rs`, and the `parse/`/`embed/`/`harness/` seams |
-| `app/src-tauri/src/bin/oculus.rs` | The headless CLI over the same engine |
-| `docs/` | The map: where things live, how they connect, why |
-| `CLAUDE.md` | The short list of rules for coding agents |
-
-Start at [docs/index.md](docs/index.md). The pages are written to be read
-*before* exploring source, and they record what the code alone won't tell you
-rather than restating it.
-
----
-
-## Status
-
-**Built:** Canvas SSO and sync, Ed Discussion, Echo360 download and playback,
-PDF parsing (MinerU cloud or a MinerU you run), page-image retrieval plus a
-local lexical index, chat as a CLI agent over four bridges (Claude Code,
-Codex, opencode, Antigravity), your own files alongside the scraped ones,
-lecture chapters, projects with a universal tasks view, the calendar, a home
-launcher, and an in-app browser.
-
-**Removed:** the **BYOK API layer** — provider config, keychain keys, an
-OpenAI-compatible streaming client, spend limits. Deleted rather than woken
-up once the CLI-agent bridges replaced it; opencode is the API path now,
-reached as a bridge rather than a parallel world.
-
-**Removed:** **automations and the Inbox**, and scheduled sync along with
-them — sync is manual-only. The last commit that has them is `d64dc11`,
-reachable from master's history.
-
----
-
-## Not affiliated with the University of Melbourne
-
-Oculus is a personal tool that signs in as you, to material you already have
-access to, and keeps your Canvas session local to your own machine.
+Use it at your own risk, and in line with your university's rules on AI use
+and academic integrity. Oculus and its authors take no responsibility for how
+it's used, or for anything that happens to your university accounts (Canvas,
+Ed, Echo360) along the way — including access being limited or blocked.
