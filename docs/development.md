@@ -188,7 +188,6 @@ the path.
   against the renderer it was ported from.
 - Real parse regressions: the gitignored golden fixtures in
   `data/parse-fixtures/` ([parsing.md](./parsing.md)).
-- Retrieval smoke test: `app/src-tauri/src/bin/retrieval_smoke.rs`.
 - After UI changes, screenshot the running app — layout bugs show only in the
   WebView: `screencapture -x -o -l<windowid>`, where the dev window's owner is
   "app".
