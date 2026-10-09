@@ -60,7 +60,7 @@ impl Ed {
         let token = token.trim();
         let user = get_json(token, "/user")?;
         let name = user["user"]["name"].as_str().unwrap_or("Ed user").to_string();
-        std::fs::write(token_path(data_dir), token).map_err(|e| e.to_string())?;
+        crate::paths::write_private(&token_path(data_dir), token).map_err(|e| e.to_string())?;
         Ok(name)
     }
 
@@ -100,7 +100,7 @@ impl Ed {
             return;
         };
         if new != token {
-            if let Err(e) = std::fs::write(&self.token_path, &new) {
+            if let Err(e) = crate::paths::write_private(&self.token_path, &new) {
                 eprintln!("[oculus] ed token write failed: {e}");
             }
             *self.token.lock().unwrap() = new;
@@ -157,7 +157,7 @@ impl Ed {
             .ok_or("login_token exchange returned no token")?
             .to_string();
 
-        std::fs::write(&self.token_path, &token).map_err(|e| e.to_string())?;
+        crate::paths::write_private(&self.token_path, &token).map_err(|e| e.to_string())?;
         *self.token.lock().unwrap() = token;
         // The old session's enrolment list must not outlive it.
         *self.courses.lock().unwrap() = None;
