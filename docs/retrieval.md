@@ -27,7 +27,6 @@ over the same pages sits beside it.
 | Lexical query (`searchPageText`) | `app/src/lib/db.ts` |
 | Parse → embed hop | `app/src/hooks/useBackendEvents.ts` |
 | Terminal query path (`oculus search`) | `app/src-tauri/src/bin/oculus/query.rs` |
-| Smoke test | `app/src-tauri/src/bin/retrieval_smoke.rs` |
 
 ## Page images are embedded, not text — measured
 

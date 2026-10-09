@@ -4,8 +4,9 @@ version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
-# `src/bin/retrieval_smoke.rs` is a second binary, which makes a bare
-# `cargo run` (what `tauri dev` issues) ambiguous without this.
+# `src/bin/oculus/` is a second binary, which makes a bare `cargo run` (what
+# `tauri dev` issues) ambiguous without this. The Tauri bundler copies every
+# entry under `src/bin/` into `Contents/MacOS/`, so only shipped bins go there.
 default-run = "app"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
