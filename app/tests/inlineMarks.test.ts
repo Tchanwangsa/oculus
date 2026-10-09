@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { EditorSelection, EditorState, type StateCommand } from "@codemirror/state";
 import { markdownLanguage } from "@codemirror/lang-markdown";
+import type { MarkdownParser } from "@lezer/markdown";
 import { Language, syntaxTree } from "@codemirror/language";
 import { MathSyntax } from "../src/components/documents/editor/mathSyntax";
 import {
@@ -11,7 +12,7 @@ import {
   toggleStrike,
 } from "../src/components/documents/editor/commands";
 
-const language = new Language(markdownLanguage.data, markdownLanguage.parser.configure(MathSyntax));
+const language = new Language(markdownLanguage.data, (markdownLanguage.parser as MarkdownParser).configure(MathSyntax));
 
 /** Runs `command` with `sel` (a substring of `doc`, or null for a caret at
  *  `at`) selected; returns the document and the text left selected. */

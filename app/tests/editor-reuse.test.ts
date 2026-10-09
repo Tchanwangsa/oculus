@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { commonmarkLanguage } from "@codemirror/lang-markdown";
+import type { MarkdownParser } from "@lezer/markdown";
 import { Language } from "@codemirror/language";
 import { MathSyntax } from "../src/components/documents/editor/mathSyntax";
 import { mathAt } from "../src/components/documents/editor/mathContext";
@@ -8,7 +9,7 @@ import { ancestorAt } from "../src/components/documents/editor/syntax";
 import { toggleBold } from "../src/components/documents/editor/commands";
 import { cellChange, cellText, movedColumns, movedRows, parseTable, removeCells } from "../src/components/documents/editor/tableModel";
 
-const language = new Language(commonmarkLanguage.data, commonmarkLanguage.parser.configure(MathSyntax));
+const language = new Language(commonmarkLanguage.data, (commonmarkLanguage.parser as MarkdownParser).configure(MathSyntax));
 const stateFor = (doc: string, from = 0, to = from) => EditorState.create({
   doc, selection: EditorSelection.range(from, to), extensions: [language],
 });
