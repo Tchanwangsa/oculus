@@ -379,6 +379,84 @@ pub fn seed_sessions(_app: &AppHandle, then: impl FnOnce() + Send + 'static) {
     then();
 }
 
+/// Whether a cookie scoped to `domain` is sent to `host`, as
+/// `cookies_for_url` decides it.
+fn sent_to(domain: &str, host: &str) -> bool {
+    let domain = domain.trim_start_matches('.');
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+/// Deletes every cookie WebKit's shared jar would send to Canvas or Okta, then
+/// runs `then`. Sign-out calls it: otherwise a browser tab is still signed in
+/// and a Canvas page saves the session straight back to disk. `then` is
+/// dropped uncalled when the main thread cannot be reached.
+#[cfg(target_os = "macos")]
+pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
+    use std::cell::Cell;
+    use std::ptr::NonNull;
+    use std::rc::Rc;
+
+    use block2::RcBlock;
+    use objc2::MainThreadMarker;
+    use objc2_foundation::{NSArray, NSHTTPCookie};
+    use objc2_web_kit::WKWebsiteDataStore;
+
+    let then: Box<dyn FnOnce() + Send> = Box::new(then);
+    let result = app.run_on_main_thread(move || {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let store = unsafe { WKWebsiteDataStore::defaultDataStore(mtm).httpCookieStore() };
+        let then = Rc::new(Cell::new(Some(then)));
+        let get_store = store.clone();
+        let got_all = RcBlock::new(move |all: NonNull<NSArray<NSHTTPCookie>>| {
+            let all = unsafe { all.as_ref() };
+            let ours: Vec<_> = all
+                .iter()
+                .filter(|c| {
+                    let domain = c.domain().to_string();
+                    sent_to(&domain, CANVAS_HOST) || sent_to(&domain, crate::okta::SSO_HOST)
+                })
+                .collect();
+            let count = ours.len();
+            let finish = {
+                let then = then.clone();
+                Rc::new(move || {
+                    if let Some(then) = then.take() {
+                        eprintln!("[oculus] browser: cleared {count} Canvas and Okta cookies from WebKit");
+                        then();
+                    }
+                })
+            };
+            if ours.is_empty() {
+                finish();
+                return;
+            }
+            let pending = Rc::new(Cell::new(count));
+            for cookie in &ours {
+                let pending = pending.clone();
+                let finish = finish.clone();
+                let deleted = RcBlock::new(move || {
+                    pending.set(pending.get() - 1);
+                    if pending.get() == 0 {
+                        finish();
+                    }
+                });
+                unsafe { store.deleteCookie_completionHandler(cookie, Some(&deleted)) };
+            }
+        });
+        unsafe { get_store.getAllCookies(&got_all) };
+    });
+    if result.is_err() {
+        eprintln!("[oculus] browser: could not reach the main thread to clear cookies");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn clear_sessions(_app: &AppHandle, then: impl FnOnce() + Send + 'static) {
+    then();
+}
+
 // ── Layout ──────────────────────────────────────────────────────────────
 
 /// Seeds the cookie jar and hooks the main window's resize. From `setup`.
@@ -1240,4 +1318,19 @@ pub fn browser_close_tab(app: AppHandle, id: u32) {
         s.shown.remove(&id);
     });
     broadcast(&app);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sign_out_clears_what_cookies_for_url_would_send() {
+        assert!(sent_to("canvas.lms.unimelb.edu.au", CANVAS_HOST));
+        assert!(sent_to(".unimelb.edu.au", CANVAS_HOST));
+        assert!(sent_to(".sso.unimelb.edu.au", crate::okta::SSO_HOST));
+        assert!(!sent_to("library.unimelb.edu.au", CANVAS_HOST));
+        assert!(!sent_to("lms.unimelb.edu.au.evil.com", CANVAS_HOST));
+        assert!(!sent_to("edstem.org", crate::okta::SSO_HOST));
+    }
 }

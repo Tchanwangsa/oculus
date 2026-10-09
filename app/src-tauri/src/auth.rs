@@ -241,6 +241,12 @@ pub async fn disconnect_canvas(
         win.close().map_err(|e| e.to_string())?;
     }
 
+    // The jar first, or a Canvas tab saves the session straight back.
+    let (cleared, done) = tokio::sync::oneshot::channel();
+    crate::browser::clear_sessions(&app, move || {
+        cleared.send(()).ok();
+    });
+    done.await.ok();
     crate::paths::sign_out(&crate::paths::data_dir()).map_err(|e| e.to_string())?;
     Ok(())
 }

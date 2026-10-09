@@ -42,10 +42,18 @@ is on the page either way; only its `disabled` attribute tells you.)
   probes the cookie: `Valid` confirms, `Rejected` clears the flag (keeping the
   Okta snapshot) and emits `canvas-auth-expired`, `Unreachable` stays connected.
 - Signing out (Settings or `oculus auth logout`, both `paths::sign_out`)
-  deletes the Canvas and Okta snapshots and the flag. The Okta one goes too,
-  or the in-app browser would pass through SSO and re-save a Canvas session.
-  The [attempt record](#every-sign-in-attempt-goes-through-one-guard) stays,
-  so a lockout pause outlives a sign-out.
+  deletes the Canvas, Okta and Ed snapshots and the flag, and writes
+  `canvas-session/signed-out`. The Okta one goes too, or the in-app browser
+  would pass through SSO and re-save a Canvas session. The
+  [attempt record](#every-sign-in-attempt-goes-through-one-guard) stays, so a
+  lockout pause outlives a sign-out.
+- The marker keeps every automatic sign-in off (`LoginError::SignedOut`)
+  until a session is established again: `paths::mark_authenticated` removes
+  it.
+- Settings' sign-out first deletes every cookie WebKit would send to Canvas
+  or Okta (`browser::clear_sessions`), or a tab still signed in would save the
+  session straight back. `oculus auth logout` cannot reach a running app's
+  jar, so a Canvas tab open there can still re-save the cookie.
 
 ## The in-app browser is seeded with the same sessions
 
@@ -81,7 +89,8 @@ passes straight through.
   sign-in. Every outcome is a line in `session-keepalive.log` and exit 0,
   because launchd has no console and a non-zero exit reads as a crashed job.
 - The tick re-authenticates only on `Rejected`; on `Unreachable` it logs and
-  waits rather than spending an Okta attempt on a dead network.
+  waits rather than spending an Okta attempt on a dead network. After a
+  sign-out it logs and does nothing.
 - The agent installs itself only after a headless sign-in has succeeded
   (`keepalive::ensure_installed`), not when credentials are stored: an org
   that offers only push or WebAuthn would fail every six hours forever.
@@ -137,6 +146,8 @@ every attempt with its caller to `okta-sign-in.log`.
   credentials also clears the pause.
 - Manual attempts skip the wait, because a person is waiting on the answer,
   but are still recorded.
+- After a sign-out no automatic attempt starts at all, and none is recorded
+  (`LoginError::SignedOut`).
 
 ## Ed mints its `x-token` from Canvas
 
