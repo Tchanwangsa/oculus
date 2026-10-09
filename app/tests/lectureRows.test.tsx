@@ -19,7 +19,7 @@ function render(progress: Record<string, DlProgress>, active: Record<string, boo
   snapshot.active = active;
   try {
     return renderToStaticMarkup(
-      <LectureRow lecture={lecture} active={false} onSelect={noop} onDownload={noop} onDelete={noop} />,
+      <LectureRow lecture={lecture} active={false} onSelect={noop} onDownload={noop} onDelete={noop} onToggleDone={noop} />,
     );
   } finally {
     snapshot.progress = original.progress;

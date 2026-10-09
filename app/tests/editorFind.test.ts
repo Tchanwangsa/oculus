@@ -29,7 +29,6 @@ function fakeView(doc: string, extra: Extension = [], anchor = 0) {
   return view as typeof view & EditorView;
 }
 
-const selected = (v: EditorView) => v.state.sliceDoc(v.state.selection.main.from, v.state.selection.main.to);
 const sel = (v: EditorView) => [v.state.selection.main.from, v.state.selection.main.to];
 
 describe("matching", () => {

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   messageAt, parseErrorMeta, parseItemMeta, parsePermissionMeta, parseToolMeta,
-  type HarnessItem,
+  type HarnessItem, type ToolMeta,
 } from "../src/lib/harness";
 
 const row = (meta: string | null): HarnessItem => ({
@@ -27,7 +27,7 @@ test("metadata caches follow immutable row replacement and preserve all tool fie
   expect(parseToolMeta(item)).toBe(parseToolMeta(item));
   expect(messageAt(item)).toBe(0);
   const finished = { ...item, meta: JSON.stringify({ ...meta, ok: true, output: "done" }) };
-  expect(parseToolMeta(finished)).toEqual({ kind: "bash", input: { args: [] }, ok: true, at: 0, output: "done" });
+  expect(parseToolMeta(finished)).toEqual({ kind: "bash", input: { args: [] }, ok: true, at: 0, output: "done" } as ToolMeta);
   expect(parseToolMeta(item).ok).toBe(false);
 });
 
