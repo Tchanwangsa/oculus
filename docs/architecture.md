@@ -134,9 +134,10 @@ app links too, for the client and the installer only.
   same-user caller. The adapter also gives each caller a role — `app` (the
   bundle itself), `cli` (its `Contents/MacOS/oculus`) or `unknown`; a dev
   build goes by file name, `app` or `oculus` — which the log records beside
-  the signing identifier. Ops are to check the role, never a path: the four
-  Okta ops admit only `app` and `cli`, because every executable in the install
-  passes the caller check.
+  the signing identifier. Ops check the role, never a path, and in one place
+  (`State::dispatch`): every op but `ping` needs `app` or `cli`, because every
+  executable in the install (ffmpeg ships in it) passes the caller check.
+  `ping` answers whoever was admitted, for diagnostics.
 - **keyd holds the Okta credentials and runs the sign-in.** The username,
   password and TOTP seed are vault entries, written together by `okta_save`
   (which validates) and removed together by `okta_forget`. `ensure_signed_in`

@@ -12,7 +12,7 @@ cookie.
 | Cookie (Canvas and Okta), auth-flag and keep-alive log paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
 | The app's Okta commands and calls: each goes to keyd, or to the keychain and an in-process sign-in when keyd is absent | `app/src-tauri/src/okta.rs` |
 | The sign-in flow, TOTP and the attempt guard — one implementation, run by keyd and by the in-process fallback | `app/keyd/core/src/okta/` |
-| keyd's Okta ops: the vault entries, the old-item import, the role check, one sign-in at a time | `app/keyd/core/src/ops/okta.rs` |
+| keyd's Okta ops: the vault entries, the old-item import, one sign-in at a time; the role check every op passes | `app/keyd/core/src/ops/okta.rs`, `app/keyd/core/src/ops.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
 | Staging the CLI into the bundle | `app/scripts/stage-cli.mjs` |
@@ -178,8 +178,9 @@ typed.
   forget marks all three imported, so an old item is never copied back over
   either.
 - **The app and the CLI only.** keyd's caller check admits any executable
-  in the install, so each Okta op also requires the `app` or `cli` role;
-  ffmpeg, whisper-cli and the like are refused.
+  in the install, so every op but `ping` (not just the Okta ones) also
+  requires the `app` or `cli` role; ffmpeg, which ships in the bundle, is
+  refused. The check is `ops::require_role`, called once by `dispatch`.
 - **One sign-in runs at a time.** A request that arrives while keyd is
   signing in waits for that attempt and returns its outcome, rather than
   starting another or being held off by the guard. The socket has no timeout

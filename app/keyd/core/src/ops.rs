@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use crate::clock::Clock;
 use crate::forward::{Call, Routes, Upstream};
 use crate::names;
-use crate::platform::Caller;
+use crate::platform::{Caller, Role};
 use crate::vault::{KeyError, KeySource, LegacySource, MasterKey, Vault, VaultError};
 
 /// What `ping` reports: keyd's version and the source hash its build script
@@ -62,8 +62,8 @@ pub struct State {
 
 /// An op's failure as it goes on the wire: `{"error": kind, "detail": …}`.
 /// Kinds: `request` (malformed, unknown op or name, a refused path or header),
-/// `caller` (refused: the peer check, or an Okta op asked by a program that
-/// is neither the app nor the CLI), `keychain` (the master key, or an old item
+/// `caller` (refused: the peer check, or any op but `ping` asked by a program
+/// that is neither the app nor the CLI), `keychain` (the master key, or an old item
 /// being imported, was refused or failed), `vault`, `missing` (`forward` for a
 /// secret the vault does not hold), `upstream` (`forward` got no answer: DNS,
 /// connect, TLS or a reset).
@@ -189,8 +189,8 @@ impl State {
 
     /// One request. `body` is the raw bytes after the header line; only
     /// `forward` takes any. No reply carries a secret value. `caller` is who
-    /// asked: the Okta ops are for the app and the CLI only, while the rest
-    /// are open to any admitted caller.
+    /// asked: the peer check admits any executable in the install (ffmpeg
+    /// ships in it), so every op but `ping` also needs the app or the CLI.
     pub fn dispatch(
         &self,
         caller: &Caller,
@@ -198,6 +198,7 @@ impl State {
         req: &Value,
         body: &[u8],
     ) -> Result<Reply, OpError> {
+        require_role(op, caller.role)?;
         if !body.is_empty() && op != "forward" {
             return Err(OpError::new("request", format!("{op} takes no body")));
         }
@@ -240,9 +241,9 @@ impl State {
                 Ok(json!({"existed": existed}).into())
             }
             "forward" => self.forward(req, body),
-            "okta_save" => self.okta_save(caller, req),
-            "okta_forget" => self.okta_forget(caller),
-            "okta_status" => self.okta_status(caller),
+            "okta_save" => self.okta_save(req),
+            "okta_forget" => self.okta_forget(),
+            "okta_status" => self.okta_status(),
             "ensure_signed_in" => self.ensure_signed_in(caller, req),
             _ => Err(OpError::new("request", format!("unknown op {op:?}"))),
         }
@@ -325,6 +326,18 @@ impl State {
     }
 }
 
+/// The one place an op's caller is judged, so a new op cannot forget it.
+/// `ping` answers whoever the peer check admitted, for diagnostics.
+fn require_role(op: &str, role: Role) -> Result<(), OpError> {
+    match (op, role) {
+        ("ping", _) | (_, Role::App | Role::Cli) => Ok(()),
+        (_, Role::Unknown) => Err(OpError::new(
+            "caller",
+            "this op is for the Oculus app and CLI only",
+        )),
+    }
+}
+
 fn imported_marker(name: &str) -> Option<String> {
     IMPORTED_ON_USE
         .contains(&name)
@@ -376,6 +389,17 @@ mod tests {
     use crate::test_support::{Answer, FakeOrigin, OldItems, Reads, Scratch, BUILD};
     use crate::vault::{NoLegacy, StaticKey};
 
+    fn as_role(role: Role) -> Caller {
+        Caller {
+            role,
+            ..Caller::default()
+        }
+    }
+
+    fn cli() -> Caller {
+        as_role(Role::Cli)
+    }
+
     fn key() -> MasterKey {
         MasterKey::from_bytes([9; 32])
     }
@@ -391,7 +415,7 @@ mod tests {
 
     /// The reply's header, for ops that answer without a body.
     fn call(state: &State, op: &str, req: Value) -> Result<Value, OpError> {
-        state.dispatch(&Caller::default(), op, &req, b"").map(|r| {
+        state.dispatch(&cli(), op, &req, b"").map(|r| {
             assert!(r.body.is_empty());
             r.header
         })
@@ -431,7 +455,7 @@ mod tests {
         let dir = Scratch::new("refused");
         let state = State::new(BUILD, dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
         let err = state
-            .dispatch(&Caller::default(), "has", &json!({"secret": "voyage"}), b"")
+            .dispatch(&cli(), "has", &json!({"secret": "voyage"}), b"")
             .unwrap_err();
         assert_eq!(err.kind, "keychain");
         assert_eq!(err.to_json()["error"], "keychain");
@@ -455,7 +479,7 @@ mod tests {
             .map(|_| {
                 let s = state.clone();
                 std::thread::spawn(move || {
-                    s.dispatch(&Caller::default(), "has", &json!({"secret": "groq"}), b"")
+                    s.dispatch(&cli(), "has", &json!({"secret": "groq"}), b"")
                         .unwrap()
                         .header
                 })
@@ -496,6 +520,74 @@ mod tests {
         );
     }
 
+    /// One well-formed request for every op there is.
+    fn every_op() -> Vec<(&'static str, Value)> {
+        vec![
+            ("has", json!({"secret": "voyage"})),
+            ("store", json!({"secret": "voyage", "value": "pa-x"})),
+            ("delete", json!({"secret": "voyage"})),
+            (
+                "forward",
+                json!({"secret": "voyage", "method": "POST", "path": "/v1/x"}),
+            ),
+            (
+                "okta_save",
+                json!({"username": "u", "password": "p", "totp_secret": "GEZD"}),
+            ),
+            ("okta_forget", json!({})),
+            ("okta_status", json!({})),
+            ("ensure_signed_in", json!({"trigger": "manual"})),
+            ("a_future_op", json!({})),
+        ]
+    }
+
+    #[test]
+    fn every_op_but_ping_refuses_a_caller_of_no_role_before_anything_runs() {
+        let dir = Scratch::new("no-role");
+        let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let state = State::new(
+            BUILD,
+            dir.0.clone(),
+            Box::new(Counting(reads.clone())),
+            Box::new(NoLegacy),
+        );
+        let nobody = as_role(Role::Unknown);
+        for (op, req) in every_op() {
+            let err = state.dispatch(&nobody, op, &req, b"").unwrap_err();
+            assert_eq!(err.kind, "caller", "{op}");
+            assert!(!err.detail.contains(op), "{op}: {}", err.detail);
+        }
+        // Not even a body is read for it.
+        assert_eq!(
+            state
+                .dispatch(&nobody, "has", &json!({"secret": "voyage"}), b"x")
+                .unwrap_err()
+                .kind,
+            "caller"
+        );
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(!crate::paths::vault(&dir.0).exists());
+        assert!(!crate::paths::sign_in_record(&dir.0).exists());
+
+        // ping is the one op that answers everyone, for diagnostics.
+        let ping = state.dispatch(&nobody, "ping", &json!({}), b"").unwrap();
+        assert_eq!(ping.header["version"], BUILD.version);
+    }
+
+    #[test]
+    fn the_app_and_the_cli_get_past_the_role_gate_for_every_op() {
+        for role in [Role::App, Role::Cli] {
+            let dir = Scratch::new("with-role");
+            let state = state_in(&dir);
+            for (op, req) in every_op() {
+                // Whatever else the op says, it is not a refusal of the caller.
+                if let Err(e) = state.dispatch(&as_role(role), op, &req, b"") {
+                    assert_ne!(e.kind, "caller", "{role:?} {op}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn malformed_requests_are_request_errors() {
         let dir = Scratch::new("bad");
@@ -509,9 +601,7 @@ mod tests {
             ("store", json!({"secret": "voyage", "value": 5}), b""),
             ("ping", json!({}), b"x"),
         ] {
-            let err = state
-                .dispatch(&Caller::default(), op, &req, body)
-                .unwrap_err();
+            let err = state.dispatch(&cli(), op, &req, body).unwrap_err();
             assert_eq!(err.kind, "request", "{op} {req}");
         }
         assert!(!crate::paths::vault(&dir.0).exists(), "nothing was written");
@@ -537,7 +627,7 @@ mod tests {
             "headers": [["Content-Type", "application/json"], ["Accept", "application/json"]],
             "body_len": body.len(),
         });
-        state.dispatch(&Caller::default(), "forward", &req, body)
+        state.dispatch(&cli(), "forward", &req, body)
     }
 
     fn header<'a>(reply: &'a Reply, name: &str) -> Option<&'a str> {
@@ -687,9 +777,7 @@ mod tests {
             json!({"secret": "groq", "method": "POST", "path": "/api/v4/x"}),
             json!({"secret": "okta.password", "method": "POST", "path": "/v1/x"}),
         ] {
-            let err = state
-                .dispatch(&Caller::default(), "forward", &req, b"")
-                .unwrap_err();
+            let err = state.dispatch(&cli(), "forward", &req, b"").unwrap_err();
             assert_eq!(err.kind, "request", "{req}");
         }
     }

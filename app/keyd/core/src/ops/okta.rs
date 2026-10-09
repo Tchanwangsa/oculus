@@ -5,8 +5,8 @@
 //! `okta_save` and `okta_forget`, always together and always with their
 //! import markers, so an old keychain item is never copied back over a save
 //! or a forget. Every op is for the app and the CLI: the caller check admits
-//! any executable in the install (ffmpeg, whisper-cli), so the role is the
-//! real gate. A sign-in's outcome is a reply, not an error: the client
+//! any executable in the install (ffmpeg ships in it), so the role, checked
+//! once in `State::dispatch`, is the real gate. A sign-in's outcome is a reply, not an error: the client
 //! rebuilds the exact `LoginError`.
 
 use std::sync::{Condvar, Mutex, MutexGuard};
@@ -18,7 +18,7 @@ use crate::names;
 use crate::okta::{
     self, outcome_to_wire, CredentialStore, Credentials, Env, LoginError, OktaStatus, Trigger,
 };
-use crate::platform::{Caller, Role};
+use crate::platform::Caller;
 use crate::vault::Vault;
 
 type Outcome = Result<String, LoginError>;
@@ -149,17 +149,6 @@ impl CredentialStore for VaultStore<'_> {
     }
 }
 
-/// Refuses a caller that is neither the app nor the CLI.
-fn require_user(caller: &Caller) -> Result<(), OpError> {
-    match caller.role {
-        Role::App | Role::Cli => Ok(()),
-        Role::Unknown => Err(OpError::new(
-            "caller",
-            "the Okta credentials are for the Oculus app and CLI only",
-        )),
-    }
-}
-
 impl State {
     /// Copies each Okta item's old keychain item in, once. Each costs one
     /// keychain prompt, ever; a refusal is a `keychain` error and is retried.
@@ -172,8 +161,7 @@ impl State {
     /// `{username, password, totp_secret}` in, `{"saved": true}` out. Invalid
     /// input is a `request` error carrying the shared message, and writes
     /// nothing. The three values and their markers land in one vault write.
-    pub(super) fn okta_save(&self, caller: &Caller, req: &Value) -> Result<Reply, OpError> {
-        require_user(caller)?;
+    pub(super) fn okta_save(&self, req: &Value) -> Result<Reply, OpError> {
         let field = |key: &str| {
             req.get(key).and_then(Value::as_str).ok_or_else(|| {
                 OpError::new("request", format!("okta_save needs a string \"{key}\""))
@@ -208,8 +196,7 @@ impl State {
 
     /// Removes all three values; `{"existed": bool}` says whether any was
     /// there. Their markers are set, so nothing is imported afterwards.
-    pub(super) fn okta_forget(&self, caller: &Caller) -> Result<Reply, OpError> {
-        require_user(caller)?;
+    pub(super) fn okta_forget(&self) -> Result<Reply, OpError> {
         let existed = self.vault()?.update(|e| {
             let mut any = false;
             for name in names::OKTA {
@@ -222,8 +209,7 @@ impl State {
     }
 
     /// What is on file: the username, and whether a password and a seed are.
-    pub(super) fn okta_status(&self, caller: &Caller) -> Result<Reply, OpError> {
-        require_user(caller)?;
+    pub(super) fn okta_status(&self) -> Result<Reply, OpError> {
         let vault = self.vault()?;
         self.import_okta(&vault)?;
         let entries = vault.load()?;
@@ -240,7 +226,6 @@ impl State {
     /// its outcome. The attempt guard, the log and both cookie files are
     /// `okta::sign_in`'s.
     pub(super) fn ensure_signed_in(&self, caller: &Caller, req: &Value) -> Result<Reply, OpError> {
-        require_user(caller)?;
         let trigger = req
             .get("trigger")
             .and_then(Value::as_str)
@@ -280,6 +265,7 @@ mod tests {
 
     use super::*;
     use crate::okta::outcome_from_wire;
+    use crate::platform::Role;
     use crate::test_support::okta_fake::{
         answer, code_from_t0, script, COOKIE, PASSWORD, SEED, T0, USERNAME,
     };
@@ -690,14 +676,17 @@ mod tests {
             op(&state, &cli(), "has", json!({"secret": "okta.password"})).unwrap(),
             json!({"has": true})
         );
-        // Even a caller of no role may ask whether a value exists, as for any key.
-        assert!(op(
-            &state,
-            &as_role(Role::Unknown),
-            "has",
-            json!({"secret": "okta.password"})
-        )
-        .is_ok());
+        // A caller of no role may not even ask whether a value exists.
+        for name in ["okta.password", "voyage"] {
+            let err = op(
+                &state,
+                &as_role(Role::Unknown),
+                "has",
+                json!({"secret": name}),
+            )
+            .unwrap_err();
+            assert_eq!(err.kind, "caller", "{name}");
+        }
     }
 
     // ── Import on first use ──────────────────────────────────────────────────

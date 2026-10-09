@@ -748,7 +748,7 @@ mod against_keyd {
     }
 
     #[test]
-    fn a_caller_of_no_role_is_refused_every_okta_call_but_may_ask_has() {
+    fn a_caller_of_no_role_is_refused_every_call_but_ping() {
         let fake = FakeOrigin::start(script(code_from_t0));
         let (keyd, dir, _clock) = serve(Role::Unknown, &fake);
         assert!(matches!(keyd.okta_status(), Err(KeydError::Caller(_))));
@@ -761,9 +761,23 @@ mod against_keyd {
             keyd.ensure_signed_in(Trigger::Manual),
             Err(KeydError::Caller(_))
         ));
+        assert!(matches!(
+            keyd.has("okta.password"),
+            Err(KeydError::Caller(_))
+        ));
+        assert!(matches!(keyd.has("voyage"), Err(KeydError::Caller(_))));
+        assert!(matches!(
+            keyd.store("voyage", "pa-x"),
+            Err(KeydError::Caller(_))
+        ));
+        assert!(matches!(keyd.delete("voyage"), Err(KeydError::Caller(_))));
+        assert!(matches!(
+            keyd.send("voyage", "GET", "/v1/x", &[], b"", Some(OP_TIMEOUT)),
+            Err(KeydError::Caller(_))
+        ));
         assert!(!paths::vault(&dir.0).exists());
         assert!(fake.hits().is_empty());
-        assert!(!keyd.has("okta.password").unwrap());
+        assert_eq!(keyd.ping().unwrap()["version"], BUILD.version);
     }
 
     #[test]

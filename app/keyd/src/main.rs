@@ -18,7 +18,9 @@
 //! sign-in's fake Canvas and Okta: `http://127.0.0.1:<port>` or
 //! `http://localhost:<port>`, on different hosts), and OCULUS_KEYD_NOW (Unix
 //! seconds the sign-in and its attempt guard see for good, so a test never
-//! waits on a TOTP window). Release builds have none.
+//! waits on a TOTP window), and OCULUS_KEYD_TEST_ROLE (`app` or `cli`: the role
+//! every caller is given, so a test process need not be named `app` or
+//! `oculus`). Release builds have none.
 
 use std::path::PathBuf;
 use std::process::exit;
@@ -27,6 +29,8 @@ use std::time::Duration;
 
 use keyd_core::log;
 use keyd_core::ops::{Build, State};
+#[cfg(debug_assertions)]
+use keyd_core::platform::Role;
 use keyd_core::platform::{self, Listener, Policy};
 use keyd_core::server::Server;
 use keyd_core::vault::{KeySource, LegacySource};
@@ -96,7 +100,7 @@ fn serve(listeners: Vec<Listener>) {
     let state = with_test_origins(state);
     #[cfg(debug_assertions)]
     let state = with_test_clock(state);
-    let server = Arc::new(Server::new(state, platform::peer_check(POLICY), idle()));
+    let server = Arc::new(Server::new(state, peer_check(), idle()));
     server.run(&listeners);
 }
 
@@ -135,6 +139,46 @@ fn with_test_origins(state: State) -> State {
             ));
             exit(64);
         }
+    }
+}
+
+/// The caller check for `POLICY`. A debug build gives every caller the role in
+/// `OCULUS_KEYD_TEST_ROLE` when it is set.
+fn peer_check() -> Box<dyn platform::PeerCheck> {
+    let check = platform::peer_check(POLICY);
+    #[cfg(debug_assertions)]
+    if let Ok(name) = std::env::var("OCULUS_KEYD_TEST_ROLE") {
+        let role = match name.as_str() {
+            "app" => Role::App,
+            "cli" => Role::Cli,
+            _ => {
+                log("OCULUS_KEYD_TEST_ROLE is not app or cli");
+                exit(64);
+            }
+        };
+        return Box::new(TestRole { check, role });
+    }
+    check
+}
+
+/// The caller check, with every caller's role replaced.
+#[cfg(debug_assertions)]
+struct TestRole {
+    check: Box<dyn platform::PeerCheck>,
+    role: Role,
+}
+
+#[cfg(debug_assertions)]
+impl platform::PeerCheck for TestRole {
+    fn inspect(&self, conn: &platform::Conn) -> platform::Caller {
+        platform::Caller {
+            role: self.role,
+            ..self.check.inspect(conn)
+        }
+    }
+
+    fn admit(&self, caller: &platform::Caller) -> Result<(), String> {
+        self.check.admit(caller)
     }
 }
 
