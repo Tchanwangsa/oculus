@@ -289,7 +289,7 @@ all there is to it, and a whole sheet makes no usable page image.
 A `.csv` takes the same route as a one-sheet workbook named after its file,
 read by `csv_rows` rather than calamine: quoted fields, `""` and line breaks
 inside quotes, CRLF or LF, a UTF-8 BOM dropped, non-UTF-8 read as Latin-1,
-and `;` or tab as the delimiter when the first line uses it more than `,`.
+and `;`, tab or `|` as the delimiter when the first line uses it more than `,`.
 It has no formulas or merges, so it is only the table.
 
 - **The table holds values**, each formula cell's stored result. A formula
