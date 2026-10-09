@@ -364,13 +364,8 @@ impl Ctx {
     }
 
     pub(crate) fn logout(&self) -> Result<(), String> {
-        let cookie = app_lib::paths::cookie_path(&self.data_dir);
-        let session_dir = self.data_dir.join("canvas-session");
-        let had = cookie.exists() || session_dir.exists();
-
-        std::fs::remove_file(&cookie).ok();
-        // Removes the SSO profile too, so the next login is a fresh one.
-        std::fs::remove_dir_all(&session_dir).ok();
+        // Drops the Okta session too, so the next login is a fresh one.
+        let had = app_lib::paths::sign_out(&self.data_dir).map_err(|e| e.to_string())?;
 
         println!("{}", if had { paint("signed out", GREEN) } else { paint("no session to clear", DIM) });
         Ok(())
