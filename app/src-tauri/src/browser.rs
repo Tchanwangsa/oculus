@@ -622,9 +622,11 @@ fn create_page(app: &AppHandle, id: u32, url: url::Url) -> Result<(), String> {
             if !started {
                 // A signed-in Canvas load rolls the session forward;
                 // re-snapshot it. A signed-out one would save the anonymous
-                // cookie over the good one.
+                // cookie over the good one. If the app is not connected,
+                // someone signed in here, so connect it.
                 if crate::auth::is_authenticated_url(payload.url()) {
                     crate::auth::save_session_cookie(webview.app_handle());
+                    crate::auth::confirm_browser_sign_in(webview.app_handle());
                 }
                 if is_sso_app_entry(payload.url()) {
                     recover_sso(&load_app, id);
