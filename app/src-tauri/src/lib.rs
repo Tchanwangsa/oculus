@@ -36,6 +36,7 @@ mod ratelimit;
 pub mod reading;
 pub mod retrieval;
 mod scrape;
+pub mod sheets;
 mod storage;
 pub mod store;
 mod subjects;
@@ -94,6 +95,8 @@ pub fn run() {
             chapters::app::reconcile(app.handle());
             reading::app::reconcile(app.handle());
             lecture_end::app::reconcile(app.handle());
+            // Spreadsheets on record without their text (`docs/parsing.md`).
+            sheets::reconcile_in_background();
 
             // Open and active time per hour, from the window and the frontend's pings.
             usage::start(app.handle());

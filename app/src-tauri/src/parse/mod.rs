@@ -406,6 +406,10 @@ pub trait Parser: Send + Sync {
 /// is no PDF, so nothing was sent to any parser.
 pub const CONVERSION_FAILED: &str = "office-conversion";
 
+/// The `Document` code for a spreadsheet `crate::sheets` could not read: it
+/// is converted to text in-process, never parsed.
+pub const SHEET_UNREADABLE: &str = "sheet-unreadable";
+
 /// Why a parse did not happen. Nothing falls back (see `docs/parsing.md`), so the
 /// variants keep "wait", "retry" and "fix a setting" distinguishable.
 ///
@@ -524,6 +528,11 @@ impl fmt::Display for ParseError {
                 f,
                 "This file could not be converted to PDF, so there is nothing to parse. The \
                  next sync tries the conversion again."
+            ),
+            ParseError::Document { code } if code == SHEET_UNREADABLE => write!(
+                f,
+                "This spreadsheet could not be read, so it has no text. Other files are \
+                 unaffected."
             ),
             ParseError::Document { code } => write!(
                 f,
@@ -926,6 +935,14 @@ mod tests {
         assert_eq!(error.kind(), "document");
         assert!(!error.retryable());
         assert!(!error.latching());
+        assert!(!error.to_string().contains("MinerU"), "{error}");
+    }
+
+    #[test]
+    fn an_unreadable_spreadsheet_is_a_document_failure_that_does_not_blame_mineru() {
+        let error = ParseError::Document { code: SHEET_UNREADABLE.into() };
+        assert_eq!(error.kind(), "document");
+        assert!(!error.retryable());
         assert!(!error.to_string().contains("MinerU"), "{error}");
     }
 

@@ -12,6 +12,7 @@ absence.
 | What you are looking in | `oculus grep` | `oculus search` |
 | --- | --- | --- |
 | PDF and Office page text | yes, exactly | yes, by meaning |
+| Spreadsheets (one page per sheet) | yes | **no** |
 | Canvas pages, announcements, assignments, Ed threads | yes | **no** |
 | Lecture transcripts and outlines | **no** | **no** |
 

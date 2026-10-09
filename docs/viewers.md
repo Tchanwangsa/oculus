@@ -37,6 +37,9 @@ classes work even when there are no dollar delimiters.
   are deliberately *unlayered* — in `@layer base` they would lose to the
   utilities they override. **`InlineMd` flattens blocks** because chapter
   summaries sit inside buttons, and a `<p>` in a `<button>` closes it early.
+- **A spreadsheet opens as its text** (`marks.xlsx.md`, a table per sheet),
+  in-app like a PDF rather than in the system viewer (`openFile.ts`), with no
+  PDF ↔ Markdown toggle.
 - **`FileViewer` resolves in-file links locally** — relative links and Canvas
   `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`
   (`app/src/lib/libraryLinks.ts`, shared with the note editor). A selection

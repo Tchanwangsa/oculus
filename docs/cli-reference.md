@@ -328,7 +328,7 @@ Options:
 Search the library by pattern (offline, no model).
 
 Covers both halves of the library: the markdown on disk (Canvas pages, announcements,
-assignments, Ed threads) and the page text extracted from PDFs, which lives only in the
+assignments, Ed threads) and the page text of PDFs and spreadsheets, which lives in the
 database — ripgrep over the library directory cannot see it, which is why this exists.
 
 Needs no network and no model, so it is the fallback whenever `oculus search` cannot
@@ -373,9 +373,10 @@ Options:
 Print the text of one library file.
 
 For a PDF or Office document this is the parsed page markdown from the database, so
-`--pages` addresses the same page numbers `oculus search` and the app's viewer report.
-For markdown and other text it is the file on disk. A PDF that has never been parsed
-says so rather than printing nothing — run `oculus index <SUBJECT_CODE>` for it.
+`--pages` addresses the same page numbers `oculus search` and the app's viewer report. A
+spreadsheet's text is one page per sheet, in workbook order. For markdown and other text
+it is the file on disk. A PDF that has never been parsed says so rather than printing
+nothing — run `oculus index <SUBJECT_CODE>` for it.
 
 FILE may be a full library path, a bare filename, or any distinctive fragment of either.
 An ambiguous fragment lists the candidates instead of guessing.

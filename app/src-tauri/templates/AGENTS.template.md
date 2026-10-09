@@ -19,6 +19,7 @@ desktop app. Only `uploads/` and `documents/` are the student's own.
   ed/              Ed Discussion threads, NNNN-slug.md
   files/           downloads plus parsed siblings:
                      13.pdf  13.md  13.pages.json  13_images/
+                   a spreadsheet's text is beside it: marks.xlsx.md
   modules/         module pages, in course order; an item marked
                    _(video <id>)_ links where the video lands once the
                    student downloads it in the app — until then it is absent
@@ -35,6 +36,15 @@ desktop app. Only `uploads/` and `documents/` are the student's own.
 Per-page PDF text is **not** on disk — it lives in the Oculus database. Plain
 `grep`/`rg` over this folder silently misses every slide deck; `oculus grep`
 reads both halves.
+
+A spreadsheet (`.xlsx`, `.xlsm`, `.xls`, `.ods`) is text, not a PDF:
+`marks.xlsx.md` holds one `##` section per sheet as a table of the values
+the sheet shows, a merged block's value repeated in each of its cells, then
+`Formulas:` listing how computed cells are worked out (`- D9:D14: =PROPER(G9)`
+for a formula copied down). A cell reading `=FORMULA` is one the file stored
+no result for. Read it like any markdown, or `oculus read marks.xlsx --pages 2`
+for its second sheet; `oculus grep` finds it too. `oculus search` does not
+rank it.
 
 ## Rules
 

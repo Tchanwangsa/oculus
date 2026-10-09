@@ -156,6 +156,8 @@ fn store_upload(
     }
 
     // The derived sibling PDF for Office documents (`doc_pdf_rel` in paths.rs).
+    // A spreadsheet's text is written by the parse kick the frontend sends once
+    // the row exists (`parse_file` → `crate::sheets`).
     let warning = match crate::sync::office_ext_of(&name) {
         None => None,
         Some(ext) => match crate::sync::office_to_pdf(&bytes, ext) {

@@ -26,7 +26,7 @@ import {
 } from "@/lib/db";
 import { searchProjects, searchTasks } from "@/lib/projects";
 import { addressKind, hostOf, normalizeAddress } from "@/lib/browser";
-import { categoryIconFor, isPdfBacked } from "@/lib/fileTypes";
+import { categoryIconFor, isPipelineFile } from "@/lib/fileTypes";
 import { displayCode, displayName } from "@/lib/format";
 import { fmtLectureDate, lecturePagePath } from "@/lib/lectures";
 import { filePagePath, fileTitle, openFileSmart } from "@/lib/openFile";
@@ -164,7 +164,7 @@ function fileItem(f: LibraryFileHit): SearchItem {
     label: fileTitle(f),
     meta: displayCode(f.subject_code),
     target:
-      f.category === "file" && !isPdfBacked(f.filename)
+      f.category === "file" && !isPipelineFile(f.filename)
         ? { kind: "file", file: f }
         : { kind: "route", path: filePagePath(f.subject_id, f.relative_path) },
   };
