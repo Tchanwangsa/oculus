@@ -16,8 +16,11 @@ impl Ctx {
     ) -> Result<(), String> {
         let from = match from {
             Some(p) => p.to_path_buf(),
-            None => keyd::candidate()
-                .ok_or("no built oculus-keyd found — run `bun run keyd`, or pass --from")?,
+            None => keyd::candidate().ok_or_else(|| {
+                keyd::no_candidate_reason().unwrap_or_else(|| {
+                    "no built oculus-keyd found — run `bun run keyd`, or pass --from".into()
+                })
+            })?,
         };
         let installed = if if_changed {
             keyd::install_if_changed(&self.data_dir, &from)?
@@ -86,6 +89,7 @@ impl Ctx {
                 println!("           {}", c.display());
             }
             (Some(c), None, Some(e)) => println!("available  {} {}", c.display(), paint(e, RED)),
+            (None, None, Some(e)) => println!("available  {}", paint(e, RED)),
             _ => println!(
                 "available  {}",
                 paint("no built keyd beside this binary", DIM)

@@ -38,12 +38,17 @@ pub fn installed_stamp(data_dir: &Path) -> Option<String> {
     Some(text.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// The keyd beside an executable: where a bundle puts it.
+fn sibling_of(exe: &Path) -> Option<PathBuf> {
+    exe.parent().map(|dir| dir.join(BINARY))
+}
+
 /// The keyd this build of the app or CLI would install: the one beside it in
 /// the bundle, else (debug builds) the signed output of `bun run keyd` in the
 /// checkout it was built from.
 pub fn candidate() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
-    let sibling = exe.parent()?.join(BINARY);
+    let sibling = sibling_of(&exe)?;
     if sibling.is_file() {
         return Some(sibling);
     }
@@ -54,6 +59,28 @@ pub fn candidate() -> Option<PathBuf> {
         return built.canonicalize().ok().filter(|p| p.is_file());
     }
     None
+}
+
+/// Why `exe` has no keyd to install, when a release build should: its bundle
+/// ships keyd beside it, so a missing file is a broken install, and without it
+/// every credential call quietly falls back to the keychain. A debug build
+/// has none until `bun run keyd` runs, which is no fault.
+fn missing_bundled(exe: &Path, debug_build: bool) -> Option<String> {
+    let sibling = sibling_of(exe)?;
+    if debug_build || sibling.is_file() {
+        return None;
+    }
+    Some(format!(
+        "the bundled {BINARY} is missing ({}) — this Oculus install is broken, \
+         and credentials fall back to the keychain; reinstall Oculus",
+        sibling.display()
+    ))
+}
+
+/// Why this build has no keyd to install, when that is a broken install.
+pub fn no_candidate_reason() -> Option<String> {
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    missing_bundled(&exe, cfg!(debug_assertions))
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -154,7 +181,8 @@ pub fn uninstall(data_dir: &Path) -> Result<Vec<PathBuf>, String> {
 /// Startup check. Dev builds do nothing: the preflight installs from the main
 /// checkout only, and an app built in a worktree must not take keyd over.
 /// A release reinstalls its bundled keyd when the stamp or the registered
-/// program differs from it.
+/// program differs from it, and logs why when it cannot (`oculus keyd status`
+/// reports a missing bundled keyd as well).
 pub fn ensure_installed() {
     if cfg!(debug_assertions) {
         return;
@@ -172,11 +200,21 @@ pub fn ensure_installed() {
 
 fn ensure_bundled(data_dir: &Path) -> Result<Option<Installed>, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let bundled = exe.with_file_name(BINARY);
-    if !bundled.is_file() {
-        return Ok(None);
+    ensure_bundled_beside(data_dir, &exe, cfg!(debug_assertions))
+}
+
+fn ensure_bundled_beside(
+    data_dir: &Path,
+    exe: &Path,
+    debug_build: bool,
+) -> Result<Option<Installed>, String> {
+    if let Some(broken) = missing_bundled(exe, debug_build) {
+        return Err(broken);
     }
-    install_if_changed(data_dir, &bundled)
+    match sibling_of(exe).filter(|p| p.is_file()) {
+        Some(bundled) => install_if_changed(data_dir, &bundled),
+        None => Ok(None),
+    }
 }
 
 // ── Status ───────────────────────────────────────────────────────────────────
@@ -210,7 +248,7 @@ pub fn status(data_dir: &Path) -> Result<Status, String> {
             Ok(h) => (Some(h), None),
             Err(e) => (None, Some(e)),
         },
-        None => (None, None),
+        None => (None, no_candidate_reason()),
     };
     let (ping, ping_error) = match Client::at(data_dir).ping() {
         Ok(v) => (Some(v), None),
@@ -244,6 +282,48 @@ mod tests {
         assert!(err.contains("not an oculus-keyd"), "{err}");
         assert!(install(&dir.join("data"), Path::new("/bin/echo")).is_err());
         assert!(install_if_changed(&dir.join("data"), Path::new("/bin/echo")).is_err());
+        assert!(!dir.join("data").exists());
+    }
+
+    fn exe_in(name: &str) -> (crate::test_support::Scratch, PathBuf) {
+        let dir = crate::test_support::Scratch::new(name);
+        let macos = dir.join("Oculus.app/Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        let exe = macos.join("app");
+        std::fs::write(&exe, "").unwrap();
+        (dir, exe)
+    }
+
+    #[test]
+    fn a_release_without_its_bundled_keyd_is_a_broken_install_not_a_silent_skip() {
+        let (dir, exe) = exe_in("keyd-broken-install");
+        let data = dir.join("data");
+
+        let why = ensure_bundled_beside(&data, &exe, false).unwrap_err();
+        assert!(why.contains("bundled oculus-keyd is missing"), "{why}");
+        assert!(why.contains("Contents/MacOS/oculus-keyd"), "{why}");
+        assert!(why.contains("reinstall"), "{why}");
+        assert_eq!(missing_bundled(&exe, false), Some(why));
+        assert!(!data.exists(), "nothing is written for a missing keyd");
+    }
+
+    #[test]
+    fn a_debug_build_without_a_keyd_beside_it_is_not_an_error() {
+        let (dir, exe) = exe_in("keyd-dev-no-sibling");
+        assert!(ensure_bundled_beside(&dir.join("data"), &exe, true)
+            .unwrap()
+            .is_none());
+        assert_eq!(missing_bundled(&exe, true), None);
+    }
+
+    #[test]
+    fn a_bundled_file_that_is_not_keyd_is_an_error_too() {
+        // A zero-byte sidecar placeholder that reached a bundle.
+        let (dir, exe) = exe_in("keyd-placeholder");
+        std::fs::write(sibling_of(&exe).unwrap(), "").unwrap();
+        assert_eq!(missing_bundled(&exe, false), None);
+        let why = ensure_bundled_beside(&dir.join("data"), &exe, false).unwrap_err();
+        assert!(why.contains("Contents/MacOS/oculus-keyd"), "{why}");
         assert!(!dir.join("data").exists());
     }
 

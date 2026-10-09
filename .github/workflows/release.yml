@@ -24,8 +24,10 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       SCCACHE_GHA_ENABLED: "true"
-      # Ad-hoc signature: the bundle runs, but macOS quarantines a downloaded
-      # copy until `xattr -dr com.apple.quarantine` clears it. A Developer ID
+      # Ad-hoc signature, hardened runtime and entitlements (tauri.conf.json
+      # sets the same; this variable is what a Developer ID certificate would
+      # override). The bundle runs, but macOS quarantines a downloaded copy
+      # until `xattr -dr com.apple.quarantine` clears it. A Developer ID
       # certificate and notarisation replace this.
       APPLE_SIGNING_IDENTITY: "-"
     steps:
@@ -44,7 +46,8 @@ jobs:
         working-directory: app
         run: bun install --frozen-lockfile
 
-      # beforeBuildCommand fetches and builds the native sidecars and stages the CLI.
+      # beforeBuildCommand fetches and builds the native sidecars and stages oculus-keyd
+      # (the release policy) and the CLI; tauri signs every sidecar with the bundle.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -7,7 +7,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 
 | Piece | Location |
 | --- | --- |
-| Scripts (`predev`, `cli`, `cli:dev`, `cli:install`, `stage-cli`, `docs:cli`, …) | `app/package.json` |
+| Scripts (`predev`, `cli`, `cli:dev`, `cli:install`, `stage-cli`, `stage-keyd`, `docs:cli`, …) | `app/package.json` |
 | `beforeDevCommand`, `beforeBuildCommand`, `externalBin` | `app/src-tauri/tauri.conf.json`; macOS's `externalBin` in `app/src-tauri/tauri.macos.conf.json` |
 | Cargo CLI build, target paths and host detection | `app/scripts/runtime.mjs`, `app/scripts/build-cli.mjs` |
 | Shared cached native download and installation | `app/scripts/native-binary.mjs` |
@@ -16,7 +16,11 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | Native binary fetchers | `app/scripts/fetch-pdfium.mjs`, `app/scripts/fetch-ffmpeg.mjs` |
 | Compiles the on-device speech helper | `app/scripts/build-speech.mjs`, `app/src-tauri/speech/main.swift` |
 | Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
-| Builds, signs and (main checkout only) installs `oculus-keyd` | `app/scripts/build-keyd.mjs`, `app/keyd/.cargo/config.toml` |
+| Builds, signs and (main checkout only) installs the dev `oculus-keyd` | `app/scripts/build-keyd.mjs`, `app/scripts/keyd-build.mjs`, `app/keyd/.cargo/config.toml` |
+| Builds, signs and stages the release `oculus-keyd` the bundle ships | `app/scripts/stage-keyd.mjs`, `app/scripts/keyd-build.mjs` |
+| Hardened-runtime signing of the bundle | `bundle.macOS` in `app/src-tauri/tauri.conf.json`, `app/src-tauri/Entitlements.plist` |
+| That the configs, `beforeBuildCommand` and CI agree on the sidecars | `app/scripts/bundle-config.test.mjs` |
+| keyd's release policy against a signed bundle | `app/keyd/tests/bundle.rs` |
 | Keeps keyd's OS calls inside its adapters | `app/scripts/keyd-seams.test.mjs` |
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
@@ -40,7 +44,8 @@ bun run pdfium        # fetch libpdfium into app/src-tauri/binaries/
 bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
 bun run speech        # compile the on-device speech helper there (macOS)
 bun run whisper       # build whisper.cpp's whisper-cli there (macOS, needs cmake)
-bun run keyd          # build and sign oculus-keyd; install it from the main checkout
+bun run keyd          # build and sign the dev oculus-keyd; install it from the main checkout
+bun run stage-keyd    # build and sign the release oculus-keyd the bundle ships, into binaries/
 ```
 
 ## `predev` is the whole preflight, and it is idempotent
@@ -48,9 +53,10 @@ bun run keyd          # build and sign oculus-keyd; install it from the main che
 It is bun's lifecycle hook for `dev`, and `beforeDevCommand` is
 `OCULUS_CLI_WATCH=1 bun run dev`, so every `tauri dev` runs it. In order it
 runs `bun install`, fetches ffmpeg and pdfium, compiles the speech helper and
-`whisper-cli`, builds the debug `oculus`, builds and signs `oculus-keyd`
-(failing like the CLI build does, and installing only as
-[below](#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)),
+`whisper-cli`, builds and signs the dev `oculus-keyd` and stages it as the
+sidecar (failing like the CLI build does), builds the debug `oculus`, installs
+keyd only as
+[below](#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source),
 regenerates [cli-reference.md](./cli-reference.md) (written only when the help
 changed), and runs `oculus docs` to refresh the library's agent docs. The last
 two are non-fatal: a machine whose app has never run has no library to fill.
@@ -62,7 +68,8 @@ installing anything. Pdfium extracts into a private temporary directory per run.
 
 `cargo test` and `bun run cli` go through neither Tauri nor `predev`, so on a
 fresh checkout run `bun run pdfium`, `bun run ffmpeg` and (on macOS)
-`bun run speech` and `bun run whisper` yourself.
+`bun run speech` and `bun run whisper` yourself, and on macOS `bun run
+stage-keyd`, since the app's build script needs keyd's sidecar to exist.
 
 ## The speech helper is compiled, not fetched
 
@@ -75,7 +82,8 @@ and fails loudly without them. Elsewhere it logs and does nothing.
 
 It is an `externalBin` on macOS only, through `tauri.macos.conf.json`, which
 Tauri merges over `tauri.conf.json` as a JSON Merge Patch — arrays are
-replaced, so that file lists ffmpeg and oculus again. tauri-build reads the
+replaced, so that file lists ffmpeg and oculus again, and `oculus-keyd`, which
+has an adapter on macOS only. tauri-build reads the
 merged list, so on a Mac `cargo check` refuses to run until the helper exists,
 exactly as for ffmpeg.
 
@@ -124,24 +132,30 @@ instead of passing on an old file. `oculus_cli` ranks every candidate it finds
 by mtime rather than trusting one, which covers the seconds when the dev path
 has no binary at all.
 
-`tauri build` runs `stage-cli` then `docs:cli` from `beforeBuildCommand`: the
-CLI ships inside the bundle because the keep-alive LaunchAgent runs it
-([auth.md](./auth.md)), and the reference is regenerated at the one moment a
-current release binary is guaranteed to exist.
+`tauri build` runs `stage-keyd`, `stage-cli` then `docs:cli` from
+`beforeBuildCommand`: the CLI ships inside the bundle because keyd admits only
+executables inside its own bundle, and gives `Contents/MacOS/oculus` the `cli`
+role ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)),
+and because the keep-alive LaunchAgent runs it ([auth.md](./auth.md)); the
+reference is regenerated at the one moment a current release binary is
+guaranteed to exist.
 
 ## CI proves a fresh checkout builds; releases are cut by hand
 
 `ci.yml` runs on every push to `master` and every pull request, on a macOS
 runner with nothing cached but crates: `cargo fmt --check` (the app, keyd
 and keyd core), `bun run test`, `bun run build`, the two native fetches, the
-speech helper and `whisper-cli`, `stage-cli`, `cargo test --release --locked`,
+speech helper and `whisper-cli`, `stage-keyd` (a real release build and signature
+of keyd, as the bundle carries it), `stage-cli`, `cargo test --release --locked`,
 keyd core's tests with every feature and keyd's with and without `dev`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
 reference fails. A second job, `keyd-linux`, checks and tests keyd core and
 checks keyd on Ubuntu, where only the unsupported adapter exists
-([below](#keyds-os-code-lives-in-one-adapter)). `stage-cli` comes before any cargo call because tauri-build
-refuses to compile until every `externalBin` exists, and it is what writes the
-placeholder sidecar on a clean tree. The release profile is shared with that
+([below](#keyds-os-code-lives-in-one-adapter)). `stage-keyd` and `stage-cli` come before any
+cargo call of the app because tauri-build refuses to compile until every
+`externalBin` exists. keyd's own build never goes through tauri-build, so its
+sidecar needs no placeholder; `stage-cli` is what writes the CLI's, on a clean
+tree. The release profile is shared with that
 CLI build, so the tests reuse its artifacts. sccache is installed because
 `app/src-tauri/.cargo/config.toml` makes it rustc's wrapper.
 
@@ -149,7 +163,7 @@ CLI build, so the tests reuse its artifacts. sccache is installed because
 `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` together, push,
 then run **Release** from the Actions tab. `tauri-apps/tauri-action` runs
 `tauri build` (so `beforeBuildCommand` fetches natives, compiles the speech
-helper and stages the CLI),
+helper and stages keyd and the CLI),
 creates tag `v<version>` on that commit, and attaches the `.dmg` and `.app` to
 a draft prerelease; the same files are kept as workflow artifacts. Publishing
 the draft is a manual step on GitHub.
@@ -157,7 +171,15 @@ the draft is a manual step on GitHub.
 - The matrix has one entry, Apple Silicon. Another platform is one more
   `include` with its runner and `args` (`--target …`); the sidecars are named by
   `hostTriple()`, so build on the runner whose triple you want.
-- The bundle is signed ad-hoc (`APPLE_SIGNING_IDENTITY: "-"`). A downloaded copy
+- The bundle is signed ad-hoc with the hardened runtime. `bundle.macOS` in
+  `tauri.conf.json` sets `signingIdentity: "-"`, `hardenedRuntime` and
+  `entitlements: "Entitlements.plist"`, so a local `tauri build` signs like CI
+  (`APPLE_SIGNING_IDENTITY` overrides the identity, which is how a Developer ID
+  certificate would come in). Tauri signs inside-out — libpdfium, each sidecar,
+  then the app — and puts the same entitlements on every executable. There is
+  one, `com.apple.security.cs.disable-library-validation`: an ad-hoc signature
+  has no team identifier, so without it the hardened app cannot load
+  `Contents/Frameworks/libpdfium.dylib`. A downloaded copy
   is quarantined — `xattr -dr com.apple.quarantine /Applications/Oculus.app` —
   and, having no team identifier, re-prompts for keychain items after every
   update. A Developer ID certificate plus notarisation (the `APPLE_*` secrets
@@ -185,7 +207,7 @@ is built to give the same bytes for the same source:
   with `server` (the vault, the ops, `forward`, the server loop). So an app
   edit never touches keyd, and a core edit is a keyd source change.
 - **Reproducible flags.** `-Wl,-S` in `app/keyd/.cargo/config.toml` keeps the
-  object paths out of LC_UUID; `build-keyd.mjs` adds `--remap-path-prefix` for
+  object paths out of LC_UUID; `keyd-build.mjs` adds `--remap-path-prefix` for
   the crate, `~/.cargo` and `~/.rustup` through `--config`, which cargo joins
   onto that file's list. Cargo reads that file only when run from
   `app/keyd`, so build from there.
@@ -193,6 +215,38 @@ is built to give the same bytes for the same source:
   com.tchan.oculus.keyd` on a temp file renamed into `target/signed/`.
   Re-signing a file that has already run leaves the kernel's cached signature
   stale, and `-i` keeps the cdhash independent of the file name.
+- **The bundle ships a second build of it.** `stage-keyd` (from
+  `beforeBuildCommand` and CI) runs the same reproducible build and the same
+  signature without `--features dev`, so the bundled keyd admits only
+  executables in its own app bundle. It signs into `target/bundle/`, never
+  replacing the dev build's `target/signed/`, and writes
+  `binaries/oculus-keyd-<triple>`, an `externalBin` in
+  `tauri.macos.conf.json` only. Tauri strips the triple, giving
+  `Contents/MacOS/oculus-keyd`, which `keyd::ensure_installed` registers in
+  place at startup. It leaves an identical sidecar untouched, and `--out
+  <dir>` stages somewhere else. The dev preflight stages the dev build into the
+  same sidecar so `target/debug/oculus-keyd` is the dev keyd; a `tauri build`
+  leaves a release one there until the next preflight puts the dev one back.
+- **Tauri re-signs the bundled keyd, so Tauri's signature is the one the
+  keychain trusts.** It runs `codesign --force -s - --options runtime
+  --entitlements Entitlements.plist` on every sidecar, with no `-i`, which
+  replaces the `com.tchan.oculus.keyd` signature `stage-keyd` made: the
+  identifier becomes `oculus-keyd-` plus the Mach-O's UUID, and the code
+  hash covers the entitlements. The result depends
+  only on keyd's bytes, its file name in the bundle and `Entitlements.plist`,
+  not on how the staged file was signed, so the same source gives the same
+  hash. Editing `Entitlements.plist` therefore changes keyd, and costs one
+  keychain prompt like a keyd update. `stage-keyd`'s own signature is what
+  `codesign --verify --strict` checks before staging and what
+  `oculus keyd install --from` sees on an unbundled copy.
+- **A dev and a bundled keyd on one Mac** share the LaunchAgent label and the
+  socket. Dev's program is `<data_dir>/bin/oculus-keyd`, the bundle's is inside
+  the `.app`, so whichever installed last owns it, and `oculus keyd status`
+  says which. Their code hashes differ, so switching costs a prompt.
+- **A release app whose bundle lacks keyd is a broken install.** Startup logs
+  the failure and `oculus keyd status` / `install` name it, rather than
+  skipping quietly while every credential call falls back to the keychain; a
+  dev build with no keyd built is not an error.
 - **Installed by source hash, not bytes.** `build.rs` hashes keyd's and
   core's sources and manifests, keyd's `Cargo.lock` and its cargo config;
   `oculus-keyd source-hash` prints it and `oculus keyd install` writes it to
@@ -210,6 +264,15 @@ is built to give the same bytes for the same source:
 - Checks: `cargo test` in `app/keyd` with and without `--features dev`, and
   `cargo test --all-features` in `app/keyd/core`. No test touches launchd or
   the keychain; the Okta sign-in runs against a loopback Canvas and Okta.
+  Without `dev`, `app/keyd/tests/bundle.rs` lays out and signs a scratch
+  `Oculus.app` with copies of its own test binary as `app`, `oculus` and a
+  helper, and checks that the bundled keyd serves each of them, gives only the
+  first two the Okta ops, refuses the same binary outside the bundle, and
+  refuses everyone once a sealed resource is edited.
+  `app/scripts/bundle-config.test.mjs` checks that both tauri configs, the
+  scripts `beforeBuildCommand` runs, CI and the signing settings agree.
+- **Not covered by any test:** a real `tauri build`, launching the bundle, a
+  launchd-activated bundled keyd, Gatekeeper and notarisation.
 
 ## keyd's OS code lives in one adapter
 
@@ -220,7 +283,7 @@ keychain, the LaunchAgent, `flock` and file modes — sits under
 the adapter by `cfg(target_os)`. Everything else in core, keyd's `main`, and
 the app's `credentials.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay OS-free.
 
-- **The build step** is the adapter's too: `build-keyd.mjs` keeps one
+- **The build step** is the adapter's too: `keyd-build.mjs` keeps one
   function per OS (`buildForMacos`, the reproducible build and the ad-hoc
   signature above) and builds nothing on an OS without one.
 - **Core's tests run anywhere.** The server loop and the client are tested
@@ -234,7 +297,7 @@ the app's `credentials.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay OS-free.
   included; the `keyd-linux` CI job builds core and keyd against the
   unsupported adapter.
 - **Adding an OS** is a `platform/<os>.rs` written to the contract, its
-  build step in `build-keyd.mjs`, and a CI row. If anything outside
+  build step in `keyd-build.mjs`, and a CI row. If anything outside
   `platform/` has to change, the seam is wrong: fix it in core first.
 
 ## Template edits reach the library only through `oculus docs`
