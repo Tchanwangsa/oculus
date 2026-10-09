@@ -173,7 +173,7 @@ export default function SubjectLecturesPage() {
         title="Delete this download?"
         description={
           pendingDelete
-            ? `The video file for “${pendingDelete.title}” is removed from this Mac. Your place in it, the transcript and any chapters or reading copy are kept, and you can download it again whenever you want.`
+            ? `The video file for “${pendingDelete.title}” is removed from this Mac. Your place in it, the transcript and any chapters are kept, and you can download it again whenever you want.`
             : ""
         }
         confirmLabel="Delete"

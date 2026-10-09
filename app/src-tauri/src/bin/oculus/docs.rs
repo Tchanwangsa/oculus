@@ -177,10 +177,6 @@ mod cli_tests {
             assert!(markdown.contains(&heading), "missing {heading}");
         }
         assert!(markdown.contains("### `oculus auth login`"), "nested commands");
-        assert!(
-            markdown.contains("### `oculus lecture reading`"),
-            "lecture reading command"
-        );
         assert!(!markdown.contains('\u{1b}'), "no ANSI escapes in a file");
     }
 
@@ -189,34 +185,5 @@ mod cli_tests {
     fn generated_docs_list_global_options_once() {
         let markdown = render_cli_docs();
         assert_eq!(markdown.matches("      --json").count(), 1);
-    }
-
-    #[test]
-    fn lecture_reading_accepts_one_run_overrides() {
-        let cli = Cli::try_parse_from([
-            "oculus",
-            "lecture",
-            "reading",
-            "a1b2c3d4",
-            "--force",
-            "--provider",
-            "codex",
-            "--model",
-            "gpt-example",
-            "--effort",
-            "medium",
-        ])
-        .expect("reading flags");
-        let Some(Command::Lecture {
-            action: LectureAction::Reading(args),
-        }) = cli.command
-        else {
-            panic!("lecture reading command");
-        };
-        assert_eq!(args.id, "a1b2c3d4");
-        assert_eq!(args.provider.as_deref(), Some("codex"));
-        assert_eq!(args.model.as_deref(), Some("gpt-example"));
-        assert_eq!(args.effort.as_deref(), Some("medium"));
-        assert!(args.force);
     }
 }

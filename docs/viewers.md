@@ -10,7 +10,7 @@ video's transcript, and a web page.
 | --- | --- |
 | Markdown, maths, mermaid, lightbox, PDF | `app/src/components/markdown/`, `app/src/components/ui/Lightbox.tsx`, `app/src/components/files/PDFViewer.tsx` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/media.ts`, `app/src/stores/playerPrefsStore.ts`, `app/src/hooks/useTranscriptDock.ts` |
-| Lecture player: two sources, playback owner, chapters, reading copy, chat | `app/src/components/lectures/`, `app/src/lib/lecturePlayback.ts`, `app/src/lib/playbackOwner.ts` |
+| Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lecturePlayback.ts`, `app/src/lib/playbackOwner.ts` |
 | Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectureEnd.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/chapters.rs` |
 | Library videos | `app/src/components/files/VideoFileViewer.tsx`, `app/src/lib/openFile.ts` |
 | Transcribe from a player | `app/src/hooks/useTranscription.ts`, `app/src/components/media/TranscribeEmpty.tsx` |
@@ -117,8 +117,8 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
 ([architecture.md](./architecture.md)).
 
 - **`LecturePlayer` adds the lecture's layers**: the shared elements and their
-  owner (below), two sources with PiP and stack, chapters, the reading copy,
-  chat, downloads and progress.
+  owner (below), two sources with PiP and stack, chapters, chat, downloads and
+  progress.
 - **A video file in the library opens in the file page**
   (`openFileSmart` and `filePageHref` route `isVideoFile` there, not to the
   system viewer), where `VideoFileViewer` renders its own `<video>`. Its
@@ -188,15 +188,14 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   the floor for Chat and caps the drawn size by the container (`KEEP_W` /
   `KEEP_H`), dropping a side dock to the bottom when it can't fit — without
   rewriting the preference.
-- **The transcript is virtualised** (~2500 cues a lecture) through `FollowList`,
-  shared by both registers. Following is tracked by pointer *intent*, since the
-  follow-scroll fires `scroll` too, and runs off the active-cue index rather
-  than `timeupdate`. Don't call `measure()` on a search: heights are cached by
-  cue key and survive it. Key callbacks stay stable between searches so a
-  playback highlight does not rebuild every row's offsets. Chapters and the
-  reading copy are [chapters.md](./chapters.md).
+- **The transcript is virtualised** (~2500 cues a lecture) through `FollowList`.
+  Following is tracked by pointer *intent*, since the follow-scroll fires
+  `scroll` too, and runs off the active-cue index rather than `timeupdate`.
+  Don't call `measure()` on a search: heights are cached by cue key and survive
+  it. Key callbacks stay stable between searches so a playback highlight does
+  not rebuild every row's offsets. Chapters are [chapters.md](./chapters.md).
 
-Playback's ordered cue, chapter and reading starts use an upper-bound lookup,
+Playback's ordered cue and chapter starts use an upper-bound lookup,
 including the last entry when timestamps coincide. A player subscribes only to
 its lecture's download progress; stable dock callbacks keep playback ticks
 outside the transcript's memo boundary. The catalogue's `LectureRow`

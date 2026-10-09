@@ -9,7 +9,7 @@ cookie.
 | --- | --- |
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
 | Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
-| Cookie (Canvas and Okta), auth-flag and keep-alive log paths | `app/src-tauri/src/paths.rs` |
+| Cookie (Canvas and Okta), auth-flag and keep-alive log paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
 | Headless Okta sign-in, TOTP, stored credentials, the attempt guard | `app/src-tauri/src/okta.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
@@ -30,15 +30,30 @@ Do not propose `Authorization: Bearer`. (The "New Access Token" button's text
 is on the page either way; only its `disabled` attribute tells you.)
 
 - Sign-in goes through the university's SAML IdP, so the first login happens
-  in a visible app WebView. The cookie is persisted to the data dir in
-  plaintext beside an auth-flag file meaning "we believe we have a session".
+  in a visible app WebView. The cookie is persisted to the data dir in a
+  plaintext file only this user can read (`paths::write_private`, like every
+  session file here), beside an auth-flag file meaning "we believe we have a
+  session".
 - The session has no cookie-side expiry: the server extends it on use, so
   periodic requests keep it alive. There is no remember-me cookie — once dead,
   it is rebuilt by [automated sign-in](#okta-sign-in-runs-headless-in-rust)
   or by hand.
 - On launch with the flag present, the app starts connected while a thread
   probes the cookie: `Valid` confirms, `Rejected` clears the flag (keeping the
-  SSO profile) and emits `canvas-auth-expired`, `Unreachable` stays connected.
+  Okta snapshot) and emits `canvas-auth-expired`, `Unreachable` stays connected.
+- Signing out (Settings or `oculus auth logout`, both `paths::sign_out`)
+  deletes the Canvas, Okta and Ed snapshots and the flag, and writes
+  `canvas-session/signed-out`. The Okta one goes too, or the in-app browser
+  would pass through SSO and re-save a Canvas session. The
+  [attempt record](#every-sign-in-attempt-goes-through-one-guard) stays, so a
+  lockout pause outlives a sign-out.
+- The marker keeps every automatic sign-in off (`LoginError::SignedOut`)
+  until a session is established again: `paths::mark_authenticated` removes
+  it.
+- Settings' sign-out first deletes every cookie WebKit would send to Canvas
+  or Okta (`browser::clear_sessions`), or a tab still signed in would save the
+  session straight back. `oculus auth logout` cannot reach a running app's
+  jar, so a Canvas tab open there can still re-save the cookie.
 
 ## The in-app browser is seeded with the same sessions
 
@@ -64,6 +79,19 @@ passes straight through.
 - A signed-in Canvas page (`auth::is_authenticated_url`) re-snapshots both,
   deduped by name, so the scraper inherits the fresher cookie. A signed-out
   page never does: it would save Canvas's anonymous cookie over the good one.
+- If the app is not connected when that happens, someone signed in by hand in
+  the tab. `auth::confirm_browser_sign_in` checks the saved cookie with Canvas
+  and, if Canvas accepts it, connects the app.
+
+## Every sign-in ends in one place
+
+The login window, a browser tab and the headless flow each put their cookies
+on disk their own way, then call `auth::session_established`. It sets the
+auth flag (which also removes the signed-out marker), the in-memory state and
+`canvas-auth-success`. A sign-in by a person (window or tab) also clears the
+attempt guard's wait and pause; the headless one has already updated the
+guard. The CLI has no app to update, so `oculus auth auto` sets only the flag
+(`paths::mark_authenticated`).
 
 ## Keep-alive runs in two layers
 
@@ -74,7 +102,8 @@ passes straight through.
   sign-in. Every outcome is a line in `session-keepalive.log` and exit 0,
   because launchd has no console and a non-zero exit reads as a crashed job.
 - The tick re-authenticates only on `Rejected`; on `Unreachable` it logs and
-  waits rather than spending an Okta attempt on a dead network.
+  waits rather than spending an Okta attempt on a dead network. After a
+  sign-out it logs and does nothing.
 - The agent installs itself only after a headless sign-in has succeeded
   (`keepalive::ensure_installed`), not when credentials are stored: an org
   that offers only push or WebAuthn would fail every six hours forever.
@@ -106,6 +135,9 @@ IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
 - Both probe sites in `lib.rs` call `okta::try_auto_recover` before declaring
   a session expired, and `useAuth().connect()` tries it before opening the
   login window. Credentials come from Settings → Canvas or `oculus auth setup`.
+- A keychain read that is refused is `LoginError::UnreadableCredentials`,
+  never `NotConfigured`: no attempt is made or recorded, `try_auto_recover`
+  logs it, and Settings → Canvas shows it.
 - Password and TOTP seed share one keychain, so against code already running
   as this user the second factor is not a second factor — the same posture as
   a password manager that stores TOTP.
@@ -123,10 +155,13 @@ every attempt with its caller to `okta-sign-in.log`.
 - A network failure waits but does not count: Okta gave no verdict.
 - A lockout, a rejected password or a factor it cannot answer pauses automatic
   sign-in until a manual one succeeds (`Trigger::Manual`: Connect, saving
-  credentials, `oculus auth auto`) or the login window does. Saving
+  credentials, `oculus auth auto`) or a person signs in in the login window
+  or a browser tab. Saving
   credentials also clears the pause.
 - Manual attempts skip the wait, because a person is waiting on the answer,
   but are still recorded.
+- After a sign-out no automatic attempt starts at all, and none is recorded
+  (`LoginError::SignedOut`).
 
 ## Ed mints its `x-token` from Canvas
 
@@ -135,7 +170,8 @@ JWT. `app/src-tauri/src/ed.rs` mints it by walking the Canvas → Ed LTI 1.3
 launch (tool page → `oidc_login` → Canvas `/api/lti/authorize` → `launch` →
 one-shot `?_logintoken=` → `POST /api/login_token`). Tokens last about two
 weeks, are renewed with `POST /api/renew_token` on each sync, and a dead one
-is re-minted. `oculus auth ed <TOKEN>` is a manual override.
+is re-minted. The token file is private to this user, like the cookies.
+`oculus auth ed <TOKEN>` is a manual override.
 
 ## Echo360 has no stored credential
 
@@ -146,7 +182,7 @@ course's LTI external-tool form (see
 
 ## Gotchas
 
-- Every path that establishes a session must call `paths::mark_authenticated` — the startup probe reads the flag first, and without it a valid cookie opens disconnected.
+- Every path that establishes a session must end in `auth::session_established` (the CLI: `paths::mark_authenticated`) — the startup probe reads the flag first, and without it a valid cookie opens disconnected.
 - Holding a `canvas_session` is not success: Canvas issues an anonymous one before auth, so `complete_saml` accepts one only after posting an assertion and `sign_in` verifies it against `/api/v1/users/self` before writing it.
 - Answer `currentAuthenticator`'s challenge before reading the chooser — OIE offers `select-authenticator-authenticate` beside every challenge, and taking it loops forever.
 - The login page names `stateToken` several times; the first is a fragment introspect rejects as "session has expired", so `state_token_candidates` tries every plausible one.

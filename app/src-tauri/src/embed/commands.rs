@@ -110,6 +110,9 @@ pub struct EmbedSettings {
     pub dim: usize,
     /// Cloud: a key is in the keychain. Local: always true.
     pub credentials_ready: bool,
+    /// Cloud: the keychain refused to say whether a key is saved, so
+    /// `credentials_ready` is false without the key being missing.
+    pub credentials_error: Option<String>,
     pub engines: Vec<EngineOption>,
     /// What is in the index *now* — the number the confirmation quotes.
     pub index: IndexStats,
@@ -145,15 +148,20 @@ fn available(engine: Engine) -> bool {
 
 async fn view(db: &Path) -> Result<EmbedSettings, String> {
     let config = super::embed_config();
+    let (credentials_ready, credentials_error) = match config.engine {
+        Engine::Cloud => match crate::voyage::voyage_has_api_key() {
+            Ok(saved) => (saved, None),
+            Err(e) => (false, Some(e)),
+        },
+        Engine::Local => (true, None),
+    };
     Ok(EmbedSettings {
         engine: config.engine.as_str(),
         base_url: config.base_url,
         model: EMBED_MODEL,
         dim: EMBED_DIM,
-        credentials_ready: match config.engine {
-            Engine::Cloud => crate::voyage::stored_api_key().is_some(),
-            Engine::Local => true,
-        },
+        credentials_ready,
+        credentials_error,
         engines: engines(),
         index: crate::retrieval::stats(db).await?,
         usage: match config.engine {

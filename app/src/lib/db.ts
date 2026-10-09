@@ -226,7 +226,6 @@ export async function setSyncOptions(options: SyncOptions): Promise<void> {
 /** Mirrors `Job` in `app/src-tauri/src/harness/jobs.rs`. */
 export type JobId =
   | "lectureChapters"
-  | "lectureReading"
   | "lectureEnd"
   | "threadNaming"
   | "documentSuggestions";
@@ -247,12 +246,6 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
     label: "Lecture chapters",
     description:
       "Reads a recording's slide frames and transcript and names its topics. One long turn, eight to eleven minutes.",
-  },
-  {
-    id: "lectureReading",
-    label: "Lecture reading copy",
-    description:
-      "Rewrites the transcript as readable text — one sentence per line, pinned to its second, with spoken maths set as maths. One agent turn per ten minutes.",
   },
   {
     id: "lectureEnd",
@@ -278,7 +271,6 @@ export const JOBS: { id: JobId; label: string; description: string }[] = [
  *  side may resolve an unconfigured job, so they must agree. */
 export const DEFAULT_JOB_MODELS: JobModels = {
   lectureChapters: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
-  lectureReading: { provider: "codex", model: "gpt-5.6-luna", reasoningEffort: "medium" },
   lectureEnd: { provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null },
   threadNaming: { provider: "claude", model: "claude-haiku-4-5-20251001", reasoningEffort: null },
   documentSuggestions: { provider: "claude", model: "claude-sonnet-5-5", reasoningEffort: "medium" },
@@ -1133,10 +1125,6 @@ export interface Lecture {
   chaptered_at: string | null;
   /** Why the last run failed; cleared on success. */
   chapter_error: string | null;
-  /** Same values as `chapter_status`; the two jobs are independent. */
-  reading_status: string | null;
-  reading_written_at: string | null;
-  reading_error: string | null;
   /** Where the lecture's planned content ends (`lecture_end`): the end of the
    *  sign-off line, in seconds. Kept when a later run fails. */
   content_end_seconds: number | null;
@@ -1333,38 +1321,6 @@ export async function getChapterStatus(
   const rows = await db.select<
     { chapter_status: string | null; chapter_error: string | null }[]
   >(`SELECT chapter_status, chapter_error FROM lectures WHERE id = $1`, [lectureId]);
-  return rows[0] ?? null;
-}
-
-// ── Lecture reading copy ──────────────────────────────────────────────────────
-
-/** A `lecture_reading` row (`app/src-tauri/src/reading.rs`): one sentence,
- *  pinned to its second, running until the next. `para` (derived in Rust) is 1
- *  where the panel breaks a paragraph. */
-export interface ReadingLine {
-  lecture_id: string;
-  idx: number;
-  start_seconds: number;
-  para: number;
-  text: string;
-}
-
-export async function getReading(lectureId: string): Promise<ReadingLine[]> {
-  const db = await getDb();
-  return db.select<ReadingLine[]>(
-    `SELECT * FROM lecture_reading WHERE lecture_id = $1 ORDER BY idx ASC`,
-    [lectureId],
-  );
-}
-
-/** Read on its own, as `getChapterStatus` is. */
-export async function getReadingStatus(
-  lectureId: string,
-): Promise<{ reading_status: string | null; reading_error: string | null } | null> {
-  const db = await getDb();
-  const rows = await db.select<
-    { reading_status: string | null; reading_error: string | null }[]
-  >(`SELECT reading_status, reading_error FROM lectures WHERE id = $1`, [lectureId]);
   return rows[0] ?? null;
 }
 

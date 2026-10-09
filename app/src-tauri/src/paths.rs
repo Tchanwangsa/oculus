@@ -27,19 +27,67 @@ pub fn sso_cookie_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("sso-session.cookie")
 }
 
-/// Writes a session snapshot readable by this user only.
+/// Writes a session file readable by this user only. A new file is created
+/// 0600 and an existing one narrowed before the body lands, so the secret is
+/// never on disk world-readable.
 pub fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
-    std::fs::write(path, body)?;
+    use std::io::Write;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    Ok(())
+    file.write_all(body.as_bytes())
+}
+
+/// Ed's `x-token`, minted from the Canvas session (`ed.rs`).
+pub fn ed_token_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("ed-session.token")
 }
 
 pub fn auth_flag_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("canvas-session").join("authenticated")
+}
+
+/// Present from a sign-out until the next session (`mark_authenticated`).
+/// While it is, automatic sign-ins stand down (`okta::sign_in`).
+pub fn signed_out_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("canvas-session").join("signed-out")
+}
+
+/// Drops the saved Canvas, Okta and Ed sessions and the auth flag, and marks
+/// the app signed out; returns whether there was anything to drop. The attempt
+/// record beside the flag stays: forgetting a lockout pause would let
+/// automatic sign-in resume.
+pub fn sign_out(data_dir: &std::path::Path) -> std::io::Result<bool> {
+    let mut had = false;
+    for path in [
+        cookie_path(data_dir),
+        sso_cookie_path(data_dir),
+        ed_token_path(data_dir),
+        auth_flag_path(data_dir),
+    ] {
+        match std::fs::remove_file(&path) {
+            Ok(()) => had = true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    let marker = signed_out_path(data_dir);
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&marker, b"1")?;
+    Ok(had)
 }
 
 /// Record that we hold a session Canvas has accepted.
@@ -52,6 +100,7 @@ pub fn mark_authenticated(data_dir: &std::path::Path) {
         std::fs::create_dir_all(parent).ok();
     }
     std::fs::write(&flag, b"1").ok();
+    std::fs::remove_file(signed_out_path(data_dir)).ok();
 }
 
 /// Where the LaunchAgent keep-alive logs; shown in Settings → Canvas.
@@ -373,6 +422,45 @@ pub fn category_from_path(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sign_out_keeps_the_attempt_record() {
+        let dir = crate::test_support::Scratch::new("sign-out");
+        mark_authenticated(&dir);
+        write_private(&cookie_path(&dir), "canvas_session=a").unwrap();
+        write_private(&sso_cookie_path(&dir), "idx=b").unwrap();
+        write_private(&ed_token_path(&dir), "jwt").unwrap();
+        std::fs::write(sign_in_record_path(&dir), r#"{"paused":"locked"}"#).unwrap();
+
+        assert!(sign_out(&dir).unwrap());
+        assert!(!cookie_path(&dir).exists());
+        assert!(!sso_cookie_path(&dir).exists());
+        assert!(!ed_token_path(&dir).exists());
+        assert!(!auth_flag_path(&dir).exists());
+        assert!(sign_in_record_path(&dir).exists());
+        assert!(signed_out_path(&dir).exists());
+        assert!(!sign_out(&dir).unwrap());
+
+        mark_authenticated(&dir);
+        assert!(!signed_out_path(&dir).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_writes_narrow_an_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = crate::test_support::Scratch::new("write-private");
+        let path = dir.join("ed-session.token");
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        write_private(&path, "fresh").unwrap();
+        assert_eq!(mode(&path), 0o600);
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, "tok").unwrap();
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "tok");
+    }
 
     #[test]
     fn identifier_matches_tauri_conf() {

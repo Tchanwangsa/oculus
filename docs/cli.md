@@ -28,7 +28,7 @@ agent queries and plans through. Flags are in
 | `search`, `grep`, `read`, `files`, `calendar`, `list`, `status` | Nothing | Safe for any caller |
 | `project`, `task` | The student's own plans | No upstream copy: unknown columns are refused, batches are one transaction, `task rm` says in `--help` there is no undo |
 | `memory` | Agents' notes in `agents/memories/` | Files, not rows, because the thread writing them cannot open the database ([harness.md](./harness.md)) |
-| `lecture chapters`, `lecture reading`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
+| `lecture chapters`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
 | `keyd install`, `keyd uninstall` | The LaunchAgent `com.tchan.oculus.keyd`, `bin/oculus-keyd` and its stamp in the data dir; install also (re)loads the agent | Never touches `vault.bin` or the keychain, so uninstalling loses no key ([below](#keyd-install-never-points-the-agent-at-a-build-tree)) |
@@ -94,10 +94,6 @@ rewriting itself in place is how a long run is told from a stuck one.
 - `status` reports the selected parser through `preflight`, so it never spends
   cloud quota; on the local engine it probes the loopback address with a
   three-second timeout.
-- `lecture reading` runs its roughly ten-minute windows in sequence and commits
-  each one, so an error can leave this run's finished windows visible.
-  `--provider`, `--model` and `--effort` override one run without changing the
-  configured job ([chapters.md](./chapters.md)).
 - `lecture end` takes several ids or `--all` (lectures with a transcript whose
   end was never looked for; every one with `--force`) and prints a line, or a
   JSON object per line with `--json`, per lecture. `--dry-run` asks the model

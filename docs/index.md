@@ -20,7 +20,7 @@ the root `CLAUDE.md` holds only the rules.
 | [harness.md](./harness.md) | Chat as a CLI agent: the four bridges, containment, the timeline |
 | [calendar.md](./calendar.md) | Class times, deadlines and recordings on one grid |
 | [projects.md](./projects.md) | Projects and tasks: the Overview, board, table, timeline and the universal Tasks view |
-| [chapters.md](./chapters.md) | Lecture chapters, the reading copy and where a lecture ends: the detector and the three model jobs |
+| [chapters.md](./chapters.md) | Lecture chapters and where a lecture ends: the detector and the two model jobs |
 | [frontend.md](./frontend.md) | The frontend's data side: backend events, settings, parse state, library files |
 | [shell.md](./shell.md) | Per-pane routers, tabs, the side panel, window shortcuts, ⌘F, search |
 | [ui.md](./ui.md) | The UI system: design rules, and the WebKit and CSS traps |

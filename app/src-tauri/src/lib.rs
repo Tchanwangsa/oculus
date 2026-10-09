@@ -34,7 +34,6 @@ pub mod paths;
 mod pipeline_events;
 pub mod projects;
 mod ratelimit;
-pub mod reading;
 pub mod retrieval;
 mod scrape;
 pub mod sheets;
@@ -94,7 +93,6 @@ pub fn run() {
             harness::app::sweep_strays();
             // Clear `running` markers left by lecture job runs cut short.
             chapters::app::reconcile(app.handle());
-            reading::app::reconcile(app.handle());
             lecture_end::app::reconcile(app.handle());
             // Spreadsheets on record without their text (`docs/parsing.md`).
             sheets::reconcile_in_background();
@@ -293,7 +291,6 @@ pub fn run() {
             chapters::app::lecture_find_chapters,
             chapters::app::lecture_grab_frames,
             chapters::app::lecture_thumbnail,
-            reading::app::lecture_write_reading,
             lecture_end::app::lecture_find_end,
             storage::storage_report,
             usage::usage_activity,

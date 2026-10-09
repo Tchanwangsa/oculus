@@ -1,6 +1,6 @@
-//! Inputs, one-turn agent replies and app orchestration shared by the chapter
-//! and reading-copy jobs. Each job owns its algorithm, claim rules and commit
-//! boundary.
+//! Inputs, one-turn agent replies and app orchestration for the lecture jobs:
+//! chapters and where the content ends (`lecture_end`). Each job owns its
+//! algorithm, claim rules and commit boundary.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -88,15 +88,7 @@ pub(crate) fn reply(
     Ok(text)
 }
 
-/// A reading-copy window count; chaptering never sets it.
-#[derive(serde::Serialize, Clone, Copy)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WindowProgress {
-    pub(crate) done: u32,
-    pub(crate) total: u32,
-}
-
-/// One step of a lecture job in flight, shared by chapters and `reading`.
+/// One step of a chaptering run in flight.
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Progress {
@@ -109,7 +101,6 @@ pub(crate) struct Progress {
     /// Countable phases only; the agent turn has no denominator.
     pub(crate) done: Option<u32>,
     pub(crate) total: Option<u32>,
-    pub(crate) window: Option<WindowProgress>,
 }
 
 impl Progress {
@@ -121,7 +112,6 @@ impl Progress {
             kind: None,
             done: None,
             total: None,
-            window: None,
         }
     }
 }

@@ -673,7 +673,6 @@ pub(crate) struct TaskRmArgs {
 pub(crate) enum LectureAction {
     Candidates(LectureCandidatesArgs),
     Chapters(LectureChaptersArgs),
-    Reading(LectureReadingArgs),
     End(LectureEndArgs),
 }
 
@@ -732,44 +731,6 @@ pub(crate) struct LectureChaptersArgs {
     #[arg(long)]
     pub(crate) effort: Option<String>,
     /// Re-run over a lecture that already has chapters, replacing them
-    #[arg(long)]
-    pub(crate) force: bool,
-    /// Which captured stream to read — 1 or 2. Default: source 1, unless it
-    /// turns out to be dead, in which case source 2 if it is downloaded
-    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=2))]
-    pub(crate) source: Option<u8>,
-}
-
-/// Write a recording's reading copy with a CLI agent
-///
-/// Rewrites the transcript as text a student can read: one sentence per
-/// line, each pinned to the second it was said, with spoken maths set as
-/// maths and speech-recognition errors fixed from the slide. The lecture is
-/// split at its slide changes — which become paragraph breaks — and grouped
-/// into roughly ten-minute windows, one agent turn each. Each window is
-/// validated and written before the next starts, so a long run has useful
-/// partial results if a later window fails.
-///
-/// Unlike chapter naming, this needs the transcript: the reading copy is the
-/// transcript, rewritten. The recording and transcript must both have been
-/// downloaded first.
-#[derive(Args)]
-pub(crate) struct LectureReadingArgs {
-    /// Lecture id, as `oculus list -l` prints it; a unique prefix is enough
-    #[arg(value_name = "LECTURE_ID")]
-    pub(crate) id: String,
-    // As for chapters: flags override the job's configured selection.
-    /// Which CLI to drive (default: the configured one)
-    #[arg(short, long, value_parser = ["claude", "codex", "opencode"])]
-    pub(crate) provider: Option<String>,
-    /// Model to request (default: the configured one)
-    #[arg(short, long)]
-    pub(crate) model: Option<String>,
-    /// Reasoning effort — low, medium, high, xhigh, max (default: the
-    /// configured one)
-    #[arg(long)]
-    pub(crate) effort: Option<String>,
-    /// Re-run over a lecture that already has a reading copy, replacing it
     #[arg(long)]
     pub(crate) force: bool,
     /// Which captured stream to read — 1 or 2. Default: source 1, unless it

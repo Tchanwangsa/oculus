@@ -47,7 +47,6 @@ import {
 } from "@/lib/lectures";
 import { useLectureChapters } from "@/hooks/useLectureChapters";
 import { useLectureEnd } from "@/hooks/useLectureEnd";
-import { useLectureReading } from "@/hooks/useLectureReading";
 import {
   TRANSCRIBED_EVENT,
   settleTranscription,
@@ -55,7 +54,6 @@ import {
   type TranscribedDetail,
 } from "@/hooks/useTranscription";
 import type { ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
-import type { ReadingListProps } from "@/components/lectures/ReadingList";
 import type { LectureChatPanelProps } from "@/components/lectures/LectureChatPanel";
 import type { TranscribeEmptyProps } from "@/components/media/TranscribeEmpty";
 import { PIP_CORNERS, useSourceLayout, type PipCorner } from "@/hooks/useSourceLayout";
@@ -201,7 +199,7 @@ interface LecturePlayerProps {
 /**
  * The lecture page's player: `MediaPlayer` over the shared elements
  * (`lib/lecturePlayback.ts`), with what only a lecture has — two sources, the
- * pane that owns playback, chapters, the reading copy, chat and downloads.
+ * pane that owns playback, chapters, chat and downloads.
  */
 export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   const [cues, setCues] = useState<Cue[]>([]);
@@ -332,15 +330,6 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   // Found on first open; Done (`lib/lecturePlayback.ts`) and Up Next read it.
   const end = useLectureEnd(lecture.id, lecture.transcript_path);
   const endError = end.state?.status === "error" ? (end.state.error ?? "") : null;
-
-  // ── Reading copy ─────────────────────────────────────────────────────────
-
-  // Independent of chapters — a lecture can have either, both or neither.
-  const readingState = useLectureReading(lecture.id);
-  const lineStarts = useMemo(
-    () => readingState.lines.map((l) => l.start_seconds),
-    [readingState.lines],
-  );
 
   // ── Transcript loading ───────────────────────────────────────────────────
 
@@ -531,9 +520,6 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
   const activeChapter =
     activeChapterIdx >= 0 ? chapterState.chapters[activeChapterIdx] : null;
 
-  /** The reading line the playhead is in. */
-  const activeLineIdx = spanAt(lineStarts, currentTime);
-
   // One memoised bag per tab: `TranscriptPanel` is memo'd against a player that
   // re-renders on every `timeupdate`.
   const chaptersProps: ChaptersPanelProps = useMemo(
@@ -568,45 +554,6 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
       seek,
       endError,
       end.retry,
-    ],
-  );
-
-  /** The Transcript tab's Enhanced register. That tab only exists when there
-   *  are cues, so the bag carries no `hasTranscript`. */
-  const readingProps: Omit<ReadingListProps, "picker"> = useMemo(
-    () => ({
-      lines: readingState.lines,
-      activeLineIdx,
-      status: readingState.status,
-      error: readingState.error,
-      since: readingState.since,
-      progress: readingState.progress,
-      busy: readingState.busy,
-      onWrite: readingState.write,
-      downloaded: !!lecture.video_path,
-      open: showDock,
-      active: frontTab === "transcript",
-      following,
-      onScrollAway,
-      onBackToLive,
-      onSeek: seek,
-    }),
-    [
-      readingState.lines,
-      readingState.status,
-      readingState.error,
-      readingState.since,
-      readingState.progress,
-      readingState.busy,
-      readingState.write,
-      activeLineIdx,
-      lecture.video_path,
-      showDock,
-      frontTab,
-      following,
-      onScrollAway,
-      onBackToLive,
-      seek,
     ],
   );
 
@@ -798,7 +745,6 @@ export function LecturePlayer({ lecture, onRefresh }: LecturePlayerProps) {
           tab={dockTab}
           onTabChange={handleDockTabChange}
           chapters={chaptersProps}
-          reading={readingProps}
           chat={chatProps}
           transcribe={transcribeProps}
           dock={dock}
