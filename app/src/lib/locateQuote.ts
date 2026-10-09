@@ -74,7 +74,9 @@ export function matchText(root: Node, quote: string): Range | null {
   return null;
 }
 
-function layoutTop(el: HTMLElement): number {
+/** An element's top in the document in layout pixels, unscaled by page zoom
+ *  and unmoved by scrolling. */
+export function layoutTop(el: HTMLElement): number {
   let y = 0;
   for (let n: HTMLElement | null = el; n; n = n.offsetParent as HTMLElement | null) y += n.offsetTop;
   return y;

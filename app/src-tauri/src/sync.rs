@@ -1517,11 +1517,12 @@ pub fn parse_pdf(
     rel_path: &str,
     subject_id: i64,
 ) -> Result<ParseSummary, parse::ParseError> {
-    parse_pdf_reporting(data_dir, rel_path, subject_id, &|_| {})
+    parse_pdf_reporting(data_dir, rel_path, subject_id, false, &|_| {})
 }
 
 /// `parse_pdf` plus a progress callback, for the CLI (the app reads the
-/// `parse-status` events).
+/// `parse-status` events). `reparse_outdated` parses a file again when its
+/// record predates `PARSER_VERSION` (`oculus index --reparse`).
 ///
 /// One parse per PDF at a time (`parse::InFlight`): a second caller waits,
 /// then takes the already-parsed path. A panic becomes this file's `error`,
@@ -1530,12 +1531,19 @@ pub fn parse_pdf_reporting(
     data_dir: &Path,
     rel_path: &str,
     subject_id: i64,
+    reparse_outdated: bool,
     on_progress: &dyn Fn(parse::Progress),
 ) -> Result<ParseSummary, parse::ParseError> {
     let key = parse_key(data_dir, rel_path);
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _claim = parse::InFlight::shared().claim(&key);
-        run_parse(data_dir, rel_path, subject_id, on_progress)
+        run_parse(
+            data_dir,
+            rel_path,
+            subject_id,
+            reparse_outdated,
+            on_progress,
+        )
     }))
     .unwrap_or_else(|_| {
         Err(parse::ParseError::Io(
@@ -1561,6 +1569,7 @@ fn run_parse(
     data_dir: &Path,
     rel_path: &str,
     subject_id: i64,
+    reparse_outdated: bool,
     on_progress: &dyn Fn(parse::Progress),
 ) -> Result<ParseSummary, parse::ParseError> {
     // Local failures: `Io` is retryable, not latching, so a missing file never
@@ -1576,7 +1585,11 @@ fn run_parse(
         )));
     }
 
-    if parse::parse_mode(&pdf).is_some() {
+    // Decided under the `InFlight` claim, so a parse that just landed counts.
+    // Nothing is purged first: the old record stands until the new one lands,
+    // and `.emb.json` (page images, same page count) stays current.
+    let reparse = reparse_outdated && parse::is_outdated(&pdf);
+    if !reparse && parse::parse_mode(&pdf).is_some() {
         // An artifact on disk is no promise its page rows exist; backfill.
         let record = parse::read_record(&pdf);
         // The `.md` is derived from the record, so a lost one is rebuilt here.

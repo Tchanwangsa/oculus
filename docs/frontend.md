@@ -194,7 +194,8 @@ library files; the rest of the frontend has its own pages:
 - **The PDF/markdown toggle probes file metadata**, through
   `course_file_has_content` in `app/src-tauri/src/files.rs`, without reading or
   transferring the parsed text. `app/src/components/files/FileMarkdown.tsx`
-  renders the markdown and discards obsolete read responses.
+  renders the markdown (a parsed PDF's from its `.pages.json` record,
+  [viewers.md](./viewers.md)) and discards obsolete read responses.
 - **Scraped header metadata loads through `useCourseFileData`**: assignments,
   discussion threads and module TOCs supply a stable parser, while the hook
   owns parallel reads and cancellation of stale answers. Unchanged file rows

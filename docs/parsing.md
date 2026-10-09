@@ -163,8 +163,8 @@ assume the cloud. Beside each PDF:
 
 - `<stem>.md` — full-document markdown, derived from the record.
 - `<stem>.pages.json` — `{pdf, mode, parser_version, page_count, pages:
-  [{page_no, markdown}]}`, keyed by 1-based `page_no`: **the join key
-  retrieval rests on** ([retrieval.md](./retrieval.md)).
+  [{page_no, markdown, blocks?}]}`, keyed by 1-based `page_no`: **the join key
+  retrieval rests on** ([retrieval.md](./retrieval.md)). `blocks` is below.
 - `<stem>_images/` — its *name* is the link prefix written into the markdown,
   so both are computed in `parse/mod.rs`, never by a backend.
 
@@ -184,6 +184,38 @@ stale `queued`/`running`/`quality` is cleared, but `error` and `skipped` stay.
 `PARSER_VERSION` moves only when the artifacts change shape. `parse_mode` does
 **not** check it, so a bump never re-parses the library; it is enforced by the
 `Health` handshake, which refuses a backend with another version, naming both.
+Older records keep reading: every field added since is optional.
+
+`oculus index --reparse` is the one way to bring old records up to date. A
+file whose record is `quality` but whose `parser_version` is missing or below
+`PARSER_VERSION` (`parse::is_outdated`, an untyped read like `parse_mode`) skips
+the already-parsed short-circuit and runs the ordinary parse path; every other
+file behaves as plain `index`. It spends MinerU allowance and **keeps the
+embeddings**: nothing is purged, the old record stands until the new one lands,
+`record_pages` rewrites `pages.markdown`, and `.emb.json` — keyed on page
+images and page count — stays current, so ingest skips the file. The app's
+parse path never re-parses on version.
+
+### `blocks`: where each rendered item sits
+
+Each page lists one block per **rendered** content-list item, in markdown
+order (after the header sort): `{kind, bbox, start, end}`.
+
+- `kind` is MinerU's raw `type` (`text`, `header`, `equation`, `image`,
+  `table`, `chart`, …); a `text_level` heading stays `text`.
+- `bbox` is `[x0, y0, x1, y1]` as **fractions of the page**, top-left origin,
+  y down: MinerU's content list gives 0–1000 integers, divided by 1000 and
+  clamped to [0, 1]. Multiply by the page size in points to place it.
+- `start..end` are **UTF-16 code-unit** offsets into that page's `markdown`
+  (the consumer is JS `String.slice`), covering exactly the item's text — the
+  `"\n\n"` between items is outside every block. An image or table and its
+  footnote are one item, so one block.
+- Items the renderer drops (boilerplate, footers, size-filtered crops,
+  empties) have no block; neither does a rendered item without four finite
+  numbers spanning a non-empty box — never a zero box. Blank pages, pages
+  `ParseOutput::new` gap-fills, spreadsheets and records written before
+  version 3 have none, and the key is omitted when empty.
+- Tracking blocks never changes the markdown; `render.rs`'s tests pin it.
 
 A result with no content list writes **nothing**. Changed bytes purge the
 artifacts (`paths::purge_parse_artifacts`) before re-parsing, or a stale

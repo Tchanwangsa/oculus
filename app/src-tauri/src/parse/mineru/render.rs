@@ -11,7 +11,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::parse::{ParseError, ParsePage};
+use crate::parse::{ParseBlock, ParseError, ParsePage};
 
 /// A header/footer on at least this fraction of a window's pages is template
 /// furniture, not content.
@@ -73,6 +73,22 @@ fn basename(path: &str) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// The item's `bbox` as page fractions. MinerU's content list gives
+/// `[x0, y0, x1, y1]` in 0–1000 integers, top-left origin, y down. `None`
+/// for anything but four finite numbers spanning a non-empty box.
+fn page_box(item: &Value) -> Option<[f32; 4]> {
+    let values = item.get("bbox")?.as_array()?;
+    if values.len() != 4 {
+        return None;
+    }
+    let mut out = [0f32; 4];
+    for (slot, value) in out.iter_mut().zip(values) {
+        let n = value.as_f64().filter(|n| n.is_finite())?;
+        *slot = (n / 1000.0).clamp(0.0, 1.0) as f32;
+    }
+    (out[2] > out[0] && out[3] > out[1]).then_some(out)
 }
 
 /// The caption/footnote list, space-joined and trimmed.
@@ -279,7 +295,7 @@ pub fn render(
             .push(item);
     }
 
-    let mut by_page: BTreeMap<i64, String> = BTreeMap::new();
+    let mut by_page: BTreeMap<i64, (String, Vec<ParseBlock>)> = BTreeMap::new();
     for (window, items) in windows {
         let window_pages = RENDER_GROUP_PAGES.min(total_pages as i64 - window * RENDER_GROUP_PAGES);
         let boilerplate = find_boilerplate(&items, window_pages);
@@ -290,13 +306,9 @@ pub fn render(
         }
         for (page_no, mut page_items) in per_page {
             page_items.sort_by(|left, right| compare(left, right));
-            let blocks: Vec<String> = page_items
-                .iter()
-                .filter_map(|item| render_item(item, images_rel, &dropped, &boilerplate))
-                .collect();
-            if !blocks.is_empty() {
+            if let Some(page) = render_page(&page_items, images_rel, &dropped, &boilerplate) {
                 // Windows partition by page: no page is written twice.
-                by_page.insert(page_no, blocks.join("\n\n"));
+                by_page.insert(page_no, page);
             }
         }
     }
@@ -311,12 +323,51 @@ pub fn render(
         .into_iter()
         // A broken offset below the first page has nowhere to attach.
         .filter(|(page_no, _)| *page_no >= 1)
-        .map(|(page_no, markdown)| ParsePage {
+        .map(|(page_no, (markdown, blocks))| ParsePage {
             page_no: page_no as u32,
             markdown,
+            blocks,
         })
         .collect();
     Ok((pages, image_count))
+}
+
+/// One page's sorted items joined by a blank line, plus a block per rendered
+/// item that has a usable box. `None` when nothing rendered.
+fn render_page(
+    items: &[&Value],
+    images_rel: &str,
+    dropped: &HashSet<String>,
+    boilerplate: &HashSet<String>,
+) -> Option<(String, Vec<ParseBlock>)> {
+    const SEPARATOR: &str = "\n\n";
+    let mut markdown = String::new();
+    let mut blocks = Vec::new();
+    // `markdown`'s length in UTF-16 code units, the unit the offsets use.
+    let mut units = 0u32;
+    let mut rendered_any = false;
+    for item in items {
+        let Some(text) = render_item(item, images_rel, dropped, boilerplate) else {
+            continue;
+        };
+        if rendered_any {
+            markdown.push_str(SEPARATOR);
+            units += SEPARATOR.len() as u32;
+        }
+        rendered_any = true;
+        let start = units;
+        units += text.encode_utf16().count() as u32;
+        markdown.push_str(&text);
+        if let Some(bbox) = page_box(item) {
+            blocks.push(ParseBlock {
+                kind: kind_of(item).to_string(),
+                bbox,
+                start,
+                end: units,
+            });
+        }
+    }
+    rendered_any.then_some((markdown, blocks))
 }
 
 /// Is this crop too small to be a real figure? Reads the header only. An
@@ -566,6 +617,239 @@ mod tests {
         content.push(json!({"type": "text", "text": "Mast20004 Probability", "page_idx": 0}));
         // Every spelling goes, including a plain text item with the same key.
         assert_eq!(markdown(&rendered(&content, 4)), vec!["", "", "", ""]);
+    }
+
+    // ── Blocks ───────────────────────────────────────────────────────────────
+
+    /// The span `[start, end)` of `markdown`, in UTF-16 code units as JS
+    /// `String.slice` reads it.
+    fn slice16(markdown: &str, start: u32, end: u32) -> String {
+        let units: Vec<u16> = markdown.encode_utf16().collect();
+        String::from_utf16(&units[start as usize..end as usize]).unwrap()
+    }
+
+    /// The per-page join `render` did before it tracked blocks: the oracle for
+    /// "block tracking never changes the markdown".
+    fn joined_without_blocks(content: &[Value], page_idx_wanted: i64) -> String {
+        let mut items: Vec<&Value> = content
+            .iter()
+            .filter(|item| page_idx(item) == page_idx_wanted)
+            .collect();
+        items.sort_by(|left, right| compare(left, right));
+        let none = HashSet::new();
+        items
+            .iter()
+            .filter_map(|item| render_item(item, "deck_images", &none, &none))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    fn mixed_page() -> Vec<Value> {
+        vec![
+            json!({"type": "text", "text": "Δx → 0 as n → ∞", "page_idx": 0,
+                   "bbox": [80, 110, 920, 190]}),
+            json!({"type": "header", "text": "Week 3 · Limits", "page_idx": 0,
+                   "bbox": [50, 20, 600, 60]}),
+            json!({"type": "footer", "text": "Page 3", "page_idx": 0, "bbox": [0, 950, 100, 990]}),
+            json!({"type": "text", "text": "Definition", "text_level": 1, "page_idx": 0,
+                   "bbox": [80, 200, 400, 230]}),
+            json!({"type": "equation", "text": "$$\\mathbb{E}[X] = 𝔼 😀$$", "page_idx": 0,
+                   "bbox": [100, 240, 900, 300]}),
+            json!({"type": "text", "text": "   ", "page_idx": 0, "bbox": [0, 0, 10, 10]}),
+            json!({"type": "table", "page_idx": 0, "bbox": [80, 320, 920, 600],
+                   "table_body": "<table><tr><td>ψ</td></tr></table>",
+                   "table_footnote": ["Source: notes"]}),
+            json!({"type": "text", "text": "No box at all", "page_idx": 0}),
+            json!({"type": "text", "text": "A flat box", "page_idx": 0, "bbox": [80, 700, 920, 700]}),
+            json!({"type": "image", "page_idx": 0, "bbox": [100, 720, 900, 1100],
+                   "img_path": "images/fig.png", "image_caption": ["Figure 1"],
+                   "image_footnote": ["Read left to right"]}),
+        ]
+    }
+
+    /// Tracking blocks leaves each page's markdown byte-identical to the
+    /// plain join.
+    #[test]
+    fn block_tracking_never_changes_the_markdown() {
+        let content = mixed_page();
+        let pages = rendered(&content, 1);
+        assert_eq!(pages[0].markdown, joined_without_blocks(&content, 0));
+        assert_eq!(
+            pages[0].markdown,
+            "## Week 3 · Limits\n\nΔx → 0 as n → ∞\n\n## Definition\n\n\
+             $$\\mathbb{E}[X] = 𝔼 😀$$\n\n\
+             <table><tr><td>ψ</td></tr></table>\n\nSource: notes\n\n\
+             No box at all\n\nA flat box\n\n\
+             ![Figure 1](deck_images/fig.png)\n\nRead left to right"
+        );
+    }
+
+    /// Offsets are UTF-16 code units — astral characters count two — and each
+    /// span is exactly its item's text, separators excluded.
+    #[test]
+    fn blocks_carry_page_fractions_and_utf16_offsets() {
+        let pages = rendered(&mixed_page(), 1);
+        let page = &pages[0];
+        let spans: Vec<(&str, String)> = page
+            .blocks
+            .iter()
+            .map(|block| {
+                (
+                    block.kind.as_str(),
+                    slice16(&page.markdown, block.start, block.end),
+                )
+            })
+            .collect();
+        assert_eq!(
+            spans,
+            vec![
+                ("header", "## Week 3 · Limits".to_string()),
+                ("text", "Δx → 0 as n → ∞".to_string()),
+                ("text", "## Definition".to_string()),
+                ("equation", "$$\\mathbb{E}[X] = 𝔼 😀$$".to_string()),
+                (
+                    "table",
+                    "<table><tr><td>ψ</td></tr></table>\n\nSource: notes".to_string()
+                ),
+                (
+                    "image",
+                    "![Figure 1](deck_images/fig.png)\n\nRead left to right".to_string()
+                ),
+            ]
+        );
+
+        let header = &page.blocks[0];
+        assert_eq!(header.start, 0);
+        assert_eq!(header.bbox, [0.05, 0.02, 0.6, 0.06]);
+        // "Δx → 0 as n → ∞" is 15 UTF-16 units but 22 bytes.
+        let text = &page.blocks[1];
+        assert_eq!(text.start, header.end + 2);
+        assert_eq!(text.end - text.start, 15);
+        assert_eq!(text.bbox, [0.08, 0.11, 0.92, 0.19]);
+        // 𝔼 and 😀 are astral: two units each.
+        let equation = &page.blocks[3];
+        assert_eq!(
+            equation.end - equation.start,
+            "$$\\mathbb{E}[X] = 𝔼 😀$$".chars().count() as u32 + 2
+        );
+        // Past the page edge clamps to it.
+        assert_eq!(page.blocks[5].bbox, [0.1, 0.72, 0.9, 1.0]);
+        // The last block ends where the markdown does.
+        assert_eq!(
+            page.blocks[5].end as usize,
+            page.markdown.encode_utf16().count()
+        );
+    }
+
+    /// Lifting headers to the top moves each block with its own span.
+    #[test]
+    fn the_header_sort_keeps_each_block_with_its_span() {
+        let content = vec![
+            json!({"type": "text", "text": "First", "page_idx": 0, "bbox": [0, 500, 1000, 520]}),
+            json!({"type": "header", "text": "Lower", "page_idx": 0, "bbox": [5, 40, 9, 50]}),
+            json!({"type": "text", "text": "Second", "page_idx": 0, "bbox": [0, 600, 1000, 620]}),
+            json!({"type": "header", "text": "Upper", "page_idx": 0, "bbox": [1, 10, 9, 20]}),
+        ];
+        let pages = rendered(&content, 1);
+        let page = &pages[0];
+        assert_eq!(page.markdown, "## Upper\n\n## Lower\n\nFirst\n\nSecond");
+        let pairs: Vec<(String, f32)> = page
+            .blocks
+            .iter()
+            .map(|block| {
+                (
+                    slice16(&page.markdown, block.start, block.end),
+                    block.bbox[1],
+                )
+            })
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("## Upper".to_string(), 0.01),
+                ("## Lower".to_string(), 0.04),
+                ("First".to_string(), 0.5),
+                ("Second".to_string(), 0.6),
+            ]
+        );
+    }
+
+    /// Only rendered items get blocks: boilerplate, footers, empties and a
+    /// size-filtered crop have none, and neither does a blank page.
+    #[test]
+    fn dropped_items_have_no_block() {
+        let root = Scratch::new("render-blocks");
+        let source = root.join("source");
+        let out = root.join("deck_images");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("logo.png"), png_header(100, 100)).unwrap();
+
+        let boxed = [100, 100, 900, 200];
+        let mut content: Vec<Value> = (0..4)
+            .map(|page| json!({"type": "header", "text": "Running head", "page_idx": page, "bbox": boxed}))
+            .collect();
+        content.extend([
+            json!({"type": "footer", "text": "Slide 1", "page_idx": 0, "bbox": boxed}),
+            json!({"type": "text", "text": "", "page_idx": 0, "bbox": boxed}),
+            json!({"type": "equation", "text": "  ", "page_idx": 0, "bbox": boxed}),
+            json!({"type": "image", "page_idx": 0, "img_path": "images/logo.png",
+                   "image_caption": ["Logo"], "bbox": boxed}),
+            json!({"type": "text", "text": "Kept", "page_idx": 0, "bbox": [100, 300, 900, 400]}),
+            json!({"type": "text", "text": "Only on page two", "page_idx": 1, "bbox": [0, 0, 1000]}),
+        ]);
+        let (pages, _) = render(&content, 4, &source, &out, "deck_images").unwrap();
+
+        assert_eq!(pages[0].markdown, "Kept");
+        assert_eq!(
+            pages[0].blocks,
+            vec![ParseBlock {
+                kind: "text".into(),
+                bbox: [0.1, 0.3, 0.9, 0.4],
+                start: 0,
+                end: 4,
+            }]
+        );
+        // Rendered, but a three-number bbox is no box.
+        assert_eq!(pages[1].markdown, "Only on page two");
+        assert!(pages[1].blocks.is_empty());
+        // Furniture-only and blank pages.
+        assert!(pages[2].markdown.is_empty() && pages[2].blocks.is_empty());
+        assert!(pages[3].markdown.is_empty() && pages[3].blocks.is_empty());
+    }
+
+    /// An image and the footnote hanging under it are one item, so one block.
+    #[test]
+    fn an_image_and_its_footnote_are_one_block() {
+        let content = vec![json!({
+            "type": "chart", "page_idx": 0, "bbox": [0, 0, 500, 500],
+            "img_path": "images/c.png", "chart_footnote": ["Explaining prose"],
+        })];
+        let pages = rendered(&content, 1);
+        assert_eq!(pages[0].blocks.len(), 1);
+        let block = &pages[0].blocks[0];
+        assert_eq!(block.kind, "chart");
+        assert_eq!(
+            slice16(&pages[0].markdown, block.start, block.end),
+            "![](deck_images/c.png)\n\nExplaining prose"
+        );
+    }
+
+    /// The degenerate-box and non-number cases of `page_box`.
+    #[test]
+    fn only_a_real_box_is_kept() {
+        let boxed = |bbox: Value| page_box(&json!({ "bbox": bbox }));
+        assert_eq!(boxed(json!([0, 0, 1000, 1000])), Some([0.0, 0.0, 1.0, 1.0]));
+        assert_eq!(
+            boxed(json!([-50, 10.5, 2000, 20])),
+            Some([0.0, 0.0105, 1.0, 0.02])
+        );
+        assert_eq!(boxed(json!([500, 0, 500, 100])), None);
+        assert_eq!(boxed(json!([0, 300, 100, 200])), None);
+        assert_eq!(boxed(json!([1200, 0, 1500, 100])), None);
+        assert_eq!(boxed(json!([0, 0, "100", 100])), None);
+        assert_eq!(boxed(json!([0, 0, 100, 100, 5])), None);
+        assert_eq!(boxed(json!(null)), None);
+        assert_eq!(page_box(&json!({})), None);
     }
 
     fn png_header(width: u32, height: u32) -> Vec<u8> {

@@ -660,7 +660,7 @@
   position: relative;
 }
 /* A page sits white in either theme, with a card's shadow. Inside, in paint
- * order: the raster, find highlights, the text layer, links. */
+ * order: the raster, block boxes, find highlights, the text layer, links. */
 .pdf-surface .page {
   position: absolute;
   overflow: hidden;
@@ -671,6 +671,7 @@
     0 1px 2px -1px rgb(0 0 0 / 0.1);
 }
 .pdf-surface .pdf-canvas,
+.pdf-surface .pdf-block-layer,
 .pdf-surface .pdf-find-layer,
 .pdf-surface .textLayer,
 .pdf-surface .pdf-link-layer {
@@ -681,9 +682,19 @@
   width: 100%;
   height: 100%;
 }
+.pdf-surface .pdf-block-layer,
 .pdf-surface .pdf-find-layer,
 .pdf-surface .pdf-link-layer {
   pointer-events: none;
+}
+/* A cited parse block's box (`PdfPage`'s block layer). Under the text
+ * layer, like find. */
+.pdf-surface .pdf-block-layer > div {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 55%, transparent);
+  background-color: color-mix(in srgb, var(--color-brand) 18%, transparent);
 }
 .pdf-surface .pdf-find-layer > div {
   position: absolute;

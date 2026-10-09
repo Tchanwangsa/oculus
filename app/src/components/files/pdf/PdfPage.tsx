@@ -18,6 +18,8 @@ interface Props {
   /** On or near the screen: draw the canvas, text and links. */
   near: boolean;
   highlights?: readonly Highlight[];
+  /** The boxes of the parse blocks a citation names. */
+  blockBoxes?: readonly Rect[];
   /** After this page's text layer is (re)built. */
   onTextLayer: (page: number) => void;
   onGoToPage: (page: number) => void;
@@ -32,8 +34,8 @@ const placed = (r: Rect): CSSProperties => ({
   height: pt(r.height),
 });
 
-/** One page: its box always, and while `near` the raster, find highlights,
- *  text layer and links, stacked in that order. */
+/** One page: its box always, and while `near` the raster, block boxes, find
+ *  highlights, text layer and links, stacked in that order. */
 export const PdfPage = memo(function PdfPage({
   path,
   box,
@@ -42,6 +44,7 @@ export const PdfPage = memo(function PdfPage({
   dpr,
   near,
   highlights,
+  blockBoxes,
   onTextLayer,
   onGoToPage,
 }: Props) {
@@ -55,6 +58,13 @@ export const PdfPage = memo(function PdfPage({
   return (
     <div className="page" data-page-number={box.page} style={style}>
       {near && <PageCanvas path={path} page={box.page} size={size} scale={renderScale} dpr={dpr} />}
+      {near && blockBoxes?.length ? (
+        <div className="pdf-block-layer">
+          {blockBoxes.map((b, i) => (
+            <div key={i} style={placed(b)} />
+          ))}
+        </div>
+      ) : null}
       {near && highlights?.length ? (
         <div className="pdf-find-layer">
           {highlights.map((h, i) => (

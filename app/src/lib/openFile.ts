@@ -36,12 +36,15 @@ export function recordFileAccess(file: Pick<DbFile, "id"> & Partial<Pick<DbFile,
 }
 
 /** A spot in the file a citation points at: a PDF page (and the passage to
- *  highlight on it), or for markdown just the passage. `seq` is fresh per
- *  click, so citing the same spot again re-jumps. Rides in the file page's
- *  router state (`{ locate }`), not its URL: quotes are long. */
+ *  highlight on it, or the parse's blocks on it to box), or for markdown just
+ *  the passage. `seq` is fresh per click, so citing the same spot again
+ *  re-jumps. Rides in the file page's router state (`{ locate }`), not its
+ *  URL: quotes are long. */
 export interface FileLocate {
   page?: number;
   quote?: string;
+  /** Indices into the page's `.pages.json` blocks (`PdfBlock`). */
+  blocks?: number[];
   seq: number;
 }
 
@@ -52,6 +55,8 @@ export function routeLocate(state: unknown): FileLocate | undefined {
   return {
     page: typeof l.page === "number" ? l.page : undefined,
     quote: typeof l.quote === "string" ? l.quote : undefined,
+    blocks:
+      Array.isArray(l.blocks) && l.blocks.every((b) => Number.isInteger(b)) ? (l.blocks as number[]) : undefined,
     seq: l.seq,
   };
 }
@@ -230,15 +235,21 @@ async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void>
 }
 
 /** Where in `file` the citation points. A line of a parsed `.md` becomes its
- *  PDF page and the line's text; a `#page=` on anything PDF-backed is just
- *  the page; a line of a plain markdown file, or of a spreadsheet's text, is
- *  just its text. */
+ *  PDF page, the line's text and the parse blocks it covers; a `#page=` on
+ *  anything PDF-backed is just the page; a line of a plain markdown file, or
+ *  of a spreadsheet's text, is just its text. */
 async function citationLocate(cite: Citation, file: DbFile): Promise<FileLocate | undefined> {
   const seq = ++locateSeq;
   const pdf = isPdfBacked(file.filename);
   if (pdf && cite.line && cite.path === parsedMdRelPath(file)) {
     const hit = await citedPage(cite.path, cite.line);
-    if (hit) return { page: hit.page, quote: hit.quote || undefined, seq };
+    if (hit)
+      return {
+        page: hit.page,
+        quote: hit.quote || undefined,
+        blocks: hit.blocks.length ? hit.blocks : undefined,
+        seq,
+      };
   }
   if (pdf && cite.page) return { page: cite.page, seq };
   const textPath = isSheetFile(file.filename) ? parsedMdRelPath(file) : file.relative_path;

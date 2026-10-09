@@ -73,7 +73,7 @@ export default function SubjectFilePage() {
   const pdf = usePdfMd(file);
   const isDocument = file?.category === "document";
 
-  // A cited page is in the PDF, whichever face was showing.
+  // A cited page is in the PDF: the Markdown face gives way to it.
   const { setViewMode } = pdf;
   useEffect(() => {
     if (locate?.page) setViewMode("pdf");
@@ -182,6 +182,7 @@ export default function SubjectFilePage() {
             files={files}
             onOpenFile={openFileSmart}
             pdfViewMode={pdf.viewMode}
+            pdfLink={pdf.link}
             locate={locate}
           />
         )}

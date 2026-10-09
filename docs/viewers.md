@@ -9,6 +9,7 @@ video's transcript, and a web page.
 | Piece | Location |
 | --- | --- |
 | Markdown, maths, mermaid, lightbox, PDF | `app/src/components/markdown/`, `app/src/components/ui/Lightbox.tsx`, `app/src/components/files/pdf/`, `app/src/lib/pdfView.ts`, `app/src/lib/pdfFind.ts` |
+| A parsed PDF's faces: PDF, Markdown | `app/src/components/files/FileViewer.tsx`, `app/src/components/files/FileMarkdown.tsx`, `app/src/components/files/pdfMdLink.ts`, `app/src/lib/pdfBlocks.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/media.ts`, `app/src/stores/playerPrefsStore.ts`, `app/src/hooks/useTranscriptDock.ts` |
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lecturePlayback.ts`, `app/src/lib/playbackOwner.ts` |
 | Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectureEnd.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/chapters.rs` |
@@ -113,8 +114,12 @@ classes work even when there are no dollar delimiters.
     walkers), figure links match the Markdown view's copy, and an end on an
     unparsed or unalignable page copies that page's text. It is bound in the
     **capture** phase on the scroller.
-  - **A citation** jumps to its page and marks the quote's spans
-    (`citation-hit`) each time that page's text layer is built.
+  - **A citation** jumps to its page. When the record has blocks, the cited
+    lines' blocks (`citedPage` maps the line range into the page's markdown
+    and onto the block spans) are boxed and the first is brought into view;
+    otherwise the quote's spans are marked (`citation-hit`) each time that
+    page's text layer is built. A citation jumps once: coming back from the
+    Markdown face keeps the reader's place and the marks.
   - **Find is the viewer's own behind `ui/FindBar.tsx`** (`usePdfFind.ts`,
     `app/src/lib/pdfFind.ts`): opening it reads every page's text once, and a
     query matches case- and diacritic-blind over each page's lines joined by
@@ -140,6 +145,33 @@ classes work even when there are no dollar delimiters.
     included. Errors are codes: `not-found`, `encrypted`, `invalid`,
     `outside-library`, `page-out-of-range`, `invalid-size`, `too-large`,
     `render-failed`.
+
+- **A parsed PDF has two faces, PDF | Markdown** (`PdfMdToggle` in the file
+  page's header, state in `usePdfMd`). One shows at a time. A citation with
+  a page turns Markdown to PDF.
+  - **The Markdown face renders the `.pages.json` record**, not the `.md`
+    (`buildBlockDoc` in `app/src/lib/pdfBlocks.ts`; [parsing.md](./parsing.md)
+    has the record): pages joined by "\n\n" as the `.md` is, each cut at its
+    blocks' spans with text outside every block kept as its page's own,
+    `normalizeMath` per chunk. It is one `ReactMarkdown`, whose output
+    matches the `.md`'s apart from the anchors. Two rehype passes
+    (`blockAnchorPlugins`) give each top-level element, and each item of a
+    top-level list, `data-page` and `data-block` from the chunk its source
+    starts in; the second runs after KaTeX, which replaces a display
+    formula's node with one that has no source position. Without a record
+    it renders the flat `.md`; a record without blocks anchors pages only.
+  - **The faces share one reading position** (`PdfMdLink`, fresh per file):
+    each reports the block at its top a moment after scrolling stops and
+    once more on unmount, and the face toggled to puts it back near its top. The PDF reads it by layout
+    arithmetic over the page sizes and the boxes, the Markdown by offsets,
+    never `getBoundingClientRect`. A record without blocks syncs by page. A
+    citation not yet shown wins over the stored position. The Markdown face
+    holds a restored block in place while images load or its width changes,
+    until the reader scrolls.
+  - **Boxes are drawn only for cited blocks**, in a layer of `PdfPage`
+    under the text spans like find's, from the `bbox` fractions times the
+    page size in points. A record without blocks boxes nothing; its
+    citations mark spans.
 
 Chat's composer (`MentionInput.tsx` sends chips as backticked library paths),
 picker and timeline are [harness.md](./harness.md).

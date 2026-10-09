@@ -603,6 +603,7 @@ pub fn convert(data_dir: &Path, rel: &str) -> Result<Vec<ParsePage>, ParseError>
         .map(|(i, markdown)| ParsePage {
             page_no: i as u32 + 1,
             markdown,
+            blocks: Vec::new(),
         })
         .collect())
 }
@@ -1180,6 +1181,7 @@ mod tests {
         let page = |n: u32, text: &str| ParsePage {
             page_no: n,
             markdown: text.into(),
+            blocks: Vec::new(),
         };
         // No row yet: the conversion beat the frontend's upsert.
         record(&pool, 7, rel, &[page(1, "a"), page(2, "b"), page(3, "c")])

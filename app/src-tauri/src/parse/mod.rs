@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 /// The version stamped into every `.pages.json`. It moves only when the
 /// artifacts themselves change shape — not when a backend or the app changes.
-pub const PARSER_VERSION: u32 = 2;
+pub const PARSER_VERSION: u32 = 3;
 
 /// The one parse tier. Records on disk carry the field, so it round-trips.
 pub const MODE: &str = "quality";
@@ -56,9 +56,23 @@ pub fn read_record(pdf: &Path) -> Option<ParseOutput> {
 ///   crash that never wrote the record.
 /// * No `parser_version` check: a version bump must not re-parse the library.
 pub fn parse_mode(pdf: &Path) -> Option<&'static str> {
-    let text = fs::read_to_string(pages_path(pdf)).ok()?;
-    let record: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let record = record_value(pdf)?;
     (record.get("mode").and_then(|v| v.as_str()) == Some(MODE)).then_some(MODE)
+}
+
+/// A parsed record written by an older `PARSER_VERSION`, or with none: what
+/// `oculus index --reparse` parses again. Untyped, so any old shape reads.
+pub fn is_outdated(pdf: &Path) -> bool {
+    let Some(record) = record_value(pdf) else {
+        return false;
+    };
+    let parsed = record.get("mode").and_then(|v| v.as_str()) == Some(MODE);
+    let version = record.get("parser_version").and_then(|v| v.as_u64());
+    parsed && version.is_none_or(|v| v < u64::from(PARSER_VERSION))
+}
+
+fn record_value(pdf: &Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&fs::read_to_string(pages_path(pdf)).ok()?).ok()
 }
 
 // ── The parsed document ──────────────────────────────────────────────────────
@@ -69,6 +83,23 @@ pub fn parse_mode(pdf: &Path) -> Option<&'static str> {
 pub struct ParsePage {
     pub page_no: u32,
     pub markdown: String,
+    /// Where each rendered item sits on the page and in `markdown`, in
+    /// markdown order. Absent in records older than version 3.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<ParseBlock>,
+}
+
+/// One rendered content-list item: its box on the page and its span in the
+/// page's markdown. Units are pinned in `docs/parsing.md`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParseBlock {
+    /// The backend's raw item `type` (`text`, `header`, `image`, `table`, ...).
+    pub kind: String,
+    /// `[x0, y0, x1, y1]` as fractions of the page, top-left origin, y down.
+    pub bbox: [f32; 4],
+    /// UTF-16 code-unit offsets into `markdown`: the consumer is JS.
+    pub start: u32,
+    pub end: u32,
 }
 
 /// Exactly the `.pages.json` on disk, plus one field that never goes there.
@@ -99,10 +130,10 @@ impl ParseOutput {
         backend: Option<String>,
         image_count: u32,
     ) -> Self {
-        let mut slots = vec![String::new(); page_count as usize];
+        let mut slots = vec![(String::new(), Vec::new()); page_count as usize];
         for page in pages {
             if page.page_no >= 1 && page.page_no <= page_count {
-                slots[(page.page_no - 1) as usize] = page.markdown;
+                slots[(page.page_no - 1) as usize] = (page.markdown, page.blocks);
             }
         }
         Self {
@@ -116,9 +147,10 @@ impl ParseOutput {
             pages: slots
                 .into_iter()
                 .enumerate()
-                .map(|(i, markdown)| ParsePage {
+                .map(|(i, (markdown, blocks))| ParsePage {
                     page_no: i as u32 + 1,
                     markdown,
+                    blocks,
                 })
                 .collect(),
             backend,
@@ -809,16 +841,19 @@ mod tests {
                 ParsePage {
                     page_no: 3,
                     markdown: "three".into(),
+                    blocks: Vec::new(),
                 },
                 ParsePage {
                     page_no: 1,
                     markdown: "one".into(),
+                    blocks: Vec::new(),
                 },
                 // Out of range: a backend that split the document and got its
                 // offsets wrong must not be able to corrupt the join key.
                 ParsePage {
                     page_no: 9,
                     markdown: "nine".into(),
+                    blocks: Vec::new(),
                 },
             ],
             Some("mineru-cloud".into()),
@@ -843,6 +878,7 @@ mod tests {
             vec![ParsePage {
                 page_no: 1,
                 markdown: "ψ".into(),
+                blocks: Vec::new(),
             }],
             None,
             0,
@@ -852,7 +888,7 @@ mod tests {
         assert!(json.contains("\"ψ\""), "{json}");
         assert!(!json.contains("backend"), "{json}");
         assert!(!json.contains("image_count"), "{json}");
-        assert!(json.contains("\"parser_version\":2"), "{json}");
+        assert!(json.contains("\"parser_version\":3"), "{json}");
     }
 
     #[test]
@@ -874,6 +910,7 @@ mod tests {
             vec![ParsePage {
                 page_no: 1,
                 markdown: "![](Lecture 3_images/new.jpg)".into(),
+                blocks: Vec::new(),
             }],
             Some("mineru-cloud".into()),
             1,
@@ -962,6 +999,84 @@ mod tests {
     }
 
     #[test]
+    fn reparse_selects_only_records_older_than_this_version() {
+        let dir = scratch("outdated");
+        let pdf = sample_pdf(&dir);
+        let with = |body: &str| {
+            fs::write(pages_path(&pdf), body).unwrap();
+            is_outdated(&pdf)
+        };
+
+        // Never parsed: the ordinary path parses it, not `--reparse`.
+        assert!(!is_outdated(&pdf));
+        assert!(with(r#"{"mode":"quality","parser_version":2}"#));
+        assert!(with(r#"{"mode":"quality"}"#));
+        assert!(with(r#"{"mode":"quality","parser_version":"2"}"#));
+        assert!(!with(&format!(
+            r#"{{"mode":"quality","parser_version":{PARSER_VERSION}}}"#
+        )));
+        assert!(!with(r#"{"mode":"fast","parser_version":1}"#));
+        assert!(!with("{ not json"));
+    }
+
+    /// A version-2 record has no `blocks`; it must still read as a record, or
+    /// the file would look unparsed.
+    #[test]
+    fn a_version_2_record_still_reads() {
+        let dir = scratch("v2");
+        let pdf = sample_pdf(&dir);
+        fs::write(
+            pages_path(&pdf),
+            r#"{"pdf":"Lecture 3.pdf","mode":"quality","parser_version":2,"page_count":1,
+                "pages":[{"page_no":1,"markdown":"one"}],"backend":"mineru-cloud"}"#,
+        )
+        .unwrap();
+        let record = read_record(&pdf).expect("v2 record reads");
+        assert_eq!(record.parser_version, 2);
+        assert_eq!(record.pages[0].markdown, "one");
+        assert!(record.pages[0].blocks.is_empty());
+    }
+
+    #[test]
+    fn blocks_round_trip_and_survive_gap_filling() {
+        let dir = scratch("blocks");
+        let pdf = sample_pdf(&dir);
+        let block = ParseBlock {
+            kind: "text".into(),
+            bbox: [0.08, 0.11, 0.92, 0.19],
+            start: 0,
+            end: 3,
+        };
+        let out = ParseOutput::new(
+            &pdf,
+            2,
+            vec![ParsePage {
+                page_no: 2,
+                markdown: "two".into(),
+                blocks: vec![block.clone()],
+            }],
+            None,
+            0,
+        );
+        // The gap-filled page has no blocks, and writes no key for them.
+        assert!(out.pages[0].blocks.is_empty());
+        let json = serde_json::to_string(&out).unwrap();
+        assert_eq!(json.matches("\"blocks\"").count(), 1, "{json}");
+        assert!(
+            json.contains(
+                r#""blocks":[{"kind":"text","bbox":[0.08,0.11,0.92,0.19],"start":0,"end":3}]"#
+            ),
+            "{json}"
+        );
+
+        out.write(&pdf, ImageStaging::begin(&pdf).unwrap()).unwrap();
+        let back = read_record(&pdf).unwrap();
+        assert_eq!(back.parser_version, PARSER_VERSION);
+        assert_eq!(back.pages[1].blocks, vec![block]);
+        assert!(!is_outdated(&pdf));
+    }
+
+    #[test]
     fn a_second_parse_of_the_same_pdf_waits_for_the_first() {
         use std::sync::atomic::AtomicUsize;
         use std::sync::Arc;
@@ -1009,10 +1124,12 @@ mod tests {
                 ParsePage {
                     page_no: 1,
                     markdown: "one".into(),
+                    blocks: Vec::new(),
                 },
                 ParsePage {
                     page_no: 2,
                     markdown: "two".into(),
+                    blocks: Vec::new(),
                 },
             ],
             None,

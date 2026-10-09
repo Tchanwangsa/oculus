@@ -1168,6 +1168,7 @@ mod tests {
         crate::parse::ParsePage {
             page_no,
             markdown: markdown.to_string(),
+            blocks: Vec::new(),
         }
     }
 

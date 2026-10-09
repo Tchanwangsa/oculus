@@ -19,7 +19,9 @@ import { centerIn, matchSpans } from "@/lib/locateQuote";
 import type { FileLocate } from "@/lib/openFile";
 import { selectContents, useFindTarget } from "@/lib/find";
 import { useDataDir } from "@/hooks/useDataDir";
-import { loadParsedPages } from "@/lib/citations";
+import { loadPagesRecord, loadParsedPages, type PdfBlock } from "@/lib/citations";
+import { blockRect, type BlockRef } from "@/lib/pdfBlocks";
+import type { PdfMdLink } from "@/components/files/pdfMdLink";
 import { libraryImageSrc } from "@/lib/libraryLinks";
 import { copyPdfAsMarkdown, dragPdfAsMarkdown } from "@/lib/pdfSelectionMarkdown";
 import { openPdf, type PdfPageSize } from "@/lib/pdfView";
@@ -63,6 +65,14 @@ const GESTURE_LAPSE = 400;
 /** The class a cited passage's text-layer spans carry (`index.css`). */
 const HIT = "citation-hit";
 
+/** Layout pixels between the view's top and a block brought to it; the
+ *  reading line a position is read at sits just under it, so a restore
+ *  reports the block it restored. */
+const PLACE = 12;
+
+/** The position is reported this long after the last scroll. */
+const REPORT_MS = 150;
+
 interface Props {
   /** Library-relative, as Rust's `pdf_*` commands take it. */
   path: string;
@@ -71,10 +81,14 @@ interface Props {
   /** The parse's `.md` (library-relative): a selection copies as its
    *  markdown (`pdfSelectionMarkdown.ts`). */
   markdownPath?: string;
+  /** Shared with the Markdown face (`pdfMdLink.ts`): the position is
+   *  reported to it and restored from it on mount. */
+  link?: PdfMdLink;
 }
 
-/** Where a page jump lands: the page's top, or a spot on it brought into view. */
-type ScrollTarget = { page: number; rect?: Rect };
+/** Where a page jump lands: the page's top, or a spot on it brought into
+ *  view — centred, or with `top` just under the view's top. */
+type ScrollTarget = { page: number; rect?: Rect; top?: boolean };
 
 const ERRORS: Record<string, string> = {
   encrypted: "This PDF is password-protected, so it can't be shown here.",
@@ -90,7 +104,7 @@ export function PDFViewer(props: Props) {
   return <Viewer key={props.path} {...props} />;
 }
 
-function Viewer({ path, locate, markdownPath }: Props) {
+function Viewer({ path, locate, markdownPath, link }: Props) {
   const [sizes, setSizes] = useState<PdfPageSize[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [mode, setMode] = useStoredState<LayoutMode>(MODE_KEY, (stored) =>
@@ -120,6 +134,11 @@ function Viewer({ path, locate, markdownPath }: Props) {
   const viewerElRef = useRef<HTMLDivElement>(null);
   /** The parsed pages, once read; the copy handlers need them synchronously. */
   const pagesRef = useRef<ReadonlyMap<number, string> | null>(null);
+  /** Each page's parse blocks, once the record is read; null when it has none. */
+  const [blocks, setBlocks] = useState<ReadonlyMap<number, PdfBlock[]> | null>(null);
+  const [recordReady, setRecordReady] = useState(!markdownPath);
+  /** The blocks a citation names. */
+  const [cited, setCited] = useState<{ page: number; blocks: number[] } | null>(null);
   const dataDir = useDataDir();
 
   // Mirrors for callbacks that must stay stable.
@@ -140,6 +159,14 @@ function Viewer({ path, locate, markdownPath }: Props) {
   const targetRef = useRef<ScrollTarget | null>(null);
   const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textListeners = useRef(new Set<(page: number) => void>());
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
+  /** Set once the shared position is restored (or there was none); no
+   *  position is reported before, so the opening scroll can't overwrite it. */
+  const placedRef = useRef(false);
+  const reportRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The citation this mount jumped to. */
+  const jumpSeqRef = useRef<number | null>(null);
 
   const layout = useMemo<Layout | null>(
     () => (sizes && scale != null && view.width ? layoutPages(sizes, mode, scale, current, view.width) : null),
@@ -219,15 +246,66 @@ function Viewer({ path, locate, markdownPath }: Props) {
     if (!same(nextNear, nearRef.current)) setNear((nearRef.current = nextNear));
   }, []);
 
-  /** Shows `page` — its top, or `rect` on it centred if it is out of view. */
-  const goToPage = useCallback((page: number, rect?: Rect) => {
+  /** Shows `page` — its top, or `rect` on it: centred if it is out of view,
+   *  or with `top` just under the view's top. */
+  const goToPage = useCallback((page: number, rect?: Rect, top?: boolean) => {
     const count = sizesRef.current?.length ?? 0;
     if (!count) return;
     const p = Math.min(Math.max(1, page), count);
     const m = modeRef.current;
     if (m !== "scroll") setCurrent(m === "spread" ? spreadStart(p) : p);
-    targetRef.current = { page: p, rect };
+    targetRef.current = { page: p, rect, top };
     setScrollTick((n) => n + 1);
+  }, []);
+
+  /** A block's box in points, if the record has it. */
+  const rectOf = useCallback((page: number, block: number) => {
+    const b = blocksRef.current?.get(page)?.[block];
+    const size = sizesRef.current?.[page - 1];
+    return b && size ? blockRect(b, size.width, size.height) : null;
+  }, []);
+
+  /** Shows a block near the view's top, or a page's top. */
+  const showRef = useCallback(
+    (ref: BlockRef) => {
+      const rect = ref.block != null ? rectOf(ref.page, ref.block) : null;
+      if (rect) goToPage(ref.page, rect, true);
+      else goToPage(ref.page);
+    },
+    [goToPage, rectOf],
+  );
+
+  /** The block at the reading line, by layout arithmetic: on the first page
+   *  in view that has one there, the highest block reaching past the line.
+   *  Without blocks, the page being read. */
+  const readPosition = useCallback((): BlockRef | null => {
+    const el = containerRef.current;
+    const lay = layoutRef.current;
+    if (!el || !lay?.boxes.length) return null;
+    const top = el.scrollTop;
+    const bottom = top + el.clientHeight;
+    const line = top + PLACE + 1;
+    const all = blocksRef.current;
+    if (all) {
+      for (const box of lay.boxes) {
+        if (box.top >= bottom) break;
+        if (box.top + box.height <= line) continue;
+        let best: number | null = null;
+        let bestTop = Infinity;
+        (all.get(box.page) ?? []).forEach((b, i) => {
+          const r = blockRect(b, 1, 1);
+          if (!r) return;
+          const y0 = box.top + r.y * box.height;
+          const y1 = y0 + r.height * box.height;
+          if (y1 > line && y0 < bottom && y0 < bestTop) {
+            bestTop = y0;
+            best = i;
+          }
+        });
+        if (best != null) return { page: box.page, block: best };
+      }
+    }
+    return { page: modeRef.current === "scroll" ? mainRef.current : currentRef.current };
   }, []);
 
   /** Sets the scale, keeping the spot under view point (`vx`, `vy`) — the
@@ -327,7 +405,8 @@ function Viewer({ path, locate, markdownPath }: Props) {
         const r = target.rect;
         const y = box.top + r.y * k;
         const h = r.height * k;
-        if (y < el.scrollTop || y + h > el.scrollTop + el.clientHeight)
+        if (target.top) el.scrollTop = y - PLACE;
+        else if (y < el.scrollTop || y + h > el.scrollTop + el.clientHeight)
           el.scrollTop = y - (el.clientHeight - h) / 2;
         const x = box.left + r.x * k;
         const w = r.width * k;
@@ -348,14 +427,91 @@ function Viewer({ path, locate, markdownPath }: Props) {
     setScrollTick((n) => n + 1);
   };
 
-  // ── Citation locate ──────────────────────────────────────────────────────
-  //
-  // Go to the cited page, then mark the quote's spans once that page's text
-  // layer exists — after the jump, or when it is built, which also happens
-  // when a page scrolled away comes back, so the marks return while this
-  // locate is current. Scrolls to the passage only the first time.
+  // ── The record: blocks, and markdown for copy ──────────────────────────────
+
+  useEffect(() => {
+    pagesRef.current = null;
+    setBlocks(null);
+    if (!markdownPath) {
+      setRecordReady(true);
+      return;
+    }
+    let live = true;
+    // The fresh read first, so the pages below share it.
+    loadPagesRecord(markdownPath, true).then((record) => {
+      if (!live) return;
+      const map = new Map((record?.pages ?? []).map((p) => [p.page_no, p.blocks ?? []]));
+      setBlocks([...map.values()].some((b) => b.length) ? map : null);
+      setRecordReady(true);
+    });
+    loadParsedPages(markdownPath).then((pages) => {
+      if (live) pagesRef.current = pages;
+    });
+    return () => {
+      live = false;
+    };
+  }, [markdownPath]);
 
   const ready = !!layout;
+
+  // ── Position shared with the Markdown face ───────────────────────────────
+  //
+  // Once laid out and the record read, put back the position the other face
+  // left — unless a citation not yet shown is about to jump. From then on,
+  // report the block at the top after each scroll settles.
+
+  useEffect(() => {
+    if (!ready || !recordReady || placedRef.current) return;
+    placedRef.current = true;
+    const anchor = link?.anchor;
+    if (!anchor || (locate?.page && link.locateSeq !== locate.seq)) return;
+    showRef(anchor);
+    // Once, on the first layout with the record.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, recordReady]);
+
+  const report = useCallback(() => {
+    reportRef.current = null;
+    const ref = readPosition();
+    if (ref && link) link.anchor = ref;
+  }, [link, readPosition]);
+
+  const reportSoon = () => {
+    if (!link || !placedRef.current) return;
+    if (reportRef.current != null) clearTimeout(reportRef.current);
+    reportRef.current = setTimeout(report, REPORT_MS);
+  };
+
+  // A pending report lands on unmount, before the scroller leaves the
+  // document, so a toggle right after a scroll keeps the position.
+  useLayoutEffect(
+    () => () => {
+      if (reportRef.current == null) return;
+      clearTimeout(reportRef.current);
+      report();
+    },
+    [report],
+  );
+
+  /** The cited blocks' boxes, on the cited page only; other pages get none,
+   *  so their memoised `PdfPage`s stay put. */
+  const citedBoxes = useMemo(() => {
+    if (!cited) return null;
+    const rects = cited.blocks.map((b) => rectOf(cited.page, b)).filter((r): r is Rect => !!r);
+    return rects.length ? { page: cited.page, rects } : null;
+    // `rectOf` reads `blocks` and `sizes` through refs; they are listed so a
+    // record or document arriving redraws the boxes.
+  }, [cited, blocks, sizes, rectOf]);
+
+  // ── Citation locate ──────────────────────────────────────────────────────
+  //
+  // Go to the cited page and mark the cited blocks' boxes when the record has
+  // them; otherwise mark the quote's spans once that page's text layer exists
+  // — after the jump, or when it is built, which also happens when a page
+  // scrolled away comes back, so the marks return while this locate is
+  // current. Scrolls only the first time a citation is shown, so a remount
+  // (back from the Markdown face) keeps the reader's place.
+
   const onTextLayer = useCallback((page: number) => {
     for (const listener of textListeners.current) listener(page);
   }, []);
@@ -363,13 +519,25 @@ function Viewer({ path, locate, markdownPath }: Props) {
   useEffect(() => {
     const container = containerRef.current;
     const count = sizesRef.current?.length ?? 0;
-    if (!ready || !container || !count || !locate?.page) return;
+    if (!ready || !recordReady || !container || !count || !locate?.page) return;
+    // A citation is this mount's to jump to if no face showed it before; the
+    // ref keeps that answer through StrictMode's second run.
+    if (link?.locateSeq !== locate.seq) jumpSeqRef.current = locate.seq;
+    if (link) link.locateSeq = locate.seq;
+    const jump = jumpSeqRef.current === locate.seq;
     for (const el of container.querySelectorAll(`.${HIT}`)) el.classList.remove(HIT);
     const pageNumber = Math.min(Math.max(1, locate.page), count);
-    goToPage(pageNumber);
+    const boxed = (locate.blocks ?? []).filter((b) => rectOf(pageNumber, b));
+    if (boxed.length) {
+      setCited({ page: pageNumber, blocks: boxed });
+      if (jump) goToPage(pageNumber, rectOf(pageNumber, boxed[0])!);
+      return () => setCited(null);
+    }
+    setCited(null);
+    if (jump) goToPage(pageNumber);
     const quote = locate.quote;
     if (!quote) return;
-    let scrolled = false;
+    let scrolled = !jump;
     const mark = () => {
       const layer = container.querySelector(`.page[data-page-number="${pageNumber}"] .textLayer`);
       if (!layer) return;
@@ -394,21 +562,9 @@ function Viewer({ path, locate, markdownPath }: Props) {
     // `locate` is read through its `seq`: a new object with the same seq is
     // the same citation (a refreshed row).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locate?.seq, ready]);
+  }, [locate?.seq, ready, recordReady]);
 
   // ── Copy as markdown ─────────────────────────────────────────────────────
-
-  useEffect(() => {
-    pagesRef.current = null;
-    if (!markdownPath) return;
-    let live = true;
-    loadParsedPages(markdownPath).then((pages) => {
-      if (live) pagesRef.current = pages;
-    });
-    return () => {
-      live = false;
-    };
-  }, [markdownPath]);
 
   /** A figure's link as the Markdown view's copy writes it, so both faces of
    *  a file copy the same text. */
@@ -722,7 +878,10 @@ function Viewer({ path, locate, markdownPath }: Props) {
       <div className="relative flex-1 min-h-0">
         <div
           ref={containerRef}
-          onScroll={sync}
+          onScroll={() => {
+            sync();
+            reportSoon();
+          }}
           // Capture, so the markdown is on the clipboard before anything
           // inside the pages could write its own.
           onCopyCapture={(e) => pagesRef.current && copyPdfAsMarkdown(e, e.currentTarget, pagesRef.current, resolveImage)}
@@ -747,6 +906,7 @@ function Viewer({ path, locate, markdownPath }: Props) {
                   dpr={dpr}
                   near={box.page >= near.first && box.page <= near.last}
                   highlights={find.highlights.get(box.page)}
+                  blockBoxes={citedBoxes?.page === box.page ? citedBoxes.rects : undefined}
                   onTextLayer={onTextLayer}
                   onGoToPage={goToPage}
                 />

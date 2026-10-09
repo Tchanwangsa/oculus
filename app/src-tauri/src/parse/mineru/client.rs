@@ -1351,7 +1351,10 @@ mod tests {
 
     fn content_list(from: usize, pages: usize) -> Vec<u8> {
         let items: Vec<Value> = (0..pages)
-            .map(|page| json!({ "type": "text", "text": format!("page {}", from + page + 1), "page_idx": page }))
+            .map(|page| {
+                json!({ "type": "text", "text": format!("page {}", from + page + 1),
+                        "page_idx": page, "bbox": [100, 200, 900, 300] })
+            })
             .collect();
         Value::Array(items).to_string().into_bytes()
     }
@@ -1809,6 +1812,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["page 1", "page 2", "page 3"]
         );
+        // The bbox survives `page_idx` rebasing, the second task's page included.
+        assert!(output
+            .pages
+            .iter()
+            .all(|page| page.blocks.len() == 1 && page.blocks[0].bbox == [0.1, 0.2, 0.9, 0.3]));
         assert_eq!(output.image_count, 0);
 
         let seen = hold(&seen).clone();
