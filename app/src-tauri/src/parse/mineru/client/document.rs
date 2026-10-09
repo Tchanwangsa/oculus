@@ -150,7 +150,8 @@ impl CloudDocument {
     }
 
     /// Read the PDF's page count once. The caller's thread does it before
-    /// submitting, so a PDF that crashes `lopdf` fails alone, not its batch.
+    /// submitting, so a PDF that crashes `hayro-syntax` fails alone, not its
+    /// batch.
     pub(super) fn count_pages(&self) -> Result<u32, ParseError> {
         if let Some(pages) = hold(&self.state).counted_pages {
             return Ok(pages);

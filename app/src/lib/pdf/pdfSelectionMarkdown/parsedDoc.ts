@@ -161,9 +161,9 @@ export interface PageSelection {
   end: number | null;
 }
 
-/** A page copied as its text-layer text, among markdown pages: pdf.js's own
- *  clean-up (no NULs or controls, ligatures split), and `$` escaped so it
- *  cannot pair into maths. */
+/** A page copied as its text-layer text, among markdown pages: cleaned up
+ *  (no NULs or controls, ligatures split), and `$` escaped so it cannot pair
+ *  into maths. */
 export function plainText(text: string): string {
   return text
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")

@@ -93,7 +93,7 @@ fn the_zip_becomes_page_records_through_the_shared_renderer() {
 
     // A trailing blank page: nothing on page 3 to be counted by.
     let content = json!([
-        { "type": "text", "text": "First slide", "page_idx": 0 },
+        { "type": "text", "text": "First slide", "page_idx": 0, "bbox": [100, 200, 900, 300] },
         { "type": "text", "text": "Second slide", "page_idx": 1 },
     ]);
     let zip = result_zip("Lecture 3", content);
@@ -130,6 +130,10 @@ fn the_zip_becomes_page_records_through_the_shared_renderer() {
         output.pages[1]
     );
     assert_eq!(output.pages[2].markdown, "");
+    // Blocks reach the record; a boxless item and a blank page have none.
+    assert_eq!(output.pages[0].blocks.len(), 1);
+    assert_eq!(output.pages[0].blocks[0].bbox, [0.1, 0.2, 0.9, 0.3]);
+    assert!(output.pages[1].blocks.is_empty() && output.pages[2].blocks.is_empty());
     assert_eq!(output.backend.as_deref(), Some(BACKEND));
     assert_eq!(output.parser_version, PARSER_VERSION);
 

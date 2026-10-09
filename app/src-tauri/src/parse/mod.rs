@@ -32,14 +32,15 @@ pub use inflight::{InFlight, InFlightClaim};
 pub use parser::Parser;
 pub use progress::{Phase, Progress};
 pub use record::{
-    images_dir_for, md_path, pages_path, parse_mode, read_record, ParseOutput, ParsePage,
+    images_dir_for, is_outdated, md_path, pages_path, parse_mode, read_record, ParseBlock,
+    ParseOutput, ParsePage,
 };
 pub use skips::{check_skipped, Skips};
 pub use staging::ImageStaging;
 
 /// The version stamped into every `.pages.json`. It moves only when the
 /// artifacts themselves change shape — not when a backend or the app changes.
-pub const PARSER_VERSION: u32 = 2;
+pub const PARSER_VERSION: u32 = 3;
 
 /// The one parse tier. Records on disk carry the field, so it round-trips.
 pub const MODE: &str = "quality";

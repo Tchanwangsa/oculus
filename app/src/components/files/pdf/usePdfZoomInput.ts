@@ -1,49 +1,18 @@
-import { useCallback, useEffect, type RefObject } from "react";
-import {
-  DEFAULT_FIT,
-  DRAW_DELAY,
-  FIT_VALUES,
-  GESTURE_LAPSE,
-  LINE_HEIGHT,
-} from "@/components/files/pdf/constants";
-import type { Engine } from "@/components/files/pdf/types";
+import { useEffect, type RefObject } from "react";
 
-/** Zoom: the toolbar's steps, pinch and ⌘-wheel (which pdf.js does not bind
- *  itself), and re-fitting when the container resizes. */
-export function usePdfZoom(
-  engineRef: RefObject<Engine | null>,
+/** WebKit sometimes drops `gestureend`, which would latch `gestureActive` and
+ *  kill ⌘-scroll zoom; the flag releases itself after this much quiet. */
+const GESTURE_LAPSE = 400;
+
+/** Pixels per line when `deltaMode === DOM_DELTA_LINE`. */
+const LINE_HEIGHT = 16;
+
+/** ⌘-scroll and trackpad pinch on the scroller zoom by a factor about the
+ *  pointer (`zoomBy`). */
+export function usePdfZoomInput(
   containerRef: RefObject<HTMLDivElement | null>,
+  zoomBy: (factor: number, clientX?: number, clientY?: number) => void,
 ) {
-  /** Scale by a ratio about a point (or the view's centre). pdf.js wants
-   *  `origin` in the container's offset space — it subtracts `offsetTop`/
-   *  `offsetLeft` — so client coordinates are converted, not passed through. */
-  const zoomBy = useCallback(
-    (factor: number, clientX?: number, clientY?: number) => {
-      const viewer = engineRef.current?.viewer;
-      const container = containerRef.current;
-      if (!viewer || !container) return;
-      let origin: [number, number] | undefined;
-      if (clientX != null && clientY != null) {
-        const rect = container.getBoundingClientRect();
-        origin = [
-          clientX - rect.left + container.offsetLeft,
-          clientY - rect.top + container.offsetTop,
-        ];
-      }
-      viewer.updateScale({
-        scaleFactor: factor,
-        origin,
-        drawingDelay: DRAW_DELAY,
-      });
-    },
-    [],
-  );
-
-  const resetZoom = useCallback(() => {
-    const viewer = engineRef.current?.viewer;
-    if (viewer) viewer.currentScaleValue = DEFAULT_FIT;
-  }, []);
-
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -115,22 +84,4 @@ export function usePdfZoom(
       disarm();
     };
   }, [zoomBy]);
-
-  // Re-apply a fit when the container resizes; pdf.js leaves re-fitting to
-  // the host viewer.
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const viewer = engineRef.current?.viewer;
-      const value = viewer?.currentScaleValue;
-      if (viewer && value && FIT_VALUES.has(value)) {
-        viewer.currentScaleValue = value;
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  return { zoomBy, resetZoom };
 }

@@ -8,12 +8,14 @@ impl Ctx {
     /// Serial, so the log stays readable; both halves are idempotent. Each file
     /// blocks for minutes and there is deliberately no deadline here — see
     /// `docs/parsing.md`. The two callbacks below
-    /// keep a live counter instead.
+    /// keep a live counter instead. `reparse` parses again any file whose
+    /// record predates `PARSER_VERSION`.
     pub(super) fn index_pdfs(
         &self,
         pool: &SqlitePool,
         pdfs: &[(i64, String)],
         embed: bool,
+        reparse: bool,
     ) -> Result<(), String> {
         if pdfs.is_empty() {
             return Ok(());
@@ -47,8 +49,12 @@ impl Ctx {
             let _ = std::io::stdout().flush();
 
             // Rewrite the line in place; `\x1b[K` clears the longer previous count.
-            let outcome =
-                app_lib::sync::parse_pdf_reporting(&self.data_dir, rel, *subject_id, &|p| {
+            let outcome = app_lib::sync::parse_pdf_reporting(
+                &self.data_dir,
+                rel,
+                *subject_id,
+                reparse,
+                &|p| {
                     let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
                     let seen = match (p.phase, p.total_pages) {
                         (app_lib::parse::Phase::UploadWait, _) => {
@@ -64,7 +70,8 @@ impl Ctx {
                     };
                     print!("\r{label}{}\x1b[K", paint(&seen, DIM));
                     let _ = std::io::stdout().flush();
-                });
+                },
+            );
             print!("\r{label}\x1b[K");
             let parsed = match outcome {
                 Ok(summary) => summary.to_string(),
@@ -162,6 +169,19 @@ impl Ctx {
             println!("{}", paint("no PDFs on record — run a sync first", DIM));
             return Ok(());
         }
-        self.index_pdfs(&pool, &pdfs, true)
+        if args.reparse {
+            let outdated = pdfs
+                .iter()
+                .filter_map(|(_, rel)| app_lib::library::paths::doc_pdf_rel(rel))
+                .filter(|pdf_rel| app_lib::parse::is_outdated(&self.data_dir.join(pdf_rel)))
+                .count();
+            println!(
+                "{} {outdated} of {} PDF(s) parsed before parser version {}",
+                paint("re-parsing", BOLD),
+                pdfs.len(),
+                app_lib::parse::PARSER_VERSION
+            );
+        }
+        self.index_pdfs(&pool, &pdfs, true, args.reparse)
     }
 }

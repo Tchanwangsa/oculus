@@ -221,10 +221,10 @@ pub fn page_sizes(pdf: &Path) -> Result<Vec<(u32, u32)>, RasterError> {
     Ok(sizes)
 }
 
-/// pdfium's page count. It can disagree with `lopdf`'s (which `parse/`
-/// counts with): pdfium repairs damaged xrefs and page trees the way a viewer
-/// does, and the two may read different revisions. Since `page_no` is the join
-/// key, callers treat a mismatch as a document error.
+/// pdfium's page count. It can disagree with `hayro-syntax`'s (which `parse/`
+/// counts with): the two repair damaged xrefs and page trees differently, and
+/// may read different revisions. Since `page_no` is the join key, callers
+/// treat a mismatch as a document error.
 pub fn page_count(pdf: &Path) -> Result<u32, RasterError> {
     let _session = session();
     let pdfium = pdfium()?;

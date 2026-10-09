@@ -28,11 +28,9 @@ function paint(label: string, err: unknown) {
   document.body.appendChild(box);
 }
 
-// Not faults: the ResizeObserver loop notice is the browser deferring delivery
-// a frame, and the `previousSibling` one is pdf.js's unguarded global
-// `selectionchange` handler. A bare identifier only, so our own
-// `p.node.previousSibling` still surfaces.
-const BENIGN = /^ResizeObserver loop|evaluating '\w+\.previousSibling'/;
+// Not a fault: the ResizeObserver loop notice is the browser deferring
+// delivery a frame.
+const BENIGN = /^ResizeObserver loop/;
 
 window.addEventListener("error", (ev) => {
   if (BENIGN.test(ev.message ?? "")) return;

@@ -404,6 +404,7 @@ async fn recording_replaces_the_pages_and_marks_the_sheet_finished() {
     let page = |n: u32, text: &str| ParsePage {
         page_no: n,
         markdown: text.into(),
+        blocks: Vec::new(),
     };
     // No row yet: the conversion beat the frontend's upsert.
     record(&pool, 7, rel, &[page(1, "a"), page(2, "b"), page(3, "c")])

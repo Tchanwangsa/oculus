@@ -90,9 +90,10 @@ impl Embedder for VoyageCloud {
         page_count: u32,
         on_progress: &dyn Fn(Progress),
     ) -> Result<EmbedOutput, EmbedError> {
-        // pdfium and the parse record's `lopdf` can disagree on page count
-        // (damaged xref, lying `/Count`). `page_no` is the join key, so refuse
-        // before a pixel is billed rather than file vectors under wrong pages.
+        // pdfium and the parse record's `hayro-syntax` can disagree on page
+        // count (damaged xref, lying `/Count`). `page_no` is the join key, so
+        // refuse before a pixel is billed rather than file vectors under wrong
+        // pages.
         let theirs = raster::page_count(pdf)?;
         if page_count > 0 && theirs != page_count {
             return Err(EmbedError::Document {

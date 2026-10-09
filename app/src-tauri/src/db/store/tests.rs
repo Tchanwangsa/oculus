@@ -330,6 +330,7 @@ fn page(page_no: u32, markdown: &str) -> crate::parse::ParsePage {
     crate::parse::ParsePage {
         page_no,
         markdown: markdown.to_string(),
+        blocks: Vec::new(),
     }
 }
 

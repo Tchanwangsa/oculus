@@ -49,7 +49,7 @@ function pipeTables(md: string): string {
 
 const FIELD = "input, textarea, [contenteditable='true']";
 
-/** The selection inside `root` (the pdf.js container) as markdown, or "" to
+/** The selection inside `root` (the viewer's scroller) as markdown, or "" to
  *  leave the browser's own copy alone. */
 export function pdfSelectionMarkdown(
   selection: Selection | null,
@@ -99,9 +99,9 @@ function markdownFor(
   return pdfSelectionMarkdown(window.getSelection(), root, pages, resolveImage);
 }
 
-/** Bind as `onCopyCapture`: pdf.js's text layer has its own `copy` listener
- *  that writes the raw text and stops propagation, so a bubbling `onCopy`
- *  never runs. Stopping here keeps pdf.js from overwriting ours. */
+/** Bind as `onCopyCapture` on the scroller, so the markdown is written before
+ *  any handler inside the pages runs; stopping it keeps them from overwriting
+ *  ours. */
 export function copyPdfAsMarkdown(
   e: ClipboardEvent,
   root: HTMLElement,

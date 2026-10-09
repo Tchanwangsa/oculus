@@ -8,10 +8,11 @@ mod boilerplate;
 mod content;
 mod item;
 mod order;
+mod page;
 #[cfg(test)]
 mod tests;
 
-use crate::parse::{ParseError, ParsePage};
+use crate::parse::{ParseBlock, ParseError, ParsePage};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
@@ -19,8 +20,8 @@ use std::path::Path;
 
 use boilerplate::find_boilerplate;
 use content::*;
-use item::render_item;
 use order::compare;
+use page::render_page;
 
 /// Crops render at ~1.5x: 20k px² rejects small template furniture while
 /// retaining the smallest real figure in the measured deck (58k px²).
@@ -88,7 +89,7 @@ pub fn render(
             .push(item);
     }
 
-    let mut by_page: BTreeMap<i64, String> = BTreeMap::new();
+    let mut by_page: BTreeMap<i64, (String, Vec<ParseBlock>)> = BTreeMap::new();
     for (window, items) in windows {
         let window_pages = RENDER_GROUP_PAGES.min(total_pages as i64 - window * RENDER_GROUP_PAGES);
         let boilerplate = find_boilerplate(&items, window_pages);
@@ -99,13 +100,9 @@ pub fn render(
         }
         for (page_no, mut page_items) in per_page {
             page_items.sort_by(|left, right| compare(left, right));
-            let blocks: Vec<String> = page_items
-                .iter()
-                .filter_map(|item| render_item(item, images_rel, &dropped, &boilerplate))
-                .collect();
-            if !blocks.is_empty() {
+            if let Some(page) = render_page(&page_items, images_rel, &dropped, &boilerplate) {
                 // Windows partition by page: no page is written twice.
-                by_page.insert(page_no, blocks.join("\n\n"));
+                by_page.insert(page_no, page);
             }
         }
     }
@@ -120,9 +117,10 @@ pub fn render(
         .into_iter()
         // A broken offset below the first page has nowhere to attach.
         .filter(|(page_no, _)| *page_no >= 1)
-        .map(|(page_no, markdown)| ParsePage {
+        .map(|(page_no, (markdown, blocks))| ParsePage {
             page_no: page_no as u32,
             markdown,
+            blocks,
         })
         .collect();
     Ok((pages, image_count))

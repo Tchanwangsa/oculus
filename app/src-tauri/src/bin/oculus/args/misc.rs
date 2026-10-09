@@ -37,6 +37,10 @@ pub(crate) struct IndexArgs {
     /// Subject codes to index. Omit for every subject.
     #[arg(value_name = "SUBJECT_CODE")]
     pub(crate) codes: Vec<String>,
+    /// Parse again every PDF whose record predates the current parser version.
+    /// Spends MinerU allowance; embeddings are kept
+    #[arg(long)]
+    pub(crate) reparse: bool,
 }
 
 #[derive(Subcommand)]

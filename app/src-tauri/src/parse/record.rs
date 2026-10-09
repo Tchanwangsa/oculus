@@ -37,9 +37,23 @@ pub fn read_record(pdf: &Path) -> Option<ParseOutput> {
 ///   crash that never wrote the record.
 /// * No `parser_version` check: a version bump must not re-parse the library.
 pub fn parse_mode(pdf: &Path) -> Option<&'static str> {
-    let text = fs::read_to_string(pages_path(pdf)).ok()?;
-    let record: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let record = record_value(pdf)?;
     (record.get("mode").and_then(|v| v.as_str()) == Some(MODE)).then_some(MODE)
+}
+
+/// A parsed record written by an older `PARSER_VERSION`, or with none: what
+/// `oculus index --reparse` parses again. Untyped, so any old shape reads.
+pub fn is_outdated(pdf: &Path) -> bool {
+    let Some(record) = record_value(pdf) else {
+        return false;
+    };
+    let parsed = record.get("mode").and_then(|v| v.as_str()) == Some(MODE);
+    let version = record.get("parser_version").and_then(|v| v.as_u64());
+    parsed && version.is_none_or(|v| v < u64::from(PARSER_VERSION))
+}
+
+fn record_value(pdf: &Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&fs::read_to_string(pages_path(pdf)).ok()?).ok()
 }
 
 /// One page's markdown, keyed by its 1-based page number — the join key
@@ -48,6 +62,23 @@ pub fn parse_mode(pdf: &Path) -> Option<&'static str> {
 pub struct ParsePage {
     pub page_no: u32,
     pub markdown: String,
+    /// Where each rendered item sits on the page and in `markdown`, in
+    /// markdown order. Absent in records older than version 3.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<ParseBlock>,
+}
+
+/// One rendered content-list item: its box on the page and its span in the
+/// page's markdown. Units are pinned in `docs/parsing.md`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParseBlock {
+    /// The backend's raw item `type` (`text`, `header`, `image`, `table`, ...).
+    pub kind: String,
+    /// `[x0, y0, x1, y1]` as fractions of the page, top-left origin, y down.
+    pub bbox: [f32; 4],
+    /// UTF-16 code-unit offsets into `markdown`: the consumer is JS.
+    pub start: u32,
+    pub end: u32,
 }
 
 /// Exactly the `.pages.json` on disk, plus one field that never goes there.
@@ -78,10 +109,10 @@ impl ParseOutput {
         backend: Option<String>,
         image_count: u32,
     ) -> Self {
-        let mut slots = vec![String::new(); page_count as usize];
+        let mut slots = vec![(String::new(), Vec::new()); page_count as usize];
         for page in pages {
             if page.page_no >= 1 && page.page_no <= page_count {
-                slots[(page.page_no - 1) as usize] = page.markdown;
+                slots[(page.page_no - 1) as usize] = (page.markdown, page.blocks);
             }
         }
         Self {
@@ -95,9 +126,10 @@ impl ParseOutput {
             pages: slots
                 .into_iter()
                 .enumerate()
-                .map(|(i, markdown)| ParsePage {
+                .map(|(i, (markdown, blocks))| ParsePage {
                     page_no: i as u32 + 1,
                     markdown,
+                    blocks,
                 })
                 .collect(),
             backend,

@@ -5,11 +5,20 @@ use std::fs;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
+/// The page count must equal pdfium's (`embed::raster`), since `page_no` is
+/// the join key. hayro opens a PDF encrypted with an empty user password, as
+/// pdfium does, and takes no pdfium session, which an embed holds for minutes.
 pub(in crate::parse::mineru) fn page_count(pdf: &Path) -> Result<u32, ParseError> {
-    let document = lopdf::Document::load(pdf).map_err(|_| ParseError::Document {
-        code: "unreadable-pdf".into(),
+    let bytes =
+        fs::read(pdf).map_err(|e| ParseError::Io(format!("read {}: {e}", pdf.display())))?;
+    let document = hayro_syntax::Pdf::new(bytes).map_err(|error| ParseError::Document {
+        code: match error {
+            hayro_syntax::LoadPdfError::Decryption(_) => "encrypted-pdf",
+            hayro_syntax::LoadPdfError::Invalid => "unreadable-pdf",
+        }
+        .into(),
     })?;
-    let pages = document.get_pages().len() as u32;
+    let pages = document.pages().len() as u32;
     if pages == 0 {
         return Err(ParseError::Document {
             code: "empty-pdf".into(),

@@ -47,6 +47,22 @@ pub(super) fn basename(path: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The item's `bbox` as page fractions. MinerU's content list gives
+/// `[x0, y0, x1, y1]` in 0–1000 integers, top-left origin, y down. `None`
+/// for anything but four finite numbers spanning a non-empty box.
+pub(super) fn page_box(item: &Value) -> Option<[f32; 4]> {
+    let values = item.get("bbox")?.as_array()?;
+    if values.len() != 4 {
+        return None;
+    }
+    let mut out = [0f32; 4];
+    for (slot, value) in out.iter_mut().zip(values) {
+        let n = value.as_f64().filter(|n| n.is_finite())?;
+        *slot = (n / 1000.0).clamp(0.0, 1.0) as f32;
+    }
+    (out[2] > out[0] && out[3] > out[1]).then_some(out)
+}
+
 /// The caption/footnote list, space-joined and trimmed.
 pub(super) fn join_parts(item: &Value, key: &str) -> String {
     let Some(parts) = item.get(key).and_then(Value::as_array) else {

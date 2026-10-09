@@ -56,16 +56,19 @@ fn pages_are_ordered_and_gap_filled() {
             ParsePage {
                 page_no: 3,
                 markdown: "three".into(),
+                blocks: Vec::new(),
             },
             ParsePage {
                 page_no: 1,
                 markdown: "one".into(),
+                blocks: Vec::new(),
             },
             // Out of range: a backend that split the document and got its
             // offsets wrong must not be able to corrupt the join key.
             ParsePage {
                 page_no: 9,
                 markdown: "nine".into(),
+                blocks: Vec::new(),
             },
         ],
         Some("mineru-cloud".into()),
@@ -90,6 +93,7 @@ fn record_keeps_the_python_wire_shape() {
         vec![ParsePage {
             page_no: 1,
             markdown: "ψ".into(),
+            blocks: Vec::new(),
         }],
         None,
         0,
@@ -99,7 +103,7 @@ fn record_keeps_the_python_wire_shape() {
     assert!(json.contains("\"ψ\""), "{json}");
     assert!(!json.contains("backend"), "{json}");
     assert!(!json.contains("image_count"), "{json}");
-    assert!(json.contains("\"parser_version\":2"), "{json}");
+    assert!(json.contains("\"parser_version\":3"), "{json}");
 }
 
 #[test]
@@ -121,6 +125,7 @@ fn write_swaps_images_and_lands_the_record_last() {
         vec![ParsePage {
             page_no: 1,
             markdown: "![](Lecture 3_images/new.jpg)".into(),
+            blocks: Vec::new(),
         }],
         Some("mineru-cloud".into()),
         1,
@@ -209,6 +214,84 @@ fn only_a_quality_record_counts_as_parsed() {
 }
 
 #[test]
+fn reparse_selects_only_records_older_than_this_version() {
+    let dir = scratch("outdated");
+    let pdf = sample_pdf(&dir);
+    let with = |body: &str| {
+        fs::write(pages_path(&pdf), body).unwrap();
+        is_outdated(&pdf)
+    };
+
+    // Never parsed: the ordinary path parses it, not `--reparse`.
+    assert!(!is_outdated(&pdf));
+    assert!(with(r#"{"mode":"quality","parser_version":2}"#));
+    assert!(with(r#"{"mode":"quality"}"#));
+    assert!(with(r#"{"mode":"quality","parser_version":"2"}"#));
+    assert!(!with(&format!(
+        r#"{{"mode":"quality","parser_version":{PARSER_VERSION}}}"#
+    )));
+    assert!(!with(r#"{"mode":"fast","parser_version":1}"#));
+    assert!(!with("{ not json"));
+}
+
+/// A version-2 record has no `blocks`; it must still read as a record, or
+/// the file would look unparsed.
+#[test]
+fn a_version_2_record_still_reads() {
+    let dir = scratch("v2");
+    let pdf = sample_pdf(&dir);
+    fs::write(
+        pages_path(&pdf),
+        r#"{"pdf":"Lecture 3.pdf","mode":"quality","parser_version":2,"page_count":1,
+            "pages":[{"page_no":1,"markdown":"one"}],"backend":"mineru-cloud"}"#,
+    )
+    .unwrap();
+    let record = read_record(&pdf).expect("v2 record reads");
+    assert_eq!(record.parser_version, 2);
+    assert_eq!(record.pages[0].markdown, "one");
+    assert!(record.pages[0].blocks.is_empty());
+}
+
+#[test]
+fn blocks_round_trip_and_survive_gap_filling() {
+    let dir = scratch("blocks");
+    let pdf = sample_pdf(&dir);
+    let block = ParseBlock {
+        kind: "text".into(),
+        bbox: [0.08, 0.11, 0.92, 0.19],
+        start: 0,
+        end: 3,
+    };
+    let out = ParseOutput::new(
+        &pdf,
+        2,
+        vec![ParsePage {
+            page_no: 2,
+            markdown: "two".into(),
+            blocks: vec![block.clone()],
+        }],
+        None,
+        0,
+    );
+    // The gap-filled page has no blocks, and writes no key for them.
+    assert!(out.pages[0].blocks.is_empty());
+    let json = serde_json::to_string(&out).unwrap();
+    assert_eq!(json.matches("\"blocks\"").count(), 1, "{json}");
+    assert!(
+        json.contains(
+            r#""blocks":[{"kind":"text","bbox":[0.08,0.11,0.92,0.19],"start":0,"end":3}]"#
+        ),
+        "{json}"
+    );
+
+    out.write(&pdf, ImageStaging::begin(&pdf).unwrap()).unwrap();
+    let back = read_record(&pdf).unwrap();
+    assert_eq!(back.parser_version, PARSER_VERSION);
+    assert_eq!(back.pages[1].blocks, vec![block]);
+    assert!(!is_outdated(&pdf));
+}
+
+#[test]
 fn a_second_parse_of_the_same_pdf_waits_for_the_first() {
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
@@ -256,10 +339,12 @@ fn a_lost_markdown_is_rebuilt_from_the_record() {
             ParsePage {
                 page_no: 1,
                 markdown: "one".into(),
+                blocks: Vec::new(),
             },
             ParsePage {
                 page_no: 2,
                 markdown: "two".into(),
+                blocks: Vec::new(),
             },
         ],
         None,

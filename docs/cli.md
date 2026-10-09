@@ -68,6 +68,9 @@ rewriting itself in place is how a long run is told from a stuck one.
 - `index` re-embeds any file whose vectors came from another model, dim or
   instruction, or cover too few pages (`embed::is_embedded`). There is no
   migration between embedding spaces.
+- `index --reparse` also parses again every file whose record predates
+  `PARSER_VERSION`. It spends MinerU allowance and keeps the embeddings
+  ([parsing.md](./parsing.md#pagesjson-is-the-only-evidence-a-parse-finished)).
 - `index` obeys the spend guard Settings sets, because both processes read
   `voyage-usage.json`. Past it the client returns `BudgetReached`, which names
   the setting; waiting will not clear it.

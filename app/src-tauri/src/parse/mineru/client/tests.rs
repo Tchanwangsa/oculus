@@ -29,7 +29,10 @@ fn zip_of(entries: &[(&str, Vec<u8>)]) -> Vec<u8> {
 
 fn content_list(from: usize, pages: usize) -> Vec<u8> {
     let items: Vec<Value> = (0..pages)
-        .map(|page| json!({ "type": "text", "text": format!("page {}", from + page + 1), "page_idx": page }))
+        .map(|page| {
+            json!({ "type": "text", "text": format!("page {}", from + page + 1),
+                    "page_idx": page, "bbox": [100, 200, 900, 300] })
+        })
         .collect();
     Value::Array(items).to_string().into_bytes()
 }
@@ -317,6 +320,42 @@ fn an_oversized_document_is_refused_before_anything_is_sent() {
     assert_eq!(client.build_tasks(0, &document).unwrap().len(), 1);
 }
 
+#[test]
+fn page_count_refuses_junk_and_pageless_files() {
+    let scratch = Scratch::new("cloud-count");
+    let pdf = scratch.join("three.pdf");
+    write_pdf(&pdf, 3);
+    assert_eq!(archive::page_count(&pdf).unwrap(), 3);
+
+    let junk = scratch.join("junk.pdf");
+    fs::write(&junk, b"not a pdf at all").unwrap();
+    assert!(
+        matches!(archive::page_count(&junk), Err(ParseError::Document { ref code }) if code == "unreadable-pdf")
+    );
+
+    let empty = scratch.join("empty.pdf");
+    write_pdf(&empty, 0);
+    assert!(
+        matches!(archive::page_count(&empty), Err(ParseError::Document { ref code }) if code == "empty-pdf")
+    );
+}
+
+/// The count must match pdfium's, which rasterises the pages the embedder
+/// files under the same `page_no`. Point it at a library PDF (read-only);
+/// an encrypted one with an empty user password is the case worth trying.
+#[test]
+fn page_count_agrees_with_pdfium_on_a_real_pdf() {
+    let Some(path) = std::env::var_os("OCULUS_PARSE_PDF") else {
+        eprintln!("skipping: set OCULUS_PARSE_PDF to a real library PDF");
+        return;
+    };
+    let path = std::path::PathBuf::from(path);
+    let ours = archive::page_count(&path);
+    let theirs = crate::embed::raster::page_count(&path);
+    eprintln!("pages: ours {ours:?}, pdfium {theirs:?}");
+    assert_eq!(ours.unwrap(), theirs.unwrap());
+}
+
 /// Submit → upload → poll → download → collect, with the two tasks of one
 /// document completing in the wrong order.
 #[test]
@@ -441,6 +480,11 @@ fn a_batch_runs_end_to_end_and_sums_progress_monotonically() {
             .collect::<Vec<_>>(),
         vec!["page 1", "page 2", "page 3"]
     );
+    // The bbox survives `page_idx` rebasing, the second task's page included.
+    assert!(output
+        .pages
+        .iter()
+        .all(|page| page.blocks.len() == 1 && page.blocks[0].bbox == [0.1, 0.2, 0.9, 0.3]));
     assert_eq!(output.image_count, 0);
 
     let seen = hold(&seen).clone();

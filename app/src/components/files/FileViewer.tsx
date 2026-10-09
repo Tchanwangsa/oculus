@@ -4,7 +4,7 @@ import { ArrowSquareOut, File, FileText } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
-import { PDFViewer } from "@/components/files/PDFViewer";
+import { PDFViewer } from "@/components/files/pdf/PDFViewer";
 import { docPdfRelPath, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath } from "@/lib/files/fileTypes";
 import { filePageHref, type FileLocate } from "@/lib/files/openFile";
 import { libraryImageSrc, libraryLinkTarget } from "@/lib/files/libraryLinks";
@@ -12,20 +12,29 @@ import { useDataDir } from "@/hooks/backend/useDataDir";
 import type { DbFile } from "@/lib/db";
 import { courseFileHasContent } from "@/lib/files/courseFiles";
 import { FileMarkdown } from "@/components/files/FileMarkdown";
+import { createPdfMdLink, type PdfMdLink } from "@/components/files/pdf/pdfMdLink";
 import { VideoFileViewer } from "@/components/files/VideoFileViewer";
 import { useParseStore } from "@/stores/sync/parseStore";
 
+/** Which face of a parsed PDF shows: the PDF or its markdown. */
+export type PdfViewMode = "pdf" | "markdown";
+
 /**
  * PDF ↔ parsed-markdown toggle state, lifted out so the host renders the
- * toggle in its own header. Also the "is there markdown?" probe: `mdChecked`
- * holds both controls back until it answers, or `MarkdownUnavailable` would
- * flash on every parsed file. A live parse-status change re-asks, so a parse
- * that lands while the page is open shows its markdown.
+ * toggle in its own header, and the faces' shared state (`link`: the reading
+ * position each restores), fresh per file. Also the "is there markdown?"
+ * probe: `mdChecked` holds both controls back until it answers, or
+ * `MarkdownUnavailable` would flash on every parsed file. A live parse-status
+ * change re-asks, so a parse that lands while the page is open shows its
+ * markdown.
  */
 export function usePdfMd(file: DbFile | null) {
   const isPdf = file != null && isPdfBacked(file.filename);
   const mdRelPath = file ? parsedMdRelPath(file) : null;
-  const [viewMode, setViewMode] = useState<"pdf" | "markdown">("pdf");
+  const [viewMode, setViewMode] = useState<PdfViewMode>("pdf");
+  // A new link per file: the deps name the file, which the factory never reads.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const link = useMemo(() => createPdfMdLink(), [file?.id, mdRelPath]);
   const [mdExists, setMdExists] = useState(false);
   const [mdChecked, setMdChecked] = useState(false);
   const parseStatus = useParseStore((s) => (file ? s.statuses[file.relative_path] : undefined));
@@ -49,22 +58,22 @@ export function usePdfMd(file: DbFile | null) {
     };
   }, [file?.id, mdRelPath, parseStatus]);
 
-  return { isPdf, mdExists, mdChecked, viewMode, setViewMode };
+  return { isPdf, mdExists, mdChecked, viewMode, setViewMode, link };
 }
 
 export function PdfMdToggle({
   value,
   onChange,
 }: {
-  value: "pdf" | "markdown";
-  onChange: (v: "pdf" | "markdown") => void;
+  value: PdfViewMode;
+  onChange: (v: PdfViewMode) => void;
 }) {
   return (
     <ToggleGroup
       type="single"
       value={value}
       /* Radix clears the value on pressing the active item; ignore that. */
-      onValueChange={(v) => v && onChange(v as "pdf" | "markdown")}
+      onValueChange={(v) => v && onChange(v as PdfViewMode)}
       variant="outline"
       size="sm"
       className="text-[11px] shrink-0"
@@ -94,7 +103,9 @@ interface FileViewerProps {
   /** Follows a link inside the markdown to another file. */
   onOpenFile: (file: DbFile) => void;
   /** From `usePdfMd` — which face of a parsed PDF to show. */
-  pdfViewMode?: "pdf" | "markdown";
+  pdfViewMode?: PdfViewMode;
+  /** From `usePdfMd` — what the faces share. */
+  pdfLink?: PdfMdLink;
   /** A cited spot in the PDF (`PDFViewer`). */
   locate?: FileLocate;
 }
@@ -109,6 +120,7 @@ export function FileViewer({
   files,
   onOpenFile,
   pdfViewMode = "pdf",
+  pdfLink,
   locate,
 }: FileViewerProps) {
   const dataDir = useDataDir();
@@ -146,9 +158,14 @@ export function FileViewer({
     return (
       <div className="flex flex-col h-full">
         {pdfViewMode === "markdown" && mdRelPath ? (
-          <FileMarkdown relPath={mdRelPath} components={components} />
+          <FileMarkdown relPath={mdRelPath} components={components} link={pdfLink} />
         ) : (
-          <PDFViewer src={assetUrl(pdfRelPath)} locate={locate} markdownPath={mdRelPath ?? undefined} />
+          <PDFViewer
+            path={pdfRelPath}
+            locate={locate}
+            markdownPath={mdRelPath ?? undefined}
+            link={mdRelPath ? pdfLink : undefined}
+          />
         )}
       </div>
     );

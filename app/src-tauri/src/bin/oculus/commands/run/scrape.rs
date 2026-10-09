@@ -275,6 +275,6 @@ impl Ctx {
             .filter(|f| f.relative_path.to_lowercase().ends_with(".pdf"))
             .map(|f| (f.subject_id, f.relative_path.clone()))
             .collect();
-        self.index_pdfs(p, &pdfs, !args.no_embed)
+        self.index_pdfs(p, &pdfs, !args.no_embed, false)
     }
 }

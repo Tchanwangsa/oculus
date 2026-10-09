@@ -45,6 +45,7 @@ pub fn convert(data_dir: &Path, rel: &str) -> Result<Vec<ParsePage>, ParseError>
         .map(|(i, markdown)| ParsePage {
             page_no: i as u32 + 1,
             markdown,
+            blocks: Vec::new(),
         })
         .collect())
 }
