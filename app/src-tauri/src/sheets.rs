@@ -1,5 +1,5 @@
 //! Spreadsheets as text. A workbook (xlsx, xlsm, xls, ods) is read in-process
-//! with calamine and written as `{name}.md` beside it: `# {name}`, then one
+//! with calamine, a CSV by `csv_rows`, and written as `{name}.md` beside it: `# {name}`, then one
 //! `##` section per worksheet holding its used range as a GFM table of values
 //! (merged blocks filled, `=FORMULA` where no result was stored), then its
 //! formulas, one line per copied-down or -across pattern. Each sheet is one
@@ -169,6 +169,73 @@ fn table(rows: &[Vec<String>]) -> Option<String> {
     out.push(format!("|{}", " --- |".repeat(right - left + 1)));
     out.extend(rows[1..].iter().map(line));
     Some(out.join("\n"))
+}
+
+// ── CSV → markdown ───────────────────────────────────────────────────────────
+
+/// A CSV is one sheet, named after its file. Text that isn't UTF-8 is read as
+/// Latin-1, which is what a CSV exported on Windows usually is.
+fn csv_section(filename: &str, bytes: &[u8]) -> String {
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    let text = match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_) => bytes.iter().map(|&b| b as char).collect(),
+    };
+    let rows: Vec<Vec<String>> = csv_rows(&text, delimiter(&text))
+        .into_iter()
+        .map(|row| row.iter().map(|c| escape(c)).collect())
+        .collect();
+    let body = table(&rows).unwrap_or_else(|| "(empty)".to_string());
+    format!("## {}
+
+{body}", filename.trim())
+}
+
+/// Whichever of `,` `;` or tab the first line uses most: Excel writes `;` in
+/// locales whose decimal mark is a comma.
+fn delimiter(text: &str) -> char {
+    let first = text.lines().next().unwrap_or("");
+    let count = |d: char| first.chars().filter(|&c| c == d).count();
+    [',', ';', '\t'].into_iter().max_by_key(|&d| (count(d), d == ',')).unwrap_or(',')
+}
+
+/// RFC 4180 rows: quoted fields may hold the delimiter, line breaks and `""`
+/// for a quote; CRLF and LF both end a row.
+fn csv_rows(text: &str, delimiter: char) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if quoted {
+            match c {
+                '"' if chars.peek() == Some(&'"') => {
+                    field.push('"');
+                    chars.next();
+                }
+                '"' => quoted = false,
+                _ => field.push(c),
+            }
+        } else if c == '"' && field.is_empty() {
+            quoted = true;
+        } else if c == delimiter {
+            row.push(std::mem::take(&mut field));
+        } else if c == '\n' || c == '\r' {
+            if c == '\r' && chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            row.push(std::mem::take(&mut field));
+            rows.push(std::mem::take(&mut row));
+        } else {
+            field.push(c);
+        }
+    }
+    if !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        rows.push(row);
+    }
+    rows
 }
 
 /// A cell as it reads in the sheet, safe inside a table row.
@@ -449,12 +516,17 @@ pub fn convert(data_dir: &Path, rel: &str) -> Result<Vec<ParsePage>, ParseError>
         .map_err(|e| ParseError::Io(format!("read {}: {e}", source.display())))?;
     paths::purge_parse_artifacts(data_dir, rel);
 
-    let sections = sections(&bytes).map_err(|detail| {
+    let filename = rel.rsplit('/').next().unwrap_or(rel);
+    let sections = if filename.to_ascii_lowercase().ends_with(".csv") {
+        Ok(vec![csv_section(filename, &bytes)])
+    } else {
+        sections(&bytes)
+    };
+    let sections = sections.map_err(|detail| {
         // The UI keeps the sentence; calamine's reason goes to stderr.
         eprintln!("[oculus] spreadsheet unreadable: {rel}: {detail}");
         ParseError::Document { code: parse::SHEET_UNREADABLE.into() }
     })?;
-    let filename = rel.rsplit('/').next().unwrap_or(rel);
     let md = data_dir.join(md_rel(rel));
     let tmp = md.with_extension(format!("md.tmp{}-{}", std::process::id(), crate::clock::now_nanos()));
     crate::atomic_write::write(&md, &tmp, document(filename, &sections).as_bytes())
@@ -641,6 +713,31 @@ pub fn reconcile_in_background() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_csv_reads_quotes_line_breaks_and_its_locale_delimiter() {
+        let rows = csv_rows("a,\"b, \"\"c\"\"\"\r\n1,\"two\nlines\"\n3", ',');
+        assert_eq!(rows, vec![
+            vec!["a".to_string(), "b, \"c\"".into()],
+            vec!["1".into(), "two\nlines".into()],
+            vec!["3".into()],
+        ]);
+        assert_eq!(delimiter("name;mark;note, if any\n"), ';');
+        assert_eq!(delimiter("a\tb\tc\n"), '\t');
+        assert_eq!(delimiter("single\n"), ',');
+    }
+
+    #[test]
+    fn a_csv_is_one_section_named_after_its_file() {
+        let bytes = b"\xEF\xBB\xBFName,Mark\nAda,9\nBo|b,\n";
+        assert_eq!(
+            csv_section("marks.csv", bytes),
+            "## marks.csv\n\n| Name | Mark |\n| --- | --- |\n| Ada | 9 |\n| Bo\\|b |  |"
+        );
+        // Not UTF-8: read as Latin-1, never refused.
+        assert!(csv_section("x.csv", b"caf\xE9\n").contains("caf\u{e9}"));
+        assert!(csv_section("empty.csv", b"").ends_with("(empty)"));
+    }
     use calamine::{CellErrorType, ExcelDateTimeType};
     use std::io::Write;
 

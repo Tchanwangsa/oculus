@@ -220,10 +220,10 @@ pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
 /// Mirrored by `OFFICE_EXTS` in `app/src/lib/fileTypes.ts`.
 pub const OFFICE_EXTS: &[&str] = &[".pptx", ".docx", ".ppt", ".doc"];
 
-/// Spreadsheets, converted to `{name}.md` text in-process (`crate::sheets`):
-/// never PDF-backed, never embedded. Mirrored by `SHEET_EXTS` in
-/// `app/src/lib/fileTypes.ts`.
-pub const SHEET_EXTS: &[&str] = &[".xlsx", ".xlsm", ".xls", ".ods"];
+/// Spreadsheets and CSVs, converted to `{name}.md` text in-process
+/// (`crate::sheets`): never PDF-backed, never embedded. Mirrored by
+/// `SHEET_EXTS` in `app/src/lib/fileTypes.ts`.
+pub const SHEET_EXTS: &[&str] = &[".xlsx", ".xlsm", ".xls", ".ods", ".csv"];
 
 /// A spreadsheet by name, in any case.
 pub fn is_sheet(rel: &str) -> bool {
