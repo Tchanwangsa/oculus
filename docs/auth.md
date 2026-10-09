@@ -92,8 +92,9 @@ The login window, a browser tab and the headless flow each put their cookies
 on disk their own way, then call `auth::session_established`. It sets the
 auth flag (which also removes the signed-out marker), the in-memory state and
 `canvas-auth-success`. A sign-in by a person (window or tab) also clears the
-attempt guard's wait and pause; the headless one has already updated the
-guard. The CLI has no app to update, so `oculus auth auto` sets only the flag
+attempt guard's failures, pause and wait, by asking keyd (`okta_resume`, app
+only); the app writes the record itself only when keyd is absent. The headless
+sign-in has already updated the guard. The CLI has no app to update, so `oculus auth auto` sets only the flag
 (`paths::mark_authenticated`).
 
 ## Keep-alive runs in two layers
@@ -153,7 +154,7 @@ IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
 every sign-in (Settings, the probes, the browser, `oculus auth auto`,
 `oculus auth tick`) are requests to `oculus-keyd` through
 `credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,
-`ensure_signed_in`). Neither process reads the password or the seed back: no
+`ensure_signed_in`, and `okta_resume` for the guard). Neither process reads the password or the seed back: no
 op returns one, and `oculus auth setup` prints the code from the seed just
 typed.
 
@@ -181,6 +182,7 @@ typed.
   in the install, so every op but `ping` (not just the Okta ones) also
   requires the `app` or `cli` role; ffmpeg, which ships in the bundle, is
   refused. The check is `ops::require_role`, called once by `dispatch`.
+  `okta_resume` is the app's alone, because it lifts a lockout pause.
 - **One sign-in runs at a time.** A request that arrives while keyd is
   signing in waits for that attempt and returns its outcome, rather than
   starting another or being held off by the guard. The socket has no timeout
@@ -194,7 +196,7 @@ typed.
 
 The startup probe, the in-app 6 h thread, the browser, `oculus auth tick` and
 `oculus auth auto` each sign in on their own, in two processes, and Okta locks
-the account after too many attempts (it did on 2026-09-20). So
+the account after too many attempts. So
 `keyd_core::okta::sign_in` checks one record, `canvas-session/sign-in.json`,
 before each attempt, and logs every attempt with its caller to
 `okta-sign-in.log`. The guard is that one function (`okta/guard.rs`), so keyd

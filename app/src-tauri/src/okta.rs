@@ -12,7 +12,7 @@
 //! password manager holding TOTP.
 
 use crate::credentials::{Credentialed, KeydError};
-pub use keyd_core::okta::{resume_automatic_sign_in, totp_now, LoginError, Trigger, SSO_HOST};
+pub use keyd_core::okta::{totp_now, LoginError, Trigger, SSO_HOST};
 use keyd_core::okta::{validate_credentials, CredentialStore, Credentials, Env};
 pub use keyd_core::platform::Role;
 
@@ -94,7 +94,7 @@ fn keychain_store(username: &str, password: &str, totp_secret: &str) -> Result<(
     write("username", &creds.username)?;
     write("password", &creds.password)?;
     write("totp_secret", &creds.totp_secret)?;
-    if let Err(why) = resume_automatic_sign_in(&crate::paths::data_dir()) {
+    if let Err(why) = keyd_core::okta::resume_automatic_sign_in(&crate::paths::data_dir()) {
         eprintln!("[oculus] the attempt guard was not cleared: {why}");
     }
     Ok(())
@@ -202,6 +202,26 @@ fn sign_in_in(
         Err(KeydError::Absent) => in_process(),
         Err(KeydError::Keychain(e)) => Err(LoginError::UnreadableCredentials(e)),
         Err(e) => Err(LoginError::Unexpected(e.to_string())),
+    }
+}
+
+/// Clears the attempt guard's failures, pause and wait after a person signed
+/// in themselves. keyd does it, so the app never writes the record; only an
+/// absent keyd lets this process reset it. A failure is logged: the sign-in
+/// itself succeeded.
+pub fn resume_automatic_sign_in(data_dir: &std::path::Path) {
+    resume_in(&Credentialed::at(data_dir), || {
+        keyd_core::okta::resume_automatic_sign_in(data_dir)
+    });
+}
+
+fn resume_in(broker: &Credentialed, in_process: impl FnOnce() -> Result<(), String>) {
+    let outcome = match broker.okta_resume() {
+        Err(KeydError::Absent) => in_process(),
+        other => other.map_err(|e| e.to_string()),
+    };
+    if let Err(why) = outcome {
+        eprintln!("[oculus] the attempt guard was not cleared: {why}");
     }
 }
 
@@ -505,6 +525,34 @@ mod tests {
             assert_eq!(keyd.requests().len(), 1, "{kind}: exactly one request");
             assert_eq!(entries(&dir), before, "{kind}: nothing written");
         }
+    }
+
+    #[test]
+    fn a_resume_goes_to_keyd_and_only_an_absent_keyd_resets_the_record_here() {
+        let dir = Scratch::new("okta-resume");
+        let keyd = FakeKeyd::start(&dir, |_, _| (json!({"resumed": true}), vec![]));
+        resume_in(&Credentialed::at(&dir), || panic!("in-process"));
+        assert_eq!(keyd.requests()[0].0, json!({"op": "okta_resume"}));
+        assert_eq!(keyd.requests().len(), 1);
+
+        for kind in ["caller", "record", "vault", "keychain"] {
+            let dir = Scratch::new("okta-resume-refused");
+            let keyd = FakeKeyd::start(&dir, move |_, _| keyd_error(kind, "refused"));
+            resume_in(&Credentialed::at(&dir), || panic!("in-process {kind}"));
+            assert_eq!(keyd.requests().len(), 1, "{kind}");
+            assert!(
+                !keyd_core::paths::sign_in_record(&dir).exists(),
+                "{kind}: the app wrote the record"
+            );
+        }
+
+        let dir = Scratch::new("okta-resume-absent");
+        let ran = std::cell::Cell::new(false);
+        resume_in(&Credentialed::at(&dir), || {
+            ran.set(true);
+            Ok(())
+        });
+        assert!(ran.get());
     }
 
     #[test]

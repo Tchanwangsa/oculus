@@ -64,8 +64,9 @@ pub struct State {
 /// Kinds: `request` (malformed, unknown op or name, a refused path or header),
 /// `caller` (refused: the peer check, or any op but `ping` asked by a program
 /// that is neither the app nor the CLI), `keychain` (the master key, or an old item
-/// being imported, was refused or failed), `vault`, `missing` (`forward` for a
-/// secret the vault does not hold), `upstream` (`forward` got no answer: DNS,
+/// being imported, was refused or failed), `vault`, `record` (`okta_resume`:
+/// the sign-in attempt record could not be replaced; a client reads it as
+/// `Broken`), `missing` (`forward` for a secret the vault does not hold), `upstream` (`forward` got no answer: DNS,
 /// connect, TLS or a reset).
 #[derive(Debug)]
 pub struct OpError {
@@ -245,6 +246,7 @@ impl State {
             "okta_forget" => self.okta_forget(),
             "okta_status" => self.okta_status(),
             "ensure_signed_in" => self.ensure_signed_in(caller, req),
+            "okta_resume" => self.okta_resume(),
             _ => Err(OpError::new("request", format!("unknown op {op:?}"))),
         }
     }
@@ -327,15 +329,22 @@ impl State {
 }
 
 /// The one place an op's caller is judged, so a new op cannot forget it.
-/// `ping` answers whoever the peer check admitted, for diagnostics.
+/// `ping` answers whoever the peer check admitted, for diagnostics; the rest
+/// are for the app and the CLI, except `okta_resume`, which lifts a lockout
+/// pause and so is for the app alone.
 fn require_role(op: &str, role: Role) -> Result<(), OpError> {
-    match (op, role) {
-        ("ping", _) | (_, Role::App | Role::Cli) => Ok(()),
-        (_, Role::Unknown) => Err(OpError::new(
-            "caller",
-            "this op is for the Oculus app and CLI only",
-        )),
+    let (allowed, who) = match op {
+        "ping" => return Ok(()),
+        "okta_resume" => (role == Role::App, "app"),
+        _ => (matches!(role, Role::App | Role::Cli), "app and CLI"),
+    };
+    if allowed {
+        return Ok(());
     }
+    Err(OpError::new(
+        "caller",
+        format!("this op is for the Oculus {who} only"),
+    ))
 }
 
 fn imported_marker(name: &str) -> Option<String> {
@@ -537,6 +546,7 @@ mod tests {
             ("okta_forget", json!({})),
             ("okta_status", json!({})),
             ("ensure_signed_in", json!({"trigger": "manual"})),
+            ("okta_resume", json!({})),
             ("a_future_op", json!({})),
         ]
     }
@@ -580,10 +590,17 @@ mod tests {
             let dir = Scratch::new("with-role");
             let state = state_in(&dir);
             for (op, req) in every_op() {
-                // Whatever else the op says, it is not a refusal of the caller.
-                if let Err(e) = state.dispatch(&as_role(role), op, &req, b"") {
-                    assert_ne!(e.kind, "caller", "{role:?} {op}");
-                }
+                // Whatever else the op says, it is not a refusal of the caller,
+                // except that lifting a lockout pause is the app's alone.
+                let refused = matches!(
+                    state.dispatch(&as_role(role), op, &req, b""),
+                    Err(OpError { kind: "caller", .. })
+                );
+                assert_eq!(
+                    refused,
+                    role == Role::Cli && op == "okta_resume",
+                    "{role:?} {op}"
+                );
             }
         }
     }

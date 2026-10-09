@@ -101,10 +101,11 @@ app links too, for the client and the installer only.
   header names them; replies have the same shape. One module writes and reads
   it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
   hash, pid), `has`, `store`, `delete`, `forward`, and the Okta ops `okta_save`,
-  `okta_forget`, `okta_status` and `ensure_signed_in`. No op returns a key, a
+  `okta_forget`, `okta_status`, `ensure_signed_in` and `okta_resume`. No op returns a key, a
   password or a seed, and only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
   `request`, `caller`, `keychain` (the master key or an old item refused or
-  failed), `vault`, `missing` and `upstream`.
+  failed), `vault`, `record` (the sign-in attempt record could not be replaced),
+  `missing` and `upstream`.
 - **`forward` sends one request with the key added; the key never leaves.**
   The request names a `secret`, `method` (GET or POST), `path` and `headers`;
   keyd sends it to that secret's fixed origin (`app/keyd/core/src/forward.rs`:

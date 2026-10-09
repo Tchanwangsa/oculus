@@ -171,6 +171,15 @@ impl Client {
             .unwrap_or(false))
     }
 
+    /// Clears the attempt guard's failures, pause and wait, after a person
+    /// signed in themselves. App only: a CLI caller gets `KeydError::Caller`,
+    /// because a lockout pause is for a person to lift. A record keyd could
+    /// not replace is `KeydError::Broken`.
+    pub fn okta_resume(&self) -> Result<(), KeydError> {
+        self.exchange(&json!({"op": "okta_resume"}), &[], Some(OP_TIMEOUT))
+            .map(|_| ())
+    }
+
     /// Has keyd sign in to Canvas through Okta, or wait for the sign-in it is
     /// already running and share its outcome. The inner result is the
     /// sign-in's own: success (the cookies are in the data dir, never in the
@@ -578,6 +587,30 @@ mod tests {
     }
 
     #[test]
+    fn okta_resume_sends_its_op_and_surfaces_a_refusal() {
+        let (broker, seen) = fake_keyd(|_, _| (json!({"resumed": true}), vec![]));
+        broker.okta_resume().unwrap();
+        assert_eq!(seen.lock().unwrap()[0].0, json!({"op": "okta_resume"}));
+
+        let (broker, _) = fake_keyd(|_, _| {
+            (
+                json!({"error": "caller", "detail": "this op is for the Oculus app only"}),
+                vec![],
+            )
+        });
+        assert!(matches!(broker.okta_resume(), Err(KeydError::Caller(_))));
+        let (broker, _) = fake_keyd(|_, _| {
+            (
+                json!({"error": "record", "detail": "saving sign-in.json: disk full"}),
+                vec![],
+            )
+        });
+        assert!(matches!(broker.okta_resume(), Err(KeydError::Broken(_))));
+        let absent = unreachable(ConnectError::Absent("ENOENT".into()));
+        assert_eq!(absent.okta_resume().unwrap_err(), KeydError::Absent);
+    }
+
+    #[test]
     fn a_signed_in_outcome_is_just_success() {
         let (broker, _) = fake_keyd(|_, _| (json!({"result": "signed_in"}), vec![]));
         assert_eq!(broker.ensure_signed_in(Trigger::Manual).unwrap(), Ok(()));
@@ -832,5 +865,26 @@ mod against_keyd {
             );
         }
         assert_eq!(fake.hits().len(), requests);
+    }
+
+    #[test]
+    fn only_the_app_may_resume_the_attempt_guard_over_the_wire() {
+        let fake = FakeOrigin::start(script(code_from_t0));
+        let dir = Scratch::new("client-resume");
+        let clock = TestClock::at(T0);
+        let app = serve_on(Role::App, &fake, &dir, &clock);
+        let cli = serve_on(Role::Cli, &fake, &dir, &clock);
+        app.okta_save(USERNAME, PASSWORD, SEED).unwrap();
+        let record = paths::sign_in_record(&dir.0);
+        std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+        std::fs::write(&record, r#"{"last":5,"failures":3,"paused":"locked"}"#).unwrap();
+
+        assert!(matches!(cli.okta_resume(), Err(KeydError::Caller(_))));
+        assert!(matches!(
+            cli.ensure_signed_in(Trigger::Startup).unwrap(),
+            Err(LoginError::Paused(_))
+        ));
+        app.okta_resume().unwrap();
+        assert_eq!(cli.ensure_signed_in(Trigger::Startup).unwrap(), Ok(()));
     }
 }
