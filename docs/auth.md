@@ -19,8 +19,8 @@ cookie.
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
 | Frontend auth state | `app/src/hooks/useAuth.ts`, `app/src/hooks/useKeepalive.ts` |
 | Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
-| Keychain entry lifecycle (also used by MinerU, Voyage and Groq) | `app/src-tauri/src/credentials.rs` |
-| The `oculus-keyd` client, which Voyage's key goes through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`) |
+| Keychain entry lifecycle (also used by MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/credentials.rs` |
+| The `oculus-keyd` client, which the Voyage, MinerU and Groq keys go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/credentials.rs` (`CloudKey`) |
 | Credential entry UI | `app/src/components/settings/AutoSignIn.tsx` |
 
 ## Canvas authenticates by session cookie only

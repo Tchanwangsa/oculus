@@ -32,11 +32,23 @@ pub struct Routes(Vec<Route>);
 
 impl Routes {
     pub fn compiled() -> Routes {
-        Routes(vec![Route {
-            secret: names::VOYAGE,
-            origin: "https://api.voyageai.com".to_string(),
-            prefix: "/v1/",
-        }])
+        Routes(vec![
+            Route {
+                secret: names::VOYAGE,
+                origin: "https://api.voyageai.com".to_string(),
+                prefix: "/v1/",
+            },
+            Route {
+                secret: names::MINERU,
+                origin: "https://mineru.net".to_string(),
+                prefix: "/api/v4/",
+            },
+            Route {
+                secret: names::GROQ,
+                origin: "https://api.groq.com".to_string(),
+                prefix: "/openai/v1/",
+            },
+        ])
     }
 
     pub fn get(&self, secret: &str) -> Option<&Route> {
@@ -282,15 +294,31 @@ mod tests {
     }
 
     #[test]
-    fn only_voyage_has_a_route_and_its_origin_is_fixed() {
+    fn each_cloud_key_has_one_fixed_origin_and_prefix_and_nothing_else_does() {
         let routes = Routes::compiled();
-        assert_eq!(
-            routes.get("voyage").unwrap().origin,
-            "https://api.voyageai.com"
-        );
-        for name in ["mineru", "groq", "okta.password", "nope"] {
+        for (name, origin, prefix) in [
+            ("voyage", "https://api.voyageai.com", "/v1/"),
+            ("mineru", "https://mineru.net", "/api/v4/"),
+            ("groq", "https://api.groq.com", "/openai/v1/"),
+        ] {
+            let route = routes.get(name).unwrap();
+            assert_eq!((route.origin.as_str(), route.prefix), (origin, prefix));
+        }
+        for name in ["okta.username", "okta.password", "okta.totp_secret", "nope"] {
             assert!(routes.get(name).is_none(), "{name}");
         }
+    }
+
+    #[test]
+    fn a_path_must_stay_under_its_own_routes_prefix() {
+        let routes = Routes::compiled();
+        let mineru = routes.get("mineru").unwrap();
+        let groq = routes.get("groq").unwrap();
+        let post = |path: &str| json!({"method": "POST", "path": path});
+        assert!(Call::parse(&post("/api/v4/file-urls/batch"), mineru, b"{}").is_ok());
+        assert!(Call::parse(&post("/openai/v1/audio/transcriptions"), groq, b"x").is_ok());
+        assert!(Call::parse(&post("/v1/multimodalembeddings"), mineru, b"").is_err());
+        assert!(Call::parse(&post("/api/v4/file-urls/batch"), groq, b"").is_err());
     }
 
     #[test]

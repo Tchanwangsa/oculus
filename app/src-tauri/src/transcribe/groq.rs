@@ -1,32 +1,122 @@
 //! Whisper on Groq: one multipart upload per audio file, timed segments back.
-//! The key is `crate::groq`'s; this is the client that spends it.
+//! The key is `crate::groq`'s; this is the client that spends it. With
+//! `oculus-keyd` installed the upload goes through keyd, which adds the key;
+//! otherwise straight to Groq with the keychain's key (`super::groq_engine`).
+//! Both routes hand `transcribe` the same `RawResponse`.
 
 use std::path::Path;
+
+use crate::credentials::{Credentialed, KeydError, RawResponse};
 
 use super::{audio, Engine, EngineError, Segment};
 
 const BASE_URL: &str = "https://api.groq.com/openai/v1";
+/// `BASE_URL`'s path, which keyd's `forward` is given in place of a URL.
+const CLOUD_PATH: &str = "/openai/v1";
+const TRANSCRIPTIONS_PATH: &str = "/audio/transcriptions";
 const MODEL: &str = "whisper-large-v3-turbo";
 
 /// Groq's free tier refuses uploads over 25 MB. Spans are cut by time, so a
 /// dense stretch of speech can run past its share; the margin absorbs that.
 const UPLOAD_BUDGET: u64 = 20_000_000;
 
+/// How the upload gets its key.
+pub(super) enum Auth {
+    /// This process holds the key: keyd is absent.
+    Direct(String),
+    /// keyd adds it; the key never enters this process.
+    Keyd(Credentialed),
+}
+
 pub(super) struct Groq {
-    key: String,
+    auth: Auth,
     base_url: String,
     /// An ISO-639-1 code; `None` lets Groq detect the language.
     language: Option<String>,
 }
 
 impl Groq {
-    pub(super) fn new(key: String, language: Option<String>) -> Self {
+    pub(super) fn new(auth: Auth, language: Option<String>) -> Self {
         Self {
-            key,
+            auth,
             base_url: BASE_URL.into(),
             language,
         }
     }
+
+    /// One POST of `body` by this client's route. A status is an answer,
+    /// whatever it is; `transcribe` reads it. No timeout on either route: an
+    /// hour of audio is a long upload and a long answer.
+    fn post(&self, content_type: &str, body: &[u8]) -> Result<RawResponse, EngineError> {
+        match &self.auth {
+            Auth::Keyd(broker) => broker
+                .send(
+                    crate::groq::SECRET,
+                    "POST",
+                    &format!("{CLOUD_PATH}{TRANSCRIPTIONS_PATH}"),
+                    &[("Content-Type", content_type)],
+                    body,
+                    None,
+                )
+                .map_err(keyd_error),
+            Auth::Direct(key) => {
+                let sent = ureq::post(&format!("{}{TRANSCRIPTIONS_PATH}", self.base_url))
+                    .set("Authorization", &format!("Bearer {key}"))
+                    .set("Content-Type", content_type)
+                    .send_bytes(body);
+                let response = match sent {
+                    Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+                    Err(error) => {
+                        return Err(EngineError::Failed(format!(
+                            "could not reach Groq: {error}"
+                        )))
+                    }
+                };
+                let status = response.status();
+                let headers = response
+                    .headers_names()
+                    .into_iter()
+                    .filter_map(|name| {
+                        let value = response.header(&name)?.to_string();
+                        Some((name, value))
+                    })
+                    .collect();
+                // A refusal's unreadable body is still a refusal.
+                let body = match response.into_string() {
+                    Ok(text) => text.into_bytes(),
+                    Err(e) if status < 400 => {
+                        return Err(EngineError::Failed(format!(
+                            "Groq's reply could not be read: {e}"
+                        )))
+                    }
+                    Err(_) => Vec::new(),
+                };
+                Ok(RawResponse {
+                    status,
+                    headers,
+                    body,
+                })
+            }
+        }
+    }
+}
+
+/// keyd's refusals in Groq's words. Only `upstream` means keyd could not
+/// reach Groq; every other kind is keyd's own failure.
+fn keyd_error(error: KeydError) -> EngineError {
+    EngineError::Failed(match error {
+        KeydError::Keychain(e) => {
+            format!("The keychain refused to give out the Groq API key ({e})")
+        }
+        KeydError::Missing(_) => super::NO_GROQ_KEY.to_string(),
+        KeydError::Upstream(detail) => format!("could not reach Groq: {detail}"),
+        KeydError::Absent => "oculus-keyd, which holds the Groq API key, stopped listening".into(),
+        other => {
+            format!(
+                "oculus-keyd, which holds the Groq API key, could not send this request: {other}"
+            )
+        }
+    })
 }
 
 impl Engine for Groq {
@@ -66,38 +156,18 @@ impl Engine for Groq {
             },
         );
 
-        // No timeout: an hour of audio is a long upload and a long answer.
-        match ureq::post(&format!("{}/audio/transcriptions", self.base_url))
-            .set("Authorization", &format!("Bearer {}", self.key))
-            .set(
-                "Content-Type",
-                &format!("multipart/form-data; boundary={boundary}"),
-            )
-            .send_bytes(&body)
-        {
-            Ok(response) => {
-                let text = response.into_string().map_err(|e| {
-                    EngineError::Failed(format!("Groq's reply could not be read: {e}"))
-                })?;
-                parse_segments(&text)
-            }
-            Err(ureq::Error::Status(status, response)) => {
-                let retry_after = response.header("retry-after").map(str::to_string);
-                let reset = response
-                    .header("x-ratelimit-reset-requests")
-                    .map(str::to_string);
-                let body = response.into_string().unwrap_or_default();
-                Err(refusal(
-                    status,
-                    retry_after.as_deref(),
-                    reset.as_deref(),
-                    &body,
-                ))
-            }
-            Err(error) => Err(EngineError::Failed(format!(
-                "could not reach Groq: {error}"
-            ))),
+        let response = self.post(&format!("multipart/form-data; boundary={boundary}"), &body)?;
+        if response.status >= 400 {
+            return Err(refusal(
+                response.status,
+                response.header("retry-after"),
+                response.header("x-ratelimit-reset-requests"),
+                &String::from_utf8_lossy(&response.body),
+            ));
         }
+        let text = String::from_utf8(response.body)
+            .map_err(|e| EngineError::Failed(format!("Groq's reply could not be read: {e}")))?;
+        parse_segments(&text)
     }
 }
 
@@ -309,7 +379,7 @@ Content-Type: audio/ogg\r\n\r\n"
         std::fs::write(&audio, b"OggS-audio").unwrap();
 
         let groq = Groq {
-            key: "gsk_test".into(),
+            auth: Auth::Direct("gsk_test".into()),
             base_url: server.origin(),
             language: Some("en".into()),
         };
@@ -350,13 +420,125 @@ Content-Type: audio/ogg\r\n\r\n"
         std::fs::write(&audio, b"OggS").unwrap();
 
         let groq = Groq {
-            key: "gsk_test".into(),
+            auth: Auth::Direct("gsk_test".into()),
             base_url: server.origin(),
             language: None,
         };
         match groq.transcribe(&audio) {
             Err(EngineError::RateLimited(message)) => assert!(message.contains("2 minutes")),
             other => panic!("expected a rate limit, got {other:?}"),
+        }
+    }
+
+    // ── Through oculus-keyd ──────────────────────────────────────────────────
+
+    /// A Groq client through a fake keyd that answers each `forward` with
+    /// `answer`, and the audio file it uploads.
+    fn through_keyd<F>(answer: F) -> (Groq, crate::test_support::FakeKeyd, Scratch)
+    where
+        F: Fn() -> (serde_json::Value, Vec<u8>) + Send + 'static,
+    {
+        let dir = Scratch::new("groq-keyd");
+        std::fs::write(dir.join("part.ogg"), b"OggS-audio").unwrap();
+        let keyd = crate::test_support::FakeKeyd::start(&dir, move |_, _| answer());
+        let groq = Groq::new(Auth::Keyd(Credentialed::at(&dir)), Some("en".into()));
+        (groq, keyd, dir)
+    }
+
+    fn forwarded(
+        status: u16,
+        headers: serde_json::Value,
+        body: &serde_json::Value,
+    ) -> (serde_json::Value, Vec<u8>) {
+        let body = body.to_string().into_bytes();
+        (
+            json!({ "status": status, "headers": headers, "body_len": body.len() }),
+            body,
+        )
+    }
+
+    #[test]
+    fn through_keyd_the_audio_is_forwarded_without_the_key() {
+        let (groq, keyd, dir) = through_keyd(|| {
+            forwarded(
+                200,
+                json!([]),
+                &json!({"segments": [{"start": 1.0, "end": 2.0, "text": " Hi."}]}),
+            )
+        });
+        let segments = groq.transcribe(&dir.join("part.ogg")).unwrap();
+        assert_eq!(segments.len(), 1);
+
+        let (header, body) = &keyd.requests()[0];
+        assert_eq!(header["op"], "forward");
+        assert_eq!(header["secret"], "groq");
+        assert_eq!(header["method"], "POST");
+        assert_eq!(header["path"], "/openai/v1/audio/transcriptions");
+        let headers = header["headers"].as_array().unwrap();
+        assert_eq!(headers.len(), 1, "{header}");
+        assert_eq!(headers[0][0], "Content-Type");
+        assert!(headers[0][1]
+            .as_str()
+            .unwrap()
+            .starts_with("multipart/form-data; boundary=oculus-"));
+        assert!(
+            !header.to_string().to_lowercase().contains("authorization"),
+            "{header}"
+        );
+        let body = String::from_utf8_lossy(body);
+        assert!(body.contains("name=\"language\"\r\n\r\nen\r\n"));
+        assert!(body.contains("OggS-audio"));
+    }
+
+    #[test]
+    fn through_keyd_refusals_read_as_they_do_direct() {
+        let (groq, _keyd, dir) = through_keyd(|| {
+            forwarded(
+                429,
+                json!([["retry-after", "120"]]),
+                &json!({"error": {"message": "Rate limit reached"}}),
+            )
+        });
+        match groq.transcribe(&dir.join("part.ogg")) {
+            Err(EngineError::RateLimited(message)) => assert!(message.contains("2 minutes")),
+            other => panic!("expected a rate limit, got {other:?}"),
+        }
+
+        let (groq, _keyd, dir) = through_keyd(|| {
+            forwarded(
+                401,
+                json!([]),
+                &json!({"error": {"message": "Invalid API Key"}}),
+            )
+        });
+        assert!(matches!(
+            groq.transcribe(&dir.join("part.ogg")),
+            Err(EngineError::Failed(m)) if m.starts_with("Groq rejected the saved key")
+        ));
+    }
+
+    #[test]
+    fn keyds_own_errors_say_what_failed() {
+        for (wire, start) in [
+            ("missing", "No Groq API key"),
+            (
+                "keychain",
+                "The keychain refused to give out the Groq API key (refused)",
+            ),
+            ("upstream", "could not reach Groq: refused"),
+            (
+                "vault",
+                "oculus-keyd, which holds the Groq API key, could not send this request",
+            ),
+        ] {
+            let (groq, _keyd, dir) =
+                through_keyd(move || (json!({"error": wire, "detail": "refused"}), vec![]));
+            match groq.transcribe(&dir.join("part.ogg")) {
+                Err(EngineError::Failed(message)) => {
+                    assert!(message.starts_with(start), "{wire}: {message}")
+                }
+                other => panic!("{wire}: expected a failure, got {other:?}"),
+            }
         }
     }
 }

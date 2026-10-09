@@ -267,7 +267,7 @@ impl VoyageCloud {
                     &format!("{CLOUD_PATH}{EMBED_PATH}"),
                     &headers,
                     body,
-                    API_TIMEOUT,
+                    Some(API_TIMEOUT),
                 )
                 .map_err(Unanswered::from_keyd),
             Auth::Direct(key) => {

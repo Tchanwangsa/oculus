@@ -204,8 +204,8 @@ is built to give the same bytes for the same source:
 - **`--features dev`** is what `bun run keyd` builds: it admits any same-user
   caller, because a dev keyd has no bundle to check callers against. Test
   hooks (`serve-local`, a data-dir override, an injected key that also turns
-  off reading old keychain items, a loopback Voyage origin) exist only in
-  debug builds.
+  off reading old keychain items, a loopback origin for Voyage, MinerU or
+  Groq through `OCULUS_KEYD_<NAME>_ORIGIN`) exist only in debug builds.
 - Checks: `cargo test` in `app/keyd` with and without `--features dev`, and
   `cargo test --all-features` in `app/keyd/core`. No test touches launchd or
   the keychain.
@@ -273,8 +273,8 @@ the path.
   "app".
 
 The parser and embedder are settings (Settings → Parsing and Settings →
-Embeddings) and their keys live in the keychain — neither is an environment
-variable.
+Embeddings) and their keys live in `oculus-keyd`'s vault, or the keychain
+without keyd — neither is an environment variable.
 
 ## Gotchas
 

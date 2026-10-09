@@ -21,7 +21,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
 | Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/keyd.rs` |
-| Credential storage (keychain), the keyd client; provider probes | `app/src-tauri/src/credentials.rs`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
+| Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes | `app/src-tauri/src/credentials.rs`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
 | Lecture video server | `app/src-tauri/src/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
@@ -56,15 +56,14 @@ its failure rules are in [parsing.md](./parsing.md).
   transcription run through `blocking::run`, so synchronous I/O cannot hold
   Tauri's command thread.
   Upload batches serialize their name allocation.
-- Credentials go keychain → in-process client, except Voyage's while keyd is
-  installed ([below](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+- Credentials go keychain → in-process client, except the Voyage, MinerU and
+  Groq keys while keyd is installed
+  ([below](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
   No key enters SQLite, the WebView, a health response or a progress event.
-  The local engine needs none.
+  The local engines need none.
   A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
   sandbox, which fails right after the prompt is approved) is reported as
-  unreadable, never as a missing key (`Secret::fetch`, `Secret::has`). MinerU's
-  parse path is the exception: it still reads a refusal as no token
-  (`Secret::read`).
+  unreadable, never as a missing key (`Secret::fetch`, `Secret::has`).
 
 ## `oculus-keyd` is the only process meant to read its key
 
@@ -108,7 +107,9 @@ app links too, for the client and the installer only.
 - **`forward` sends one request with the key added; the key never leaves.**
   The request names a `secret`, `method` (GET or POST), `path` and `headers`;
   keyd sends it to that secret's fixed origin (`app/keyd/core/src/forward.rs`:
-  only `voyage` → `https://api.voyageai.com`, under `/v1/`) with
+  `voyage` → `https://api.voyageai.com` under `/v1/`, `mineru` →
+  `https://mineru.net` under `/api/v4/`, `groq` → `https://api.groq.com`
+  under `/openai/v1/`; Okta's names have no route) with
   `Authorization: Bearer <key>`. The path is held to plain characters with no
   `%`, dot segment or `//`, and only `Content-Type` and `Accept` may be set.
   The reply is `{"status", "headers", "body_len"}` and the origin's body,
@@ -116,11 +117,13 @@ app links too, for the client and the installer only.
   `upstream` means no answer arrived (DNS, connect, TLS, reset). ureq runs
   without gzip or proxy variables, and its 30 s connect timeout is the only
   one. The log line names the status and byte counts, never a header or body.
-- **Voyage's old keychain item is imported on first use.** The first `has`
-  or `forward` for `voyage` copies `com.tchan.oculus.voyage` into the vault
-  unless the vault already holds a key, then records `keyd.imported.voyage`
-  in the vault; `store` and `delete` record it too, so a deleted key never
-  comes back from the old item, which stays in the keychain. Entries under
+- **The cloud keys' old keychain items are imported on first use.** The
+  first `has` or `forward` for `voyage`, `mineru` or `groq` copies that
+  name's old item (`com.tchan.oculus.voyage`, `.mineru`, `.groq`) into the
+  vault unless the vault already holds a key, then records
+  `keyd.imported.<name>` in the vault; `store` and `delete` record it too, so
+  a deleted key never comes back from the old item, which stays in the
+  keychain. Okta's items are never imported. Entries under
   `keyd.` are bookkeeping no op can name (`app/keyd/core/src/names.rs`).
 - **The caller check runs before any request is read.** The peer's uid must
   be keyd's. A bundled keyd then admits only executables inside its own app
@@ -131,15 +134,18 @@ app links too, for the client and the installer only.
   build goes by file name, `app` or `oculus` — which the log records beside
   the signing identifier. Ops are to check the role, never a path; none
   does yet.
-- **Voyage goes through it; nothing else does yet.** `credentials::Credentialed`
+- **Voyage, MinerU and Groq go through it.** `credentials::Credentialed`
   (`keyd_core::client::Client`, `app/keyd/core/src/client.rs`) is the client,
   one connection per call. It treats a missing socket or a refused connect as keyd not
   installed (`KeydError::Absent`), the only case in which a caller reads the
-  keychain itself; every other error surfaces. The Voyage client and its
-  Settings commands use it ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key)).
-  The app and CLI still read the MinerU, Groq and Okta items themselves (the
-  credentials bullet above). keyd's `migrate`, which copies every old item at
-  once, is not called.
+  keychain itself; every other error surfaces. The Voyage and MinerU clients,
+  Groq transcription, and the three keys' Settings commands
+  (`credentials::CloudKey`) use it
+  ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key),
+  [parsing.md](./parsing.md#with-oculus-keyd-installed-no-oculus-process-holds-the-mineru-token),
+  [viewers.md](./viewers.md)). A request's timeout is the caller's own, and
+  Groq's upload has none. The app and CLI still read the Okta items
+  themselves (the credentials bullet above).
 - `keyd::ensure_installed` runs at app startup and does nothing in a dev
   build; a dev install is the preflight's ([cli.md](./cli.md)).
 - **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus

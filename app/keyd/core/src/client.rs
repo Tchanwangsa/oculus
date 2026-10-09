@@ -101,7 +101,11 @@ impl Client {
     }
 
     pub fn has(&self, secret: &str) -> Result<bool, KeydError> {
-        let (reply, _) = self.exchange(&json!({"op": "has", "secret": secret}), &[], OP_TIMEOUT)?;
+        let (reply, _) = self.exchange(
+            &json!({"op": "has", "secret": secret}),
+            &[],
+            Some(OP_TIMEOUT),
+        )?;
         reply
             .get("has")
             .and_then(Value::as_bool)
@@ -112,15 +116,18 @@ impl Client {
         self.exchange(
             &json!({"op": "store", "secret": secret, "value": value}),
             &[],
-            OP_TIMEOUT,
+            Some(OP_TIMEOUT),
         )
         .map(|_| ())
     }
 
     /// True when a value was there.
     pub fn delete(&self, secret: &str) -> Result<bool, KeydError> {
-        let (reply, _) =
-            self.exchange(&json!({"op": "delete", "secret": secret}), &[], OP_TIMEOUT)?;
+        let (reply, _) = self.exchange(
+            &json!({"op": "delete", "secret": secret}),
+            &[],
+            Some(OP_TIMEOUT),
+        )?;
         Ok(reply
             .get("existed")
             .and_then(Value::as_bool)
@@ -128,7 +135,8 @@ impl Client {
     }
 
     /// One request to `secret`'s origin with keyd adding the key. `timeout`
-    /// bounds each read and write, as the caller's own HTTP timeout did.
+    /// bounds each read and write, as the caller's own HTTP timeout did;
+    /// `None` waits for ever, for a caller that has no timeout of its own.
     pub fn send(
         &self,
         secret: &str,
@@ -136,7 +144,7 @@ impl Client {
         path: &str,
         headers: &[(&str, &str)],
         body: &[u8],
-        timeout: Duration,
+        timeout: Option<Duration>,
     ) -> Result<RawResponse, KeydError> {
         let header = json!({
             "op": "forward",
@@ -178,7 +186,7 @@ impl Client {
     /// OS has it registered; keyd answers without opening the vault.
     pub fn ping(&self) -> Result<Value, String> {
         let conn = (self.connect)().map_err(|e| format!("{}: {e}", self.endpoint.display()))?;
-        match self.over(conn, &json!({"op": "ping"}), &[], PING_TIMEOUT) {
+        match self.over(conn, &json!({"op": "ping"}), &[], Some(PING_TIMEOUT)) {
             Ok((reply, _)) => Ok(reply),
             Err(KeydError::Broken(d)) => Err(d),
             Err(e) => Err(format!("keyd refused ping ({}): {}", e.kind(), e.detail())),
@@ -191,7 +199,7 @@ impl Client {
         &self,
         header: &Value,
         body: &[u8],
-        timeout: Duration,
+        timeout: Option<Duration>,
     ) -> Result<(Value, Vec<u8>), KeydError> {
         let conn = (self.connect)().map_err(|e| match e {
             ConnectError::Absent(_) => KeydError::Absent,
@@ -207,9 +215,9 @@ impl Client {
         conn: Conn,
         header: &Value,
         body: &[u8],
-        timeout: Duration,
+        timeout: Option<Duration>,
     ) -> Result<(Value, Vec<u8>), KeydError> {
-        conn.set_timeout(Some(timeout)).ok();
+        conn.set_timeout(timeout).ok();
         let mut stream = BufReader::new(conn);
         framing::write_frame(stream.get_mut(), header, body)
             .map_err(|e| KeydError::Broken(format!("sending: {e}")))?;
@@ -346,7 +354,7 @@ mod tests {
         );
         assert!(broker.delete("voyage").unwrap());
         assert!(matches!(
-            broker.send("voyage", "GET", "/v1/x", &[], b"", OP_TIMEOUT),
+            broker.send("voyage", "GET", "/v1/x", &[], b"", Some(OP_TIMEOUT)),
             Err(KeydError::Broken(_))
         ));
         assert_eq!(
@@ -372,7 +380,7 @@ mod tests {
                 "/v1/x",
                 &[("Content-Type", "application/json")],
                 &body,
-                Duration::from_secs(10),
+                Some(Duration::from_secs(10)),
             )
             .unwrap();
         assert_eq!(answer.status, 429);
@@ -407,7 +415,14 @@ mod tests {
     #[test]
     fn a_connection_that_drops_is_broken_not_absent() {
         let err = answers_once(b"{\"status\":200,\"body_len\":10}\nabc")
-            .send("voyage", "POST", "/v1/x", &[], b"", Duration::from_secs(10))
+            .send(
+                "voyage",
+                "POST",
+                "/v1/x",
+                &[],
+                b"",
+                Some(Duration::from_secs(10)),
+            )
             .unwrap_err();
         assert!(matches!(err, KeydError::Broken(_)), "{err:?}");
         let err = answers_once(b"").has("voyage").unwrap_err();
@@ -433,7 +448,7 @@ mod tests {
                 "/v1/x",
                 &[],
                 b"",
-                Duration::from_millis(100),
+                Some(Duration::from_millis(100)),
             )
             .unwrap_err();
         assert!(matches!(err, KeydError::Broken(_)), "{err:?}");

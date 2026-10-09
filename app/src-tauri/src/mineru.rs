@@ -1,21 +1,32 @@
 //! MinerU cloud credential storage.
 //!
-//! The token lives only in the macOS keychain, never in SQLite or the
-//! WebView; `parse::mineru::client` reads it at construction.
+//! With `oculus-keyd` installed the token lives in its vault, and these
+//! commands go through keyd; without it, in the macOS keychain
+//! (`credentials::CloudKey`). Never in SQLite or the WebView.
+//! `parse::mineru::client` asks keyd for each request, or reads the keychain
+//! at construction when keyd is absent.
 
 use std::time::Duration;
 
-use crate::credentials::{Secret, Verdict};
+use crate::credentials::{CloudKey, Secret, Verdict};
 
-const KEY: Secret = Secret::new("com.tchan.oculus.mineru", "mineru");
+/// The name keyd stores the token under.
+pub(crate) const SECRET: &str = "mineru";
+
+pub(crate) static KEY: CloudKey = CloudKey {
+    secret: SECRET,
+    what: "MinerU token",
+    keychain: Secret::new("com.tchan.oculus.mineru", "mineru"),
+};
 
 /// A task id that cannot exist: a good token answers "no such task", a bad
 /// one 401. Nothing is created or charged.
 const PROBE_URL: &str =
     "https://mineru.net/api/v4/extract/task/00000000-0000-0000-0000-000000000000";
 
-pub(crate) fn stored_api_key() -> Option<String> {
-    KEY.read()
+/// `Err` when the keychain refused, as opposed to holding no token.
+pub(crate) fn fetch_api_key() -> Result<Option<String>, String> {
+    KEY.fetch()
 }
 
 /// Ask MinerU whether it accepts this token. `Err` is a token MinerU actively
@@ -57,15 +68,16 @@ fn probe(key: &str) -> Result<Verdict, String> {
 
 /// Store a token, but only one MinerU has agreed to. Returns `"ok"` when it
 /// was checked against MinerU and `"unverified"` when MinerU was unreachable
-/// and the token was stored on trust.
+/// and the token was stored on trust. The probe runs here with the token
+/// just typed; only the store goes through keyd.
 #[tauri::command]
 pub fn mineru_set_api_key(key: String) -> Result<String, String> {
-    KEY.store_checked(&key, probe)
+    KEY.set(&key, probe)
 }
 
 #[tauri::command]
 pub fn mineru_has_api_key() -> Result<bool, String> {
-    KEY.has("MinerU token")
+    KEY.has()
 }
 
 #[tauri::command]

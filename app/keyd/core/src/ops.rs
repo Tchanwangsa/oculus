@@ -25,8 +25,9 @@ pub struct Build {
 }
 
 /// Secrets whose old keychain item keyd copies into the vault the first time
-/// an op touches them (`State::import_once`).
-const IMPORTED_ON_USE: &[&str] = &[names::VOYAGE];
+/// an op touches them (`State::import_once`): the three cloud keys. Okta's
+/// items are not imported, because nothing asks keyd for them.
+const IMPORTED_ON_USE: &[&str] = &[names::VOYAGE, names::MINERU, names::GROQ];
 
 pub struct State {
     build: Build,
@@ -290,59 +291,11 @@ fn secret_name(req: &Value) -> Result<&str, OpError> {
     Ok(name)
 }
 
-// ── Migration ────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Default, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
-pub struct Migrated {
-    pub copied: Vec<&'static str>,
-    /// Already in the vault, so the old item was not read.
-    pub kept: Vec<&'static str>,
-    /// No old item, or an empty one.
-    pub absent: Vec<&'static str>,
-    pub failed: Vec<(&'static str, String)>,
-}
-
-/// Copies each old per-service keychain item into the vault, skipping names
-/// the vault already holds. Copy-only: the old items stay, because the app
-/// still reads them. Runs when the readers switch over to keyd.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn migrate(vault: &Vault, legacy: &dyn LegacySource) -> Result<Migrated, VaultError> {
-    let present = vault.load()?;
-    let mut out = Migrated::default();
-    let mut found = Vec::new();
-    for item in names::LEGACY {
-        if present.contains(item.secret) {
-            out.kept.push(item.secret);
-            continue;
-        }
-        // Each read may prompt, so they run outside the vault's lock.
-        match legacy.read(item.service, item.account) {
-            Ok(Some(value)) if !value.is_empty() => found.push((item.secret, value)),
-            Ok(_) => out.absent.push(item.secret),
-            Err(e) => out.failed.push((item.secret, e.to_string())),
-        }
-    }
-    vault.update(|entries| {
-        for (name, value) in &found {
-            // A store that landed while the old items were read wins.
-            if entries.contains(name) {
-                out.kept.push(*name);
-            } else {
-                entries.insert(name, value);
-                out.copied.push(*name);
-            }
-        }
-    })?;
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::{Answer, FakeOrigin, Scratch, BUILD};
     use crate::vault::{NoLegacy, StaticKey};
-    use std::collections::HashMap;
 
     fn key() -> MasterKey {
         MasterKey::from_bytes([9; 32])
@@ -483,70 +436,6 @@ mod tests {
             assert_eq!(err.kind, "request", "{op} {req}");
         }
         assert!(!crate::paths::vault(&dir.0).exists(), "nothing was written");
-    }
-
-    struct Items(HashMap<(&'static str, &'static str), Result<Option<String>, KeyError>>);
-
-    impl LegacySource for Items {
-        fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
-            self.0
-                .iter()
-                .find(|((s, a), _)| *s == service && *a == account)
-                .map(|(_, r)| r.clone())
-                .unwrap_or(Ok(None))
-        }
-    }
-
-    #[test]
-    fn migration_copies_missing_names_and_keeps_existing_ones() {
-        let dir = Scratch::new("migrate");
-        let v = Vault::new(crate::paths::vault(&dir.0), key());
-        v.store(names::GROQ, "gsk-new").unwrap();
-        let legacy = Items(HashMap::from([
-            (
-                ("com.tchan.oculus.voyage", "voyage"),
-                Ok(Some("pa-old".to_string())),
-            ),
-            (
-                ("com.tchan.oculus.groq", "groq"),
-                Ok(Some("gsk-old".to_string())),
-            ),
-            (
-                ("com.tchan.oculus.mineru", "mineru"),
-                Ok(Some(String::new())),
-            ),
-            (
-                ("com.oculus.unimelb-sso", "username"),
-                Ok(Some("student".to_string())),
-            ),
-            (
-                ("com.oculus.unimelb-sso", "password"),
-                Err(KeyError::Refused("denied".into())),
-            ),
-        ]));
-
-        let m = migrate(&v, &legacy).unwrap();
-        assert_eq!(m.copied, [names::VOYAGE, names::OKTA_USERNAME]);
-        assert_eq!(m.kept, [names::GROQ]);
-        assert_eq!(m.absent, [names::MINERU, names::OKTA_TOTP_SECRET]);
-        assert_eq!(m.failed.len(), 1);
-        assert_eq!(m.failed[0].0, names::OKTA_PASSWORD);
-
-        assert_eq!(v.get(names::VOYAGE).unwrap().as_deref(), Some("pa-old"));
-        assert_eq!(
-            v.get(names::GROQ).unwrap().as_deref(),
-            Some("gsk-new"),
-            "the vault's value wins"
-        );
-        assert!(!v.has(names::MINERU).unwrap());
-
-        // Idempotent: a second run copies nothing.
-        let again = migrate(&v, &legacy).unwrap();
-        assert!(again.copied.is_empty());
-        assert_eq!(
-            again.kept,
-            [names::VOYAGE, names::GROQ, names::OKTA_USERNAME]
-        );
     }
 
     // ── forward ──────────────────────────────────────────────────────────────
@@ -715,7 +604,8 @@ mod tests {
             json!({"secret": "voyage", "method": "POST", "path": "/v2/x"}),
             json!({"secret": "voyage", "method": "DELETE", "path": "/v1/x"}),
             json!({"secret": "voyage", "method": "POST", "path": "/v1/x", "headers": [["Authorization", "Bearer x"]]}),
-            json!({"secret": "mineru", "method": "POST", "path": "/api/v4/x"}),
+            json!({"secret": "mineru", "method": "POST", "path": "/v1/x"}),
+            json!({"secret": "groq", "method": "POST", "path": "/api/v4/x"}),
             json!({"secret": "okta.password", "method": "POST", "path": "/v1/x"}),
         ] {
             let err = state
@@ -727,32 +617,48 @@ mod tests {
 
     // ── Import on first use ──────────────────────────────────────────────────
 
-    /// One old Voyage item, counting its reads.
-    struct OldVoyage(
-        Result<Option<String>, KeyError>,
-        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    type Reads = std::sync::Arc<std::sync::atomic::AtomicUsize>;
+
+    /// Old keychain items by service and account, counting every read.
+    struct OldItems(
+        Vec<(
+            (&'static str, &'static str),
+            Result<Option<String>, KeyError>,
+        )>,
+        Reads,
     );
 
-    impl LegacySource for OldVoyage {
+    impl LegacySource for OldItems {
         fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
-            assert_eq!((service, account), ("com.tchan.oculus.voyage", "voyage"));
             self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            self.0.clone()
+            self.0
+                .iter()
+                .find(|((s, a), _)| *s == service && *a == account)
+                .map(|(_, r)| r.clone())
+                .unwrap_or(Ok(None))
         }
     }
 
-    fn with_old(
+    fn with_items(
         dir: &Scratch,
-        old: Result<Option<String>, KeyError>,
-    ) -> (State, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
-        let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        items: Vec<(
+            (&'static str, &'static str),
+            Result<Option<String>, KeyError>,
+        )>,
+    ) -> (State, Reads) {
+        let reads = Reads::default();
         let state = State::new(
             BUILD,
             dir.0.clone(),
             Box::new(StaticKey(key())),
-            Box::new(OldVoyage(old, reads.clone())),
+            Box::new(OldItems(items, reads.clone())),
         );
         (state, reads)
+    }
+
+    /// One old Voyage item.
+    fn with_old(dir: &Scratch, old: Result<Option<String>, KeyError>) -> (State, Reads) {
+        with_items(dir, vec![(("com.tchan.oculus.voyage", "voyage"), old)])
     }
 
     #[test]
@@ -871,11 +777,46 @@ mod tests {
     }
 
     #[test]
-    fn other_names_are_never_imported() {
-        let dir = Scratch::new("import-groq");
-        let (state, reads) = with_old(&dir, Ok(Some("x".into())));
+    fn mineru_and_groqs_old_items_are_imported_once() {
+        let dir = Scratch::new("import-mineru-groq");
+        let (state, reads) = with_items(
+            &dir,
+            vec![
+                (
+                    ("com.tchan.oculus.mineru", "mineru"),
+                    Ok(Some("mineru-old".into())),
+                ),
+                (
+                    ("com.tchan.oculus.groq", "groq"),
+                    Ok(Some("gsk_old".into())),
+                ),
+            ],
+        );
+        for name in ["mineru", "groq", "mineru", "groq"] {
+            assert_eq!(
+                call(&state, "has", json!({"secret": name})).unwrap()["has"],
+                true,
+                "{name}"
+            );
+        }
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let v = Vault::new(crate::paths::vault(&dir.0), key());
+        assert_eq!(v.get("mineru").unwrap().as_deref(), Some("mineru-old"));
+        assert_eq!(v.get("groq").unwrap().as_deref(), Some("gsk_old"));
+    }
+
+    #[test]
+    fn okta_names_are_never_imported() {
+        let dir = Scratch::new("import-okta");
+        let (state, reads) = with_items(
+            &dir,
+            vec![(
+                ("com.oculus.unimelb-sso", "password"),
+                Ok(Some("hunter2".into())),
+            )],
+        );
         assert_eq!(
-            call(&state, "has", json!({"secret": "groq"})).unwrap()["has"],
+            call(&state, "has", json!({"secret": "okta.password"})).unwrap()["has"],
             false
         );
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);

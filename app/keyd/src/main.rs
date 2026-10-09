@@ -12,8 +12,9 @@
 //! Debug builds add `serve-local <endpoint>`, which binds the endpoint itself,
 //! and read OCULUS_KEYD_DATA_DIR, OCULUS_KEYD_TEST_KEY (64 hex characters, in
 //! place of the keychain; old keychain items are then never read either),
-//! OCULUS_KEYD_IDLE_SECS and OCULUS_KEYD_VOYAGE_ORIGIN (`http://127.0.0.1:<port>`,
-//! a fake Voyage). Release builds have none.
+//! OCULUS_KEYD_IDLE_SECS, and OCULUS_KEYD_VOYAGE_ORIGIN, OCULUS_KEYD_MINERU_ORIGIN
+//! and OCULUS_KEYD_GROQ_ORIGIN (each `http://127.0.0.1:<port>`, a fake of that
+//! service). Release builds have none.
 
 use std::path::PathBuf;
 use std::process::exit;
@@ -86,20 +87,30 @@ fn serve(listeners: Vec<Listener>) {
     let (keys, legacy) = key_sources();
     let state = State::new(BUILD, data_dir(), keys, legacy);
     #[cfg(debug_assertions)]
-    let state = match std::env::var("OCULUS_KEYD_VOYAGE_ORIGIN") {
-        Ok(origin) => match keyd_core::forward::Routes::compiled()
-            .with_origin(keyd_core::names::VOYAGE, &origin)
-        {
-            Ok(routes) => state.with_routes(routes),
-            Err(e) => {
-                log(&format!("OCULUS_KEYD_VOYAGE_ORIGIN: {e}"));
-                exit(64);
-            }
-        },
-        Err(_) => state,
-    };
+    let state = state.with_routes(test_routes());
     let server = Arc::new(Server::new(state, platform::peer_check(POLICY), idle()));
     server.run(&listeners);
+}
+
+/// The compiled routes, with any secret whose `OCULUS_KEYD_<NAME>_ORIGIN` is
+/// set pointed at that loopback origin instead.
+#[cfg(debug_assertions)]
+fn test_routes() -> keyd_core::forward::Routes {
+    use keyd_core::names::{GROQ, MINERU, VOYAGE};
+    let mut routes = keyd_core::forward::Routes::compiled();
+    for secret in [VOYAGE, MINERU, GROQ] {
+        let var = format!("OCULUS_KEYD_{}_ORIGIN", secret.to_uppercase());
+        if let Ok(origin) = std::env::var(&var) {
+            routes = match routes.with_origin(secret, &origin) {
+                Ok(routes) => routes,
+                Err(e) => {
+                    log(&format!("{var}: {e}"));
+                    exit(64);
+                }
+            };
+        }
+    }
+    routes
 }
 
 /// `keyd_core::paths::data_dir`, the app's own definition.

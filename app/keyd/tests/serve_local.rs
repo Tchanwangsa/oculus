@@ -19,10 +19,12 @@ struct Keyd {
 
 impl Keyd {
     fn start(idle_secs: u64) -> Keyd {
-        Keyd::start_with(idle_secs, None)
+        Keyd::start_with(idle_secs, &[])
     }
 
-    fn start_with(idle_secs: u64, voyage_origin: Option<&str>) -> Keyd {
+    /// `origins` sets each `(variable, origin)`, e.g. a fake Voyage under
+    /// `OCULUS_KEYD_VOYAGE_ORIGIN`.
+    fn start_with(idle_secs: u64, origins: &[(&str, &str)]) -> Keyd {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let dir = std::env::temp_dir().join(format!("keyd-bin-{}-{n}", std::process::id()));
@@ -35,8 +37,8 @@ impl Keyd {
             .env("OCULUS_KEYD_TEST_KEY", "11".repeat(32))
             .env("OCULUS_KEYD_IDLE_SECS", idle_secs.to_string())
             .stderr(Stdio::piped());
-        if let Some(origin) = voyage_origin {
-            cmd.env("OCULUS_KEYD_VOYAGE_ORIGIN", origin);
+        for (var, origin) in origins {
+            cmd.env(var, origin);
         }
         let child = cmd.spawn().unwrap();
         let started = Instant::now();
@@ -174,7 +176,7 @@ fn the_binary_forwards_to_its_test_origin_and_never_logs_the_key() {
         return;
     }
     let (origin, seen) = fake_origin();
-    let mut keyd = Keyd::start_with(60, Some(&origin));
+    let mut keyd = Keyd::start_with(60, &[("OCULUS_KEYD_VOYAGE_ORIGIN", &origin)]);
     assert_eq!(
         keyd.call(json!({"op": "store", "secret": "voyage", "value": "pa-SECRET"}))["stored"],
         true
@@ -227,4 +229,79 @@ fn the_binary_forwards_to_its_test_origin_and_never_logs_the_key() {
     for leak in ["pa-SECRET", "BODY-TEXT", "slow down", "application/json"] {
         assert!(!log.contains(leak), "{leak} in {log}");
     }
+}
+
+/// One `forward` and its reply: header, then body.
+fn forward(keyd: &Keyd, req: Value, body: &[u8]) -> (Value, Vec<u8>) {
+    let stream = UnixStream::connect(&keyd.sock).unwrap();
+    (&stream).write_all(format!("{req}\n").as_bytes()).unwrap();
+    (&stream).write_all(body).unwrap();
+    let mut reader = BufReader::new(&stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let reply: Value = serde_json::from_str(&line).unwrap();
+    let mut answer = vec![0; reply["body_len"].as_u64().unwrap_or(0) as usize];
+    std::io::Read::read_exact(&mut reader, &mut answer).unwrap();
+    (reply, answer)
+}
+
+#[test]
+fn mineru_and_groq_forward_to_their_own_test_origins() {
+    if !cfg!(feature = "dev") {
+        return;
+    }
+    let (mineru, mineru_seen) = fake_origin();
+    let (groq, groq_seen) = fake_origin();
+    let keyd = Keyd::start_with(
+        60,
+        &[
+            ("OCULUS_KEYD_MINERU_ORIGIN", &mineru),
+            ("OCULUS_KEYD_GROQ_ORIGIN", &groq),
+        ],
+    );
+    for (secret, value) in [("mineru", "mineru-SECRET"), ("groq", "gsk_SECRET")] {
+        assert_eq!(
+            keyd.call(json!({"op": "store", "secret": secret, "value": value}))["stored"],
+            true
+        );
+    }
+
+    let (reply, _) = forward(
+        &keyd,
+        json!({"op": "forward", "secret": "mineru", "method": "GET",
+               "path": "/api/v4/extract-results/batch/b-1", "headers": [["Accept", "application/json"]]}),
+        b"",
+    );
+    assert_eq!(reply["status"], 429, "{reply}");
+    let head = mineru_seen.join().unwrap();
+    assert!(
+        head.starts_with("GET /api/v4/extract-results/batch/b-1 HTTP/1.1"),
+        "{head}"
+    );
+    assert!(
+        head.to_lowercase()
+            .contains("authorization: bearer mineru-secret"),
+        "{head}"
+    );
+
+    let body = b"--B\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nx\r\n--B--\r\n";
+    let (reply, _) = forward(
+        &keyd,
+        json!({"op": "forward", "secret": "groq", "method": "POST",
+               "path": "/openai/v1/audio/transcriptions",
+               "headers": [["Content-Type", "multipart/form-data; boundary=B"]], "body_len": body.len()}),
+        body,
+    );
+    assert_eq!(reply["status"], 429, "{reply}");
+    let head = groq_seen.join().unwrap();
+    assert!(
+        head.starts_with("POST /openai/v1/audio/transcriptions HTTP/1.1"),
+        "{head}"
+    );
+    let lower = head.to_lowercase();
+    assert!(lower.contains("authorization: bearer gsk_secret"), "{head}");
+    assert!(
+        lower.contains("content-type: multipart/form-data; boundary=b"),
+        "{head}"
+    );
 }
