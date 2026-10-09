@@ -118,6 +118,11 @@ app links too, for the client and the installer only.
   `upstream` means no answer arrived (DNS, connect, TLS, reset). ureq runs
   without gzip or proxy variables, and its 30 s connect timeout is the only
   one. The log line names the status and byte counts, never a header or body.
+  The Okta sign-in (`okta/flow.rs`) is built to send the same request in
+  keyd and in the app, whose ureq also enables `cookies` and `gzip` through
+  feature unification: each request gets a new agent, so no cookie store
+  has anything to replay beside the flow's own `Cookie` header, and each asks
+  for `Accept-Encoding: identity`.
 - **The cloud keys' old keychain items are imported on first use.** The
   first `has` or `forward` for `voyage`, `mineru` or `groq` copies that
   name's old item (`com.tchan.oculus.voyage`, `.mineru`, `.groq`) into the
