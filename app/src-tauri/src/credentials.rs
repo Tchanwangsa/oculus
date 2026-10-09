@@ -16,7 +16,17 @@ impl<'a> Secret<'a> {
     }
 
     pub(crate) fn read(&self) -> Option<String> {
-        self.entry().ok()?.get_password().ok()
+        self.fetch().ok().flatten()
+    }
+
+    /// `Ok(None)` only when no item exists. A refused prompt or a sandboxed
+    /// process is an `Err`, so a saved key is never reported as missing.
+    pub(crate) fn fetch(&self) -> Result<Option<String>, String> {
+        match self.entry()?.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
     }
 
     pub(crate) fn write(&self, value: &str) -> Result<(), String> {

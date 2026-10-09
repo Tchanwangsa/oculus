@@ -345,6 +345,9 @@ pub trait Embedder: Send + Sync {
 pub enum EmbedError {
     /// No API key is stored.
     MissingCredentials,
+    /// A key may be stored, but the keychain refused to hand it over (a denied
+    /// prompt, or a sandboxed process). Holds the keychain's own error.
+    UnreadableCredentials(String),
     /// The backend refused the key. Latching: every file would hit it.
     RejectedCredentials { code: Option<String>, expired: bool },
     /// Throttled per minute. On the free tier this is the steady state of a
@@ -379,6 +382,7 @@ impl EmbedError {
     pub fn kind(&self) -> &'static str {
         match self {
             EmbedError::MissingCredentials => "missing_credentials",
+            EmbedError::UnreadableCredentials(_) => "unreadable_credentials",
             EmbedError::RejectedCredentials { .. } => "rejected_credentials",
             EmbedError::RateLimited { .. } => "rate_limited",
             EmbedError::QuotaExhausted => "quota_exhausted",
@@ -399,7 +403,8 @@ impl EmbedError {
             | EmbedError::Offline(_)
             | EmbedError::Io(_)
             | EmbedError::QuotaExhausted
-            | EmbedError::NotReady { .. } => true,
+            | EmbedError::NotReady { .. }
+            | EmbedError::UnreadableCredentials(_) => true,
             EmbedError::MissingCredentials
             | EmbedError::RejectedCredentials { .. }
             | EmbedError::Document { .. }
@@ -415,6 +420,7 @@ impl EmbedError {
         matches!(
             self,
             EmbedError::MissingCredentials
+                | EmbedError::UnreadableCredentials(_)
                 | EmbedError::RejectedCredentials { .. }
                 | EmbedError::QuotaExhausted
                 | EmbedError::BudgetReached { .. }
@@ -431,6 +437,11 @@ impl fmt::Display for EmbedError {
             EmbedError::MissingCredentials => {
                 write!(f, "No Voyage API key is saved — add one in Settings to index PDFs.")
             }
+            EmbedError::UnreadableCredentials(detail) => write!(
+                f,
+                "The keychain refused to give out the Voyage API key ({detail}). The key is \
+                 not missing — macOS denied this process access to it."
+            ),
             EmbedError::RejectedCredentials { code, expired } => {
                 let code = code.as_deref().map(|c| format!(" ({c})")).unwrap_or_default();
                 if *expired {
@@ -530,10 +541,12 @@ pub enum CredentialSource {
 }
 
 impl CredentialSource {
-    pub fn key(self) -> Option<String> {
+    pub fn key(self) -> Result<Option<String>, EmbedError> {
         match self {
-            CredentialSource::Keychain => crate::voyage::stored_api_key(),
-            CredentialSource::None => None,
+            CredentialSource::Keychain => {
+                crate::voyage::fetch_api_key().map_err(EmbedError::UnreadableCredentials)
+            }
+            CredentialSource::None => Ok(None),
         }
     }
 }
@@ -829,6 +842,12 @@ mod tests {
             assert!(!error.retryable());
             assert!(error.latching());
         }
+        // Retrying asks the keychain again, and that prompt can be allowed.
+        let unreadable = EmbedError::UnreadableCredentials("denied".into());
+        assert!(unreadable.kind().contains("credential"), "{}", unreadable.kind());
+        assert!(unreadable.retryable());
+        assert!(unreadable.latching());
+        assert!(!unreadable.to_string().contains("No Voyage API key"), "{unreadable}");
         let shown = EmbedError::RejectedCredentials { code: Some("401".into()), expired: true }
             .to_string();
         assert!(shown.contains("Settings"), "{shown}");
