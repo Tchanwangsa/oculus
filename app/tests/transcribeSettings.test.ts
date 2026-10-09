@@ -1,5 +1,6 @@
 import { afterAll, expect, mock, spyOn, test } from "bun:test";
 import * as db from "../src/lib/db";
+import type { TranscribeEngine } from "../src/lib/transcribe";
 
 mock.module("@tauri-apps/api/core", () => ({ invoke: async () => null }));
 mock.module("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
@@ -30,7 +31,7 @@ const read_ = async (row: unknown) => {
 // Mirrors `settings_from` in app/src-tauri/src/transcribe/mod.rs.
 test("a missing or mistyped row reads as the default order, every engine on, the default language", async () => {
   const defaults = {
-    order: ["groq", "whisper", "apple"],
+    order: ["groq", "whisper", "apple"] as TranscribeEngine[],
     language: null,
     groq: { enabled: true },
     whisper: { enabled: true, model: null },
