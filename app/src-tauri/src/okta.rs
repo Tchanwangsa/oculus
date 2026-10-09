@@ -151,8 +151,9 @@ fn secret(account: &str) -> crate::credentials::Secret<'_> {
     crate::credentials::Secret::new(KEYCHAIN_SERVICE, account)
 }
 
-fn read(account: &str) -> Option<String> {
-    secret(account).read().filter(|s| !s.is_empty())
+/// `Err` when the keychain refused the read, as opposed to holding nothing.
+fn read(account: &str) -> Result<Option<String>, String> {
+    Ok(secret(account).fetch()?.filter(|s| !s.is_empty()))
 }
 
 fn write(account: &str, value: &str) -> Result<(), String> {
@@ -172,12 +173,14 @@ pub struct Credentials {
 }
 
 impl Credentials {
-    pub fn load() -> Option<Credentials> {
-        Some(Credentials {
-            username: read("username")?,
-            password: read("password")?,
-            totp_secret: read("totp_secret")?,
-        })
+    /// `Ok(None)` when any piece is missing; a refused keychain read is
+    /// `UnreadableCredentials`, never "not set up".
+    pub fn load() -> Result<Option<Credentials>, LoginError> {
+        let get = |account| read(account).map_err(LoginError::UnreadableCredentials);
+        let Some(username) = get("username")? else { return Ok(None) };
+        let Some(password) = get("password")? else { return Ok(None) };
+        let Some(totp_secret) = get("totp_secret")? else { return Ok(None) };
+        Ok(Some(Credentials { username, password, totp_secret }))
     }
 }
 
@@ -190,12 +193,13 @@ pub struct CredentialStatus {
     pub has_totp: bool,
 }
 
-pub fn credential_status() -> CredentialStatus {
-    CredentialStatus {
-        username: read("username"),
-        has_password: read("password").is_some(),
-        has_totp: read("totp_secret").is_some(),
-    }
+pub fn credential_status() -> Result<CredentialStatus, String> {
+    let unreadable = |e| LoginError::UnreadableCredentials(e).to_string();
+    Ok(CredentialStatus {
+        username: read("username").map_err(unreadable)?,
+        has_password: read("password").map_err(unreadable)?.is_some(),
+        has_totp: read("totp_secret").map_err(unreadable)?.is_some(),
+    })
 }
 
 /// Validates the TOTP seed first: an undecodable one would otherwise surface
@@ -286,6 +290,9 @@ impl Jar {
 pub enum LoginError {
     /// No credentials on file — automated sign-in was never set up.
     NotConfigured,
+    /// The keychain refused the read (a denied prompt, a sandboxed process);
+    /// the credentials may well be on file. Carries the keychain's error.
+    UnreadableCredentials(String),
     BadPassword(String),
     BadTotp(String),
     /// Okta offered only factors we cannot answer; carries their labels.
@@ -310,6 +317,11 @@ impl std::fmt::Display for LoginError {
                 f,
                 "Automated sign-in is not set up — save your username, password and \
                  authenticator setup key first."
+            ),
+            LoginError::UnreadableCredentials(m) => write!(
+                f,
+                "The keychain refused to give out the saved sign-in credentials ({m}). They \
+                 are not missing — macOS denied this process access to them."
             ),
             LoginError::BadPassword(m) => write!(f, "Okta rejected the password: {m}"),
             LoginError::BadTotp(m) => write!(
@@ -754,7 +766,7 @@ fn with_record<T>(data_dir: &std::path::Path, f: impl FnOnce(&mut AttemptRecord)
 /// after any attempt, then 1 h and 6 h as failures repeat, and stop on a
 /// failure retrying cannot fix. Each attempt is a line in `okta-sign-in.log`.
 pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger) -> Result<String, LoginError> {
-    let creds = Credentials::load().ok_or(LoginError::NotConfigured)?;
+    let creds = Credentials::load()?.ok_or(LoginError::NotConfigured)?;
     let now = crate::clock::now_secs();
     with_record(data_dir, |r| admit(r, trigger, now))?;
 
@@ -1150,7 +1162,7 @@ pub fn diagnose() -> String {
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn okta_credential_status() -> CredentialStatus {
+pub fn okta_credential_status() -> Result<CredentialStatus, String> {
     credential_status()
 }
 
@@ -1175,34 +1187,38 @@ pub async fn okta_sign_in(app: tauri::AppHandle) -> Result<String, String> {
     crate::blocking::run(move || run_sign_in(&app, &crate::paths::data_dir(), Trigger::Manual)).await
 }
 
-/// Sign in, then set the auth flag, state and event exactly as the
-/// interactive sign-in does.
 fn run_sign_in(app: &tauri::AppHandle, dir: &std::path::Path, trigger: Trigger) -> Result<String, String> {
+    sign_in(dir, trigger).map_err(|e| e.to_string())?;
+    signed_in(app, dir)
+}
+
+/// Set the auth flag, state and event exactly as the interactive sign-in does,
+/// returning the account name.
+fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, String> {
     use tauri::{Emitter, Manager};
 
-    match sign_in(dir, trigger) {
-        Ok(_) => {
-            crate::paths::mark_authenticated(dir);
-            if let Some(state) = app.try_state::<crate::auth::AuthState>() {
-                *state.0.lock().unwrap() = true;
-            }
-            // The headless path works on this account, so a re-authenticating
-            // LaunchAgent is worth installing.
-            crate::keepalive::ensure_installed();
-            app.emit("canvas-auth-success", "ok").ok();
-            crate::canvas::Canvas::open(dir).whoami()
-        }
-        Err(e) => Err(e.to_string()),
+    crate::paths::mark_authenticated(dir);
+    if let Some(state) = app.try_state::<crate::auth::AuthState>() {
+        *state.0.lock().unwrap() = true;
     }
+    // The headless path works on this account, so a re-authenticating
+    // LaunchAgent is worth installing.
+    crate::keepalive::ensure_installed();
+    app.emit("canvas-auth-success", "ok").ok();
+    crate::canvas::Canvas::open(dir).whoami()
 }
 
 /// Called when a probe finds the session dead: rebuild it silently if
-/// automated sign-in is set up. `false` means ask the user.
+/// automated sign-in is set up. `false` means ask the user; every reason but
+/// "never set up" is logged, a keychain refusal included.
 pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
-    if Credentials::load().is_none() {
-        return false;
-    }
-    match run_sign_in(app, &crate::paths::data_dir(), trigger) {
+    let dir = crate::paths::data_dir();
+    let outcome = match sign_in(&dir, trigger) {
+        Err(LoginError::NotConfigured) => return false,
+        Err(e) => Err(e.to_string()),
+        Ok(_) => signed_in(app, &dir),
+    };
+    match outcome {
         Ok(name) => {
             eprintln!("[oculus] session rebuilt without a browser ({name})");
             true

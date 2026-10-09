@@ -58,7 +58,9 @@ its failure rules are in [parsing.md](./parsing.md).
   WebView, a health response or a progress event. The local engine needs none.
   A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
   sandbox, which fails right after the prompt is approved) is reported as
-  unreadable, never as a missing key (`Secret::fetch`).
+  unreadable, never as a missing key (`Secret::fetch`, `Secret::has`). MinerU's
+  parse path is the exception: it still reads a refusal as no token
+  (`Secret::read`).
 
 ## Scraping lives in Rust because hidden WebViews freeze
 

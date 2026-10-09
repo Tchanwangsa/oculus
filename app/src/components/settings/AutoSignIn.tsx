@@ -33,8 +33,9 @@ export function AutoSignIn({ onSignedIn }: { onSignedIn?: () => void }) {
   const refresh = useCallback(async () => {
     try {
       setStatus(await invoke<CredentialStatus>("okta_credential_status"));
-    } catch {
-      /* leave the previous state */
+    } catch (e) {
+      // A keychain refusal: the credentials may be saved, so keep the old state.
+      setError(String(e));
     }
   }, []);
 

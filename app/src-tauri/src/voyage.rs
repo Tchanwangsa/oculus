@@ -14,10 +14,6 @@ const KEY: Secret = Secret::new("com.tchan.oculus.voyage", "voyage");
 const PROBE_URL: &str = "https://api.voyageai.com/v1/embeddings";
 const PROBE_BODY: &str = r#"{"model":"voyage-3.5","input":["ok"],"output_dimension":512}"#;
 
-pub(crate) fn stored_api_key() -> Option<String> {
-    KEY.read()
-}
-
 /// `Err` when the keychain refused, as opposed to holding no key.
 pub(crate) fn fetch_api_key() -> Result<Option<String>, String> {
     KEY.fetch()
@@ -110,8 +106,8 @@ pub fn voyage_set_api_key(key: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn voyage_has_api_key() -> bool {
-    stored_api_key().is_some()
+pub fn voyage_has_api_key() -> Result<bool, String> {
+    KEY.has("Voyage API key")
 }
 
 #[tauri::command]
