@@ -172,6 +172,7 @@ function UploadRow({
       case "running": return "reading";
       case "fast":
       case "quality": return "parsed";
+      case "skipped": return "skipped";
       default: return "";
     }
   }, [file.filename, file.parse_status, status]);
@@ -191,7 +192,7 @@ function UploadRow({
             "w-14 shrink-0 text-right text-[10px] uppercase tracking-wide",
             status === "error"
               ? "text-destructive"
-              : label === "reading"
+              : label === "reading" || label === "skipped"
                 ? "text-muted-foreground"
                 : "text-success",
           )}

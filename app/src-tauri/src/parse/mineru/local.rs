@@ -18,7 +18,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::parse::{
-    parse_config, Health, ParseError, ParseOutput, Parser, Progress, PARSER_VERSION,
+    check_skipped, parse_config, Health, ParseError, ParseOutput, Parser, Progress, PARSER_VERSION,
 };
 use crate::ratelimit::transport_detail;
 
@@ -139,6 +139,9 @@ impl Parser for MinerULocal {
         images_rel: &str,
         on_progress: &dyn Fn(Progress),
     ) -> Result<ParseOutput, ParseError> {
+        // A skip cannot abort the blocking request, so it is checked on each
+        // side of it and a result that arrives after one is discarded.
+        check_skipped(pdf)?;
         // From the PDF, not the content list: a blank last page has no item.
         let total = page_count(pdf)?;
 
@@ -148,11 +151,14 @@ impl Parser for MinerULocal {
         {
             // Held until the result ZIP is read off the socket.
             let _permit = PARSE_GATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            check_skipped(pdf)?;
             // `/file_parse` blocks with nothing to subscribe to, so progress is
             // the page count and then the finish — never an estimate between.
-            on_progress(Progress { pages_done: 0, total_pages: total, backend: BACKEND });
+            // Loopback has no upload phase worth showing.
+            on_progress(Progress::processing(0, total, BACKEND));
             self.post_file_parse(pdf, &archive)?;
         }
+        check_skipped(pdf)?;
         safe_extract(&archive, &extracted)?;
 
         let (content_path, items) = super::content_list(&extracted)?;
@@ -162,7 +168,7 @@ impl Parser for MinerULocal {
         let (pages, image_count) =
             render::render(&items, total, &source_images, images_dir, images_rel)?;
 
-        on_progress(Progress { pages_done: total, total_pages: total, backend: BACKEND });
+        on_progress(Progress::processing(total, total, BACKEND));
         Ok(ParseOutput::new(pdf, total, pages, Some(BACKEND.to_string()), image_count))
     }
 
@@ -411,6 +417,49 @@ mod tests {
             .parse(&pdf, &dir.join("images"), "images", &|_| {})
             .unwrap_err();
         assert!(matches!(&error, ParseError::Document { code } if code == "no-content-list"));
+    }
+
+    // ── Skipping ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn a_skipped_pdf_is_never_posted() {
+        let dir = Scratch::new("local-skip-before");
+        let pdf = dir.join("Skipped.pdf");
+        write_pdf(&pdf, 1);
+        let server = FakeServer::start(|_| (500, Vec::new()));
+        crate::parse::Skips::shared().mark(&pdf);
+        let error = MinerULocal::new(&server.origin())
+            .parse(&pdf, &dir.join("images"), "images", &|_| {})
+            .unwrap_err();
+        crate::parse::Skips::shared().clear(&pdf);
+        assert!(matches!(error, ParseError::Cancelled), "{error}");
+        assert!(server.hits().is_empty());
+    }
+
+    #[test]
+    fn a_result_that_lands_after_a_skip_is_discarded() {
+        let dir = Scratch::new("local-skip-during");
+        let pdf = dir.join("Late.pdf");
+        write_pdf(&pdf, 1);
+        let zip = result_zip("Late", json!([{ "type": "text", "text": "x", "page_idx": 0 }]));
+        let server = {
+            let pdf = pdf.clone();
+            // The skip arrives while the server is still parsing.
+            FakeServer::start(move |_| {
+                crate::parse::Skips::shared().mark(&pdf);
+                (200, zip.clone())
+            })
+        };
+        let seen: Mutex<Vec<crate::parse::Phase>> = Mutex::new(Vec::new());
+        let error = MinerULocal::new(&server.origin())
+            .parse(&pdf, &dir.join("images"), "images", &|progress| {
+                seen.lock().unwrap().push(progress.phase);
+            })
+            .unwrap_err();
+        crate::parse::Skips::shared().clear(&pdf);
+        assert!(matches!(error, ParseError::Cancelled), "{error}");
+        assert!(!dir.join("images").exists(), "nothing was rendered");
+        assert_eq!(*seen.lock().unwrap(), vec![crate::parse::Phase::Processing]);
     }
 
     // ── Failure ──────────────────────────────────────────────────────────────

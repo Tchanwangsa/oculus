@@ -52,7 +52,8 @@ import { ResultCertWarning } from "@/components/sync/ResultCertWarning";
 import { SyncHistoryTable } from "@/components/sync/SyncHistoryTable";
 import { SubjectPicker } from "@/components/sync/SubjectPicker";
 import { SyncSettings } from "@/components/sync/SyncSettings";
-import { parseFile, scanParsedFiles } from "@/lib/courseFiles";
+import { parseFile, parseSkip, parseSkipped, scanParsedFiles } from "@/lib/courseFiles";
+import { useParseStore } from "@/stores/parseStore";
 
 const PHASE_LABEL: Record<string, string> = {
   home: "overview",
@@ -216,16 +217,17 @@ export default function SyncPage() {
 
   const items = useMemo(() => Object.values(pipelineItems), [pipelineItems]);
   const counts = useMemo(() => {
-    let active = 0, waiting = 0, paused = 0, failed = 0, done = 0;
+    let active = 0, waiting = 0, paused = 0, failed = 0, skipped = 0, done = 0;
     for (const it of items) {
       const phase = statusOf(it, embedStage).phase;
       if (phase === "active") active++;
       else if (phase === "waiting") waiting++;
       else if (phase === "paused") paused++;
       else if (phase === "failed") failed++;
+      else if (phase === "skipped") skipped++;
       else done++;
     }
-    return { active, waiting, paused, failed, done };
+    return { active, waiting, paused, failed, skipped, done };
   }, [items, embedStage]);
 
   // ── Auth events (cancelled, expired) ──────────────────────────────────────
@@ -319,13 +321,29 @@ export default function SyncPage() {
 
   /** Resume one file at the stage it stopped. Both calls are idempotent in
    *  Rust, so resume = retry; the stage picks which call, since re-parsing a
-   *  parsed file would leave the pending embed untouched. */
+   *  parsed file would leave the pending embed untouched. A skipped file has
+   *  its mark lifted and is parsed. */
   const resumeItem = useCallback(async (it: PipelineItem) => {
     // Not on disk, so neither call has anything to work on; the next sync
     // downloads it again.
     if (it.download === "error") return;
     const { touch } = usePipelineStore.getState();
     const embedding = it.parse === "done";
+
+    if (it.parse === "skipped") {
+      // Both stores leave the skip at once, or it would swallow the parse's
+      // events (`useBackendEvents`).
+      const ev = { relative_path: it.relativePath, subject_id: it.subjectId };
+      useParseStore.getState().update({ ...ev, status: "queued" });
+      touch(it.relativePath, it.subjectId, { parse: "queued", skippedAt: undefined });
+      try {
+        await parseSkipped(it.subjectId, it.code, it.relativePath);
+      } catch (e) {
+        useParseStore.getState().update({ ...ev, status: "error", error: String(e) });
+        touch(it.relativePath, it.subjectId, { parse: "error", error: String(e) });
+      }
+      return;
+    }
 
     // Clear paused/failed immediately so the row reads as moving again.
     touch(it.relativePath, it.subjectId, {
@@ -359,6 +377,13 @@ export default function SyncPage() {
     }
   }, []);
 
+  /** Stop one file's parse and keep it unparsed; Rust answers `skipped`. */
+  const skipItem = useCallback((it: PipelineItem) => {
+    parseSkip(it.subjectId, it.relativePath, true).catch((e) =>
+      console.error("parse_skip failed", it.relativePath, e),
+    );
+  }, []);
+
   /** Resume every paused row; parses batch behind one another and embeds go
    *  into the one serial queue. */
   const resumeAll = useCallback(() => {
@@ -385,8 +410,8 @@ export default function SyncPage() {
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const phase = progress?.phase ? (PHASE_LABEL[progress.phase] ?? progress.phase) : null;
-  // What "Clear finished" removes: completed rows only, so a failure stays
-  // in view until it is retried or the file goes.
+  // What "Clear finished" removes: completed and skipped rows, so a failure
+  // stays in view until it is retried or the file goes.
   const finishedCount = items.filter(
     (it) => isComplete(it, embedStage) && !hasFailed(it, embedStage),
   ).length;
@@ -497,6 +522,11 @@ export default function SyncPage() {
                   {counts.failed} failed
                 </Badge>
               )}
+              {counts.skipped > 0 && (
+                <Badge variant="outline" className="text-[11px] text-muted-foreground">
+                  {counts.skipped} skipped
+                </Badge>
+              )}
               {counts.done > 0 && (
                 <Badge variant="success" className="text-[11px]">
                   {counts.done} done
@@ -550,7 +580,7 @@ export default function SyncPage() {
         {view === "history" ? (
           <SyncHistoryTable runs={runs} progress={progress} />
         ) : (
-          <PipelineTable items={items} onResume={resumeItem} />
+          <PipelineTable items={items} onResume={resumeItem} onSkip={skipItem} />
         )}
       </div>
     </div>

@@ -1365,7 +1365,7 @@ pub fn parse_pdf_reporting(
     subject_id: i64,
     on_progress: &dyn Fn(parse::Progress),
 ) -> Result<ParseSummary, parse::ParseError> {
-    let key = data_dir.join(paths::doc_pdf_rel(rel_path).unwrap_or_else(|| rel_path.to_string()));
+    let key = parse_key(data_dir, rel_path);
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _claim = parse::InFlight::shared().claim(&key);
         run_parse(data_dir, rel_path, subject_id, on_progress)
@@ -1378,6 +1378,12 @@ pub fn parse_pdf_reporting(
             Err(error)
         }
     }
+}
+
+/// The PDF a library file parses as: the key of `parse::InFlight` and
+/// `parse::Skips`, and the path every engine is handed.
+pub fn parse_key(data_dir: &Path, rel_path: &str) -> PathBuf {
+    data_dir.join(paths::doc_pdf_rel(rel_path).unwrap_or_else(|| rel_path.to_string()))
 }
 
 fn run_parse(
@@ -1417,6 +1423,8 @@ fn run_parse(
         return Ok(ParseSummary { skipped: true, pages, images: 0, pages_recorded });
     }
 
+    // Skipped by the user: nothing is sent. A parse already done stays done.
+    parse::check_skipped(&pdf)?;
     parse::events::queued(rel_path, subject_id);
 
     let parser = parse::backend()?;
@@ -1424,9 +1432,15 @@ fn run_parse(
 
     let staging = parse::ImageStaging::begin(&pdf)?;
     let output = parser.parse(&pdf, staging.dir(), staging.rel(), &|progress| {
+        // `parse_skip` has already reported `skipped`; don't take it back.
+        if parse::Skips::shared().is_marked(&pdf) {
+            return;
+        }
         parse::events::running(rel_path, subject_id, progress);
         on_progress(progress);
     })?;
+    // A result that lands after a skip is discarded, never written.
+    parse::check_skipped(&pdf)?;
     // `.pages.json` is the only evidence a parse finished; written last, atomically.
     output.write(&pdf, staging)?;
 

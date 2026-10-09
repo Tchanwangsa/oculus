@@ -20,6 +20,7 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | Token bucket, semaphore, retry ladder (shared with Voyage) | `app/src-tauri/src/ratelimit.rs` |
 | The `parse-status` event and shared wire payload | `app/src-tauri/src/parse/events.rs`, `app/src-tauri/src/pipeline_events.rs` |
 | Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync.rs` |
+| Skipping a file: the `parse_skip` command and its marks | `app/src-tauri/src/scrape.rs`, `app/src-tauri/src/parse/mod.rs` (`Skips`) |
 | Artifact purging | `app/src-tauri/src/paths.rs` |
 | MinerU keychain commands + the pre-store token probe | `app/src-tauri/src/mineru.rs` |
 | Engine selection, endpoint override, local probe | `app/src-tauri/src/parse/commands.rs` |
@@ -58,6 +59,7 @@ must say so. `ParseError` keeps the answers distinguishable:
 | `VersionMismatch` | `version_mismatch` | no | yes |
 | `NotReady` | `not_ready` | yes | no |
 | `Io` | `io` | yes | no |
+| `Cancelled` | `cancelled` | no | no |
 
 - **`kind()` is a frozen vocabulary**; `Display` is prose and may change.
   `parseState.ts` matches `/credential|token/i` on `kind` to decide whether to
@@ -76,6 +78,9 @@ must say so. `ParseError` keeps the answers distinguishable:
   source chain ("certificate expired", "connection refused") and drops the URL,
   and the sentence shows it. Every failure is also printed to stderr as
   `[oculus] parse failed: <path>: <sentence>`, since the DB keeps only `error`.
+- **`Cancelled` is a skip, not a failure**: it reaches the UI as the terminal
+  status `skipped` with no error fields, and stderr says
+  `[oculus] parse skipped: <path>`. See below.
 
 ## A parse takes minutes, and only the engine bounds it
 
@@ -89,6 +94,13 @@ was still progressing.
   server is not running.
 - **Progress is counted, never inferred**: cloud sums per-task page counts;
   local reports a page count and then a finish, with no estimated bar between.
+- **A running parse names its phase** (`parse::Phase`, the `phase` field of a
+  `running` event): `upload_wait` (its batch is submitted, another file is
+  uploading first; carries `bytes_total`), `uploading` (`bytes_done` and
+  `bytes_total`, at most two events a second plus the final 100%), then
+  `processing`. A document over several tasks uploads its file once per task,
+  so its byte total is the sum. Only the cloud uploads; the local engine
+  reports `processing` alone, and an absent `phase` means `processing`.
 
 **Concurrency belongs to each engine.** `sync.rs` spawns one detached thread
 per PDF. Cloud threads park on the batcher's condvar until their window
@@ -103,12 +115,37 @@ file at once. `parse::InFlight` holds each PDF path while its parse runs; a
 second caller waits (no timeout) and then takes the already-parsed path, which
 emits `quality` without a second billed call.
 
-**Every parse ends in `quality` or `error`.** `parse_pdf_reporting` catches a
+**Every parse ends in `quality`, `error` or `skipped`.** `parse_pdf_reporting` catches a
 panic on the parse thread (`lopdf`, rendering, writing) as `Io` "the parser
 crashed on this file". The cloud client counts pages on the caller's thread
 before submitting, so a PDF that crashes `lopdf` fails alone rather than
 through its batch. `parse_file` reports its own refusals (not a parseable
 file, not on disk) as `Io` too, so a sweep kick never vanishes.
+
+## A skip ends a parse without failing it
+
+`parse_skip(relativePath, subjectId, skip)` marks the PDF in `parse::Skips`,
+keyed like `InFlight` (`sync::parse_key`), and emits `skipped` at once, so the
+row settles whether or not a parse is running. `skip: false` clears the mark
+and emits nothing; the frontend then calls `parse_file`. The mark lives only in
+memory; across restarts the skip is the row's `files.parse_status = 'skipped'`,
+which the frontend writes, and which `oculus index` (`store::pdf_files`) and
+the background sweep both pass over.
+
+Every engine ends a marked file as `Cancelled`, without billed work where it
+can and without artifacts always:
+
+- **`run_parse`** returns `Cancelled` before calling the backend, and discards
+  a result that lands after a skip. An already-parsed file still takes the
+  already-parsed path.
+- **Cloud**: a marked document leaves its batch before the ledger reservation
+  and the submit, is checked again before each `PUT`, and fails its upload
+  body's next read mid-`PUT`. A skip while its batch polls drops it, and its
+  result is never fetched. The waiting caller re-checks every 300 ms, so the
+  thread ends promptly; the document is then abandoned, so clearing the mark
+  for a fresh parse cannot revive it.
+- **Local**: a blocking `/file_parse` cannot be aborted cleanly, so the mark is
+  checked before and after taking `PARSE_GATE` and after the request returns.
 
 ## `.pages.json` is the only evidence a parse finished
 
@@ -133,7 +170,7 @@ no re-parse.
 
 `oculus index` reconciles `files.parse_status` with the disk
 (`store::reconcile_parse_status`): a record means `quality`; without one a
-stale `queued`/`running`/`quality` is cleared, but `error` stays.
+stale `queued`/`running`/`quality` is cleared, but `error` and `skipped` stay.
 
 `PARSER_VERSION` moves only when the artifacts change shape. `parse_mode` does
 **not** check it, so a bump never re-parses the library; it is enforced by the
@@ -202,6 +239,16 @@ The ignored test `a_real_mineru_answers_the_way_this_client_expects` in
 A batch is a list of names; MinerU returns one signed upload URL each, every
 file is `PUT`, and one endpoint is polled until each task has a result ZIP.
 The window is **5 s or 20 files**, with **8 batches in flight**.
+
+- **Polling starts only after every `PUT`**, so a slow upload holds back its
+  whole batch. A file over `SOLO_UPLOAD_BYTES` (8 MiB, `mineru/batch.rs`)
+  therefore never shares one: it leaves at once as a batch of one, and the
+  window gathers only smaller files.
+- **Within a batch, the smallest file is `PUT` first.**
+- **Uploads and result downloads end on a stall, never a deadline**
+  (`TRANSFER_STALL`, 120 s without a byte, in `mineru/client.rs` and
+  `result_tls::agent`). ureq's overall `timeout` would fail a slow but moving
+  `PUT` at its response read, after every byte had gone up.
 
 - **Pages come from `content_list.json`, never the ZIP's flat `.md`**, which
   has no page boundaries and drops `header` items (slide titles).

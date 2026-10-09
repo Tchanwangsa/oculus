@@ -21,13 +21,18 @@ use serde::Serialize;
 
 pub const RESULT_HOST: &str = "cdn-mineru.openxlab.org.cn";
 
-/// The agent `download_zip` uses: ureq's defaults plus the verifier below.
+/// The agent `download_zip` uses: the verifier below, and stall timeouts
+/// rather than a deadline (`client::TRANSFER_STALL`).
 pub fn agent(accept_expired: bool) -> &'static ureq::Agent {
     static ACCEPTING: OnceLock<ureq::Agent> = OnceLock::new();
     static STRICT: OnceLock<ureq::Agent> = OnceLock::new();
     let slot = if accept_expired { &ACCEPTING } else { &STRICT };
     slot.get_or_init(|| {
-        ureq::AgentBuilder::new().tls_config(Arc::new(config(accept_expired))).build()
+        ureq::AgentBuilder::new()
+            .tls_config(Arc::new(config(accept_expired)))
+            .timeout_connect(super::client::TRANSFER_STALL)
+            .timeout_read(super::client::TRANSFER_STALL)
+            .build()
     })
 }
 

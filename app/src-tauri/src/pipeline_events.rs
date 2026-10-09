@@ -39,6 +39,14 @@ pub(crate) struct Status {
     pages_done: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     total_pages: Option<u32>,
+    /// Parse only: `upload_wait` | `uploading` | `processing`. Absent means
+    /// processing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    phase: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes_done: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes_total: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -59,7 +67,8 @@ impl Status {
     pub(crate) fn new(relative_path: &str, subject_id: i64, status: &'static str) -> Self {
         Self {
             relative_path: relative_path.to_string(), subject_id, status,
-            pages_done: None, total_pages: None, error: None,
+            pages_done: None, total_pages: None,
+            phase: None, bytes_done: None, bytes_total: None, error: None,
             kind: None, retryable: None, latching: None,
             waiting_until_ms: None, waiting_reason: None,
         }
@@ -69,6 +78,19 @@ impl Status {
     pub(crate) fn progress(mut self, done: u32, total: u32) -> Self {
         self.pages_done = Some(done);
         self.total_pages = (total > 0).then_some(total);
+        self
+    }
+
+    /// Where a running parse is, with whichever byte counts that phase has.
+    pub(crate) fn phase(
+        mut self,
+        phase: &'static str,
+        bytes_done: Option<u64>,
+        bytes_total: Option<u64>,
+    ) -> Self {
+        self.phase = Some(phase);
+        self.bytes_done = bytes_done;
+        self.bytes_total = bytes_total;
         self
     }
 
@@ -133,6 +155,37 @@ mod tests {
         assert_eq!(held["waiting_until_ms"], 1_700_000_000_000u64);
         assert_eq!(held["waiting_reason"], "rate-limited by Voyage");
         assert_eq!(held["pages_done"], 3);
+    }
+
+    #[test]
+    fn upload_phases_carry_their_byte_counts_and_nothing_else_does() {
+        let uploading = to_value(Status::new("a.pdf", 4, "running").progress(0, 9)
+            .phase("uploading", Some(512), Some(2048))).unwrap();
+        assert_eq!(uploading, json!({
+            "relative_path": "a.pdf", "subject_id": 4, "status": "running",
+            "pages_done": 0, "total_pages": 9,
+            "phase": "uploading", "bytes_done": 512, "bytes_total": 2048,
+        }));
+        let waiting = to_value(Status::new("a.pdf", 4, "running").progress(0, 9)
+            .phase("upload_wait", None, Some(2048))).unwrap();
+        assert_eq!(waiting["phase"], "upload_wait");
+        assert!(waiting.get("bytes_done").is_none());
+        assert_eq!(waiting["bytes_total"], 2048);
+        let processing = to_value(Status::new("a.pdf", 4, "running").progress(3, 9)
+            .phase("processing", None, None)).unwrap();
+        assert_eq!(processing["phase"], "processing");
+        assert!(processing.get("bytes_done").is_none());
+        assert!(processing.get("bytes_total").is_none());
+        // Embed's running events never name a phase.
+        let plain = to_value(Status::new("a.pdf", 4, "running").progress(3, 9)).unwrap();
+        assert!(plain.get("phase").is_none());
+    }
+
+    #[test]
+    fn a_skip_is_a_bare_terminal_status() {
+        assert_eq!(to_value(Status::new("courses/a.pdf", 4, "skipped")).unwrap(), json!({
+            "relative_path": "courses/a.pdf", "subject_id": 4, "status": "skipped",
+        }));
     }
 
     #[test]
