@@ -73,12 +73,14 @@ regex = "1"
 # one use: reading a crop's dimensions from its header to drop template
 # furniture.
 zip = { version = "2", default-features = false, features = ["deflate"] }
-hayro-syntax = { version = "0.8", default-features = false, features = ["std"] }
+hayro-syntax = { git = "https://github.com/LaurenzV/hayro", rev = "9016f891986f290b9bc00dabf3e5e572c6e1cdb2", default-features = false, features = ["std"] }
 imagesize = "0.13"
 pdfium-render = "0.9"
 # The PDF viewer's renderer, text and links (`src/pdf_view.rs`): pure Rust,
 # so the viewer needs no native library. Re-exports hayro-interpret/-syntax.
-hayro = "0.8"
+# Both hayro crates pin one upstream commit after 0.8.0 for its soft-mask fix
+# (#1394, Figma exports); back to crates.io once a release carries it.
+hayro = { git = "https://github.com/LaurenzV/hayro", rev = "9016f891986f290b9bc00dabf3e5e572c6e1cdb2" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Spreadsheets (xlsx/xlsm/xls/ods) become markdown text in-process
 # (`src/sheets.rs`); no LibreOffice, no parse service, no embedding.
