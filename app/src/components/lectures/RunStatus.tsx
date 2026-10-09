@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { CircleNotch } from "@phosphor-icons/react";
 
 import { cn } from "@/lib/utils";
@@ -7,9 +7,9 @@ import { fmtClockSecs } from "@/lib/media";
 import { toolVerb, type ToolKind } from "@/lib/harness";
 import { useTabActive } from "@/components/tabs/TabContext";
 
-/** The pieces the chapter list and the reading copy share for an agent job:
- *  the in-flight status and the Regenerate footer. Their empty state is the
- *  dock's `PanelEmpty` (`components/media/MediaDock.tsx`). */
+/** The chapter list's pieces for its agent job: the in-flight status and the
+ *  Regenerate footer. Its empty state is the dock's `PanelEmpty`
+ *  (`components/media/MediaDock.tsx`). */
 
 interface StepProgress {
   phase: string;
@@ -46,15 +46,12 @@ export function RunStatus({
   since,
   label,
   progress,
-  counter,
   note,
   compact,
 }: {
   since: number | null;
   label: string;
   progress: StepProgress | null;
-  /** Shown between the label and the clock, e.g. "3/7". */
-  counter?: ReactNode;
   /** The expected duration, under the status when not `compact`. */
   note: string;
   compact?: boolean;
@@ -81,9 +78,6 @@ export function RunStatus({
       <span className="flex max-w-full items-center gap-1.5">
         <CircleNotch size={12} className="shrink-0 animate-spin" />
         <span className="truncate">{label}</span>
-        {counter != null && (
-          <span className="shrink-0 tabular-nums text-muted-foreground">{counter}</span>
-        )}
         {elapsed !== null && (
           <span className="shrink-0 tabular-nums text-muted-foreground">{fmtClockSecs(elapsed)}</span>
         )}

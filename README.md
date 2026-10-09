@@ -67,9 +67,7 @@ is what makes it the one folder you can delete from freely.
 
 **Lectures.** Echo360 recordings download and play in-app. Chapter boundaries
 are detected and named by a CLI agent, shown as a dock list, a
-current-chapter strip and ticks on the scrub bar. A reading copy rewrites the
-transcript into one sentence per moment — spoken maths set as maths — as an
-alternate register of the same transcript tab.
+current-chapter strip and ticks on the scrub bar.
 → [docs/chapters.md](docs/chapters.md)
 
 **Projects.** An assignment broken into tasks: an Overview with a brief, tags
@@ -205,8 +203,8 @@ rather than restating it.
 PDF parsing (MinerU cloud or a MinerU you run), page-image retrieval plus a
 local lexical index, chat as a CLI agent over four bridges (Claude Code,
 Codex, opencode, Antigravity), your own files alongside the scraped ones,
-lecture chapters and the transcript's reading copy, projects with a universal
-tasks view, the calendar, a home launcher, and an in-app browser.
+lecture chapters, projects with a universal tasks view, the calendar, a home
+launcher, and an in-app browser.
 
 **Removed:** the **BYOK API layer** — provider config, keychain keys, an
 OpenAI-compatible streaming client, spend limits. Deleted rather than woken

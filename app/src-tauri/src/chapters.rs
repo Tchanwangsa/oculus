@@ -333,17 +333,6 @@ pub fn candidates(
     gaps: &[(u32, f32)],
     duration_secs: u32,
 ) -> Vec<Candidate> {
-    candidates_with_spacing(diffs, gaps, duration_secs, MIN_SPACING)
-}
-
-/// [`candidates`] with a caller-chosen thinning radius; the reading copy
-/// thins more densely than chapters do.
-pub fn candidates_with_spacing(
-    diffs: &[(u32, f32)],
-    gaps: &[(u32, f32)],
-    duration_secs: u32,
-    min_spacing: u32,
-) -> Vec<Candidate> {
     // A collapsed run keeps its peak magnitude.
     let mut collapsed: Vec<(u32, f32)> = Vec::new();
     for &(second, diff) in diffs {
@@ -394,7 +383,7 @@ pub fn candidates_with_spacing(
     for candidate in scored {
         if kept
             .iter()
-            .all(|k| k.seconds.abs_diff(candidate.seconds) >= min_spacing)
+            .all(|k| k.seconds.abs_diff(candidate.seconds) >= MIN_SPACING)
         {
             kept.push(candidate);
         }
@@ -410,7 +399,7 @@ pub struct Detection {
     pub source: crate::echo360::SourceNum,
     /// The file the diffs came from, and so the one frame grabs must use.
     pub video: PathBuf,
-    /// The raw decode, for a caller that thins it its own way (`reading`).
+    /// The raw per-second frame diffs, before [`candidates`] thins them.
     pub diffs: Vec<(u32, f32)>,
     /// [`candidates`] over those diffs, in play order.
     pub candidates: Vec<Candidate>,
@@ -474,7 +463,7 @@ pub fn detect(
 ///
 /// JPEGs a previous run left that this one will not rewrite are deleted first,
 /// so the folder never holds frames from another candidate set or stream.
-/// Subfolders (`live/`, `reading/`) belong to other jobs and are left alone.
+/// The `live/` subfolder belongs to another job and is left alone.
 pub fn extract_frames(
     ffmpeg: &Path,
     video: &Path,
@@ -803,7 +792,7 @@ pub fn parse_chapters(reply: &str) -> Result<Vec<Chapter>, String> {
 /// The first fragment of `reply` that `decode` accepts, trying the whole
 /// reply, each fenced block, then balanced `[…]`/`{…}` runs — models wrap JSON
 /// in prose, fences or objects however plainly asked. `what` names the
-/// expected shape in the error. Shared with `reading`.
+/// expected shape in the error. Shared with `lecture_end`.
 pub(crate) fn parse_reply<T>(
     reply: &str,
     what: &str,

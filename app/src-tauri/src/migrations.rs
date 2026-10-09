@@ -776,6 +776,21 @@ ALTER TABLE lectures ADD COLUMN content_end_error TEXT;
                         "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 43,
+            description: "lectures: no reading copy",
+            // Derived, so dropped. The CASE guards `json_type` as in 34.
+            sql: r#"
+DROP TABLE IF EXISTS lecture_reading;
+ALTER TABLE lectures DROP COLUMN reading_status;
+ALTER TABLE lectures DROP COLUMN reading_written_at;
+ALTER TABLE lectures DROP COLUMN reading_error;
+UPDATE settings SET value = json_remove(value, '$.lectureReading')
+ WHERE key = 'job_models'
+   AND CASE WHEN json_valid(value) THEN json_type(value, '$.lectureReading') END IS NOT NULL;
+                        "#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -797,5 +812,41 @@ mod tests {
         let checksum: String = migration.checksum.iter().map(|byte| format!("{byte:02x}")).collect();
         assert_eq!(checksum, "5b74e95b4722a907975ca2d3987acc2450993baeb45734c2b327c92821c54bf18243b1ff91d7225967de9ec955470809",
             "SQL comments and whitespace are part of an applied migration's identity");
+    }
+
+    /// 43 drops the reading copy's job selection and nothing beside it, and a
+    /// malformed registry passes through instead of failing the migration.
+    #[tokio::test]
+    async fn the_reading_copy_leaves_the_job_registry() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1)
+            .connect("sqlite::memory:").await.unwrap();
+        let (before, after): (Vec<_>, Vec<_>) =
+            super::all().into_iter().partition(|migration| migration.version < 43);
+        for migration in before {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('job_models', ?1), ('other', ?2)")
+            .bind(r#"{"lectureReading":{"model":"a"},"lectureEnd":{"model":"b"}}"#)
+            .bind(r#"{"lectureReading":1}"#)
+            .execute(&pool).await.unwrap();
+        for migration in after {
+            sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
+        }
+        let value = |key: &'static str| {
+            let pool = pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = ?1")
+                    .bind(key).fetch_one(&pool).await.unwrap()
+            }
+        };
+        assert_eq!(value("job_models").await, r#"{"lectureEnd":{"model":"b"}}"#);
+        assert_eq!(value("other").await, r#"{"lectureReading":1}"#, "only the job registry");
+
+        sqlx::query("UPDATE settings SET value = 'not json' WHERE key = 'job_models'")
+            .execute(&pool).await.unwrap();
+        let reading = super::all().into_iter().find(|migration| migration.version == 43).unwrap();
+        let update = &reading.sql[reading.sql.find("UPDATE settings").unwrap()..];
+        sqlx::raw_sql(update).execute(&pool).await.unwrap();
+        assert_eq!(value("job_models").await, "not json");
     }
 }

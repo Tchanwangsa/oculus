@@ -78,47 +78,6 @@ export function findLectureChapters(
   return invoke("lecture_find_chapters", { lectureId, force, source });
 }
 
-// ── Reading copy ─────────────────────────────────────────────────────────────
-
-/** Tauri event from `reading::app::LECTURE_READING_EVENT`: a run finished. */
-export const LECTURE_READING_EVENT = "lecture-reading";
-
-/** Step report (`reading::app::LECTURE_READING_PROGRESS_EVENT`). */
-export const LECTURE_READING_PROGRESS_EVENT = "lecture-reading-progress";
-
-export type ReadingPhase = "decoding" | "frames" | "agent" | "writing";
-
-/** As `ChapterRunProgress`, plus `window`: the job's countable agent turns. */
-export interface ReadingRunProgress {
-  lectureId: string;
-  phase: ReadingPhase;
-  detail: string | null;
-  kind: ToolKind | null;
-  done: number | null;
-  total: number | null;
-  window: { done: number; total: number } | null;
-}
-
-export const READING_PHASE_LABEL: Record<ReadingPhase, string> = {
-  decoding: "Watching the recording",
-  frames: "Grabbing slide frames",
-  agent: "Writing the reading copy",
-  writing: "Saving lines",
-};
-
-/**
- * Start a reading-copy run (the `lectureReading` job, as `oculus lecture
- * reading`). Needs both recording and transcript. `source` as in
- * `findLectureChapters`.
- */
-export function writeLectureReading(
-  lectureId: string,
-  force = false,
-  source?: SourceNum
-): Promise<void> {
-  return invoke("lecture_write_reading", { lectureId, force, source });
-}
-
 // ── Where the content ends ───────────────────────────────────────────────────
 
 /** Tauri event from `lecture_end::app::LECTURE_END_EVENT`: a run finished. */

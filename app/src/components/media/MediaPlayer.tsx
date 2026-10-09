@@ -6,7 +6,7 @@
  * transcript; a library video renders its own `<video>`.
  *
  * `useMediaPlayer` holds the state, so a caller can derive from the playhead
- * (a chapter, a reading line) before rendering `MediaPlayer` with it.
+ * (the playing chapter) before rendering `MediaPlayer` with it.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {

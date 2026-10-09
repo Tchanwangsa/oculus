@@ -6,15 +6,6 @@ export type Dock = "bottom" | "top" | "left" | "right";
 
 export type DockTab = "chapters" | "transcript" | "chat";
 
-/**
- * The Transcript tab's register: `standard` is the VTT cue list, `enhanced` the
- * reading copy (`docs/chapters.md`). A stored `enhanced` falls back to
- * `standard` on a lecture without one (`modeInFront`).
- */
-export type TranscriptMode = "standard" | "enhanced";
-
-const TRANSCRIPT_MODES: TranscriptMode[] = ["standard", "enhanced"];
-
 /** Every valid tab; the tolerant reads below check against this one list. */
 const DOCK_TABS: DockTab[] = ["chapters", "transcript", "chat"];
 
@@ -96,7 +87,6 @@ export interface PlayerPrefs {
   dock: Dock;
   dockTab: DockTab;
   dockTabOrder: DockTab[];
-  transcriptMode: TranscriptMode;
   height: number;
   width: number;
   speed: number;
@@ -120,7 +110,6 @@ const DEFAULTS: PlayerPrefs = {
   // Every downloaded lecture has a transcript; chapters must be asked for.
   dockTab: "transcript",
   dockTabOrder: [...DOCK_TABS],
-  transcriptMode: "standard",
   height: DEFAULT_H,
   width: DEFAULT_W,
   speed: 1,
@@ -161,9 +150,6 @@ function load(): PlayerPrefs {
           : DEFAULTS.dock,
       dockTab: DOCK_TABS.includes(p.dockTab as DockTab) ? (p.dockTab as DockTab) : DEFAULTS.dockTab,
       dockTabOrder: orderDockTabs(p.dockTabOrder),
-      transcriptMode: TRANSCRIPT_MODES.includes(p.transcriptMode as TranscriptMode)
-        ? (p.transcriptMode as TranscriptMode)
-        : DEFAULTS.transcriptMode,
       height: num(p.height, DEFAULTS.height),
       width: num(p.width, DEFAULTS.width),
       speed:
