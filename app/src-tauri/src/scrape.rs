@@ -151,6 +151,22 @@ pub fn parse_file(
     Ok(())
 }
 
+/// Skip one file's parse, or lift the skip. A skip marks the PDF in
+/// `parse::Skips`, which ends any parse of it in flight without writing
+/// artifacts, and reports `skipped` at once whether or not one was running.
+/// Lifting it emits nothing; the frontend then calls `parse_file`.
+#[tauri::command]
+pub fn parse_skip(relative_path: String, subject_id: i64, skip: bool) -> Result<(), String> {
+    let key = crate::sync::parse_key(&crate::paths::data_dir(), &relative_path);
+    if skip {
+        crate::parse::Skips::shared().mark(&key);
+        crate::parse::events::skipped(&relative_path, subject_id);
+    } else {
+        crate::parse::Skips::shared().clear(&key);
+    }
+    Ok(())
+}
+
 // ── Module videos ────────────────────────────────────────────────────────────
 
 /// One cancel flag per in-flight module-video download, keyed by Canvas file

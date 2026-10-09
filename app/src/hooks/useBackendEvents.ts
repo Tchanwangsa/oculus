@@ -8,7 +8,7 @@ import {
 } from "@/lib/db";
 import { useSyncStore } from "@/stores/syncStore";
 import { useParseStore } from "@/stores/parseStore";
-import { usePipelineStore } from "@/stores/pipelineStore";
+import { NO_UPLOAD, runningPatch, usePipelineStore } from "@/stores/pipelineStore";
 import { reportEmbedPages, useIndexStore } from "@/stores/indexStore";
 import { embedReady } from "@/lib/retrieval";
 import type { SyncProgress } from "@/stores/syncStore";
@@ -23,8 +23,9 @@ import { useTauriEvent } from "@/hooks/useEvents";
 import { createParseStatusWriter } from "@/lib/parseStatusWriter";
 
 /** `parse-status` and `files.parse_status` share this vocabulary; `"quality"`
- *  is a finished parse, and renaming it would invalidate every stored row. */
-const PARSE_STATUSES = new Set(["queued", "running", "quality", "error"]);
+ *  is a finished parse, and renaming it would invalidate every stored row.
+ *  `"skipped"` is the user's choice, kept until they parse the file. */
+const PARSE_STATUSES = new Set(["queued", "running", "quality", "error", "skipped"]);
 const parseStatuses = createParseStatusWriter(setParseStatus);
 
 const EMBED_STATUSES = new Set(["queued", "running", "done", "error"]);
@@ -152,6 +153,8 @@ export function useBackendEvents() {
             parseQueuePos: undefined,
             parsedAt: undefined,
             embeddedAt: undefined,
+            skippedAt: undefined,
+            ...NO_UPLOAD,
             ...NO_ERROR,
           });
         } else {
@@ -249,11 +252,15 @@ export function useBackendEvents() {
     const path = ev.relative_path;
     if (!path) return;
 
-    // A late "running" heartbeat must not undo a finished parse.
-    const staleRunning =
-      ev.status === "running" &&
-      usePipelineStore.getState().items[path]?.parse === "done";
-    if (staleRunning) return;
+    // A late "running" heartbeat must not undo a finished parse, nor a
+    // heartbeat or the cancelled parse's error undo a skip.
+    const parse = usePipelineStore.getState().items[path]?.parse;
+    const skipped =
+      parse === "skipped" || useParseStore.getState().statuses[path] === "skipped";
+    const stale =
+      (ev.status === "running" && (parse === "done" || skipped)) ||
+      (ev.status === "error" && skipped);
+    if (stale) return;
 
     let persisted = Promise.resolve();
     if (PARSE_STATUSES.has(ev.status)) {
@@ -270,6 +277,8 @@ export function useBackendEvents() {
           download: "done",
           parse: "queued",
           parseQueuePos: ev.position,
+          skippedAt: undefined,
+          ...NO_UPLOAD,
         });
         break;
       case "running":
@@ -279,6 +288,7 @@ export function useBackendEvents() {
           pagesDone: ev.pages_done ?? 0,
           totalPages: ev.total_pages ?? 0,
           parseQueuePos: undefined,
+          ...runningPatch(pipeline().items[path], ev, Date.now()),
         });
         break;
       case "quality": {
@@ -288,6 +298,7 @@ export function useBackendEvents() {
         touch(path, ev.subject_id, {
           download: "done",
           parse: "done",
+          parsePhase: undefined,
           ...(prev?.parse !== "done" ? { parsedAt: Date.now() } : {}),
           ...clearErrorUnless(path, "embed"),
         });
@@ -302,9 +313,20 @@ export function useBackendEvents() {
         }
         break;
       }
+      // The user's skip: settled, so no error, latch or queue position.
+      case "skipped":
+        touch(path, ev.subject_id, {
+          parse: "skipped",
+          parsePhase: undefined,
+          parseQueuePos: undefined,
+          skippedAt: Date.now(),
+          ...NO_ERROR,
+        });
+        break;
       case "error":
         touch(path, ev.subject_id, {
           parse: "error",
+          parsePhase: undefined,
           error: ev.error ?? "Parse failed",
           errorKind: ev.kind,
           errorRetryable: ev.retryable,

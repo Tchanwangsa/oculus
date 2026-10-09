@@ -196,6 +196,7 @@ pub fn run() {
             scrape::canvas_download_video,
             scrape::canvas_cancel_video,
             scrape::parse_file,
+            scrape::parse_skip,
             files::read_course_file,
             files::course_file_has_content,
             files::open_course_file,

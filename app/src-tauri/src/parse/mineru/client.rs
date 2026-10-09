@@ -11,9 +11,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Read};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -21,8 +21,8 @@ use serde_json::{json, Value};
 use url::Url;
 
 use crate::parse::{
-    check_size, parse_config, Health, ParseError, ParseOutput, ParsePage, Parser, Progress,
-    PARSER_VERSION,
+    check_size, parse_config, Health, ParseError, ParseOutput, ParsePage, Parser, Phase, Progress,
+    Skips, PARSER_VERSION,
 };
 use crate::ratelimit::{hold, nap, transport_detail, Retry, TokenBucket};
 
@@ -39,14 +39,20 @@ pub const BACKEND: &str = "mineru-cloud";
 /// Attempts per API call. A 429 deliberately does not consume one.
 const ATTEMPTS: u32 = 4;
 const API_TIMEOUT: Duration = Duration::from_secs(30);
-const UPLOAD_TIMEOUT: Duration = Duration::from_secs(120);
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+/// Transfers end on a stall, never on a deadline: a 40 MB PUT over a slow
+/// link takes hours, and ureq's overall `timeout` would fail its response read
+/// the moment the last byte went up. Result downloads: `result_tls::agent`.
+pub(super) const TRANSFER_STALL: Duration = Duration::from_secs(120);
 const UPLOAD_CHUNK: usize = 1024 * 1024;
 /// How long a batch may stay unfinished. Also the only bound on the 429 loop
 /// in `api_json`.
 const POLL_DEADLINE: Duration = Duration::from_secs(60 * 60);
 const FIRST_POLL_DELAY: Duration = Duration::from_millis(2_000);
 const MAX_POLL_DELAY: Duration = Duration::from_secs(10);
+/// How often a parked caller re-checks for a skip while nothing changes.
+const SKIP_CHECK: Duration = Duration::from_millis(300);
+/// At most two `uploading` events a second per file; the last byte always reports.
+const UPLOAD_REPORT_EVERY: Duration = Duration::from_millis(500);
 
 // ── One document in flight ───────────────────────────────────────────────────
 
@@ -57,12 +63,22 @@ pub struct CloudDocument {
     pdf: PathBuf,
     images_dir: PathBuf,
     images_rel: String,
+    /// The PDF's size when queued: batching and upload order go by it.
+    bytes: u64,
+    /// Set when the caller stopped waiting on a skip, so the batch drops this
+    /// document even after the mark is cleared for a fresh parse.
+    abandoned: AtomicBool,
     state: Mutex<DocumentState>,
     changed: Condvar,
 }
 
 #[derive(Default)]
 struct DocumentState {
+    /// `None` until its batch is submitted; nothing is reported before then.
+    phase: Option<Phase>,
+    /// Across all of this document's PUTs in the current submit.
+    bytes_done: u64,
+    bytes_total: u64,
     total_pages: u32,
     /// The PDF's page count once read, kept apart from `total_pages` so
     /// counting early reports no progress before the batch runs.
@@ -86,10 +102,18 @@ pub struct DocumentOutput {
 
 impl CloudDocument {
     pub fn new(pdf: &Path, images_dir: &Path, images_rel: &str) -> Arc<Self> {
+        let bytes = fs::metadata(pdf).map(|m| m.len()).unwrap_or(0);
+        Self::sized(pdf, images_dir, images_rel, bytes)
+    }
+
+    /// `new` with the size given rather than read, for the batching tests.
+    pub(super) fn sized(pdf: &Path, images_dir: &Path, images_rel: &str, bytes: u64) -> Arc<Self> {
         Arc::new(Self {
             pdf: pdf.to_path_buf(),
             images_dir: images_dir.to_path_buf(),
             images_rel: images_rel.to_string(),
+            bytes,
+            abandoned: AtomicBool::new(false),
             state: Mutex::new(DocumentState::default()),
             changed: Condvar::new(),
         })
@@ -99,32 +123,57 @@ impl CloudDocument {
         &self.pdf
     }
 
+    pub fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    /// The user skipped this PDF (`parse::Skips`), or its caller has left.
+    pub fn cancelled(&self) -> bool {
+        self.abandoned.load(AtomicOrdering::SeqCst) || Skips::shared().is_marked(&self.pdf)
+    }
+
     /// Park until the batch this document travelled in has an answer for it,
-    /// delivering progress on this thread as it changes.
+    /// delivering progress on this thread as it changes. A skip ends the wait
+    /// within `SKIP_CHECK`; the batch drops the document on its own.
     pub fn wait(&self, on_progress: &dyn Fn(Progress)) -> Result<DocumentOutput, ParseError> {
         let mut state = hold(&self.state);
-        // Seeded so a document that finishes early does not emit 0/0.
-        let mut last = (0u32, 0u32);
+        let mut last: Option<Progress> = None;
         loop {
             if let Some(outcome) = state.outcome.take() {
                 return outcome;
             }
-            let now = (state.pages_done(), state.total_pages);
-            if now != last {
-                last = now;
-                drop(state);
-                on_progress(Progress {
-                    pages_done: now.0,
-                    total_pages: now.1,
-                    backend: BACKEND,
-                });
-                state = hold(&self.state);
-                continue;
+            if self.cancelled() {
+                self.abandoned.store(true, AtomicOrdering::SeqCst);
+                return Err(ParseError::Cancelled);
+            }
+            if let Some(now) = state.progress() {
+                if last.map_or(true, |seen| !same_progress(&seen, &now)) {
+                    // Events coalesce here, so an upload this thread last saw
+                    // part-way still ends at 100% before processing.
+                    let unfinished = last.map_or(true, |seen| match seen.phase {
+                        Phase::UploadWait => true,
+                        Phase::Uploading => seen.bytes_done < seen.bytes_total,
+                        Phase::Processing => false,
+                    });
+                    last = Some(now);
+                    drop(state);
+                    if unfinished && now.phase == Phase::Processing && now.bytes_total > 0 {
+                        on_progress(Progress {
+                            phase: Phase::Uploading,
+                            bytes_done: now.bytes_total,
+                            ..now
+                        });
+                    }
+                    on_progress(now);
+                    state = hold(&self.state);
+                    continue;
+                }
             }
             state = self
                 .changed
-                .wait(state)
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                .wait_timeout(state, SKIP_CHECK)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
         }
     }
 
@@ -152,6 +201,32 @@ impl CloudDocument {
 
     fn set_total_pages(&self, pages: u32) {
         hold(&self.state).total_pages = pages;
+        self.changed.notify_all();
+    }
+
+    /// Submitted: this many bytes wait for their turn to upload.
+    fn await_upload(&self, bytes_total: u64) {
+        let mut state = hold(&self.state);
+        state.phase = Some(Phase::UploadWait);
+        state.bytes_done = 0;
+        state.bytes_total = bytes_total;
+        drop(state);
+        self.changed.notify_all();
+    }
+
+    fn set_phase(&self, phase: Phase) {
+        hold(&self.state).phase = Some(phase);
+        self.changed.notify_all();
+    }
+
+    fn bytes_done(&self) -> u64 {
+        hold(&self.state).bytes_done
+    }
+
+    fn set_bytes_done(&self, bytes: u64) {
+        let mut state = hold(&self.state);
+        state.bytes_done = bytes.min(state.bytes_total);
+        drop(state);
         self.changed.notify_all();
     }
 
@@ -191,6 +266,22 @@ impl DocumentState {
     fn pages_done(&self) -> u32 {
         self.task_pages.values().sum::<u32>().min(self.total_pages)
     }
+
+    fn progress(&self) -> Option<Progress> {
+        Some(Progress {
+            pages_done: self.pages_done(),
+            total_pages: self.total_pages,
+            backend: BACKEND,
+            phase: self.phase?,
+            bytes_done: self.bytes_done,
+            bytes_total: self.bytes_total,
+        })
+    }
+}
+
+fn same_progress(a: &Progress, b: &Progress) -> bool {
+    (a.phase, a.pages_done, a.total_pages, a.bytes_done, a.bytes_total)
+        == (b.phase, b.pages_done, b.total_pages, b.bytes_done, b.bytes_total)
 }
 
 // ── Tasks ────────────────────────────────────────────────────────────────────
@@ -405,7 +496,15 @@ impl MinerUCloud {
     /// the upload when one is present (`ureq` adds none unless asked). An
     /// explicit `Content-Length` avoids chunked encoding, which a signed PUT
     /// rejects. No `Authorization` and no retry: the signature is single-use.
-    fn put_file(&self, url: &str, path: &Path) -> Result<(), ParseError> {
+    /// `report` gets the bytes sent so far; once `cancelled` holds, the body
+    /// stops reading and the PUT ends as `Cancelled`.
+    fn put_file(
+        &self,
+        url: &str,
+        path: &Path,
+        report: &dyn Fn(u64),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), ParseError> {
         check_transfer_url(url, "upload")?;
         let size = fs::metadata(path)
             .map_err(|e| ParseError::Io(format!("stat {}: {e}", path.display())))?
@@ -414,15 +513,21 @@ impl MinerUCloud {
             .map_err(|e| ParseError::Io(format!("open {}: {e}", path.display())))?;
 
         let agent = ureq::AgentBuilder::new()
-            .timeout(UPLOAD_TIMEOUT)
+            .timeout_connect(TRANSFER_STALL)
+            .timeout_read(TRANSFER_STALL)
+            .timeout_write(TRANSFER_STALL)
             // A redirected signed PUT has lost its signature.
             .redirects(0)
             .build();
-        match agent
-            .put(url)
-            .set("Content-Length", &size.to_string())
-            .send(BufReader::with_capacity(UPLOAD_CHUNK, file))
-        {
+        let body = UploadBody::new(
+            BufReader::with_capacity(UPLOAD_CHUNK, file),
+            size,
+            UPLOAD_REPORT_EVERY,
+            report,
+            cancelled,
+        );
+        match agent.put(url).set("Content-Length", &size.to_string()).send(body) {
+            Err(_) if cancelled() => Err(ParseError::Cancelled),
             Ok(response) if (200..300).contains(&response.status()) => Ok(()),
             Ok(response) => {
                 Err(ParseError::Document { code: format!("upload-http-{}", response.status()) })
@@ -441,7 +546,7 @@ impl MinerUCloud {
         let mut last = ParseError::Offline("result download failed".into());
         for attempt in 0..3u32 {
             let agent = result_tls::agent(parse_config().accept_expired_result_cert);
-            let attempted = agent.get(url).timeout(DOWNLOAD_TIMEOUT).call().and_then(|response| {
+            let attempted = agent.get(url).call().and_then(|response| {
                 Ok((response.status(), response.into_reader()))
             });
             match attempted {
@@ -525,6 +630,10 @@ impl MinerUCloud {
         let mut failures: Vec<Option<ParseError>> = documents.iter().map(|_| None).collect();
         let mut tasks: Vec<Task> = Vec::new();
         for (index, document) in documents.iter().enumerate() {
+            if document.cancelled() {
+                failures[index] = Some(ParseError::Cancelled);
+                continue;
+            }
             document.set_source_images(workspace.path().join(data_id()).join("images"));
             match self.build_tasks(index, document) {
                 Ok(built) => tasks.extend(built),
@@ -555,6 +664,11 @@ impl MinerUCloud {
             .iter()
             .enumerate()
             .map(|(index, document)| {
+                // Before `render`, which would write into a staging directory
+                // its abandoned caller has already removed.
+                if document.cancelled() {
+                    return Err(ParseError::Cancelled);
+                }
                 if let Some(error) = failures[index].take() {
                     return Err(error);
                 }
@@ -595,6 +709,12 @@ impl MinerUCloud {
         fs::create_dir_all(workspace)
             .map_err(|e| ParseError::Io(format!("create {}: {e}", workspace.display())))?;
 
+        // A skipped document is dropped before anything is reserved or sent.
+        for task in tasks {
+            if failures[task.document].is_none() && documents[task.document].cancelled() {
+                failures[task.document] = Some(ParseError::Cancelled);
+            }
+        }
         // Documents that already failed earlier in this batch are not sent.
         let live: Vec<&Task> =
             tasks.iter().filter(|task| failures[task.document].is_none()).collect();
@@ -631,20 +751,48 @@ impl MinerUCloud {
             return Err(ParseError::Document { code: "missing-batch-id".into() });
         }
 
+        // Smallest file first: extraction starts only once every PUT is in,
+        // so the small ones must not queue behind a slow large upload.
+        let mut uploads: Vec<(&Task, &str)> = live.iter().copied().zip(urls).collect();
+        uploads.sort_by_key(|(task, _)| documents[task.document].bytes());
+        // A document over several tasks uploads its whole file once per task.
+        let mut puts_left: HashMap<usize, u32> = HashMap::new();
+        for (task, _) in &uploads {
+            *puts_left.entry(task.document).or_default() += 1;
+        }
+        for (&index, &puts) in &puts_left {
+            documents[index].await_upload(documents[index].bytes() * u64::from(puts));
+        }
+
         let mut remaining: HashMap<&str, &Task> = HashMap::new();
-        for (task, url) in live.iter().copied().zip(urls) {
+        for (task, url) in uploads {
             if failures[task.document].is_some() {
                 continue;
             }
-            match self.put_file(url, &task.source) {
+            let document = &documents[task.document];
+            if document.cancelled() {
+                fail_document(failures, &mut remaining, task, ParseError::Cancelled);
+                continue;
+            }
+            document.set_phase(Phase::Uploading);
+            let before = document.bytes_done();
+            let uploaded = self.put_file(
+                url,
+                &task.source,
+                &|sent| document.set_bytes_done(before + sent),
+                &|| document.cancelled(),
+            );
+            match uploaded {
                 Ok(()) => {
                     remaining.insert(task.data_id.as_str(), task);
+                    let left = puts_left.entry(task.document).or_default();
+                    *left = left.saturating_sub(1);
+                    if *left == 0 {
+                        document.set_phase(Phase::Processing);
+                    }
                 }
                 Err(error) if scope_of(&error) == Scope::Batch => return Err(error),
-                Err(error) => {
-                    failures[task.document] = Some(error);
-                    remaining.retain(|_, queued| queued.document != task.document);
-                }
+                Err(error) => fail_document(failures, &mut remaining, task, error),
             }
         }
 
@@ -652,7 +800,19 @@ impl MinerUCloud {
             live.iter().map(|task| (task.upload_name.as_str(), *task)).collect();
         let deadline = Instant::now() + POLL_DEADLINE.mul_f64(self.time_scale);
         let mut delay = FIRST_POLL_DELAY;
-        while !remaining.is_empty() {
+        loop {
+            // A document skipped mid-poll is dropped; its result is never fetched.
+            let skipped: Vec<&Task> = remaining
+                .values()
+                .copied()
+                .filter(|task| documents[task.document].cancelled())
+                .collect();
+            for task in skipped {
+                fail_document(failures, &mut remaining, task, ParseError::Cancelled);
+            }
+            if remaining.is_empty() {
+                break;
+            }
             if Instant::now() >= deadline {
                 // Not `Document`: a stall is worth retrying later.
                 return Err(ParseError::Offline("batch timed out after 60 minutes".into()));
@@ -679,6 +839,10 @@ impl MinerUCloud {
                     continue;
                 }
                 let document = &documents[task.document];
+                if document.cancelled() {
+                    fail_document(failures, &mut remaining, task, ParseError::Cancelled);
+                    continue;
+                }
                 let state = result.get("state").and_then(Value::as_str).unwrap_or_default();
 
                 if state == "running" {
@@ -807,6 +971,52 @@ impl MinerUCloud {
 
         document.push_content(rebased);
         Ok(())
+    }
+}
+
+/// A PUT body that counts what `ureq` has read, for the `uploading` phase,
+/// and fails the next read once the file is skipped, which aborts the request.
+struct UploadBody<'a, R> {
+    inner: R,
+    sent: u64,
+    total: u64,
+    every: Duration,
+    reported: Option<(u64, Instant)>,
+    report: &'a dyn Fn(u64),
+    cancelled: &'a dyn Fn() -> bool,
+}
+
+impl<'a, R: Read> UploadBody<'a, R> {
+    fn new(
+        inner: R,
+        total: u64,
+        every: Duration,
+        report: &'a dyn Fn(u64),
+        cancelled: &'a dyn Fn() -> bool,
+    ) -> Self {
+        Self { inner, sent: 0, total, every, reported: None, report, cancelled }
+    }
+}
+
+impl<R: Read> Read for UploadBody<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if (self.cancelled)() {
+            // Not `Interrupted`, which `io::copy` would retry.
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "upload skipped"));
+        }
+        let read = self.inner.read(buf)?;
+        self.sent += read as u64;
+        let sent = self.sent.min(self.total);
+        let finished = read == 0 || sent >= self.total;
+        let due = match self.reported {
+            None => true,
+            Some((bytes, at)) => bytes != sent && (finished || at.elapsed() >= self.every),
+        };
+        if due {
+            self.reported = Some((sent, Instant::now()));
+            (self.report)(sent);
+        }
+        Ok(read)
     }
 }
 
@@ -1049,7 +1259,16 @@ mod tests {
         fs::write(&pdf, vec![7u8; 3_000]).unwrap();
 
         let client = client(&fake, ledger(&scratch));
-        client.put_file(&format!("{}/upload/0?signature=private", fake.origin()), &pdf).unwrap();
+        let reported = Mutex::new(Vec::new());
+        client
+            .put_file(
+                &format!("{}/upload/0?signature=private", fake.origin()),
+                &pdf,
+                &|sent| hold(&reported).push(sent),
+                &|| false,
+            )
+            .unwrap();
+        assert_eq!(hold(&reported).last().copied(), Some(3_000), "the last byte always reports");
 
         let hits = fake.hits();
         assert_eq!(hits.len(), 1);
@@ -1060,6 +1279,64 @@ mod tests {
         // A bearer token here would go to whatever storage host MinerU uses.
         assert_eq!(hit.header("authorization"), None);
         assert_eq!(hit.body.len(), 3_000);
+    }
+
+    #[test]
+    fn the_upload_body_reports_at_most_every_interval_and_always_the_end() {
+        let reported = Mutex::new(Vec::new());
+        let report = |sent| hold(&reported).push(sent);
+        let mut body = UploadBody::new(
+            std::io::Cursor::new(vec![1u8; 10_000]),
+            10_000,
+            Duration::from_secs(3600),
+            &report,
+            &|| false,
+        );
+        let mut chunk = [0u8; 1_000];
+        while body.read(&mut chunk).unwrap() > 0 {}
+        // The first read, then nothing until the last byte.
+        assert_eq!(*hold(&reported), vec![1_000, 10_000]);
+    }
+
+    #[test]
+    fn a_skip_fails_the_upload_body_on_its_next_read() {
+        let skipped = AtomicBool::new(false);
+        let cancelled = || skipped.load(AtomicOrdering::SeqCst);
+        let mut body = UploadBody::new(
+            std::io::Cursor::new(vec![1u8; 4_000]),
+            4_000,
+            Duration::ZERO,
+            &|_| {},
+            &cancelled,
+        );
+        let mut chunk = [0u8; 1_000];
+        assert_eq!(body.read(&mut chunk).unwrap(), 1_000);
+        skipped.store(true, AtomicOrdering::SeqCst);
+        let error = body.read(&mut chunk).unwrap_err();
+        // `Interrupted` would be retried by `io::copy` instead of ending the PUT.
+        assert_ne!(error.kind(), std::io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn a_skip_ends_the_wait_and_outlives_its_mark() {
+        let scratch = Scratch::new("cloud-wait-skip");
+        let pdf = scratch.join("waiting.pdf");
+        let document = CloudDocument::new(&pdf, &scratch.join("images"), "images");
+        let marker = {
+            let pdf = pdf.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(50));
+                Skips::shared().mark(&pdf);
+            })
+        };
+        let started = Instant::now();
+        let error = document.wait(&|_| {}).unwrap_err();
+        marker.join().unwrap();
+        assert!(matches!(error, ParseError::Cancelled), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        // A re-parse clears the mark; this abandoned document stays dropped.
+        Skips::shared().clear(&pdf);
+        assert!(document.cancelled());
     }
 
     #[test]
@@ -1293,10 +1570,32 @@ mod tests {
             })
         };
         let seen: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
+        let phases: Mutex<Vec<Progress>> = Mutex::new(Vec::new());
         let output = document
-            .wait(&|progress| hold(&seen).push((progress.pages_done, progress.total_pages)))
+            .wait(&|progress| {
+                hold(&seen).push((progress.pages_done, progress.total_pages));
+                hold(&phases).push(progress);
+            })
             .unwrap();
         worker.join().unwrap();
+
+        // Phases only move forward, and the upload ends at 100% — the whole
+        // file once per task — before processing, however events coalesced.
+        let phases = hold(&phases).clone();
+        let order = |phase| match phase {
+            Phase::UploadWait => 0,
+            Phase::Uploading => 1,
+            Phase::Processing => 2,
+        };
+        assert!(phases.windows(2).all(|pair| order(pair[0].phase) <= order(pair[1].phase)));
+        let size = fs::metadata(&pdf).unwrap().len();
+        assert!(
+            phases.iter().any(|p| p.phase == Phase::Uploading
+                && p.bytes_done == 2 * size
+                && p.bytes_total == 2 * size),
+            "{phases:?}"
+        );
+        assert_eq!(phases.last().map(|p| p.phase), Some(Phase::Processing));
 
         assert_eq!(output.total_pages, 3);
         assert_eq!(
@@ -1394,6 +1693,92 @@ mod tests {
         let good = results[2].as_ref().expect("the third document was unaffected");
         assert_eq!(good.pages.len(), 1);
         assert_eq!(good.pages[0].markdown, "page 1");
+    }
+
+    /// Serves one batch: records the POSTed `data_id`s and the PUT order,
+    /// and answers every poll with `done` and the same one-page result.
+    fn recording_server(
+        submitted: Arc<Mutex<Vec<String>>>,
+        puts: Arc<Mutex<Vec<String>>>,
+    ) -> FakeServer {
+        let zip = zip_of(&[("r/x_content_list.json", content_list(0, 1))]);
+        FakeServer::start(move |hit| {
+            let origin = hit.origin.clone();
+            if hit.method == "POST" {
+                let files = hit.json()["files"].as_array().unwrap().clone();
+                *hold(&submitted) = files
+                    .iter()
+                    .map(|file| file["data_id"].as_str().unwrap().to_string())
+                    .collect();
+                return Reply::json(json!({ "code": 0, "data": {
+                    "batch_id": "b",
+                    "file_urls": (0..files.len()).map(|i| format!("{origin}/upload/{i}")).collect::<Vec<_>>(),
+                }}));
+            }
+            if hit.method == "PUT" {
+                hold(&puts).push(hit.url.clone());
+                return Reply::bytes(Vec::new());
+            }
+            if hit.url.starts_with("/result/") {
+                return Reply::bytes(zip.clone());
+            }
+            let results: Vec<Value> = hold(&submitted)
+                .iter()
+                .map(|id| json!({ "data_id": id, "state": "done", "full_zip_url": format!("{origin}/result/0.zip") }))
+                .collect();
+            Reply::json(json!({ "code": 0, "data": { "extract_result": results }}))
+        })
+    }
+
+    #[test]
+    fn the_smallest_file_is_uploaded_first() {
+        let scratch = Scratch::new("cloud-order");
+        let large = scratch.join("large.pdf");
+        write_pdf(&large, 40);
+        let small = scratch.join("small.pdf");
+        write_pdf(&small, 1);
+        assert!(fs::metadata(&large).unwrap().len() > fs::metadata(&small).unwrap().len());
+
+        let puts = Arc::new(Mutex::new(Vec::new()));
+        let fake = recording_server(Arc::new(Mutex::new(Vec::new())), puts.clone());
+        let client = client(&fake, ledger(&scratch));
+        let documents: Vec<Arc<CloudDocument>> = [&large, &small]
+            .iter()
+            .map(|pdf| CloudDocument::new(pdf, &scratch.join("images"), "images"))
+            .collect();
+        let results = client.extract_documents(&documents);
+        assert!(results.iter().all(Result::is_ok));
+        // The URLs come back in submit order: `large` is 0, `small` is 1.
+        assert_eq!(*hold(&puts), vec!["/upload/1", "/upload/0"]);
+    }
+
+    #[test]
+    fn a_skipped_document_is_never_reserved_submitted_or_uploaded() {
+        let scratch = Scratch::new("cloud-skip");
+        let skipped = scratch.join("skipped.pdf");
+        write_pdf(&skipped, 4);
+        let kept = scratch.join("kept.pdf");
+        write_pdf(&kept, 1);
+        Skips::shared().mark(&skipped);
+
+        let submitted = Arc::new(Mutex::new(Vec::new()));
+        let puts = Arc::new(Mutex::new(Vec::new()));
+        let fake = recording_server(submitted.clone(), puts.clone());
+        let book = ledger(&scratch);
+        let client = client(&fake, book.clone());
+        let documents: Vec<Arc<CloudDocument>> = [&skipped, &kept]
+            .iter()
+            .map(|pdf| CloudDocument::new(pdf, &scratch.join("images"), "images"))
+            .collect();
+        let results = client.extract_documents(&documents);
+        Skips::shared().clear(&skipped);
+
+        assert!(matches!(results[0], Err(ParseError::Cancelled)));
+        assert!(results[1].is_ok());
+        assert_eq!(hold(&submitted).len(), 1);
+        assert_eq!(hold(&puts).len(), 1);
+        let usage = book.snapshot();
+        assert_eq!((usage.files, usage.pages), (1, 1), "only the kept file was reserved");
     }
 
     #[test]
