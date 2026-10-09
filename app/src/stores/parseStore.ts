@@ -1,11 +1,17 @@
 import { create } from "zustand";
 
-/** The `parse-status` event. `status`: queued | running | quality | error, where
- *  `"quality"` is success (frozen: every parsed row's `files.parse_status`). */
+/** The `parse-status` event. `status`: queued | running | quality | error |
+ *  skipped, where `"quality"` is success (frozen: every parsed row's
+ *  `files.parse_status`) and `"skipped"` is the user's `parse_skip`. */
 export interface ParseJob {
   relative_path: string;
   subject_id: number;
   status: string;
+  /** "running": a cloud parse's sub-step; absent means processing. */
+  phase?: "upload_wait" | "uploading" | "processing";
+  /** "running": upload bytes, `bytes_total` from `upload_wait` on. */
+  bytes_done?: number;
+  bytes_total?: number;
   pages_done?: number;
   total_pages?: number;
   /** "queued": place in line, when it is known. */

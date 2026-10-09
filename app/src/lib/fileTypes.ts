@@ -27,10 +27,20 @@ import {
 
 /** Office formats stored with a derived sibling PDF ("deck.pptx" →
  *  "deck.pptx.pdf"). Mirrors OFFICE_EXTS in paths.rs. */
-export const OFFICE_EXTS = ["pptx", "docx", "xlsx", "ppt", "doc", "xls"];
+export const OFFICE_EXTS = ["pptx", "docx", "ppt", "doc"];
+
+/** Spreadsheets, converted in Rust to text beside them ("marks.xlsx" →
+ *  "marks.xlsx.md", one page per sheet); never PDF-backed, never embedded.
+ *  Mirrors SHEET_EXTS in paths.rs. */
+export const SHEET_EXTS = ["xlsx", "xlsm", "xls", "ods", "csv"];
+
+const sqlList = (exts: string[]) => `(${exts.map((e) => `'${e}'`).join(", ")})`;
 
 /** PDF plus OFFICE_EXTS as a SQL list, for `lower(file_type) IN …`. */
-export const PDF_BACKED_SQL_LIST = `('pdf', ${OFFICE_EXTS.map((e) => `'${e}'`).join(", ")})`;
+export const PDF_BACKED_SQL_LIST = sqlList(["pdf", ...OFFICE_EXTS]);
+
+/** Every file with a File Activity row: the PDF-backed ones and spreadsheets. */
+export const PIPELINE_SQL_LIST = sqlList(["pdf", ...OFFICE_EXTS, ...SHEET_EXTS]);
 
 function ext(filename: string): string {
   const i = filename.lastIndexOf(".");
@@ -55,6 +65,16 @@ export function isPdfBacked(filename: string): boolean {
   return ext(filename) === "pdf" || isOfficeFile(filename);
 }
 
+export function isSheetFile(filename: string): boolean {
+  return SHEET_EXTS.includes(ext(filename));
+}
+
+/** True when the file has a File Activity row: download → parse (for a
+ *  spreadsheet, its conversion to text), and embed only if PDF-backed. */
+export function isPipelineFile(filename: string): boolean {
+  return isPdfBacked(filename) || isSheetFile(filename);
+}
+
 /** Video formats a library file can hold — module videos land as
  *  `files/<name>.mp4`. Mirrors VIDEO_EXTS in sync.rs. */
 const VIDEO_EXTS = ["mp4", "mov", "m4v", "webm"];
@@ -64,12 +84,12 @@ export function isVideoFile(filename: string): boolean {
   return VIDEO_EXTS.includes(ext(filename));
 }
 
-/** The parser's markdown for a PDF-backed file: "a.pdf" → "a.md",
- *  "deck.pptx" → "deck.pptx.md". */
+/** The derived markdown of a PDF-backed file or spreadsheet: "a.pdf" →
+ *  "a.md", "deck.pptx" → "deck.pptx.md", "marks.xlsx" → "marks.xlsx.md". */
 export function parsedMdRelPath(file: { filename: string; relative_path: string }): string | null {
   const e = ext(file.filename);
   if (e === "pdf") return file.relative_path.replace(/\.pdf$/i, ".md");
-  if (OFFICE_EXTS.includes(e)) return `${file.relative_path}.md`;
+  if (OFFICE_EXTS.includes(e) || SHEET_EXTS.includes(e)) return `${file.relative_path}.md`;
   return null;
 }
 
@@ -101,7 +121,9 @@ export function fileIconFor(filename: string): Icon {
     case "ppt":
     case "pptx": return FilePpt;
     case "xls":
-    case "xlsx": return FileXls;
+    case "xlsx":
+    case "xlsm":
+    case "ods": return FileXls;
     case "csv": return FileCsv;
     case "md": return FileMd;
     case "txt": return FileText;
@@ -139,12 +161,12 @@ export function fileIconFor(filename: string): Icon {
 }
 
 /**
- * The inverse of `parsedMdRelPath`, for an agent citing parser markdown that
- * has no row of its own: "a.md" → "a.pdf", "deck.pptx.md" → "deck.pptx". Only
- * called after a direct lookup misses.
+ * The inverse of `parsedMdRelPath`, for an agent citing derived markdown that
+ * has no row of its own: "a.md" → "a.pdf", "deck.pptx.md" → "deck.pptx",
+ * "marks.xlsx.md" → "marks.xlsx". Only called after a direct lookup misses.
  */
 export function parsedMdSource(path: string): string | null {
   if (!/\.md$/i.test(path)) return null;
   const stem = path.slice(0, -3);
-  return isOfficeFile(stem) ? stem : `${stem}.pdf`;
+  return isOfficeFile(stem) || isSheetFile(stem) ? stem : `${stem}.pdf`;
 }

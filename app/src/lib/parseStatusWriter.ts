@@ -34,7 +34,7 @@ export function createParseStatusWriter(
         if (entry.status === status) return;
         entry.status = null;
         if (await persist(subjectId, path, status)) entry.status = status;
-      }, status === "quality" || status === "error");
+      }, status === "quality" || status === "error" || status === "skipped");
     },
     mutate(subjectId: number, path: string, action: () => Promise<void>): Promise<void> {
       return enqueue(subjectId, path, async (entry) => {

@@ -267,6 +267,35 @@ pub async fn upsert_pages(
     pages: &[crate::parse::ParsePage],
 ) -> Result<usize, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let with_text = write_pages(&mut tx, file_id, pages).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(with_text)
+}
+
+/// Replace one file's page records outright, vectors included: for text that
+/// is never embedded (`crate::sheets`), where a shorter workbook must lose
+/// its old sheets.
+pub async fn replace_pages(
+    pool: &SqlitePool,
+    file_id: i64,
+    pages: &[crate::parse::ParsePage],
+) -> Result<usize, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM pages WHERE file_id = ?1")
+        .bind(file_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    let with_text = write_pages(&mut tx, file_id, pages).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(with_text)
+}
+
+async fn write_pages(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    file_id: i64,
+    pages: &[crate::parse::ParsePage],
+) -> Result<usize, String> {
     let mut with_text = 0usize;
     for page in pages {
         if !page.markdown.is_empty() {
@@ -281,11 +310,10 @@ pub async fn upsert_pages(
         .bind(file_id)
         .bind(i64::from(page.page_no))
         .bind(&page.markdown)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| format!("upsert page {}: {e}", page.page_no))?;
     }
-    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(with_text)
 }
 
@@ -299,13 +327,16 @@ pub async fn page_count(pool: &SqlitePool, file_id: i64) -> Result<i64, String> 
 }
 
 /// Every PDF-backed file on record (PDFs and Office documents with a derived
-/// sibling PDF), optionally narrowed to a set of subjects.
+/// sibling PDF), optionally narrowed to a set of subjects. A file the user
+/// skipped stays out until they parse it.
 pub async fn pdf_files(
     pool: &SqlitePool,
     subject_ids: &[i64],
 ) -> Result<Vec<(i64, String)>, String> {
     let rows = sqlx::query(
-        "SELECT subject_id, relative_path FROM files ORDER BY relative_path",
+        "SELECT subject_id, relative_path FROM files
+         WHERE parse_status IS NULL OR parse_status != 'skipped'
+         ORDER BY relative_path",
     )
     .fetch_all(pool)
     .await
@@ -324,7 +355,8 @@ pub async fn pdf_files(
 /// Derive parse status from what the parser left on disk: a record is
 /// `quality`. Without one, the transient `queued`/`running` a killed run
 /// leaves behind (and a `quality` whose record is gone) are cleared, but
-/// `error` stays — it is the only trace of a failure from an earlier run.
+/// `error` stays — it is the only trace of a failure from an earlier run —
+/// and so does `skipped`, the only memory of a skip across restarts.
 pub async fn reconcile_parse_status(pool: &SqlitePool, data_dir: &Path) -> Result<u64, String> {
     let rows = sqlx::query("SELECT relative_path FROM files")
         .fetch_all(pool)
@@ -353,7 +385,7 @@ pub async fn reconcile_parse_status(pool: &SqlitePool, data_dir: &Path) -> Resul
                 sqlx::query(
                     "UPDATE files SET parse_status = NULL, parsed_at = NULL
                      WHERE relative_path = ?1 AND parse_status IS NOT NULL
-                       AND parse_status != 'error'",
+                       AND parse_status NOT IN ('error', 'skipped')",
                 )
                 .bind(&rel)
                 .execute(pool)
@@ -966,13 +998,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reconciling_parse_status_keeps_failures_and_clears_stale_runs() {
+    async fn reconciling_parse_status_keeps_failures_and_skips_and_clears_stale_runs() {
         let pool = migrated_pool().await;
         let dir = crate::test_support::Scratch::new("reconcile-parse");
         sqlx::query("INSERT INTO subjects (id, code, name) VALUES (1, 'SUBJ', 'Subject')")
             .execute(&pool).await.unwrap();
         let rows = [
             ("courses/SUBJ/files/failed.pdf", "error"),
+            ("courses/SUBJ/files/skipped.pdf", "skipped"),
             ("courses/SUBJ/files/queued.pdf", "queued"),
             ("courses/SUBJ/files/running.pdf", "running"),
             ("courses/SUBJ/files/gone.pdf", "quality"),
@@ -1006,6 +1039,7 @@ mod tests {
             }
         };
         assert_eq!(status("courses/SUBJ/files/failed.pdf").await.as_deref(), Some("error"));
+        assert_eq!(status("courses/SUBJ/files/skipped.pdf").await.as_deref(), Some("skipped"));
         assert_eq!(status("courses/SUBJ/files/queued.pdf").await, None);
         assert_eq!(status("courses/SUBJ/files/running.pdf").await, None);
         assert_eq!(status("courses/SUBJ/files/gone.pdf").await, None);

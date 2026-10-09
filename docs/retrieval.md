@@ -20,14 +20,13 @@ over the same pages sits beside it.
 | The `embed-status` event and shared wire payload | `app/src-tauri/src/embed/events.rs`, `app/src-tauri/src/pipeline_events.rs` |
 | API key (keychain only) | `app/src-tauri/src/voyage.rs` |
 | Ingest, brute-force cosine search, `PAGES_FTS_SQL` + `fts_tests` | `app/src-tauri/src/retrieval.rs` |
-| Who writes `pages.markdown` (`store::upsert_pages`) | `app/src-tauri/src/sync.rs`, `app/src-tauri/src/store.rs` |
+| Who writes `pages.markdown` (`store::upsert_pages`, `store::replace_pages`) | `app/src-tauri/src/sync.rs`, `app/src-tauri/src/sheets.rs`, `app/src-tauri/src/store.rs` |
 | `pages` table schema | `app/src-tauri/src/migrations.rs` |
 | The serial index queue (app side) | `app/src/stores/indexStore.ts` |
 | Frontend embed calls, `embedReady`, backlog query | `app/src/lib/retrieval.ts` |
 | Lexical query (`searchPageText`) | `app/src/lib/db.ts` |
 | Parse → embed hop | `app/src/hooks/useBackendEvents.ts` |
 | Terminal query path (`oculus search`) | `app/src-tauri/src/bin/oculus/query.rs` |
-| Smoke test | `app/src-tauri/src/bin/retrieval_smoke.rs` |
 
 ## Page images are embedded, not text — measured
 
@@ -170,6 +169,11 @@ discipline as `mineru-usage.json`.
   (`store::upsert_pages`), so `oculus grep` never depends on the vector index.
   Ingest also upserts markdown; both sides never let an empty page overwrite
   stored text.
+- **A spreadsheet's pages never get a vector.** They are its text, one row
+  per sheet ([parsing.md](./parsing.md#spreadsheets-are-converted-to-text-never-parsed)),
+  and every embed path keys on the PDF-backed list (`paths::doc_pdf_rel`,
+  `PDF_BACKED_SQL_LIST`), which leaves sheets out. Scans read only rows with
+  an `embedding`, and the lexical index covers every row.
 - **Ingest is idempotent in two halves**: a PDF already embedded in the current
   space is not re-embedded, but its record is still folded into `pages`.
 - **`retrieval::IngestError` carries `{message, kind, retryable, latching}`**,
@@ -185,8 +189,8 @@ discipline as `mineru-usage.json`.
   of the queue unrun (Stop, a latch, a thrown run) hands them back as pending.
   An enqueue during a stop is refused, never a new run behind the user's back;
   removing the Voyage key stops the run.
-- **A terminal `parse-status` enqueues that file** (`useBackendEvents.ts`),
-  gated on `embedReady` — a stored key and an available engine. The backlog is
+- **A finished parse (`quality`) of a PDF-backed file enqueues that file**
+  (`useBackendEvents.ts`), gated on `embedReady` — a stored key and an available engine. The backlog is
   never swept up automatically: it is hours of metered work, and the Settings
   estimate exists to be read first.
 - **The queue survives a restart as `files.embed_status = 'queued'`**

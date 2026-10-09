@@ -23,19 +23,18 @@ import {
   SIDE_NAV_ROW,
   SIDE_NAV_ROW_IDLE,
   SideNav,
-  SideNavCollapseToggle,
   SideNavGroupLabel,
   SideNavLink,
   SideNavSearch,
-  SideNavTip,
-  SIDE_NAV_COLLAPSED_WIDTH,
   SIDE_NAV_FOLDS,
 } from "@/components/ui/SideNav";
 import { ResizeHandle } from "@/components/ui/ResizeHandle";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useWindowEvent } from "@/hooks/useEvents";
 import { useScrollFade } from "@/hooks/useScrollFade";
 import { useSearch } from "@/hooks/useSearch";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
+import { useTabActive } from "@/components/tabs/TabContext";
 import type { Subject } from "@/lib/db";
 import { displayCode, displayName } from "@/lib/format";
 import { openSearchItem, type SearchFilter, type SearchItem, type SearchSection } from "@/lib/search";
@@ -59,13 +58,21 @@ const TABS = [
 const TAB_PATHS = new Set<string>(TABS.map((tab) => tab.to));
 
 /** One width and fold for every subject: they are layout choices. */
-const PANEL = {
+export const SUBJECT_NAV_PANEL = {
   defaultWidth: 208,
   minWidth: 168,
   maxWidth: 320,
-  collapsedWidth: SIDE_NAV_COLLAPSED_WIDTH,
+  collapsedWidth: 0,
   storageKey: "oculus-subject-nav-width",
 };
+
+type Panel = ReturnType<typeof useResizablePanel>;
+
+/** The tab open at `pathname`, for the page header's title. */
+export function subjectTabLabel(pathname: string): string {
+  const tab = pathname.split("/")[3]; // ["", "subjects", ":id", tab, …]
+  return TABS.find((t) => t.to === (tab || "."))?.label ?? "Overview";
+}
 
 /**
  * `id`'s page for the tab open at `pathname`. Only the top-level tab carries
@@ -78,15 +85,18 @@ function switchPath(pathname: string, id: number): string {
 
 /** The subject page's nav column: who it is, a switcher, a search over the
  *  subject, and its tabs — replaced by the results while the search has text.
- *  Collapsed, it keeps the switcher and tabs as icons. */
+ *  Its width and fold come from `panel` (`SubjectLayout` owns it); ⌘⌥B or the
+ *  header row's toggle folds it away completely, as Chat's column does. */
 export function SubjectNav({
   subject,
   current,
   past,
+  panel,
 }: {
   subject: Subject;
   current: Subject[];
   past: Subject[];
+  panel: Panel;
 }) {
   const newCounts = useNewFilesStore(useShallow((s) =>
     TABS.map((tab) => newCountForTab(s.bySubject, subject.id, tab.to)),
@@ -96,21 +106,16 @@ export function SubjectNav({
   // The results own their list; Enter in the field opens its first row.
   const openFirst = useRef<() => void>(() => {});
   useEffect(() => setQuery(""), [subject.id]);
-  const panel = useResizablePanel(PANEL);
-  const { collapsed, setCollapsed } = panel;
-  const searchRef = useRef<HTMLInputElement>(null);
-  // Set by the folded search pill: focus the field once it unfolds.
-  const focusSearch = useRef(false);
-  useEffect(() => {
-    if (collapsed || !focusSearch.current) return;
-    focusSearch.current = false;
-    searchRef.current?.focus();
-  }, [collapsed]);
-
-  const toggle = () => {
-    setQuery("");
+  const { collapsed } = panel;
+  // Every tab stays mounted, so only the one in front answers the chord.
+  // `e.code`, not `e.key`: on macOS ⌥B arrives as `∫`.
+  const active = useTabActive();
+  useWindowEvent("keydown", (e) => {
+    const k = e as KeyboardEvent;
+    if (!active || !k.altKey || !(k.metaKey || k.ctrlKey) || k.code !== "KeyB") return;
+    k.preventDefault();
     panel.toggle();
-  };
+  });
 
   return (
     <>
@@ -119,20 +124,18 @@ export function SubjectNav({
         width={panel.width}
         collapsed={collapsed}
         animate={!panel.dragging}
-        footer={<SideNavCollapseToggle collapsed={collapsed} onToggle={toggle} />}
         header={
           <>
             <div className="px-4 pt-4 pb-3">
               {/* The switcher spans the row, icon included; the icon's own
-                  trigger sits over its slot, since triggers can't nest. Folded,
-                  the switcher takes the whole icon. */}
+                  trigger sits over its slot, since triggers can't nest. */}
               <div className="relative -mx-2">
-                <SubjectSwitcher subject={subject} current={current} past={past} collapsed={collapsed} />
+                <SubjectSwitcher subject={subject} current={current} past={past} />
                 <SubjectIconPicker code={subject.code}>
                   <button
                     type="button"
                     aria-label="Change subject icon"
-                    className="absolute top-1/2 left-1 -translate-y-1/2 rounded-md p-1 transition-colors hover:bg-sidebar-item-hover group-data-[collapsed=true]/nav:pointer-events-none"
+                    className="absolute top-1/2 left-1 -translate-y-1/2 rounded-md p-1 transition-colors hover:bg-sidebar-item-hover"
                   >
                     <SubjectIcon code={subject.code} size={16} />
                   </button>
@@ -151,12 +154,7 @@ export function SubjectNav({
               value={query}
               onChange={setQuery}
               onEnter={() => openFirst.current()}
-              onExpand={() => {
-                focusSearch.current = true;
-                setCollapsed(false);
-              }}
               placeholder={`Search ${displayCode(subject.code)}`}
-              inputRef={searchRef}
             />
           </>
         }
@@ -178,17 +176,19 @@ export function SubjectNav({
             icon={tab.icon}
             label={tab.label}
             trailing={<NewCountBadge count={newCounts[index]} />}
-            dot={newCounts[index] > 0}
           />
         ))}
       </SideNav>
-      {/* On the seam: negative margins cost no layout width. */}
-      <ResizeHandle
-        onMouseDown={panel.onMouseDown}
-        dragging={panel.dragging}
-        label="Resize subject sidebar"
-        className="-mx-0.5"
-      />
+      {/* On the seam: negative margins cost no layout width. Folded away the
+          seam is the page's own left edge, where a side panel's handle lives. */}
+      {!collapsed && (
+        <ResizeHandle
+          onMouseDown={panel.onMouseDown}
+          dragging={panel.dragging}
+          label="Resize subject sidebar"
+          className="-mx-0.5"
+        />
+      )}
     </>
   );
 }
@@ -303,7 +303,7 @@ function SubjectSearchResults({
 
 /** The column's shape while the subject loads. */
 export function SubjectNavSkeleton() {
-  const panel = useResizablePanel(PANEL);
+  const panel = useResizablePanel(SUBJECT_NAV_PANEL);
   return (
     <SideNav
       width={panel.width}
@@ -334,13 +334,10 @@ function SubjectSwitcher({
   subject,
   current,
   past,
-  collapsed = false,
 }: {
   subject: Subject;
   current: Subject[];
   past: Subject[];
-  /** Folded to the icon: the list opens to the right instead. */
-  collapsed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
@@ -353,30 +350,27 @@ function SubjectSwitcher({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <SideNavTip label={displayCode(subject.code)}>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            title={collapsed ? undefined : "Switch subject"}
-            aria-label="Switch subject"
-            className="flex w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2 py-1 text-left transition-colors hover:bg-sidebar-item-hover"
-          >
-            {/* The icon's slot; its button is drawn over it by the header. */}
-            <span aria-hidden className="size-4 shrink-0" />
-            <span className={cn("min-w-0 flex-1 truncate font-display text-[16px] font-semibold leading-none tracking-tight text-foreground", SIDE_NAV_FOLDS)}>
-              {displayCode(subject.code)}
-            </span>
-            <CaretUpDown size={12} className={cn("shrink-0 text-muted-foreground/60", SIDE_NAV_FOLDS)} />
-          </button>
-        </PopoverTrigger>
-      </SideNavTip>
-      {/* As wide as the trigger, which spans the header row; collapsed, the
-          width that row has when expanded. */}
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Switch subject"
+          aria-label="Switch subject"
+          className="flex w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2 py-1 text-left transition-colors hover:bg-sidebar-item-hover"
+        >
+          {/* The icon's slot; its button is drawn over it by the header. */}
+          <span aria-hidden className="size-4 shrink-0" />
+          <span className={cn("min-w-0 flex-1 truncate font-display text-[16px] font-semibold leading-none tracking-tight text-foreground", SIDE_NAV_FOLDS)}>
+            {displayCode(subject.code)}
+          </span>
+          <CaretUpDown size={12} className={cn("shrink-0 text-muted-foreground/60", SIDE_NAV_FOLDS)} />
+        </button>
+      </PopoverTrigger>
+      {/* As wide as the trigger, which spans the header row. */}
       <PopoverContent
-        side={collapsed ? "right" : "bottom"}
+        side="bottom"
         align="start"
         sideOffset={8}
-        className={cn(collapsed ? "w-48" : "w-(--radix-popover-trigger-width)", "p-1.5")}
+        className="w-(--radix-popover-trigger-width) p-1.5"
       >
         <SwitcherList
           subject={subject}

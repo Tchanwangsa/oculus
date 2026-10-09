@@ -263,12 +263,89 @@ impl Drop for ImageStaging {
 
 // ── Progress and health ──────────────────────────────────────────────────────
 
-/// Reported while a parse runs. `total_pages` is zero until the backend knows.
+/// Where a running parse is. Only the cloud uploads; the local engine and a
+/// cloud file whose bytes are sent both report `Processing`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Phase {
+    /// Its batch was submitted; another file of the batch is uploading first.
+    UploadWait,
+    Uploading,
+    /// Uploaded (or local): the engine is extracting.
+    Processing,
+}
+
+impl Phase {
+    /// The `phase` on the `parse-status` wire.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Phase::UploadWait => "upload_wait",
+            Phase::Uploading => "uploading",
+            Phase::Processing => "processing",
+        }
+    }
+}
+
+/// Reported while a parse runs. `total_pages` is zero until the backend knows;
+/// the byte counts are zero outside the upload phases.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct Progress {
     pub pages_done: u32,
     pub total_pages: u32,
     pub backend: &'static str,
+    pub phase: Phase,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+}
+
+impl Progress {
+    /// The engine is extracting: pages only.
+    pub fn processing(pages_done: u32, total_pages: u32, backend: &'static str) -> Self {
+        Self {
+            pages_done, total_pages, backend,
+            phase: Phase::Processing, bytes_done: 0, bytes_total: 0,
+        }
+    }
+}
+
+// ── Skipping a file's parse ──────────────────────────────────────────────────
+
+/// PDFs the user skipped this session, keyed like `InFlight`. Memory only:
+/// across restarts the frontend's `files.parse_status = 'skipped'` holds it.
+/// Engines poll `is_marked` and end the parse as `ParseError::Cancelled`.
+pub struct Skips {
+    marked: Mutex<BTreeSet<PathBuf>>,
+}
+
+impl Skips {
+    pub const fn new() -> Self {
+        Self { marked: Mutex::new(BTreeSet::new()) }
+    }
+
+    pub fn shared() -> &'static Skips {
+        static SHARED: Skips = Skips::new();
+        &SHARED
+    }
+
+    pub fn mark(&self, pdf: &Path) {
+        self.marked.lock().unwrap_or_else(|p| p.into_inner()).insert(pdf.to_path_buf());
+    }
+
+    pub fn clear(&self, pdf: &Path) {
+        self.marked.lock().unwrap_or_else(|p| p.into_inner()).remove(pdf);
+    }
+
+    pub fn is_marked(&self, pdf: &Path) -> bool {
+        self.marked.lock().unwrap_or_else(|p| p.into_inner()).contains(pdf)
+    }
+}
+
+/// `Err(Cancelled)` when the user skipped this PDF.
+pub fn check_skipped(pdf: &Path) -> Result<(), ParseError> {
+    if Skips::shared().is_marked(pdf) {
+        return Err(ParseError::Cancelled);
+    }
+    Ok(())
 }
 
 /// What a backend says about itself.
@@ -329,6 +406,10 @@ pub trait Parser: Send + Sync {
 /// is no PDF, so nothing was sent to any parser.
 pub const CONVERSION_FAILED: &str = "office-conversion";
 
+/// The `Document` code for a spreadsheet `crate::sheets` could not read: it
+/// is converted to text in-process, never parsed.
+pub const SHEET_UNREADABLE: &str = "sheet-unreadable";
+
 /// Why a parse did not happen. Nothing falls back (see `docs/parsing.md`), so the
 /// variants keep "wait", "retry" and "fix a setting" distinguishable.
 ///
@@ -354,6 +435,9 @@ pub enum ParseError {
     NotReady { backend: String },
     /// Writing the artifacts failed; the parse itself may have succeeded.
     Io(String),
+    /// The user skipped this file (`Skips`). Not a failure: nothing to retry
+    /// until they ask for the parse again.
+    Cancelled,
 }
 
 impl ParseError {
@@ -371,6 +455,7 @@ impl ParseError {
             ParseError::VersionMismatch { .. } => "version_mismatch",
             ParseError::NotReady { .. } => "not_ready",
             ParseError::Io(_) => "io",
+            ParseError::Cancelled => "cancelled",
         }
     }
 
@@ -386,7 +471,8 @@ impl ParseError {
             | ParseError::RejectedCredentials { .. }
             | ParseError::TooLarge { .. }
             | ParseError::Document { .. }
-            | ParseError::VersionMismatch { .. } => false,
+            | ParseError::VersionMismatch { .. }
+            | ParseError::Cancelled => false,
         }
     }
 
@@ -443,6 +529,11 @@ impl fmt::Display for ParseError {
                 "This file could not be converted to PDF, so there is nothing to parse. The \
                  next sync tries the conversion again."
             ),
+            ParseError::Document { code } if code == SHEET_UNREADABLE => write!(
+                f,
+                "This spreadsheet could not be read, so it has no text. Other files are \
+                 unaffected."
+            ),
             ParseError::Document { code } => write!(
                 f,
                 "MinerU could not read this PDF (error {code}). Other files are unaffected."
@@ -456,6 +547,7 @@ impl fmt::Display for ParseError {
                 write!(f, "The {backend} parser is not ready yet. Try again in a moment.")
             }
             ParseError::Io(detail) => write!(f, "Could not save the parsed output: {detail}"),
+            ParseError::Cancelled => write!(f, "Skipped — parse it again from File Activity."),
         }
     }
 }
@@ -844,6 +936,36 @@ mod tests {
         assert!(!error.retryable());
         assert!(!error.latching());
         assert!(!error.to_string().contains("MinerU"), "{error}");
+    }
+
+    #[test]
+    fn an_unreadable_spreadsheet_is_a_document_failure_that_does_not_blame_mineru() {
+        let error = ParseError::Document { code: SHEET_UNREADABLE.into() };
+        assert_eq!(error.kind(), "document");
+        assert!(!error.retryable());
+        assert!(!error.to_string().contains("MinerU"), "{error}");
+    }
+
+    #[test]
+    fn a_skip_is_neither_retried_nor_latching() {
+        let error = ParseError::Cancelled;
+        assert_eq!(error.kind(), "cancelled");
+        assert!(!error.retryable());
+        assert!(!error.latching());
+        assert!(error.to_string().starts_with("Skipped"), "{error}");
+    }
+
+    #[test]
+    fn a_skip_mark_holds_until_cleared() {
+        let skips = Skips::new();
+        let pdf = Path::new("/library/skip-me.pdf");
+        assert!(!skips.is_marked(pdf));
+        skips.mark(pdf);
+        skips.mark(pdf);
+        assert!(skips.is_marked(pdf));
+        assert!(!skips.is_marked(Path::new("/library/other.pdf")));
+        skips.clear(pdf);
+        assert!(!skips.is_marked(pdf));
     }
 
     #[test]

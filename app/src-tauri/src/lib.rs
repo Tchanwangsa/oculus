@@ -36,6 +36,7 @@ mod ratelimit;
 pub mod reading;
 pub mod retrieval;
 mod scrape;
+pub mod sheets;
 mod storage;
 pub mod store;
 mod subjects;
@@ -94,6 +95,8 @@ pub fn run() {
             chapters::app::reconcile(app.handle());
             reading::app::reconcile(app.handle());
             lecture_end::app::reconcile(app.handle());
+            // Spreadsheets on record without their text (`docs/parsing.md`).
+            sheets::reconcile_in_background();
 
             // Open and active time per hour, from the window and the frontend's pings.
             usage::start(app.handle());
@@ -117,7 +120,7 @@ pub fn run() {
                     }
                     AuthProbe::Rejected(_) => {
                         // `try_auto_recover` emits its own success event.
-                        if okta::try_auto_recover(&app_handle) {
+                        if okta::try_auto_recover(&app_handle, okta::Trigger::Startup) {
                             *mem.lock().unwrap() = true;
                         } else {
                             eprintln!("[oculus] session rejected — reset to disconnected");
@@ -147,7 +150,7 @@ pub fn run() {
                     continue;
                 }
                 if let AuthProbe::Rejected(_) = saved_session_probe() {
-                    if okta::try_auto_recover(&ka_handle) {
+                    if okta::try_auto_recover(&ka_handle, okta::Trigger::KeepAlive) {
                         eprintln!("[oculus] keep-alive: session renewed automatically");
                         continue;
                     }
@@ -196,6 +199,7 @@ pub fn run() {
             scrape::canvas_download_video,
             scrape::canvas_cancel_video,
             scrape::parse_file,
+            scrape::parse_skip,
             files::read_course_file,
             files::course_file_has_content,
             files::open_course_file,

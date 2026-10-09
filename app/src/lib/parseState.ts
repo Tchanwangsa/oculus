@@ -13,6 +13,7 @@ type ParseStateKind =
   | "parsed"
   | "running"
   | "queued"
+  | "skipped"
   | "unparsed"
   | "failed"
   | "permanent"
@@ -27,7 +28,7 @@ export interface ParseState {
   detail: string;
   /** A few words for a file row's tooltip; `detail` is shown on the file. */
   summary: string;
-  /** Only a genuine failure is `bad`; "not parsed yet" is not one. */
+  /** Only a genuine failure is `bad`; "not parsed yet" and a skip are not. */
   tone: "quiet" | "progress" | "good" | "bad" | "hold";
   /** Settings → Parsing can fix it (a missing or rejected token). */
   fixInSettings: boolean;
@@ -49,7 +50,7 @@ export function tokenish(kind: string | undefined, message: string): boolean {
 
 /** The row tooltip's line for a failure, by `ParseError::kind` in
  *  `parse/mod.rs`. Empty when the kind is unknown (a previous session's). */
-function summaryOf(kind: string | undefined): string {
+export function summaryOf(kind: string | undefined): string {
   switch (kind) {
     case "offline": return "Couldn't reach MinerU.";
     case "io": return "Couldn't save the parsed output.";
@@ -102,6 +103,18 @@ export function parseStateOf(
       detail: "",
       summary: "",
       tone: "progress",
+      fixInSettings: false,
+    };
+  }
+  // The user's choice: calm, and beats a latch, since nothing is waiting on it.
+  if (status === "skipped") {
+    return {
+      kind: "skipped",
+      label: "skipped",
+      title: "Skipped",
+      detail: "",
+      summary: "Not parsed until you ask.",
+      tone: "quiet",
       fixInSettings: false,
     };
   }

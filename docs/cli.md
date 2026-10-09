@@ -44,9 +44,13 @@ migrations, so on a fresh machine the app must open once first; until then
 - `auth login` launches the app for the SAML browser step, because a push or
   biometric challenge needs a human. `auth setup` stores what `auth auto` needs
   to sign in headlessly; `auth forget` clears it ([auth.md](./auth.md)).
-- `auth tick` is one keep-alive cycle, run by the LaunchAgent. It prints
-  nothing, logs to `session-keepalive.log`, and always exits 0, because launchd
-  reads a non-zero exit as a crashed job.
+  `auth auto` is a manual sign-in, so it skips the
+  [attempt guard](./auth.md#every-sign-in-attempt-goes-through-one-guard)'s
+  wait and lifts its pause.
+- `auth tick` is one keep-alive cycle, run by the LaunchAgent. Its sign-in is
+  automatic, so the guard can skip it. It prints nothing, logs to
+  `session-keepalive.log`, and always exits 0, because launchd reads a
+  non-zero exit as a crashed job.
 - `run -s` scrapes, then parses and embeds each written PDF one file at a time,
   then replaces each subject's `calendar_events` — always, since there are no
   sync options to gate it ([calendar.md](./calendar.md)).
@@ -100,7 +104,8 @@ rewriting itself in place is how a long run is told from a stuck one.
   with the real list; a real category a subject lacks returns nothing.
 - `read` uses the page numbers `search` reports and the viewer shows — all
   three key `pages.markdown` on `(file_id, page_no)`. An Office document's
-  pages are its derived PDF's (`paths::doc_pdf_rel`).
+  pages are its derived PDF's (`paths::doc_pdf_rel`); a spreadsheet's are its
+  sheets, and with no rows yet `read` prints its `.md` from disk.
 - Read commands share subject-ID resolution in `query.rs`: an omitted scope
   means every subject, while a prefix keeps every matching term and an unknown
   code fails before querying files.

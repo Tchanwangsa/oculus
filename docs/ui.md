@@ -93,16 +93,15 @@ headings and Inter for everything else, Notion-style layout.
   16px icon and the active row filled, never an underline strip, and
   `SideNavSearch`, the pill search field under the header. Rows that are not
   links take its exported row classes. The subject and Chat columns are
-  drag-resizable and fold (`useResizablePanel`, width and fold remembered) —
-  the subject column to a 48px strip, Chat's to nothing — from
-  `SideNavCollapseToggle` (the subject column's footer, Chat's page header
-  beside the title) or by dragging it narrow.
-  Both states share one layout that the column clips, so icons hold their
-  place while the width eases: labels fade (`SIDE_NAV_FOLDS`), tooltips
-  name the icons, and a count becomes a dot.
-- **Subject tabs share `SubjectPage` for width and gutters** beside the
-  subject's nav column, `SubjectLoading` for skeleton rows and `SubjectEmpty`
-  for the empty view. Per-tab content and actions stay with the page.
+  drag-resizable and fold away to nothing (`useResizablePanel`, width and
+  fold remembered) from ⌘⌥B, from `SideNavCollapseToggle` at the start of the
+  page's 48px header row, beside its title, or by dragging it narrow. Labels
+  fade as the width eases shut (`SIDE_NAV_FOLDS`).
+- **Subject tabs share `SubjectPage` for width and gutters** under
+  `SubjectLayout`'s header row (the toggle, the subject crumb, the tab's
+  name) and beside the subject's nav column, `SubjectLoading` for skeleton
+  rows and `SubjectEmpty` for the empty view. Per-tab content and actions
+  stay with the page.
 - **View preferences use `useStoredState`**, with readers that own defaults and validation; `useStoredSet` keeps collapsed group keys. Storage failures leave the live view usable.
 - **No toasts, no bottom progress bars** — background jobs surface in the
   sidebar only, as a spinner or dot on their rail item

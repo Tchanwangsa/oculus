@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTabStore } from "@/stores/tabStore";
 import { openBeside } from "@/lib/tabRouters";
 import { humanizeSlug } from "@/lib/format";
-import { isPdfBacked, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/fileTypes";
+import { isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath, parsedMdSource } from "@/lib/fileTypes";
 import { getFileByRelativePath, getLecture, markFileAccessed, type DbFile } from "@/lib/db";
 import { attachmentPath } from "@/lib/attachments";
 import { isWebUrl, openExternal } from "@/lib/browser";
@@ -70,9 +70,10 @@ export function routeParseDetails(state: unknown): number | undefined {
 }
 
 /** A binary the app has no viewer for: it opens in the system viewer. PDFs,
- *  Office documents (via their converted PDF) and videos render in-app. */
+ *  Office documents (via their converted PDF), spreadsheets (as their text)
+ *  and videos render in-app. */
 function systemOnly(file: DbFile): boolean {
-  return !isPdfBacked(file.filename) && !isVideoFile(file.filename);
+  return !isPdfBacked(file.filename) && !isSheetFile(file.filename) && !isVideoFile(file.filename);
 }
 
 /** How any list row opens a file: anything renderable as its page in the
@@ -230,7 +231,8 @@ async function openCitationAsync(cite: Citation, newTab: boolean): Promise<void>
 
 /** Where in `file` the citation points. A line of a parsed `.md` becomes its
  *  PDF page and the line's text; a `#page=` on anything PDF-backed is just
- *  the page; a line of a plain markdown file is just its text. */
+ *  the page; a line of a plain markdown file, or of a spreadsheet's text, is
+ *  just its text. */
 async function citationLocate(cite: Citation, file: DbFile): Promise<FileLocate | undefined> {
   const seq = ++locateSeq;
   const pdf = isPdfBacked(file.filename);
@@ -239,8 +241,9 @@ async function citationLocate(cite: Citation, file: DbFile): Promise<FileLocate 
     if (hit) return { page: hit.page, quote: hit.quote || undefined, seq };
   }
   if (pdf && cite.page) return { page: cite.page, seq };
-  if (!pdf && cite.line && /\.md$/i.test(file.relative_path)) {
-    const text = await readCourseFile(file.relative_path).catch(() => "");
+  const textPath = isSheetFile(file.filename) ? parsedMdRelPath(file) : file.relative_path;
+  if (!pdf && cite.line && textPath && /\.md$/i.test(textPath)) {
+    const text = await readCourseFile(textPath).catch(() => "");
     const quote = quoteFromLines(text.split("\n"), cite.line);
     if (quote) return { quote, seq };
   }

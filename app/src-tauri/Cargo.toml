@@ -4,8 +4,9 @@ version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
-# `src/bin/retrieval_smoke.rs` is a second binary, which makes a bare
-# `cargo run` (what `tauri dev` issues) ambiguous without this.
+# `src/bin/oculus/` is a second binary, which makes a bare `cargo run` (what
+# `tauri dev` issues) ambiguous without this. The Tauri bundler copies every
+# entry under `src/bin/` into `Contents/MacOS/`, so only shipped bins go there.
 default-run = "app"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -74,6 +75,9 @@ lopdf = { version = "0.34", default-features = false, features = ["nom_parser"] 
 imagesize = "0.13"
 pdfium-render = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Spreadsheets (xlsx/xlsm/xls/ods) become markdown text in-process
+# (`src/sheets.rs`); no LibreOffice, no parse service, no embedding.
+calamine = "0.36"
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
 # `seed_canvas_session` in src/browser.rs) — Tauri exposes no cookie setter, so

@@ -118,9 +118,10 @@ impl Reporter for AppReporter {
     }
 }
 
-/// Parse one already-downloaded PDF (a no-op if already parsed).
-/// Fire-and-forget: progress arrives as `parse-status` events. A refusal is
-/// also an `error` status, or a sweep would re-kick the row unseen.
+/// Parse one already-downloaded PDF (a no-op if already parsed), or convert a
+/// spreadsheet to its text again. Fire-and-forget: progress arrives as
+/// `parse-status` events. A refusal is also an `error` status, or a sweep
+/// would re-kick the row unseen.
 #[tauri::command]
 pub fn parse_file(
     subject_id: i64,
@@ -134,6 +135,19 @@ pub fn parse_file(
         crate::parse::events::failed(&relative_path, subject_id, &error);
         detail
     };
+    // A spreadsheet is converted to text in-process, never parsed.
+    if crate::paths::is_sheet(&relative_path) {
+        if !data_dir.join(&relative_path).is_file() {
+            return Err(refuse(format!("not on disk: {relative_path}")));
+        }
+        std::thread::spawn(move || {
+            match crate::sheets::index(&data_dir, &relative_path, subject_id) {
+                Ok(pages) => eprintln!("[oculus] parse_file {relative_path}: {pages} sheet(s) as text"),
+                Err(e) => eprintln!("[oculus] parse_file {relative_path}: {e}"),
+            }
+        });
+        return Ok(());
+    }
     // For Office files this is the derived sibling PDF.
     let pdf_rel = crate::paths::doc_pdf_rel(&relative_path)
         .ok_or_else(|| refuse(format!("{relative_path}: not a parseable file")))?;
@@ -148,6 +162,22 @@ pub fn parse_file(
             Err(e) => eprintln!("[oculus] parse_file {relative_path}: {e}"),
         }
     });
+    Ok(())
+}
+
+/// Skip one file's parse, or lift the skip. A skip marks the PDF in
+/// `parse::Skips`, which ends any parse of it in flight without writing
+/// artifacts, and reports `skipped` at once whether or not one was running.
+/// Lifting it emits nothing; the frontend then calls `parse_file`.
+#[tauri::command]
+pub fn parse_skip(relative_path: String, subject_id: i64, skip: bool) -> Result<(), String> {
+    let key = crate::sync::parse_key(&crate::paths::data_dir(), &relative_path);
+    if skip {
+        crate::parse::Skips::shared().mark(&key);
+        crate::parse::events::skipped(&relative_path, subject_id);
+    } else {
+        crate::parse::Skips::shared().clear(&key);
+    }
     Ok(())
 }
 

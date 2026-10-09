@@ -159,6 +159,7 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
             if !was_resolved {
                 *auth_flag_nav.lock().unwrap() = true;
                 crate::paths::mark_authenticated(&dir);
+                crate::okta::resume_automatic_sign_in(&dir);
 
                 // Give Canvas a moment to set the session cookie first.
                 let app_delayed = app_nav.clone();

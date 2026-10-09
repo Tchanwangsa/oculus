@@ -56,6 +56,9 @@ its failure rules are in [parsing.md](./parsing.md).
   Upload batches serialize their name allocation.
 - Credentials go keychain → in-process client. No key enters SQLite, the
   WebView, a health response or a progress event. The local engine needs none.
+  A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
+  sandbox, which fails right after the prompt is approved) is reported as
+  unreadable, never as a missing key (`Secret::fetch`).
 
 ## Scraping lives in Rust because hidden WebViews freeze
 
@@ -101,7 +104,8 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
-- The session cookie, auth flag and `session-keepalive.log` ([auth.md](./auth.md)).
+- The session cookie, auth flag, `session-keepalive.log`, and the sign-in
+  attempt record and its `okta-sign-in.log` ([auth.md](./auth.md)).
 
 ## The database has one schema owner and two writers
 
