@@ -17,6 +17,11 @@ pub(crate) fn stored_api_key() -> Option<String> {
     KEY.read()
 }
 
+/// `Err` when the keychain refused, as opposed to holding no key.
+pub(crate) fn fetch_api_key() -> Result<Option<String>, String> {
+    KEY.fetch()
+}
+
 /// Groq's OpenAI-shaped `{"error": {"message": "..."}}`.
 pub(crate) fn message_of(body: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(body)

@@ -169,12 +169,14 @@ fn order_from(stored: Option<&serde_json::Value>) -> Vec<&'static str> {
 /// switched-off engine never touches the keychain.
 fn groq_engine(
     settings: &Settings,
-    key: impl FnOnce() -> Option<String>,
+    key: impl FnOnce() -> Result<Option<String>, String>,
 ) -> Result<groq::Groq, String> {
     if !settings.groq {
         return Err("Groq is turned off in Settings → Transcription".into());
     }
-    let key = key().ok_or("No Groq API key — add one in Settings → Transcription")?;
+    let key = key()
+        .map_err(|e| format!("The keychain refused to give out the Groq API key ({e})"))?
+        .ok_or("No Groq API key — add one in Settings → Transcription")?;
     Ok(groq::Groq::new(key, settings.language.groq()))
 }
 
@@ -193,7 +195,7 @@ fn engines(
     let mut missing = Vec::new();
     for &name in settings.order.iter().filter(|&&name| only.is_none_or(|only| only == name)) {
         let engine: Result<Box<dyn Engine>, String> = match name {
-            "groq" => groq_engine(&settings, crate::groq::stored_api_key)
+            "groq" => groq_engine(&settings, crate::groq::fetch_api_key)
                 .map(|e| Box::new(e) as Box<dyn Engine>),
             "whisper" => whisper::Whisper::configured(&settings, resource_dir.clone(), ffmpeg)
                 .map(|e| Box::new(e) as Box<dyn Engine>),
@@ -809,8 +811,10 @@ mod tests {
         assert_eq!(refused, "Groq is turned off in Settings → Transcription");
 
         let on = settings(r#"{"language":"auto"}"#);
-        assert!(groq_engine(&on, || None).err().unwrap().contains("Settings → Transcription"));
-        assert_eq!(groq_engine(&on, || Some("gsk_test".into())).ok().unwrap().name(), "groq");
+        assert!(groq_engine(&on, || Ok(None)).err().unwrap().contains("Settings → Transcription"));
+        let refused = groq_engine(&on, || Err("denied".into())).err().unwrap();
+        assert!(refused.contains("keychain") && refused.contains("denied"), "{refused}");
+        assert_eq!(groq_engine(&on, || Ok(Some("gsk_test".into()))).ok().unwrap().name(), "groq");
     }
 
     #[test]
