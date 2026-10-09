@@ -59,11 +59,29 @@ pub fn keepalive_log_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("session-keepalive.log")
 }
 
-/// Append one timestamped line, keeping the file bounded.
+/// Append one timestamped line to the keep-alive log.
 pub fn append_keepalive_log(data_dir: &std::path::Path, message: &str) {
+    append_bounded_log(&keepalive_log_path(data_dir), message);
+}
+
+/// Every headless Okta sign-in attempt, whoever made it (`okta::sign_in`).
+pub fn sign_in_log_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("okta-sign-in.log")
+}
+
+/// The attempt record every process checks before an automatic sign-in.
+pub fn sign_in_record_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("canvas-session").join("sign-in.json")
+}
+
+pub fn append_sign_in_log(data_dir: &std::path::Path, message: &str) {
+    append_bounded_log(&sign_in_log_path(data_dir), message);
+}
+
+/// Append one timestamped line, keeping the file bounded.
+fn append_bounded_log(path: &std::path::Path, message: &str) {
     use std::io::Write;
 
-    let path = keepalive_log_path(data_dir);
     let stamp = crate::clock::now_secs();
     let line = format!("{}Z {message}\n", iso8601_utc(stamp));
 

@@ -140,6 +140,9 @@ Options:
 ```
 Sign in headlessly with the stored credentials, now
 
+A manual sign-in: it skips the wait between automatic attempts, and success resumes
+automatic sign-in after a lockout or a rejected password paused it.
+
 Usage: oculus auth auto
 
 Options:
