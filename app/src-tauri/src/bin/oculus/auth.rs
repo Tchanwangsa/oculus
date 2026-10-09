@@ -265,7 +265,11 @@ impl Ctx {
 
     /// Run the headless sign-in and report precisely why it failed.
     pub(crate) fn auth_auto(&self) -> Result<(), String> {
-        match app_lib::okta::sign_in(&self.data_dir, app_lib::okta::Trigger::Manual) {
+        match app_lib::okta::sign_in(
+            &self.data_dir,
+            app_lib::okta::Trigger::Manual,
+            app_lib::okta::Role::Cli,
+        ) {
             Ok(_) => {
                 let name = app_lib::canvas::Canvas::open(&self.data_dir).whoami()?;
                 // Without the flag the app treats this as never signed in.
@@ -309,7 +313,11 @@ impl Ctx {
             SessionProbe::Rejected(why) => log(&format!("session rejected — {why}")),
         }
 
-        match app_lib::okta::sign_in(&self.data_dir, app_lib::okta::Trigger::KeepAlive) {
+        match app_lib::okta::sign_in(
+            &self.data_dir,
+            app_lib::okta::Trigger::KeepAlive,
+            app_lib::okta::Role::Cli,
+        ) {
             Ok(_) => match app_lib::canvas::Canvas::open(&self.data_dir).whoami() {
                 Ok(name) => {
                     app_lib::paths::mark_authenticated(&self.data_dir);

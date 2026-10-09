@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::test_support::okta_fake::{script, COOKIE, PASSWORD, SEED, USERNAME};
-use crate::test_support::{FakeOrigin, Scratch};
+use crate::test_support::{FakeOrigin, Scratch, TestClock};
 
 /// 2005-03-18 01:58:31 UTC: 29 s from the next code, so no test waits for one.
 const T0: u64 = 1_111_111_111;
@@ -88,7 +88,7 @@ fn a_manual_sign_in_walks_canvas_to_okta_and_back_and_saves_both_sessions() {
     let fake = FakeOrigin::start(script(|p| p == CODE));
     let store = Store::with_password(PASSWORD);
 
-    let cookie = sign_in(&env(&dir, &fake.origin, &store), Trigger::Manual).unwrap();
+    let cookie = sign_in(&env(&dir, &fake.origin, &store), Trigger::Manual, Role::App).unwrap();
     assert_eq!(cookie, COOKIE);
 
     assert_eq!(
@@ -143,7 +143,7 @@ fn a_rejected_password_is_reported_logged_and_forgotten_without_saving_a_session
     let fake = FakeOrigin::start(script(|p| p == CODE));
     let store = Store::with_password("not-the-password");
 
-    let result = sign_in(&env(&dir, &fake.origin, &store), Trigger::Manual);
+    let result = sign_in(&env(&dir, &fake.origin, &store), Trigger::Manual, Role::App);
     let Err(LoginError::BadPassword(why)) = result else {
         panic!("expected BadPassword, got {result:?}");
     };
@@ -171,36 +171,84 @@ fn an_automatic_sign_in_goes_nowhere_when_the_attempt_record_is_out_of_reach() {
     let store = Store::with_password(PASSWORD);
     std::fs::create_dir_all(paths::sign_in_record(&dir.0)).unwrap();
 
-    let result = sign_in(&env(&dir, &fake.origin, &store), Trigger::KeepAlive);
+    let result = sign_in(
+        &env(&dir, &fake.origin, &store),
+        Trigger::KeepAlive,
+        Role::App,
+    );
     assert!(matches!(result, Err(LoginError::Paused(_))), "{result:?}");
     assert!(fake.hits().is_empty(), "no request without a record");
     assert!(!store.password_cleared());
 }
 
 #[test]
-fn an_automatic_sign_in_after_a_recent_attempt_waits_without_a_request() {
+fn a_sign_in_after_a_recent_attempt_waits_without_a_request() {
     let dir = Scratch::new("sign-in-waits");
-    let fake = FakeOrigin::start(script(|p| p == CODE));
+    let next_code = totp_code(SEED, T0 + 60).unwrap();
+    let fake = FakeOrigin::start(script(move |p| p == CODE || p == next_code));
     let store = Store::with_password(PASSWORD);
-    let env = env(&dir, &fake.origin, &store);
+    let clock = TestClock::at(T0);
+    let mut env = env(&dir, &fake.origin, &store);
+    env.now = clock.clock();
 
-    sign_in(&env, Trigger::Startup).unwrap();
+    sign_in(&env, Trigger::Startup, Role::App).unwrap();
     let before = fake.hits().len();
-    let result = sign_in(&env, Trigger::Browser);
+    let result = sign_in(&env, Trigger::Browser, Role::App);
     assert!(
         matches!(result, Err(LoginError::Waiting(600))),
         "{result:?}"
     );
+    // A person skips that wait, but not the minute between any two attempts.
+    for role in [Role::App, Role::Cli] {
+        let result = sign_in(&env, Trigger::Manual, role);
+        assert!(matches!(result, Err(LoginError::Waiting(60))), "{result:?}");
+    }
     assert_eq!(fake.hits().len(), before);
-    // The wait does not apply to a person.
-    sign_in(&env, Trigger::Manual).unwrap();
+
+    clock.advance(60);
+    sign_in(&env, Trigger::Manual, Role::Cli).unwrap();
     assert_eq!(
         log_lines(&dir),
         [
             "2005-03-18T01:58:31Z app startup: signed in",
-            "2005-03-18T01:58:31Z manual: signed in",
+            "2005-03-18T01:59:31Z manual: signed in",
         ]
     );
+}
+
+#[test]
+fn a_lockout_stops_the_cli_before_any_request_and_the_app_may_try_again() {
+    let dir = Scratch::new("sign-in-lockout-roles");
+    let next_code = totp_code(SEED, T0 + 120).unwrap();
+    let fake = FakeOrigin::start(script(move |p| p == CODE || p == next_code));
+    let store = Store::with_password(PASSWORD);
+    let clock = TestClock::at(T0 - 3600);
+    let mut env = env(&dir, &fake.origin, &store);
+    env.now = clock.clock();
+    let record = paths::sign_in_record(&dir.0);
+    std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+    std::fs::write(
+        &record,
+        format!(
+            r#"{{"last":{},"failures":1,"paused":"The account is locked or blocked: x","credentials_paused":true}}"#,
+            T0 - 7200
+        ),
+    )
+    .unwrap();
+
+    clock.advance(3600);
+    for trigger in [Trigger::Manual, Trigger::Startup] {
+        let result = sign_in(&env, trigger, Role::Cli);
+        assert!(matches!(result, Err(LoginError::Paused(_))), "{result:?}");
+    }
+    assert!(fake.hits().is_empty(), "the CLI made no request");
+    assert!(log_lines(&dir).is_empty(), "a refusal is not an attempt");
+
+    sign_in(&env, Trigger::Manual, Role::App).unwrap();
+    assert!(!fake.hits().is_empty());
+    // The app's success cleared the pause for the CLI as well.
+    clock.advance(120);
+    sign_in(&env, Trigger::Manual, Role::Cli).unwrap();
 }
 
 #[test]
@@ -214,13 +262,13 @@ fn a_signed_out_app_or_missing_credentials_stop_before_any_request() {
     std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
     std::fs::write(&marker, b"1").unwrap();
     assert!(matches!(
-        sign_in(&env, Trigger::KeepAlive),
+        sign_in(&env, Trigger::KeepAlive, Role::App),
         Err(LoginError::SignedOut)
     ));
 
     store.clear_password().unwrap();
     assert!(matches!(
-        sign_in(&env, Trigger::Manual),
+        sign_in(&env, Trigger::Manual, Role::App),
         Err(LoginError::NotConfigured)
     ));
     assert!(fake.hits().is_empty());

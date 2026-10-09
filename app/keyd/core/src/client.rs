@@ -643,13 +643,21 @@ mod against_keyd {
     use crate::platform::Role;
     use crate::server::Server;
     use crate::test_support::okta_fake::{
-        code_at_t0, script, COOKIE, PASSWORD, SEED, T0, USERNAME,
+        code_from_t0, script, COOKIE, PASSWORD, SEED, T0, USERNAME,
     };
     use crate::test_support::{FakeOrigin, Peers, Scratch, TestClock, BUILD};
     use crate::vault::{MasterKey, NoLegacy, StaticKey};
 
-    fn serve(role: Role, fake: &FakeOrigin) -> (Client, Scratch) {
+    fn serve(role: Role, fake: &FakeOrigin) -> (Client, Scratch, TestClock) {
+        let clock = TestClock::at(T0);
         let dir = Scratch::new("client-keyd");
+        let client = serve_on(role, fake, &dir, &clock);
+        (client, dir, clock)
+    }
+
+    /// A keyd for `role` over `dir`, on `clock`; two of them share the data
+    /// dir, and so the attempt record, as the app's and the CLI's calls do.
+    fn serve_on(role: Role, fake: &FakeOrigin, dir: &Scratch, clock: &TestClock) -> Client {
         let port = fake.origin.rsplit(':').next().unwrap();
         let state = State::new(
             BUILD,
@@ -657,7 +665,7 @@ mod against_keyd {
             Box::new(StaticKey(MasterKey::from_bytes([5; 32]))),
             Box::new(NoLegacy),
         )
-        .with_clock(TestClock::at(T0).clock())
+        .with_clock(clock.clock())
         .with_origins(
             Some(&format!("http://127.0.0.1:{port}")),
             Some(&format!("http://localhost:{port}")),
@@ -670,17 +678,16 @@ mod against_keyd {
             Duration::from_secs(60),
         ));
         std::thread::spawn(move || server.run(&[listener]));
-        let client = Client {
+        Client {
             endpoint: PathBuf::from("memory"),
             connect: Arc::new(move || Ok(connector.connect())),
-        };
-        (client, dir)
+        }
     }
 
     #[test]
     fn save_status_sign_in_and_forget_over_the_wire() {
-        let fake = FakeOrigin::start(script(code_at_t0));
-        let (keyd, dir) = serve(Role::App, &fake);
+        let fake = FakeOrigin::start(script(code_from_t0));
+        let (keyd, dir, clock) = serve(Role::App, &fake);
 
         let empty = keyd.okta_status().unwrap();
         assert_eq!(
@@ -714,6 +721,12 @@ mod against_keyd {
             panic!("expected the guard's wait");
         };
         assert_eq!(waiting.to_string(), LoginError::Waiting(secs).to_string());
+        // A manual attempt skips that wait, but not the minute.
+        assert!(matches!(
+            keyd.ensure_signed_in(Trigger::Manual).unwrap(),
+            Err(LoginError::Waiting(60))
+        ));
+        clock.advance(60);
         assert!(keyd.ensure_signed_in(Trigger::Manual).unwrap().is_ok());
 
         assert!(keyd.okta_forget().unwrap());
@@ -723,8 +736,8 @@ mod against_keyd {
 
     #[test]
     fn a_rejected_password_comes_back_as_the_same_error_and_is_forgotten() {
-        let fake = FakeOrigin::start(script(code_at_t0));
-        let (keyd, _dir) = serve(Role::Cli, &fake);
+        let fake = FakeOrigin::start(script(code_from_t0));
+        let (keyd, _dir, _clock) = serve(Role::Cli, &fake);
         keyd.okta_save(USERNAME, "wrong", SEED).unwrap();
         let outcome = keyd.ensure_signed_in(Trigger::Manual).unwrap();
         let expected = LoginError::BadPassword("Password is incorrect".into());
@@ -736,8 +749,8 @@ mod against_keyd {
 
     #[test]
     fn a_caller_of_no_role_is_refused_every_okta_call_but_may_ask_has() {
-        let fake = FakeOrigin::start(script(code_at_t0));
-        let (keyd, dir) = serve(Role::Unknown, &fake);
+        let fake = FakeOrigin::start(script(code_from_t0));
+        let (keyd, dir, _clock) = serve(Role::Unknown, &fake);
         assert!(matches!(keyd.okta_status(), Err(KeydError::Caller(_))));
         assert!(matches!(keyd.okta_forget(), Err(KeydError::Caller(_))));
         assert!(matches!(
@@ -751,5 +764,59 @@ mod against_keyd {
         assert!(!paths::vault(&dir.0).exists());
         assert!(fake.hits().is_empty());
         assert!(!keyd.has("okta.password").unwrap());
+    }
+
+    #[test]
+    fn a_lockout_pause_is_lifted_by_a_manual_sign_in_from_the_app_and_not_from_the_cli() {
+        let fake = FakeOrigin::start(script(code_from_t0));
+        let dir = Scratch::new("client-roles");
+        let clock = TestClock::at(T0);
+        let app = serve_on(Role::App, &fake, &dir, &clock);
+        let cli = serve_on(Role::Cli, &fake, &dir, &clock);
+        app.okta_save(USERNAME, PASSWORD, SEED).unwrap();
+        let record = paths::sign_in_record(&dir.0);
+        std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+        std::fs::write(
+            &record,
+            format!(
+                r#"{{"last":{},"failures":1,"paused":"The account is locked or blocked: x","credentials_paused":true}}"#,
+                T0 - 7200
+            ),
+        )
+        .unwrap();
+
+        let paused = cli.ensure_signed_in(Trigger::Manual).unwrap().unwrap_err();
+        assert!(matches!(paused, LoginError::Paused(_)), "{paused:?}");
+        // The text tells the person where to fix it.
+        let text = paused.to_string();
+        assert!(
+            text.contains("Settings → Canvas") && text.contains("oculus auth setup"),
+            "{text}"
+        );
+        assert!(fake.hits().is_empty());
+
+        assert_eq!(app.ensure_signed_in(Trigger::Manual).unwrap(), Ok(()));
+        clock.advance(60);
+        assert_eq!(cli.ensure_signed_in(Trigger::Manual).unwrap(), Ok(()));
+    }
+
+    #[test]
+    fn a_second_manual_sign_in_within_a_minute_waits_for_either_caller() {
+        let fake = FakeOrigin::start(script(code_from_t0));
+        let dir = Scratch::new("client-spacing");
+        let clock = TestClock::at(T0);
+        let app = serve_on(Role::App, &fake, &dir, &clock);
+        let cli = serve_on(Role::Cli, &fake, &dir, &clock);
+        app.okta_save(USERNAME, PASSWORD, SEED).unwrap();
+
+        assert_eq!(cli.ensure_signed_in(Trigger::Manual).unwrap(), Ok(()));
+        let requests = fake.hits().len();
+        for client in [&cli, &app] {
+            assert_eq!(
+                client.ensure_signed_in(Trigger::Manual).unwrap(),
+                Err(LoginError::Waiting(60))
+            );
+        }
+        assert_eq!(fake.hits().len(), requests);
     }
 }

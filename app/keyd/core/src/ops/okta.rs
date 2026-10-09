@@ -258,7 +258,7 @@ impl State {
                 env.sso_base = sso.clone();
             }
             env.now = self.clock.clone();
-            okta::sign_in(&env, trigger)
+            okta::sign_in(&env, trigger, caller.role)
         });
         let note = match &outcome {
             Ok(_) => "result=signed_in".to_string(),
@@ -281,7 +281,7 @@ mod tests {
     use super::*;
     use crate::okta::outcome_from_wire;
     use crate::test_support::okta_fake::{
-        answer, code_at_t0, script, COOKIE, PASSWORD, SEED, T0, USERNAME,
+        answer, code_from_t0, script, COOKIE, PASSWORD, SEED, T0, USERNAME,
     };
     use crate::test_support::{FakeOrigin, OldItems, Reads, Scratch, TestClock, BUILD};
     use crate::vault::{KeyError, MasterKey, NoLegacy, StaticKey};
@@ -302,16 +302,18 @@ mod tests {
     }
 
     fn fake() -> FakeOrigin {
-        FakeOrigin::start(script(code_at_t0))
+        FakeOrigin::start(script(code_from_t0))
     }
 
-    fn state_with(
+    /// A keyd whose sign-in clock reads `clock`.
+    fn state_on(
         dir: &Scratch,
         fake: Option<&FakeOrigin>,
         legacy: Box<dyn crate::vault::LegacySource>,
+        clock: &TestClock,
     ) -> State {
         let state = State::new(BUILD, dir.0.clone(), Box::new(StaticKey(key())), legacy)
-            .with_clock(TestClock::at(T0).clock());
+            .with_clock(clock.clock());
         let Some(fake) = fake else { return state };
         let port = fake.origin.rsplit(':').next().unwrap();
         state
@@ -322,8 +324,22 @@ mod tests {
             .unwrap()
     }
 
+    fn state_with(
+        dir: &Scratch,
+        fake: Option<&FakeOrigin>,
+        legacy: Box<dyn crate::vault::LegacySource>,
+    ) -> State {
+        state_on(dir, fake, legacy, &TestClock::at(T0))
+    }
+
     fn state(dir: &Scratch, fake: &FakeOrigin) -> State {
         state_with(dir, Some(fake), Box::new(NoLegacy))
+    }
+
+    /// A keyd on a clock the test moves.
+    fn clocked(dir: &Scratch, fake: &FakeOrigin) -> (State, TestClock) {
+        let clock = TestClock::at(T0);
+        (state_on(dir, Some(fake), Box::new(NoLegacy), &clock), clock)
     }
 
     fn op(state: &State, caller: &Caller, name: &str, req: Value) -> Result<Value, OpError> {
@@ -343,14 +359,22 @@ mod tests {
         save(state, USERNAME, PASSWORD, SEED).unwrap();
     }
 
-    fn ensure(state: &State, trigger: &str) -> Result<Result<(), LoginError>, OpError> {
+    fn ensure_as(
+        state: &State,
+        role: Role,
+        trigger: &str,
+    ) -> Result<Result<(), LoginError>, OpError> {
         let header = op(
             state,
-            &cli(),
+            &as_role(role),
             "ensure_signed_in",
             json!({"trigger": trigger}),
         )?;
         Ok(outcome_from_wire(&header).unwrap_or_else(|| panic!("{header}")))
+    }
+
+    fn ensure(state: &State, trigger: &str) -> Result<Result<(), LoginError>, OpError> {
+        ensure_as(state, Role::Cli, trigger)
     }
 
     fn status(state: &State) -> OktaStatus {
@@ -519,17 +543,27 @@ mod tests {
         let dir = Scratch::new("okta-resume");
         let fake = fake();
         let state = state(&dir, &fake);
+        save_good(&state);
         let record = crate::paths::sign_in_record(&dir.0);
-        std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+        // A lockout, and the last attempt just over a minute ago.
         std::fs::write(
             &record,
-            r#"{"last":4102444800,"failures":3,"paused":"locked"}"#,
+            format!(
+                r#"{{"last":{},"failures":3,"paused":"locked","manual_failures":3}}"#,
+                T0 - 61
+            ),
         )
         .unwrap();
+        assert!(matches!(
+            ensure(&state, "startup").unwrap(),
+            Err(LoginError::Paused(_))
+        ));
         save_good(&state);
         let text = std::fs::read_to_string(&record).unwrap();
         assert!(
-            text.contains(r#""last":0"#) && text.contains(r#""paused":null"#),
+            text.contains(r#""failures":0"#)
+                && text.contains(r#""paused":null"#)
+                && text.contains(r#""manual_failures":0"#),
             "{text}"
         );
         // So the next automatic attempt runs.
@@ -916,21 +950,85 @@ mod tests {
     }
 
     #[test]
-    fn the_second_automatic_attempt_waits_and_a_manual_one_does_not() {
+    fn the_second_automatic_attempt_waits_and_a_manual_one_waits_a_minute() {
         let dir = Scratch::new("okta-guard");
         let fake = fake();
-        let state = state(&dir, &fake);
+        let (state, clock) = clocked(&dir, &fake);
         save_good(&state);
 
         assert_eq!(ensure(&state, "startup").unwrap(), Ok(()));
         let before = requests(&fake);
-        let Err(LoginError::Waiting(secs)) = ensure(&state, "browser").unwrap() else {
-            panic!("an automatic attempt right after another waits");
-        };
-        assert!((590..=600).contains(&secs), "{secs}");
+        assert_eq!(
+            ensure(&state, "browser").unwrap(),
+            Err(LoginError::Waiting(600))
+        );
+        assert_eq!(
+            ensure(&state, "manual").unwrap(),
+            Err(LoginError::Waiting(60))
+        );
         assert_eq!(requests(&fake), before, "the wait costs no request");
+
+        clock.advance(60);
         assert_eq!(ensure(&state, "manual").unwrap(), Ok(()));
         assert!(requests(&fake) > before);
+        assert_eq!(
+            ensure(&state, "manual").unwrap(),
+            Err(LoginError::Waiting(60))
+        );
+    }
+
+    #[test]
+    fn a_manual_request_from_the_cli_cannot_lift_a_lockout_but_the_apps_can() {
+        let dir = Scratch::new("okta-lockout-roles");
+        let fake = fake();
+        let (state, clock) = clocked(&dir, &fake);
+        save_good(&state);
+        let record = crate::paths::sign_in_record(&dir.0);
+        std::fs::write(
+            &record,
+            format!(
+                r#"{{"last":{},"failures":1,"paused":"The account is locked or blocked: x","credentials_paused":true,"manual_failures":0}}"#,
+                T0 - 7200
+            ),
+        )
+        .unwrap();
+
+        for trigger in ["manual", "startup", "keep-alive", "browser"] {
+            let Err(LoginError::Paused(_)) = ensure_as(&state, Role::Cli, trigger).unwrap() else {
+                panic!("the CLI's {trigger} request was not paused");
+            };
+        }
+        assert_eq!(requests(&fake), 0, "the CLI cost Okta nothing");
+        assert!(ensure_as(&state, Role::App, "startup").unwrap().is_err());
+
+        assert_eq!(ensure_as(&state, Role::App, "manual").unwrap(), Ok(()));
+        // The app's success lifted the pause for everyone.
+        clock.advance(60);
+        assert_eq!(ensure_as(&state, Role::Cli, "manual").unwrap(), Ok(()));
+    }
+
+    #[test]
+    fn three_failed_manual_requests_hold_the_next_one_until_credentials_are_saved() {
+        let dir = Scratch::new("okta-three");
+        let fake = fake();
+        let (state, clock) = clocked(&dir, &fake);
+        // A well-formed seed that is not the account's: every code is wrong.
+        save(&state, USERNAME, PASSWORD, "JBSWY3DPEHPK3PXP").unwrap();
+        for _ in 0..3 {
+            let Err(LoginError::BadTotp(_)) = ensure(&state, "manual").unwrap() else {
+                panic!("expected a rejected code");
+            };
+            clock.advance(60);
+        }
+        let before = requests(&fake);
+        let Err(LoginError::Waiting(secs)) = ensure(&state, "manual").unwrap() else {
+            panic!("a fourth manual attempt ran");
+        };
+        assert_eq!(secs, 6 * 3600 - 60);
+        assert_eq!(requests(&fake), before);
+
+        save_good(&state);
+        assert_eq!(ensure(&state, "manual").unwrap(), Ok(()));
     }
 
     #[test]
@@ -979,7 +1077,7 @@ mod tests {
     #[test]
     fn a_caller_arriving_mid_sign_in_waits_and_gets_its_outcome_and_one_flow_runs() {
         let dir = Scratch::new("okta-flight");
-        let fake = slow(script(code_at_t0));
+        let fake = slow(script(code_from_t0));
         let state = Arc::new(state(&dir, &fake));
         save_good(&state);
 

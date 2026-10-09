@@ -25,9 +25,10 @@ pub fn current_code(passcode: &str) -> bool {
 /// next code, so no sign-in under it waits for a fresh one.
 pub const T0: u64 = 1_111_111_111;
 
-/// For a sign-in whose clock is pinned at `T0`.
-pub fn code_at_t0(passcode: &str) -> bool {
-    crate::okta::totp_code(SEED, T0).is_ok_and(|code| code == passcode)
+/// For a sign-in whose clock starts at `T0` and is moved in whole windows
+/// (30 s): the code of any window in the next day.
+pub fn code_from_t0(passcode: &str) -> bool {
+    (0..3000).any(|k| crate::okta::totp_code(SEED, T0 + 30 * k).is_ok_and(|code| code == passcode))
 }
 
 pub fn answer(status: u16, headers: &[(&'static str, &str)], body: &str) -> Answer {

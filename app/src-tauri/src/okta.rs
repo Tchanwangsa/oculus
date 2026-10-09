@@ -14,6 +14,7 @@
 use crate::credentials::{Credentialed, KeydError};
 pub use keyd_core::okta::{resume_automatic_sign_in, totp_now, LoginError, Trigger, SSO_HOST};
 use keyd_core::okta::{validate_credentials, CredentialStore, Credentials, Env};
+pub use keyd_core::platform::Role;
 
 fn broker() -> Credentialed {
     Credentialed::at(&crate::paths::data_dir())
@@ -182,11 +183,12 @@ fn env(data_dir: &std::path::Path) -> Env<'static> {
 }
 
 /// Headless sign-in behind the attempt guard. keyd runs it and writes the
-/// session files; with keyd absent it runs here with the keychain's
-/// credentials (`keyd_core::okta::sign_in`).
-pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger) -> Result<(), LoginError> {
+/// session files, taking `role` from the caller's identity; with keyd absent
+/// it runs here with the keychain's credentials and the `role` the caller
+/// states (`keyd_core::okta::sign_in`).
+pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger, role: Role) -> Result<(), LoginError> {
     sign_in_in(&Credentialed::at(data_dir), trigger, || {
-        keyd_core::okta::sign_in(&env(data_dir), trigger).map(|_| ())
+        keyd_core::okta::sign_in(&env(data_dir), trigger, role).map(|_| ())
     })
 }
 
@@ -240,7 +242,7 @@ fn run_sign_in(
     dir: &std::path::Path,
     trigger: Trigger,
 ) -> Result<String, String> {
-    sign_in(dir, trigger).map_err(|e| e.to_string())?;
+    sign_in(dir, trigger, Role::App).map_err(|e| e.to_string())?;
     signed_in(app, dir)
 }
 
@@ -259,7 +261,7 @@ fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, St
 /// "never set up" and "signed out" is logged, a keychain refusal included.
 pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
     let dir = crate::paths::data_dir();
-    let outcome = match sign_in(&dir, trigger) {
+    let outcome = match sign_in(&dir, trigger, Role::App) {
         Err(LoginError::NotConfigured | LoginError::SignedOut) => return false,
         Err(e) => Err(e.to_string()),
         Ok(()) => signed_in(app, &dir),

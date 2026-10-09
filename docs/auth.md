@@ -191,40 +191,61 @@ typed.
 
 ## Every sign-in attempt goes through one guard
 
-The startup probe, the in-app 6 h thread, the browser and `oculus auth tick`
-each sign in on their own, in two processes, and Okta locks the account after
-too many attempts. So `keyd_core::okta::sign_in` checks one record,
-`canvas-session/sign-in.json`, under a file lock before each attempt, and logs
-every attempt with its caller to `okta-sign-in.log`. The guard is that one
-function, so keyd and the in-process fallback share it and the file.
+The startup probe, the in-app 6 h thread, the browser, `oculus auth tick` and
+`oculus auth auto` each sign in on their own, in two processes, and Okta locks
+the account after too many attempts (it did on 2026-09-20). So
+`keyd_core::okta::sign_in` checks one record, `canvas-session/sign-in.json`,
+before each attempt, and logs every attempt with its caller to
+`okta-sign-in.log`. The guard is that one function (`okta/guard.rs`), so keyd
+and the in-process fallback share it and the file; nothing calls the flow
+around it. `sign_in` takes who asked: keyd passes its caller's role (`app` or
+`cli`), an in-process run states its own (the app `app`, the CLI binary
+`cli`).
 
-- The record is replaced atomically (a temp file in the same directory,
-  fsynced, then renamed over it) under a lock on a sibling file,
-  `sign-in.json.lock`, so a crash leaves the old record or the new one and
-  never an empty file. The lock file is created on first use, so a record with
-  none beside it is read as it is.
+**The rules** (`guard::admit`):
+
+- **Every attempt, manual included, starts at least 60 s after the last**
+  (`LoginError::Waiting`).
+- **Automatic attempts** also wait 10 min after any attempt, then 1 h after
+  two failures in a row and 6 h after three, and stop at a pause. A success
+  resets the count. A network failure waits but does not count: Okta gave no
+  verdict.
+- **A manual attempt** (`Trigger::Manual`: Connect, `oculus auth auto`) skips
+  that back-off and the pause, because a person is waiting. After three
+  failed manual attempts in a row, with no success or credential save between,
+  it is held to the back-off and the pause like an automatic one.
+- **A lockout or a rejected password pauses automatic sign-in**, and only a
+  manual attempt from the app lifts it, or saving credentials, or a person
+  signing in in the login window or a browser tab. A manual request from the
+  CLI is refused with `Paused` pointing at Settings → Canvas and
+  `oculus auth setup`, so a command (or an agent running one) cannot keep
+  retrying a locked account. A factor Okta offers that the flow cannot answer
+  also pauses; any manual attempt lifts that one.
+- **Saving credentials or a person's sign-in** (`resume_automatic_sign_in`)
+  clears the failures, the pause and the back-off, but not the 60 s between
+  attempts.
+- After a sign-out no automatic attempt starts at all, and none is recorded
+  (`LoginError::SignedOut`).
+
+**The record** (`okta/guard/record.rs`) holds `last` (when the last attempt
+started), `failures`, `paused`, `credentials_paused` (the pause is a lockout or
+password; a record that does not say counts as one), `manual_failures` and
+`forgiven` (a save cleared the back-off).
+
+- It is replaced atomically (a temp file in the same directory, fsynced, then
+  renamed over it) under a lock on a sibling file, `sign-in.json.lock`, so a
+  crash leaves the old record or the new one and never an empty file. The lock
+  file is created on first use, so a record with none beside it is read as it
+  is.
 - A file that is missing is a blank record: nothing has been attempted. A file
   that exists but is empty, truncated, mistyped or short of a field is
   *damaged*, and a blank record would forget a lockout pause, so an automatic
   attempt is refused (`LoginError::Paused`, naming the file) and the file is
   left untouched. A manual attempt, saving credentials or a person's sign-in
   writes a good record over it.
-- An automatic attempt is also refused when the record cannot be locked, read
-  or saved: with no count of earlier attempts, running could lock the account.
-  A manual attempt still runs, since a person is waiting.
-
-- An automatic attempt waits 10 min after any attempt, then 1 h after two
-  failures in a row and 6 h after three. A success resets the count.
-- A network failure waits but does not count: Okta gave no verdict.
-- A lockout, a rejected password or a factor it cannot answer pauses automatic
-  sign-in until a manual one succeeds (`Trigger::Manual`: Connect, saving
-  credentials, `oculus auth auto`) or a person signs in in the login window
-  or a browser tab. Saving
-  credentials also clears the pause.
-- Manual attempts skip the wait, because a person is waiting on the answer,
-  but are still recorded.
-- After a sign-out no automatic attempt starts at all, and none is recorded
-  (`LoginError::SignedOut`).
+- An attempt is also refused when the record cannot be locked, read or saved:
+  with no count of earlier attempts, running could lock the account. Only a
+  manual attempt from the app still runs, since a person is waiting.
 
 ## Ed mints its `x-token` from Canvas
 

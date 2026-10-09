@@ -35,6 +35,7 @@ pub use wire::{outcome_from_wire, outcome_to_wire, OktaStatus};
 
 use crate::clock::Clock;
 use crate::paths;
+use crate::platform::Role;
 
 pub const SSO_HOST: &str = "sso.unimelb.edu.au";
 
@@ -138,11 +139,13 @@ pub enum LoginError {
     /// The state machine went somewhere this code does not model; carries the
     /// remediation names.
     Unexpected(String),
-    /// The attempt guard held an automatic sign-in back; carries seconds until
-    /// the next one is allowed.
+    /// The attempt guard held a sign-in back; carries seconds until the next
+    /// one is allowed.
     Waiting(u64),
-    /// Automatic sign-in stopped after a failure retrying cannot fix; carries
-    /// that failure. A manual sign-in or newly saved credentials resume it.
+    /// The attempt guard refused a sign-in: automatic sign-in stopped after a
+    /// failure retrying cannot fix, or the attempt record is unusable. Carries
+    /// the reason. A manual sign-in from the app, a sign-in a person finishes
+    /// in the browser, or newly saved credentials resume it.
     Paused(String),
 }
 
@@ -186,22 +189,27 @@ impl std::fmt::Display for LoginError {
             LoginError::Unexpected(m) => write!(f, "Unexpected sign-in step: {m}"),
             LoginError::Waiting(secs) => write!(
                 f,
-                "Holding off automatic sign-in for {} more min after the last attempt.",
-                secs.div_ceil(60)
+                "Holding off sign-in after the last attempt; try again in {}.",
+                if *secs < 60 {
+                    format!("{secs} s")
+                } else {
+                    format!("{} min", secs.div_ceil(60))
+                }
             ),
             LoginError::Paused(m) => write!(
                 f,
-                "Automatic sign-in is paused after: {m}. Sign in from Settings → Canvas \
-                 or run `oculus auth auto` to resume it."
+                "Automatic sign-in is paused after: {m}. Sign in from Settings → Canvas, or \
+                 save the credentials again with `oculus auth setup`, to resume it."
             ),
         }
     }
 }
 
-/// Headless sign-in behind the attempt guard. Automatic attempts wait 10 min
-/// after any attempt, then 1 h and 6 h as failures repeat, and stop on a
-/// failure retrying cannot fix. Each attempt is a line in `okta-sign-in.log`.
-pub fn sign_in(env: &Env, trigger: Trigger) -> Result<String, LoginError> {
+/// Headless sign-in behind the attempt guard (`guard.rs`). `role` is who asked,
+/// and matters only to a manual attempt against a lockout or a rejected
+/// password: keyd takes it from its caller, an in-process run states its own.
+/// Each attempt is a line in `okta-sign-in.log`.
+pub fn sign_in(env: &Env, trigger: Trigger, role: Role) -> Result<String, LoginError> {
     if trigger != Trigger::Manual && paths::signed_out(&env.data_dir).exists() {
         return Err(LoginError::SignedOut);
     }
@@ -210,10 +218,10 @@ pub fn sign_in(env: &Env, trigger: Trigger) -> Result<String, LoginError> {
         .load()
         .map_err(LoginError::UnreadableCredentials)?
         .ok_or(LoginError::NotConfigured)?;
-    guard::admit_recorded(&env.data_dir, trigger, (env.now)())?;
+    guard::admit_recorded(&env.data_dir, trigger, role, (env.now)())?;
 
     let result = flow::attempt_sign_in(env, &creds);
-    guard::settle_recorded(&env.data_dir, &result);
+    guard::settle_recorded(&env.data_dir, trigger, &result);
     let outcome = match &result {
         Ok(_) => "signed in".to_string(),
         Err(e) => format!("failed — {e}"),
