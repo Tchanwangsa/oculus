@@ -926,7 +926,8 @@ impl Engine {
         let office = office_ext(&ct).or_else(|| is_generic_binary(&ct).then(|| office_ext_of(&name)).flatten());
         let sheet = is_sheet_type(&ct, &name);
         let downloadable = DOWNLOADABLE_TYPES.contains(&ct.as_str())
-            || (is_generic_binary(&ct) && paths::is_pdf(&name));
+            || (is_generic_binary(&ct) && paths::is_pdf(&name))
+            || is_csv_type(&ct, &name);
         if !video && !downloadable && office.is_none() && !sheet {
             return Ok(Fetched::Skipped);
         }
@@ -1561,6 +1562,17 @@ fn is_sheet_type(ct: &str, name: &str) -> bool {
     (SHEET_TYPES.contains(&ct) || is_generic_binary(ct)) && paths::is_sheet(name)
 }
 
+/// A `.csv` under any type Canvas labels one with. It is already text, so it
+/// is stored as-is and never parsed, converted or embedded.
+fn is_csv_type(ct: &str, name: &str) -> bool {
+    let typed = matches!(
+        ct,
+        "text/csv" | "application/csv" | "text/comma-separated-values" | "text/plain"
+            | "application/vnd.ms-excel"
+    );
+    (typed || is_generic_binary(ct)) && name.to_ascii_lowercase().ends_with(".csv")
+}
+
 /// The converter extension an untyped file's name claims, if known.
 pub(crate) fn office_ext_of(name: &str) -> Option<&'static str> {
     let lower = name.to_ascii_lowercase();
@@ -1837,6 +1849,16 @@ mod tests {
         assert!(!is_sheet_type("application/zip", "marks.xlsx"));
         assert!(!is_sheet_type("application/octet-stream", "deck.pptx"));
         assert_eq!(office_ext_of("marks.xlsx"), None);
+    }
+
+    #[test]
+    fn a_csv_downloads_as_itself_whatever_canvas_labels_it() {
+        for ct in ["text/csv", "application/csv", "text/plain", "application/vnd.ms-excel", ""] {
+            assert!(is_csv_type(ct, "Grades.CSV"), "{ct}");
+        }
+        assert!(!is_csv_type("text/csv", "grades.txt"));
+        assert!(!is_csv_type("application/zip", "grades.csv"));
+        assert!(!paths::is_pdf("grades.csv") && !paths::is_sheet("grades.csv"));
     }
 
     #[test]

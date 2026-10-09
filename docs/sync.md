@@ -121,6 +121,11 @@ One needs a spreadsheet type (or none) *and* a spreadsheet's extension
 (`is_sheet_type`): every later gate goes by the extension, and a `.csv` can
 arrive labelled `application/vnd.ms-excel`.
 
+A `.csv` is already text, so it is stored as-is and nothing more: no parse,
+conversion, embed or File Activity row (`is_csv_type` — a `.csv` name under
+a CSV, plain-text, Excel or missing type). `oculus read` and `oculus grep`
+read it from disk.
+
 ## Ed threads are a custom XML dialect
 
 Ed returns threads as `<document>` XML, parsed with an HTML parser in
