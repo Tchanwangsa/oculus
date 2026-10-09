@@ -251,11 +251,10 @@ impl Ctx {
         let secret = read_secret("Authenticator setup key: ")?;
 
         app_lib::okta::store_credentials(&username, &password, &secret)?;
-        app_lib::okta::resume_automatic_sign_in(&self.data_dir);
         let code = app_lib::okta::totp_now(&secret)?;
 
         println!();
-        println!("{} to the macOS keychain", paint("saved", GREEN));
+        println!("{}", paint("saved", GREEN));
         println!(
             "This Mac's code right now is {} — confirm it matches your phone",
             paint(&code, GREEN)

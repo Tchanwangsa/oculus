@@ -46,12 +46,15 @@ migrations, so on a fresh machine the app must open once first; until then
 
 - `auth login` launches the app for the SAML browser step, because a push or
   biometric challenge needs a human. `auth setup` stores what `auth auto` needs
-  to sign in headlessly; `auth forget` clears it ([auth.md](./auth.md)).
+  to sign in headlessly, in keyd's vault (the keychain when keyd is absent),
+  then prints the code for the setup key just typed — nothing reads a stored
+  password or key back; `auth forget` clears it
+  ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-credentials-and-runs-the-sign-in)).
   `auth auto` is a manual sign-in, so it skips the
   [attempt guard](./auth.md#every-sign-in-attempt-goes-through-one-guard)'s
   wait and lifts its pause.
 - `auth tick` is one keep-alive cycle, run by the LaunchAgent. Its sign-in is
-  automatic, so the guard can skip it. It prints nothing, logs to
+  automatic, so the guard can skip it. keyd runs it when installed. It prints nothing, logs to
   `session-keepalive.log`, and always exits 0, because launchd reads a
   non-zero exit as a crashed job.
 - `run -s` scrapes, then parses and embeds each written PDF one file at a time,

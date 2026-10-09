@@ -21,7 +21,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
 | Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/keyd.rs` |
-| Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes | `app/src-tauri/src/credentials.rs`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
+| Credential storage (keychain, and `CloudKey` for the three cloud keys keyd holds), the keyd client; provider probes; the Okta calls, which keyd answers or the keychain does when it is absent | `app/src-tauri/src/credentials.rs`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
 | Lecture video server | `app/src-tauri/src/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
@@ -57,7 +57,7 @@ its failure rules are in [parsing.md](./parsing.md).
   Tauri's command thread.
   Upload batches serialize their name allocation.
 - Credentials go keychain → in-process client, except the Voyage, MinerU and
-  Groq keys while keyd is installed
+  Groq keys and the Okta sign-in credentials while keyd is installed
   ([below](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
   No key enters SQLite, the WebView, a health response or a progress event.
   The local engines need none.
@@ -100,8 +100,9 @@ app links too, for the client and the installer only.
 - **The wire format** is one JSON line, then `body_len` raw bytes if the
   header names them; replies have the same shape. One module writes and reads
   it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
-  hash, pid), `has`, `store`, `delete`, `forward`. No op returns a value, and
-  only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
+  hash, pid), `has`, `store`, `delete`, `forward`, and the Okta ops `okta_save`,
+  `okta_forget`, `okta_status` and `ensure_signed_in`. No op returns a key, a
+  password or a seed, and only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
   `request`, `caller`, `keychain` (the master key or an old item refused or
   failed), `vault`, `missing` and `upstream`.
 - **`forward` sends one request with the key added; the key never leaves.**
@@ -123,7 +124,8 @@ app links too, for the client and the installer only.
   vault unless the vault already holds a key, then records
   `keyd.imported.<name>` in the vault; `store` and `delete` record it too, so
   a deleted key never comes back from the old item, which stays in the
-  keychain. Okta's items are never imported. Entries under
+  keychain. The Okta items are imported the same way, by `okta_status` and the
+  sign-in, and `okta_save` and `okta_forget` mark them. Entries under
   `keyd.` are bookkeeping no op can name (`app/keyd/core/src/names.rs`).
 - **The caller check runs before any request is read.** The peer's uid must
   be keyd's. A bundled keyd then admits only executables inside its own app
@@ -132,20 +134,27 @@ app links too, for the client and the installer only.
   same-user caller. The adapter also gives each caller a role — `app` (the
   bundle itself), `cli` (its `Contents/MacOS/oculus`) or `unknown`; a dev
   build goes by file name, `app` or `oculus` — which the log records beside
-  the signing identifier. Ops are to check the role, never a path; none
-  does yet.
-- **Voyage, MinerU and Groq go through it.** `credentials::Credentialed`
+  the signing identifier. Ops are to check the role, never a path: the four
+  Okta ops admit only `app` and `cli`, because every executable in the install
+  passes the caller check.
+- **keyd holds the Okta credentials and runs the sign-in.** The username,
+  password and TOTP seed are vault entries, written together by `okta_save`
+  (which validates) and removed together by `okta_forget`. `ensure_signed_in`
+  runs `keyd_core::okta::sign_in` (flow, attempt guard, log) once at a time
+  and answers with the outcome as a `LoginError`, never a cookie; the Canvas
+  and Okta cookie files it writes are in the data dir
+  ([auth.md](./auth.md#with-keyd-installed-keyd-holds-the-credentials-and-runs-the-sign-in)).
+- **Voyage, MinerU, Groq and the Okta sign-in go through it.** `credentials::Credentialed`
   (`keyd_core::client::Client`, `app/keyd/core/src/client.rs`) is the client,
   one connection per call. It treats a missing socket or a refused connect as keyd not
   installed (`KeydError::Absent`), the only case in which a caller reads the
   keychain itself; every other error surfaces. The Voyage and MinerU clients,
-  Groq transcription, and the three keys' Settings commands
-  (`credentials::CloudKey`) use it
+  Groq transcription, the three keys' Settings commands
+  (`credentials::CloudKey`) and the Okta calls (`okta.rs`) use it
   ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key),
   [parsing.md](./parsing.md#with-oculus-keyd-installed-no-oculus-process-holds-the-mineru-token),
   [viewers.md](./viewers.md)). A request's timeout is the caller's own, and
-  Groq's upload has none. The app and CLI still read the Okta items
-  themselves (the credentials bullet above).
+  Groq's upload has none, and neither has `ensure_signed_in`.
 - `keyd::ensure_installed` runs at app startup and does nothing in a dev
   build; a dev install is the preflight's ([cli.md](./cli.md)).
 - **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus
@@ -157,7 +166,7 @@ app links too, for the client and the installer only.
 macOS suspends an off-screen WKWebView's content process, which freezes
 anything running in it mid-run with nothing to catch. So the scrape engine is
 `app/src-tauri/src/sync.rs`, and the headless Okta sign-in
-(`app/src-tauri/src/okta.rs`) runs in Rust too. Never move background work into
+(`app/keyd/core/src/okta/`) runs in Rust too, in keyd or in-process. Never move background work into
 a WebView.
 
 ## Lecture video streams over localhost HTTP

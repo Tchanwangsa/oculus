@@ -10,7 +10,9 @@ cookie.
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
 | Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
 | Cookie (Canvas and Okta), auth-flag and keep-alive log paths; private writes, sign-out | `app/src-tauri/src/paths.rs` |
-| Headless Okta sign-in, TOTP, stored credentials, the attempt guard | `app/src-tauri/src/okta.rs` |
+| The app's Okta commands and calls: each goes to keyd, or to the keychain and an in-process sign-in when keyd is absent | `app/src-tauri/src/okta.rs` |
+| The sign-in flow, TOTP and the attempt guard — one implementation, run by keyd and by the in-process fallback | `app/keyd/core/src/okta/` |
+| keyd's Okta ops: the vault entries, the old-item import, the role check, one sign-in at a time | `app/keyd/core/src/ops/okta.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
 | Staging the CLI into the bundle | `app/scripts/stage-cli.mjs` |
@@ -19,8 +21,8 @@ cookie.
 | Echo360 session via LTI, per-course cache | `app/src-tauri/src/echo360.rs`, `app/src-tauri/src/lectures.rs` |
 | Frontend auth state | `app/src/hooks/useAuth.ts`, `app/src/hooks/useKeepalive.ts` |
 | Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
-| Keychain entry lifecycle (also used by MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/credentials.rs` |
-| The `oculus-keyd` client, which the Voyage, MinerU and Groq keys go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/credentials.rs` (`CloudKey`) |
+| Keychain entry lifecycle (the fallback for the Okta credentials and for MinerU, Voyage and Groq when keyd is absent) | `app/src-tauri/src/credentials.rs` |
+| The `oculus-keyd` client, which the Voyage, MinerU and Groq keys and the Okta credentials and sign-in go through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`), `app/src-tauri/src/credentials.rs` (`CloudKey`) |
 | Credential entry UI | `app/src/components/settings/AutoSignIn.tsx` |
 
 ## Canvas authenticates by session cookie only
@@ -100,7 +102,7 @@ guard. The CLI has no app to update, so `oculus auth auto` sets only the flag
   hours and emits `canvas-auth-expired` on rejection.
 - **App closed** — `app/src-tauri/src/keepalive.rs` installs a LaunchAgent
   that runs `oculus auth tick`, which shares the app's probe, cookie merge and
-  sign-in. Every outcome is a line in `session-keepalive.log` and exit 0,
+  sign-in (which goes through keyd when it is installed). Every outcome is a line in `session-keepalive.log` and exit 0,
   because launchd has no console and a non-zero exit reads as a crashed job.
 - The tick re-authenticates only on `Rejected`; on `Unreachable` it logs and
   waits rather than spending an Okta attempt on a dead network. After a
@@ -129,27 +131,77 @@ IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
 
 - The loop dispatches on remediation **names**, not a fixed order, because
   factor order is an Okta policy setting.
-- It answers **password** (macOS keychain) and **TOTP** (generated in-tree
-  from a stored seed, pinned by the RFC 4226/6238 vectors). Okta Verify push
+- It answers **password** and **TOTP** (generated in-tree from a stored
+  seed, pinned by the RFC 4226/6238 vectors), both from keyd's vault or, with
+  keyd absent, the keychain. Okta Verify push
   and WebAuthn need a human; `LoginError::UnsupportedFactor` names the factors
   Okta did offer.
 - Both probe sites in `lib.rs` call `okta::try_auto_recover` before declaring
   a session expired, and `useAuth().connect()` tries it before opening the
   login window. Credentials come from Settings → Canvas or `oculus auth setup`.
-- A keychain read that is refused is `LoginError::UnreadableCredentials`,
-  never `NotConfigured`: no attempt is made or recorded, `try_auto_recover`
-  logs it, and Settings → Canvas shows it.
-- Password and TOTP seed share one keychain, so against code already running
+- A credential read that is refused (keyd's master key, or an old keychain
+  item) is `LoginError::UnreadableCredentials`, never `NotConfigured`: no
+  attempt is made or recorded, `try_auto_recover` logs it, and Settings →
+  Canvas shows it.
+- Password and TOTP seed are kept together, so against code already running
   as this user the second factor is not a second factor — the same posture as
   a password manager that stores TOTP.
+
+## With keyd installed, keyd holds the credentials and runs the sign-in
+
+`okta.rs` in the app only routes. Saving, forgetting, the Settings status and
+every sign-in (Settings, the probes, the browser, `oculus auth auto`,
+`oculus auth tick`) are requests to `oculus-keyd` through
+`credentials::Credentialed` (ops `okta_save`, `okta_forget`, `okta_status`,
+`ensure_signed_in`). Neither process reads the password or the seed back: no
+op returns one, and `oculus auth setup` prints the code from the seed just
+typed.
+
+- **Only `KeydError::Absent` takes the old route.** The keychain items
+  (`com.oculus.unimelb-sso`: `username`, `password`, `totp_secret`) and an
+  in-process `keyd_core::okta::sign_in` answer only when nothing is listening
+  on `keyd.sock`. Every other keyd error surfaces and starts no second route,
+  because an in-process attempt after a keyd failure could be a second
+  attempt at Okta's lockout.
+- **Failures map to the sign-in's own errors.** `ensure_signed_in` carries a
+  failed sign-in as its `LoginError`, variant for variant, so callers act on
+  it as they do in-process. A `keychain` error is
+  `LoginError::UnreadableCredentials`; any other keyd error is
+  `LoginError::Unexpected` with keyd's message.
+- **keyd validates a save.** The app sends the values as typed, and
+  `validate_credentials` (the check the keychain route applies too) runs in
+  keyd; its message for bad input reaches the user unchanged. A save also
+  clears the attempt guard's wait and pause.
+- **The vault holds `okta.username`, `okta.password` and `okta.totp_secret`.**
+  The first `okta_status` or sign-in copies the old keychain items in, one
+  keychain prompt each, once; the items stay in the keychain, and a save or a
+  forget marks all three imported, so an old item is never copied back over
+  either.
+- **The app and the CLI only.** keyd's caller check admits any executable
+  in the install, so each Okta op also requires the `app` or `cli` role;
+  ffmpeg, whisper-cli and the like are refused.
+- **One sign-in runs at a time.** A request that arrives while keyd is
+  signing in waits for that attempt and returns its outcome, rather than
+  starting another or being held off by the guard. The socket has no timeout
+  on this op: the flow can wait for the next TOTP window.
+- **The session files are still written by keyd into the data dir** —
+  `canvas-session.cookie` and `sso-session.cookie`, the same files at the same
+  paths as the in-process route — and the app and CLI read them from there. No
+  reply carries a cookie, a password or a seed.
 
 ## Every sign-in attempt goes through one guard
 
 The startup probe, the in-app 6 h thread, the browser and `oculus auth tick`
 each sign in on their own, in two processes, and Okta locks the account after
-too many attempts. So `okta::sign_in` checks one record,
+too many attempts. So `keyd_core::okta::sign_in` checks one record,
 `canvas-session/sign-in.json`, under a file lock before each attempt, and logs
-every attempt with its caller to `okta-sign-in.log`.
+every attempt with its caller to `okta-sign-in.log`. The guard is that one
+function, so keyd and the in-process fallback share it and the file.
+
+- An automatic attempt is refused (`LoginError::Paused`) when the record
+  cannot be locked, opened or saved: with no count of earlier attempts, running
+  could lock the account. A manual attempt still runs, since a person is
+  waiting.
 
 - An automatic attempt waits 10 min after any attempt, then 1 h after two
   failures in a row and 6 h after three. A success resets the count.
@@ -188,6 +240,7 @@ course's LTI external-tool form (see
 - Answer `currentAuthenticator`'s challenge before reading the chooser — OIE offers `select-authenticator-authenticate` beside every challenge, and taking it loops forever.
 - The login page names `stateToken` several times; the first is a fragment introspect rejects as "session has expired", so `state_token_candidates` tries every plausible one.
 - Only `/idp/idx/introspect` takes `stateToken`; every later call sends `stateHandle`.
+- An Okta call falls back to the keychain and an in-process sign-in only on `KeydError::Absent`; on any other keyd error that route can double an attempt against Okta's lockout.
 - A rejected password is cleared and automatic sign-in paused, or every automatic path would replay it until Okta locks the account.
 - A TOTP seed cannot be recovered from codes; getting it means re-enrolling the factor.
 - `setCookies:completionHandler:` must get a real block — nil segfaults the app seconds later from a WebKit-only stack.

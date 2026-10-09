@@ -261,7 +261,7 @@ pub fn repair_path() {
 /// Install the agent after a headless sign-in has actually worked — not merely
 /// when credentials are stored: Okta Verify push / WebAuthn-only accounts cannot
 /// be driven from a LaunchAgent. Called on the success path of
-/// [`crate::okta::run_sign_in`]; silent in every early return.
+/// [`crate::okta::signed_in`]; silent in every early return.
 pub fn ensure_installed() {
     if !cfg!(target_os = "macos") {
         return;

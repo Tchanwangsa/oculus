@@ -32,7 +32,7 @@ dirs = "6"
 # keyd's client, its registrar and the one definition of the data dir, plus
 # the headless Okta sign-in the app runs when keyd is absent. Never keyd's
 # server half (docs/development.md).
-keyd_core = { package = "oculus-keyd-core", path = "../keyd/core", features = ["client", "okta"] }
+keyd_core = { package = "oculus-keyd-core", path = "../keyd/core", features = ["client"] }
 serde = { version = "1", features = ["derive"] }
 # `raw_value`: `harness/antigravity_rules.rs` rewrites two lists in agy's
 # settings file and hands every other value back verbatim, in file order.
