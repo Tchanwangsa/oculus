@@ -30,3 +30,8 @@ app/src-tauri/binaries/
 # trap is that it lands wherever you happened to be. The real fix is
 # MINERU_API_OUTPUT_ROOT in the start line — see docs/parsing.md.
 output/
+
+# tsc -b output; the build is `tsc` (noEmit) + vite
+*.tsbuildinfo
+app/vite.config.js
+app/vite.config.d.ts
