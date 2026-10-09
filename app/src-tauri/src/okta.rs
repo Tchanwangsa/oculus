@@ -950,7 +950,7 @@ fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<St
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    std::fs::write(&path, &cookie)
+    crate::paths::write_private(&path, &cookie)
         .map_err(|e| LoginError::Unexpected(format!("could not save the session cookie: {e}")))?;
     // Okta's session too, so an in-app browser page that redirects to SSO
     // passes straight through (`browser::seed_sessions`).
