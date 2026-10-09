@@ -7,6 +7,11 @@
 //! Errors carry a code, never the server's text (see `EmbedError`). A 429 is
 //! not a failure: it is honoured, learned from (the only place the account's
 //! real limits are stated) and retried without consuming an attempt.
+//!
+//! The request goes through `oculus-keyd` when it is installed and the API
+//! root is Voyage's own, so this process never holds the key; otherwise
+//! straight to the API root with the keychain's key (`with_config`). Both
+//! routes hand `send` the same `RawResponse`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -15,10 +20,11 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use serde_json::{json, Value};
 
+use crate::credentials::{Credentialed, KeydError, RawResponse};
 use crate::embed::raster::{self, RenderedPage};
 use crate::embed::{
-    embed_config, pack_vector, unpack_vector, EmbedConfig, EmbedError, EmbedOutput, Embedder,
-    Health, Limiter, Progress, Wait, EMBED_DIM, EMBED_MODEL,
+    embed_config, pack_vector, unpack_vector, CredentialSource, EmbedConfig, EmbedError,
+    EmbedOutput, Embedder, Health, Limiter, Progress, Wait, CLOUD_BASE_URL, EMBED_DIM, EMBED_MODEL,
 };
 
 use crate::ratelimit::{nap, transport_detail, Retry};
@@ -31,6 +37,9 @@ pub const BACKEND: &str = "voyage-cloud";
 
 /// `/embeddings` is the text-only model's and refuses images.
 const EMBED_PATH: &str = "/multimodalembeddings";
+
+/// `CLOUD_BASE_URL`'s path, which keyd's `forward` is given in place of a URL.
+const CLOUD_PATH: &str = "/v1";
 
 /// The wire side of `embed::QUERY_INSTRUCTION`.
 const INPUT_TYPE_DOCUMENT: &str = "document";
@@ -102,10 +111,43 @@ impl From<EmbedError> for SendFailure {
     }
 }
 
+/// How a request gets its key.
+#[derive(Clone)]
+enum Auth {
+    /// This process holds the key: keyd is absent, or the API root is not
+    /// Voyage's.
+    Direct(Arc<String>),
+    /// keyd adds it; the key never enters this process.
+    Keyd(Arc<Credentialed>),
+}
+
+/// A request that got no answer. `Transport` backs off and retries like a
+/// dropped connection; `Fatal` ends the request.
+enum Unanswered {
+    Transport(String),
+    Fatal(EmbedError),
+}
+
+impl Unanswered {
+    /// keyd's refusals in the seam's vocabulary. `upstream` and a broken
+    /// socket are a failure to reach Voyage, so they back off and retry.
+    fn from_keyd(error: KeydError) -> Self {
+        match error {
+            KeydError::Missing(_) => Unanswered::Fatal(EmbedError::MissingCredentials),
+            KeydError::Keychain(detail) => Unanswered::Fatal(EmbedError::UnreadableCredentials(detail)),
+            KeydError::Upstream(detail) | KeydError::Broken(detail) => Unanswered::Transport(detail),
+            KeydError::Absent => Unanswered::Transport("oculus-keyd stopped listening".into()),
+            other @ (KeydError::Request(_) | KeydError::Caller(_) | KeydError::Vault(_)) => {
+                Unanswered::Fatal(EmbedError::Broker(other.to_string()))
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct VoyageCloud {
     base_url: Arc<String>,
-    key: Arc<String>,
+    auth: Auth,
     ledger: Arc<UsageLedger>,
     gate: Arc<RateGate>,
     limits: Limits,
@@ -121,7 +163,34 @@ impl VoyageCloud {
     }
 
     pub fn with_config(config: &EmbedConfig) -> Result<Self, EmbedError> {
-        let key = config.credentials.key()?.unwrap_or_default();
+        Self::with_config_in(config, &crate::paths::data_dir(), || config.credentials.key())
+    }
+
+    /// keyd when it is installed and `config` names Voyage's own API root, so
+    /// keyd's fixed origin is the one meant; otherwise the key from
+    /// `direct_key`. Only an absent keyd falls back. keyd's `has` keeps the
+    /// early "no key saved" check.
+    fn with_config_in(
+        config: &EmbedConfig,
+        data_dir: &Path,
+        direct_key: impl FnOnce() -> Result<Option<String>, EmbedError>,
+    ) -> Result<Self, EmbedError> {
+        let cloud_root = config.base_url.trim_end_matches('/') == CLOUD_BASE_URL;
+        if config.credentials == CredentialSource::Keychain && cloud_root {
+            let broker = Credentialed::at(data_dir);
+            match broker.has(crate::voyage::SECRET) {
+                Ok(true) => return Ok(Self::through_keyd(broker)),
+                Ok(false) => return Err(EmbedError::MissingCredentials),
+                Err(KeydError::Absent) => {}
+                Err(error) => {
+                    return Err(match Unanswered::from_keyd(error) {
+                        Unanswered::Fatal(error) => error,
+                        Unanswered::Transport(detail) => EmbedError::Broker(detail),
+                    })
+                }
+            }
+        }
+        let key = direct_key()?.unwrap_or_default();
         Self::new(&config.base_url, &key)
     }
 
@@ -131,14 +200,22 @@ impl VoyageCloud {
         if key.is_empty() {
             return Err(EmbedError::MissingCredentials);
         }
-        Ok(Self {
+        Ok(Self::with_auth(base_url, Auth::Direct(Arc::new(key.to_string()))))
+    }
+
+    fn through_keyd(broker: Credentialed) -> Self {
+        Self::with_auth(CLOUD_BASE_URL, Auth::Keyd(Arc::new(broker)))
+    }
+
+    fn with_auth(base_url: &str, auth: Auth) -> Self {
+        Self {
             base_url: Arc::new(base_url.trim_end_matches('/').to_string()),
-            key: Arc::new(key.to_string()),
+            auth,
             ledger: UsageLedger::shared(),
             gate: RateGate::shared(),
             limits: Limits::default(),
             time_scale: 1.0,
-        })
+        }
     }
 
     pub fn with_ledger(mut self, ledger: Arc<UsageLedger>) -> Self {
@@ -163,6 +240,49 @@ impl VoyageCloud {
 
     // ── One request ──────────────────────────────────────────────────────────
 
+    /// One POST of `body` by this client's route. A status is an answer,
+    /// whatever it is; `send` reads it.
+    fn post(&self, body: &[u8]) -> Result<RawResponse, Unanswered> {
+        let headers = [("Content-Type", "application/json"), ("Accept", "application/json")];
+        match &self.auth {
+            Auth::Keyd(broker) => broker
+                .send(
+                    crate::voyage::SECRET,
+                    "POST",
+                    &format!("{CLOUD_PATH}{EMBED_PATH}"),
+                    &headers,
+                    body,
+                    API_TIMEOUT,
+                )
+                .map_err(Unanswered::from_keyd),
+            Auth::Direct(key) => {
+                let mut request = ureq::post(&format!("{}{}", self.base_url, EMBED_PATH))
+                    .timeout(API_TIMEOUT)
+                    .set("Authorization", &format!("Bearer {key}"));
+                for (name, value) in headers {
+                    request = request.set(name, value);
+                }
+                let response = match request.send_bytes(body) {
+                    Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+                    Err(ureq::Error::Transport(transport)) => {
+                        return Err(Unanswered::Transport(transport_detail(&transport)))
+                    }
+                };
+                let status = response.status();
+                let headers = response
+                    .headers_names()
+                    .into_iter()
+                    .filter_map(|name| {
+                        let value = response.header(&name)?.to_string();
+                        Some((name, value))
+                    })
+                    .collect();
+                let body = response.into_string().unwrap_or_default().into_bytes();
+                Ok(RawResponse { status, headers, body })
+            }
+        }
+    }
+
     /// Send one request and hand back one vector per input: reserve, wait for
     /// the gate, send, and on a 429 learn the tier and go round again.
     /// `on_wait` hears of each rate-limit wait long enough to look like a
@@ -175,7 +295,6 @@ impl VoyageCloud {
         cost: Cost,
         on_wait: &dyn Fn(Option<Wait>),
     ) -> Result<Vec<Vec<f32>>, SendFailure> {
-        let url = format!("{}{}", self.base_url, EMBED_PATH);
         let body = json!({
             "model": EMBED_MODEL,
             "inputs": inputs,
@@ -204,62 +323,55 @@ impl VoyageCloud {
                 }
             });
             notice.clear();
-            let sent = ureq::post(&url)
-                .timeout(API_TIMEOUT)
-                .set("Authorization", &format!("Bearer {}", self.key))
-                .set("Content-Type", "application/json")
-                .set("Accept", "application/json")
-                .send_bytes(&encoded);
-
-            let response = match sent {
+            let response = match self.post(&encoded) {
                 Ok(response) => response,
-                Err(ureq::Error::Status(status, response)) => {
-                    let retry_after = response
-                        .header("Retry-After")
-                        .and_then(|value| value.trim().parse::<f64>().ok());
-                    let text = response.into_string().unwrap_or_default();
-
-                    if status == 429 {
-                        // The body states the real limits; read, then dropped.
-                        let wait = self.gate.throttled(retry_after, &text);
-                        last_retry_after = Some(wait.as_secs());
-
-                        // Livelock guard: over the per-minute ceiling no wait
-                        // helps, so repack smaller. A single input cannot be
-                        // split and takes the ordinary wait.
-                        if expected > 1 && cost.tokens > self.max_tokens() {
-                            return Err(SendFailure::Resize);
-                        }
-                        if Instant::now() >= throttled_until {
-                            return Err(EmbedError::RateLimited {
-                                retry_after_secs: last_retry_after,
-                            }
-                            .into());
-                        }
-                        // The gate's pause and drained buckets may outlast the nap.
-                        let resume = wait
-                            .mul_f64(self.time_scale)
-                            .max(self.gate.expected_wait(cost.tokens));
-                        notice.show(Wait::after(resume, Limiter::Throttled));
-                        nap(wait, self.time_scale);
-                        continue;
-                    }
-                    match self.status_error(status, &text, &mut retry) {
-                        Some(error) => return Err(error.into()),
-                        // A 5xx with attempts left: already backed off.
-                        None => continue,
-                    }
-                }
-                Err(ureq::Error::Transport(transport)) => {
+                Err(Unanswered::Fatal(error)) => return Err(error.into()),
+                Err(Unanswered::Transport(detail)) => {
                     if retry.back_off() {
                         continue;
                     }
-                    return Err(EmbedError::Offline(transport_detail(&transport)).into());
+                    return Err(EmbedError::Offline(detail).into());
                 }
             };
 
-            let text = response.into_string().unwrap_or_default();
-            let payload = match serde_json::from_str::<Value>(&text) {
+            let status = response.status;
+            if status >= 400 {
+                let retry_after = response
+                    .header("Retry-After")
+                    .and_then(|value| value.trim().parse::<f64>().ok());
+                let text = String::from_utf8_lossy(&response.body);
+
+                if status == 429 {
+                    // The body states the real limits; read, then dropped.
+                    let wait = self.gate.throttled(retry_after, &text);
+                    last_retry_after = Some(wait.as_secs());
+
+                    // Livelock guard: over the per-minute ceiling no wait
+                    // helps, so repack smaller. A single input cannot be
+                    // split and takes the ordinary wait.
+                    if expected > 1 && cost.tokens > self.max_tokens() {
+                        return Err(SendFailure::Resize);
+                    }
+                    if Instant::now() >= throttled_until {
+                        return Err(EmbedError::RateLimited { retry_after_secs: last_retry_after }
+                            .into());
+                    }
+                    // The gate's pause and drained buckets may outlast the nap.
+                    let resume = wait
+                        .mul_f64(self.time_scale)
+                        .max(self.gate.expected_wait(cost.tokens));
+                    notice.show(Wait::after(resume, Limiter::Throttled));
+                    nap(wait, self.time_scale);
+                    continue;
+                }
+                match self.status_error(status, &text, &mut retry) {
+                    Some(error) => return Err(error.into()),
+                    // A 5xx with attempts left: already backed off.
+                    None => continue,
+                }
+            }
+
+            let payload = match serde_json::from_slice::<Value>(&response.body) {
                 Ok(payload) => payload,
                 Err(_) if retry.back_off() => continue,
                 Err(_) => return Err(EmbedError::Offline("unreadable response".into()).into()),
@@ -517,8 +629,9 @@ mod tests {
     use std::sync::Mutex;
 
     use super::super::ledger::{TierSource, FREE_TPM};
+    use crate::embed::Engine;
     use crate::ratelimit::hold;
-    use crate::test_support::{write_pdf, write_pdf_sized, FakeServer, Reply, Scratch};
+    use crate::test_support::{write_pdf, write_pdf_sized, FakeKeyd, FakeServer, Reply, Scratch};
 
     /// Never a real key; the live one stays in the keychain.
     const TEST_KEY: &str = "pa-test-only-not-a-real-key";
@@ -551,16 +664,20 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 
-    fn ok_response(count: usize) -> Reply {
+    fn ok_body(count: usize) -> Value {
         let data: Vec<Value> = (0..count)
             .map(|index| json!({ "index": index, "embedding": wire_vector(index as u32) }))
             .collect();
-        Reply::json(json!({
+        json!({
             "object": "list",
             "data": data,
             "model": EMBED_MODEL,
             "usage": { "total_tokens": 3_572 * count },
-        }))
+        })
+    }
+
+    fn ok_response(count: usize) -> Reply {
+        Reply::json(ok_body(count))
     }
 
     /// Landscape A4, 842 x 595 pt: over the billed-pixel cap at `RENDER_DPI`.
@@ -1060,6 +1177,210 @@ mod tests {
             VoyageCloud::new("https://example.invalid/v1", "   "),
             Err(EmbedError::MissingCredentials)
         ));
+    }
+
+    // ── Through oculus-keyd ──────────────────────────────────────────────────
+
+    fn cloud() -> EmbedConfig {
+        EmbedConfig {
+            engine: Engine::Cloud,
+            base_url: CLOUD_BASE_URL.to_string(),
+            credentials: CredentialSource::Keychain,
+        }
+    }
+
+    /// A keyd holding a key that answers the `n`th `forward` with `answer(n)`.
+    fn keyd_with<F>(scratch: &Scratch, answer: F) -> FakeKeyd
+    where
+        F: Fn(usize) -> (Value, Vec<u8>) + Send + 'static,
+    {
+        let forwards = AtomicUsize::new(0);
+        FakeKeyd::start(scratch, move |req, _| match req["op"].as_str().unwrap() {
+            "has" => (json!({ "has": true }), vec![]),
+            "forward" => answer(forwards.fetch_add(1, Ordering::SeqCst)),
+            op => (json!({ "error": "request", "detail": format!("unexpected {op}") }), vec![]),
+        })
+    }
+
+    fn forwarded(status: u16, headers: Value, body: &Value) -> (Value, Vec<u8>) {
+        let body = body.to_string().into_bytes();
+        (json!({ "status": status, "headers": headers, "body_len": body.len() }), body)
+    }
+
+    fn keyd_client(scratch: &Scratch) -> VoyageCloud {
+        let ledger = Arc::new(UsageLedger::at(scratch.join("voyage-usage.json")));
+        let Ok(client) = VoyageCloud::with_config_in(&cloud(), scratch, || {
+            panic!("the keychain must not be read while keyd is installed")
+        }) else {
+            panic!("no client through keyd");
+        };
+        client
+            .with_ledger(ledger.clone())
+            .with_gate(Arc::new(RateGate::with_pace(ledger, Duration::from_secs(3_600), TEST_PACE)))
+            .with_time_scale(0.002)
+    }
+
+    fn config_error(config: &EmbedConfig, scratch: &Scratch) -> EmbedError {
+        match VoyageCloud::with_config_in(config, scratch, || Ok(Some(TEST_KEY.to_string()))) {
+            Ok(_) => panic!("expected an error"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn the_keyd_path_is_the_cloud_roots_path() {
+        assert!(CLOUD_BASE_URL.ends_with(CLOUD_PATH));
+        assert!(!CLOUD_BASE_URL[..CLOUD_BASE_URL.len() - CLOUD_PATH.len()].contains("/v"));
+    }
+
+    #[test]
+    fn through_keyd_a_query_is_forwarded_without_the_key() {
+        let scratch = Scratch::new("vk-ok");
+        let keyd = keyd_with(&scratch, |_| forwarded(200, json!([]), &ok_body(1)));
+        let vector = keyd_client(&scratch).embed_query("what is a martingale").unwrap();
+        assert_eq!(vector.len(), EMBED_DIM);
+
+        assert_eq!(keyd.ops(), ["has", "forward"]);
+        let (header, body) = &keyd.requests()[1];
+        assert_eq!(header["secret"], "voyage");
+        assert_eq!(header["method"], "POST");
+        assert_eq!(header["path"], "/v1/multimodalembeddings");
+        assert_eq!(
+            header["headers"],
+            json!([["Content-Type", "application/json"], ["Accept", "application/json"]])
+        );
+        assert!(!header.to_string().to_lowercase().contains("authorization"), "{header}");
+        let sent: Value = serde_json::from_slice(body).unwrap();
+        assert_eq!(sent["input_type"], "query");
+        assert_eq!(sent["output_encoding"], "base64");
+    }
+
+    #[test]
+    fn through_keyd_a_429_is_waited_out_and_its_stated_limit_is_learned() {
+        let scratch = Scratch::new("vk-429");
+        let keyd = keyd_with(&scratch, |n| {
+            if n == 0 {
+                forwarded(
+                    429,
+                    json!([["retry-after", "2"]]),
+                    &json!({ "detail": "Rate limit exceeded: 3 requests per minute (RPM) and \
+                                        10000 tokens per minute (TPM) for this account." }),
+                )
+            } else {
+                forwarded(200, json!([]), &ok_body(1))
+            }
+        });
+        let ledger = Arc::new(UsageLedger::at(scratch.join("voyage-usage.json")));
+        let gate =
+            Arc::new(RateGate::with_pace(ledger.clone(), Duration::from_secs(3_600), TEST_PACE));
+        let client = keyd_client(&scratch).with_ledger(ledger).with_gate(gate.clone());
+
+        client.embed_query("hello").unwrap();
+        assert_eq!(keyd.ops(), ["has", "forward", "forward"]);
+        assert_eq!(gate.tier().source, TierSource::Stated);
+        assert_eq!(gate.tier().tpm, FREE_TPM);
+    }
+
+    #[test]
+    fn through_keyd_a_refused_key_and_spent_credit_read_as_they_do_direct() {
+        let scratch = Scratch::new("vk-401");
+        let keyd = keyd_with(&scratch, |_| {
+            forwarded(401, json!([]), &json!({ "detail": "This API key has expired." }))
+        });
+        let error = keyd_client(&scratch).embed_query("x").unwrap_err();
+        assert!(matches!(error, EmbedError::RejectedCredentials { expired: true, .. }), "{error:?}");
+        assert_eq!(keyd.ops(), ["has", "forward"], "a rejected key is not retried");
+
+        let scratch = Scratch::new("vk-402");
+        let _keyd = keyd_with(&scratch, |_| {
+            forwarded(403, json!([]), &json!({ "detail": "Your account has run out of credit." }))
+        });
+        assert_eq!(keyd_client(&scratch).embed_query("x").unwrap_err().kind(), "quota_exhausted");
+    }
+
+    #[test]
+    fn keyd_without_a_key_is_missing_before_and_during_a_request() {
+        let scratch = Scratch::new("vk-none");
+        let _keyd = FakeKeyd::start(&scratch, |_, _| (json!({ "has": false }), vec![]));
+        assert!(matches!(config_error(&cloud(), &scratch), EmbedError::MissingCredentials));
+
+        // Deleted between the check and the request.
+        let scratch = Scratch::new("vk-gone");
+        let _keyd = keyd_with(&scratch, |_| {
+            (json!({ "error": "missing", "detail": "no voyage key is stored" }), vec![])
+        });
+        let error = keyd_client(&scratch).embed_query("x").unwrap_err();
+        assert_eq!(error.kind(), "missing_credentials");
+    }
+
+    #[test]
+    fn keyd_reaching_no_origin_backs_off_then_reads_as_offline() {
+        let scratch = Scratch::new("vk-upstream");
+        let keyd = keyd_with(&scratch, |_| {
+            (json!({ "error": "upstream", "detail": "Dns Failed: no such host" }), vec![])
+        });
+        let error = keyd_client(&scratch).embed_query("x").unwrap_err();
+        assert_eq!(error.kind(), "offline");
+        assert!(error.retryable());
+        assert!(error.to_string().contains("Dns Failed"), "{error}");
+        assert_eq!(keyd.ops().len(), 1 + ATTEMPTS as usize);
+    }
+
+    #[test]
+    fn keyds_own_refusals_surface_by_kind() {
+        for (wire, kind) in [
+            ("keychain", "unreadable_credentials"),
+            ("caller", "credential_broker"),
+            ("vault", "credential_broker"),
+        ] {
+            let scratch = Scratch::new("vk-refused");
+            let _keyd = FakeKeyd::start(&scratch, move |_, _| {
+                (json!({ "error": wire, "detail": "refused" }), vec![])
+            });
+            let error = config_error(&cloud(), &scratch);
+            assert_eq!(error.kind(), kind, "{wire}");
+            assert!(error.latching(), "{wire}");
+        }
+    }
+
+    #[test]
+    fn without_keyd_or_off_voyages_root_the_key_is_read_directly() {
+        // No socket: today's path, with the keychain's key.
+        let scratch = Scratch::new("vk-absent");
+        let Ok(client) =
+            VoyageCloud::with_config_in(&cloud(), &scratch, || Ok(Some(TEST_KEY.to_string())))
+        else {
+            panic!("a direct client");
+        };
+        assert!(matches!(&client.auth, Auth::Direct(key) if key.as_str() == TEST_KEY));
+        assert!(matches!(config_error_none(&scratch), EmbedError::MissingCredentials));
+
+        // A hand-edited `engineUrl` never goes through keyd, even when it is there.
+        let scratch = Scratch::new("vk-elsewhere");
+        let keyd = keyd_with(&scratch, |_| forwarded(500, json!([]), &json!({})));
+        let fake = FakeServer::start(|_| ok_response(1));
+        let config = EmbedConfig { base_url: format!("{}/v1", fake.origin()), ..cloud() };
+        let Ok(client) =
+            VoyageCloud::with_config_in(&config, &scratch, || Ok(Some(TEST_KEY.to_string())))
+        else {
+            panic!("a direct client");
+        };
+        let ledger = Arc::new(UsageLedger::at(scratch.join("voyage-usage.json")));
+        client
+            .with_ledger(ledger.clone())
+            .with_gate(Arc::new(RateGate::with_pace(ledger, Duration::from_secs(3_600), TEST_PACE)))
+            .embed_query("x")
+            .unwrap();
+        assert!(keyd.requests().is_empty());
+        assert_eq!(fake.hits()[0].header("authorization"), Some(format!("Bearer {TEST_KEY}").as_str()));
+    }
+
+    /// No keyd and no key in the keychain.
+    fn config_error_none(scratch: &Scratch) -> EmbedError {
+        match VoyageCloud::with_config_in(&cloud(), scratch, || Ok(None)) {
+            Ok(_) => panic!("expected an error"),
+            Err(error) => error,
+        }
     }
 
     /// The one test that talks to Voyage, off unless `OCULUS_VOYAGE_LIVE=1`.

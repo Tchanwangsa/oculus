@@ -76,6 +76,11 @@ protected paths are one list in `protected.rs`.
   reads (without it `ls ../courses` is refused), `Edit` denies on protected
   paths so `--add-dir` doesn't pull them into `acceptEdits`, and
   `--permission-prompts none`, since an unanswered prompt under `-p` hangs.
+  `sandbox.network.allowUnixSockets` names `keyd.sock` and nothing else, so
+  `oculus search` reaches the Voyage key through `oculus-keyd`
+  ([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key));
+  without it the connect fails with EPERM. Codex (`network_access`) and agy
+  reach the socket with no extra rule.
 - **Codex**: `workspace-write` with one root, `approvalPolicy: never`; any
   server request is declined.
 - **opencode has no sandbox** — a rule list its runner checks. File tools are

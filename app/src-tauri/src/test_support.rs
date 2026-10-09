@@ -233,3 +233,55 @@ pub fn dead_origin() -> String {
     drop(listener);
     format!("http://127.0.0.1:{port}")
 }
+
+// ── A fake oculus-keyd ───────────────────────────────────────────────────────
+
+/// A stand-in `oculus-keyd` on `<dir>/keyd.sock`, speaking its framing: each
+/// request's header and body go to `handler`, whose header and body are the
+/// reply. Its thread ends with the test process.
+pub struct FakeKeyd {
+    requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>>,
+}
+
+impl FakeKeyd {
+    pub fn start<H>(dir: &Path, handler: H) -> Self
+    where
+        H: Fn(&Value, &[u8]) -> (Value, Vec<u8>) + Send + 'static,
+    {
+        use std::io::{BufRead, BufReader, Read, Write};
+
+        let listener = std::os::unix::net::UnixListener::bind(crate::paths::keyd_socket_path(dir)).unwrap();
+        let requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let log = requests.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    let header: Value = serde_json::from_str(&line).unwrap();
+                    let len = header.get("body_len").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let mut body = vec![0; len];
+                    reader.read_exact(&mut body).unwrap();
+                    let (reply, out) = handler(&header, &body);
+                    hold(&log).push((header, body));
+                    let mut writer = &stream;
+                    writer.write_all(format!("{reply}\n").as_bytes()).ok();
+                    writer.write_all(&out).ok();
+                    line.clear();
+                }
+            }
+        });
+        Self { requests }
+    }
+
+    /// Every request so far, in order: header, then body.
+    pub fn requests(&self) -> Vec<(Value, Vec<u8>)> {
+        hold(&self.requests).clone()
+    }
+
+    /// The ops requested so far, in order.
+    pub fn ops(&self) -> Vec<String> {
+        self.requests().iter().map(|(h, _)| h["op"].as_str().unwrap_or("").to_string()).collect()
+    }
+}

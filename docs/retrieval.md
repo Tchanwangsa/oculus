@@ -18,7 +18,7 @@ over the same pages sits beside it.
 | Cost of an outstanding run, before it runs | `app/src-tauri/src/embed/estimate.rs` |
 | Engine selection, throwing the index away, `embed_blocked` | `app/src-tauri/src/embed/commands.rs` |
 | The `embed-status` event and shared wire payload | `app/src-tauri/src/embed/events.rs`, `app/src-tauri/src/pipeline_events.rs` |
-| API key (keychain only) | `app/src-tauri/src/voyage.rs` |
+| API key: through `oculus-keyd` when installed, else the keychain | `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/credentials/broker.rs` |
 | Ingest, brute-force cosine search, `PAGES_FTS_SQL` + `fts_tests` | `app/src-tauri/src/retrieval.rs` |
 | Who writes `pages.markdown` (`store::upsert_pages`, `store::replace_pages`) | `app/src-tauri/src/sync.rs`, `app/src-tauri/src/sheets.rs`, `app/src-tauri/src/store.rs` |
 | `pages` table schema | `app/src-tauri/src/migrations.rs` |
@@ -163,6 +163,27 @@ discipline as `mineru-usage.json`.
   for byte and token ceilings no DPI fixes. Skipping the page instead would
   write a short record and leave it unsearchable.
 
+## With `oculus-keyd` installed, no Oculus process holds the Voyage key
+
+`VoyageCloud::with_config` picks the route once per client. If the API root
+is Voyage's own and keyd answers `has voyage`, every request is a keyd
+`forward` and the key stays in keyd's vault
+([architecture.md](./architecture.md#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+Only an absent keyd (no socket, or nothing listening) means today's direct
+path: the keychain's key, sent by ureq. A hand-edited `engineUrl` always takes
+the direct path, because keyd talks only to Voyage's fixed origin.
+
+- Both routes hand `send` the same status, headers and body, so 429 learning,
+  credit detection and `usage.total_tokens` read one way.
+- keyd's errors map onto the seam: `missing` is `MissingCredentials`,
+  `keychain` is `UnreadableCredentials`, `upstream` or a dropped socket backs
+  off like a transport error and ends `Offline`, and a refused caller or a
+  damaged vault is `Broker` (kind `credential_broker`, latching).
+- The Settings commands (`voyage_has_api_key`, `_set_`, `_delete_`) also go
+  through keyd when it is there. The probe still runs in the app with the key
+  just typed; only the store goes to keyd. Deleting through keyd leaves the
+  old keychain item, which only the direct path reads.
+
 ## Ingest follows a parse, through one queue
 
 - **`pages.markdown` is the parse's write, not the embedder's**
@@ -238,4 +259,5 @@ correctness.
 - Don't drop the `embed_model`/`embed_dim` filter from a scan — mixed spaces rank as noise, silently.
 - Don't remove `raster.rs`'s session lock — concurrent pdfium sessions misreport files as encrypted.
 - FTS5 is required to open the database at all (migration 35); `fts_tests` asserts the bundled `libsqlite3-sys` still enables it.
-- The Voyage key lives only in the keychain, and no `EmbedError` carries response text — an error body can echo the base64 page image.
+- The Voyage key lives only in keyd's vault or the keychain, and no `EmbedError` carries response text — an error body can echo the base64 page image.
+- Falling back to the keychain on any keyd error but "absent" would hide a refused caller or a broken vault behind a keychain prompt.

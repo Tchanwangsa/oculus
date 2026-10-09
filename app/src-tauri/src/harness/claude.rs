@@ -357,6 +357,9 @@ fn settings_json(library: &Path, cwd: &Path, oculus: Option<&Path>) -> String {
                 .map(|p| p.display().to_string()),
         )
         .collect();
+    // `oculus` reaches its keys only through keyd's socket; without this the
+    // sandbox refuses the connect (EPERM).
+    let keyd = crate::paths::keyd_socket_path(library).display().to_string();
     serde_json::json!({
         "permissions": { "allow": allow, "deny": deny },
         "sandbox": {
@@ -364,7 +367,7 @@ fn settings_json(library: &Path, cwd: &Path, oculus: Option<&Path>) -> String {
             "failIfUnavailable": false,
             "autoAllowBashIfSandboxed": true,
             "allowUnsandboxedCommands": false,
-            "network": { "allowLocalBinding": true },
+            "network": { "allowLocalBinding": true, "allowUnixSockets": [keyd] },
             "filesystem": { "allowWrite": write },
         },
         "autoMemoryEnabled": false,
@@ -771,6 +774,11 @@ mod tests {
         );
         assert_eq!(v["sandbox"]["enabled"], true);
         assert_eq!(v["autoMemoryEnabled"], false);
+        assert_eq!(
+            v.pointer("/sandbox/network/allowUnixSockets").unwrap(),
+            &serde_json::json!(["/Users/x/Library/Application Support/com.tchan.oculus/keyd.sock"]),
+            "keyd's socket, and no other"
+        );
 
         let deny: Vec<&str> = v
             .pointer("/permissions/deny")

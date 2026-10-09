@@ -21,7 +21,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
 | Credential broker `oculus-keyd`, its vault, and its installer | `app/keyd/`, `app/keyd/vault/`; `app/src-tauri/src/keyd.rs` |
-| Credential storage (keychain only); provider probes | `app/src-tauri/src/credentials.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
+| Credential storage (keychain), the keyd client; provider probes | `app/src-tauri/src/credentials.rs`, `app/src-tauri/src/credentials/broker.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
 | Lecture video server | `app/src-tauri/src/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
@@ -56,8 +56,10 @@ its failure rules are in [parsing.md](./parsing.md).
   transcription run through `blocking::run`, so synchronous I/O cannot hold
   Tauri's command thread.
   Upload batches serialize their name allocation.
-- Credentials go keychain → in-process client. No key enters SQLite, the
-  WebView, a health response or a progress event. The local engine needs none.
+- Credentials go keychain → in-process client, except Voyage's while keyd is
+  installed ([below](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
+  No key enters SQLite, the WebView, a health response or a progress event.
+  The local engine needs none.
   A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
   sandbox, which fails right after the prompt is approved) is reported as
   unreadable, never as a missing key (`Secret::fetch`, `Secret::has`). MinerU's
@@ -111,9 +113,15 @@ changes when its own source does and one keychain approval sticks
   bundle whose seal verifies strictly (`app/keyd/src/caller.rs`); a `dev`
   build admits any same-user caller. Each connection records the caller's
   signing identifier.
-- **Nothing uses it yet.** The app and CLI still read the Voyage, MinerU, Groq
-  and Okta items themselves (the credentials bullet above). keyd's `migrate`,
-  which copies every old item at once, is not called.
+- **Voyage goes through it; nothing else does yet.** `credentials::Credentialed`
+  (`app/src-tauri/src/credentials/broker.rs`) is the client, one connection
+  per call. It treats a missing socket or a refused connect as keyd not
+  installed (`KeydError::Absent`), the only case in which a caller reads the
+  keychain itself; every other error surfaces. The Voyage client and its
+  Settings commands use it ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key)).
+  The app and CLI still read the MinerU, Groq and Okta items themselves (the
+  credentials bullet above). keyd's `migrate`, which copies every old item at
+  once, is not called.
 - `keyd::ensure_installed` runs at app startup and does nothing in a dev
   build; a dev install is the preflight's ([cli.md](./cli.md)).
 

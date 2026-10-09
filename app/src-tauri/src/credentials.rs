@@ -1,5 +1,10 @@
-//! Keychain storage shared by cloud keys and university sign-in credentials.
-//! Callers own validation and probing; values never leave the keychain here.
+//! Keychain storage shared by cloud keys and university sign-in credentials,
+//! and `Credentialed`, the client of `oculus-keyd` (`broker.rs`). Callers own
+//! validation and probing; values never leave the keychain here.
+
+mod broker;
+
+pub(crate) use broker::{Credentialed, KeydError, RawResponse};
 
 pub(crate) struct Secret<'a> {
     service: &'a str,
@@ -50,24 +55,34 @@ impl<'a> Secret<'a> {
         }
     }
 
-    /// Probe before storing. An unreachable service can accept a key on trust;
-    /// an active refusal leaves the saved key untouched.
+    /// `store_checked` into this keychain item.
     pub(crate) fn store_checked(
         &self,
         key: &str,
         probe: impl FnOnce(&str) -> Result<Verdict, String>,
     ) -> Result<String, String> {
-        let key = key.trim();
-        if key.is_empty() {
-            return Err("empty key".into());
-        }
-        let verdict = probe(key)?;
-        self.write(key)?;
-        Ok(match verdict {
-            Verdict::Good => "ok".into(),
-            Verdict::Unverified => "unverified".into(),
-        })
+        store_checked(key, probe, |value| self.write(value))
     }
+}
+
+/// Probe before storing. An unreachable service can accept a key on trust;
+/// an active refusal leaves the saved key untouched. `write` stores the
+/// trimmed key: into the keychain, or through keyd.
+pub(crate) fn store_checked(
+    key: &str,
+    probe: impl FnOnce(&str) -> Result<Verdict, String>,
+    write: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err("empty key".into());
+    }
+    let verdict = probe(key)?;
+    write(key)?;
+    Ok(match verdict {
+        Verdict::Good => "ok".into(),
+        Verdict::Unverified => "unverified".into(),
+    })
 }
 
 /// What a probe learned about a key. `Unverified`: the service was unreachable,
