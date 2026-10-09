@@ -30,7 +30,7 @@ const row = (filename: string, patch: Partial<PipelineItem>): PipelineItem => ({
 
 describe("spreadsheets", () => {
   test("are pipeline files with text beside them, never PDF-backed", () => {
-    for (const name of ["marks.xlsx", "MACROS.XLSM", "old.xls", "calc.ods"]) {
+    for (const name of ["marks.xlsx", "MACROS.XLSM", "old.xls", "calc.ods", "grades.CSV"]) {
       expect(isSheetFile(name)).toBe(true);
       expect(isPdfBacked(name)).toBe(false);
       expect(isPipelineFile(name)).toBe(true);
@@ -43,7 +43,7 @@ describe("spreadsheets", () => {
   test("the SQL lists mirror paths.rs", () => {
     // `pdf_backed_sql_list` in paths.rs asserts the same string.
     expect(PDF_BACKED_SQL_LIST).toBe("('pdf', 'pptx', 'docx', 'ppt', 'doc')");
-    expect(PIPELINE_SQL_LIST).toBe("('pdf', 'pptx', 'docx', 'ppt', 'doc', 'xlsx', 'xlsm', 'xls', 'ods')");
+    expect(PIPELINE_SQL_LIST).toBe("('pdf', 'pptx', 'docx', 'ppt', 'doc', 'xlsx', 'xlsm', 'xls', 'ods', 'csv')");
   });
 
   test("a sheet's row is done at its conversion, even with the embed stage on", () => {

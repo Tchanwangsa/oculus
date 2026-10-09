@@ -113,18 +113,15 @@ the library row, and `paths::doc_pdf_rel` resolves it for every consumer. The
 student's own uploads go through the same conversion
 (`app/src-tauri/src/files.rs`).
 
-Spreadsheets (`.xlsx/.xlsm/.xls/.ods`) are kept intact too, but become text,
+Spreadsheets (`.xlsx/.xlsm/.xls/.ods/.csv`) are kept intact too, but become text,
 not a PDF: `marks.xlsx.md` beside them, written as they download
 (`crate::sheets`, see
 [parsing.md](./parsing.md#spreadsheets-are-converted-to-text-never-parsed)).
 One needs a spreadsheet type (or none) *and* a spreadsheet's extension
 (`is_sheet_type`): every later gate goes by the extension, and a `.csv` can
 arrive labelled `application/vnd.ms-excel`.
-
-A `.csv` is already text, so it is stored as-is and nothing more: no parse,
-conversion, embed or File Activity row (`is_csv_type` — a `.csv` name under
-a CSV, plain-text, Excel or missing type). `oculus read` and `oculus grep`
-read it from disk.
+A `.csv` counts under a CSV, plain-text, Excel or missing type
+(`is_csv_type`).
 
 ## Ed threads are a custom XML dialect
 

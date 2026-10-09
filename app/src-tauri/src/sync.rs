@@ -924,10 +924,9 @@ impl Engine {
         let ct = content_type_of(&info);
         let video = is_video(&ct, &name);
         let office = office_ext(&ct).or_else(|| is_generic_binary(&ct).then(|| office_ext_of(&name)).flatten());
-        let sheet = is_sheet_type(&ct, &name);
+        let sheet = is_sheet_type(&ct, &name) || is_csv_type(&ct, &name);
         let downloadable = DOWNLOADABLE_TYPES.contains(&ct.as_str())
-            || (is_generic_binary(&ct) && paths::is_pdf(&name))
-            || is_csv_type(&ct, &name);
+            || (is_generic_binary(&ct) && paths::is_pdf(&name));
         if !video && !downloadable && office.is_none() && !sheet {
             return Ok(Fetched::Skipped);
         }
@@ -1562,8 +1561,8 @@ fn is_sheet_type(ct: &str, name: &str) -> bool {
     (SHEET_TYPES.contains(&ct) || is_generic_binary(ct)) && paths::is_sheet(name)
 }
 
-/// A `.csv` under any type Canvas labels one with. It is already text, so it
-/// is stored as-is and never parsed, converted or embedded.
+/// A `.csv` under any type Canvas labels one with. It is converted like a
+/// spreadsheet (`crate::sheets`), so search finds it too.
 fn is_csv_type(ct: &str, name: &str) -> bool {
     let typed = matches!(
         ct,
@@ -1843,7 +1842,7 @@ mod tests {
             assert!(is_sheet_type(ct, "Marks.xlsx"), "{ct}");
             assert_eq!(office_ext(ct), None, "{ct}");
         }
-        assert!(!is_sheet_type("application/vnd.ms-excel", "grades.csv"));
+        assert!(is_sheet_type("application/vnd.ms-excel", "grades.csv"));
         assert!(is_sheet_type("application/octet-stream", "Marks.XLSM"));
         assert!(is_sheet_type("", "calc.ods"));
         assert!(!is_sheet_type("application/zip", "marks.xlsx"));
@@ -1852,13 +1851,13 @@ mod tests {
     }
 
     #[test]
-    fn a_csv_downloads_as_itself_whatever_canvas_labels_it() {
+    fn a_csv_is_a_sheet_whatever_canvas_labels_it() {
         for ct in ["text/csv", "application/csv", "text/plain", "application/vnd.ms-excel", ""] {
             assert!(is_csv_type(ct, "Grades.CSV"), "{ct}");
         }
         assert!(!is_csv_type("text/csv", "grades.txt"));
         assert!(!is_csv_type("application/zip", "grades.csv"));
-        assert!(!paths::is_pdf("grades.csv") && !paths::is_sheet("grades.csv"));
+        assert!(!paths::is_pdf("grades.csv") && paths::is_sheet("grades.csv"));
     }
 
     #[test]

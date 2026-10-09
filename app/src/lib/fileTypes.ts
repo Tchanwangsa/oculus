@@ -32,7 +32,7 @@ export const OFFICE_EXTS = ["pptx", "docx", "ppt", "doc"];
 /** Spreadsheets, converted in Rust to text beside them ("marks.xlsx" →
  *  "marks.xlsx.md", one page per sheet); never PDF-backed, never embedded.
  *  Mirrors SHEET_EXTS in paths.rs. */
-export const SHEET_EXTS = ["xlsx", "xlsm", "xls", "ods"];
+export const SHEET_EXTS = ["xlsx", "xlsm", "xls", "ods", "csv"];
 
 const sqlList = (exts: string[]) => `(${exts.map((e) => `'${e}'`).join(", ")})`;
 
