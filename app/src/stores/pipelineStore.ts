@@ -1,9 +1,11 @@
 import { create } from "zustand";
+import { isPdfBacked, isSheetFile } from "@/lib/fileTypes";
 
 /**
  * Per-file view of the ingest pipeline: download → parse → embed. The embed
- * stage applies only when a Voyage key is stored (`embedStage`); without one a
- * parsed file is finished.
+ * stage applies only when a Voyage key is stored (`embedStage`), and only to
+ * PDF-backed files (`embedsIn`); otherwise a parsed file is finished. A
+ * spreadsheet's parse is its conversion to text.
  *
  * Fed by `useBackendEvents` (scrape-file-start, scrape-file, parse-status,
  * embed-status) and seeded from the DB on the Sync page. A finished parse is
@@ -411,17 +413,25 @@ function mergeSeed(live: PipelineItem, db: PipelineItem, now: number): PipelineI
 
 // ── Derived views ─────────────────────────────────────────────────────────────
 
+/** Whether this row has an embed stage: the app's `embedStage`, and only for
+ *  a PDF-backed file — a spreadsheet's text is never embedded. */
+export function embedsIn(it: Pick<PipelineItem, "filename">, embedStage: boolean): boolean {
+  return embedStage && isPdfBacked(it.filename);
+}
+
 /** Nothing more will happen to the row: finished, or its parse skipped.
  *  `embedStage` defaults to false: with no embedder, parsed is finished. */
 export function isComplete(it: PipelineItem, embedStage = false): boolean {
   if (it.parse === "skipped") return true;
-  return embedStage ? it.embed === "done" : it.parse === "done";
+  return embedsIn(it, embedStage) ? it.embed === "done" : it.parse === "done";
 }
 
 /** `embedStage` defaults to true; with it off, a failed embed is not drawn. */
 export function hasFailed(it: PipelineItem, embedStage = true): boolean {
   return (
-    it.download === "error" || it.parse === "error" || (embedStage && it.embed === "error")
+    it.download === "error" ||
+    it.parse === "error" ||
+    (embedsIn(it, embedStage) && it.embed === "error")
   );
 }
 
@@ -429,8 +439,6 @@ export type PipelinePhase = "active" | "waiting" | "paused" | "failed" | "skippe
 
 export interface StatusView {
   phase: PipelinePhase;
-  /** Status pill word, e.g. "Parsing". */
-  short: string;
   /** The progress caption, e.g. "Parsing — 12/37 pages". */
   label: string;
   /** 0–100 for the current stage; null without page counts. */
@@ -455,18 +463,18 @@ export function fmtResume(until: number, now: number): string {
 /** The row's single progress bar, which tracks one stage at a time. `now`
  *  only words a rate-limit countdown; it never changes the phase. */
 export function statusOf(it: PipelineItem, embedStage = false, now = Date.now()): StatusView {
+  const sheet = isSheetFile(it.filename);
   if (hasFailed(it, embedStage)) {
-    return { phase: "failed", short: "Failed", label: it.error || "Failed", percent: null };
+    return { phase: "failed", label: it.error || "Failed", percent: null };
   }
   if (it.download === "active") {
-    return { phase: "active", short: "Downloading", label: "Downloading", percent: null };
+    return { phase: "active", label: "Downloading", percent: null };
   }
   if (it.parse === "skipped") {
-    // The pill says "Skipped"; the caption says what that means.
-    return { phase: "skipped", short: "Skipped", label: "Not parsed until you ask", percent: null };
+    return { phase: "skipped", label: "Not parsed until you ask", percent: null };
   }
   if (it.parse === "active" && it.parsePhase === "upload_wait") {
-    return { phase: "active", short: "Waiting", label: "Waiting for upload", percent: null };
+    return { phase: "active", label: "Waiting for upload", percent: null };
   }
   if (it.parse === "active" && it.parsePhase === "uploading") {
     const total = it.bytesTotal ?? 0;
@@ -474,7 +482,6 @@ export function statusOf(it: PipelineItem, embedStage = false, now = Date.now())
     const label = total > 0 ? `Uploading — ${fmtMb(done)} of ${fmtMb(total)} MB` : "Uploading";
     return {
       phase: "active",
-      short: "Uploading",
       label,
       percent: total > 0 ? (done / total) * 100 : null,
     };
@@ -482,7 +489,7 @@ export function statusOf(it: PipelineItem, embedStage = false, now = Date.now())
   if (it.parse === "active") {
     const pct = it.totalPages > 0 ? (it.pagesDone / it.totalPages) * 100 : null;
     const label = it.totalPages > 0 ? `Parsing — ${it.pagesDone}/${it.totalPages} pages` : "Parsing";
-    return { phase: "active", short: "Parsing", label, percent: pct };
+    return { phase: "active", label, percent: pct };
   }
   // An embed can run for an hour; its page counter is the proof it is alive.
   if (it.embed === "active") {
@@ -497,29 +504,27 @@ export function statusOf(it: PipelineItem, embedStage = false, now = Date.now())
         (pages ? ` · ${pages}` : "");
       return {
         phase: "active",
-        short: "Rate-limited",
         label,
         percent: pct,
         resumesAt: it.embedWaitingUntil,
       };
     }
     const label = pages ? `Embedding — ${pages}` : "Embedding";
-    return { phase: "active", short: "Embedding", label, percent: pct };
+    return { phase: "active", label, percent: pct };
   }
   if (isComplete(it, embedStage)) {
-    // The pill says "Done"; the caption says what was done.
-    const embedded = embedStage && it.embed === "done";
-    const pages = embedded ? it.embedTotalPages : it.totalPages;
-    const what = embedded ? "Parsed and embedded" : "Parsed";
-    const label = pages > 0 ? `${what} — ${pages} page${pages === 1 ? "" : "s"}` : what;
-    return { phase: "done", short: "Done", label, percent: 100 };
+    // Searchable once embedded; without the embed stage, parsed is the end.
+    const label = sheet
+      ? "Converted to text"
+      : embedStage && it.embed === "done" ? "Indexed" : "Parsed";
+    return { phase: "done", label, percent: 100 };
   }
   if (it.embed === "queued") {
-    return { phase: "waiting", short: "Queued", label: "Queued to embed", percent: null };
+    return { phase: "waiting", label: "Queued to embed", percent: null };
   }
   if (it.paused) {
-    const stage = it.parse === "done" ? "embed" : "parse";
-    return { phase: "paused", short: "Paused", label: `Paused — ${stage} pending`, percent: null };
+    const stage = it.parse === "done" ? "embed" : sheet ? "conversion" : "parse";
+    return { phase: "paused", label: `Paused — ${stage} pending`, percent: null };
   }
   if (it.parse === "queued") {
     const label = it.parseQueuePos
@@ -527,16 +532,16 @@ export function statusOf(it: PipelineItem, embedStage = false, now = Date.now())
         ? "Queued to parse — next up"
         : `Queued to parse — #${it.parseQueuePos} in line`
       : "Queued to parse";
-    return { phase: "waiting", short: "Queued", label, percent: null };
+    return { phase: "waiting", label, percent: null };
   }
   // Backlog: nothing is queued; the next sync or the sweep picks these up.
   if (it.parse === "done") {
-    return { phase: "waiting", short: "Waiting", label: "Waiting to embed", percent: null };
+    return { phase: "waiting", label: "Waiting to embed", percent: null };
   }
   if (it.download === "done") {
-    return { phase: "waiting", short: "Waiting", label: "Waiting to parse", percent: null };
+    return { phase: "waiting", label: sheet ? "Waiting to convert" : "Waiting to parse", percent: null };
   }
-  return { phase: "waiting", short: "Waiting", label: "Waiting to download", percent: null };
+  return { phase: "waiting", label: "Waiting to download", percent: null };
 }
 
 /** Megabytes to one decimal, the unit an upload's caption counts in. */

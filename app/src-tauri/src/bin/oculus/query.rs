@@ -277,6 +277,25 @@ impl Ctx {
                     text: None,
                 }
             }
+            // A spreadsheet without page rows still has its text beside it.
+            None if app_lib::paths::is_sheet(&file.relative_path) => {
+                let md = self.data_dir.join(app_lib::sheets::md_rel(&file.relative_path));
+                let text = std::fs::read_to_string(&md).map_err(|_| {
+                    format!(
+                        "{} has not been converted to text yet.\n       \
+                         Open the Oculus app, or run `oculus run -s {}`, to convert it.",
+                        file.relative_path, file.code
+                    )
+                })?;
+                Document {
+                    path: &file.relative_path,
+                    filename: &file.filename,
+                    subject: &file.code,
+                    file_type: &file.file_type,
+                    pages: None,
+                    text: Some(text),
+                }
+            }
             None => {
                 let abs = self.data_dir.join(&file.relative_path);
                 if !is_text_file(&file.relative_path) {

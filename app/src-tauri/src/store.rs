@@ -267,6 +267,35 @@ pub async fn upsert_pages(
     pages: &[crate::parse::ParsePage],
 ) -> Result<usize, String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let with_text = write_pages(&mut tx, file_id, pages).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(with_text)
+}
+
+/// Replace one file's page records outright, vectors included: for text that
+/// is never embedded (`crate::sheets`), where a shorter workbook must lose
+/// its old sheets.
+pub async fn replace_pages(
+    pool: &SqlitePool,
+    file_id: i64,
+    pages: &[crate::parse::ParsePage],
+) -> Result<usize, String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM pages WHERE file_id = ?1")
+        .bind(file_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    let with_text = write_pages(&mut tx, file_id, pages).await?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(with_text)
+}
+
+async fn write_pages(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    file_id: i64,
+    pages: &[crate::parse::ParsePage],
+) -> Result<usize, String> {
     let mut with_text = 0usize;
     for page in pages {
         if !page.markdown.is_empty() {
@@ -281,11 +310,10 @@ pub async fn upsert_pages(
         .bind(file_id)
         .bind(i64::from(page.page_no))
         .bind(&page.markdown)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(|e| format!("upsert page {}: {e}", page.page_no))?;
     }
-    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(with_text)
 }
 

@@ -1,6 +1,7 @@
 # Parsing — PDFs into per-page markdown
 
-Every PDF is read by **MinerU** — its cloud service, or a MinerU server the
+Every PDF (and every Office document, as its LibreOffice-converted PDF) is
+read by **MinerU** — its cloud service, or a MinerU server the
 user runs on their own Mac over loopback — chosen in Settings → Parsing. Both
 are HTTP calls made in-process from Rust; Oculus never starts or supervises
 either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
@@ -20,6 +21,7 @@ either. MinerU is ~100× faster than docling with formula enrichment, with 1% vs
 | Token bucket, semaphore, retry ladder (shared with Voyage) | `app/src-tauri/src/ratelimit.rs` |
 | The `parse-status` event and shared wire payload | `app/src-tauri/src/parse/events.rs`, `app/src-tauri/src/pipeline_events.rs` |
 | Call site; one thread per PDF; LibreOffice conversion | `app/src-tauri/src/sync.rs` |
+| Spreadsheets to text: conversion, page rows, startup reconcile | `app/src-tauri/src/sheets.rs` |
 | Skipping a file: the `parse_skip` command and its marks | `app/src-tauri/src/scrape.rs`, `app/src-tauri/src/parse/mod.rs` (`Skips`) |
 | Artifact purging | `app/src-tauri/src/paths.rs` |
 | MinerU keychain commands + the pre-store token probe | `app/src-tauri/src/mineru.rs` |
@@ -71,7 +73,8 @@ must say so. `ParseError` keeps the answers distinguishable:
   re-kicked, and a latch stands it down (one probe file after
   `LATCH_PROBE_AFTER_MS`).
 - **An Office file LibreOffice could not convert is `Document`** with code
-  `parse::CONVERSION_FAILED`, whose sentence names the conversion, not MinerU.
+  `parse::CONVERSION_FAILED`, whose sentence names the conversion, not MinerU;
+  an unreadable spreadsheet is `Document` with `parse::SHEET_UNREADABLE`.
 - **`NotReady` is retryable and non-latching on purpose**: a local server that
   is stopped or still loading must not mark any file permanently broken.
 - **`Offline` names its cause**: `ratelimit::transport_detail` keeps ureq's
@@ -273,6 +276,50 @@ or a log. `mineru_set_api_key` checks it first by GETting a non-existent task:
 and an unreachable MinerU stores it as `unverified`. The client keeps no
 rejection latch; `parseStore`'s session-scoped `ParseLatch` does, and saving a
 token lifts it.
+
+## Spreadsheets are converted to text, never parsed
+
+A workbook (`.xlsx`, `.xlsm`, `.xls`, `.ods`) is read in-process by `calamine`
+(`app/src-tauri/src/sheets.rs`) and written beside the original as
+`marks.xlsx.md`: `# marks.xlsx`, then a `## <sheet>` section per worksheet
+holding its filled extent as a GFM table, first row as the header (`(empty)`
+for a blank sheet). No PDF, no MinerU call, no embedding: a sheet's text is
+all there is to it, and a whole sheet makes no usable page image.
+
+- **The table holds values**, each formula cell's stored result. A formula
+  the file stored no result for (a workbook written by a script and never
+  recalculated) shows in place as `=FORMULA`.
+- **A merged block repeats its value** in every cell it covers, so each row
+  reads on its own (a rubric's section label, a grouped header). xlsx and xls
+  record merges; calamine reads none from ods, whose blocks stay top-left only.
+- **`Formulas:` follows the table** when the sheet has any: one bullet per
+  pattern, in order of its first cell. Cells whose formulas match once each
+  A1 reference is made relative to its own cell (`$` parts stay absolute) —
+  a run copied down or across — share a line naming the blocks they cover and
+  the first cell's formula: `- D9:E14, D20: =PROPER(G9)`. A sheet lists 200
+  patterns, a line 20 blocks, then `… and N more`. calamine expands an xlsx
+  shared formula into each cell; an xls one it does not decode, so only cells
+  with a formula of their own are listed there.
+
+- **Each worksheet is one `pages` row**, page 1 the first sheet, so
+  `oculus read --pages`, `oculus grep` and the lexical index see it.
+  `sheets::record` replaces the file's rows outright (`store::replace_pages`),
+  sets `parse_status = 'quality'` and clears the embed columns.
+- **It ends in the events a parse ends in** (`quality`, or `error` as a
+  `Document` failure), so its File Activity row settles; nothing is queued,
+  started or skippable. A failure deletes its text and pages, never falls
+  back to LibreOffice.
+- **Three callers**: a sync converts at download, and again for unchanged
+  bytes whose `.md` is missing (`sheets::needs_conversion`); `parse_file`
+  converts on request (an upload's kick, a Retry); app startup runs
+  `sheets::reconcile` over every sheet on record.
+- **A sync's conversion can beat the frontend's write of the `files` row**,
+  so `sheets::record` inserts a bare row when there is none and the frontend's
+  upsert fills in the rest.
+- **PDF-route files beside a sheet are swept**: a `.xlsx.pdf`,
+  `.xlsx.pages.json`, `.xlsx.emb.json` or `.xlsx_images/` makes
+  `needs_conversion` true, and the conversion deletes them
+  (`paths::purge_parse_artifacts`) before writing its text.
 
 ## Gotchas
 

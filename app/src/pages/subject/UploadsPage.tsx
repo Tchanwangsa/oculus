@@ -10,7 +10,7 @@ import { useSubjectFiles } from "@/hooks/useSubjectFiles";
 import { useParseStore } from "@/stores/parseStore";
 import { useReconcileParseStatus } from "@/hooks/useReconcileParseStatus";
 import type { DbFile } from "@/lib/db";
-import { fileIconFor, isPdfBacked } from "@/lib/fileTypes";
+import { fileIconFor, isPipelineFile, isSheetFile } from "@/lib/fileTypes";
 import { fmtSize } from "@/lib/format";
 import { openFileSmart } from "@/lib/openFile";
 import { useFilesTab } from "@/pages/subject/FilesPage";
@@ -163,15 +163,15 @@ function UploadRow({
   onDelete: () => void;
 }) {
   const Icon = fileIconFor(file.filename);
-  // Live status, else the stored column. Only PDF-backed files get a word.
+  // Live status, else the stored column. Only pipeline files get a word.
   const label = useMemo(() => {
-    if (!isPdfBacked(file.filename)) return "";
+    if (!isPipelineFile(file.filename)) return "";
     switch (status ?? file.parse_status) {
       case "error": return "failed";
       case "queued":
       case "running": return "reading";
       case "fast":
-      case "quality": return "parsed";
+      case "quality": return isSheetFile(file.filename) ? "converted" : "parsed";
       case "skipped": return "skipped";
       default: return "";
     }

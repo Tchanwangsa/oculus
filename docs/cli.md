@@ -100,7 +100,8 @@ rewriting itself in place is how a long run is told from a stuck one.
   with the real list; a real category a subject lacks returns nothing.
 - `read` uses the page numbers `search` reports and the viewer shows — all
   three key `pages.markdown` on `(file_id, page_no)`. An Office document's
-  pages are its derived PDF's (`paths::doc_pdf_rel`).
+  pages are its derived PDF's (`paths::doc_pdf_rel`); a spreadsheet's are its
+  sheets, and with no rows yet `read` prints its `.md` from disk.
 - Read commands share subject-ID resolution in `query.rs`: an omitted scope
   means every subject, while a prefix keeps every matching term and an unknown
   code fails before querying files.

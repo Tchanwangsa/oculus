@@ -187,12 +187,17 @@ pub fn write_course_bytes(
     Ok((rel, content.len() as u64, action))
 }
 
-/// Delete a PDF-backed file's parse/embed artifacts (`{stem}.md`,
+/// Delete a file's derived text and parse/embed artifacts (`{stem}.md`,
 /// `.pages.json`, `.emb.json`, `{stem}_images/`). The skip checks read those
-/// records, not the PDF, so changed bytes would otherwise keep the old parse.
-/// `library_rel` is data-dir-relative (`courses/…`).
+/// records, not the source, so changed bytes would otherwise keep the old text.
+/// A spreadsheet's stem is its own name, and a `{name}.pdf` beside it is a
+/// PDF-route leftover that goes too. `library_rel` is data-dir-relative.
 pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
-    let Some(pdf_rel) = doc_pdf_rel(library_rel) else { return };
+    let sheet = is_sheet(library_rel);
+    let Some(pdf_rel) = doc_pdf_rel(library_rel).or_else(|| sheet.then(|| format!("{library_rel}.pdf")))
+    else {
+        return;
+    };
     let pdf = data_dir.join(&pdf_rel);
     let (Some(stem), Some(parent)) = (pdf.file_stem().and_then(|s| s.to_str()), pdf.parent())
     else {
@@ -206,11 +211,25 @@ pub fn purge_parse_artifacts(data_dir: &std::path::Path, library_rel: &str) {
         let _ = std::fs::remove_file(parent.join(name));
     }
     let _ = std::fs::remove_dir_all(parent.join(format!("{stem}_images")));
+    if sheet {
+        let _ = std::fs::remove_file(&pdf);
+    }
 }
 
 /// Extensions LibreOffice converts to PDF at download, as `{name}.pdf` beside it.
 /// Mirrored by `OFFICE_EXTS` in `app/src/lib/fileTypes.ts`.
-pub const OFFICE_EXTS: &[&str] = &[".pptx", ".docx", ".xlsx", ".ppt", ".doc", ".xls"];
+pub const OFFICE_EXTS: &[&str] = &[".pptx", ".docx", ".ppt", ".doc"];
+
+/// Spreadsheets, converted to `{name}.md` text in-process (`crate::sheets`):
+/// never PDF-backed, never embedded. Mirrored by `SHEET_EXTS` in
+/// `app/src/lib/fileTypes.ts`.
+pub const SHEET_EXTS: &[&str] = &[".xlsx", ".xlsm", ".xls", ".ods"];
+
+/// A spreadsheet by name, in any case.
+pub fn is_sheet(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    SHEET_EXTS.iter().any(|e| lower.ends_with(e))
+}
 
 /// A PDF by name, in any case: Canvas keeps whatever the uploader typed.
 pub fn is_pdf(rel: &str) -> bool {
@@ -382,8 +401,8 @@ mod tests {
         assert_eq!(doc_pdf_rel("files/SCAN.PDF").as_deref(), Some("files/SCAN.PDF"));
         assert_eq!(doc_pdf_rel("files/deck.pptx").as_deref(), Some("files/deck.pptx.pdf"));
         assert_eq!(doc_pdf_rel("files/notes.DOCX").as_deref(), Some("files/notes.DOCX.pdf"));
-        assert_eq!(doc_pdf_rel("files/marks.xlsx").as_deref(), Some("files/marks.xlsx.pdf"));
-        assert_eq!(doc_pdf_rel("files/legacy.xls").as_deref(), Some("files/legacy.xls.pdf"));
+        assert_eq!(doc_pdf_rel("files/marks.xlsx"), None);
+        assert_eq!(doc_pdf_rel("files/legacy.XLS"), None);
         assert_eq!(doc_pdf_rel("pages/intro.md"), None);
         assert_eq!(doc_pdf_rel("images/x.png"), None);
     }
@@ -399,7 +418,34 @@ mod tests {
 
     #[test]
     fn the_sql_list_is_pdf_plus_every_office_extension() {
-        assert_eq!(pdf_backed_sql_list(), "('pdf', 'pptx', 'docx', 'xlsx', 'ppt', 'doc', 'xls')");
+        assert_eq!(pdf_backed_sql_list(), "('pdf', 'pptx', 'docx', 'ppt', 'doc')");
+    }
+
+    #[test]
+    fn spreadsheets_are_known_by_extension_and_are_never_pdf_backed() {
+        for rel in ["f/marks.xlsx", "f/MACROS.XLSM", "f/old.xls", "f/calc.ods"] {
+            assert!(is_sheet(rel), "{rel}");
+            assert!(doc_pdf_rel(rel).is_none(), "{rel}");
+        }
+        assert!(!is_sheet("f/marks.xlsx.md"));
+        assert!(!is_sheet("f/deck.pptx"));
+        assert!(SHEET_EXTS.iter().all(|e| !OFFICE_EXTS.contains(e)));
+    }
+
+    #[test]
+    fn purging_a_sheet_takes_its_text_and_any_pdf_route_files() {
+        let scratch = crate::test_support::Scratch::new("purge-sheet");
+        let dir = scratch.join("courses/X/files");
+        std::fs::create_dir_all(dir.join("m.xlsx_images")).unwrap();
+        for name in ["m.xlsx", "m.xlsx.md", "m.xlsx.pdf", "m.xlsx.pages.json", "m.xlsx.emb.json"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        purge_parse_artifacts(&scratch, "courses/X/files/m.xlsx");
+        let left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, vec!["m.xlsx".to_string()]);
     }
 
     #[test]

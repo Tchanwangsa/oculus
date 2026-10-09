@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { deleteFileRow, upsertFile, type DbFile } from "@/lib/db";
-import { isPdfBacked } from "@/lib/fileTypes";
+import { isPipelineFile } from "@/lib/fileTypes";
 import { parseFile } from "@/lib/courseFiles";
 
 // The student's own files: Rust copies them into `courses/<code>/uploads/`,
@@ -30,7 +30,7 @@ const announce = () =>
   window.dispatchEvent(new CustomEvent(UPLOADS_CHANGED_EVENT));
 
 /** The native open panel; `[]` if cancelled. Deliberately unfiltered: any file
- *  can be kept, only PDF-backed ones also become searchable. */
+ *  can be kept, only PDF-backed ones and spreadsheets also become searchable. */
 export async function pickUploads(): Promise<string[]> {
   const picked = await open({ multiple: true, title: "Add files to this subject" });
   if (picked == null) return [];
@@ -59,9 +59,10 @@ export async function addUploads(
       file.size_bytes,
       "upload",
     );
-    // Fire-and-forget: the parse runs in Rust, a retryable failure is re-kicked
-    // by `useQualitySweep` and any other surfaces on the file row.
-    if (!outcome.error && isPdfBacked(file.filename)) {
+    // Fire-and-forget: the parse (a spreadsheet's conversion to text) runs in
+    // Rust, a retryable failure is re-kicked by `useQualitySweep` and any
+    // other surfaces on the file row.
+    if (!outcome.error && isPipelineFile(file.filename)) {
       parseFile(subject.id, subject.code, file.relative_path).catch((e) => console.warn(`[uploads] parse ${file.relative_path}: ${e}`));
     }
   }

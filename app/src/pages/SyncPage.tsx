@@ -23,7 +23,7 @@ import {
   upsertSubjects,
   getSubjects,
   getSyncRunSummaries,
-  getPdfPipelineRows,
+  getPipelineRows,
   getEmbedCoverage,
   getFileByRelativePath,
   setParseStatusByPath,
@@ -123,11 +123,11 @@ export default function SyncPage() {
     return () => clearInterval(t);
   }, [scraping, active]);
 
-  // Backfill the pipeline table with every PDF on record. The DB's
+  // Backfill the pipeline table with every pipeline file on record. The DB's
   // parse_status can lag disk (e.g. CLI parses), so disk is consulted for
   // anything not fully parsed and the DB patched to match.
   const seedFromDb = useCallback(async () => {
-    const rows = await getPdfPipelineRows();
+    const rows = await getPipelineRows();
     const byPath = new Map(rows.map((r) => [r.relative_path, r]));
 
     // Seed embed from page coverage in the *current* space, never

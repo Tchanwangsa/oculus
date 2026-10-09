@@ -112,7 +112,10 @@ library files; the rest of the frontend has its own pages:
   setting both stores to queued before it calls Rust. New bytes from a sync
   reset it with the rest of the pipeline.
 - **The pipeline is `download → parse → embed`**, the third stage drawn only
-  when `embedStage` is set. A running cloud parse carries a `phase` —
+  when `embedStage` is set, and only for a PDF-backed file (`embedsIn`). A
+  spreadsheet's row (`isPipelineFile`) is two stages, its parse being the
+  conversion to text: done reads "Converted to text", its steps say
+  "Converted", and it offers no Embed or Skip. A running cloud parse carries a `phase` —
   `upload_wait` (its batch is in, another file uploads first), `uploading`
   with bytes, `processing` — which the row keeps with the first and latest
   upload samples; `uploadEta` gives a time left only after 10 s of them, and
@@ -122,20 +125,23 @@ library files; the rest of the frontend has its own pages:
 - **A rate-limited embed stays `active`** (`embedWaitingUntil` and
   `embedWaitingReason` on the row, from `embed-status`; any embed event
   without them clears them). `statusOf` keeps the phase, so the row keeps its
-  place, and words it as a "Rate-limited" warning pill with the reason on
-  hover, over a caption with the reason and a per-second countdown
+  place, and words it as a caption with the reason and a per-second countdown
   ("resuming…" once past due). Settings → Embeddings appends the same wait to
   the index run's line.
 - **The Sync page's pipeline rows keep their immutable item identity**
   (`app/src/components/sync/PipelineTable.tsx`), so one progress tick renders
   only its changed row.
 - **A File Activity row says each fact once**: the file (name, subject code),
-  one segmented track — a segment per stage, done filled green, the moving one
-  filled to its percent in brand (pulsing when no percent is known), a held one
-  (waiting for its upload turn, rate-limited) unanimated, skipped hatched,
-  failed red — with one caption beside it (`statusOf`'s label, an upload's
-  time left, or a failure's short cause), when the file last moved, and the
-  status pill. Clicking the name opens the file beside the page (⌘-click a new
+  one segmented track that is the row's status — a segment per stage, done
+  filled green, the moving one filled to its percent in brand (pulsing when no
+  percent is known), a held one (waiting for its upload turn, rate-limited)
+  in amber and unanimated, a paused file's next stage amber, skipped hatched,
+  failed red — with one caption beside it (`statusOf`'s label — "Indexed" once
+  done — an upload's time left, or a failure's short cause), and when the file
+  last moved. The track's tooltip is the whole caption, plus a finished file's
+  page count. The table sizes by its own width (`@container`): narrow, the
+  caption hides behind that tooltip, and narrower still the subject code goes,
+  so the name keeps the room. Clicking the name opens the file beside the page (⌘-click a new
   tab, via `data-tab-href`); clicking elsewhere expands it. Row actions
   (▶ resume, retry, embed or parse a skipped file; Skip; Open beside) take the
   time's place on hover or keyboard focus. Skip is offered until the parse

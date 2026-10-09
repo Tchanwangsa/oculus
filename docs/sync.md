@@ -100,20 +100,26 @@ have nothing to do with Echo360 lectures.
 - The cookie goes only to Canvas: `download_to` sets it for a Canvas URL, and
   ureq strips `Cookie` on every redirect, so the signed file host a Canvas
   download redirects to never sees it.
-- Videos never reach parse or embed: every pipeline gate is a PDF/Office
-  allowlist (`paths::doc_pdf_rel`, `isPdfBacked`, `PDF_BACKED_SQL_LIST`).
+- Videos never reach parse or embed: every pipeline gate is a PDF/Office or
+  spreadsheet allowlist (`paths::doc_pdf_rel`, `paths::is_sheet`,
+  `isPdfBacked`, `isPipelineFile`, `PDF_BACKED_SQL_LIST`).
 
 ## Office documents are stored as themselves plus a derived PDF
 
-Everything downstream is PDF-shaped, so `.pptx/.docx/.xlsx/.ppt/.doc/.xls` are
-kept intact and LibreOffice headless writes `deck.pptx.pdf` beside them
+Parsing and embedding are PDF-shaped, so `.pptx/.docx/.ppt/.doc` are kept
+intact and LibreOffice headless writes `deck.pptx.pdf` beside them
 (`office_to_pdf`). The derived PDF never gets a `files` row; the original is
 the library row, and `paths::doc_pdf_rel` resolves it for every consumer. The
 student's own uploads go through the same conversion
-(`app/src-tauri/src/files.rs`). A spreadsheet exports with `SinglePageSheets`
-(`convert_target`), because Calc's default pagination splits wide sheets into
-header-less column bands; `dpi_for_page` in `app/src-tauri/src/embed/raster.rs`
-caps the resulting page's render size.
+(`app/src-tauri/src/files.rs`).
+
+Spreadsheets (`.xlsx/.xlsm/.xls/.ods`) are kept intact too, but become text,
+not a PDF: `marks.xlsx.md` beside them, written as they download
+(`crate::sheets`, see
+[parsing.md](./parsing.md#spreadsheets-are-converted-to-text-never-parsed)).
+One needs a spreadsheet type (or none) *and* a spreadsheet's extension
+(`is_sheet_type`): every later gate goes by the extension, and a `.csv` can
+arrive labelled `application/vnd.ms-excel`.
 
 ## Ed threads are a custom XML dialect
 

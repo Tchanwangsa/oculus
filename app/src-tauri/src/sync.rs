@@ -14,7 +14,7 @@ use crate::md::{self, ImageMap};
 use crate::parse;
 use crate::paths;
 
-/// Types stored as-is; everything downstream is PDF-shaped.
+/// Types stored as-is and parsed as PDFs.
 const DOWNLOADABLE_TYPES: &[&str] = &["application/pdf"];
 
 /// Office formats kept as-is plus a LibreOffice-converted sibling PDF, mapped
@@ -22,10 +22,17 @@ const DOWNLOADABLE_TYPES: &[&str] = &["application/pdf"];
 const OFFICE_TYPES: &[(&str, &str)] = &[
     ("application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
     ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
-    ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
     ("application/vnd.ms-powerpoint", "ppt"),
     ("application/msword", "doc"),
-    ("application/vnd.ms-excel", "xls"),
+];
+
+/// Spreadsheets, kept as-is plus their text (`crate::sheets`) when the name
+/// is a spreadsheet's too (`is_sheet_type`).
+const SHEET_TYPES: &[&str] = &[
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel.sheet.macroEnabled.12",
+    "application/vnd.ms-excel",
+    "application/vnd.oasis.opendocument.spreadsheet",
 ];
 
 /// A wedged soffice must not hang the whole sync run.
@@ -917,9 +924,10 @@ impl Engine {
         let ct = content_type_of(&info);
         let video = is_video(&ct, &name);
         let office = office_ext(&ct).or_else(|| is_generic_binary(&ct).then(|| office_ext_of(&name)).flatten());
+        let sheet = is_sheet_type(&ct, &name);
         let downloadable = DOWNLOADABLE_TYPES.contains(&ct.as_str())
             || (is_generic_binary(&ct) && paths::is_pdf(&name));
-        if !video && !downloadable && office.is_none() {
+        if !video && !downloadable && office.is_none() && !sheet {
             return Ok(Fetched::Skipped);
         }
         if !video && info["size"].as_u64().unwrap_or(0) > MAX_FILE_BYTES {
@@ -970,6 +978,11 @@ impl Engine {
 
         if known && on_disk {
             unchanged();
+            // Unchanged bytes with no text of their own, or PDF-route files
+            // beside them, are converted again without a download.
+            if sheet && crate::sheets::needs_conversion(&self.data_dir, &rel) {
+                self.convert_sheet(&c.code, &rel, c.id);
+            }
             return Ok(Fetched::Saved(rel));
         }
 
@@ -996,7 +1009,8 @@ impl Engine {
         let bytes = self.fetch_bytes(&url).map_err(|e| failed(format!("Download failed: {e}.")))?;
 
         // The original is the library file. Office documents get a derived
-        // "deck.pptx.pdf" beside them — never announced, never a database row.
+        // "deck.pptx.pdf" beside them — never announced, never a database row
+        // — and spreadsheets their text, "marks.xlsx.md".
         let (rel, action) = self
             .store(c, &format!("files/{name}"), &bytes, Some(file_id), None)
             .map_err(|e| failed(format!("Could not save the file: {e}.")))?;
@@ -1021,6 +1035,9 @@ impl Engine {
                     self.conversion_failed(&rel, action, c.id);
                 }
             }
+        }
+        if sheet {
+            self.convert_sheet(&c.code, &rel, c.id);
         }
         if complete && !modified.is_empty() {
             self.manifest
@@ -1280,6 +1297,16 @@ impl Engine {
         Ok((rel, action))
     }
 
+    /// A spreadsheet's text, at once: it takes moments and starts no parse.
+    /// A failure is the row's parse error; the bytes stay in the manifest,
+    /// since a re-download cannot change them.
+    fn convert_sheet(&self, code: &str, rel: &str, subject_id: i64) {
+        if let Err(e) = crate::sheets::index(&self.data_dir, rel, subject_id) {
+            let name = rel.rsplit('/').next().unwrap_or(rel);
+            self.reporter.log("warning", code, &format!("{name}: no text — {e}"));
+        }
+    }
+
     /// An Office original whose conversion failed has no PDF to parse. A
     /// derived PDF from older bytes is deleted with its artifacts, or it would
     /// be parsed as current; the failure is the row's terminal parse status.
@@ -1527,6 +1554,13 @@ fn is_video(ct: &str, name: &str) -> bool {
         || (is_generic_binary(ct) && VIDEO_EXTS.iter().any(|e| lower.ends_with(&format!(".{e}"))))
 }
 
+/// A spreadsheet type (or an untyped upload) with a spreadsheet's name: every
+/// later gate goes by the extension, and Windows browsers label a `.csv` as
+/// `application/vnd.ms-excel`.
+fn is_sheet_type(ct: &str, name: &str) -> bool {
+    (SHEET_TYPES.contains(&ct) || is_generic_binary(ct)) && paths::is_sheet(name)
+}
+
 /// The converter extension an untyped file's name claims, if known.
 pub(crate) fn office_ext_of(name: &str) -> Option<&'static str> {
     let lower = name.to_ascii_lowercase();
@@ -1555,18 +1589,6 @@ pub(crate) fn office_to_pdf(bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> 
     result
 }
 
-/// Calc slices a wide sheet into header-less page-width columns, so
-/// spreadsheets export with `SinglePageSheets`; the resulting huge page is
-/// kept in bounds by `embed/raster.rs::dpi_for_page`.
-fn convert_target(ext: &str) -> &'static str {
-    match ext {
-        "xlsx" | "xls" => {
-            r#"pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}"#
-        }
-        _ => "pdf",
-    }
-}
-
 fn convert_in(soffice: &Path, dir: &Path, bytes: &[u8], ext: &str) -> Result<Vec<u8>, String> {
     let input = dir.join(format!("input.{ext}"));
     std::fs::write(&input, bytes).map_err(|e| format!("write temp: {e}"))?;
@@ -1577,8 +1599,7 @@ fn convert_in(soffice: &Path, dir: &Path, bytes: &[u8], ext: &str) -> Result<Vec
         .map_err(|_| "profile path not absolute".to_string())?;
     let mut child = std::process::Command::new(soffice)
         .arg(format!("-env:UserInstallation={profile}"))
-        .args(["--headless", "--norestore", "--convert-to"])
-        .arg(convert_target(ext))
+        .args(["--headless", "--norestore", "--convert-to", "pdf"])
         .arg("--outdir")
         .arg(dir)
         .arg(&input)
@@ -1805,21 +1826,17 @@ mod tests {
     }
 
     #[test]
-    fn spreadsheets_convert_like_every_other_office_format() {
-        assert_eq!(
-            office_ext("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-            Some("xlsx")
-        );
-        assert_eq!(office_ext("application/vnd.ms-excel"), Some("xls"));
-        assert_eq!(office_ext("application/zip"), None);
-    }
-
-    #[test]
-    fn only_spreadsheets_ask_calc_to_stop_slicing_the_sheet() {
-        assert_eq!(convert_target("pptx"), "pdf");
-        assert_eq!(convert_target("docx"), "pdf");
-        assert!(convert_target("xlsx").contains("SinglePageSheets"));
-        assert!(convert_target("xls").starts_with("pdf:calc_pdf_Export:"));
+    fn spreadsheets_are_text_never_a_libreoffice_conversion() {
+        for ct in SHEET_TYPES {
+            assert!(is_sheet_type(ct, "Marks.xlsx"), "{ct}");
+            assert_eq!(office_ext(ct), None, "{ct}");
+        }
+        assert!(!is_sheet_type("application/vnd.ms-excel", "grades.csv"));
+        assert!(is_sheet_type("application/octet-stream", "Marks.XLSM"));
+        assert!(is_sheet_type("", "calc.ods"));
+        assert!(!is_sheet_type("application/zip", "marks.xlsx"));
+        assert!(!is_sheet_type("application/octet-stream", "deck.pptx"));
+        assert_eq!(office_ext_of("marks.xlsx"), None);
     }
 
     #[test]
@@ -1835,7 +1852,6 @@ mod tests {
         // The longer extension has to win, or "deck.pptx" converts as "ppt".
         assert_eq!(office_ext_of("deck.pptx"), Some("pptx"));
         assert_eq!(office_ext_of("old deck.PPT"), Some("ppt"));
-        assert_eq!(office_ext_of("marks.xlsx"), Some("xlsx"));
         // Not an Office format, so the name buys it nothing.
         assert_eq!(office_ext_of("archive.zip"), None);
         assert_eq!(office_ext_of("notes.pdf"), None);
