@@ -19,8 +19,6 @@ pub const SETTINGS_KEY: &str = "job_models";
 pub enum Job {
     /// `oculus lecture chapters` / `lecture_find_chapters`.
     LectureChapters,
-    /// `oculus lecture reading` / `lecture_write_reading`.
-    LectureReading,
     /// `oculus lecture end` / `lecture_find_end`: one tool-less turn.
     LectureEnd,
     /// The one-line naming turn after a thread's first exchange.
@@ -34,7 +32,6 @@ impl Job {
     pub fn key(self) -> &'static str {
         match self {
             Job::LectureChapters => "lectureChapters",
-            Job::LectureReading => "lectureReading",
             Job::LectureEnd => "lectureEnd",
             Job::ThreadNaming => "threadNaming",
             Job::DocumentSuggestions => "documentSuggestions",
@@ -64,11 +61,6 @@ pub fn default_selection(job: Job) -> JobSelection {
             provider: Provider::Codex,
             model: "gpt-5.6-luna".into(),
             reasoning_effort: Some("xhigh".into()),
-        },
-        Job::LectureReading => JobSelection {
-            provider: Provider::Codex,
-            model: "gpt-5.6-luna".into(),
-            reasoning_effort: Some("medium".into()),
         },
         Job::LectureEnd => JobSelection {
             provider: Provider::Claude,
@@ -147,22 +139,6 @@ mod tests {
     }
 
     #[test]
-    fn the_reading_copy_has_its_own_registry_key() {
-        let s = from_json(
-            r#"{"lectureReading":{"provider":"codex","model":"gpt-5.6-luna","reasoningEffort":"medium"}}"#,
-            Job::LectureReading,
-        )
-        .expect("the reading key resolves");
-        assert_eq!(s.provider, Provider::Codex);
-        assert_eq!(s.effort(), Some("medium"));
-        assert!(from_json(
-            r#"{"lectureReading":{"provider":"codex","model":"gpt-5.6-luna","reasoningEffort":"medium"}}"#,
-            Job::LectureChapters,
-        )
-        .is_none());
-    }
-
-    #[test]
     fn malformed_or_partial_values_fall_back_rather_than_fail() {
         for body in [
             "not json at all",
@@ -184,11 +160,6 @@ mod tests {
         let n = default_selection(Job::ThreadNaming);
         assert_eq!(n.provider, Provider::Claude);
         assert_eq!((n.model.as_str(), n.effort()), ("claude-haiku-4-5-20251001", None));
-        let r = default_selection(Job::LectureReading);
-        assert_eq!(
-            (r.provider, r.model.as_str(), r.effort()),
-            (Provider::Codex, "gpt-5.6-luna", Some("medium"))
-        );
         let e = default_selection(Job::LectureEnd);
         assert_eq!(
             (e.provider, e.model.as_str(), e.effort()),

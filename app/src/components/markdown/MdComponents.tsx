@@ -231,8 +231,8 @@ const NO_PLUGINS: never[] = [];
 
 /**
  * Markdown with no block elements in the output, for text inside a `<button>`
- * (transcript lines, chapter summaries): a block element inside a button makes
- * WebKit close the button early.
+ * (chapter summaries): a block element inside a button makes WebKit close the
+ * button early.
  */
 export const InlineMd = memo(function InlineMd({ text, className }: { text: string; className?: string }) {
   const math = hasMath(text);

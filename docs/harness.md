@@ -439,8 +439,8 @@ provider-verified model (Meta's Muse Spark) fails once in the timeline.
 
 ## Per-job models
 
-Chaptering, the reading copy, the lecture end, thread naming and document
-suggestions each name their agent, model and level in a Settings → Jobs row
+Chaptering, the lecture end, thread naming and document suggestions each
+name their agent, model and level in a Settings → Jobs row
 using `ModelPicker`. The registry is one
 `settings` value, `job_models`, read by `jobs.rs` and written by `db.ts`; both
 carry the defaults and must agree (a new job is a `Job` variant plus entries in

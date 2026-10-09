@@ -80,7 +80,6 @@ fn main() {
         Some(Command::Lecture { action }) => match action {
             LectureAction::Candidates(a) => ctx.lecture_candidates(&a),
             LectureAction::Chapters(a) => ctx.lecture_chapters(&a),
-            LectureAction::Reading(a) => ctx.lecture_reading(&a),
             LectureAction::End(a) => ctx.lecture_end(&a),
         },
         Some(Command::Memory { action }) => match action {

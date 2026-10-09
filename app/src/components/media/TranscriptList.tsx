@@ -1,4 +1,4 @@
-import { useCallback, type ReactNode } from "react";
+import { useCallback } from "react";
 import { cn } from "@/lib/utils";
 import type { TranscriptSearch } from "@/hooks/useTranscriptSearch";
 import { fmtClockSecs, type Cue } from "@/lib/media";
@@ -21,8 +21,6 @@ export interface TranscriptListProps {
   onScrollAway: () => void;
   /** Resume following and snap back to the playing cue. */
   onBackToLive: () => void;
-  /** Beside the search field, e.g. the lecture's register picker. */
-  tools?: ReactNode;
 }
 
 /** The Transcript tab's cue list: search, then cue space mapped to
@@ -37,7 +35,6 @@ export function TranscriptList({
   following,
   onScrollAway,
   onBackToLive,
-  tools,
 }: TranscriptListProps) {
   const { query, setQuery, needle, searching, rows, followIdx } = search;
   // The virtualizer keys its measurement memo by this function identity.
@@ -45,17 +42,12 @@ export function TranscriptList({
 
   return (
     <>
-      {/* Tools share the search row: the dock can be 220px wide. */}
-      <div className="flex shrink-0 items-center gap-1.5 px-1.5 pt-1.5">
-        <SearchField
-          value={query}
-          onChange={setQuery}
-          placeholder="Search"
-          count={searching ? rows.length : undefined}
-          className="min-w-0 flex-1 shrink p-0"
-        />
-        {tools}
-      </div>
+      <SearchField
+        value={query}
+        onChange={setQuery}
+        placeholder="Search"
+        count={searching ? rows.length : undefined}
+      />
       <FollowList
         count={rows.length}
         followIdx={followIdx}

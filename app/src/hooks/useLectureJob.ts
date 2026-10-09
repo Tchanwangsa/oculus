@@ -5,8 +5,8 @@ import { useTauriEvent } from "@/hooks/useEvents";
 export type LectureJobStatus = "none" | "running" | "ready" | "error";
 
 /**
- * One background lecture job (chaptering, the reading copy): how to read its
- * rows and status column, the Rust events that report it, and how to start it.
+ * One background lecture job, such as chaptering: how to read its rows and
+ * status column, the Rust events that report it, and how to start it.
  * Status is read from SQLite rather than the `lectures` row the player was
  * handed — that row is a snapshot that is not re-read when a run lands.
  */
@@ -21,8 +21,6 @@ export interface LectureJob<Row, P extends { lectureId: string }> {
   /** Step event: display only, costs a `setState`. */
   progressEvent: string;
   start: (id: string, force: boolean) => Promise<unknown>;
-  /** A step after which rows already committed are worth re-reading. */
-  reloadOnStep?: (p: P) => boolean;
   /**
    * When this session claimed each run, and each run's last step, keyed by
    * lecture. Module-level because the player unmounts on every tab switch and
@@ -107,7 +105,6 @@ export function useLectureJob<Row, P extends { lectureId: string }>(
     // A step proves a run: a `reload` that raced the claim may have read
     // the old NULL and would otherwise offer the start button again.
     setStatus("running");
-    if (job.reloadOnStep?.(e.payload)) reload();
   });
 
   const run = useCallback(

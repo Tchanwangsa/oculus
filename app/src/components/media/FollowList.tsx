@@ -1,7 +1,7 @@
 /**
- * A virtualised list that follows playback, behind the transcript and the Read
- * tab: snap on first sync, the 20–80% band rule, nudge / unfollow /
- * soft-resume, idle re-sync with a countdown ring, edge fades, reopen scroll.
+ * A virtualised list that follows playback, behind `TranscriptList`: snap on
+ * first sync, the 20–80% band rule, nudge / unfollow / soft-resume, idle
+ * re-sync with a countdown ring, edge fades, reopen scroll.
  * Virtualised because a transcript runs to thousands of rows beside a decoding
  * video; heights are measured, so `estimateSize` need only be close.
  */
@@ -405,19 +405,16 @@ export function SearchField({
   onChange,
   placeholder,
   count,
-  className,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
   /** Matches to show beside the clear button; `undefined` when not searching. */
   count?: number;
-  /** Row override (beside the register picker the row owns the padding). */
-  className?: string;
 }) {
   const searching = count !== undefined;
   return (
-    <div className={cn("px-1.5 pt-1.5 shrink-0", className)}>
+    <div className="px-1.5 pt-1.5 shrink-0">
       <div className="relative">
         <MagnifyingGlass
           size={12}

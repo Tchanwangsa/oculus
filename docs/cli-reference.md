@@ -1150,7 +1150,6 @@ Usage: oculus lecture <COMMAND>
 Commands:
   candidates  Find where a recording plausibly changes topic
   chapters    Name a recording's chapters with a CLI agent, and store them
-  reading     Write a recording's reading copy with a CLI agent
   end         Find where a recording's lecture ends, before its Q&A and dead air
   help        Print this message or the help of the given subcommand(s)
 
@@ -1224,50 +1223,6 @@ Options:
 
       --force
           Re-run over a lecture that already has chapters, replacing them
-
-      --source <N>
-          Which captured stream to read — 1 or 2. Default: source 1, unless it turns out
-          to be dead, in which case source 2 if it is downloaded
-
-  -h, --help
-          Print help (see a summary with '-h')
-```
-
-### `oculus lecture reading`
-
-```
-Write a recording's reading copy with a CLI agent
-
-Rewrites the transcript as text a student can read: one sentence per line, each pinned
-to the second it was said, with spoken maths set as maths and speech-recognition errors
-fixed from the slide. The lecture is split at its slide changes — which become paragraph
-breaks — and grouped into roughly ten-minute windows, one agent turn each. Each window
-is validated and written before the next starts, so a long run has useful partial
-results if a later window fails.
-
-Unlike chapter naming, this needs the transcript: the reading copy is the transcript,
-rewritten. The recording and transcript must both have been downloaded first.
-
-Usage: oculus lecture reading [OPTIONS] <LECTURE_ID>
-
-Arguments:
-  <LECTURE_ID>
-          Lecture id, as `oculus list -l` prints it; a unique prefix is enough
-
-Options:
-  -p, --provider <PROVIDER>
-          Which CLI to drive (default: the configured one)
-
-          [possible values: claude, codex, opencode]
-
-  -m, --model <MODEL>
-          Model to request (default: the configured one)
-
-      --effort <EFFORT>
-          Reasoning effort — low, medium, high, xhigh, max (default: the configured one)
-
-      --force
-          Re-run over a lecture that already has a reading copy, replacing it
 
       --source <N>
           Which captured stream to read — 1 or 2. Default: source 1, unless it turns out
