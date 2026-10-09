@@ -8,7 +8,7 @@ video's transcript, and a web page.
 
 | Piece | Location |
 | --- | --- |
-| Markdown, maths, mermaid, lightbox, PDF | `app/src/components/markdown/`, `app/src/components/ui/Lightbox.tsx`, `app/src/components/files/PDFViewer.tsx` |
+| Markdown, maths, mermaid, lightbox, PDF | `app/src/components/markdown/`, `app/src/components/ui/Lightbox.tsx`, `app/src/components/files/pdf/`, `app/src/lib/pdfView.ts`, `app/src/lib/pdfFind.ts` |
 | Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/media.ts`, `app/src/stores/playerPrefsStore.ts`, `app/src/hooks/useTranscriptDock.ts` |
 | Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lecturePlayback.ts`, `app/src/lib/playbackOwner.ts` |
 | Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectureEnd.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/chapters.rs` |
@@ -72,13 +72,37 @@ classes work even when there are no dollar delimiters.
 - **`Lightbox.tsx` pans with its container's scroll and zooms with a
   `transform`**; every input moves a target the painted scale eases toward, so
   bursts compose.
-- **`PDFViewer` mounts pdf.js's own viewer**, loaded by `app/src/lib/pdfjs.ts`
-  through awaited dynamic imports because `pdf_viewer.mjs` reads
-  `globalThis.pdfjsLib` at evaluation. `index.css` pins `color-scheme` to
-  `.dark`, overriding the `:root` rule pdf.js's stylesheet adds. A pinch arrives
-  as both `ctrlKey` wheel and `gesture*` events; only the gesture zooms.
-  - **Selection and cursor are pdf.js's own**: a drag selects text and the
-    trackpad scrolls. `index.css` only recolours `::selection` to the accent.
+- **`PDFViewer` is ours, over Rust's `pdf_*` commands**
+  (`app/src/components/files/pdf/`, invoke wrappers and caches in
+  `app/src/lib/pdfView.ts`). It opens a file by its library-relative path;
+  `pdf_open` gives the page sizes, `pdf_render` an RGBA raster at the device
+  size the viewer asks for, `pdf_text` a page's lines with per-character
+  stops, `pdf_links` its links — all in points of the rendered page. A
+  document is shared by every viewer holding it and closed shortly after the
+  last one lets go; a password-protected one says so in the viewer body.
+  - **Layout is arithmetic, not measurement** (`layout.ts`): continuous
+    scroll, single page, or a spread pairing 1|2, 3|4, chosen in the toolbar
+    and remembered. Scroll offsets, the page range, the fit and the zoom
+    anchor all come from the page sizes, since page zoom scales
+    `getBoundingClientRect` ([ui.md](./ui.md#gotchas)).
+  - **Zoom** is absolute (100% is printed size), 10%–1000%, by toolbar,
+    ⌘-wheel or pinch about the pointer; a pinch arrives as both `ctrlKey`
+    wheel and `gesture*` events, and only the gesture zooms. Until the reader
+    zooms, the size fits the view and follows its resizes: a portrait page
+    fills the width, a wider one fits whole, capped at 125%. The old rasters
+    stretch at once and pages redraw 400 ms after the last change.
+  - **Only pages near the view are drawn**: within a view's height of it,
+    each gets a raster at its CSS size × `devicePixelRatio` (capped to Rust's
+    40M-pixel limit), a text layer and links; the rest are empty boxes. A
+    render for a size since replaced is dropped, and queued renders run
+    newest first.
+  - **The text layer is one transparent span per line**, `<br>` between
+    lines, so its text nodes read the page in order (`textLayer.ts`). Each
+    span is placed in points × `--pdf-unit`, so a zoom never rebuilds it or
+    drops a selection, and stretched to its box with `scaleX` from a canvas
+    `measureText`. While a drag selects, an empty block under the spans
+    keeps a pointer between lines from jumping the selection to the page's
+    end. `index.css` recolours `::selection` to the accent.
   - **A selection copies as the parse's markdown** when the file has one
     (`app/src/lib/pdfSelectionMarkdown.ts`). Text layer and `.pages.json`
     meet in `normalizeText` form and are aligned patience-diff style; the
@@ -88,18 +112,34 @@ classes work even when there are no dollar delimiters.
     tables whole (tables come out as pipe tables through `selectionMarkdown`'s
     walkers), figure links match the Markdown view's copy, and an end on an
     unparsed or unalignable page copies that page's text. It is bound in the
-    **capture** phase: pdf.js's text layer writes its own copy and stops it.
-  - **Find is pdf.js's `PDFFindController` behind `ui/FindBar.tsx`**; each
-    viewer is a find target, and which one ⌘F reaches is
+    **capture** phase on the scroller.
+  - **A citation** jumps to its page and marks the quote's spans
+    (`citation-hit`) each time that page's text layer is built.
+  - **Find is the viewer's own behind `ui/FindBar.tsx`** (`usePdfFind.ts`,
+    `app/src/lib/pdfFind.ts`): opening it reads every page's text once, and a
+    query matches case- and diacritic-blind over each page's lines joined by
+    spaces, so a match runs across a line break. Every match is painted
+    under the text layer, the current one stronger; a new query starts at the
+    page in view. Each viewer is a find target, and which one ⌘F reaches is
     [find routing](./shell.md#f-reaches-one-registered-find).
+  - **Links** are anchors over the page: a web link opens in-app like any
+    other `<a href>`, an internal one scrolls to its page.
   - **The page box names the pages on screen** (`shownPages`: a spread, or in
     continuous scroll every page filling a fifth of the viewport or showing
     half of itself) beside a fixed "/ total". Focused, it holds only the first
     page: digits only, Enter jumps, a range is never typed.
-  - **`pdfjs-dist` is patched** (`app/patches/`): its text layer multiplies
-    every font size by a 1px probe's measured height, which page zoom 1.15
-    reads as 0.87, so the selectable text ran 13% short of the glyphs. The
-    probe is clamped to at least 1.
+  - **Rust's half is `app/src-tauri/src/pdf_view.rs`, on the pure-Rust
+    renderer hayro.** A path must sit under `courses/`, `lectures/` or
+    `agents/` in the data directory. The four most recent documents stay
+    open, keyed by path and modification time. Renders and text extraction
+    share half the cores, and each hayro call runs under `catch_unwind`, so a
+    PDF that crashes hayro fails only that call. A raster is exactly the size
+    asked for, opaque on white. Lines come in reading order from PdfCraft's
+    layout: baseline segments, blocks, columns left to right, inferred word
+    spaces. Links resolve URIs and in-document destinations, named ones
+    included. Errors are codes: `not-found`, `encrypted`, `invalid`,
+    `outside-library`, `page-out-of-range`, `invalid-size`, `too-large`,
+    `render-failed`.
 
 Chat's composer (`MentionInput.tsx` sends chips as backticked library paths),
 picker and timeline are [harness.md](./harness.md).

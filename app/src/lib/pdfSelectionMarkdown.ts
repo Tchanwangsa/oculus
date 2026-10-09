@@ -5,7 +5,7 @@ import { elementMarkdown } from "@/lib/selectionMarkdown";
 
 /**
  * A selection in the PDF viewer, copied as the parsed markdown instead of
- * pdf.js's text layer. The pages' markdown is one document (`parsedDoc`); a
+ * the text layer's plain text. The pages' markdown is one document (`parsedDoc`); a
  * page's text-layer text and its markdown are reduced to one comparison form
  * (`normalizeText`: letters and digits) and aligned patience-diff style, so
  * the selection's two ends land in the document and everything between is one
@@ -14,7 +14,8 @@ import { elementMarkdown } from "@/lib/selectionMarkdown";
  * tables, links and code come whole and emphasis stays balanced. An end on a
  * page with no markdown, or one too poorly aligned to trust, copies that
  * page's text. The core is pure (tested under bun, which has no DOM); the DOM
- * edge at the bottom reads pdf.js's `.page` / `.textLayer` markup.
+ * edge at the bottom reads the viewer's `.page` / `.textLayer` markup
+ * (`components/files/pdf/textLayer.ts`).
  */
 
 // ── Skeletons ────────────────────────────────────────────────────────────────
@@ -816,9 +817,9 @@ export interface PageSelection {
   end: number | null;
 }
 
-/** A page copied as its text-layer text, among markdown pages: pdf.js's own
- *  clean-up (no NULs or controls, ligatures split), and `$` escaped so it
- *  cannot pair into maths. */
+/** A page copied as its text-layer text, among markdown pages: cleaned up
+ *  (no NULs or controls, ligatures split), and `$` escaped so it cannot pair
+ *  into maths. */
 export function plainText(text: string): string {
   return text
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
@@ -950,7 +951,7 @@ function pipeTables(md: string): string {
 
 const FIELD = "input, textarea, [contenteditable='true']";
 
-/** The selection inside `root` (the pdf.js container) as markdown, or "" to
+/** The selection inside `root` (the viewer's scroller) as markdown, or "" to
  *  leave the browser's own copy alone. */
 export function pdfSelectionMarkdown(
   selection: Selection | null,
@@ -1000,9 +1001,9 @@ function markdownFor(
   return pdfSelectionMarkdown(window.getSelection(), root, pages, resolveImage);
 }
 
-/** Bind as `onCopyCapture`: pdf.js's text layer has its own `copy` listener
- *  that writes the raw text and stops propagation, so a bubbling `onCopy`
- *  never runs. Stopping here keeps pdf.js from overwriting ours. */
+/** Bind as `onCopyCapture` on the scroller, so the markdown is written before
+ *  any handler inside the pages runs; stopping it keeps them from overwriting
+ *  ours. */
 export function copyPdfAsMarkdown(
   e: ClipboardEvent,
   root: HTMLElement,

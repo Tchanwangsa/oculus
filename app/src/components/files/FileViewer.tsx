@@ -4,7 +4,7 @@ import { ArrowSquareOut, File, FileText } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
-import { PDFViewer } from "@/components/files/PDFViewer";
+import { PDFViewer } from "@/components/files/pdf/PDFViewer";
 import { docPdfRelPath, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath } from "@/lib/fileTypes";
 import { filePageHref, type FileLocate } from "@/lib/openFile";
 import { libraryImageSrc, libraryLinkTarget } from "@/lib/libraryLinks";
@@ -148,7 +148,7 @@ export function FileViewer({
         {pdfViewMode === "markdown" && mdRelPath ? (
           <FileMarkdown relPath={mdRelPath} components={components} />
         ) : (
-          <PDFViewer src={assetUrl(pdfRelPath)} locate={locate} markdownPath={mdRelPath ?? undefined} />
+          <PDFViewer path={pdfRelPath} locate={locate} markdownPath={mdRelPath ?? undefined} />
         )}
       </div>
     );

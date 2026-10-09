@@ -30,6 +30,7 @@ pub mod mineru;
 pub mod okta;
 pub mod parse;
 pub mod paths;
+mod pdf_view;
 mod pipeline_events;
 pub mod projects;
 mod ratelimit;
@@ -213,6 +214,11 @@ pub fn run() {
             files::list_documents,
             files::attach_document_image,
             files::attach_document_file,
+            pdf_view::pdf_open,
+            pdf_view::pdf_render,
+            pdf_view::pdf_text,
+            pdf_view::pdf_links,
+            pdf_view::pdf_close,
             calendar::calendar_sync_events,
             lectures::echo360_sync_lectures,
             lectures::echo360_download_video,

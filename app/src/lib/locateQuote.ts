@@ -1,8 +1,8 @@
 /**
  * Finding a cited passage on screen: in a PDF page's text layer (spans) or in
  * rendered markdown (text nodes). Both sides compare as `normalizeText` — no
- * spaces or punctuation — since pdf.js splits words across spans and the
- * quote comes from markdown. Scrolling uses offsets, never
+ * spaces or punctuation — since a quote runs across the text layer's line
+ * spans and comes from markdown. Scrolling uses offsets, never
  * `getBoundingClientRect`, which page zoom scales.
  */
 import { normalizeText } from "@/lib/citations";

@@ -650,31 +650,92 @@
   opacity: 1;
 }
 
-/* Overrides for pdf.js's unlayered `pdf_viewer.css` (`PDFViewer.tsx`), each one
- * step more specific than the rule it answers. That sheet sets `color-scheme:
- * light dark` on `:root`; pin it to the `.dark` class instead. */
-html:root {
-  color-scheme: light;
+/* The PDF viewer (`components/files/pdf/`). The scroller always shows its
+ * vertical bar, so a fit never changes the width it fitted to (docs/ui.md). */
+.pdf-surface {
+  overflow-x: auto;
+  overflow-y: scroll;
 }
-html:root.dark {
-  color-scheme: dark;
+.pdf-surface .pdf-pages {
+  position: relative;
 }
-
-.pdf-surface .pdfViewer {
-  padding-block: 16px;
-}
-/* `removePageBorders` drops pdf.js's frame; the page takes a card's shadow. */
-.pdf-surface .pdfViewer.removePageBorders .page {
-  margin: 0 auto 16px;
+/* A page sits white in either theme, with a card's shadow. Inside, in paint
+ * order: the raster, find highlights, the text layer, links. */
+.pdf-surface .page {
+  position: absolute;
+  overflow: hidden;
+  background: white;
   border-radius: 4px;
   box-shadow:
     0 1px 3px 0 rgb(0 0 0 / 0.1),
     0 1px 2px -1px rgb(0 0 0 / 0.1);
 }
+.pdf-surface .pdf-canvas,
+.pdf-surface .pdf-find-layer,
+.pdf-surface .textLayer,
+.pdf-surface .pdf-link-layer {
+  position: absolute;
+  inset: 0;
+}
+.pdf-surface .pdf-canvas {
+  width: 100%;
+  height: 100%;
+}
+.pdf-surface .pdf-find-layer,
+.pdf-surface .pdf-link-layer {
+  pointer-events: none;
+}
+.pdf-surface .pdf-find-layer > div {
+  position: absolute;
+  border-radius: 2px;
+}
+/* Find matches: every one a tint of the accent, the current one stronger —
+ * the same pair as DOM find's below. Both sit over the white page. */
+.pdf-surface .pdf-find-match {
+  background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
+}
+.pdf-surface .pdf-find-current {
+  background-color: color-mix(in srgb, var(--color-brand) 50%, transparent);
+}
+/* The text layer (`textLayer.ts`): transparent lines over the raster, placed
+ * in points times `--pdf-unit`. Its own stacking context, so the spans' z-index
+ * stays under the links. */
+.pdf-surface .textLayer {
+  z-index: 0;
+  overflow: hidden;
+  line-height: 1;
+  -webkit-text-size-adjust: none;
+  forced-color-adjust: none;
+}
+.pdf-surface .textLayer > span {
+  position: absolute;
+  z-index: 1;
+  white-space: pre;
+  color: transparent;
+  font-family: sans-serif;
+  transform-origin: 0 0;
+  cursor: text;
+}
+/* While a drag selects, the end block covers the layer under the spans. */
+.pdf-surface .textLayer > .pdf-text-end {
+  position: absolute;
+  inset: 100% 0 0;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pdf-surface .textLayer.selecting > .pdf-text-end {
+  top: 0;
+}
+.pdf-surface .pdf-link-layer > a {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+}
 
-/* A cited passage: its text-layer spans in a PDF (`PDFViewer.tsx`, whose text
- * is transparent over the canvas, so the ground shows through) and the
- * markdown highlight (`useLocateHighlight.ts`). */
+/* A cited passage: its text-layer spans in a PDF (transparent over the
+ * raster, so the ground shows through) and the markdown highlight
+ * (`useLocateHighlight.ts`). */
 .pdf-surface .textLayer .citation-hit {
   background-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
   border-radius: 2px;
@@ -684,21 +745,14 @@ html:root.dark {
   background-color: color-mix(in srgb, var(--color-brand) 30%, transparent);
 }
 /* DOM find (`useDomFind.ts`): every match a tint of the accent, the current
- * one stronger: the same pair as pdf.js's find below. */
+ * one stronger. */
 ::highlight(find-match) {
   background-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
 }
 ::highlight(find-current) {
   background-color: color-mix(in srgb, var(--color-brand) 50%, transparent);
 }
-/* The selection: pdf.js's own, in the accent rather than the system's. */
+/* A PDF selection, in the accent rather than the system's colour. */
 .pdf-surface .textLayer ::selection {
   background: color-mix(in srgb, var(--color-brand) 30%, transparent);
-}
-/* Find matches (`PDFFindController`): pdf.js colours them through these
- * properties on `.textLayer .highlight`. Every match is a tint of the accent
- * and the current one is darker; both sit over the white page in either theme. */
-.pdf-surface .textLayer .highlight {
-  --highlight-bg-color: color-mix(in srgb, var(--color-brand) 22%, transparent);
-  --highlight-selected-bg-color: color-mix(in srgb, var(--color-brand) 50%, transparent);
 }
