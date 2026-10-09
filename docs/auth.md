@@ -79,11 +79,10 @@ passes straight through.
   that offers only push or WebAuthn would fail every six hours forever.
   Turning it off writes a `keepalive-disabled` marker so the next sign-in
   does not reinstall it.
-- The CLI ships as a Tauri `externalBin`, staged by
-  `app/scripts/stage-cli.mjs`: the bundler copies some cargo bins into
-  `Contents/MacOS/` on its own, but not `oculus`. `tauri-build` validates
-  every `externalBin` path even while building `oculus` itself, so the script
-  writes an empty placeholder for that build and removes it on failure.
+- The CLI ships in `Contents/MacOS/` as a Tauri `externalBin`, staged by
+  `app/scripts/stage-cli.mjs`. `tauri-build` validates every `externalBin`
+  path even while building `oculus` itself, so the script writes an empty
+  placeholder for that build and removes it on failure.
 - The plist stores the CLI path absolutely; `keepalive::repair_path` re-points
   it on startup when the bundle has moved.
 - Neither layer beats an absolute session cap or a forced IdP re-auth.
