@@ -101,7 +101,8 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   spend guard from Settings → Embeddings, kept here rather than in `settings`
   because the reservation that enforces it already reads this file
   ([retrieval.md](./retrieval.md)).
-- The session cookie, auth flag and `session-keepalive.log` ([auth.md](./auth.md)).
+- The session cookie, auth flag, `session-keepalive.log`, and the sign-in
+  attempt record and its `okta-sign-in.log` ([auth.md](./auth.md)).
 
 ## The database has one schema owner and two writers
 

@@ -295,6 +295,12 @@ pub enum LoginError {
     /// The state machine went somewhere this code does not model; carries the
     /// remediation names.
     Unexpected(String),
+    /// The attempt guard held an automatic sign-in back; carries seconds until
+    /// the next one is allowed.
+    Waiting(u64),
+    /// Automatic sign-in stopped after a failure retrying cannot fix; carries
+    /// that failure. A manual sign-in or newly saved credentials resume it.
+    Paused(String),
 }
 
 impl std::fmt::Display for LoginError {
@@ -321,6 +327,16 @@ impl std::fmt::Display for LoginError {
             LoginError::Locked(m) => write!(f, "The account is locked or blocked: {m}"),
             LoginError::Network(m) => write!(f, "Could not reach the sign-in service: {m}"),
             LoginError::Unexpected(m) => write!(f, "Unexpected sign-in step: {m}"),
+            LoginError::Waiting(secs) => write!(
+                f,
+                "Holding off automatic sign-in for {} more min after the last attempt.",
+                secs.div_ceil(60)
+            ),
+            LoginError::Paused(m) => write!(
+                f,
+                "Automatic sign-in is paused after: {m}. Sign in from Settings → Canvas \
+                 or run `oculus auth auto` to resume it."
+            ),
         }
     }
 }
@@ -625,13 +641,149 @@ fn check_messages(state: &serde_json::Value, answering: Option<Factor>) -> Resul
     })
 }
 
+// ── Attempt guard ────────────────────────────────────────────────────────────
+//
+// The app's startup probe, its keep-alive thread, the browser and the CLI's
+// `auth tick` each sign in on their own, and Okta locks the account after too
+// many attempts. So every attempt goes through one record on disk.
+
+/// Who asked for a sign-in. Only `Manual` skips the guard: a person is
+/// waiting on the answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trigger {
+    Manual,
+    Startup,
+    KeepAlive,
+    Browser,
+}
+
+impl Trigger {
+    fn as_str(self) -> &'static str {
+        match self {
+            Trigger::Manual => "manual",
+            Trigger::Startup => "app startup",
+            Trigger::KeepAlive => "keep-alive",
+            Trigger::Browser => "browser",
+        }
+    }
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct AttemptRecord {
+    /// Unix seconds when the last attempt started.
+    last: u64,
+    /// Failed attempts since the last success; sets the wait.
+    failures: u32,
+    /// Why automatic sign-in is paused, if it is.
+    paused: Option<String>,
+}
+
+/// How long automatic sign-in waits after an attempt.
+fn wait_after(failures: u32) -> u64 {
+    match failures {
+        0 | 1 => 600,
+        2 => 3600,
+        _ => 6 * 3600,
+    }
+}
+
+/// Whether an attempt may start at `now`, recording it if so.
+fn admit(r: &mut AttemptRecord, trigger: Trigger, now: u64) -> Result<(), LoginError> {
+    if trigger != Trigger::Manual {
+        if let Some(why) = &r.paused {
+            return Err(LoginError::Paused(why.clone()));
+        }
+        let ready = r.last.saturating_add(wait_after(r.failures));
+        if now < ready {
+            return Err(LoginError::Waiting(ready - now));
+        }
+    }
+    r.last = now;
+    Ok(())
+}
+
+/// Fold an attempt's outcome into the record.
+fn settle(r: &mut AttemptRecord, result: &Result<String, LoginError>) {
+    match result {
+        Ok(_) => {
+            r.failures = 0;
+            r.paused = None;
+        }
+        // Okta gave no verdict, so it does not count against the account.
+        Err(LoginError::Network(_)) => {}
+        Err(e @ (LoginError::Locked(_) | LoginError::BadPassword(_) | LoginError::UnsupportedFactor(_))) => {
+            r.failures += 1;
+            r.paused = Some(e.to_string());
+        }
+        Err(_) => r.failures += 1,
+    }
+}
+
+/// Runs `f` on the record under an exclusive file lock, so two processes
+/// cannot both decide to sign in. An unreadable record acts as a blank one.
+fn with_record<T>(data_dir: &std::path::Path, f: impl FnOnce(&mut AttemptRecord) -> T) -> T {
+    use std::io::{Read, Seek, Write};
+
+    let path = crate::paths::sign_in_record_path(data_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+    else {
+        return f(&mut AttemptRecord::default());
+    };
+    file.lock().ok();
+    let mut text = String::new();
+    file.read_to_string(&mut text).ok();
+    let mut record: AttemptRecord = serde_json::from_str(&text).unwrap_or_default();
+    let out = f(&mut record);
+    if let Ok(body) = serde_json::to_string(&record) {
+        file.set_len(0).ok();
+        file.rewind().ok();
+        file.write_all(body.as_bytes()).ok();
+    }
+    out
+}
+
+/// Headless sign-in behind the attempt guard. Automatic attempts wait 10 min
+/// after any attempt, then 1 h and 6 h as failures repeat, and stop on a
+/// failure retrying cannot fix. Each attempt is a line in `okta-sign-in.log`.
+pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger) -> Result<String, LoginError> {
+    let creds = Credentials::load().ok_or(LoginError::NotConfigured)?;
+    let now = crate::clock::now_secs();
+    with_record(data_dir, |r| admit(r, trigger, now))?;
+
+    let result = attempt_sign_in(data_dir, &creds);
+    with_record(data_dir, |r| settle(r, &result));
+    let outcome = match &result {
+        Ok(_) => "signed in".to_string(),
+        Err(e) => format!("failed — {e}"),
+    };
+    crate::paths::append_sign_in_log(data_dir, &format!("{}: {outcome}", trigger.as_str()));
+    if let Err(LoginError::BadPassword(_)) = &result {
+        // Replaying a wrong password unattended locks the account.
+        clear_password().ok();
+    }
+    result
+}
+
+/// Clears the wait and any pause: newly saved credentials, or a sign-in a
+/// person finished in the window, deserve an immediate automatic try.
+pub fn resume_automatic_sign_in(data_dir: &std::path::Path) {
+    with_record(data_dir, |r| *r = AttemptRecord::default());
+}
+
 // ── The flow ─────────────────────────────────────────────────────────────────
 
 /// Sign in headlessly and persist the resulting Canvas session cookie,
 /// returning the cookie header. Driven by whichever remediations Okta offers,
-/// since factor order is a policy setting.
-pub fn sign_in(data_dir: &std::path::Path) -> Result<String, LoginError> {
-    let creds = Credentials::load().ok_or(LoginError::NotConfigured)?;
+/// since factor order is a policy setting. Only `sign_in` calls this.
+fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<String, LoginError> {
     let mut jar = Jar::default();
 
     let (state_token, saml_url) = bootstrap(&mut jar)?;
@@ -1008,7 +1160,9 @@ pub fn okta_save_credentials(
     password: String,
     totp_secret: String,
 ) -> Result<(), String> {
-    store_credentials(&username, &password, &totp_secret)
+    store_credentials(&username, &password, &totp_secret)?;
+    resume_automatic_sign_in(&crate::paths::data_dir());
+    Ok(())
 }
 
 #[tauri::command]
@@ -1018,15 +1172,15 @@ pub fn okta_clear_credentials() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn okta_sign_in(app: tauri::AppHandle) -> Result<String, String> {
-    crate::blocking::run(move || run_sign_in(&app, &crate::paths::data_dir())).await
+    crate::blocking::run(move || run_sign_in(&app, &crate::paths::data_dir(), Trigger::Manual)).await
 }
 
 /// Sign in, then set the auth flag, state and event exactly as the
 /// interactive sign-in does.
-fn run_sign_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, String> {
+fn run_sign_in(app: &tauri::AppHandle, dir: &std::path::Path, trigger: Trigger) -> Result<String, String> {
     use tauri::{Emitter, Manager};
 
-    match sign_in(dir) {
+    match sign_in(dir, trigger) {
         Ok(_) => {
             crate::paths::mark_authenticated(dir);
             if let Some(state) = app.try_state::<crate::auth::AuthState>() {
@@ -1038,22 +1192,17 @@ fn run_sign_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, 
             app.emit("canvas-auth-success", "ok").ok();
             crate::canvas::Canvas::open(dir).whoami()
         }
-        Err(e @ LoginError::BadPassword(_)) => {
-            // Otherwise the keep-alive replays it until Okta locks the account.
-            clear_password().ok();
-            Err(e.to_string())
-        }
         Err(e) => Err(e.to_string()),
     }
 }
 
 /// Called when a probe finds the session dead: rebuild it silently if
 /// automated sign-in is set up. `false` means ask the user.
-pub fn try_auto_recover(app: &tauri::AppHandle) -> bool {
+pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
     if Credentials::load().is_none() {
         return false;
     }
-    match run_sign_in(app, &crate::paths::data_dir()) {
+    match run_sign_in(app, &crate::paths::data_dir(), trigger) {
         Ok(name) => {
             eprintln!("[oculus] session rebuilt without a browser ({name})");
             true
@@ -1068,6 +1217,44 @@ pub fn try_auto_recover(app: &tauri::AppHandle) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_attempts_back_off_and_manual_ones_do_not() {
+        let mut r = AttemptRecord::default();
+        assert!(admit(&mut r, Trigger::Startup, 1_000_000).is_ok());
+        settle(&mut r, &Err(LoginError::BadTotp(String::new())));
+        assert!(matches!(admit(&mut r, Trigger::Browser, 1_000_599), Err(LoginError::Waiting(1))));
+        assert!(admit(&mut r, Trigger::KeepAlive, 1_000_600).is_ok());
+        settle(&mut r, &Err(LoginError::Unexpected(String::new())));
+        // Two failures in a row: an hour.
+        assert!(matches!(admit(&mut r, Trigger::KeepAlive, 1_003_000), Err(LoginError::Waiting(_))));
+        assert!(admit(&mut r, Trigger::Manual, 1_003_000).is_ok());
+        settle(&mut r, &Err(LoginError::BadTotp(String::new())));
+        assert_eq!(wait_after(r.failures), 6 * 3600);
+        settle(&mut r, &Ok(String::new()));
+        assert_eq!(r.failures, 0);
+    }
+
+    #[test]
+    fn a_network_failure_waits_without_counting() {
+        let mut r = AttemptRecord::default();
+        admit(&mut r, Trigger::Startup, 5_000).unwrap();
+        settle(&mut r, &Err(LoginError::Network(String::new())));
+        assert_eq!(r.failures, 0);
+        assert!(matches!(admit(&mut r, Trigger::Startup, 5_100), Err(LoginError::Waiting(500))));
+    }
+
+    #[test]
+    fn a_lockout_pauses_automatic_sign_in_until_a_manual_success() {
+        let mut r = AttemptRecord::default();
+        admit(&mut r, Trigger::KeepAlive, 10_000).unwrap();
+        settle(&mut r, &Err(LoginError::Locked("Too many attempts".into())));
+        assert!(matches!(admit(&mut r, Trigger::KeepAlive, 1_000_000), Err(LoginError::Paused(_))));
+        assert!(admit(&mut r, Trigger::Manual, 1_000_000).is_ok());
+        settle(&mut r, &Ok(String::new()));
+        assert!(r.paused.is_none());
+        assert!(admit(&mut r, Trigger::KeepAlive, 1_000_600).is_ok());
+    }
 
     /// RFC 4226 appendix D, the canonical HOTP vectors.
     #[test]

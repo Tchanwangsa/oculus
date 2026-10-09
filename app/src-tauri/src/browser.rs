@@ -327,10 +327,6 @@ fn is_sso_app_entry(url: &url::Url) -> bool {
         && url.path().ends_with("/sso/saml")
 }
 
-/// When the last headless sign-in for a browser page started; one per ten
-/// minutes, so a session Okta will not honour cannot loop sign-ins.
-static SSO_RECOVERED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
-
 /// A page reached Okta's sign-in for a UniMelb app: if the browser holds no
 /// live Okta session, sign in headlessly (which saves Okta's cookies), seed
 /// them and reload. Asks Okta, not the page, whether a session exists.
@@ -367,15 +363,10 @@ fn recover_sso(app: &AppHandle, id: u32) {
             Err(_) => return,
         }
 
-        {
-            let mut last = SSO_RECOVERED.lock().unwrap_or_else(|e| e.into_inner());
-            if last.is_some_and(|t| t.elapsed() < Duration::from_secs(600)) {
-                return;
-            }
-            *last = Some(std::time::Instant::now());
-        }
+        // The attempt guard in `okta::sign_in` keeps a session Okta will not
+        // honour from looping sign-ins.
         eprintln!("[oculus] browser: tab {id} reached Okta sign-in with no session; signing in");
-        if !crate::okta::try_auto_recover(&app) {
+        if !crate::okta::try_auto_recover(&app, crate::okta::Trigger::Browser) {
             return;
         }
         let reload_app = app.clone();
