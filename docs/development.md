@@ -219,7 +219,10 @@ socket, launchd's activation, the caller's audit token and signature, the
 keychain, the LaunchAgent, `flock` and file modes — sits under
 `app/keyd/core/src/platform/`, whose `mod.rs` states the contract and picks
 the adapter by `cfg(target_os)`. Everything else in core, keyd's `main`, and
-the app's `credentials.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay OS-free.
+the app's `credentials.rs`, `okta.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay
+OS-free, with one exception: `credentials/keychain.rs` is the legacy-keychain
+fallback (`Secret`, over the `keyring` crate) that runs while keyd is absent,
+and it goes with that fallback.
 
 - **The build step** is the adapter's too: `build-keyd.mjs` keeps one
   function per OS (`buildForMacos`, the reproducible build and the ad-hoc
@@ -237,9 +240,10 @@ the app's `credentials.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay OS-free.
   (`cargo test --all-features -- --ignored --nocapture`);
   `KEYD_COST_BUNDLE=<signed .app>` times a real bundle too.
 - **Enforced twice.** `keyd-seams.test.mjs` (in `bun run test`) fails on any
-  `std::os::unix`, `libc::`, framework, `extern "C"`, `launchctl` or
-  `Library/Application Support` outside `platform/` in those files, comments
-  included; the `keyd-linux` CI job builds core and keyd against the
+  `std::os::unix`, `libc::`, framework, `extern "C"`, `launchctl`,
+  `Library/Application Support` or `keyring::` outside `platform/` in those
+  files, comments included (`credentials/keychain.rs` alone is allowed
+  `keyring::`); the `keyd-linux` CI job builds core and keyd against the
   unsupported adapter.
 - **Adding an OS** is a `platform/<os>.rs` written to the contract, its
   build step in `build-keyd.mjs`, and a CI row. If anything outside
