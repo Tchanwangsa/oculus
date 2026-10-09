@@ -75,6 +75,8 @@ interface EmbedSettings {
   model: string;
   dim: number;
   credentials_ready: boolean;
+  /** The keychain refused the read; the key may still be saved. */
+  credentials_error: string | null;
   engines: EngineOption[];
   index: {
     files_embedded: number;
@@ -263,7 +265,7 @@ export function EmbeddingSection() {
     try {
       const verdict = await invoke<string>("voyage_set_api_key", { key: key.trim() });
       setKey("");
-      setSettings((prev) => (prev ? { ...prev, credentials_ready: true } : prev));
+      setSettings((prev) => (prev ? { ...prev, credentials_ready: true, credentials_error: null } : prev));
       // Re-asked rather than assumed: the engine also decides readiness.
       void embedReady().then((ready) => useIndexStore.getState().setReady(ready));
       setKeyNote(
@@ -283,7 +285,7 @@ export function EmbeddingSection() {
     try {
       await invoke("voyage_delete_api_key");
       setKey("");
-      setSettings((prev) => (prev ? { ...prev, credentials_ready: false } : prev));
+      setSettings((prev) => (prev ? { ...prev, credentials_ready: false, credentials_error: null } : prev));
       useIndexStore.getState().setReady(false);
     } catch (cause) {
       console.error("Voyage key removal failed", cause);
@@ -315,7 +317,11 @@ export function EmbeddingSection() {
           />
         </div>
 
-        {settings && !settings.credentials_ready && settings.engine === "cloud" ? (
+        {settings?.credentials_error ? (
+          <p className="text-[11px] leading-relaxed text-destructive" data-selectable>
+            {settings.credentials_error}
+          </p>
+        ) : settings && !settings.credentials_ready && settings.engine === "cloud" ? (
           <p className="text-[11px] leading-relaxed text-warning">
             Nothing can be indexed or searched until a Voyage API key is saved below.
           </p>

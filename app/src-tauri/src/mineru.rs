@@ -64,8 +64,8 @@ pub fn mineru_set_api_key(key: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn mineru_has_api_key() -> bool {
-    stored_api_key().is_some()
+pub fn mineru_has_api_key() -> Result<bool, String> {
+    KEY.has("MinerU token")
 }
 
 #[tauri::command]

@@ -88,7 +88,10 @@ export function TranscriptionSection() {
       .then((present) => {
         if (!cancelled) setConnected(present);
       })
-      .catch((cause) => console.error("Groq key check failed", cause));
+      .catch((cause) => {
+        console.error("Groq key check failed", cause);
+        if (!cancelled) setNote(String(cause));
+      });
     appleSpeechStatus()
       .then((status) => {
         if (!cancelled) setSpeech(status);

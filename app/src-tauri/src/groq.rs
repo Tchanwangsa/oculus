@@ -13,10 +13,6 @@ const KEY: Secret = Secret::new("com.tchan.oculus.groq", "groq");
 /// call, so the probe must not transcribe anything.
 const PROBE_URL: &str = "https://api.groq.com/openai/v1/models";
 
-pub(crate) fn stored_api_key() -> Option<String> {
-    KEY.read()
-}
-
 /// `Err` when the keychain refused, as opposed to holding no key.
 pub(crate) fn fetch_api_key() -> Result<Option<String>, String> {
     KEY.fetch()
@@ -103,8 +99,8 @@ pub fn groq_set_api_key(key: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn groq_has_api_key() -> bool {
-    stored_api_key().is_some()
+pub fn groq_has_api_key() -> Result<bool, String> {
+    KEY.has("Groq API key")
 }
 
 #[tauri::command]

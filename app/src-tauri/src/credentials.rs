@@ -15,8 +15,18 @@ impl<'a> Secret<'a> {
         keyring::Entry::new(self.service, self.account).map_err(|e| e.to_string())
     }
 
+    /// A refusal reads as no value. Use `fetch` or `has` wherever the caller
+    /// can report the refusal instead.
     pub(crate) fn read(&self) -> Option<String> {
         self.fetch().ok().flatten()
+    }
+
+    /// Whether a value is saved, for Settings. A refusal is an `Err` naming
+    /// `what`, so a page never offers to replace a key that is still there.
+    pub(crate) fn has(&self, what: &str) -> Result<bool, String> {
+        self.fetch()
+            .map(|value| value.is_some())
+            .map_err(|e| format!("The keychain refused to give out the {what} ({e})"))
     }
 
     /// `Ok(None)` only when no item exists. A refused prompt or a sandboxed
