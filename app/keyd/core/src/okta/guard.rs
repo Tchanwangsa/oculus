@@ -20,6 +20,28 @@ pub enum Trigger {
 }
 
 impl Trigger {
+    /// The name a client sends keyd, and keyd's reply log uses.
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            Trigger::Manual => "manual",
+            Trigger::Startup => "startup",
+            Trigger::KeepAlive => "keep-alive",
+            Trigger::Browser => "browser",
+        }
+    }
+
+    pub fn from_wire_name(name: &str) -> Option<Trigger> {
+        [
+            Trigger::Manual,
+            Trigger::Startup,
+            Trigger::KeepAlive,
+            Trigger::Browser,
+        ]
+        .into_iter()
+        .find(|t| t.wire_name() == name)
+    }
+
+    /// The label in `okta-sign-in.log`.
     pub(super) fn as_str(self) -> &'static str {
         match self {
             Trigger::Manual => "manual",

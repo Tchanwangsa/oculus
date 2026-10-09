@@ -14,7 +14,9 @@
 //! place of the keychain; old keychain items are then never read either),
 //! OCULUS_KEYD_IDLE_SECS, and OCULUS_KEYD_VOYAGE_ORIGIN, OCULUS_KEYD_MINERU_ORIGIN
 //! and OCULUS_KEYD_GROQ_ORIGIN (each `http://127.0.0.1:<port>`, a fake of that
-//! service). Release builds have none.
+//! service), and OCULUS_KEYD_CANVAS_ORIGIN and OCULUS_KEYD_SSO_ORIGIN (the
+//! sign-in's fake Canvas and Okta: `http://127.0.0.1:<port>` or
+//! `http://localhost:<port>`, on different hosts). Release builds have none.
 
 use std::path::PathBuf;
 use std::process::exit;
@@ -88,6 +90,8 @@ fn serve(listeners: Vec<Listener>) {
     let state = State::new(BUILD, data_dir(), keys, legacy);
     #[cfg(debug_assertions)]
     let state = state.with_routes(test_routes());
+    #[cfg(debug_assertions)]
+    let state = with_test_origins(state);
     let server = Arc::new(Server::new(state, platform::peer_check(POLICY), idle()));
     server.run(&listeners);
 }
@@ -111,6 +115,23 @@ fn test_routes() -> keyd_core::forward::Routes {
         }
     }
     routes
+}
+
+/// The sign-in's Canvas and Okta, pointed at the loopback origins in
+/// `OCULUS_KEYD_CANVAS_ORIGIN` and `OCULUS_KEYD_SSO_ORIGIN` when they are set.
+#[cfg(debug_assertions)]
+fn with_test_origins(state: State) -> State {
+    let canvas = std::env::var("OCULUS_KEYD_CANVAS_ORIGIN").ok();
+    let sso = std::env::var("OCULUS_KEYD_SSO_ORIGIN").ok();
+    match state.with_origins(canvas.as_deref(), sso.as_deref()) {
+        Ok(state) => state,
+        Err(e) => {
+            log(&format!(
+                "OCULUS_KEYD_CANVAS_ORIGIN / OCULUS_KEYD_SSO_ORIGIN: {e}"
+            ));
+            exit(64);
+        }
+    }
 }
 
 /// `keyd_core::paths::data_dir`, the app's own definition.

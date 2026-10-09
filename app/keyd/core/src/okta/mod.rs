@@ -24,12 +24,14 @@ mod flow;
 mod guard;
 mod jar;
 pub mod totp;
+mod wire;
 
 #[cfg(test)]
 mod sign_in_tests;
 
 pub use guard::{resume_automatic_sign_in, Trigger};
 pub use totp::{base32_decode, totp_at, totp_code, totp_now, totp_seconds_remaining};
+pub use wire::{outcome_from_wire, outcome_to_wire, OktaStatus};
 
 use crate::paths;
 
@@ -41,6 +43,30 @@ pub struct Credentials {
     pub username: String,
     pub password: String,
     pub totp_secret: String,
+}
+
+/// The one check on credentials before they are saved, wherever they are
+/// kept. An undecodable TOTP seed would otherwise surface mid sign-in as an
+/// indistinguishable "wrong code". Messages never contain a value.
+pub fn validate_credentials(
+    username: &str,
+    password: &str,
+    totp_secret: &str,
+) -> Result<Credentials, String> {
+    let username = username.trim();
+    let secret = totp_secret.trim().replace(' ', "");
+    if username.is_empty() {
+        return Err("Username is required.".to_string());
+    }
+    if password.is_empty() {
+        return Err("Password is required.".to_string());
+    }
+    base32_decode(&secret).map_err(|e| format!("That does not look like a TOTP setup key: {e}"))?;
+    Ok(Credentials {
+        username: username.to_string(),
+        password: password.to_string(),
+        totp_secret: secret,
+    })
 }
 
 /// Where the sign-in finds the saved credentials, and how it forgets a
@@ -93,7 +119,7 @@ impl<'a> Env<'a> {
 
 /// Why an automated sign-in stopped. Callers act on the variant: a bad
 /// password clears the stored one, a network failure keeps the session.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoginError {
     /// No credentials on file — automated sign-in was never set up.
     NotConfigured,

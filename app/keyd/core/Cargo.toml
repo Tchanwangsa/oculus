@@ -15,8 +15,12 @@ name = "keyd_core"
 # keyd's half: the vault, the ops, `forward`, the server loop, and the OS
 # secret store behind them.
 server = ["okta", "dep:chacha20poly1305", "dep:getrandom", "dep:ureq", "dep:core-foundation", "dep:core-foundation-sys", "dep:security-framework"]
-# The app's and CLI's half: the client and the registrar.
-client = []
+# The app's and CLI's half: the client and the registrar. It includes `okta`:
+# the client returns the sign-in's own `LoginError`.
+client = ["okta"]
+# `test_support` (a fake HTTP origin, a scripted Canvas and Okta) for keyd's
+# integration test. Dev-dependency only; a release links none of it.
+test-support = ["okta"]
 # The headless Okta sign-in. keyd runs it (so `server` includes it); the app
 # links it too, to run it in-process while keyd is absent.
 okta = ["dep:ureq", "dep:scraper", "dep:url"]

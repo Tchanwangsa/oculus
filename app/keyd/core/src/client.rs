@@ -1,10 +1,13 @@
-//! The client side of `oculus-keyd`: `has`, `store`, `delete` and `forward`,
+//! The client side of `oculus-keyd`: `has`, `store`, `delete` and `forward`
+//! for the cloud keys, `okta_*` and `ensure_signed_in` for the Okta sign-in,
 //! one connection per call, and the `ping` that `oculus keyd status` sends.
 //! The app re-exports it as `credentials::Credentialed`.
 //!
 //! `KeydError::Absent` (nothing at the endpoint, or nothing listening on it)
 //! means keyd is not installed, and is the only error a caller may answer by
-//! reading the keychain itself. Every other error surfaces.
+//! going to the keychain (or, for the sign-in, running it in-process) itself.
+//! Every other error surfaces. A sign-in that keyd ran and that failed is not
+//! an error here: it is `Ok(Err(LoginError))`, as in-process.
 
 use std::fmt;
 use std::io::BufReader;
@@ -15,11 +18,12 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::framing::{self, MAX_REPLY_LINE};
+use crate::okta::{outcome_from_wire, LoginError, OktaStatus, Trigger};
 use crate::paths;
 use crate::platform::{self, Conn, ConnectError};
 
-/// For `has`, `store` and `delete`: long enough to answer the keychain prompt
-/// keyd raises on its first read after an update.
+/// For `has`, `store`, `delete` and the `okta_*` ops: long enough to answer
+/// the keychain prompt keyd raises on its first read after an update.
 pub const OP_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// For `ping`, a probe: it does no work, so a reply this late means keyd is
@@ -132,6 +136,55 @@ impl Client {
             .get("existed")
             .and_then(Value::as_bool)
             .unwrap_or(false))
+    }
+
+    /// Which Okta credentials keyd holds. The first call after an install
+    /// imports the old keychain items, one prompt each, once.
+    pub fn okta_status(&self) -> Result<OktaStatus, KeydError> {
+        let (reply, _) = self.exchange(&json!({"op": "okta_status"}), &[], Some(OP_TIMEOUT))?;
+        OktaStatus::from_wire(&reply)
+            .ok_or_else(|| KeydError::Broken("okta_status: no answer".into()))
+    }
+
+    /// Saves all three. `KeydError::Request` carries keyd's validation
+    /// message ("Username is required.", …) as written.
+    pub fn okta_save(
+        &self,
+        username: &str,
+        password: &str,
+        totp_secret: &str,
+    ) -> Result<(), KeydError> {
+        self.exchange(
+            &json!({"op": "okta_save", "username": username, "password": password, "totp_secret": totp_secret}),
+            &[],
+            Some(OP_TIMEOUT),
+        )
+        .map(|_| ())
+    }
+
+    /// True when any of the three was on file.
+    pub fn okta_forget(&self) -> Result<bool, KeydError> {
+        let (reply, _) = self.exchange(&json!({"op": "okta_forget"}), &[], Some(OP_TIMEOUT))?;
+        Ok(reply
+            .get("existed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false))
+    }
+
+    /// Has keyd sign in to Canvas through Okta, or wait for the sign-in it is
+    /// already running and share its outcome. The inner result is the
+    /// sign-in's own: success (the cookies are in the data dir, never in the
+    /// reply), or the `LoginError` an in-process `okta::sign_in` would give. There is no socket timeout: the flow takes
+    /// seconds, can wait for a fresh TOTP window, and the attempt it waits on
+    /// may be another caller's.
+    pub fn ensure_signed_in(&self, trigger: Trigger) -> Result<Result<(), LoginError>, KeydError> {
+        let (reply, _) = self.exchange(
+            &json!({"op": "ensure_signed_in", "trigger": trigger.wire_name()}),
+            &[],
+            None,
+        )?;
+        outcome_from_wire(&reply)
+            .ok_or_else(|| KeydError::Broken("ensure_signed_in: no outcome".into()))
     }
 
     /// One request to `secret`'s origin with keyd adding the key. `timeout`
@@ -475,5 +528,225 @@ mod tests {
             .ping()
             .unwrap_err();
         assert_eq!(err, "/d/keyd.sock: No such file or directory");
+    }
+
+    // ── The Okta ops against a stand-in keyd ─────────────────────────────────
+
+    #[test]
+    fn the_okta_ops_send_their_requests_and_read_the_answers() {
+        let (broker, seen) = fake_keyd(|req, _| match req["op"].as_str().unwrap() {
+            "okta_status" => (
+                json!({"username": "s1234567", "has_password": true, "has_totp": false}),
+                vec![],
+            ),
+            "okta_save" => (json!({"saved": true}), vec![]),
+            "okta_forget" => (json!({"existed": true}), vec![]),
+            _ => (
+                json!({"result": "error", "code": "waiting", "wait_secs": 125}),
+                vec![],
+            ),
+        });
+        assert_eq!(
+            broker.okta_status().unwrap(),
+            OktaStatus {
+                username: Some("s1234567".into()),
+                has_password: true,
+                has_totp: false,
+            }
+        );
+        broker.okta_save("s1234567", "pw", "GEZD").unwrap();
+        assert!(broker.okta_forget().unwrap());
+        let outcome = broker.ensure_signed_in(Trigger::KeepAlive).unwrap();
+        assert_eq!(outcome, Err(LoginError::Waiting(125)));
+        assert_eq!(
+            outcome.unwrap_err().to_string(),
+            LoginError::Waiting(125).to_string()
+        );
+
+        let seen = seen.lock().unwrap();
+        let sent: Vec<&Value> = seen.iter().map(|(h, _)| h).collect();
+        assert_eq!(sent[0], &json!({"op": "okta_status"}));
+        assert_eq!(
+            sent[1],
+            &json!({"op": "okta_save", "username": "s1234567", "password": "pw", "totp_secret": "GEZD"})
+        );
+        assert_eq!(sent[2], &json!({"op": "okta_forget"}));
+        assert_eq!(
+            sent[3],
+            &json!({"op": "ensure_signed_in", "trigger": "keep-alive"})
+        );
+    }
+
+    #[test]
+    fn a_signed_in_outcome_is_just_success() {
+        let (broker, _) = fake_keyd(|_, _| (json!({"result": "signed_in"}), vec![]));
+        assert_eq!(broker.ensure_signed_in(Trigger::Manual).unwrap(), Ok(()));
+    }
+
+    #[test]
+    fn a_save_refusal_keeps_keyds_message_intact() {
+        let (broker, _) = fake_keyd(|_, _| {
+            (
+                json!({"error": "request", "detail": "Username is required."}),
+                vec![],
+            )
+        });
+        assert_eq!(
+            broker.okta_save("", "pw", "GEZD").unwrap_err(),
+            KeydError::Request("Username is required.".into())
+        );
+    }
+
+    #[test]
+    fn transport_failures_stay_errors_and_are_not_outcomes() {
+        let (broker, _) = fake_keyd(|_, _| {
+            (
+                json!({"error": "keychain", "detail": "OSStatus -128"}),
+                vec![],
+            )
+        });
+        assert_eq!(
+            broker.okta_status().unwrap_err(),
+            KeydError::Keychain("OSStatus -128".into())
+        );
+        assert_eq!(
+            broker.ensure_signed_in(Trigger::Manual).unwrap_err(),
+            KeydError::Keychain("OSStatus -128".into())
+        );
+        // A reply this code cannot read is a broken keyd, never a sign-in result.
+        let (broker, _) = fake_keyd(|_, _| (json!({"result": "from the future"}), vec![]));
+        assert!(matches!(
+            broker.ensure_signed_in(Trigger::Manual),
+            Err(KeydError::Broken(_))
+        ));
+        assert!(matches!(broker.okta_status(), Err(KeydError::Broken(_))));
+        let absent = unreachable(ConnectError::Absent("ENOENT".into()));
+        assert_eq!(absent.okta_status().unwrap_err(), KeydError::Absent);
+        assert_eq!(absent.okta_forget().unwrap_err(), KeydError::Absent);
+        assert_eq!(
+            absent.ensure_signed_in(Trigger::Startup).unwrap_err(),
+            KeydError::Absent
+        );
+        assert_eq!(
+            absent.okta_save("u", "p", "GEZD").unwrap_err(),
+            KeydError::Absent
+        );
+    }
+}
+
+/// The client against the real server loop and ops, in memory.
+#[cfg(all(test, feature = "server"))]
+mod against_keyd {
+    use super::*;
+    use crate::ops::State;
+    use crate::platform::memory;
+    use crate::platform::Role;
+    use crate::server::Server;
+    use crate::test_support::okta_fake::{current_code, script, COOKIE, PASSWORD, SEED, USERNAME};
+    use crate::test_support::{FakeOrigin, Peers, Scratch, BUILD};
+    use crate::vault::{MasterKey, NoLegacy, StaticKey};
+
+    fn serve(role: Role, fake: &FakeOrigin) -> (Client, Scratch) {
+        let dir = Scratch::new("client-keyd");
+        let port = fake.origin.rsplit(':').next().unwrap();
+        let state = State::new(
+            BUILD,
+            dir.0.clone(),
+            Box::new(StaticKey(MasterKey::from_bytes([5; 32]))),
+            Box::new(NoLegacy),
+        )
+        .with_origins(
+            Some(&format!("http://127.0.0.1:{port}")),
+            Some(&format!("http://localhost:{port}")),
+        )
+        .unwrap();
+        let (listener, connector) = memory::listener();
+        let server = Arc::new(Server::new(
+            state,
+            Box::new(Peers::admit_as(role)),
+            Duration::from_secs(60),
+        ));
+        std::thread::spawn(move || server.run(&[listener]));
+        let client = Client {
+            endpoint: PathBuf::from("memory"),
+            connect: Arc::new(move || Ok(connector.connect())),
+        };
+        (client, dir)
+    }
+
+    #[test]
+    fn save_status_sign_in_and_forget_over_the_wire() {
+        let fake = FakeOrigin::start(script(current_code));
+        let (keyd, dir) = serve(Role::App, &fake);
+
+        let empty = keyd.okta_status().unwrap();
+        assert_eq!(
+            (empty.username, empty.has_password, empty.has_totp),
+            (None, false, false)
+        );
+        assert_eq!(
+            keyd.okta_save(" ", PASSWORD, SEED).unwrap_err(),
+            KeydError::Request("Username is required.".into())
+        );
+        assert!(matches!(
+            keyd.ensure_signed_in(Trigger::Manual).unwrap(),
+            Err(LoginError::NotConfigured)
+        ));
+
+        keyd.okta_save(USERNAME, PASSWORD, SEED).unwrap();
+        let status = keyd.okta_status().unwrap();
+        assert_eq!(status.username.as_deref(), Some(USERNAME));
+        assert!(status.has_password && status.has_totp);
+
+        assert_eq!(keyd.ensure_signed_in(Trigger::Startup).unwrap(), Ok(()));
+        assert_eq!(
+            std::fs::read_to_string(paths::cookie(&dir.0)).unwrap(),
+            COOKIE
+        );
+        // The guard's wait comes back as the same variant and text an
+        // in-process sign-in would give.
+        let Err(waiting @ LoginError::Waiting(secs)) =
+            keyd.ensure_signed_in(Trigger::Browser).unwrap()
+        else {
+            panic!("expected the guard's wait");
+        };
+        assert_eq!(waiting.to_string(), LoginError::Waiting(secs).to_string());
+        assert!(keyd.ensure_signed_in(Trigger::Manual).unwrap().is_ok());
+
+        assert!(keyd.okta_forget().unwrap());
+        assert!(!keyd.okta_forget().unwrap());
+        assert_eq!(keyd.okta_status().unwrap().username, None);
+    }
+
+    #[test]
+    fn a_rejected_password_comes_back_as_the_same_error_and_is_forgotten() {
+        let fake = FakeOrigin::start(script(current_code));
+        let (keyd, _dir) = serve(Role::Cli, &fake);
+        keyd.okta_save(USERNAME, "wrong", SEED).unwrap();
+        let outcome = keyd.ensure_signed_in(Trigger::Manual).unwrap();
+        let expected = LoginError::BadPassword("Password is incorrect".into());
+        assert_eq!(outcome.clone().unwrap_err(), expected);
+        assert_eq!(outcome.unwrap_err().to_string(), expected.to_string());
+        let status = keyd.okta_status().unwrap();
+        assert_eq!((status.has_password, status.has_totp), (false, true));
+    }
+
+    #[test]
+    fn a_caller_of_no_role_is_refused_every_okta_call_but_may_ask_has() {
+        let fake = FakeOrigin::start(script(current_code));
+        let (keyd, dir) = serve(Role::Unknown, &fake);
+        assert!(matches!(keyd.okta_status(), Err(KeydError::Caller(_))));
+        assert!(matches!(keyd.okta_forget(), Err(KeydError::Caller(_))));
+        assert!(matches!(
+            keyd.okta_save(USERNAME, PASSWORD, SEED),
+            Err(KeydError::Caller(_))
+        ));
+        assert!(matches!(
+            keyd.ensure_signed_in(Trigger::Manual),
+            Err(KeydError::Caller(_))
+        ));
+        assert!(!paths::vault(&dir.0).exists());
+        assert!(fake.hits().is_empty());
+        assert!(!keyd.has("okta.password").unwrap());
     }
 }

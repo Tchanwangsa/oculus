@@ -29,6 +29,8 @@ keyd_core = { package = "oculus-keyd-core", path = "core", features = ["server"]
 
 [dev-dependencies]
 serde_json = "=1.0.151"
+# The scripted Canvas and Okta the binary-level test signs in against.
+keyd_core = { package = "oculus-keyd-core", path = "core", features = ["server", "test-support"] }
 
 [build-dependencies]
 sha2 = "=0.10.9"

@@ -9,8 +9,8 @@
 //! the second factor is not a second factor — the same deliberate trade as a
 //! password manager holding TOTP.
 
-use keyd_core::okta::{base32_decode, CredentialStore, Credentials, Env};
 pub use keyd_core::okta::{resume_automatic_sign_in, totp_now, LoginError, Trigger, SSO_HOST};
+use keyd_core::okta::{validate_credentials, CredentialStore, Credentials, Env};
 
 // ── Stored credentials ───────────────────────────────────────────────────────
 
@@ -79,22 +79,13 @@ pub fn credential_status() -> Result<CredentialStatus, String> {
     })
 }
 
-/// Validates the TOTP seed first: an undecodable one would otherwise surface
-/// mid sign-in as an indistinguishable "wrong code".
+/// Validates with `keyd_core::okta::validate_credentials`, the check keyd
+/// applies too, then saves all three.
 pub fn store_credentials(username: &str, password: &str, totp_secret: &str) -> Result<(), String> {
-    let username = username.trim();
-    let secret = totp_secret.trim().replace(' ', "");
-    if username.is_empty() {
-        return Err("Username is required.".to_string());
-    }
-    if password.is_empty() {
-        return Err("Password is required.".to_string());
-    }
-    base32_decode(&secret).map_err(|e| format!("That does not look like a TOTP setup key: {e}"))?;
-
-    write("username", username)?;
-    write("password", password)?;
-    write("totp_secret", &secret)?;
+    let creds = validate_credentials(username, password, totp_secret)?;
+    write("username", &creds.username)?;
+    write("password", &creds.password)?;
+    write("totp_secret", &creds.totp_secret)?;
     Ok(())
 }
 

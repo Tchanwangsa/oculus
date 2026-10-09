@@ -24,10 +24,19 @@ pub struct Build {
     pub source_hash: &'static str,
 }
 
+mod okta;
+
 /// Secrets whose old keychain item keyd copies into the vault the first time
-/// an op touches them (`State::import_once`): the three cloud keys. Okta's
-/// items are not imported, because nothing asks keyd for them.
-const IMPORTED_ON_USE: &[&str] = &[names::VOYAGE, names::MINERU, names::GROQ];
+/// an op touches them (`State::import_once`): the three cloud keys and the
+/// three Okta values.
+const IMPORTED_ON_USE: &[&str] = &[
+    names::VOYAGE,
+    names::MINERU,
+    names::GROQ,
+    names::OKTA_USERNAME,
+    names::OKTA_PASSWORD,
+    names::OKTA_TOTP_SECRET,
+];
 
 pub struct State {
     build: Build,
@@ -39,12 +48,20 @@ pub struct State {
     importing: Mutex<()>,
     routes: Routes,
     upstream: Upstream,
+    /// Canvas's origin for the sign-in; production's unless a debug build
+    /// moved it.
+    canvas_base: String,
+    /// Okta's origin; `None` is production's (`okta::Env::new`).
+    sso_base: Option<String>,
+    /// One sign-in at a time; see `okta::Flight`.
+    flight: okta::Flight,
 }
 
 /// An op's failure as it goes on the wire: `{"error": kind, "detail": …}`.
 /// Kinds: `request` (malformed, unknown op or name, a refused path or header),
-/// `caller` (refused), `keychain` (the master key, or an old item being
-/// imported, was refused or failed), `vault`, `missing` (`forward` for a
+/// `caller` (refused: the peer check, or an Okta op asked by a program that
+/// is neither the app nor the CLI), `keychain` (the master key, or an old item
+/// being imported, was refused or failed), `vault`, `missing` (`forward` for a
 /// secret the vault does not hold), `upstream` (`forward` got no answer: DNS,
 /// connect, TLS or a reset).
 #[derive(Debug)]
@@ -115,6 +132,9 @@ impl State {
             importing: Mutex::new(()),
             routes: Routes::compiled(),
             upstream: Upstream::new(),
+            canvas_base: crate::paths::CANVAS_BASE.to_string(),
+            sso_base: None,
+            flight: okta::Flight::default(),
         }
     }
 
@@ -123,6 +143,19 @@ impl State {
     pub fn with_routes(mut self, routes: Routes) -> Self {
         self.routes = routes;
         self
+    }
+
+    /// Points the sign-in at fake Canvas and Okta servers. Debug builds only,
+    /// like `with_routes`: a release keyd cannot move an origin.
+    #[cfg(debug_assertions)]
+    pub fn with_origins(mut self, canvas: Option<&str>, sso: Option<&str>) -> Result<Self, String> {
+        if let Some(origin) = canvas {
+            self.canvas_base = test_origin(origin)?;
+        }
+        if let Some(origin) = sso {
+            self.sso_base = Some(test_origin(origin)?);
+        }
+        Ok(self)
     }
 
     fn master(&self) -> Result<MasterKey, KeyError> {
@@ -143,12 +176,12 @@ impl State {
     }
 
     /// One request. `body` is the raw bytes after the header line; only
-    /// `forward` takes any. No reply carries a secret value. `_caller` is who
-    /// asked: no op checks its role yet, and `forward` is open to any
-    /// admitted caller.
+    /// `forward` takes any. No reply carries a secret value. `caller` is who
+    /// asked: the Okta ops are for the app and the CLI only, while the rest
+    /// are open to any admitted caller.
     pub fn dispatch(
         &self,
-        _caller: &Caller,
+        caller: &Caller,
         op: &str,
         req: &Value,
         body: &[u8],
@@ -166,6 +199,7 @@ impl State {
             }
             "store" => {
                 let name = secret_name(req)?;
+                refuse_okta(name, "saved with okta_save")?;
                 let value = req.get("value").and_then(Value::as_str).ok_or_else(|| OpError::new("request", "store needs a string \"value\""))?;
                 if value.is_empty() {
                     return Err(OpError::new("request", "store needs a non-empty value"));
@@ -182,6 +216,7 @@ impl State {
             }
             "delete" => {
                 let name = secret_name(req)?;
+                refuse_okta(name, "removed with okta_forget")?;
                 // Marked imported, so the old item still in the keychain never comes back.
                 let marker = imported_marker(name);
                 let existed = self.vault()?.update(|e| {
@@ -193,6 +228,10 @@ impl State {
                 Ok(json!({"existed": existed}).into())
             }
             "forward" => self.forward(req, body),
+            "okta_save" => self.okta_save(caller, req),
+            "okta_forget" => self.okta_forget(caller),
+            "okta_status" => self.okta_status(caller),
+            "ensure_signed_in" => self.ensure_signed_in(caller, req),
             _ => Err(OpError::new("request", format!("unknown op {op:?}"))),
         }
     }
@@ -280,6 +319,34 @@ fn imported_marker(name: &str) -> Option<String> {
         .then(|| names::imported(name))
 }
 
+/// The generic `store` and `delete` leave the Okta values to their own ops,
+/// which write the three together, validated.
+fn refuse_okta(name: &str, how: &str) -> Result<(), OpError> {
+    if names::OKTA.contains(&name) {
+        return Err(OpError::new(
+            "request",
+            format!("{name} is not written by this op; it is {how}"),
+        ));
+    }
+    Ok(())
+}
+
+/// A fake service's origin: loopback `http` only, `127.0.0.1` or `localhost`
+/// (two hosts, so one server can play both Canvas and Okta).
+#[cfg(debug_assertions)]
+fn test_origin(origin: &str) -> Result<String, String> {
+    let port = origin
+        .strip_prefix("http://127.0.0.1:")
+        .or_else(|| origin.strip_prefix("http://localhost:"))
+        .filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    match port {
+        Some(_) => Ok(origin.to_string()),
+        None => {
+            Err("a test origin must be http://127.0.0.1:<port> or http://localhost:<port>".into())
+        }
+    }
+}
+
 fn secret_name(req: &Value) -> Result<&str, OpError> {
     let name = req
         .get("secret")
@@ -294,7 +361,7 @@ fn secret_name(req: &Value) -> Result<&str, OpError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{Answer, FakeOrigin, Scratch, BUILD};
+    use crate::test_support::{Answer, FakeOrigin, OldItems, Reads, Scratch, BUILD};
     use crate::vault::{NoLegacy, StaticKey};
 
     fn key() -> MasterKey {
@@ -617,28 +684,6 @@ mod tests {
 
     // ── Import on first use ──────────────────────────────────────────────────
 
-    type Reads = std::sync::Arc<std::sync::atomic::AtomicUsize>;
-
-    /// Old keychain items by service and account, counting every read.
-    struct OldItems(
-        Vec<(
-            (&'static str, &'static str),
-            Result<Option<String>, KeyError>,
-        )>,
-        Reads,
-    );
-
-    impl LegacySource for OldItems {
-        fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
-            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            self.0
-                .iter()
-                .find(|((s, a), _)| *s == service && *a == account)
-                .map(|(_, r)| r.clone())
-                .unwrap_or(Ok(None))
-        }
-    }
-
     fn with_items(
         dir: &Scratch,
         items: Vec<(
@@ -803,22 +848,5 @@ mod tests {
         let v = Vault::new(crate::paths::vault(&dir.0), key());
         assert_eq!(v.get("mineru").unwrap().as_deref(), Some("mineru-old"));
         assert_eq!(v.get("groq").unwrap().as_deref(), Some("gsk_old"));
-    }
-
-    #[test]
-    fn okta_names_are_never_imported() {
-        let dir = Scratch::new("import-okta");
-        let (state, reads) = with_items(
-            &dir,
-            vec![(
-                ("com.oculus.unimelb-sso", "password"),
-                Ok(Some("hunter2".into())),
-            )],
-        );
-        assert_eq!(
-            call(&state, "has", json!({"secret": "okta.password"})).unwrap()["has"],
-            false
-        );
-        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

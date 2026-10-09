@@ -6,7 +6,8 @@
 //! neither links the other and an app edit never changes keyd's bytes. The
 //! framing, the secret names, the paths, the clock and the platform's base
 //! types are always on; `okta` is the headless sign-in, which keyd runs and
-//! the app runs when keyd is absent.
+//! the app runs when keyd is absent. `client` includes it, for the
+//! `LoginError` keyd's replies carry.
 
 pub mod clock;
 pub mod framing;
@@ -27,8 +28,11 @@ pub mod server;
 #[cfg(feature = "server")]
 pub mod vault;
 
-#[cfg(all(test, any(feature = "server", feature = "okta")))]
-mod test_support;
+#[cfg(any(
+    feature = "test-support",
+    all(test, any(feature = "server", feature = "okta"))
+))]
+pub mod test_support;
 
 /// One line of keyd's log (stderr, which the agent sends to a file): the
 /// time, the pid and `msg`. Never a value, a header or a body.

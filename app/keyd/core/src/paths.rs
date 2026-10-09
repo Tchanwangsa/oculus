@@ -8,6 +8,10 @@ use std::path::{Path, PathBuf};
 /// tests hold the two together).
 pub const IDENTIFIER: &str = "com.tchan.oculus";
 
+/// Canvas's origin, without a trailing slash: where the sign-in lands and
+/// where the app's requests go.
+pub const CANVAS_BASE: &str = "https://canvas.lms.unimelb.edu.au";
+
 /// keyd's executable name, in a bundle and in `bin/`.
 pub const BINARY: &str = "oculus-keyd";
 

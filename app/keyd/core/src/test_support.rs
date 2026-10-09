@@ -1,6 +1,9 @@
 //! A temp directory per test, removed on drop, a fixed `ping` identity, a
 //! caller check that answers as told, and a fake HTTP origin for `forward`
-//! and the sign-in.
+//! and the sign-in. Compiled for tests, and for keyd's own integration test
+//! under the `test-support` feature.
+
+pub mod okta_fake;
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -12,6 +15,8 @@ use std::sync::{Arc, Mutex};
 use crate::ops::Build;
 #[cfg(feature = "server")]
 use crate::platform::{Caller, Conn, PeerCheck, Role};
+#[cfg(feature = "server")]
+use crate::vault::{KeyError, LegacySource};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
@@ -43,6 +48,7 @@ impl Drop for Scratch {
 #[cfg(feature = "server")]
 pub struct Peers {
     verdict: Result<(), String>,
+    role: Role,
     pub seen: Arc<AtomicUsize>,
 }
 
@@ -51,13 +57,23 @@ impl Peers {
     pub fn admit() -> Peers {
         Peers {
             verdict: Ok(()),
+            role: Role::Cli,
             seen: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Admits every caller, reporting `role` for each.
+    pub fn admit_as(role: Role) -> Peers {
+        Peers {
+            role,
+            ..Peers::admit()
         }
     }
 
     pub fn refuse(why: &str) -> Peers {
         Peers {
             verdict: Err(why.to_string()),
+            role: Role::Cli,
             seen: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -69,13 +85,40 @@ impl PeerCheck for Peers {
         self.seen.fetch_add(1, Ordering::SeqCst);
         Caller {
             pid: Some(std::process::id()),
-            role: Role::Cli,
+            role: self.role,
             ..Caller::default()
         }
     }
 
     fn admit(&self, _caller: &Caller) -> Result<(), String> {
         self.verdict.clone()
+    }
+}
+
+/// How many old keychain items a test keyd has read.
+#[cfg(feature = "server")]
+pub type Reads = Arc<AtomicUsize>;
+
+/// Old keychain items by (service, account), counting every read. It can only
+/// read: keyd never writes or deletes an old item.
+#[cfg(feature = "server")]
+pub struct OldItems(
+    pub  Vec<(
+        (&'static str, &'static str),
+        Result<Option<String>, KeyError>,
+    )>,
+    pub Reads,
+);
+
+#[cfg(feature = "server")]
+impl LegacySource for OldItems {
+    fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
+        self.1.fetch_add(1, Ordering::SeqCst);
+        self.0
+            .iter()
+            .find(|((s, a), _)| *s == service && *a == account)
+            .map(|(_, r)| r.clone())
+            .unwrap_or(Ok(None))
     }
 }
 

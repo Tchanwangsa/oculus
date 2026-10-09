@@ -7,6 +7,10 @@ pub const OKTA_USERNAME: &str = "okta.username";
 pub const OKTA_PASSWORD: &str = "okta.password";
 pub const OKTA_TOTP_SECRET: &str = "okta.totp_secret";
 
+/// The Okta sign-in's three values. They are written only by `okta_save` and
+/// `okta_forget`, never by the generic `store` and `delete`.
+pub const OKTA: &[&str] = &[OKTA_USERNAME, OKTA_PASSWORD, OKTA_TOTP_SECRET];
+
 /// Every name the vault accepts; anything else is refused before it is stored.
 pub const KNOWN: &[&str] = &[
     VOYAGE,
@@ -76,6 +80,16 @@ pub const LEGACY: &[Legacy] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_okta_names_are_the_okta_prefix() {
+        let by_prefix: Vec<&str> = KNOWN
+            .iter()
+            .copied()
+            .filter(|n| n.starts_with("okta."))
+            .collect();
+        assert_eq!(by_prefix, OKTA);
+    }
 
     #[test]
     fn every_legacy_item_lands_on_a_known_name_once() {
