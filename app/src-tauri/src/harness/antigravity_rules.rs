@@ -140,7 +140,7 @@ pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]
         .collect();
     // `ROOT_FILE_GLOBS` as the files they cover.
     deny.push(format!("write_file({})", crate::paths::cookie_path(library).display()));
-    deny.push(format!("write_file({})", at("ed-session.token")));
+    deny.push(format!("write_file({})", crate::paths::ed_token_path(library).display()));
     deny.push(format!("write_file({})", crate::paths::keepalive_log_path(library).display()));
     deny.push(format!("write_file({})", state_path(library).display()));
     // `sqlite3` on *this* database only: the rules are global, and a blanket

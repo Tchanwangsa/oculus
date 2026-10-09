@@ -290,6 +290,8 @@ impl Jar {
 pub enum LoginError {
     /// No credentials on file — automated sign-in was never set up.
     NotConfigured,
+    /// The user signed out; only a sign-in they start lifts it.
+    SignedOut,
     /// The keychain refused the read (a denied prompt, a sandboxed process);
     /// the credentials may well be on file. Carries the keychain's error.
     UnreadableCredentials(String),
@@ -317,6 +319,11 @@ impl std::fmt::Display for LoginError {
                 f,
                 "Automated sign-in is not set up — save your username, password and \
                  authenticator setup key first."
+            ),
+            LoginError::SignedOut => write!(
+                f,
+                "Signed out, so automatic sign-in is off until you sign in from Settings → \
+                 Canvas or run `oculus auth auto`."
             ),
             LoginError::UnreadableCredentials(m) => write!(
                 f,
@@ -766,6 +773,9 @@ fn with_record<T>(data_dir: &std::path::Path, f: impl FnOnce(&mut AttemptRecord)
 /// after any attempt, then 1 h and 6 h as failures repeat, and stop on a
 /// failure retrying cannot fix. Each attempt is a line in `okta-sign-in.log`.
 pub fn sign_in(data_dir: &std::path::Path, trigger: Trigger) -> Result<String, LoginError> {
+    if trigger != Trigger::Manual && crate::paths::signed_out_path(data_dir).exists() {
+        return Err(LoginError::SignedOut);
+    }
     let creds = Credentials::load()?.ok_or(LoginError::NotConfigured)?;
     let now = crate::clock::now_secs();
     with_record(data_dir, |r| admit(r, trigger, now))?;
@@ -1210,11 +1220,11 @@ fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, St
 
 /// Called when a probe finds the session dead: rebuild it silently if
 /// automated sign-in is set up. `false` means ask the user; every reason but
-/// "never set up" is logged, a keychain refusal included.
+/// "never set up" and "signed out" is logged, a keychain refusal included.
 pub fn try_auto_recover(app: &tauri::AppHandle, trigger: Trigger) -> bool {
     let dir = crate::paths::data_dir();
     let outcome = match sign_in(&dir, trigger) {
-        Err(LoginError::NotConfigured) => return false,
+        Err(LoginError::NotConfigured | LoginError::SignedOut) => return false,
         Err(e) => Err(e.to_string()),
         Ok(_) => signed_in(app, &dir),
     };
