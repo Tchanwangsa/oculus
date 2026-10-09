@@ -33,6 +33,7 @@ pub use guard::{resume_automatic_sign_in, Trigger};
 pub use totp::{base32_decode, totp_at, totp_code, totp_now, totp_seconds_remaining};
 pub use wire::{outcome_from_wire, outcome_to_wire, OktaStatus};
 
+use crate::clock::Clock;
 use crate::paths;
 
 pub const SSO_HOST: &str = "sso.unimelb.edu.au";
@@ -95,7 +96,7 @@ pub struct Env<'a> {
     pub sso_base: String,
     pub store: &'a dyn CredentialStore,
     /// Unix seconds, for the guard, the log and the TOTP code.
-    pub now: fn() -> u64,
+    pub now: Clock,
 }
 
 impl<'a> Env<'a> {
@@ -105,7 +106,7 @@ impl<'a> Env<'a> {
             canvas_base: canvas_base.to_string(),
             sso_base: format!("https://{SSO_HOST}"),
             store,
-            now: crate::clock::now_secs,
+            now: crate::clock::system(),
         }
     }
 

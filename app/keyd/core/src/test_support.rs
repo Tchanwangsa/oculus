@@ -8,7 +8,7 @@ pub mod okta_fake;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "server")]
@@ -19,6 +19,25 @@ use crate::platform::{Caller, Conn, PeerCheck, Role};
 use crate::vault::{KeyError, LegacySource};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+/// A clock a test sets and moves; clones share the time.
+#[derive(Clone)]
+pub struct TestClock(Arc<AtomicU64>);
+
+impl TestClock {
+    pub fn at(secs: u64) -> TestClock {
+        TestClock(Arc::new(AtomicU64::new(secs)))
+    }
+
+    pub fn advance(&self, secs: u64) {
+        self.0.fetch_add(secs, Ordering::SeqCst);
+    }
+
+    pub fn clock(&self) -> crate::clock::Clock {
+        let secs = self.0.clone();
+        Arc::new(move || secs.load(Ordering::SeqCst))
+    }
+}
 
 /// What a test keyd reports from `ping`.
 #[cfg(feature = "server")]

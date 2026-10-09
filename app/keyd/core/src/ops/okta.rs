@@ -253,6 +253,7 @@ impl State {
             if let Some(sso) = &self.sso_base {
                 env.sso_base = sso.clone();
             }
+            env.now = self.clock.clone();
             okta::sign_in(&env, trigger)
         });
         let note = match &outcome {
@@ -276,9 +277,9 @@ mod tests {
     use super::*;
     use crate::okta::outcome_from_wire;
     use crate::test_support::okta_fake::{
-        answer, current_code, script, COOKIE, PASSWORD, SEED, USERNAME,
+        answer, code_at_t0, script, COOKIE, PASSWORD, SEED, T0, USERNAME,
     };
-    use crate::test_support::{FakeOrigin, OldItems, Reads, Scratch, BUILD};
+    use crate::test_support::{FakeOrigin, OldItems, Reads, Scratch, TestClock, BUILD};
     use crate::vault::{KeyError, MasterKey, NoLegacy, StaticKey};
 
     fn key() -> MasterKey {
@@ -297,7 +298,7 @@ mod tests {
     }
 
     fn fake() -> FakeOrigin {
-        FakeOrigin::start(script(current_code))
+        FakeOrigin::start(script(code_at_t0))
     }
 
     fn state_with(
@@ -305,7 +306,8 @@ mod tests {
         fake: Option<&FakeOrigin>,
         legacy: Box<dyn crate::vault::LegacySource>,
     ) -> State {
-        let state = State::new(BUILD, dir.0.clone(), Box::new(StaticKey(key())), legacy);
+        let state = State::new(BUILD, dir.0.clone(), Box::new(StaticKey(key())), legacy)
+            .with_clock(TestClock::at(T0).clock());
         let Some(fake) = fake else { return state };
         let port = fake.origin.rsplit(':').next().unwrap();
         state
@@ -973,7 +975,7 @@ mod tests {
     #[test]
     fn a_caller_arriving_mid_sign_in_waits_and_gets_its_outcome_and_one_flow_runs() {
         let dir = Scratch::new("okta-flight");
-        let fake = slow(script(current_code));
+        let fake = slow(script(code_at_t0));
         let state = Arc::new(state(&dir, &fake));
         save_good(&state);
 

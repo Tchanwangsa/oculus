@@ -16,7 +16,9 @@
 //! and OCULUS_KEYD_GROQ_ORIGIN (each `http://127.0.0.1:<port>`, a fake of that
 //! service), and OCULUS_KEYD_CANVAS_ORIGIN and OCULUS_KEYD_SSO_ORIGIN (the
 //! sign-in's fake Canvas and Okta: `http://127.0.0.1:<port>` or
-//! `http://localhost:<port>`, on different hosts). Release builds have none.
+//! `http://localhost:<port>`, on different hosts), and OCULUS_KEYD_NOW (Unix
+//! seconds the sign-in and its attempt guard see for good, so a test never
+//! waits on a TOTP window). Release builds have none.
 
 use std::path::PathBuf;
 use std::process::exit;
@@ -92,6 +94,8 @@ fn serve(listeners: Vec<Listener>) {
     let state = state.with_routes(test_routes());
     #[cfg(debug_assertions)]
     let state = with_test_origins(state);
+    #[cfg(debug_assertions)]
+    let state = with_test_clock(state);
     let server = Arc::new(Server::new(state, platform::peer_check(POLICY), idle()));
     server.run(&listeners);
 }
@@ -129,6 +133,21 @@ fn with_test_origins(state: State) -> State {
             log(&format!(
                 "OCULUS_KEYD_CANVAS_ORIGIN / OCULUS_KEYD_SSO_ORIGIN: {e}"
             ));
+            exit(64);
+        }
+    }
+}
+
+/// The sign-in's clock, fixed at `OCULUS_KEYD_NOW` when it is set.
+#[cfg(debug_assertions)]
+fn with_test_clock(state: State) -> State {
+    let Ok(text) = std::env::var("OCULUS_KEYD_NOW") else {
+        return state;
+    };
+    match text.parse::<u64>() {
+        Ok(secs) => state.with_clock(Arc::new(move || secs)),
+        Err(_) => {
+            log("OCULUS_KEYD_NOW is not a number of seconds");
             exit(64);
         }
     }

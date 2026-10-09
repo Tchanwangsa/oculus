@@ -5,6 +5,7 @@
 use super::jar::Jar;
 use super::totp::{seconds_remaining, totp_code};
 use super::{Credentials, Env, LoginError};
+use crate::clock::Clock;
 use crate::paths;
 
 // ── HTTP plumbing ────────────────────────────────────────────────────────────
@@ -430,7 +431,7 @@ pub(super) fn attempt_sign_in(env: &Env, creds: &Credentials) -> Result<String, 
                 let passcode = match kind {
                     Factor::Password => creds.password.clone(),
                     Factor::Totp => {
-                        wait_for_fresh_code(env.now);
+                        wait_for_fresh_code(&env.now);
                         totp_code(&creds.totp_secret, (env.now)())
                             .map_err(LoginError::Unexpected)?
                     }
@@ -556,7 +557,7 @@ fn verify(env: &Env, cookie: &str) -> Result<String, LoginError> {
 
 /// Okta rejects a replayed code and repeated failures trip the lockout, so
 /// never spend one that is about to expire.
-fn wait_for_fresh_code(now: fn() -> u64) {
+fn wait_for_fresh_code(now: &Clock) {
     let left = seconds_remaining(now());
     if left < 3 {
         std::thread::sleep(std::time::Duration::from_secs(left + 1));

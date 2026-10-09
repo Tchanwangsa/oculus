@@ -21,6 +21,15 @@ pub fn current_code(passcode: &str) -> bool {
         .any(|t| crate::okta::totp_code(SEED, *t).is_ok_and(|code| code == passcode))
 }
 
+/// The instant a test clock pins: 2005-03-18 01:58:31 UTC, 29 s before the
+/// next code, so no sign-in under it waits for a fresh one.
+pub const T0: u64 = 1_111_111_111;
+
+/// For a sign-in whose clock is pinned at `T0`.
+pub fn code_at_t0(passcode: &str) -> bool {
+    crate::okta::totp_code(SEED, T0).is_ok_and(|code| code == passcode)
+}
+
 pub fn answer(status: u16, headers: &[(&'static str, &str)], body: &str) -> Answer {
     Answer {
         status,

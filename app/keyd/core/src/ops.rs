@@ -11,6 +11,7 @@ use std::sync::Mutex;
 
 use serde_json::{json, Value};
 
+use crate::clock::Clock;
 use crate::forward::{Call, Routes, Upstream};
 use crate::names;
 use crate::platform::Caller;
@@ -55,6 +56,8 @@ pub struct State {
     sso_base: Option<String>,
     /// One sign-in at a time; see `okta::Flight`.
     flight: okta::Flight,
+    /// The time the sign-in and its attempt guard see.
+    clock: Clock,
 }
 
 /// An op's failure as it goes on the wire: `{"error": kind, "detail": …}`.
@@ -135,7 +138,16 @@ impl State {
             canvas_base: crate::paths::CANVAS_BASE.to_string(),
             sso_base: None,
             flight: okta::Flight::default(),
+            clock: crate::clock::system(),
         }
+    }
+
+    /// Moves the sign-in's clock. Debug builds only, like `with_origins`: a
+    /// release keyd always reads the wall clock.
+    #[cfg(debug_assertions)]
+    pub fn with_clock(mut self, clock: Clock) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Debug builds only, like `Routes::with_origin`.

@@ -2,7 +2,7 @@
 //! server plays both: Canvas is `127.0.0.1` and Okta is `localhost`, two
 //! hosts for the jar to keep apart, told apart by the request's `Host`.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::test_support::okta_fake::{script, COOKIE, PASSWORD, SEED, USERNAME};
@@ -58,7 +58,7 @@ fn env<'a>(dir: &Scratch, origin: &str, store: &'a Store) -> Env<'a> {
     let port = origin.rsplit(':').next().unwrap();
     let mut env = Env::new(&dir.0, &format!("http://127.0.0.1:{port}"), store);
     env.sso_base = format!("http://localhost:{port}");
-    env.now = at_t0;
+    env.now = Arc::new(at_t0);
     env
 }
 

@@ -642,8 +642,10 @@ mod against_keyd {
     use crate::platform::memory;
     use crate::platform::Role;
     use crate::server::Server;
-    use crate::test_support::okta_fake::{current_code, script, COOKIE, PASSWORD, SEED, USERNAME};
-    use crate::test_support::{FakeOrigin, Peers, Scratch, BUILD};
+    use crate::test_support::okta_fake::{
+        code_at_t0, script, COOKIE, PASSWORD, SEED, T0, USERNAME,
+    };
+    use crate::test_support::{FakeOrigin, Peers, Scratch, TestClock, BUILD};
     use crate::vault::{MasterKey, NoLegacy, StaticKey};
 
     fn serve(role: Role, fake: &FakeOrigin) -> (Client, Scratch) {
@@ -655,6 +657,7 @@ mod against_keyd {
             Box::new(StaticKey(MasterKey::from_bytes([5; 32]))),
             Box::new(NoLegacy),
         )
+        .with_clock(TestClock::at(T0).clock())
         .with_origins(
             Some(&format!("http://127.0.0.1:{port}")),
             Some(&format!("http://localhost:{port}")),
@@ -676,7 +679,7 @@ mod against_keyd {
 
     #[test]
     fn save_status_sign_in_and_forget_over_the_wire() {
-        let fake = FakeOrigin::start(script(current_code));
+        let fake = FakeOrigin::start(script(code_at_t0));
         let (keyd, dir) = serve(Role::App, &fake);
 
         let empty = keyd.okta_status().unwrap();
@@ -720,7 +723,7 @@ mod against_keyd {
 
     #[test]
     fn a_rejected_password_comes_back_as_the_same_error_and_is_forgotten() {
-        let fake = FakeOrigin::start(script(current_code));
+        let fake = FakeOrigin::start(script(code_at_t0));
         let (keyd, _dir) = serve(Role::Cli, &fake);
         keyd.okta_save(USERNAME, "wrong", SEED).unwrap();
         let outcome = keyd.ensure_signed_in(Trigger::Manual).unwrap();
@@ -733,7 +736,7 @@ mod against_keyd {
 
     #[test]
     fn a_caller_of_no_role_is_refused_every_okta_call_but_may_ask_has() {
-        let fake = FakeOrigin::start(script(current_code));
+        let fake = FakeOrigin::start(script(code_at_t0));
         let (keyd, dir) = serve(Role::Unknown, &fake);
         assert!(matches!(keyd.okta_status(), Err(KeydError::Caller(_))));
         assert!(matches!(keyd.okta_forget(), Err(KeydError::Caller(_))));

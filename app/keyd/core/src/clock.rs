@@ -1,6 +1,16 @@
 //! The wall clock and the calendar, without a date crate.
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Unix seconds. The sign-in and its attempt guard take the time from one of
+/// these, so a test can pin or move it.
+pub type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
+
+/// The wall clock.
+pub fn system() -> Clock {
+    Arc::new(now_secs)
+}
 
 pub fn now_secs() -> u64 {
     SystemTime::now()
