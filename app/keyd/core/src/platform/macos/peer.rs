@@ -427,4 +427,190 @@ mod tests {
         assert!(err.contains("not inside an app bundle"), "{err}");
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    /// `<name>.app` in `dir`: a Mach-O copied from `executable`, a sealed
+    /// resource and an Info.plist, ad-hoc signed. Panics if `codesign` fails.
+    fn signed_bundle(dir: &Path, name: &str, executable: &str) -> PathBuf {
+        let bundle = dir.join(format!("{name}.app"));
+        std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        std::fs::create_dir_all(bundle.join("Contents/Resources")).unwrap();
+        std::fs::copy(executable, bundle.join("Contents/MacOS").join(name)).unwrap();
+        std::fs::write(bundle.join("Contents/Resources/data.txt"), "sealed").unwrap();
+        std::fs::write(
+            bundle.join("Contents/Info.plist"),
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>{name}</string>
+<key>CFBundleIdentifier</key><string>test.keyd.{name}</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>"#
+            ),
+        )
+        .unwrap();
+        let out = Command::new("codesign")
+            .args(["-s", "-", "-f", "--timestamp=none"])
+            .arg(&bundle)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "codesign: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        bundle
+    }
+
+    #[test]
+    fn the_seal_check_accepts_a_signed_bundle_and_refuses_one_changed_after_signing() {
+        let dir = std::env::temp_dir().join(format!("keyd-seal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bundle = signed_bundle(&dir, "Sealed", "/usr/bin/true");
+
+        assert_eq!(seal_check(&bundle), Ok(()));
+
+        let resource = bundle.join("Contents/Resources/data.txt");
+        std::fs::write(&resource, "edited").unwrap();
+        let err = seal_check(&bundle).unwrap_err();
+        assert!(err.contains("seal does not verify"), "{err}");
+
+        std::fs::write(&resource, "sealed").unwrap();
+        assert_eq!(seal_check(&bundle), Ok(()));
+        std::fs::write(bundle.join("Contents/Resources/added.txt"), "new").unwrap();
+        let err = seal_check(&bundle).unwrap_err();
+        assert!(err.contains("seal does not verify"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn timed(label: &str, runs: usize, mut each: impl FnMut()) {
+        let mut times: Vec<Duration> = (0..runs)
+            .map(|_| {
+                let start = Instant::now();
+                each();
+                start.elapsed()
+            })
+            .collect();
+        times.sort();
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        eprintln!(
+            "{label}: {runs} runs, min {:.2} ms, median {:.2} ms, p95 {:.2} ms, max {:.2} ms",
+            ms(times[0]),
+            ms(times[runs / 2]),
+            ms(times[runs * 95 / 100]),
+            ms(times[runs - 1])
+        );
+    }
+
+    /// What the strict policy costs a connection: `cargo test -- --ignored
+    /// --nocapture what_the_caller_check_costs`. `seal_check` is the bundle
+    /// half of `admit`; `inspect` is the caller half, here over a socket
+    /// whose peer is a small C client built into a signed bundle (a copy of a
+    /// system arm64e binary would not run).
+    #[test]
+    #[ignore = "a timing measurement, run by hand"]
+    fn what_the_caller_check_costs_per_connection() {
+        // Short, because a socket path is limited to 104 bytes.
+        let dir = PathBuf::from(format!("/tmp/keyd-cost-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("client.c"),
+            r#"#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    struct sockaddr_un a;
+    int s = socket(AF_UNIX, SOCK_STREAM, 0);
+    memset(&a, 0, sizeof a);
+    a.sun_family = AF_UNIX;
+    strncpy(a.sun_path, argv[1], sizeof a.sun_path - 1);
+    if (connect(s, (struct sockaddr *)&a, sizeof a)) return 1;
+    pause();
+    return 0;
+}
+"#,
+        )
+        .unwrap();
+        let cc = Command::new("cc")
+            .arg("-o")
+            .arg(dir.join("client"))
+            .arg(dir.join("client.c"))
+            .status()
+            .unwrap();
+        assert!(cc.success());
+        let bundle = signed_bundle(&dir, "Cost", dir.join("client").to_str().unwrap());
+        timed("seal_check, one small executable", 200, || {
+            seal_check(&bundle).unwrap();
+        });
+        // A real, ad-hoc signed bundle for a size that means something:
+        // KEYD_COST_BUNDLE=/path/Oculus.app.
+        if let Some(real) = std::env::var_os("KEYD_COST_BUNDLE") {
+            let real = PathBuf::from(real);
+            timed("seal_check, KEYD_COST_BUNDLE", 50, || {
+                seal_check(&real).unwrap();
+            });
+        }
+
+        let sock = dir.join("k.sock");
+        let listeners = [crate::platform::Listener::bind(&sock).unwrap()];
+        let accept = || {
+            crate::platform::accept_any(&listeners, Duration::from_secs(10))
+                .unwrap()
+                .expect("the client never connected")
+        };
+        let client = || {
+            Command::new(bundle.join("Contents/MacOS/Cost"))
+                .arg(&sock)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap()
+        };
+        let fd_of = |conn: &Conn| match &conn.0 {
+            Stream::Os(stream) => stream.as_raw_fd(),
+            _ => unreachable!(),
+        };
+
+        // One long-lived peer, inspected over and over.
+        let mut peer = client();
+        let conn = accept();
+        let fd = fd_of(&conn);
+        let caller = inspect(fd);
+        assert!(caller.valid, "{:?}", caller.problems);
+        assert_eq!(
+            caller.path.as_deref(),
+            Some(bundle.canonicalize().unwrap().as_path())
+        );
+        timed("inspect, same peer", 200, || {
+            inspect(fd);
+        });
+        peer.kill().ok();
+        peer.wait().ok();
+
+        // A new process for every connection, as keyd sees real callers; the
+        // spawn and accept are outside the timed part.
+        let mut fresh = Vec::new();
+        for _ in 0..50 {
+            let mut peer = client();
+            let conn = accept();
+            let start = Instant::now();
+            let caller = inspect(fd_of(&conn));
+            fresh.push(start.elapsed());
+            assert!(caller.valid, "{:?}", caller.problems);
+            peer.kill().ok();
+            peer.wait().ok();
+        }
+        fresh.sort();
+        eprintln!(
+            "inspect, new peer each time: 50 runs, min {:.2} ms, median {:.2} ms, max {:.2} ms",
+            fresh[0].as_secs_f64() * 1000.0,
+            fresh[25].as_secs_f64() * 1000.0,
+            fresh[49].as_secs_f64() * 1000.0
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

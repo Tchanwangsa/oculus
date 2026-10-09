@@ -229,6 +229,13 @@ the app's `credentials.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay OS-free.
   its socket, caller check, keychain errors and plist itself. The POSIX file
   helpers (`platform/unix.rs`) serve every Unix, so the vault works in
   Linux CI.
+- **The strict seal check is paid on every connection.** Under the install
+  policy `seal_check` re-verifies the whole bundle each time: 0.7 ms for a
+  bundle of one small executable, 32 ms for a signed 80 MB one (Apple silicon),
+  plus 0.2 ms to inspect the caller. `peer.rs`'s ignored test
+  `what_the_caller_check_costs_per_connection` measures it
+  (`cargo test --all-features -- --ignored --nocapture`);
+  `KEYD_COST_BUNDLE=<signed .app>` times a real bundle too.
 - **Enforced twice.** `keyd-seams.test.mjs` (in `bun run test`) fails on any
   `std::os::unix`, `libc::`, framework, `extern "C"`, `launchctl` or
   `Library/Application Support` outside `platform/` in those files, comments
