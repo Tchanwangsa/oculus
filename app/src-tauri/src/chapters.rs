@@ -108,7 +108,11 @@ pub fn sample_diffs(
 /// `video`, from one decode of the tail alone (`-sseof`), and the file's own
 /// length from ffmpeg's log. ffmpeg ignores a seek before the start, so a
 /// shorter file is read whole.
-pub fn tail_luma(ffmpeg: &Path, video: &Path, secs: u32) -> Result<(Vec<f32>, Option<f64>), String> {
+pub fn tail_luma(
+    ffmpeg: &Path,
+    video: &Path,
+    secs: u32,
+) -> Result<(Vec<f32>, Option<f64>), String> {
     let seek = format!("-{secs}");
     let mut luma: Vec<f32> = Vec::new();
     let log = each_frame(ffmpeg, video, "info", &["-sseof", &seek], |_, frame| {
@@ -178,7 +182,12 @@ fn each_frame(
     let status = child.wait().map_err(|e| e.to_string())?;
     let text = errors.join().unwrap_or_default();
     if !status.success() {
-        let detail = text.lines().last().unwrap_or("no detail").trim().to_string();
+        let detail = text
+            .lines()
+            .last()
+            .unwrap_or("no detail")
+            .trim()
+            .to_string();
         return Err(format!("ffmpeg failed: {detail}"));
     }
     Ok(text)
@@ -220,7 +229,11 @@ pub fn cue_gaps(vtt: &str) -> Vec<(u32, f32)> {
             continue;
         };
         let mut halves = line.split(" --> ");
-        let start = halves.next().map(str::trim).and_then(vtt_secs).unwrap_or(-1.0);
+        let start = halves
+            .next()
+            .map(str::trim)
+            .and_then(vtt_secs)
+            .unwrap_or(-1.0);
         let end = halves
             .next()
             .and_then(|h| h.split_whitespace().next())
@@ -259,7 +272,10 @@ pub struct TranscriptCue {
 /// Parse WebVTT timing and text into plain cues. Identifiers and settings are
 /// ignored, tags stripped, and a malformed block skipped.
 pub fn parse_transcript(vtt: &str) -> Vec<TranscriptCue> {
-    parse_transcript_voiced(vtt).into_iter().map(|(cue, _)| cue).collect()
+    parse_transcript_voiced(vtt)
+        .into_iter()
+        .map(|(cue, _)| cue)
+        .collect()
 }
 
 /// [`parse_transcript`], each cue paired with its speaker — the annotation of
@@ -328,11 +344,7 @@ fn plain_text(text: &str) -> String {
 /// boundary candidates: keep loud frames, collapse runs onto their first
 /// second, score with a pause bonus, then thin to [`MIN_SPACING`] strongest
 /// first (so the important one of two close boundaries survives).
-pub fn candidates(
-    diffs: &[(u32, f32)],
-    gaps: &[(u32, f32)],
-    duration_secs: u32,
-) -> Vec<Candidate> {
+pub fn candidates(diffs: &[(u32, f32)], gaps: &[(u32, f32)], duration_secs: u32) -> Vec<Candidate> {
     // A collapsed run keeps its peak magnitude.
     let mut collapsed: Vec<(u32, f32)> = Vec::new();
     for &(second, diff) in diffs {
@@ -361,9 +373,7 @@ pub fn candidates(
     let mut scored: Vec<Candidate> = collapsed
         .into_iter()
         .map(|(seconds, diff)| {
-            let pause = pauses
-                .iter()
-                .any(|p| p.abs_diff(seconds) <= PAUSE_WINDOW);
+            let pause = pauses.iter().any(|p| p.abs_diff(seconds) <= PAUSE_WINDOW);
             Candidate {
                 seconds,
                 score: diff + if pause { PAUSE_BONUS } else { 0.0 },
@@ -431,7 +441,12 @@ pub fn detect(
      -> Result<Detection, String> {
         let diffs = sample_diffs(ffmpeg, &path, on_frame)?;
         let candidates = candidates(&diffs, gaps, duration_secs);
-        Ok(Detection { source, video: path, diffs, candidates })
+        Ok(Detection {
+            source,
+            video: path,
+            diffs,
+            candidates,
+        })
     };
 
     if source == Some(2) {
@@ -486,7 +501,9 @@ pub fn extract_frames(
 /// Delete the `<second>.jpg` files in `out_dir` not in `keep`. Best effort;
 /// any other name was not written here and is left alone.
 fn sweep_orphans(out_dir: &Path, keep: &[u32]) {
-    let Ok(entries) = std::fs::read_dir(out_dir) else { return };
+    let Ok(entries) = std::fs::read_dir(out_dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("jpg") {
@@ -495,7 +512,10 @@ fn sweep_orphans(out_dir: &Path, keep: &[u32]) {
         if !entry.file_type().is_ok_and(|t| t.is_file()) {
             continue;
         }
-        let second = path.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse::<u32>().ok());
+        let second = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse::<u32>().ok());
         match second {
             Some(second) if keep.contains(&second) => continue,
             Some(_) => {
@@ -525,7 +545,15 @@ pub fn grab_frame(
     // Escaped: an unescaped comma would end the filter.
     let scale = format!("scale=min({width}\\,iw):-2");
     let status = Command::new(ffmpeg)
-        .args(["-v", "error", "-nostdin", "-y", "-ss", &at.to_string(), "-i"])
+        .args([
+            "-v",
+            "error",
+            "-nostdin",
+            "-y",
+            "-ss",
+            &at.to_string(),
+            "-i",
+        ])
         .arg(video)
         .args(["-frames:v", "1", "-vf", &scale, "-q:v", "3"])
         .arg(out)
@@ -780,7 +808,12 @@ Reply with JSON and nothing else, in play order:\n\n\
 
 /// `HH:MM:SS`, as every recording prompt prints it beside the bare second.
 pub fn hms(secs: u32) -> String {
-    format!("{:02}:{:02}:{:02}", secs / 3600, (secs % 3600) / 60, secs % 60)
+    format!(
+        "{:02}:{:02}:{:02}",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 /// The chapter array out of whatever the agent said. Whether it is allowed is
@@ -865,7 +898,9 @@ fn balanced_runs(text: &str, open: char) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut from = 0usize;
     while out.len() < BALANCED_RUNS {
-        let Some(offset) = text[from..].find(open) else { break };
+        let Some(offset) = text[from..].find(open) else {
+            break;
+        };
         let start = from + offset;
         let mut depth = 0i32;
         let mut in_string = false;
@@ -985,13 +1020,19 @@ pub use crate::lecture_jobs::Run;
 /// inside the agent turn arrives on `on_event` instead.
 pub enum Step<'a> {
     /// Fires often; [`run`] throttles it.
-    Decoding { second: u32, duration: u32 },
+    Decoding {
+        second: u32,
+        duration: u32,
+    },
     Detected {
         title: &'a str,
         duration: u32,
         candidates: usize,
     },
-    Grabbing { done: usize, total: usize },
+    Grabbing {
+        done: usize,
+        total: usize,
+    },
     Asking,
     Writing,
 }
@@ -1038,7 +1079,12 @@ pub fn run(
         .ok_or("no ffmpeg found — install it, or run `bun run ffmpeg`")?;
 
     // Claimed before the decode, so the UI shows the run immediately.
-    rt.block_on(crate::store::set_chapter_status(pool, id, Some("running"), None))?;
+    rt.block_on(crate::store::set_chapter_status(
+        pool,
+        id,
+        Some("running"),
+        None,
+    ))?;
 
     let outcome = (|| -> Result<Outcome, String> {
         // A missing transcript is not fatal: chaptering works off the picture.
@@ -1066,7 +1112,9 @@ pub fn run(
         )?;
         let found = detected.candidates;
         if found.is_empty() {
-            return Err(format!("no boundary candidates in {title} — nothing to chapter"));
+            return Err(format!(
+                "no boundary candidates in {title} — nothing to chapter"
+            ));
         }
         on_step(Step::Detected {
             title: &title,
@@ -1088,9 +1136,13 @@ pub fn run(
             .map_err(|e| format!("{}: {e}", dir.join("outline.md").display()))?;
 
         let total = frames_at.len();
-        extract_frames(&ffmpeg, &detected.video, &frames_at, &dir.join("frames"), |done| {
-            on_step(Step::Grabbing { done, total })
-        })?;
+        extract_frames(
+            &ffmpeg,
+            &detected.video,
+            &frames_at,
+            &dir.join("frames"),
+            |done| on_step(Step::Grabbing { done, total }),
+        )?;
 
         let course_dir = code
             .as_deref()
@@ -1121,7 +1173,12 @@ pub fn run(
     })();
 
     if let Err(e) = &outcome {
-        rt.block_on(crate::store::set_chapter_status(pool, id, Some("error"), Some(e)))?;
+        rt.block_on(crate::store::set_chapter_status(
+            pool,
+            id,
+            Some("error"),
+            Some(e),
+        ))?;
     }
     outcome
 }
@@ -1130,8 +1187,8 @@ pub fn run(
 
 pub mod app {
     use super::*;
-    use tauri::{AppHandle, Emitter};
     use crate::lecture_jobs::{check_start, reconcile_status, spawn_job, Progress};
+    use tauri::{AppHandle, Emitter};
 
     /// Emitted once when a run ends. Not `lectures-changed`, which fires on
     /// every playback-progress save.
@@ -1161,106 +1218,117 @@ pub mod app {
         force: Option<bool>,
         source: Option<u8>,
     ) -> Result<(), String> {
-        check_start(&lecture_id, source, "chapter_status", "that lecture is already being chaptered")
-            .await?;
+        check_start(
+            &lecture_id,
+            source,
+            "chapter_status",
+            "that lecture is already being chaptered",
+        )
+        .await?;
 
         let data_dir = crate::paths::data_dir();
         let force = force.unwrap_or(false);
-        spawn_job("chapters", crate::harness::jobs::Job::LectureChapters, move |rt, pool, selection| {
-            let emit = {
-                let app = app.clone();
-                move |p: Progress| {
-                    app.emit(LECTURE_CHAPTER_PROGRESS_EVENT, p).ok();
-                }
-            };
-
-            let step = {
-                let id = lecture_id.clone();
-                let emit = emit.clone();
-                move |s: Step| {
-                    let p = match s {
-                        Step::Decoding { second, duration } => Progress {
-                            done: Some(second),
-                            total: (duration > 0).then_some(duration),
-                            ..Progress::at(&id, "decoding")
-                        },
-                        Step::Detected { title, candidates, .. } => {
-                            eprintln!("[oculus] chapters: {title} — {candidates} candidate(s)");
-                            Progress {
-                                done: Some(0),
-                                total: Some(candidates as u32 + 1),
-                                ..Progress::at(&id, "frames")
-                            }
-                        }
-                        Step::Grabbing { done, total } => Progress {
-                            done: Some(done as u32),
-                            total: Some(total as u32),
-                            ..Progress::at(&id, "frames")
-                        },
-                        Step::Asking => Progress::at(&id, "agent"),
-                        Step::Writing => Progress::at(&id, "writing"),
-                    };
-                    emit(p);
-                }
-            };
-
-            // The reply is the chapter JSON, so its first delta is the agent
-            // having decided: report that once as `naming`.
-            let naming = std::sync::atomic::AtomicBool::new(false);
-            let event = {
-                let id = lecture_id.clone();
-                move |ev: &crate::harness::HarnessEvent| {
-                    use crate::harness::HarnessEvent as E;
-                    let p = match ev {
-                        E::ToolStarted { kind, title, .. } => Progress {
-                            detail: Some(title.clone()),
-                            kind: Some(*kind),
-                            ..Progress::at(&id, "agent")
-                        },
-                        E::AssistantDelta { .. } | E::AssistantMessage { .. } => {
-                            if naming.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                                return;
-                            }
-                            Progress::at(&id, "naming")
-                        }
-                        _ => return,
-                    };
-                    emit(p);
-                }
-            };
-
-            let outcome = run(
-                rt.handle(),
-                pool,
-                &Run {
-                    data_dir: &data_dir,
-                    lecture_id: &lecture_id,
-                    selection: &selection,
-                    force,
-                    source,
-                },
-                step,
-                event,
-            );
-            let finished = match &outcome {
-                Ok(o) => Finished {
-                    lecture_id: lecture_id.clone(),
-                    status: "ready",
-                    chapters: o.chapters.len(),
-                    error: None,
-                },
-                Err(e) => {
-                    eprintln!("[oculus] chapters: {e}");
-                    Finished {
-                        lecture_id: lecture_id.clone(),
-                        status: "error",
-                        chapters: 0,
-                        error: Some(e.clone()),
+        spawn_job(
+            "chapters",
+            crate::harness::jobs::Job::LectureChapters,
+            move |rt, pool, selection| {
+                let emit = {
+                    let app = app.clone();
+                    move |p: Progress| {
+                        app.emit(LECTURE_CHAPTER_PROGRESS_EVENT, p).ok();
                     }
-                }
-            };
-            app.emit(LECTURE_CHAPTERS_EVENT, finished).ok();
-        });
+                };
+
+                let step = {
+                    let id = lecture_id.clone();
+                    let emit = emit.clone();
+                    move |s: Step| {
+                        let p = match s {
+                            Step::Decoding { second, duration } => Progress {
+                                done: Some(second),
+                                total: (duration > 0).then_some(duration),
+                                ..Progress::at(&id, "decoding")
+                            },
+                            Step::Detected {
+                                title, candidates, ..
+                            } => {
+                                eprintln!("[oculus] chapters: {title} — {candidates} candidate(s)");
+                                Progress {
+                                    done: Some(0),
+                                    total: Some(candidates as u32 + 1),
+                                    ..Progress::at(&id, "frames")
+                                }
+                            }
+                            Step::Grabbing { done, total } => Progress {
+                                done: Some(done as u32),
+                                total: Some(total as u32),
+                                ..Progress::at(&id, "frames")
+                            },
+                            Step::Asking => Progress::at(&id, "agent"),
+                            Step::Writing => Progress::at(&id, "writing"),
+                        };
+                        emit(p);
+                    }
+                };
+
+                // The reply is the chapter JSON, so its first delta is the agent
+                // having decided: report that once as `naming`.
+                let naming = std::sync::atomic::AtomicBool::new(false);
+                let event = {
+                    let id = lecture_id.clone();
+                    move |ev: &crate::harness::HarnessEvent| {
+                        use crate::harness::HarnessEvent as E;
+                        let p = match ev {
+                            E::ToolStarted { kind, title, .. } => Progress {
+                                detail: Some(title.clone()),
+                                kind: Some(*kind),
+                                ..Progress::at(&id, "agent")
+                            },
+                            E::AssistantDelta { .. } | E::AssistantMessage { .. } => {
+                                if naming.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                    return;
+                                }
+                                Progress::at(&id, "naming")
+                            }
+                            _ => return,
+                        };
+                        emit(p);
+                    }
+                };
+
+                let outcome = run(
+                    rt.handle(),
+                    pool,
+                    &Run {
+                        data_dir: &data_dir,
+                        lecture_id: &lecture_id,
+                        selection: &selection,
+                        force,
+                        source,
+                    },
+                    step,
+                    event,
+                );
+                let finished = match &outcome {
+                    Ok(o) => Finished {
+                        lecture_id: lecture_id.clone(),
+                        status: "ready",
+                        chapters: o.chapters.len(),
+                        error: None,
+                    },
+                    Err(e) => {
+                        eprintln!("[oculus] chapters: {e}");
+                        Finished {
+                            lecture_id: lecture_id.clone(),
+                            status: "error",
+                            chapters: 0,
+                            error: Some(e.clone()),
+                        }
+                    }
+                };
+                app.emit(LECTURE_CHAPTERS_EVENT, finished).ok();
+            },
+        );
         Ok(())
     }
 
@@ -1298,7 +1366,12 @@ pub mod app {
             })
             .filter(|(_, path)| path.exists())
             .collect();
-        Ok(Streams { title, duration: u32::try_from(duration).unwrap_or(0), dir, sources })
+        Ok(Streams {
+            title,
+            duration: u32::try_from(duration).unwrap_or(0),
+            dir,
+            sources,
+        })
     }
 
     /// The Up Next card's thumbnail (`docs/viewers.md`): one frame a quarter
@@ -1307,7 +1380,12 @@ pub mod app {
     /// `None` while the lecture is not downloaded.
     #[tauri::command]
     pub async fn lecture_thumbnail(lecture_id: String) -> Result<Option<String>, String> {
-        let Streams { dir, duration, sources, .. } = downloaded_streams(&lecture_id).await?;
+        let Streams {
+            dir,
+            duration,
+            sources,
+            ..
+        } = downloaded_streams(&lecture_id).await?;
         let Some((video, second)) = thumbnail_pick(&sources, duration) else {
             return Ok(None);
         };
@@ -1349,7 +1427,12 @@ pub mod app {
         lecture_id: String,
         seconds: u32,
     ) -> Result<Vec<MomentFrame>, String> {
-        let Streams { title, dir, sources, .. } = downloaded_streams(&lecture_id).await?;
+        let Streams {
+            title,
+            dir,
+            sources,
+            ..
+        } = downloaded_streams(&lecture_id).await?;
         if sources.is_empty() {
             return Err(format!(
                 "{title} is not downloaded — `oculus run -l --videos` fetches it"
@@ -1384,9 +1467,7 @@ pub mod app {
             .into_iter()
             .map(|source| MomentFrame {
                 source,
-                path: format!(
-                    "../lectures/{lecture_id}/frames/live/{seconds}-source{source}.jpg"
-                ),
+                path: format!("../lectures/{lecture_id}/frames/live/{seconds}-source{source}.jpg"),
             })
             .collect())
     }
@@ -1478,7 +1559,10 @@ mod tests {
     fn frames_below_the_threshold_never_become_candidates() {
         let diffs = vec![(10, 0.008), (200, 5.9), (400, 6.1)];
         let found = candidates(&diffs, &[], 600);
-        assert_eq!(found.iter().map(|c| c.seconds).collect::<Vec<_>>(), vec![400]);
+        assert_eq!(
+            found.iter().map(|c| c.seconds).collect::<Vec<_>>(),
+            vec![400]
+        );
     }
 
     #[test]
@@ -1499,7 +1583,10 @@ mod tests {
         // 0 is strongest and keeps 80 out; 150 is 150 s from 0 and stays.
         let diffs = vec![(10, 99.0), (80, 50.0), (160, 40.0)];
         let found = candidates(&diffs, &[], 600);
-        assert_eq!(found.iter().map(|c| c.seconds).collect::<Vec<_>>(), vec![10, 160]);
+        assert_eq!(
+            found.iter().map(|c| c.seconds).collect::<Vec<_>>(),
+            vec![10, 160]
+        );
     }
 
     #[test]
@@ -1512,7 +1599,10 @@ mod tests {
         assert!(!found[0].pause);
         assert!(found[1].pause);
         assert_eq!(found[1].score, 23.0);
-        assert_eq!(found[1].diff, 20.0, "the bonus does not touch the magnitude");
+        assert_eq!(
+            found[1].diff, 20.0,
+            "the bonus does not touch the magnitude"
+        );
 
         // A pause on its own is not a boundary.
         assert!(candidates(&[], &gaps, 600).is_empty());
@@ -1531,7 +1621,10 @@ mod tests {
     fn candidates_past_the_end_are_dropped() {
         let diffs = vec![(100, 30.0), (2519, 30.0)];
         let found = candidates(&diffs, &[], 2519);
-        assert_eq!(found.iter().map(|c| c.seconds).collect::<Vec<_>>(), vec![100]);
+        assert_eq!(
+            found.iter().map(|c| c.seconds).collect::<Vec<_>>(),
+            vec![100]
+        );
     }
 
     #[test]
@@ -1568,10 +1661,19 @@ mod tests {
         sweep_orphans(&dir, &[313, 1767, 2550]);
 
         let left = |name: &str| dir.join(name).exists();
-        assert!(!left("50.jpg"), "an orphan from a previous candidate set goes");
-        assert!(left("313.jpg") && left("1767.jpg"), "a frame this run rewrites stays");
+        assert!(
+            !left("50.jpg"),
+            "an orphan from a previous candidate set goes"
+        );
+        assert!(
+            left("313.jpg") && left("1767.jpg"),
+            "a frame this run rewrites stays"
+        );
         assert!(left("notes.txt"), "only JPEGs are swept");
-        assert!(left("keyframe.jpg"), "a name that is not a second was not written here");
+        assert!(
+            left("keyframe.jpg"),
+            "a name that is not a second was not written here"
+        );
         assert!(left("live/900.jpg"), "another job's subfolder is untouched");
     }
 
@@ -1639,7 +1741,10 @@ mod tests {
     #[test]
     fn an_object_around_the_array_is_accepted() {
         let reply = format!("{{\"chapters\": {REPLY}}}");
-        assert_eq!(parse_chapters(&reply).unwrap()[0].title, "Qubits and superposition");
+        assert_eq!(
+            parse_chapters(&reply).unwrap()[0].title,
+            "Qubits and superposition"
+        );
     }
 
     #[test]
@@ -1682,13 +1787,21 @@ mod tests {
 
     #[test]
     fn a_well_formed_set_validates() {
-        let set = vec![chapter(0, "Opening"), chapter(700, "Middle"), chapter(2000, "End")];
+        let set = vec![
+            chapter(0, "Opening"),
+            chapter(700, "Middle"),
+            chapter(2000, "End"),
+        ];
         assert!(validate(&set, &BOUNDS, 2400).is_ok());
     }
 
     #[test]
     fn a_boundary_the_outline_never_printed_rejects_the_whole_set() {
-        let set = vec![chapter(0, "Opening"), chapter(701, "Middle"), chapter(2000, "End")];
+        let set = vec![
+            chapter(0, "Opening"),
+            chapter(701, "Middle"),
+            chapter(2000, "End"),
+        ];
         let error = validate(&set, &BOUNDS, 2400).unwrap_err();
         assert_eq!(
             error,
@@ -1700,15 +1813,26 @@ mod tests {
     fn a_transcript_cue_start_is_a_boundary_too() {
         let mut bounds = BOUNDS.to_vec();
         bounds.push(701);
-        let set = vec![chapter(0, "Opening"), chapter(701, "Middle"), chapter(2000, "End")];
+        let set = vec![
+            chapter(0, "Opening"),
+            chapter(701, "Middle"),
+            chapter(2000, "End"),
+        ];
         assert!(validate(&set, &bounds, 2400).is_ok());
     }
 
     #[test]
     fn chapters_out_of_order_reject_the_whole_set() {
-        let set = vec![chapter(0, "Opening"), chapter(1200, "Middle"), chapter(700, "End")];
+        let set = vec![
+            chapter(0, "Opening"),
+            chapter(1200, "Middle"),
+            chapter(700, "End"),
+        ];
         let error = validate(&set, &BOUNDS, 2400).unwrap_err();
-        assert!(error.starts_with("chapter 3 (\"End\"): starts at 700, which is not after"), "{error}");
+        assert!(
+            error.starts_with("chapter 3 (\"End\"): starts at 700, which is not after"),
+            "{error}"
+        );
         // A repeat would make a zero-length chapter.
         let set = vec![chapter(0, "Opening"), chapter(700, "A"), chapter(700, "B")];
         assert!(validate(&set, &BOUNDS, 2400).is_err());
@@ -1730,7 +1854,10 @@ mod tests {
         let set: Vec<Chapter> = bounds.iter().map(|s| chapter(*s, "Topic")).collect();
         assert_eq!(set.len(), 13);
         let error = validate(&set, &bounds, 9000).unwrap_err();
-        assert!(error.starts_with("13 chapters is more than the 12 allowed"), "{error}");
+        assert!(
+            error.starts_with("13 chapters is more than the 12 allowed"),
+            "{error}"
+        );
         // Twelve is the ceiling, not one short of it.
         assert!(validate(&set[..12], &bounds, 9000).is_ok());
     }
@@ -1740,16 +1867,22 @@ mod tests {
         assert!(validate(&[], &BOUNDS, 2400).is_err());
         let mut set = vec![chapter(0, "Opening")];
         set[0].summary.clear();
-        assert!(validate(&set, &BOUNDS, 2400).unwrap_err().contains("needs a summary"));
+        assert!(validate(&set, &BOUNDS, 2400)
+            .unwrap_err()
+            .contains("needs a summary"));
         set[0].summary = "Sets up.".into();
         set[0].title.clear();
-        assert!(validate(&set, &BOUNDS, 2400).unwrap_err().contains("needs a title"));
+        assert!(validate(&set, &BOUNDS, 2400)
+            .unwrap_err()
+            .contains("needs a title"));
     }
 
     #[test]
     fn a_chapter_past_the_end_of_the_recording_is_refused() {
         let set = vec![chapter(0, "Opening"), chapter(2000, "End")];
-        assert!(validate(&set, &BOUNDS, 2000).unwrap_err().contains("past the end"));
+        assert!(validate(&set, &BOUNDS, 2000)
+            .unwrap_err()
+            .contains("past the end"));
         assert!(validate(&set, &BOUNDS, 2001).is_ok());
     }
 
@@ -1766,8 +1899,14 @@ mod tests {
         let text = prompt(&job);
         assert!(text.contains("Lecture 7: Grover"));
         assert!(text.contains("00:42:14"), "the duration as a clock");
-        assert!(text.contains("\n  ../lectures/abc-123/outline.md"), "indented under the folder");
-        assert!(text.contains("\n  ../lectures/abc-123/frames/<second>.jpg"), "indented under the folder");
+        assert!(
+            text.contains("\n  ../lectures/abc-123/outline.md"),
+            "indented under the folder"
+        );
+        assert!(
+            text.contains("\n  ../lectures/abc-123/frames/<second>.jpg"),
+            "indented under the folder"
+        );
         assert!(text.contains("../courses/MULT20015_2026_SM2/"));
         assert!(text.contains("17 slide changes were found"));
         assert!(
@@ -1775,10 +1914,16 @@ mod tests {
             "the outline replaced the raw VTT, it did not join it"
         );
         assert!(text.contains("never more than 12"));
-        assert!(text.contains("connect your laptop"), "the AV splash warning");
+        assert!(
+            text.contains("connect your laptop"),
+            "the AV splash warning"
+        );
         assert!(!text.contains("no transcript"), "it has one");
 
-        let silent = prompt(&Job { has_transcript: false, ..job });
+        let silent = prompt(&Job {
+            has_transcript: false,
+            ..job
+        });
         assert!(
             silent.contains("no transcript, so the outline is those markers"),
             "a lecture with no transcript should not be sent looking for words"
@@ -1788,13 +1933,31 @@ mod tests {
     #[test]
     fn the_outline_merges_the_slide_changes_into_the_transcript_in_play_order() {
         let cues = vec![
-            TranscriptCue { start: 1.5, end: 4.0, text: "Good morning.".into() },
-            TranscriptCue { start: 725.0, end: 728.0, text: "An equal superposition.".into() },
+            TranscriptCue {
+                start: 1.5,
+                end: 4.0,
+                text: "Good morning.".into(),
+            },
+            TranscriptCue {
+                start: 725.0,
+                end: 728.0,
+                text: "An equal superposition.".into(),
+            },
         ];
         let changes = vec![
-            Candidate { seconds: 723, score: 42.1, diff: 39.1, pause: true },
+            Candidate {
+                seconds: 723,
+                score: 42.1,
+                diff: 39.1,
+                pause: true,
+            },
             // Past the last spoken word: it must still reach the file.
-            Candidate { seconds: 2400, score: 12.0, diff: 12.0, pause: false },
+            Candidate {
+                seconds: 2400,
+                score: 12.0,
+                diff: 12.0,
+                pause: false,
+            },
         ];
         let text = outline("Lecture 7: Grover", &cues, &changes);
         let lines: Vec<&str> = text.lines().filter(|l| l.contains("00:")).collect();
@@ -1812,9 +1975,17 @@ mod tests {
 
     #[test]
     fn an_outline_with_no_transcript_is_still_the_slide_changes() {
-        let changes = vec![Candidate { seconds: 30, score: 9.0, diff: 9.0, pause: false }];
+        let changes = vec![Candidate {
+            seconds: 30,
+            score: 9.0,
+            diff: 9.0,
+            pause: false,
+        }];
         let text = outline("Silent", &[], &changes);
-        assert!(text.contains("     30  00:00:30  --- slide change · score 9.0 ---"), "{text}");
+        assert!(
+            text.contains("     30  00:00:30  --- slide change · score 9.0 ---"),
+            "{text}"
+        );
     }
 
     #[test]

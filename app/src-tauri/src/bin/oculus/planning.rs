@@ -6,7 +6,8 @@ impl Ctx {
     // ── projects and tasks ───────────────────────────────────────────────────
 
     fn planning_db(&self) -> Result<SqlitePool, String> {
-        self.db().ok_or_else(|| "projects live in the database".to_string())
+        self.db()
+            .ok_or_else(|| "projects live in the database".to_string())
     }
 
     /// One subject id from a code (prefix match, as `run` uses). A code that
@@ -17,8 +18,7 @@ impl Ctx {
         if matched.len() == 1 {
             return Ok(matched[0].id);
         }
-        let current: Vec<&store::SubjectRow> =
-            matched.iter().filter(|s| s.is_current).collect();
+        let current: Vec<&store::SubjectRow> = matched.iter().filter(|s| s.is_current).collect();
         if current.len() == 1 {
             return Ok(current[0].id);
         }
@@ -40,7 +40,9 @@ impl Ctx {
             projects::SubjectFilter::Any
         };
         let status = if args.archived { "archived" } else { "active" };
-        let rows = self.rt.block_on(projects::projects(&pool, filter, status))?;
+        let rows = self
+            .rt
+            .block_on(projects::projects(&pool, filter, status))?;
 
         #[derive(Serialize)]
         struct Entry<'a> {
@@ -52,7 +54,11 @@ impl Ctx {
         let mut entries: Vec<Entry> = Vec::with_capacity(rows.len());
         for p in &rows {
             let (total, done) = self.rt.block_on(projects::task_counts(&pool, p.id))?;
-            entries.push(Entry { project: p, tasks_total: total, tasks_done: done });
+            entries.push(Entry {
+                project: p,
+                tasks_total: total,
+                tasks_done: done,
+            });
         }
 
         if self.json {
@@ -68,10 +74,16 @@ impl Ctx {
                 paint(&format!("{:>4}", e.project.id), DIM),
                 truncate(&e.project.name, 34),
                 paint(
-                    &format!("{:<12}", truncate(e.project.subject_code.as_deref().unwrap_or("personal"), 12)),
+                    &format!(
+                        "{:<12}",
+                        truncate(e.project.subject_code.as_deref().unwrap_or("personal"), 12)
+                    ),
                     DIM
                 ),
-                paint(&format!("{:>7}", format!("{}/{}", e.tasks_done, e.tasks_total)), DIM),
+                paint(
+                    &format!("{:>7}", format!("{}/{}", e.tasks_done, e.tasks_total)),
+                    DIM
+                ),
                 match &e.project.due_at {
                     Some(d) => paint(&format!("  due {d}"), YELLOW),
                     None => String::new(),
@@ -144,8 +156,16 @@ impl Ctx {
             name: args.name.trim().to_string(),
             subject_id,
             brief: args.brief.clone(),
-            starts_at: args.starts.as_deref().map(projects::check_iso8601).transpose()?,
-            due_at: args.due.as_deref().map(projects::check_iso8601).transpose()?,
+            starts_at: args
+                .starts
+                .as_deref()
+                .map(projects::check_iso8601)
+                .transpose()?,
+            due_at: args
+                .due
+                .as_deref()
+                .map(projects::check_iso8601)
+                .transpose()?,
             tags: split_tags(args.tags.as_deref()),
             source: AGENT_SOURCE.to_string(),
         };
@@ -184,10 +204,12 @@ impl Ctx {
             && patch.tags.is_none()
         {
             return Err(
-                "nothing to change: pass --name, --due, --starts, --brief, --tags or --status".into(),
+                "nothing to change: pass --name, --due, --starts, --brief, --tags or --status"
+                    .into(),
             );
         }
-        self.rt.block_on(projects::update_project(&pool, args.id, &patch))?;
+        self.rt
+            .block_on(projects::update_project(&pool, args.id, &patch))?;
         let updated = self
             .rt
             .block_on(projects::project(&pool, args.id))?
@@ -195,7 +217,11 @@ impl Ctx {
         if self.json {
             return self.emit(&updated);
         }
-        println!("{} {}", paint(&format!("project {}", updated.id), BOLD), updated.name);
+        println!(
+            "{} {}",
+            paint(&format!("project {}", updated.id), BOLD),
+            updated.name
+        );
         Ok(())
     }
 
@@ -271,7 +297,11 @@ impl Ctx {
 
         // A task carries its project's id, not its board. `"all"`: an archived
         // project's tasks still count.
-        let all = self.rt.block_on(projects::projects(pool, projects::SubjectFilter::Any, "all"))?;
+        let all = self.rt.block_on(projects::projects(
+            pool,
+            projects::SubjectFilter::Any,
+            "all",
+        ))?;
 
         let mut written = false;
         let unfiled: Vec<&projects::Task> =
@@ -342,7 +372,13 @@ impl Ctx {
         // Dates are validated and stored verbatim.
         let many = items.len() > 1;
         for (n, item) in items.iter_mut().enumerate() {
-            let at = |e: String| if many { format!("task {}: {e}", n + 1) } else { e };
+            let at = |e: String| {
+                if many {
+                    format!("task {}: {e}", n + 1)
+                } else {
+                    e
+                }
+            };
             if let Some(due) = &item.due {
                 item.due = Some(projects::check_iso8601(due).map_err(at)?);
             }
@@ -351,9 +387,12 @@ impl Ctx {
             }
         }
 
-        let ids = self
-            .rt
-            .block_on(projects::create_tasks(&pool, args.project, &items, AGENT_SOURCE))?;
+        let ids = self.rt.block_on(projects::create_tasks(
+            &pool,
+            args.project,
+            &items,
+            AGENT_SOURCE,
+        ))?;
         let mut created: Vec<projects::Task> = Vec::with_capacity(ids.len());
         for id in &ids {
             if let Some(task) = self.rt.block_on(projects::task(&pool, *id))? {
@@ -389,9 +428,12 @@ impl Ctx {
             && patch.due_at.is_none()
             && patch.estimate_minutes.is_none()
         {
-            return Err("nothing to change: pass --title, --body, --due, --starts or --estimate".into());
+            return Err(
+                "nothing to change: pass --title, --body, --due, --starts or --estimate".into(),
+            );
         }
-        self.rt.block_on(projects::update_task(&pool, args.id, &patch))?;
+        self.rt
+            .block_on(projects::update_task(&pool, args.id, &patch))?;
         self.print_task(&pool, args.id, None)
     }
 
@@ -442,7 +484,10 @@ impl Ctx {
             }));
         }
         if rows == 0 {
-            println!("{}", paint(&format!("task {} is already there", args.id), DIM));
+            println!(
+                "{}",
+                paint(&format!("task {} is already there", args.id), DIM)
+            );
             return Ok(());
         }
         self.print_task(&pool, args.id, Some(&label))?;
@@ -530,11 +575,11 @@ pub(crate) fn nullable_minutes(value: Option<&String>) -> Result<Option<Option<i
     match value {
         None => Ok(None),
         Some(v) if v.trim().is_empty() => Ok(Some(None)),
-        Some(v) => v
-            .trim()
-            .parse::<i64>()
-            .map(|n| Some(Some(n)))
-            .map_err(|_| format!("--estimate takes whole minutes, or \"\" to clear (got {v:?})")),
+        Some(v) => {
+            v.trim().parse::<i64>().map(|n| Some(Some(n))).map_err(|_| {
+                format!("--estimate takes whole minutes, or \"\" to clear (got {v:?})")
+            })
+        }
     }
 }
 
@@ -587,7 +632,11 @@ pub(crate) fn print_task_line(task: &projects::Task, depth: usize) {
         "  {}{} {} {}{}",
         "    ".repeat(depth),
         paint(&format!("{:>4}", task.id), DIM),
-        if task.done_at.is_some() { paint("\u{2713}", GREEN) } else { " ".to_string() },
+        if task.done_at.is_some() {
+            paint("\u{2713}", GREEN)
+        } else {
+            " ".to_string()
+        },
         truncate(&task.title, 54 - depth * 4),
         paint(&trail, DIM)
     );

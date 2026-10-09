@@ -116,7 +116,9 @@ impl Language {
     /// The helper's `--locale`. `None` is its default — English in the Mac's
     /// region — which also stands in for auto-detect, since Apple has none.
     pub fn apple(&self) -> Option<String> {
-        self.0.clone().filter(|l| l != "auto" && !l.eq_ignore_ascii_case("en"))
+        self.0
+            .clone()
+            .filter(|l| l != "auto" && !l.eq_ignore_ascii_case("en"))
     }
 }
 
@@ -127,7 +129,8 @@ impl Language {
 pub(crate) fn settings_from(row: Option<&str>) -> Settings {
     let row = row.and_then(|row| serde_json::from_str::<serde_json::Value>(row).ok());
     let at = |path: &[&str]| {
-        path.iter().try_fold(row.as_ref()?, |value, key| value.get(key))
+        path.iter()
+            .try_fold(row.as_ref()?, |value, key| value.get(key))
     };
     let text = |path: &[&str]| {
         at(path)
@@ -135,11 +138,21 @@ pub(crate) fn settings_from(row: Option<&str>) -> Settings {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
     };
-    let enabled = |engine: &str| at(&[engine, "enabled"]).and_then(|v| v.as_bool()).unwrap_or(true);
+    let enabled = |engine: &str| {
+        at(&[engine, "enabled"])
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true)
+    };
     let language = text(&["language"])
         .or_else(|| text(&["apple", "locale"]))
         .or_else(|| text(&["whisper", "language"]))
-        .map(|l| if l.eq_ignore_ascii_case("auto") { "auto".into() } else { l });
+        .map(|l| {
+            if l.eq_ignore_ascii_case("auto") {
+                "auto".into()
+            } else {
+                l
+            }
+        });
     Settings {
         order: order_from(at(&["order"])),
         language: Language(language),
@@ -154,7 +167,11 @@ pub(crate) fn settings_from(row: Option<&str>) -> Settings {
 /// default order.
 fn order_from(stored: Option<&serde_json::Value>) -> Vec<&'static str> {
     let mut order: Vec<&'static str> = Vec::new();
-    let named = stored.and_then(|v| v.as_array()).into_iter().flatten().filter_map(|v| v.as_str());
+    let named = stored
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str());
     for name in named.chain(ENGINES) {
         if let Some(&engine) = ENGINES.iter().find(|&&e| e == name) {
             if !order.contains(&engine) {
@@ -188,12 +205,19 @@ fn engines(
     only: Option<&str>,
 ) -> Result<Vec<Box<dyn Engine>>, String> {
     if let Some(name) = only.filter(|name| !ENGINES.contains(name)) {
-        return Err(format!("no engine called {name} — it is {}", ENGINES.join(", ")));
+        return Err(format!(
+            "no engine called {name} — it is {}",
+            ENGINES.join(", ")
+        ));
     }
     let settings = settings_from(crate::store::setting_blocking("transcribe").as_deref());
     let mut found: Vec<Box<dyn Engine>> = Vec::new();
     let mut missing = Vec::new();
-    for &name in settings.order.iter().filter(|&&name| only.is_none_or(|only| only == name)) {
+    for &name in settings
+        .order
+        .iter()
+        .filter(|&&name| only.is_none_or(|only| only == name))
+    {
         let engine: Result<Box<dyn Engine>, String> = match name {
             "groq" => groq_engine(&settings, crate::groq::fetch_api_key)
                 .map(|e| Box::new(e) as Box<dyn Engine>),
@@ -218,7 +242,11 @@ fn engines(
 pub enum Step {
     Extracting,
     /// Starts again from chunk 1 when a run falls through to the next engine.
-    Transcribing { engine: &'static str, chunk: usize, chunks: usize },
+    Transcribing {
+        engine: &'static str,
+        chunk: usize,
+        chunks: usize,
+    },
 }
 
 pub struct Outcome {
@@ -234,7 +262,11 @@ pub struct Outcome {
 /// Symlinks and `..` are resolved before the check, so neither escapes it.
 pub fn resolve(data_dir: &Path, video: &str) -> Result<PathBuf, String> {
     let given = Path::new(video);
-    let joined = if given.is_absolute() { given.to_path_buf() } else { data_dir.join(given) };
+    let joined = if given.is_absolute() {
+        given.to_path_buf()
+    } else {
+        data_dir.join(given)
+    };
     let real = joined
         .canonicalize()
         .map_err(|_| format!("{video} is not on disk — download it, then transcribe"))?;
@@ -242,7 +274,9 @@ pub fn resolve(data_dir: &Path, video: &str) -> Result<PathBuf, String> {
         .canonicalize()
         .map_err(|e| format!("{}: {e}", data_dir.display()))?;
     if !real.starts_with(&root) {
-        return Err(format!("{video} is outside the library — only library files are transcribed"));
+        return Err(format!(
+            "{video} is outside the library — only library files are transcribed"
+        ));
     }
     if !real.is_file() {
         return Err(format!("{video} is not a file"));
@@ -266,7 +300,10 @@ struct Claim(PathBuf);
 impl Claim {
     fn take(video: &Path) -> Result<Self, String> {
         let mut held = IN_FLIGHT.lock().unwrap();
-        if !held.get_or_insert_with(HashSet::new).insert(video.to_path_buf()) {
+        if !held
+            .get_or_insert_with(HashSet::new)
+            .insert(video.to_path_buf())
+        {
             return Err("that video is already being transcribed".into());
         }
         Ok(Self(video.to_path_buf()))
@@ -342,9 +379,18 @@ pub fn run(
     let path = vtt_path(&video);
     // Beside the target: the rename must stay on one filesystem.
     let mut tmp = path.clone().into_os_string();
-    tmp.push(format!(".tmp-{}-{}", std::process::id(), crate::clock::now_nanos()));
+    tmp.push(format!(
+        ".tmp-{}-{}",
+        std::process::id(),
+        crate::clock::now_nanos()
+    ));
     crate::atomic_write::write(&path, Path::new(&tmp), body.as_bytes())?;
-    Ok(Outcome { path, engine: heard.engine, chunks: heard.chunks, cues })
+    Ok(Outcome {
+        path,
+        engine: heard.engine,
+        chunks: heard.chunks,
+        cues,
+    })
 }
 
 struct Heard {
@@ -365,12 +411,24 @@ fn transcribe_audio(
 ) -> Result<Heard, String> {
     let mut declined = Vec::new();
     'engines: for engine in engines {
-        let spans = audio::plan(extracted.bytes, extracted.duration, engine.max_upload_bytes())?;
+        let spans = audio::plan(
+            extracted.bytes,
+            extracted.duration,
+            engine.max_upload_bytes(),
+        )?;
         let chunks = spans.len();
         let mut segments = Vec::new();
         for (index, span) in spans.iter().enumerate() {
-            let part = if chunks == 1 { audio.to_path_buf() } else { cut(engine.name(), index, span)? };
-            step(Step::Transcribing { engine: engine.name(), chunk: index + 1, chunks });
+            let part = if chunks == 1 {
+                audio.to_path_buf()
+            } else {
+                cut(engine.name(), index, span)?
+            };
+            step(Step::Transcribing {
+                engine: engine.name(),
+                chunk: index + 1,
+                chunks,
+            });
             let in_part = |e: EngineError| {
                 if chunks > 1 {
                     format!("{e} (part {} of {chunks})", index + 1)
@@ -387,11 +445,18 @@ fn transcribe_audio(
                 }
             }
         }
-        return Ok(Heard { segments, engine: engine.name(), chunks });
+        return Ok(Heard {
+            segments,
+            engine: engine.name(),
+            chunks,
+        });
     }
     Err(match declined.len() {
         1 => declined.remove(0),
-        _ => format!("no engine could transcribe this video — {}", declined.join("; ")),
+        _ => format!(
+            "no engine could transcribe this video — {}",
+            declined.join("; ")
+        ),
     })
 }
 
@@ -436,28 +501,58 @@ pub mod app {
         let resource_dir = app.path().resource_dir().ok();
         crate::blocking::run(move || {
             let emit = |phase, engine, chunk, chunks, error: Option<&str>| {
-                app.emit(PROGRESS_EVENT, Progress { path: &path, phase, engine, chunk, chunks, error })
-                    .ok();
+                app.emit(
+                    PROGRESS_EVENT,
+                    Progress {
+                        path: &path,
+                        phase,
+                        engine,
+                        chunk,
+                        chunks,
+                        error,
+                    },
+                )
+                .ok();
             };
             let seen = Cell::new((0, 0));
 
             let result = crate::echo360::find_ffmpeg(resource_dir.clone())
                 .ok_or_else(|| "ffmpeg not found — run `bun run ffmpeg` in app/".to_string())
                 .and_then(|ffmpeg| {
-                    run(&crate::paths::data_dir(), &path, &ffmpeg, resource_dir, None, |s| match s {
-                        Step::Extracting => emit("extracting", None, 0, 0, None),
-                        Step::Transcribing { engine, chunk, chunks } => {
-                            seen.set((chunk, chunks));
-                            emit("transcribing", Some(engine), chunk, chunks, None);
-                        }
-                    })
+                    run(
+                        &crate::paths::data_dir(),
+                        &path,
+                        &ffmpeg,
+                        resource_dir,
+                        None,
+                        |s| match s {
+                            Step::Extracting => emit("extracting", None, 0, 0, None),
+                            Step::Transcribing {
+                                engine,
+                                chunk,
+                                chunks,
+                            } => {
+                                seen.set((chunk, chunks));
+                                emit("transcribing", Some(engine), chunk, chunks, None);
+                            }
+                        },
+                    )
                 });
 
             let (chunk, chunks) = seen.get();
             match &result {
                 Ok(done) => {
-                    eprintln!("[oculus] transcribed {path} with {}: {} cue(s)", done.engine, done.cues);
-                    emit("complete", Some(done.engine), done.chunks, done.chunks, None);
+                    eprintln!(
+                        "[oculus] transcribed {path} with {}: {} cue(s)",
+                        done.engine, done.cues
+                    );
+                    emit(
+                        "complete",
+                        Some(done.engine),
+                        done.chunks,
+                        done.chunks,
+                        None,
+                    );
                 }
                 Err(e) => {
                     eprintln!("[oculus] transcription failed for {path}: {e}");
@@ -522,27 +617,40 @@ pub mod app {
     /// is on disk. A cancel rejects with `cancelled`.
     #[tauri::command]
     pub async fn whisper_download_model(app: AppHandle, id: String) -> Result<(), String> {
-        let model = whisper_models::find(&id).ok_or_else(|| format!("no Whisper model called {id}"))?;
+        let model =
+            whisper_models::find(&id).ok_or_else(|| format!("no Whisper model called {id}"))?;
         crate::blocking::run(move || {
             let emit = |phase, received, total, error: Option<&str>| {
                 app.emit(
                     WHISPER_MODEL_PROGRESS_EVENT,
-                    ModelProgress { id: &id, phase, received, total, error },
+                    ModelProgress {
+                        id: &id,
+                        phase,
+                        received,
+                        total,
+                        error,
+                    },
                 )
                 .ok();
             };
             let seen = Cell::new((0, model.bytes));
-            let result = whisper_models::download(&whisper_models::dir(), model, |received, total| {
-                seen.set((received, total));
-                emit("downloading", received, total, None);
-            });
+            let result =
+                whisper_models::download(&whisper_models::dir(), model, |received, total| {
+                    seen.set((received, total));
+                    emit("downloading", received, total, None);
+                });
             let (received, total) = seen.get();
             match &result {
                 Ok(path) => {
-                    eprintln!("[oculus] downloaded Whisper model {id} to {}", path.display());
+                    eprintln!(
+                        "[oculus] downloaded Whisper model {id} to {}",
+                        path.display()
+                    );
                     emit("complete", received, total, None);
                 }
-                Err(e) if e == whisper_models::CANCELLED => emit("cancelled", received, total, None),
+                Err(e) if e == whisper_models::CANCELLED => {
+                    emit("cancelled", received, total, None)
+                }
                 Err(e) => {
                     eprintln!("[oculus] Whisper model {id} failed to download: {e}");
                     emit("error", received, total, Some(e));
@@ -574,7 +682,10 @@ mod tests {
 
     #[test]
     fn a_second_claim_on_one_video_is_refused_until_the_first_drops() {
-        let (a, b) = (Path::new("/claim-test/a.mp4"), Path::new("/claim-test/b.mp4"));
+        let (a, b) = (
+            Path::new("/claim-test/a.mp4"),
+            Path::new("/claim-test/b.mp4"),
+        );
         let first = Claim::take(a).unwrap();
         assert!(Claim::take(a).is_err());
         assert!(Claim::take(b).is_ok());
@@ -610,22 +721,39 @@ mod tests {
         std::fs::write(outside.join("elsewhere.mp4"), b"x").unwrap();
         let inside = files.join("Week 1.mp4").canonicalize().unwrap();
 
-        assert_eq!(resolve(&library, "courses/MAST/files/Week 1.mp4").unwrap(), inside);
+        assert_eq!(
+            resolve(&library, "courses/MAST/files/Week 1.mp4").unwrap(),
+            inside
+        );
         assert_eq!(resolve(&library, inside.to_str().unwrap()).unwrap(), inside);
 
-        let escape = format!("courses/../../{}/elsewhere.mp4", outside.file_name().unwrap().to_string_lossy());
-        assert!(resolve(&library, &escape).unwrap_err().contains("outside the library"));
+        let escape = format!(
+            "courses/../../{}/elsewhere.mp4",
+            outside.file_name().unwrap().to_string_lossy()
+        );
+        assert!(resolve(&library, &escape)
+            .unwrap_err()
+            .contains("outside the library"));
         let absolute = outside.join("elsewhere.mp4");
-        assert!(resolve(&library, absolute.to_str().unwrap()).unwrap_err().contains("outside the library"));
+        assert!(resolve(&library, absolute.to_str().unwrap())
+            .unwrap_err()
+            .contains("outside the library"));
 
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(outside.join("elsewhere.mp4"), files.join("link.mp4")).unwrap();
-            assert!(resolve(&library, "courses/MAST/files/link.mp4").unwrap_err().contains("outside"));
+            std::os::unix::fs::symlink(outside.join("elsewhere.mp4"), files.join("link.mp4"))
+                .unwrap();
+            assert!(resolve(&library, "courses/MAST/files/link.mp4")
+                .unwrap_err()
+                .contains("outside"));
         }
 
-        assert!(resolve(&library, "courses/MAST/files/missing.mp4").unwrap_err().contains("not on disk"));
-        assert!(resolve(&library, "courses/MAST/files").unwrap_err().contains("not a file"));
+        assert!(resolve(&library, "courses/MAST/files/missing.mp4")
+            .unwrap_err()
+            .contains("not on disk"));
+        assert!(resolve(&library, "courses/MAST/files")
+            .unwrap_err()
+            .contains("not a file"));
     }
 
     /// Answers each call from a script, in order, and records the paths.
@@ -642,7 +770,12 @@ mod tests {
             cap: Option<u64>,
             replies: Vec<Result<Vec<Segment>, EngineError>>,
         ) -> Box<dyn Engine> {
-            Box::new(Self { name, cap, replies: Mutex::new(replies), heard: Mutex::new(vec![]) })
+            Box::new(Self {
+                name,
+                cap,
+                replies: Mutex::new(replies),
+                heard: Mutex::new(vec![]),
+            })
         }
     }
 
@@ -660,11 +793,18 @@ mod tests {
     }
 
     fn said(text: &str) -> Result<Vec<Segment>, EngineError> {
-        Ok(vec![Segment { start: 1.0, end: 2.0, text: text.into() }])
+        Ok(vec![Segment {
+            start: 1.0,
+            end: 2.0,
+            text: text.into(),
+        }])
     }
 
     /// 30 MB over 90 s: three parts under a 20 MB-ish cap, one without.
-    const AUDIO: audio::Extracted = audio::Extracted { bytes: 30_000_000, duration: Some(90.0) };
+    const AUDIO: audio::Extracted = audio::Extracted {
+        bytes: 30_000_000,
+        duration: Some(90.0),
+    };
 
     fn hear(engines: &[Box<dyn Engine>]) -> (Result<Heard, String>, Vec<String>) {
         let steps = Mutex::new(Vec::new());
@@ -674,8 +814,16 @@ mod tests {
             Path::new("/scratch/audio.ogg"),
             |engine, index, _| Ok(PathBuf::from(format!("/scratch/part-{engine}-{index}.ogg"))),
             &|step| {
-                if let Step::Transcribing { engine, chunk, chunks } = step {
-                    steps.lock().unwrap().push(format!("{engine} {chunk}/{chunks}"));
+                if let Step::Transcribing {
+                    engine,
+                    chunk,
+                    chunks,
+                } = step
+                {
+                    steps
+                        .lock()
+                        .unwrap()
+                        .push(format!("{engine} {chunk}/{chunks}"));
                 }
             },
         );
@@ -688,7 +836,10 @@ mod tests {
             Scripted::new(
                 "groq",
                 Some(12_000_000),
-                vec![said("from groq"), Err(EngineError::RateLimited("Groq's limit".into()))],
+                vec![
+                    said("from groq"),
+                    Err(EngineError::RateLimited("Groq's limit".into())),
+                ],
             ),
             Scripted::new("apple", None, vec![said("on device")]),
         ];
@@ -697,14 +848,27 @@ mod tests {
         assert_eq!(heard.engine, "apple");
         assert_eq!(heard.chunks, 1);
         // Groq's first part is dropped, and the whole file is reused unsplit.
-        assert_eq!(heard.segments, vec![Segment { start: 1.0, end: 2.0, text: "on device".into() }]);
+        assert_eq!(
+            heard.segments,
+            vec![Segment {
+                start: 1.0,
+                end: 2.0,
+                text: "on device".into()
+            }]
+        );
         assert_eq!(steps, vec!["groq 1/3", "groq 2/3", "apple 1/1"]);
     }
 
     #[test]
     fn a_failure_surfaces_and_never_falls_through() {
         let engines = [
-            Scripted::new("groq", None, vec![Err(EngineError::Failed("Groq rejected the saved key".into()))]),
+            Scripted::new(
+                "groq",
+                None,
+                vec![Err(EngineError::Failed(
+                    "Groq rejected the saved key".into(),
+                ))],
+            ),
             Scripted::new("apple", None, vec![said("unreached")]),
         ];
         let (result, steps) = hear(&engines);
@@ -715,20 +879,41 @@ mod tests {
     #[test]
     fn when_every_engine_declines_each_reason_is_reported() {
         let engines = [
-            Scripted::new("groq", None, vec![Err(EngineError::RateLimited("Groq: try again in 5 minutes".into()))]),
-            Scripted::new("apple", None, vec![Err(EngineError::NotConfigured("needs macOS 26".into()))]),
+            Scripted::new(
+                "groq",
+                None,
+                vec![Err(EngineError::RateLimited(
+                    "Groq: try again in 5 minutes".into(),
+                ))],
+            ),
+            Scripted::new(
+                "apple",
+                None,
+                vec![Err(EngineError::NotConfigured("needs macOS 26".into()))],
+            ),
         ];
         let message = hear(&engines).0.err().unwrap();
-        assert!(message.contains("try again in 5 minutes") && message.contains("needs macOS 26"), "{message}");
+        assert!(
+            message.contains("try again in 5 minutes") && message.contains("needs macOS 26"),
+            "{message}"
+        );
 
-        let alone = [Scripted::new("apple", None, vec![Err(EngineError::NotConfigured("needs macOS 26".into()))])];
+        let alone = [Scripted::new(
+            "apple",
+            None,
+            vec![Err(EngineError::NotConfigured("needs macOS 26".into()))],
+        )];
         assert_eq!(hear(&alone).0.err().unwrap(), "needs macOS 26");
     }
 
     #[test]
     fn an_engine_that_answers_first_is_the_only_one_called() {
         let engines = [
-            Scripted::new("groq", Some(12_000_000), vec![said("a"), said("b"), said("c")]),
+            Scripted::new(
+                "groq",
+                Some(12_000_000),
+                vec![said("a"), said("b"), said("c")],
+            ),
             Scripted::new("apple", None, vec![]),
         ];
         let heard = hear(&engines).0.unwrap();
@@ -749,10 +934,19 @@ mod tests {
         assert_eq!(settings("not json").order, default);
         assert_eq!(settings(r#"{"order":"apple"}"#).order, default);
         assert_eq!(settings(r#"{"order":[]}"#).order, default);
-        assert_eq!(settings(r#"{"order":["apple","groq","whisper"]}"#).order, vec!["apple", "groq", "whisper"]);
+        assert_eq!(
+            settings(r#"{"order":["apple","groq","whisper"]}"#).order,
+            vec!["apple", "groq", "whisper"]
+        );
         // Unknown names and non-strings are dropped, the missing appended in the default order.
-        assert_eq!(settings(r#"{"order":["vosk",3,"apple",null]}"#).order, vec!["apple", "groq", "whisper"]);
-        assert_eq!(settings(r#"{"order":["whisper","whisper","apple","whisper"]}"#).order, vec!["whisper", "apple", "groq"]);
+        assert_eq!(
+            settings(r#"{"order":["vosk",3,"apple",null]}"#).order,
+            vec!["apple", "groq", "whisper"]
+        );
+        assert_eq!(
+            settings(r#"{"order":["whisper","whisper","apple","whisper"]}"#).order,
+            vec!["whisper", "apple", "groq"]
+        );
     }
 
     #[test]
@@ -765,7 +959,10 @@ mod tests {
         );
         assert!(!row.groq && row.whisper && row.apple);
         assert_eq!(row.whisper_model.as_deref(), Some("small"));
-        assert_eq!(settings(r#"{"whisper":{"model":"  "},"apple":{"enabled":false}}"#).whisper_model, None);
+        assert_eq!(
+            settings(r#"{"whisper":{"model":"  "},"apple":{"enabled":false}}"#).whisper_model,
+            None
+        );
         assert!(!settings(r#"{"apple":{"enabled":false}}"#).apple);
     }
 
@@ -773,32 +970,53 @@ mod tests {
     fn the_language_falls_back_to_the_older_per_engine_keys() {
         let language = |row: &str| settings(row).language;
         assert_eq!(settings_from(None).language, Language(None));
-        assert_eq!(language(r#"{"language":"th_TH","apple":{"locale":"en_AU"}}"#), Language(Some("th_TH".into())));
+        assert_eq!(
+            language(r#"{"language":"th_TH","apple":{"locale":"en_AU"}}"#),
+            Language(Some("th_TH".into()))
+        );
         assert_eq!(
             language(r#"{"apple":{"locale":"en_AU"},"whisper":{"language":"fr"}}"#),
             Language(Some("en_AU".into()))
         );
-        assert_eq!(language(r#"{"apple":{"locale":" "},"whisper":{"language":"fr"}}"#), Language(Some("fr".into())));
-        assert_eq!(language(r#"{"whisper":{"language":"AUTO"}}"#), Language(Some("auto".into())));
-        assert_eq!(language(r#"{"language":7,"whisper":{"language":"de"}}"#), Language(Some("de".into())));
+        assert_eq!(
+            language(r#"{"apple":{"locale":" "},"whisper":{"language":"fr"}}"#),
+            Language(Some("fr".into()))
+        );
+        assert_eq!(
+            language(r#"{"whisper":{"language":"AUTO"}}"#),
+            Language(Some("auto".into()))
+        );
+        assert_eq!(
+            language(r#"{"language":7,"whisper":{"language":"de"}}"#),
+            Language(Some("de".into()))
+        );
     }
 
     #[test]
     fn each_engine_reads_the_language_its_own_way() {
         let of = |l: Option<&str>| Language(l.map(str::to_string));
         // The default: English, in the Mac's region for on-device speech.
-        assert_eq!((of(None).whisper(), of(None).groq(), of(None).apple()), ("en".into(), Some("en".into()), None));
+        assert_eq!(
+            (of(None).whisper(), of(None).groq(), of(None).apple()),
+            ("en".into(), Some("en".into()), None)
+        );
         let australian = of(Some("en_AU"));
         assert_eq!(
             (australian.whisper(), australian.groq(), australian.apple()),
             ("en".into(), Some("en".into()), Some("en_AU".into()))
         );
         let thai = of(Some("th_TH"));
-        assert_eq!((thai.whisper(), thai.groq(), thai.apple()), ("th".into(), Some("th".into()), Some("th_TH".into())));
+        assert_eq!(
+            (thai.whisper(), thai.groq(), thai.apple()),
+            ("th".into(), Some("th".into()), Some("th_TH".into()))
+        );
         assert_eq!(of(Some("zh-Hant-TW")).whisper(), "zh");
         // Apple has no auto-detect: it keeps its default.
         let auto = of(Some("auto"));
-        assert_eq!((auto.whisper(), auto.groq(), auto.apple()), ("auto".into(), None, None));
+        assert_eq!(
+            (auto.whisper(), auto.groq(), auto.apple()),
+            ("auto".into(), None, None)
+        );
         // The old Whisper default, a bare `en`, is the Mac's own English.
         assert_eq!(of(Some("en")).apple(), None);
         assert_eq!(of(Some("fr")).apple(), Some("fr".into()));
@@ -807,20 +1025,39 @@ mod tests {
     #[test]
     fn groq_switched_off_is_unconfigured_without_reading_the_key() {
         let off = settings(r#"{"groq":{"enabled":false}}"#);
-        let refused = groq_engine(&off, || panic!("the key was read")).err().unwrap();
+        let refused = groq_engine(&off, || panic!("the key was read"))
+            .err()
+            .unwrap();
         assert_eq!(refused, "Groq is turned off in Settings → Transcription");
 
         let on = settings(r#"{"language":"auto"}"#);
-        assert!(groq_engine(&on, || Ok(None)).err().unwrap().contains("Settings → Transcription"));
+        assert!(groq_engine(&on, || Ok(None))
+            .err()
+            .unwrap()
+            .contains("Settings → Transcription"));
         let refused = groq_engine(&on, || Err("denied".into())).err().unwrap();
-        assert!(refused.contains("keychain") && refused.contains("denied"), "{refused}");
-        assert_eq!(groq_engine(&on, || Ok(Some("gsk_test".into()))).ok().unwrap().name(), "groq");
+        assert!(
+            refused.contains("keychain") && refused.contains("denied"),
+            "{refused}"
+        );
+        assert_eq!(
+            groq_engine(&on, || Ok(Some("gsk_test".into())))
+                .ok()
+                .unwrap()
+                .name(),
+            "groq"
+        );
     }
 
     #[test]
     fn an_unknown_forced_engine_is_refused_before_anything_is_read() {
-        let refused = engines(None, Path::new("/no/ffmpeg"), Some("vosk")).err().unwrap();
-        assert_eq!(refused, "no engine called vosk — it is groq, whisper, apple");
+        let refused = engines(None, Path::new("/no/ffmpeg"), Some("vosk"))
+            .err()
+            .unwrap();
+        assert_eq!(
+            refused,
+            "no engine called vosk — it is groq, whisper, apple"
+        );
     }
 
     #[test]

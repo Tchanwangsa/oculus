@@ -36,8 +36,10 @@ const READ_ONLY_COMMANDS: [&str; 7] = ["ls", "cat", "head", "tail", "wc", "grep"
 /// The rule shapes a student may approve (no `mcp(...)`).
 pub fn is_valid_rule(rule: &str) -> bool {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(r"^(command|read_file|write_file|read_url)\(.+\)$").unwrap())
-        .is_match(rule)
+    RE.get_or_init(|| {
+        regex::Regex::new(r"^(command|read_file|write_file|read_url)\(.+\)$").unwrap()
+    })
+    .is_match(rule)
 }
 
 /// The student's approvals; a row that does not parse is none.
@@ -77,7 +79,8 @@ struct State {
 }
 
 pub fn settings_path() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("HOME is not set, so agy's settings cannot be found")?;
+    let home =
+        std::env::var_os("HOME").ok_or("HOME is not set, so agy's settings cannot be found")?;
     Ok(PathBuf::from(home).join(".gemini/antigravity-cli/settings.json"))
 }
 
@@ -139,9 +142,18 @@ pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]
         .map(|p| format!("write_file({p})"))
         .collect();
     // `ROOT_FILE_GLOBS` as the files they cover.
-    deny.push(format!("write_file({})", crate::paths::cookie_path(library).display()));
-    deny.push(format!("write_file({})", crate::paths::ed_token_path(library).display()));
-    deny.push(format!("write_file({})", crate::paths::keepalive_log_path(library).display()));
+    deny.push(format!(
+        "write_file({})",
+        crate::paths::cookie_path(library).display()
+    ));
+    deny.push(format!(
+        "write_file({})",
+        crate::paths::ed_token_path(library).display()
+    ));
+    deny.push(format!(
+        "write_file({})",
+        crate::paths::keepalive_log_path(library).display()
+    ));
     deny.push(format!("write_file({})", state_path(library).display()));
     // `sqlite3` on *this* database only: the rules are global, and a blanket
     // deny would ban it from the student's own sessions. A speed bump in front
@@ -162,9 +174,10 @@ pub fn rules_for(library: &Path, oculus: Option<&OculusCli>, approved: &[String]
 fn sqlite_paths(library: &Path) -> Vec<String> {
     let db = crate::paths::db_path(library);
     let mut plain = vec![db.display().to_string()];
-    if let Ok(real) = db.canonicalize().or_else(|_| {
-        library.canonicalize().map(|l| crate::paths::db_path(&l))
-    }) {
+    if let Ok(real) = db
+        .canonicalize()
+        .or_else(|_| library.canonicalize().map(|l| crate::paths::db_path(&l)))
+    {
         plain.push(real.display().to_string());
     }
     let mut out = Vec::new();
@@ -253,8 +266,12 @@ fn install_at(
     };
     if next != last {
         let body = serde_json::to_string_pretty(&next).map_err(|e| e.to_string())?;
-        write_atomic(state_file, &format!("{body}\n"))
-            .map_err(|e| format!("cannot record Antigravity's rules in {}: {e}", state_file.display()))?;
+        write_atomic(state_file, &format!("{body}\n")).map_err(|e| {
+            format!(
+                "cannot record Antigravity's rules in {}: {e}",
+                state_file.display()
+            )
+        })?;
     }
     Ok(())
 }
@@ -283,7 +300,10 @@ fn apply(path: &Path, last: &Rules, rules: &Rules) -> Result<Rules, String> {
         Some(t) if t.trim().is_empty() => Vec::new(),
         Some(t) => {
             let Ordered(entries) = serde_json::from_str(t).map_err(|e| refuse(e.to_string()))?;
-            entries.into_iter().map(|(k, v)| (k, Node::Raw(v))).collect()
+            entries
+                .into_iter()
+                .map(|(k, v)| (k, Node::Raw(v)))
+                .collect()
         }
     };
 
@@ -292,7 +312,10 @@ fn apply(path: &Path, last: &Rules, rules: &Rules) -> Result<Rules, String> {
         Some((_, Node::Raw(raw))) => {
             let Ordered(entries) = serde_json::from_str(raw.get())
                 .map_err(|_| refuse("`permissions` is not an object".into()))?;
-            entries.into_iter().map(|(k, v)| (k, Node::Raw(v))).collect()
+            entries
+                .into_iter()
+                .map(|(k, v)| (k, Node::Raw(v)))
+                .collect()
         }
         _ => Vec::new(),
     };
@@ -329,13 +352,20 @@ fn apply(path: &Path, last: &Rules, rules: &Rules) -> Result<Rules, String> {
         &mut body,
         serde_json::ser::PrettyFormatter::with_indent(b"  "),
     );
-    Node::Map(top).serialize(&mut ser).map_err(|e| e.to_string())?;
+    Node::Map(top)
+        .serialize(&mut ser)
+        .map_err(|e| e.to_string())?;
     body.push(b'\n');
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     }
-    write_atomic(&path, &String::from_utf8_lossy(&body))
-        .map_err(|e| format!("cannot write Antigravity's rules to {}: {e}", path.display()))?;
+    write_atomic(&path, &String::from_utf8_lossy(&body)).map_err(|e| {
+        format!(
+            "cannot write Antigravity's rules to {}: {e}",
+            path.display()
+        )
+    })?;
     Ok(owned)
 }
 
@@ -352,7 +382,9 @@ fn merge(existing: &[String], last: &[String], wanted: &[String]) -> (Vec<String
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for e in existing {
-        if (theirs.contains(e.as_str()) || wanted_set.contains(e.as_str())) && seen.insert(e.clone()) {
+        if (theirs.contains(e.as_str()) || wanted_set.contains(e.as_str()))
+            && seen.insert(e.clone())
+        {
             out.push(e.clone());
         }
     }
@@ -475,13 +507,20 @@ mod tests {
     fn a_missing_file_is_created_with_only_permissions() {
         let d = scratch("fresh");
         let path = d.join("nested/settings.json");
-        let owned = apply(&path, &Rules::default(), &rules(&["command(ls)"], &["command(sqlite3)"])).unwrap();
+        let owned = apply(
+            &path,
+            &Rules::default(),
+            &rules(&["command(ls)"], &["command(sqlite3)"]),
+        )
+        .unwrap();
         assert_eq!(owned, rules(&["command(ls)"], &["command(sqlite3)"]));
         assert_eq!(
             read(&path),
             serde_json::json!({"permissions": {"allow": ["command(ls)"], "deny": ["command(sqlite3)"]}})
         );
-        assert!(std::fs::read_to_string(&path).unwrap().contains("\n  \"permissions\""));
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("\n  \"permissions\""));
     }
 
     #[test]
@@ -497,7 +536,12 @@ mod tests {
 }"#,
         )
         .unwrap();
-        let owned = apply(&path, &Rules::default(), &rules(&["command(ls)", "command(oculus)"], &["command(sqlite3)"])).unwrap();
+        let owned = apply(
+            &path,
+            &Rules::default(),
+            &rules(&["command(ls)", "command(oculus)"], &["command(sqlite3)"]),
+        )
+        .unwrap();
         // `command(ls)` was the student's first, so it stays theirs.
         assert_eq!(owned.allow, ["command(oculus)"]);
         let text = std::fs::read_to_string(&path).unwrap();
@@ -513,7 +557,10 @@ mod tests {
             v["permissions"]["allow"],
             serde_json::json!(["command(make)", "command(ls)", "command(oculus)"])
         );
-        assert_eq!(v["permissions"]["deny"], serde_json::json!(["command(sqlite3)"]));
+        assert_eq!(
+            v["permissions"]["deny"],
+            serde_json::json!(["command(sqlite3)"])
+        );
     }
 
     #[test]
@@ -526,12 +573,24 @@ mod tests {
         )
         .unwrap();
         let last = rules(&["write_file(/old/lib/oculus.db)", "command(oculus)"], &[]);
-        let owned = apply(&path, &last, &rules(&["write_file(/new/lib/oculus.db)", "command(oculus)"], &[])).unwrap();
+        let owned = apply(
+            &path,
+            &last,
+            &rules(&["write_file(/new/lib/oculus.db)", "command(oculus)"], &[]),
+        )
+        .unwrap();
         assert_eq!(
             read(&path)["permissions"]["allow"],
-            serde_json::json!(["command(make)", "command(oculus)", "write_file(/new/lib/oculus.db)"])
+            serde_json::json!([
+                "command(make)",
+                "command(oculus)",
+                "write_file(/new/lib/oculus.db)"
+            ])
         );
-        assert_eq!(owned.allow, ["write_file(/new/lib/oculus.db)", "command(oculus)"]);
+        assert_eq!(
+            owned.allow,
+            ["write_file(/new/lib/oculus.db)", "command(oculus)"]
+        );
     }
 
     #[test]
@@ -559,20 +618,40 @@ mod tests {
         let again = apply(&path, &owned, &want).unwrap();
         assert_eq!(again, owned);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), first);
-        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), mtime, "not rewritten");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            mtime,
+            "not rewritten"
+        );
     }
 
     #[test]
     fn approvals_come_and_go_through_the_record() {
         let d = scratch("install");
         let (settings, state, lib) = (d.join("settings.json"), d.join("state.json"), d.join("lib"));
-        install_at(&settings, &state, &lib, None, Some(vec!["command(python3)".into()])).unwrap();
+        install_at(
+            &settings,
+            &state,
+            &lib,
+            None,
+            Some(vec!["command(python3)".into()]),
+        )
+        .unwrap();
         let allow = |p: &Path| read(p)["permissions"]["allow"].clone();
-        assert!(allow(&settings).as_array().unwrap().contains(&"command(python3)".into()));
+        assert!(allow(&settings)
+            .as_array()
+            .unwrap()
+            .contains(&"command(python3)".into()));
         install_at(&settings, &state, &lib, None, None).unwrap();
-        assert!(allow(&settings).as_array().unwrap().contains(&"command(python3)".into()));
+        assert!(allow(&settings)
+            .as_array()
+            .unwrap()
+            .contains(&"command(python3)".into()));
         install_at(&settings, &state, &lib, None, Some(vec![])).unwrap();
-        assert!(!allow(&settings).as_array().unwrap().contains(&"command(python3)".into()));
+        assert!(!allow(&settings)
+            .as_array()
+            .unwrap()
+            .contains(&"command(python3)".into()));
     }
 
     #[test]
@@ -595,10 +674,20 @@ mod tests {
             "command(ls)",
             "command(python3)",
         ] {
-            assert!(r.allow.iter().any(|a| a == want), "allow {want}: {:?}", r.allow);
+            assert!(
+                r.allow.iter().any(|a| a == want),
+                "allow {want}: {:?}",
+                r.allow
+            );
         }
-        assert!(!r.allow.iter().any(|a| a == "write_file(/lib)" || a == "write_file(/lib/agents)"));
-        assert!(!r.allow.iter().any(|a| a == "command(find)" || a == "command(rg)"));
+        assert!(!r
+            .allow
+            .iter()
+            .any(|a| a == "write_file(/lib)" || a == "write_file(/lib/agents)"));
+        assert!(!r
+            .allow
+            .iter()
+            .any(|a| a == "command(find)" || a == "command(rg)"));
         assert!(!r.deny.iter().any(|d| d == "command(sqlite3)"));
         for want in [
             "write_file(/lib/courses)",
@@ -607,7 +696,11 @@ mod tests {
             "write_file(/lib/antigravity-rules.json)",
             "command(sqlite3 /lib/oculus.db)",
         ] {
-            assert!(r.deny.iter().any(|a| a == want), "deny {want}: {:?}", r.deny);
+            assert!(
+                r.deny.iter().any(|a| a == want),
+                "deny {want}: {:?}",
+                r.deny
+            );
         }
     }
 
@@ -637,10 +730,21 @@ mod tests {
 
     #[test]
     fn rules_are_validated_and_denies_win() {
-        for ok in ["command(python3)", "write_file(/a/b)", "read_file(/a)", "read_url(example.com)"] {
+        for ok in [
+            "command(python3)",
+            "write_file(/a/b)",
+            "read_file(/a)",
+            "read_url(example.com)",
+        ] {
             assert!(is_valid_rule(ok), "{ok}");
         }
-        for bad in ["command()", "mcp(x/y)", "Bash(ls)", "command(ls)\ncommand(rm)", "command(ls) "] {
+        for bad in [
+            "command()",
+            "mcp(x/y)",
+            "Bash(ls)",
+            "command(ls)\ncommand(rm)",
+            "command(ls) ",
+        ] {
             assert!(!is_valid_rule(bad), "{bad:?}");
         }
         let lib = Path::new("/lib");

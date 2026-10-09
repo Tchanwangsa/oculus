@@ -640,14 +640,21 @@ impl Harness {
         let resolved = std::fs::canonicalize(&bin).unwrap_or_else(|_| bin.clone());
         let modified = std::fs::metadata(&resolved).and_then(|m| m.modified()).ok();
         let mut slot = self.claude_models.lock().unwrap();
-        if let Some(c) = slot.as_ref().filter(|c| c.bin == resolved && c.modified == modified) {
+        if let Some(c) = slot
+            .as_ref()
+            .filter(|c| c.bin == resolved && c.modified == modified)
+        {
             return Ok(c.models.clone());
         }
         let cwd = thread_cwd(&self.data_dir);
         std::fs::create_dir_all(&cwd)
             .map_err(|e| format!("cannot create {}: {e}", cwd.display()))?;
         let models = claude::list_models(&bin, &cwd, &discover::child_env())?;
-        *slot = Some(ClaudeCatalogue { bin: resolved, modified, models: models.clone() });
+        *slot = Some(ClaudeCatalogue {
+            bin: resolved,
+            modified,
+            models: models.clone(),
+        });
         Ok(models)
     }
 
@@ -951,7 +958,10 @@ impl Harness {
         prompt: &str,
     ) -> Result<String, String> {
         let turn = self.one_off(sel, instructions, agent)?;
-        let answer = turn.handle.send(prompt).map(|()| turn.wait(None, "answering"));
+        let answer = turn
+            .handle
+            .send(prompt)
+            .map(|()| turn.wait(None, "answering"));
         turn.close();
         let answer = answer?;
         let text = answer.message_or_streamed();
@@ -1122,7 +1132,11 @@ impl OneOff {
             HarnessEvent::AssistantDelta { text } => streamed.push_str(text),
             _ => {}
         });
-        OneOffReply { message, streamed, failed }
+        OneOffReply {
+            message,
+            streamed,
+            failed,
+        }
     }
 
     /// Deleted rather than detached: a session left on the opencode server
@@ -1610,12 +1624,17 @@ pub mod app {
             ));
         }
         if let Some(d) = antigravity_rules::denied_by(&crate::paths::data_dir(), &rule) {
-            return Err(format!("{rule} would change nothing: Oculus keeps {d} closed to every agent"));
+            return Err(format!(
+                "{rule} would change nothing: Oculus keeps {d} closed to every agent"
+            ));
         }
         let pool = crate::store::open_pool().await?;
         let row = store::thread(&pool, thread_id).await?;
         if row.provider != Provider::Antigravity {
-            return Err(format!("thread {thread_id} is a {} thread", row.provider.label()));
+            return Err(format!(
+                "thread {thread_id} is a {} thread",
+                row.provider.label()
+            ));
         }
         if state.queue.lock().unwrap().is_busy(thread_id) {
             return Err("stop the current turn before allowing something new".into());
@@ -1870,10 +1889,18 @@ pub mod app {
             ..opts.clone()
         };
         blocking(move || {
-            h.rewind(thread_id, provider, Some(&resume), &opts, &anchor, last_seen.as_deref(), sink)
+            h.rewind(
+                thread_id,
+                provider,
+                Some(&resume),
+                &opts,
+                &anchor,
+                last_seen.as_deref(),
+                sink,
+            )
         })
-            .await
-            .is_ok()
+        .await
+        .is_ok()
     }
 
     /// Take the thread back to just before a question and hand the question

@@ -55,8 +55,12 @@ impl Ed {
     pub fn set_token(data_dir: &Path, token: &str) -> Result<String, String> {
         let token = token.trim();
         let user = get_json(token, "/user")?;
-        let name = user["user"]["name"].as_str().unwrap_or("Ed user").to_string();
-        crate::paths::write_private(&crate::paths::ed_token_path(data_dir), token).map_err(|e| e.to_string())?;
+        let name = user["user"]["name"]
+            .as_str()
+            .unwrap_or("Ed user")
+            .to_string();
+        crate::paths::write_private(&crate::paths::ed_token_path(data_dir), token)
+            .map_err(|e| e.to_string())?;
         Ok(name)
     }
 
@@ -65,7 +69,10 @@ impl Ed {
             return Err("No saved Ed token.".to_string());
         }
         let user = self.get("/user")?;
-        Ok(user["user"]["name"].as_str().unwrap_or("Ed user").to_string())
+        Ok(user["user"]["name"]
+            .as_str()
+            .unwrap_or("Ed user")
+            .to_string())
     }
 
     fn get(&self, path: &str) -> Result<serde_json::Value, String> {
@@ -232,7 +239,9 @@ impl Ed {
                 "/courses/{course_id}/threads?limit=100&offset={}&sort=new",
                 out.len()
             ))?;
-            let Some(threads) = batch["threads"].as_array() else { break };
+            let Some(threads) = batch["threads"].as_array() else {
+                break;
+            };
             let n = threads.len();
             out.extend(threads.iter().cloned());
             if n < 100 || out.len() >= MAX_THREADS {
@@ -246,7 +255,11 @@ impl Ed {
     pub fn thread_markdown(&self, listing: &serde_json::Value) -> Result<String, String> {
         let id = listing["id"].as_i64().ok_or("thread without id")?;
         let detail = self.get(&format!("/threads/{id}?view=1"))?;
-        let thread = if detail["thread"].is_object() { &detail["thread"] } else { listing };
+        let thread = if detail["thread"].is_object() {
+            &detail["thread"]
+        } else {
+            listing
+        };
 
         // The roster may sit at either level; comments may embed their author.
         let mut users: HashMap<i64, String> = HashMap::new();
@@ -259,11 +272,17 @@ impl Ed {
                 }
             }
         }
-        if let (Some(id), Some(name)) = (listing["user"]["id"].as_i64(), listing["user"]["name"].as_str()) {
+        if let (Some(id), Some(name)) = (
+            listing["user"]["id"].as_i64(),
+            listing["user"]["name"].as_str(),
+        ) {
             users.insert(id, name.to_string());
         }
 
-        let title = thread["title"].as_str().or(listing["title"].as_str()).unwrap_or("Thread");
+        let title = thread["title"]
+            .as_str()
+            .or(listing["title"].as_str())
+            .unwrap_or("Thread");
         let mut md = format!("# {title}\n\n");
 
         let mut meta = Vec::new();
@@ -326,15 +345,19 @@ fn get_json(token: &str, path: &str) -> Result<serde_json::Value, String> {
         return Err("No saved Ed token.".to_string());
     }
     let url = format!("{ED_BASE}{path}");
-    let resp = ureq::get(&url).timeout(TIMEOUT).set("x-token", token).call();
+    let resp = ureq::get(&url)
+        .timeout(TIMEOUT)
+        .set("x-token", token)
+        .call();
     match resp {
         Ok(r) => r
             .into_string()
             .map_err(|e| format!("unreadable response: {e}"))
             .and_then(|s| serde_json::from_str(&s).map_err(|e| format!("bad JSON: {e}"))),
-        Err(ureq::Error::Status(401, _)) => {
-            Err("Ed rejected the token (401) — run `oculus auth ed <TOKEN>` with a fresh one".to_string())
-        }
+        Err(ureq::Error::Status(401, _)) => Err(
+            "Ed rejected the token (401) — run `oculus auth ed <TOKEN>` with a fresh one"
+                .to_string(),
+        ),
         Err(ureq::Error::Status(code, _)) => Err(format!("HTTP {code} for {path}")),
         Err(e) => Err(e.to_string()),
     }
@@ -349,8 +372,12 @@ fn find_ed_tool(canvas: &crate::canvas::Canvas, course_id: i64) -> Result<String
         .into_iter()
         .flatten()
         .find(|t| {
-            t["label"].as_str().is_some_and(|l| l.contains("Ed Discussion"))
-                && t["html_url"].as_str().is_some_and(|u| u.contains("/external_tools/"))
+            t["label"]
+                .as_str()
+                .is_some_and(|l| l.contains("Ed Discussion"))
+                && t["html_url"]
+                    .as_str()
+                    .is_some_and(|u| u.contains("/external_tools/"))
         })
         .and_then(|t| t["html_url"].as_str().map(str::to_string))
         .ok_or_else(|| "course has no Ed Discussion tool".to_string())
@@ -392,13 +419,19 @@ fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::
     for _ in 0..12 {
         let host = url.host_str().unwrap_or("").to_string();
         let mut req = match &form {
-            Some(_) => agent.post(url.as_str()).set("Content-Type", "application/x-www-form-urlencoded"),
+            Some(_) => agent
+                .post(url.as_str())
+                .set("Content-Type", "application/x-www-form-urlencoded"),
             None => agent.get(url.as_str()),
         }
         .timeout(TIMEOUT)
         .set("User-Agent", UA);
         if let Some(cookies) = jar.get(&host).filter(|c| !c.is_empty()) {
-            let header = cookies.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; ");
+            let header = cookies
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("; ");
             req = req.set("Cookie", &header);
         }
 
@@ -423,7 +456,9 @@ fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::
 
         if (300..400).contains(&resp.status()) {
             let loc = resp.header("Location").ok_or("redirect without Location")?;
-            let next = url.join(loc).map_err(|e| format!("bad redirect target: {e}"))?;
+            let next = url
+                .join(loc)
+                .map_err(|e| format!("bad redirect target: {e}"))?;
             if let Some((_, token)) = next.query_pairs().find(|(k, _)| k == "_logintoken") {
                 let token = token.into_owned();
                 return Ok((token, next));
@@ -433,13 +468,16 @@ fn walk_lti_chain(canvas_cookie: &str, tool_path: &str) -> Result<(String, url::
         }
 
         let html = resp.into_string().map_err(|e| e.to_string())?;
-        let (action, fields) = parse_lti_form(&html).ok_or_else(|| {
-            format!("no LTI form at {url} — the Canvas session may have lapsed")
-        })?;
-        url = url.join(&action).map_err(|e| format!("bad form action: {e}"))?;
-        form = Some(url::form_urlencoded::Serializer::new(String::new())
-            .extend_pairs(&fields)
-            .finish());
+        let (action, fields) = parse_lti_form(&html)
+            .ok_or_else(|| format!("no LTI form at {url} — the Canvas session may have lapsed"))?;
+        url = url
+            .join(&action)
+            .map_err(|e| format!("bad form action: {e}"))?;
+        form = Some(
+            url::form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(&fields)
+                .finish(),
+        );
     }
     Err("LTI launch never produced a login token (redirect loop?)".to_string())
 }
@@ -453,7 +491,11 @@ fn parse_lti_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
     let forms: Vec<_> = doc.select(&form_sel).collect();
     let form = forms
         .iter()
-        .find(|f| f.value().attr("action").is_some_and(|a| a.contains("edstem")))
+        .find(|f| {
+            f.value()
+                .attr("action")
+                .is_some_and(|a| a.contains("edstem"))
+        })
         .or_else(|| forms.iter().find(|f| f.value().attr("action").is_some()))?;
 
     let action = form.value().attr("action")?.to_string();
@@ -478,7 +520,11 @@ fn author_name(item: &serde_json::Value, users: &HashMap<i64, String>) -> String
     item["user"]["name"]
         .as_str()
         .map(str::to_string)
-        .or_else(|| item["user_id"].as_i64().and_then(|id| users.get(&id).cloned()))
+        .or_else(|| {
+            item["user_id"]
+                .as_i64()
+                .and_then(|id| users.get(&id).cloned())
+        })
         .unwrap_or_else(|| "Anonymous".to_string())
 }
 
@@ -506,7 +552,10 @@ fn render_reply(
 
     let quote = "> ".repeat(depth);
     out.push('\n');
-    for line in std::iter::once(head.as_str()).chain(std::iter::once("")).chain(body.lines()) {
+    for line in std::iter::once(head.as_str())
+        .chain(std::iter::once(""))
+        .chain(body.lines())
+    {
         out.push_str(&quote);
         out.push_str(line);
         out.push('\n');
@@ -548,7 +597,9 @@ fn attr<'a>(n: &Ref<'a>, name: &str) -> Option<&'a str> {
 pub fn document_md(xml: &str) -> String {
     // `<link>` is void to an HTML parser and would strand its text; rename it.
     // (html5ever rewrites `<image>` to `<img>`, keeping `src`.)
-    let xml = xml.replace("<link ", "<edlink ").replace("</link>", "</edlink>");
+    let xml = xml
+        .replace("<link ", "<edlink ")
+        .replace("</link>", "</edlink>");
     let doc = Html::parse_fragment(&xml);
     let mut out = String::new();
     render_nodes(doc.tree.root(), &mut out);
@@ -582,7 +633,9 @@ fn render_node(n: Ref<'_>, out: &mut String) {
             out.push_str("\n\n");
         }
         "heading" => {
-            let level = attr(&n, "level").and_then(|l| l.parse().ok()).unwrap_or(2usize);
+            let level = attr(&n, "level")
+                .and_then(|l| l.parse().ok())
+                .unwrap_or(2usize);
             out.push_str(&"#".repeat(level.clamp(1, 6)));
             out.push(' ');
             render_nodes(n, out);
@@ -710,7 +763,10 @@ mod tests {
 
     #[test]
     fn timestamps_lose_the_offset_but_keep_the_minute() {
-        assert_eq!(fmt_ts("2026-08-07T15:42:01.522942+10:00"), "2026-08-07 15:42");
+        assert_eq!(
+            fmt_ts("2026-08-07T15:42:01.522942+10:00"),
+            "2026-08-07 15:42"
+        );
         assert_eq!(fmt_ts("junk"), "junk");
     }
 

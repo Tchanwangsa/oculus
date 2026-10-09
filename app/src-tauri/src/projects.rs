@@ -103,10 +103,7 @@ fn board_of(project: Option<&Project>) -> &[Column] {
 }
 
 /// Resolve a column id against a board, or refuse naming the ids it does have.
-fn require_column<'a>(
-    project: Option<&'a Project>,
-    column_id: &str,
-) -> Result<&'a Column, String> {
+fn require_column<'a>(project: Option<&'a Project>, column_id: &str) -> Result<&'a Column, String> {
     let board = board_of(project);
     board.iter().find(|c| c.id == column_id).ok_or_else(|| {
         let known: Vec<&str> = board.iter().map(|c| c.id.as_str()).collect();
@@ -114,7 +111,10 @@ fn require_column<'a>(
             Some(p) => format!("project {}", p.id),
             None => "an unfiled task".to_string(),
         };
-        format!("{whose} has no column \"{column_id}\" (has: {})", known.join(", "))
+        format!(
+            "{whose} has no column \"{column_id}\" (has: {})",
+            known.join(", ")
+        )
     })
 }
 
@@ -356,10 +356,11 @@ pub struct NewProject {
 
 /// Create a project at the end of the list with the default board.
 pub async fn create_project(pool: &SqlitePool, input: &NewProject) -> Result<i64, String> {
-    let next: f64 = sqlx::query_scalar("SELECT CAST(COALESCE(MAX(position), -1) + 1 AS REAL) FROM projects")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+    let next: f64 =
+        sqlx::query_scalar("SELECT CAST(COALESCE(MAX(position), -1) + 1 AS REAL) FROM projects")
+            .fetch_one(pool)
+            .await
+            .map_err(|e| e.to_string())?;
     let columns = serde_json::to_string(&default_columns()).map_err(|e| e.to_string())?;
     let tags = serde_json::to_string(&normalise_tags(input.tags.iter().cloned()))
         .map_err(|e| e.to_string())?;
@@ -457,8 +458,8 @@ pub async fn update_project(
         q = q.bind(v);
     }
     if let Some(v) = &patch.tags {
-        tags_json = serde_json::to_string(&normalise_tags(v.iter().cloned()))
-            .map_err(|e| e.to_string())?;
+        tags_json =
+            serde_json::to_string(&normalise_tags(v.iter().cloned())).map_err(|e| e.to_string())?;
         q = q.bind(&tags_json);
     }
     let affected = q
@@ -545,11 +546,9 @@ pub async fn create_tasks(
         let parent_id = match &item.parent {
             None => None,
             Some(ParentRef::Id(id)) => Some(*id),
-            Some(ParentRef::Key(k)) => Some(
-                *by_key
-                    .get(k.as_str())
-                    .ok_or_else(|| format!("{}no earlier task in this batch has key \"{k}\"", where_()))?,
-            ),
+            Some(ParentRef::Key(k)) => Some(*by_key.get(k.as_str()).ok_or_else(|| {
+                format!("{}no earlier task in this batch has key \"{k}\"", where_())
+            })?),
         };
         let mut parent_column: Option<String> = None;
         if let Some(parent) = parent_id {
@@ -628,11 +627,12 @@ async fn assert_can_parent(
     parent_id: i64,
     project_id: Option<i64>,
 ) -> Result<String, String> {
-    let row = sqlx::query("SELECT parent_id, project_id, column_id FROM project_tasks WHERE id = ?1")
-        .bind(parent_id)
-        .fetch_optional(&mut *conn)
-        .await
-        .map_err(|e| e.to_string())?;
+    let row =
+        sqlx::query("SELECT parent_id, project_id, column_id FROM project_tasks WHERE id = ?1")
+            .bind(parent_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(|e| e.to_string())?;
     let row = row.ok_or_else(|| format!("parent task {parent_id} does not exist"))?;
     let owner: Option<i64> = row.get("project_id");
     if owner != project_id {
@@ -706,7 +706,8 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
         assert_can_parent(&mut *tx, parent, existing.project_id).await?;
         if has_children(&mut *tx, id).await? {
             return Err(
-                "subtasks are one level deep: a task with children cannot have a parent".to_string(),
+                "subtasks are one level deep: a task with children cannot have a parent"
+                    .to_string(),
             );
         }
     }
@@ -758,7 +759,10 @@ pub async fn update_task(pool: &SqlitePool, id: i64, patch: &TaskPatch) -> Resul
     if let Some(v) = &patch.estimate_minutes {
         q = q.bind(*v);
     }
-    q.bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    q.bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
 
     touch_project(&mut *tx, existing.project_id).await?;
     tx.commit().await.map_err(|e| e.to_string())
@@ -770,11 +774,12 @@ pub async fn delete_task(pool: &SqlitePool, id: i64) -> Result<u64, String> {
     let existing = task_on(&mut *tx, id)
         .await?
         .ok_or_else(|| format!("task {id} does not exist"))?;
-    let children: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM project_tasks WHERE parent_id = ?1")
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?;
+    let children: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM project_tasks WHERE parent_id = ?1")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM project_tasks WHERE id = ?1")
         .bind(id)
         .execute(&mut *tx)
@@ -804,12 +809,14 @@ async fn renumber_column(
     .await
     .map_err(|e| e.to_string())?;
     for (i, r) in rows.iter().enumerate() {
-        sqlx::query("UPDATE project_tasks SET position = ?1, updated_at = datetime('now') WHERE id = ?2")
-            .bind(i as f64)
-            .bind(r.get::<i64, _>("id"))
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| e.to_string())?;
+        sqlx::query(
+            "UPDATE project_tasks SET position = ?1, updated_at = datetime('now') WHERE id = ?2",
+        )
+        .bind(i as f64)
+        .bind(r.get::<i64, _>("id"))
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -851,7 +858,9 @@ pub async fn move_task(
             .await?
             .ok_or_else(|| format!("task {neighbour} does not exist"))?;
         if row.project_id != existing.project_id {
-            return Err(format!("task {neighbour} does not belong to the same project"));
+            return Err(format!(
+                "task {neighbour} does not belong to the same project"
+            ));
         }
         if row.column_id != column_id {
             return Err(format!(
@@ -1049,7 +1058,8 @@ pub async fn refile_task(
 /// optionally plus `T`/space, `HH:MM[:SS[.fff]]` and `Z` or `±HH:MM`.
 pub fn check_iso8601(value: &str) -> Result<String, String> {
     let text = value.trim();
-    let bad = || format!("\"{text}\" is not an ISO 8601 date (want 2026-09-20 or 2026-09-20T23:59:00Z)");
+    let bad =
+        || format!("\"{text}\" is not an ISO 8601 date (want 2026-09-20 or 2026-09-20T23:59:00Z)");
     let bytes = text.as_bytes();
     let digits = |from: usize, n: usize| -> Option<u32> {
         let slice = text.get(from..from + n)?;
@@ -1064,10 +1074,7 @@ pub fn check_iso8601(value: &str) -> Result<String, String> {
     if bytes.len() < 10 || bytes[4] != b'-' || bytes[7] != b'-' {
         return Err(bad());
     }
-    if digits(0, 4).is_none()
-        || !in_range(digits(5, 2), 1, 12)
-        || !in_range(digits(8, 2), 1, 31)
-    {
+    if digits(0, 4).is_none() || !in_range(digits(5, 2), 1, 12) || !in_range(digits(8, 2), 1, 31) {
         return Err(bad());
     }
     if bytes.len() == 10 {
@@ -1102,12 +1109,19 @@ pub fn check_iso8601(value: &str) -> Result<String, String> {
         Some(b'+') | Some(b'-') => {
             let rest = &text[i + 1..];
             let ok = match rest.len() {
-                5 => rest.as_bytes()[2] == b':' && in_range(digits(i + 1, 2), 0, 23)
-                    && in_range(digits(i + 4, 2), 0, 59),
+                5 => {
+                    rest.as_bytes()[2] == b':'
+                        && in_range(digits(i + 1, 2), 0, 23)
+                        && in_range(digits(i + 4, 2), 0, 59)
+                }
                 4 => in_range(digits(i + 1, 2), 0, 23) && in_range(digits(i + 3, 2), 0, 59),
                 _ => false,
             };
-            if ok { Ok(text.to_string()) } else { Err(bad()) }
+            if ok {
+                Ok(text.to_string())
+            } else {
+                Err(bad())
+            }
         }
         _ => Err(bad()),
     }
@@ -1133,7 +1147,15 @@ mod tests {
 
     #[test]
     fn refuses_what_is_not_a_date() {
-        for bad in ["next friday", "20/09/2026", "2026-13-01", "2026-09-32", "2026-09-20T25:00Z", "2026-09-20T13:05:00 AEST", ""] {
+        for bad in [
+            "next friday",
+            "20/09/2026",
+            "2026-13-01",
+            "2026-09-32",
+            "2026-09-20T25:00Z",
+            "2026-09-20T13:05:00 AEST",
+            "",
+        ] {
             assert!(check_iso8601(bad).is_err(), "{bad}");
         }
     }
@@ -1158,7 +1180,9 @@ mod tests {
         assert!(matches!(items[1].parent, Some(ParentRef::Id(1))));
         assert!(matches!(items[2].parent, Some(ParentRef::Key(ref k)) if k == "intro"));
         assert_eq!(items[1].estimate, Some(90));
-        assert!(serde_json::from_str::<Vec<NewTask>>(r#"[{"title":"x","deu":"2026-01-01"}]"#).is_err());
+        assert!(
+            serde_json::from_str::<Vec<NewTask>>(r#"[{"title":"x","deu":"2026-01-01"}]"#).is_err()
+        );
     }
 }
 
@@ -1248,11 +1272,12 @@ mod unfiled_tests {
     }
 
     async fn task_row(pool: &SqlitePool, id: i64) -> Option<(Option<i64>, Option<i64>, String)> {
-        let row = sqlx::query("SELECT project_id, parent_id, title FROM project_tasks WHERE id = ?1")
-            .bind(id)
-            .fetch_optional(pool)
-            .await
-            .expect("read");
+        let row =
+            sqlx::query("SELECT project_id, parent_id, title FROM project_tasks WHERE id = ?1")
+                .bind(id)
+                .fetch_optional(pool)
+                .await
+                .expect("read");
         row.map(|r| (r.get("project_id"), r.get("parent_id"), r.get("title")))
     }
 
@@ -1286,22 +1311,40 @@ mod unfiled_tests {
             .expect("migration 37");
 
         assert_eq!(count(&pool).await, 4, "every row survived the rebuild");
-        assert_eq!(task_row(&pool, 2).await.unwrap().1, Some(1), "subtask still names its parent");
+        assert_eq!(
+            task_row(&pool, 2).await.unwrap().1,
+            Some(1),
+            "subtask still names its parent"
+        );
         assert_eq!(task_row(&pool, 3).await.unwrap().1, Some(1));
-        assert_eq!(task_row(&pool, 4).await.unwrap().0, Some(project), "and its project");
+        assert_eq!(
+            task_row(&pool, 4).await.unwrap().0,
+            Some(project),
+            "and its project"
+        );
 
         let fresh = create_tasks(
             &pool,
             Some(project),
-            &[NewTask { title: "Submit".into(), ..Default::default() }],
+            &[NewTask {
+                title: "Submit".into(),
+                ..Default::default()
+            }],
             "manual",
         )
         .await
         .expect("create after the rebuild");
-        assert!(fresh[0] > 4, "new ids continue past the copied ones (got {})", fresh[0]);
+        assert!(
+            fresh[0] > 4,
+            "new ids continue past the copied ones (got {})",
+            fresh[0]
+        );
 
         delete_task(&pool, 1).await.expect("delete the parent");
-        assert!(task_row(&pool, 2).await.is_none(), "parent → subtask cascade");
+        assert!(
+            task_row(&pool, 2).await.is_none(),
+            "parent → subtask cascade"
+        );
         assert!(task_row(&pool, 3).await.is_none());
 
         sqlx::query("DELETE FROM projects WHERE id = ?1")
@@ -1320,7 +1363,10 @@ mod unfiled_tests {
             &pool,
             None,
             &[
-                NewTask { title: "Renew Myki".into(), ..Default::default() },
+                NewTask {
+                    title: "Renew Myki".into(),
+                    ..Default::default()
+                },
                 NewTask {
                     title: "Book a haircut".into(),
                     column: Some("todo".into()),
@@ -1344,22 +1390,43 @@ mod unfiled_tests {
 
         let child = task(&pool, ids[2]).await.unwrap().unwrap();
         assert_eq!(child.parent_id, Some(ids[1]));
-        assert_eq!(child.project_id, None, "a subtask of an unfiled task is unfiled");
+        assert_eq!(
+            child.project_id, None,
+            "a subtask of an unfiled task is unfiled"
+        );
         assert_eq!(child.column_id, "todo", "and inherits its parent's column");
 
         assert_eq!(first.position, 0.0);
 
-        move_task(&pool, ids[0], "done", None, None).await.expect("move");
+        move_task(&pool, ids[0], "done", None, None)
+            .await
+            .expect("move");
         let done = task(&pool, ids[0]).await.unwrap().unwrap();
         assert_eq!(done.column_id, "done");
-        assert!(done.done_at.is_some(), "landing in a done column stamps done_at");
-        move_task(&pool, ids[0], "doing", None, None).await.expect("move back");
-        assert!(task(&pool, ids[0]).await.unwrap().unwrap().done_at.is_none(), "leaving clears it");
+        assert!(
+            done.done_at.is_some(),
+            "landing in a done column stamps done_at"
+        );
+        move_task(&pool, ids[0], "doing", None, None)
+            .await
+            .expect("move back");
+        assert!(
+            task(&pool, ids[0])
+                .await
+                .unwrap()
+                .unwrap()
+                .done_at
+                .is_none(),
+            "leaving clears it"
+        );
 
         update_task(
             &pool,
             ids[0],
-            &TaskPatch { title: Some("Renew the Myki".into()), ..Default::default() },
+            &TaskPatch {
+                title: Some("Renew the Myki".into()),
+                ..Default::default()
+            },
         )
         .await
         .expect("patch");
@@ -1372,7 +1439,11 @@ mod unfiled_tests {
         let err = create_tasks(
             &pool,
             None,
-            &[NewTask { title: "x".into(), column: Some("nowhere".into()), ..Default::default() }],
+            &[NewTask {
+                title: "x".into(),
+                column: Some("nowhere".into()),
+                ..Default::default()
+            }],
             "manual",
         )
         .await
@@ -1389,7 +1460,10 @@ mod unfiled_tests {
         let filed = create_tasks(
             &pool,
             Some(project),
-            &[NewTask { title: "Draft".into(), ..Default::default() }],
+            &[NewTask {
+                title: "Draft".into(),
+                ..Default::default()
+            }],
             "manual",
         )
         .await
@@ -1397,7 +1471,10 @@ mod unfiled_tests {
         let unfiled = create_tasks(
             &pool,
             None,
-            &[NewTask { title: "Errand".into(), ..Default::default() }],
+            &[NewTask {
+                title: "Errand".into(),
+                ..Default::default()
+            }],
             "manual",
         )
         .await
@@ -1415,7 +1492,10 @@ mod unfiled_tests {
         )
         .await
         .expect_err("an unfiled subtask of a filed parent");
-        assert!(err.contains(&format!("belongs to project {project}")), "{err}");
+        assert!(
+            err.contains(&format!("belongs to project {project}")),
+            "{err}"
+        );
 
         let err = create_tasks(
             &pool,
@@ -1439,7 +1519,11 @@ mod unfiled_tests {
         let id = create_tasks(
             &pool,
             Some(project),
-            &[NewTask { title: "Draft".into(), column: Some("doing".into()), ..Default::default() }],
+            &[NewTask {
+                title: "Draft".into(),
+                column: Some("doing".into()),
+                ..Default::default()
+            }],
             "manual",
         )
         .await
@@ -1453,7 +1537,10 @@ mod unfiled_tests {
         assert!(row.done_at.is_none());
         assert!(tasks(&pool, project).await.unwrap().is_empty());
 
-        assert_eq!(refile_task(&pool, id, Some(project)).await.expect("file"), 1);
+        assert_eq!(
+            refile_task(&pool, id, Some(project)).await.expect("file"),
+            1
+        );
         let row = task(&pool, id).await.unwrap().unwrap();
         assert_eq!(row.project_id, Some(project));
         assert_eq!(row.column_id, "todo");
@@ -1468,7 +1555,12 @@ mod unfiled_tests {
             &pool,
             None,
             &[
-                NewTask { title: "Essay".into(), column: Some("doing".into()), key: Some("p".into()), ..Default::default() },
+                NewTask {
+                    title: "Essay".into(),
+                    column: Some("doing".into()),
+                    key: Some("p".into()),
+                    ..Default::default()
+                },
                 NewTask {
                     title: "Outline".into(),
                     parent: Some(ParentRef::Key("p".into())),
@@ -1486,21 +1578,45 @@ mod unfiled_tests {
         .await
         .expect("unfiled breakdown");
 
-        assert_eq!(refile_task(&pool, ids[0], Some(project)).await.expect("refile"), 3);
+        assert_eq!(
+            refile_task(&pool, ids[0], Some(project))
+                .await
+                .expect("refile"),
+            3
+        );
         for id in &ids {
             let row = task(&pool, *id).await.unwrap().unwrap();
             assert_eq!(row.project_id, Some(project), "task {id} came along");
         }
-        assert_eq!(task(&pool, ids[1]).await.unwrap().unwrap().column_id, "done");
-        assert!(task(&pool, ids[1]).await.unwrap().unwrap().done_at.is_some());
-        assert_eq!(task(&pool, ids[2]).await.unwrap().unwrap().column_id, "todo");
+        assert_eq!(
+            task(&pool, ids[1]).await.unwrap().unwrap().column_id,
+            "done"
+        );
+        assert!(task(&pool, ids[1])
+            .await
+            .unwrap()
+            .unwrap()
+            .done_at
+            .is_some());
+        assert_eq!(
+            task(&pool, ids[2]).await.unwrap().unwrap().column_id,
+            "todo"
+        );
         let parent = task(&pool, ids[0]).await.unwrap().unwrap();
         let sibling = task(&pool, ids[2]).await.unwrap().unwrap();
         assert_ne!(parent.position, sibling.position);
-        assert!(parent.position < sibling.position, "the parent goes in first");
+        assert!(
+            parent.position < sibling.position,
+            "the parent goes in first"
+        );
 
-        let err = refile_task(&pool, ids[1], None).await.expect_err("a lone subtask");
-        assert!(err.contains(&format!("subtask of task {}", ids[0])), "{err}");
+        let err = refile_task(&pool, ids[1], None)
+            .await
+            .expect_err("a lone subtask");
+        assert!(
+            err.contains(&format!("subtask of task {}", ids[0])),
+            "{err}"
+        );
         assert_eq!(
             task(&pool, ids[1]).await.unwrap().unwrap().project_id,
             Some(project),
@@ -1522,7 +1638,11 @@ mod unfiled_tests {
         let id = create_tasks(
             &pool,
             None,
-            &[NewTask { title: "Submit".into(), column: Some("done".into()), ..Default::default() }],
+            &[NewTask {
+                title: "Submit".into(),
+                column: Some("done".into()),
+                ..Default::default()
+            }],
             "manual",
         )
         .await
@@ -1532,7 +1652,11 @@ mod unfiled_tests {
             .await
             .expect_err("no done column to land in");
         assert!(err.contains("has no \"done\" column"), "{err}");
-        assert_eq!(task(&pool, id).await.unwrap().unwrap().project_id, None, "nothing moved");
+        assert_eq!(
+            task(&pool, id).await.unwrap().unwrap().project_id,
+            None,
+            "nothing moved"
+        );
     }
 
     #[tokio::test]
@@ -1542,7 +1666,10 @@ mod unfiled_tests {
         create_tasks(
             &pool,
             Some(project),
-            &[NewTask { title: "Draft".into(), ..Default::default() }],
+            &[NewTask {
+                title: "Draft".into(),
+                ..Default::default()
+            }],
             "manual",
         )
         .await
@@ -1550,7 +1677,10 @@ mod unfiled_tests {
         create_tasks(
             &pool,
             None,
-            &[NewTask { title: "Errand".into(), ..Default::default() }],
+            &[NewTask {
+                title: "Errand".into(),
+                ..Default::default()
+            }],
             "manual",
         )
         .await
@@ -1573,7 +1703,11 @@ mod unfiled_tests {
         let filed = create_tasks(
             &pool,
             Some(project),
-            &[NewTask { title: "Draft".into(), column: Some("todo".into()), ..Default::default() }],
+            &[NewTask {
+                title: "Draft".into(),
+                column: Some("todo".into()),
+                ..Default::default()
+            }],
             "manual",
         )
         .await
@@ -1581,7 +1715,11 @@ mod unfiled_tests {
         let unfiled = create_tasks(
             &pool,
             None,
-            &[NewTask { title: "Errand".into(), column: Some("todo".into()), ..Default::default() }],
+            &[NewTask {
+                title: "Errand".into(),
+                column: Some("todo".into()),
+                ..Default::default()
+            }],
             "manual",
         )
         .await

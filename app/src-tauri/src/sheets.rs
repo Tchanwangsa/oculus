@@ -42,7 +42,8 @@ pub fn needs_conversion(data_dir: &Path, rel: &str) -> bool {
 /// One `## sheet` section per worksheet, in workbook order. Chart, dialog and
 /// macro sheets hold no cells and are left out.
 pub fn sections(bytes: &[u8]) -> Result<Vec<String>, String> {
-    let mut book = calamine::open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|e| e.to_string())?;
+    let mut book =
+        calamine::open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|e| e.to_string())?;
     let names: Vec<String> = book
         .sheets_metadata()
         .iter()
@@ -53,8 +54,12 @@ pub fn sections(bytes: &[u8]) -> Result<Vec<String>, String> {
         .iter()
         .map(|name| {
             let failed = |e: String| format!("sheet {name}: {e}");
-            let values = book.worksheet_range(name).map_err(|e| failed(e.to_string()))?;
-            let formulas = book.worksheet_formula(name).map_err(|e| failed(e.to_string()))?;
+            let values = book
+                .worksheet_range(name)
+                .map_err(|e| failed(e.to_string()))?;
+            let formulas = book
+                .worksheet_formula(name)
+                .map_err(|e| failed(e.to_string()))?;
             let merges = merged_regions(&mut book, name).map_err(failed)?;
             Ok(section(name, &values, &formulas, &merges))
         })
@@ -64,10 +69,17 @@ pub fn sections(bytes: &[u8]) -> Result<Vec<String>, String> {
 /// A sheet's merged regions in absolute sheet coordinates. xlsx and xls
 /// record them; calamine reads none from ods or xlsb, so there a block keeps
 /// its value in its top-left cell only.
-fn merged_regions<RS: Read + Seek>(book: &mut Sheets<RS>, name: &str) -> Result<Vec<Dimensions>, String> {
+fn merged_regions<RS: Read + Seek>(
+    book: &mut Sheets<RS>,
+    name: &str,
+) -> Result<Vec<Dimensions>, String> {
     match book {
-        Sheets::Xlsx(xlsx) => xlsx.merge_cells_by_sheet_name(name).map_err(|e| e.to_string()),
-        Sheets::Xls(xls) => xls.merge_cells_by_sheet_name(name).map_err(|e| e.to_string()),
+        Sheets::Xlsx(xlsx) => xlsx
+            .merge_cells_by_sheet_name(name)
+            .map_err(|e| e.to_string()),
+        Sheets::Xls(xls) => xls
+            .merge_cells_by_sheet_name(name)
+            .map_err(|e| e.to_string()),
         Sheets::Xlsb(_) | Sheets::Ods(_) => Ok(Vec::new()),
     }
 }
@@ -84,7 +96,12 @@ pub fn document(filename: &str, sections: &[String]) -> String {
 }
 
 /// The sheet's table of values, then its formulas when it has any.
-fn section(name: &str, values: &Range<Data>, formulas: &Range<String>, merges: &[Dimensions]) -> String {
+fn section(
+    name: &str,
+    values: &Range<Data>,
+    formulas: &Range<String>,
+    merges: &[Dimensions],
+) -> String {
     let mut texts = texts(values, formulas);
     fill_merges(&mut texts, merges);
     let rows: Vec<Vec<String>> = texts.rows().map(<[String]>::to_vec).collect();
@@ -101,12 +118,20 @@ fn section(name: &str, values: &Range<Data>, formulas: &Range<String>, merges: &
 /// value, or `=FORMULA` where the file stored no result for a formula — a
 /// workbook written by a script and never recalculated has none.
 fn texts(values: &Range<Data>, formulas: &Range<String>) -> Range<String> {
-    let mut extents = [values.start().zip(values.end()), formulas.start().zip(formulas.end())]
-        .into_iter()
-        .flatten();
-    let Some(first) = extents.next() else { return Range::empty() };
+    let mut extents = [
+        values.start().zip(values.end()),
+        formulas.start().zip(formulas.end()),
+    ]
+    .into_iter()
+    .flatten();
+    let Some(first) = extents.next() else {
+        return Range::empty();
+    };
     let (start, end) = extents.fold(first, |(s, e), (s2, e2)| {
-        ((s.0.min(s2.0), s.1.min(s2.1)), (e.0.max(e2.0), e.1.max(e2.1)))
+        (
+            (s.0.min(s2.0), s.1.min(s2.1)),
+            (e.0.max(e2.0), e.1.max(e2.1)),
+        )
     });
     let mut out = Range::new(start, end);
     let origin = values.start().unwrap_or_default();
@@ -130,7 +155,11 @@ fn texts(values: &Range<Data>, formulas: &Range<String>) -> Range<String> {
 fn fill_merges<T: CellType>(range: &mut Range<T>, merges: &[Dimensions]) {
     let Some(end) = range.end() else { return };
     for region in merges {
-        let Some(value) = range.get_value(region.start).filter(|v| **v != T::default()).cloned() else {
+        let Some(value) = range
+            .get_value(region.start)
+            .filter(|v| **v != T::default())
+            .cloned()
+        else {
             continue;
         };
         for row in region.start.0..=region.end.0.min(end.0) {
@@ -154,15 +183,18 @@ fn table(rows: &[Vec<String>]) -> Option<String> {
         .filter(|&(i, row)| filled(row) || filled(&rows[first + i - 1]))
         .map(|(_, row)| row)
         .collect();
-    let column_filled =
-        |i: usize| rows.iter().any(|row| row.get(i).is_some_and(|c| !c.is_empty()));
+    let column_filled = |i: usize| {
+        rows.iter()
+            .any(|row| row.get(i).is_some_and(|c| !c.is_empty()))
+    };
     let width = rows.iter().map(|row| row.len()).max().unwrap_or(0);
     let left = (0..width).find(|&i| column_filled(i))?;
     let right = (0..width).rev().find(|&i| column_filled(i))?;
 
     let line = |row: &&Vec<String>| {
-        let cells: Vec<&str> =
-            (left..=right).map(|i| row.get(i).map(String::as_str).unwrap_or("")).collect();
+        let cells: Vec<&str> = (left..=right)
+            .map(|i| row.get(i).map(String::as_str).unwrap_or(""))
+            .collect();
         format!("| {} |", cells.join(" | "))
     };
     let mut out = vec![line(&rows[0])];
@@ -186,9 +218,12 @@ fn csv_section(filename: &str, bytes: &[u8]) -> String {
         .map(|row| row.iter().map(|c| escape(c)).collect())
         .collect();
     let body = table(&rows).unwrap_or_else(|| "(empty)".to_string());
-    format!("## {}
+    format!(
+        "## {}
 
-{body}", filename.trim())
+{body}",
+        filename.trim()
+    )
 }
 
 /// Whichever of `,` `;` tab or `|` the first line uses most: Excel writes `;`
@@ -196,7 +231,10 @@ fn csv_section(filename: &str, bytes: &[u8]) -> String {
 fn delimiter(text: &str) -> char {
     let first = text.lines().next().unwrap_or("");
     let count = |d: char| first.chars().filter(|&c| c == d).count();
-    [',', ';', '\t', '|'].into_iter().max_by_key(|&d| (count(d), d == ',')).unwrap_or(',')
+    [',', ';', '\t', '|']
+        .into_iter()
+        .max_by_key(|&d| (count(d), d == ','))
+        .unwrap_or(',')
 }
 
 /// RFC 4180 rows: quoted fields may hold the delimiter, line breaks and `""`
@@ -271,7 +309,10 @@ fn number(value: f64) -> String {
     if value.fract() == 0.0 && value.abs() < 1e15 {
         return (value as i64).to_string();
     }
-    format!("{value:.14e}").parse::<f64>().unwrap_or(value).to_string()
+    format!("{value:.14e}")
+        .parse::<f64>()
+        .unwrap_or(value)
+        .to_string()
 }
 
 /// ISO dates: `2026-03-02`, `2026-03-02 09:30:00`, or `09:30:00` for a time
@@ -280,7 +321,12 @@ fn date_time(value: &ExcelDateTime) -> String {
     let serial = value.as_f64();
     if value.is_duration() {
         let seconds = (serial * 86_400.0).round() as i64;
-        return format!("{}:{:02}:{:02}", seconds / 3600, seconds.abs() % 3600 / 60, seconds.abs() % 60);
+        return format!(
+            "{}:{:02}:{:02}",
+            seconds / 3600,
+            seconds.abs() % 3600 / 60,
+            seconds.abs() % 60
+        );
     }
     let (y, mo, d, h, mi, s, _) = value.to_ymd_hms_milli();
     let date = format!("{y:04}-{mo:02}-{d:02}");
@@ -322,7 +368,9 @@ fn formula_list(formulas: &Range<String>) -> Option<String> {
     let mut index: HashMap<String, usize> = HashMap::new();
     // Row-major, so a pattern's first cell decides its place.
     for (row, col, raw) in formulas.used_cells() {
-        let Some(body) = formula_body(raw) else { continue };
+        let Some(body) = formula_body(raw) else {
+            continue;
+        };
         let pos = (origin.0 + row as u32, origin.1 + col as u32);
         let at = *index.entry(relative(body, pos)).or_insert_with(|| {
             patterns.push((body, Vec::new()));
@@ -338,8 +386,11 @@ fn formula_list(formulas: &Range<String>) -> Option<String> {
         .take(FORMULA_LINES)
         .map(|(body, cells)| {
             let blocks = blocks(cells);
-            let mut names: Vec<String> =
-                blocks.iter().take(LINE_BLOCKS).map(|&(a, b)| block_name(a, b)).collect();
+            let mut names: Vec<String> = blocks
+                .iter()
+                .take(LINE_BLOCKS)
+                .map(|&(a, b)| block_name(a, b))
+                .collect();
             if blocks.len() > LINE_BLOCKS {
                 names.push(format!("… and {} more", blocks.len() - LINE_BLOCKS));
             }
@@ -385,8 +436,13 @@ fn blocks(cells: &[(u32, u32)]) -> Vec<((u32, u32), (u32, u32))> {
             }
             (bottom, right)
         };
-        let area = |(bottom, right): (u32, u32)| (bottom - row + 1) as u64 * (right - col + 1) as u64;
-        let end = if area(across_first) > area(down_first) { across_first } else { down_first };
+        let area =
+            |(bottom, right): (u32, u32)| (bottom - row + 1) as u64 * (right - col + 1) as u64;
+        let end = if area(across_first) > area(down_first) {
+            across_first
+        } else {
+            down_first
+        };
         for r in row..=end.0 {
             for c in col..=end.1 {
                 left.remove(&(r, c));
@@ -494,7 +550,10 @@ fn reference(token: &str) -> Option<(bool, u32, bool, u32)> {
     if !(1..=3).contains(&letters) {
         return None;
     }
-    let col = rest[..letters].bytes().fold(0u32, |n, b| n * 26 + (b - b'A' + 1) as u32) - 1;
+    let col = rest[..letters]
+        .bytes()
+        .fold(0u32, |n, b| n * 26 + (b - b'A' + 1) as u32)
+        - 1;
     let rest = &rest[letters..];
     let row_abs = rest.starts_with('$');
     let digits = &rest[row_abs as usize..];
@@ -525,17 +584,26 @@ pub fn convert(data_dir: &Path, rel: &str) -> Result<Vec<ParsePage>, ParseError>
     let sections = sections.map_err(|detail| {
         // The UI keeps the sentence; calamine's reason goes to stderr.
         eprintln!("[oculus] spreadsheet unreadable: {rel}: {detail}");
-        ParseError::Document { code: parse::SHEET_UNREADABLE.into() }
+        ParseError::Document {
+            code: parse::SHEET_UNREADABLE.into(),
+        }
     })?;
     let md = data_dir.join(md_rel(rel));
-    let tmp = md.with_extension(format!("md.tmp{}-{}", std::process::id(), crate::clock::now_nanos()));
+    let tmp = md.with_extension(format!(
+        "md.tmp{}-{}",
+        std::process::id(),
+        crate::clock::now_nanos()
+    ));
     crate::atomic_write::write(&md, &tmp, document(filename, &sections).as_bytes())
         .map_err(ParseError::Io)?;
 
     Ok(sections
         .into_iter()
         .enumerate()
-        .map(|(i, markdown)| ParsePage { page_no: i as u32 + 1, markdown })
+        .map(|(i, markdown)| ParsePage {
+            page_no: i as u32 + 1,
+            markdown,
+        })
         .collect())
 }
 
@@ -667,7 +735,9 @@ pub async fn reconcile(pool: &SqlitePool, data_dir: &Path) -> Result<u64, String
         let pages: i64 = row.get("pages");
         let pdf_route = pdf_route_files(data_dir, &rel);
         let settled = match status.as_deref() {
-            Some("quality") => pages > 0 && embed_status.is_none() && !needs_conversion(data_dir, &rel),
+            Some("quality") => {
+                pages > 0 && embed_status.is_none() && !needs_conversion(data_dir, &rel)
+            }
             Some("error") => !pdf_route,
             Some("skipped") => true,
             _ => false,
@@ -691,20 +761,22 @@ pub async fn reconcile(pool: &SqlitePool, data_dir: &Path) -> Result<u64, String
 
 /// App startup: [`reconcile`] on a thread of its own.
 pub fn reconcile_in_background() {
-    let spawned = std::thread::Builder::new().name("oculus-sheets".into()).spawn(|| {
-        let data_dir = paths::data_dir();
-        let outcome = tauri::async_runtime::block_on(async {
-            let pool = crate::store::open_pool().await?;
-            let result = reconcile(&pool, &data_dir).await;
-            pool.close().await;
-            result
+    let spawned = std::thread::Builder::new()
+        .name("oculus-sheets".into())
+        .spawn(|| {
+            let data_dir = paths::data_dir();
+            let outcome = tauri::async_runtime::block_on(async {
+                let pool = crate::store::open_pool().await?;
+                let result = reconcile(&pool, &data_dir).await;
+                pool.close().await;
+                result
+            });
+            match outcome {
+                Ok(0) => {}
+                Ok(n) => eprintln!("[oculus] spreadsheets: converted {n} to text"),
+                Err(e) => eprintln!("[oculus] spreadsheets: {e}"),
+            }
         });
-        match outcome {
-            Ok(0) => {}
-            Ok(n) => eprintln!("[oculus] spreadsheets: converted {n} to text"),
-            Err(e) => eprintln!("[oculus] spreadsheets: {e}"),
-        }
-    });
     if let Err(e) = spawned {
         eprintln!("[oculus] spreadsheets: {e}");
     }
@@ -717,11 +789,14 @@ mod tests {
     #[test]
     fn a_csv_reads_quotes_line_breaks_and_its_locale_delimiter() {
         let rows = csv_rows("a,\"b, \"\"c\"\"\"\r\n1,\"two\nlines\"\n3", ',');
-        assert_eq!(rows, vec![
-            vec!["a".to_string(), "b, \"c\"".into()],
-            vec!["1".into(), "two\nlines".into()],
-            vec!["3".into()],
-        ]);
+        assert_eq!(
+            rows,
+            vec![
+                vec!["a".to_string(), "b, \"c\"".into()],
+                vec!["1".into(), "two\nlines".into()],
+                vec!["3".into()],
+            ]
+        );
         assert_eq!(delimiter("name;mark;note, if any\n"), ';');
         assert_eq!(delimiter("a\tb\tc\n"), '\t');
         assert_eq!(delimiter("a|b|c\n"), '|');
@@ -743,7 +818,9 @@ mod tests {
     use std::io::Write;
 
     fn grid(rows: &[&[&str]]) -> Vec<Vec<String>> {
-        rows.iter().map(|r| r.iter().map(|c| c.to_string()).collect()).collect()
+        rows.iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect()
     }
 
     #[test]
@@ -776,12 +853,21 @@ mod tests {
         assert_eq!(cell(&Data::Bool(true)), "TRUE");
         assert_eq!(cell(&Data::Error(CellErrorType::Div0)), "#DIV/0!");
         assert_eq!(cell(&Data::Empty), "");
-        assert_eq!(cell(&Data::String("  a | b\nc\r\nd ".into())), "a \\| b<br>c<br>d");
-        assert_eq!(cell(&Data::DateTimeIso("2026-03-02T09:30:00".into())), "2026-03-02T09:30:00");
+        assert_eq!(
+            cell(&Data::String("  a | b\nc\r\nd ".into())),
+            "a \\| b<br>c<br>d"
+        );
+        assert_eq!(
+            cell(&Data::DateTimeIso("2026-03-02T09:30:00".into())),
+            "2026-03-02T09:30:00"
+        );
 
         let at = |serial, kind| cell(&Data::DateTime(ExcelDateTime::new(serial, kind, false)));
         assert_eq!(at(46083.0, ExcelDateTimeType::DateTime), "2026-03-02");
-        assert_eq!(at(46083.5, ExcelDateTimeType::DateTime), "2026-03-02 12:00:00");
+        assert_eq!(
+            at(46083.5, ExcelDateTimeType::DateTime),
+            "2026-03-02 12:00:00"
+        );
         assert_eq!(at(0.375, ExcelDateTimeType::DateTime), "09:00:00");
         assert_eq!(at(1.5, ExcelDateTimeType::TimeDelta), "36:00:00");
     }
@@ -789,18 +875,22 @@ mod tests {
     /// The smallest xlsx calamine opens: two worksheets, shared strings, a
     /// number, a boolean and an empty sheet.
     fn workbook() -> Vec<u8> {
-        xlsx(r#"<?xml version="1.0" encoding="UTF-8"?>
+        xlsx(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
 <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="str"><v>Pass</v></c></row>
 <row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>9.5</v></c><c r="C2" t="b"><v>1</v></c></row>
-</sheetData></worksheet>"#)
+</sheetData></worksheet>"#,
+        )
     }
 
     /// An xlsx whose first sheet, "Marks", is `marks`; shared strings 0–2 are
     /// Name, Mark and Ada, and the second sheet is empty.
     fn xlsx(marks: &str) -> Vec<u8> {
         let files: &[(&str, &str)] = &[
-            ("[Content_Types].xml", r#"<?xml version="1.0" encoding="UTF-8"?>
+            (
+                "[Content_Types].xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
@@ -808,28 +898,44 @@ mod tests {
 <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
 <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
 <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
-</Types>"#),
-            ("_rels/.rels", r#"<?xml version="1.0" encoding="UTF-8"?>
+</Types>"#,
+            ),
+            (
+                "_rels/.rels",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-</Relationships>"#),
-            ("xl/workbook.xml", r#"<?xml version="1.0" encoding="UTF-8"?>
+</Relationships>"#,
+            ),
+            (
+                "xl/workbook.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheets><sheet name="Marks" sheetId="1" r:id="rId1"/><sheet name="Notes" sheetId="2" r:id="rId2"/></sheets>
-</workbook>"#),
-            ("xl/_rels/workbook.xml.rels", r#"<?xml version="1.0" encoding="UTF-8"?>
+</workbook>"#,
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
 <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
-</Relationships>"#),
-            ("xl/sharedStrings.xml", r#"<?xml version="1.0" encoding="UTF-8"?>
+</Relationships>"#,
+            ),
+            (
+                "xl/sharedStrings.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="3" uniqueCount="3">
 <si><t>Name</t></si><si><t>Mark</t></si><si><t>Ada</t></si>
-</sst>"#),
+</sst>"#,
+            ),
             ("xl/worksheets/sheet1.xml", marks),
-            ("xl/worksheets/sheet2.xml", r#"<?xml version="1.0" encoding="UTF-8"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#),
+            (
+                "xl/worksheets/sheet2.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#,
+            ),
         ];
         let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let options = zip::write::SimpleFileOptions::default();
@@ -846,7 +952,8 @@ mod tests {
         assert_eq!(
             sections,
             vec![
-                "## Marks\n\n| Name | Mark | Pass |\n| --- | --- | --- |\n| Ada | 9.5 | TRUE |".to_string(),
+                "## Marks\n\n| Name | Mark | Pass |\n| --- | --- | --- |\n| Ada | 9.5 | TRUE |"
+                    .to_string(),
                 "## Notes\n\n(empty)".to_string(),
             ]
         );
@@ -883,15 +990,21 @@ mod tests {
         range.set_value((2, 0), Data::String("Content".into()));
         range.set_value((2, 1), Data::Float(1.0));
         range.set_value((3, 1), Data::Float(9.0));
-        fill_merges(&mut range, &[
-            Dimensions::new((2, 0), (4, 0)),
-            // Runs past the range's last column: clipped, the range keeps its size.
-            Dimensions::new((2, 1), (3, 9)),
-            // Starts above the range, and an empty top-left: both left alone.
-            Dimensions::new((0, 2), (5, 2)),
-            Dimensions::new((5, 0), (5, 2)),
-        ]);
-        let rows: Vec<Vec<String>> = range.rows().map(|row| row.iter().map(cell).collect()).collect();
+        fill_merges(
+            &mut range,
+            &[
+                Dimensions::new((2, 0), (4, 0)),
+                // Runs past the range's last column: clipped, the range keeps its size.
+                Dimensions::new((2, 1), (3, 9)),
+                // Starts above the range, and an empty top-left: both left alone.
+                Dimensions::new((0, 2), (5, 2)),
+                Dimensions::new((5, 0), (5, 2)),
+            ],
+        );
+        let rows: Vec<Vec<String>> = range
+            .rows()
+            .map(|row| row.iter().map(cell).collect())
+            .collect();
         assert_eq!(
             rows,
             grid(&[
@@ -915,14 +1028,13 @@ mod tests {
         formulas.set_value((1, 0), r#"IF(1,"","x")"#.into());
         formulas.set_value((2, 1), "A1|A2".into());
         formulas.set_value((2, 0), "of:=[.A1]*2".into());
-        let rows: Vec<Vec<String>> = texts(&values, &formulas).rows().map(<[String]>::to_vec).collect();
+        let rows: Vec<Vec<String>> = texts(&values, &formulas)
+            .rows()
+            .map(<[String]>::to_vec)
+            .collect();
         assert_eq!(
             rows,
-            grid(&[
-                &["2", ""],
-                &["", ""],
-                &["=[.A1]*2", "=A1\\|A2"],
-            ])
+            grid(&[&["2", ""], &["", ""], &["=[.A1]*2", "=A1\\|A2"],])
         );
         assert!(texts(&Range::empty(), &Range::empty()).is_empty());
     }
@@ -931,7 +1043,10 @@ mod tests {
     fn references_are_made_relative_to_their_cell() {
         // G9 seen from D9, and from D10 one row down: the same pattern.
         assert_eq!(relative("PROPER(G9)", (8, 3)), "PROPER(R[0]C[3])");
-        assert_eq!(relative("PROPER(G10)", (9, 3)), relative("PROPER(G9)", (8, 3)));
+        assert_eq!(
+            relative("PROPER(G10)", (9, 3)),
+            relative("PROPER(G9)", (8, 3))
+        );
         assert_eq!(relative("$G$9+G$9+$G9", (8, 3)), "R9C7+R9C[3]+R[0]C7");
         assert_eq!(relative("SUM(B2:B10)", (10, 1)), "SUM(R[-9]C[0]:R[-1]C[0])");
         assert_eq!(relative("SUM($B$2:$B$10)", (10, 1)), "SUM(R2C2:R10C2)");
@@ -944,7 +1059,10 @@ mod tests {
             r#"IF(R[0]C[0]="B2","say ""C3"" ok",LOG10(R[0]C[0]))"#
         );
         // ods writes `[.A1]` and `[Sheet2.A1]`.
-        assert_eq!(relative("SUM([.A1:.A3])", (3, 0)), "SUM([.R[-3]C[0]:.R[-1]C[0]])");
+        assert_eq!(
+            relative("SUM([.A1:.A3])", (3, 0)),
+            "SUM([.R[-3]C[0]:.R[-1]C[0]])"
+        );
         // Numbers, names, columns past XFD, row 0 and lower case are not references.
         let plain = "1E5+TAX2020X+XFE1+A0+a1+_xlfn.CONCAT(Ü1)";
         assert_eq!(relative(plain, (0, 0)), plain);
@@ -953,7 +1071,10 @@ mod tests {
 
     #[test]
     fn cells_are_named_in_a1() {
-        let names: Vec<String> = [0, 25, 26, 701, 702, 16_383].into_iter().map(column_name).collect();
+        let names: Vec<String> = [0, 25, 26, 701, 702, 16_383]
+            .into_iter()
+            .map(column_name)
+            .collect();
         assert_eq!(names, ["A", "Z", "AA", "ZZ", "AAA", "XFD"]);
         assert_eq!(block_name((8, 3), (8, 3)), "D9");
         assert_eq!(block_name((8, 3), (13, 4)), "D9:E14");
@@ -964,8 +1085,14 @@ mod tests {
         let rect: Vec<(u32, u32)> = (0..3).flat_map(|r| (0..2).map(move |c| (r, c))).collect();
         assert_eq!(blocks(&rect), vec![((0, 0), (2, 1))]);
         // A row run with one cell under its start: the longer run wins.
-        assert_eq!(blocks(&[(0, 0), (0, 1), (0, 2), (1, 0)]), vec![((0, 0), (0, 2)), ((1, 0), (1, 0))]);
-        assert_eq!(blocks(&[(0, 0), (2, 0), (3, 0)]), vec![((0, 0), (0, 0)), ((2, 0), (3, 0))]);
+        assert_eq!(
+            blocks(&[(0, 0), (0, 1), (0, 2), (1, 0)]),
+            vec![((0, 0), (0, 2)), ((1, 0), (1, 0))]
+        );
+        assert_eq!(
+            blocks(&[(0, 0), (2, 0), (3, 0)]),
+            vec![((0, 0), (0, 0)), ((2, 0), (3, 0))]
+        );
     }
 
     #[test]
@@ -993,7 +1120,10 @@ mod tests {
         }
         let list = formula_list(&many).unwrap();
         let lines: Vec<&str> = list.lines().collect();
-        assert_eq!((lines.len(), lines[0], lines[200]), (201, "- A1: =0+1", "- … and 5 more"));
+        assert_eq!(
+            (lines.len(), lines[0], lines[200]),
+            (201, "- A1: =0+1", "- … and 5 more")
+        );
     }
 
     #[test]
@@ -1009,7 +1139,10 @@ mod tests {
         assert!(needs_conversion(&scratch, rel));
 
         let pages = convert(&scratch, rel).unwrap();
-        assert_eq!(pages.iter().map(|p| p.page_no).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(
+            pages.iter().map(|p| p.page_no).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
         assert!(pages[0].markdown.starts_with("## Marks"));
         let md = std::fs::read_to_string(dir.join("m.xlsx.md")).unwrap();
         assert!(md.starts_with("# m.xlsx\n\n## Marks"), "{md}");
@@ -1044,11 +1177,22 @@ mod tests {
         .unwrap();
 
         let rel = "courses/X/files/m.xlsx";
-        let page = |n: u32, text: &str| ParsePage { page_no: n, markdown: text.into() };
+        let page = |n: u32, text: &str| ParsePage {
+            page_no: n,
+            markdown: text.into(),
+        };
         // No row yet: the conversion beat the frontend's upsert.
-        record(&pool, 7, rel, &[page(1, "a"), page(2, "b"), page(3, "c")]).await.unwrap();
-        sqlx::query("UPDATE pages SET embedding = x'00', embed_model = 'm'").execute(&pool).await.unwrap();
-        sqlx::query("UPDATE files SET embed_status = 'error'").execute(&pool).await.unwrap();
+        record(&pool, 7, rel, &[page(1, "a"), page(2, "b"), page(3, "c")])
+            .await
+            .unwrap();
+        sqlx::query("UPDATE pages SET embedding = x'00', embed_model = 'm'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE files SET embed_status = 'error'")
+            .execute(&pool)
+            .await
+            .unwrap();
 
         assert_eq!(record(&pool, 7, rel, &[page(1, "a2")]).await.unwrap(), 1);
         let pages: Vec<(i64, String, Option<Vec<u8>>)> =
@@ -1062,12 +1206,21 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!((filename.as_str(), file_type.as_str(), status.as_str()), ("m.xlsx", "xlsx", "quality"));
+        assert_eq!(
+            (filename.as_str(), file_type.as_str(), status.as_str()),
+            ("m.xlsx", "xlsx", "quality")
+        );
         assert_eq!(embed, None);
 
         forget(&pool, 7, rel).await.unwrap();
-        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pages").fetch_one(&pool).await.unwrap();
-        let status: String = sqlx::query_scalar("SELECT parse_status FROM files").fetch_one(&pool).await.unwrap();
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pages")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let status: String = sqlx::query_scalar("SELECT parse_status FROM files")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!((left, status.as_str()), (0, "error"));
     }
 }

@@ -2,8 +2,8 @@ pub mod agents;
 mod atomic_write;
 mod auth;
 mod blocking;
-mod bundled;
 pub mod browser;
+mod bundled;
 pub mod calendar;
 pub mod canvas;
 pub mod chapters;
@@ -41,9 +41,9 @@ mod storage;
 pub mod store;
 mod subjects;
 pub mod sync;
+pub mod terms;
 #[cfg(test)]
 mod test_support;
-pub mod terms;
 pub mod transcribe;
 mod usage;
 pub mod voyage;
@@ -64,7 +64,9 @@ pub fn run() {
         .on_menu_event(menu::handle)
         .manage(AuthState(Arc::new(Mutex::new(false))))
         .manage(SubjectsState(Arc::new(Mutex::new(vec![]))))
-        .manage(Echo360Cache(Arc::new(Mutex::new(std::collections::HashMap::new()))))
+        .manage(Echo360Cache(Arc::new(Mutex::new(
+            std::collections::HashMap::new(),
+        ))))
         .manage(lectures::DownloadCancels::default())
         .manage(ScrapeCancel::default())
         .manage(scrape::VideoCancels::default())

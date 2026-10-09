@@ -14,7 +14,8 @@ source. This file is only the rules; the reasons behind them live in `docs/`.
   gitignored `app/src-tauri/binaries/`.
 - Checks: `bun run build` (tsc + bundle), `cargo check` / `cargo test` in
   `app/src-tauri`.
-- **Never run `cargo fmt`** — the crate is hand-formatted.
+- Run `cargo fmt` in `app/src-tauri` before committing Rust; CI fails on
+  `cargo fmt --check`.
 
 ## Don't re-add
 

@@ -2,9 +2,9 @@
 //! chapters and where the content ends (`lecture_end`). Each job owns its
 //! algorithm, claim rules and commit boundary.
 
+use sqlx::Row;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use sqlx::Row;
 
 use crate::harness::{self, HarnessEvent};
 
@@ -32,12 +32,18 @@ impl Source {
     /// Called after each job's existing-result guard, so refusing a regeneration
     /// keeps its own message even when the recording has since been deleted.
     pub(crate) fn video(&self) -> Result<PathBuf, String> {
-        let path = self.video.as_deref().ok_or_else(|| format!(
-            "{} is not downloaded — `oculus run -l --videos` fetches it", self.title
-        ))?;
+        let path = self.video.as_deref().ok_or_else(|| {
+            format!(
+                "{} is not downloaded — `oculus run -l --videos` fetches it",
+                self.title
+            )
+        })?;
         let path = PathBuf::from(path);
         if !path.exists() {
-            return Err(format!("{} is on record but missing from disk", path.display()));
+            return Err(format!(
+                "{} is on record but missing from disk",
+                path.display()
+            ));
         }
         Ok(path)
     }
@@ -78,12 +84,18 @@ pub(crate) fn reply(
         reasoning_effort: selection.reasoning_effort.clone(),
         ..Default::default()
     };
-    harness::run_once(data_dir, selection.provider, &options, prompt, move |event| {
-        if let HarnessEvent::AssistantMessage { text } = event {
-            collect.lock().unwrap().push_str(text);
-        }
-        on_event(event);
-    })?;
+    harness::run_once(
+        data_dir,
+        selection.provider,
+        &options,
+        prompt,
+        move |event| {
+            if let HarnessEvent::AssistantMessage { text } = event {
+                collect.lock().unwrap().push_str(text);
+            }
+            on_event(event);
+        },
+    )?;
     let text = reply.lock().unwrap().clone();
     Ok(text)
 }
@@ -126,17 +138,20 @@ pub(crate) async fn check_start(
 ) -> Result<(), String> {
     if let Some(n) = source {
         if n != 1 && n != 2 {
-            return Err(format!("{n} is not a source — a capture has 1 and sometimes 2"));
+            return Err(format!(
+                "{n} is not a source — a capture has 1 and sometimes 2"
+            ));
         }
     }
     let pool = crate::store::open_pool().await?;
-    let running: Option<String> =
-        sqlx::query_scalar(&format!("SELECT {status_column} FROM lectures WHERE id = ?1"))
-            .bind(lecture_id)
-            .fetch_optional(&pool)
-            .await
-            .map_err(|e| e.to_string())?
-            .flatten();
+    let running: Option<String> = sqlx::query_scalar(&format!(
+        "SELECT {status_column} FROM lectures WHERE id = ?1"
+    ))
+    .bind(lecture_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .flatten();
     if running.as_deref() == Some("running") {
         return Err(busy.into());
     }
@@ -190,21 +205,34 @@ mod tests {
 
     #[tokio::test]
     async fn lecture_sources_keep_optional_fields_and_reject_unknown_ids() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1)
-            .connect("sqlite::memory:").await.unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
         sqlx::query("CREATE TABLE subjects (id INTEGER PRIMARY KEY, code TEXT)")
-            .execute(&pool).await.unwrap();
-        sqlx::query("CREATE TABLE lectures (id TEXT PRIMARY KEY, title TEXT, duration_seconds INTEGER,
-                     video_path TEXT, transcript_path TEXT, subject_id INTEGER)")
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE lectures (id TEXT PRIMARY KEY, title TEXT, duration_seconds INTEGER,
+                     video_path TEXT, transcript_path TEXT, subject_id INTEGER)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query("INSERT INTO lectures VALUES ('one', 'Lecture one', -1, NULL, NULL, NULL)")
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         let lecture = source(&pool, "one").await.unwrap();
         assert_eq!(lecture.title, "Lecture one");
         assert_eq!(lecture.duration, 0);
         assert!(lecture.transcript.is_none());
         assert!(lecture.code.is_none());
         assert!(lecture.video().unwrap_err().contains("not downloaded"));
-        assert!(matches!(source(&pool, "missing").await, Err(error) if error == "no lecture missing"));
+        assert!(
+            matches!(source(&pool, "missing").await, Err(error) if error == "no lecture missing")
+        );
     }
 }

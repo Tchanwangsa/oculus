@@ -1,7 +1,7 @@
 # Checks every push to master and every pull request on a fresh macOS checkout:
-# the frontend tests and bundle, the Rust tests (the app's, keyd's and keyd
-# core's), and that the generated CLI reference matches the binary; and on
-# Linux, that keyd builds with no OS adapter. See
+# that the Rust is formatted, the frontend tests and bundle, the Rust tests
+# (the app's, keyd's and keyd core's), and that the generated CLI reference
+# matches the binary; and on Linux, that keyd builds with no OS adapter. See
 # docs/development.md#ci-proves-a-fresh-checkout-builds-releases-are-cut-by-hand.
 name: CI
 
@@ -37,6 +37,8 @@ jobs:
         with:
           bun-version-file: app/package.json
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
@@ -44,6 +46,13 @@ jobs:
           # sccache already caches compiled crates; a multi-GB target/ would
           # crowd the repo's cache quota.
           cache-targets: false
+
+      - name: Rust is formatted
+        working-directory: app
+        run: |
+          (cd src-tauri && cargo fmt --check)
+          (cd keyd && cargo fmt --check)
+          (cd keyd/core && cargo fmt --check)
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile

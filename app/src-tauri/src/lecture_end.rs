@@ -97,7 +97,9 @@ pub fn clock(secs: u32) -> String {
 /// converting a clock rounds and then fails validation; the speaker is named
 /// only where it changes, since one label per cue doubled the prompt.
 pub fn transcript_lines(lines: &[Line]) -> String {
-    let one_voice = lines.windows(2).all(|pair| pair[0].speaker == pair[1].speaker);
+    let one_voice = lines
+        .windows(2)
+        .all(|pair| pair[0].speaker == pair[1].speaker);
     let mut last: Option<&String> = None;
     lines
         .iter()
@@ -106,7 +108,12 @@ pub fn transcript_lines(lines: &[Line]) -> String {
             last = line.speaker.as_ref();
             match &line.speaker {
                 Some(who) if changed && !one_voice => {
-                    format!("{}  {}  {who}: {}", line.start, clock(line.start), line.text)
+                    format!(
+                        "{}  {}  {who}: {}",
+                        line.start,
+                        clock(line.start),
+                        line.text
+                    )
                 }
                 _ => format!("{}  {}  {}", line.start, clock(line.start), line.text),
             }
@@ -185,7 +192,11 @@ pub fn prompt(p: &Prompt) -> String {
     if let Some(code) = p.code {
         out.push_str(&format!("Course: {code}\n"));
     }
-    out.push_str(&format!("Recording length: {} ({} s)\n", clock(p.length), p.length));
+    out.push_str(&format!(
+        "Recording length: {} ({} s)\n",
+        clock(p.length),
+        p.length
+    ));
     if let Some(at) = p.black_from {
         out.push_str(&format!(
             "The projector goes black from {} ({at}) to the end of the recording.\n",
@@ -221,12 +232,17 @@ fn decode(text: &str) -> Option<Reply> {
     let value: Value = serde_json::from_str(text).ok()?;
     let object = value.as_object()?;
     let key = |o: &serde_json::Map<String, Value>| {
-        ["ends_at", "endsAt", "end"].into_iter().find(|k| o.contains_key(*k))
+        ["ends_at", "endsAt", "end"]
+            .into_iter()
+            .find(|k| o.contains_key(*k))
     };
     // An envelope: the one object inside that has the key.
     let object = match key(object) {
         Some(_) => object,
-        None => object.values().filter_map(Value::as_object).find(|o| key(o).is_some())?,
+        None => object
+            .values()
+            .filter_map(Value::as_object)
+            .find(|o| key(o).is_some())?,
     };
     let ends_at = match &object[key(object)?] {
         Value::Null => None,
@@ -307,10 +323,15 @@ pub fn validate(reply: &Reply, lines: &[Line]) -> Result<Option<Found>, String> 
     let (at, quote) = match (reply.ends_at, &reply.quote) {
         (None, None) => return Ok(None),
         (None, Some(_)) => {
-            return Err("ends_at is null but a quote was given — reply null for both, or cite the line".into())
+            return Err(
+                "ends_at is null but a quote was given — reply null for both, or cite the line"
+                    .into(),
+            )
         }
         (Some(at), None) => {
-            return Err(format!("ends_at {at} has no quote — copy 3 to 12 words from that line"))
+            return Err(format!(
+                "ends_at {at} has no quote — copy 3 to 12 words from that line"
+            ))
         }
         (Some(at), Some(quote)) => (at, quote),
     };
@@ -319,7 +340,9 @@ pub fn validate(reply: &Reply, lines: &[Line]) -> Result<Option<Found>, String> 
         _ => return Err("there is no transcript to cite".into()),
     };
     if !at.is_finite() || at < first as f64 || at > last as f64 {
-        return Err(format!("ends_at {at} is not a second of the transcript shown"));
+        return Err(format!(
+            "ends_at {at} is not a second of the transcript shown"
+        ));
     }
     let second = at.round() as u32;
     let words = normalise(quote);
@@ -345,7 +368,9 @@ pub fn validate(reply: &Reply, lines: &[Line]) -> Result<Option<Found>, String> 
             "the quote {quote:?} is not near {second}; it is in the line at {}",
             lines[i].start
         ),
-        None => format!("the quote {quote:?} is not in the transcript near {second} — copy the words exactly"),
+        None => format!(
+            "the quote {quote:?} is not in the transcript near {second} — copy the words exactly"
+        ),
     })
 }
 
@@ -394,11 +419,21 @@ pub struct Lecture {
 /// database without it.
 pub async fn load(pool: &sqlx::SqlitePool, data_dir: &Path, id: &str) -> Result<Lecture, String> {
     let source = crate::lecture_jobs::source(pool, id).await?;
-    let transcript = source.transcript.as_deref().map(PathBuf::from).ok_or_else(|| {
-        format!("{} has no transcript — `oculus run -l --videos` downloads it", source.title)
-    })?;
+    let transcript = source
+        .transcript
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            format!(
+                "{} has no transcript — `oculus run -l --videos` downloads it",
+                source.title
+            )
+        })?;
     if !transcript.exists() {
-        return Err(format!("{} is on record but missing from disk", transcript.display()));
+        return Err(format!(
+            "{} is on record but missing from disk",
+            transcript.display()
+        ));
     }
     let dir = crate::echo360::lecture_dir(data_dir, id);
     // The column, else the stream's own path on disk (as `chapters::detect` does).
@@ -435,12 +470,18 @@ pub fn prepare(lecture: &Lecture) -> Result<Prepared, String> {
         .map_err(|e| format!("{}: {e}", lecture.transcript.display()))?;
     let cues = crate::chapters::parse_transcript_voiced(&vtt);
     if cues.is_empty() {
-        return Err(format!("{} contains no transcript cues", lecture.transcript.display()));
+        return Err(format!(
+            "{} contains no transcript cues",
+            lecture.transcript.display()
+        ));
     }
     let length = recording_length(lecture.duration, &cues);
     let lines = window(&cues, length);
     if lines.is_empty() {
-        return Err(format!("{} has no speech in its last 15 minutes", lecture.title));
+        return Err(format!(
+            "{} has no speech in its last 15 minutes",
+            lecture.title
+        ));
     }
     let black_from = match crate::echo360::find_ffmpeg(None) {
         Some(ffmpeg) if !lecture.videos.is_empty() => black_from(&ffmpeg, &lecture.videos, length),
@@ -453,11 +494,20 @@ pub fn prepare(lecture: &Lecture) -> Result<Prepared, String> {
         black_from,
         lines: &lines,
     });
-    Ok(Prepared { length, lines, black_from, prompt })
+    Ok(Prepared {
+        length,
+        lines,
+        black_from,
+        prompt,
+    })
 }
 
 /// Ask the job's agent where `prepared`'s lecture ends.
-pub fn find(harness: &Harness, selection: &JobSelection, prepared: &Prepared) -> Result<Option<Found>, String> {
+pub fn find(
+    harness: &Harness,
+    selection: &JobSelection,
+    prepared: &Prepared,
+) -> Result<Option<Found>, String> {
     ask(
         |text| harness.one_turn(selection, INSTRUCTIONS, opencode::LECTURE_END_AGENT, text),
         &prepared.prompt,
@@ -476,7 +526,9 @@ pub async fn record(
             let end = found.as_ref().map(|f| (f.end, f.quote.as_str()));
             crate::store::save_content_end(pool, lecture_id, end).await
         }
-        Err(e) => crate::store::set_content_end_error(pool, lecture_id, e).await.map(|()| false),
+        Err(e) => crate::store::set_content_end_error(pool, lecture_id, e)
+            .await
+            .map(|()| false),
     }
 }
 
@@ -492,7 +544,10 @@ pub async fn claim(
     match crate::store::claim_content_end(pool, &lecture.id, force).await? {
         EndClaim::Claimed => Ok(()),
         EndClaim::Running => Err(format!("{}'s end is already being found", lecture.title)),
-        EndClaim::Found => Err(format!("{}'s end is already found — {rerun}", lecture.title)),
+        EndClaim::Found => Err(format!(
+            "{}'s end is already found — {rerun}",
+            lecture.title
+        )),
         EndClaim::NoLecture => Err(format!("no lecture {}", lecture.id)),
     }
 }
@@ -531,32 +586,45 @@ pub mod app {
     ) -> Result<(), String> {
         let pool = crate::store::open_pool().await?;
         let lecture = load(&pool, &crate::paths::data_dir(), &lecture_id).await?;
-        claim(&pool, &lecture, force.unwrap_or(false), "re-running replaces it").await?;
+        claim(
+            &pool,
+            &lecture,
+            force.unwrap_or(false),
+            "re-running replaces it",
+        )
+        .await?;
 
         let harness = state.harness.clone();
-        spawn_job("lecture end", crate::harness::jobs::Job::LectureEnd, move |rt, pool, selection| {
-            let outcome = prepare(&lecture).and_then(|p| find(&harness, &selection, &p));
-            let finished = match rt.block_on(record(pool, &lecture.id, &outcome)).and(outcome) {
-                Ok(found) => Finished {
-                    lecture_id: lecture.id.clone(),
-                    status: if found.is_some() { "ready" } else { "none" },
-                    seconds: found.as_ref().map(|f| f.end),
-                    quote: found.map(|f| f.quote),
-                    error: None,
-                },
-                Err(e) => {
-                    eprintln!("[oculus] lecture end: {e}");
-                    Finished {
+        spawn_job(
+            "lecture end",
+            crate::harness::jobs::Job::LectureEnd,
+            move |rt, pool, selection| {
+                let outcome = prepare(&lecture).and_then(|p| find(&harness, &selection, &p));
+                let finished = match rt
+                    .block_on(record(pool, &lecture.id, &outcome))
+                    .and(outcome)
+                {
+                    Ok(found) => Finished {
                         lecture_id: lecture.id.clone(),
-                        status: "error",
-                        seconds: None,
-                        quote: None,
-                        error: Some(e),
+                        status: if found.is_some() { "ready" } else { "none" },
+                        seconds: found.as_ref().map(|f| f.end),
+                        quote: found.map(|f| f.quote),
+                        error: None,
+                    },
+                    Err(e) => {
+                        eprintln!("[oculus] lecture end: {e}");
+                        Finished {
+                            lecture_id: lecture.id.clone(),
+                            status: "error",
+                            seconds: None,
+                            quote: None,
+                            error: Some(e),
+                        }
                     }
-                }
-            };
-            app.emit(LECTURE_END_EVENT, finished).ok();
-        });
+                };
+                app.emit(LECTURE_END_EVENT, finished).ok();
+            },
+        );
         Ok(())
     }
 
@@ -574,17 +642,29 @@ mod tests {
 
     fn cue(start: f32, end: f32, speaker: &str, text: &str) -> (TranscriptCue, Option<String>) {
         (
-            TranscriptCue { start, end, text: text.into() },
+            TranscriptCue {
+                start,
+                end,
+                text: text.into(),
+            },
             Some(speaker.to_string()).filter(|s| !s.is_empty()),
         )
     }
 
     fn line(start: u32, end: u32, text: &str) -> Line {
-        Line { start, end, speaker: Some("Speaker 0".into()), text: text.into() }
+        Line {
+            start,
+            end,
+            speaker: Some("Speaker 0".into()),
+            text: text.into(),
+        }
     }
 
     fn reply(ends_at: Option<f64>, quote: Option<&str>) -> Reply {
-        Reply { ends_at, quote: quote.map(str::to_string) }
+        Reply {
+            ends_at,
+            quote: quote.map(str::to_string),
+        }
     }
 
     /// A sign-off split over two cues, then a student's question.
@@ -605,21 +685,42 @@ mod tests {
             cue(1200.4, 1203.9, "Speaker 0", "First in the window."),
             cue(2095.2, 2101.7, "Speaker 1", "Last cue."),
         ];
-        assert_eq!(recording_length(2000, &cues), 2101, "the last cue outruns the row");
+        assert_eq!(
+            recording_length(2000, &cues),
+            2101,
+            "the last cue outruns the row"
+        );
         assert_eq!(recording_length(2400, &cues), 2400);
-        assert_eq!(recording_length(0, &cues), 2101, "an unknown duration takes the cues'");
+        assert_eq!(
+            recording_length(0, &cues),
+            2101,
+            "an unknown duration takes the cues'"
+        );
         let lines = window(&cues, 2100);
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0], line(1200, 1203, "First in the window."));
         assert_eq!(lines[1].speaker.as_deref(), Some("Speaker 1"));
-        assert_eq!(window(&cues, 600).len(), 4, "a short recording is read whole");
+        assert_eq!(
+            window(&cues, 600).len(),
+            4,
+            "a short recording is read whole"
+        );
     }
 
     #[test]
     fn lines_print_both_columns_and_drop_a_lone_speaker() {
-        assert_eq!((clock(65), clock(3725)), ("01:05".to_string(), "1:02:05".to_string()));
-        let mut lines = vec![line(1915, 1918, "See you tomorrow."), line(3725, 3727, "Bye.")];
-        assert_eq!(transcript_lines(&lines), "1915  31:55  See you tomorrow.\n3725  1:02:05  Bye.");
+        assert_eq!(
+            (clock(65), clock(3725)),
+            ("01:05".to_string(), "1:02:05".to_string())
+        );
+        let mut lines = vec![
+            line(1915, 1918, "See you tomorrow."),
+            line(3725, 3727, "Bye."),
+        ];
+        assert_eq!(
+            transcript_lines(&lines),
+            "1915  31:55  See you tomorrow.\n3725  1:02:05  Bye."
+        );
         lines[1].speaker = Some("Speaker 1".into());
         assert_eq!(
             transcript_lines(&lines),
@@ -641,10 +742,19 @@ mod tests {
             black_from: Some(1925),
             lines: &lines,
         });
-        assert!(text.starts_with("Lecture: Lecture 12\nCourse: COMP30026\nRecording length: 38:10 (2290 s)\n"));
-        assert!(text.contains("The projector goes black from 32:05 (1925) to the end of the recording.\n"));
+        assert!(text.starts_with(
+            "Lecture: Lecture 12\nCourse: COMP30026\nRecording length: 38:10 (2290 s)\n"
+        ));
+        assert!(text
+            .contains("The projector goes black from 32:05 (1925) to the end of the recording.\n"));
         assert!(text.contains("1899  31:39  and I'll see you all on Thursday."));
-        let bare = prompt(&Prompt { title: "T", code: None, length: 600, black_from: None, lines: &lines });
+        let bare = prompt(&Prompt {
+            title: "T",
+            code: None,
+            length: 600,
+            black_from: None,
+            lines: &lines,
+        });
         assert!(!bare.contains("Course:") && !bare.contains("projector"));
         assert!(bare.contains("The whole transcript:"));
     }
@@ -659,10 +769,26 @@ mod tests {
     #[test]
     fn a_black_run_counts_only_to_the_end_and_after_real_picture() {
         assert_eq!(black_tail(&luma(500, 400, 0)), Tail::Black(500));
-        assert_eq!(black_tail(&luma(0, 900, 0)), Tail::Dead, "black from the window's start");
-        assert_eq!(black_tail(&luma(30, 870, 0)), Tail::Dead, "too little picture before it");
-        assert_eq!(black_tail(&luma(860, 40, 0)), Tail::Picture, "too short to be the projector off");
-        assert_eq!(black_tail(&luma(400, 300, 200)), Tail::Picture, "picture comes back");
+        assert_eq!(
+            black_tail(&luma(0, 900, 0)),
+            Tail::Dead,
+            "black from the window's start"
+        );
+        assert_eq!(
+            black_tail(&luma(30, 870, 0)),
+            Tail::Dead,
+            "too little picture before it"
+        );
+        assert_eq!(
+            black_tail(&luma(860, 40, 0)),
+            Tail::Picture,
+            "too short to be the projector off"
+        );
+        assert_eq!(
+            black_tail(&luma(400, 300, 200)),
+            Tail::Picture,
+            "picture comes back"
+        );
         assert_eq!(black_tail(&luma(900, 0, 0)), Tail::Picture);
         assert_eq!(black_tail(&[]), Tail::Dead);
     }
@@ -670,17 +796,39 @@ mod tests {
     #[test]
     fn replies_parse_through_fences_prose_floats_and_nulls() {
         let fenced = "```json\n{\"ends_at\": 1895, \"quote\": \"that's it for today\"}\n```";
-        assert_eq!(parse_reply(fenced).unwrap(), reply(Some(1895.0), Some("that's it for today")));
+        assert_eq!(
+            parse_reply(fenced).unwrap(),
+            reply(Some(1895.0), Some("that's it for today"))
+        );
         let prose = "Looking at the tail, the lecturer wraps up here:\n{\"ends_at\": 1895.0, \"quote\": \"thank you\"} — after that it is Q&A.";
-        assert_eq!(parse_reply(prose).unwrap(), reply(Some(1895.0), Some("thank you")));
-        assert_eq!(parse_reply("{\"ends_at\": \"1899\", \"quote\": \"see you\"}").unwrap().ends_at, Some(1899.0));
-        assert_eq!(parse_reply("{\"ends_at\": \"1911 31:51\", \"quote\": \"see you\"}").unwrap().ends_at, Some(1911.0));
+        assert_eq!(
+            parse_reply(prose).unwrap(),
+            reply(Some(1895.0), Some("thank you"))
+        );
+        assert_eq!(
+            parse_reply("{\"ends_at\": \"1899\", \"quote\": \"see you\"}")
+                .unwrap()
+                .ends_at,
+            Some(1899.0)
+        );
+        assert_eq!(
+            parse_reply("{\"ends_at\": \"1911 31:51\", \"quote\": \"see you\"}")
+                .unwrap()
+                .ends_at,
+            Some(1911.0)
+        );
         assert_eq!(
             parse_reply("{\"result\": {\"ends_at\": 12.5, \"quote\": \"bye\"}}").unwrap(),
             reply(Some(12.5), Some("bye"))
         );
-        assert_eq!(parse_reply("{\"ends_at\": null, \"quote\": null}").unwrap(), reply(None, None));
-        assert_eq!(parse_reply("{\"ends_at\": null}").unwrap(), reply(None, None));
+        assert_eq!(
+            parse_reply("{\"ends_at\": null, \"quote\": null}").unwrap(),
+            reply(None, None)
+        );
+        assert_eq!(
+            parse_reply("{\"ends_at\": null}").unwrap(),
+            reply(None, None)
+        );
         assert!(parse_reply("The lecture ends at 31:35.").is_err());
         assert!(parse_reply("{\"start\": 3}").is_err());
     }
@@ -689,8 +837,17 @@ mod tests {
     fn validation_takes_the_end_of_the_cited_line() {
         let lines = sign_off();
         let found = validate(&reply(Some(1895.0), Some("That's it for today")), &lines).unwrap();
-        assert_eq!(found, Some(Found { cue_start: 1895, end: 1899, quote: "That's it for today".into() }));
-        let rounded = validate(&reply(Some(1895.4), Some("thank you")), &lines).unwrap().unwrap();
+        assert_eq!(
+            found,
+            Some(Found {
+                cue_start: 1895,
+                end: 1899,
+                quote: "That's it for today".into()
+            })
+        );
+        let rounded = validate(&reply(Some(1895.4), Some("thank you")), &lines)
+            .unwrap()
+            .unwrap();
         assert_eq!(rounded.end, 1899);
         assert_eq!(validate(&reply(None, None), &lines).unwrap(), None);
     }
@@ -698,12 +855,20 @@ mod tests {
     #[test]
     fn a_quote_running_into_the_next_line_ends_with_that_line() {
         let lines = sign_off();
-        let found = validate(&reply(Some(1895.0), Some("thank you, and I'll see you all")), &lines)
-            .unwrap()
-            .unwrap();
+        let found = validate(
+            &reply(Some(1895.0), Some("thank you, and I'll see you all")),
+            &lines,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!((found.cue_start, found.end), (1895, 1902));
         // Two cues share second 1899: one ends there, one starts there.
-        let shared = validate(&reply(Some(1899.0), Some("see you all on Thursday")), &lines).unwrap().unwrap();
+        let shared = validate(
+            &reply(Some(1899.0), Some("see you all on Thursday")),
+            &lines,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!((shared.cue_start, shared.end), (1899, 1902));
     }
 
@@ -711,7 +876,9 @@ mod tests {
     fn validation_rejects_what_the_transcript_does_not_say() {
         let mut lines = sign_off();
         // A second beside the quoted line still finds it: the quote is the evidence.
-        let beside = validate(&reply(Some(1890.0), Some("that's it for today")), &lines).unwrap().unwrap();
+        let beside = validate(&reply(Some(1890.0), Some("that's it for today")), &lines)
+            .unwrap()
+            .unwrap();
         assert_eq!((beside.cue_start, beside.end), (1895, 1899));
         let wrong = validate(&reply(Some(1895.0), Some("see you next week")), &lines).unwrap_err();
         assert!(wrong.contains("not in the transcript near 1895"), "{wrong}");
@@ -731,7 +898,10 @@ mod tests {
     fn a_rejected_reply_is_asked_again_once_with_the_reason() {
         let lines = sign_off();
         let mut seen: Vec<String> = Vec::new();
-        let replies = ["{\"ends_at\": 1895, \"quote\": \"see you next week\"}", "{\"ends_at\": 1895, \"quote\": \"thank you\"}"];
+        let replies = [
+            "{\"ends_at\": 1895, \"quote\": \"see you next week\"}",
+            "{\"ends_at\": 1895, \"quote\": \"thank you\"}",
+        ];
         let found = ask(
             |text| {
                 seen.push(text.to_string());
@@ -743,7 +913,13 @@ mod tests {
         .unwrap();
         assert_eq!(found.map(|f| f.end), Some(1899));
         assert_eq!(seen.len(), 2);
-        assert!(seen[1].starts_with("PROMPT\nYour previous reply was rejected: the quote \"see you next week\" is not"), "{}", seen[1]);
+        assert!(
+            seen[1].starts_with(
+                "PROMPT\nYour previous reply was rejected: the quote \"see you next week\" is not"
+            ),
+            "{}",
+            seen[1]
+        );
 
         let twice = ask(|_| Ok("no idea".to_string()), "PROMPT", &lines).unwrap_err();
         assert!(twice.starts_with("the reply was rejected twice"), "{twice}");
@@ -756,7 +932,11 @@ mod tests {
             "PROMPT",
             &lines,
         );
-        assert_eq!((down, calls), (Err("not signed in".to_string()), 1), "a provider failure is not retried");
+        assert_eq!(
+            (down, calls),
+            (Err("not signed in".to_string()), 1),
+            "a provider failure is not retried"
+        );
     }
 
     #[test]

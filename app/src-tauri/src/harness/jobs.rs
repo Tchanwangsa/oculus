@@ -86,7 +86,10 @@ pub fn default_selection(job: Job) -> JobSelection {
 /// The job's configured selection, or its default when anything about the
 /// stored row is unreadable.
 pub async fn selection(pool: &SqlitePool, job: Job) -> JobSelection {
-    let stored = crate::store::setting(pool, SETTINGS_KEY).await.ok().flatten();
+    let stored = crate::store::setting(pool, SETTINGS_KEY)
+        .await
+        .ok()
+        .flatten();
     stored
         .as_deref()
         .and_then(|raw| from_json(raw, job))
@@ -156,10 +159,16 @@ mod tests {
     #[test]
     fn the_defaults_are_the_ones_the_cli_shipped_with() {
         let c = default_selection(Job::LectureChapters);
-        assert_eq!((c.provider, c.model.as_str(), c.effort()), (Provider::Codex, "gpt-5.6-luna", Some("xhigh")));
+        assert_eq!(
+            (c.provider, c.model.as_str(), c.effort()),
+            (Provider::Codex, "gpt-5.6-luna", Some("xhigh"))
+        );
         let n = default_selection(Job::ThreadNaming);
         assert_eq!(n.provider, Provider::Claude);
-        assert_eq!((n.model.as_str(), n.effort()), ("claude-haiku-4-5-20251001", None));
+        assert_eq!(
+            (n.model.as_str(), n.effort()),
+            ("claude-haiku-4-5-20251001", None)
+        );
         let e = default_selection(Job::LectureEnd);
         assert_eq!(
             (e.provider, e.model.as_str(), e.effort()),
@@ -177,7 +186,10 @@ mod tests {
     fn document_suggestions_have_their_own_registry_key() {
         let body = r#"{"documentSuggestions":{"provider":"opencode","model":"openrouter/x","reasoningEffort":null}}"#;
         let s = from_json(body, Job::DocumentSuggestions).expect("the suggestions key resolves");
-        assert_eq!((s.provider, s.model.as_str()), (Provider::Opencode, "openrouter/x"));
+        assert_eq!(
+            (s.provider, s.model.as_str()),
+            (Provider::Opencode, "openrouter/x")
+        );
         assert!(from_json(body, Job::ThreadNaming).is_none());
     }
 }

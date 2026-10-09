@@ -97,7 +97,11 @@ mod tests {
     #[test]
     fn empty_keys_are_rejected_before_probing_or_touching_the_keychain() {
         let key = Secret::new("test-unused", "test-unused");
-        assert_eq!(key.store_checked(" \n\t ", |_| panic!("must not probe")).unwrap_err(), "empty key");
+        assert_eq!(
+            key.store_checked(" \n\t ", |_| panic!("must not probe"))
+                .unwrap_err(),
+            "empty key"
+        );
     }
 
     #[test]

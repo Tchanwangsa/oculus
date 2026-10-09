@@ -37,12 +37,19 @@ impl AgentPrinter {
             }
         };
         match ev {
-            HarnessEvent::SessionStarted { provider_session_id, model, cwd } => {
+            HarnessEvent::SessionStarted {
+                provider_session_id,
+                model,
+                cwd,
+            } => {
                 let _ = writeln!(
                     out,
                     "{} session {provider_session_id}{} in {cwd}",
                     paint("·", DIM),
-                    model.as_ref().map(|m| format!(" ({m})")).unwrap_or_default()
+                    model
+                        .as_ref()
+                        .map(|m| format!(" ({m})"))
+                        .unwrap_or_default()
                 );
             }
             HarnessEvent::AssistantDelta { text } => {
@@ -58,7 +65,10 @@ impl AgentPrinter {
                     let _ = writeln!(
                         out,
                         "{}",
-                        paint(&format!("  · replied ({} chars)", text.chars().count()), DIM)
+                        paint(
+                            &format!("  · replied ({} chars)", text.chars().count()),
+                            DIM
+                        )
                     );
                 }
             }
@@ -76,7 +86,11 @@ impl AgentPrinter {
                 let mark = if *ok { "✓" } else { "✗" };
                 let _ = writeln!(out, "{}", paint(&format!("    {mark} {first}"), DIM));
             }
-            HarnessEvent::Usage { context_tokens, cost_usd, .. } => {
+            HarnessEvent::Usage {
+                context_tokens,
+                cost_usd,
+                ..
+            } => {
                 end_line(&mut mid, &mut out);
                 let mut s = String::from("  usage:");
                 if let Some(c) = context_tokens {
@@ -92,17 +106,29 @@ impl AgentPrinter {
                     .iter()
                     .map(|w| format!("{} {:.0}%", w.label, w.used_percent))
                     .collect();
-                let _ = writeln!(out, "{}", paint(&format!("  limits: {}", parts.join(", ")), DIM));
+                let _ = writeln!(
+                    out,
+                    "{}",
+                    paint(&format!("  limits: {}", parts.join(", ")), DIM)
+                );
             }
             HarnessEvent::Error { message, .. } => {
                 end_line(&mut mid, &mut out);
                 let _ = writeln!(out, "{} {message}", paint("error:", RED));
             }
             // Antigravity refused; the turn ends here.
-            HarnessEvent::PermissionNeeded { action, target, rule, .. } => {
+            HarnessEvent::PermissionNeeded {
+                action,
+                target,
+                rule,
+                ..
+            } => {
                 end_line(&mut mid, &mut out);
                 let what = target.as_deref().unwrap_or(action.as_str());
-                let hint = rule.as_deref().map(|r| format!(" — allow {r}")).unwrap_or_default();
+                let hint = rule
+                    .as_deref()
+                    .map(|r| format!(" — allow {r}"))
+                    .unwrap_or_default();
                 let _ = writeln!(out, "{} {what}{hint}", paint("refused:", RED));
             }
             HarnessEvent::TurnFinished { status } => {
@@ -162,7 +188,11 @@ impl Reporter for TermReporter {
             String::new()
         };
         // The course is already the section header, so drop `courses/CODE/`.
-        let short = f.relative_path.splitn(3, '/').nth(2).unwrap_or(&f.relative_path);
+        let short = f
+            .relative_path
+            .splitn(3, '/')
+            .nth(2)
+            .unwrap_or(&f.relative_path);
         // Pad before painting: escape codes count toward a width specifier.
         println!(
             "  {} {}  {short:<52} {}",
@@ -175,7 +205,11 @@ impl Reporter for TermReporter {
     }
 
     fn file_failed(&self, f: &sync::FileFailed) {
-        let short = f.relative_path.splitn(3, '/').nth(2).unwrap_or(&f.relative_path);
+        let short = f
+            .relative_path
+            .splitn(3, '/')
+            .nth(2)
+            .unwrap_or(&f.relative_path);
         eprintln!("  {} {short}: {}", paint("error", RED), f.error);
     }
 

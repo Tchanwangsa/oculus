@@ -26,10 +26,34 @@ pub struct Model {
 
 /// Worst to best transcription; "largest" below means latest in this list.
 pub const MODELS: [Model; 7] = [
-    Model { id: "tiny", label: "Tiny", file: "ggml-tiny.bin", bytes: 77_691_713, ram_bytes: 273_000_000 },
-    Model { id: "base", label: "Base", file: "ggml-base.bin", bytes: 147_951_465, ram_bytes: 388_000_000 },
-    Model { id: "small", label: "Small", file: "ggml-small.bin", bytes: 487_601_967, ram_bytes: 852_000_000 },
-    Model { id: "medium", label: "Medium", file: "ggml-medium.bin", bytes: 1_533_763_059, ram_bytes: 2_100_000_000 },
+    Model {
+        id: "tiny",
+        label: "Tiny",
+        file: "ggml-tiny.bin",
+        bytes: 77_691_713,
+        ram_bytes: 273_000_000,
+    },
+    Model {
+        id: "base",
+        label: "Base",
+        file: "ggml-base.bin",
+        bytes: 147_951_465,
+        ram_bytes: 388_000_000,
+    },
+    Model {
+        id: "small",
+        label: "Small",
+        file: "ggml-small.bin",
+        bytes: 487_601_967,
+        ram_bytes: 852_000_000,
+    },
+    Model {
+        id: "medium",
+        label: "Medium",
+        file: "ggml-medium.bin",
+        bytes: 1_533_763_059,
+        ram_bytes: 2_100_000_000,
+    },
     Model {
         id: "large-v3-turbo-q5_0",
         label: "Large v3 Turbo (quantised)",
@@ -44,7 +68,13 @@ pub const MODELS: [Model; 7] = [
         bytes: 1_624_555_275,
         ram_bytes: 2_000_000_000,
     },
-    Model { id: "large-v3", label: "Large v3", file: "ggml-large-v3.bin", bytes: 3_095_033_483, ram_bytes: 3_900_000_000 },
+    Model {
+        id: "large-v3",
+        label: "Large v3",
+        file: "ggml-large-v3.bin",
+        bytes: 3_095_033_483,
+        ram_bytes: 3_900_000_000,
+    },
 ];
 
 /// Near large-v3's accuracy at a fifth of its size, and several times faster.
@@ -58,7 +88,8 @@ const MODEL_BASE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/m
 /// Silero voice-activity detection for whisper.cpp, under 1 MB; fetched with
 /// the first model so a run can skip silence.
 pub const VAD_FILE: &str = "ggml-silero-v6.2.0.bin";
-const VAD_URL: &str = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin";
+const VAD_URL: &str =
+    "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin";
 
 /// Where the models are kept.
 pub fn dir() -> PathBuf {
@@ -93,8 +124,14 @@ pub enum Fit {
 /// large models decode slowly — else `tiny`. Every other model is ok.
 pub fn fits(total: u64, gpu: bool) -> Vec<Fit> {
     let comfortable = |m: &Model| m.ram_bytes <= total / 4;
-    let cpu_cap = MODELS.iter().position(|m| m.id == SMALL_ON_CPU).unwrap_or(0);
-    let default = MODELS.iter().position(|m| m.id == DEFAULT_MODEL).unwrap_or(0);
+    let cpu_cap = MODELS
+        .iter()
+        .position(|m| m.id == SMALL_ON_CPU)
+        .unwrap_or(0);
+    let default = MODELS
+        .iter()
+        .position(|m| m.id == DEFAULT_MODEL)
+        .unwrap_or(0);
     let recommended = if gpu && comfortable(&MODELS[default]) {
         default
     } else {
@@ -213,7 +250,9 @@ pub fn pick(dir: &Path, chosen: Option<&str>) -> Result<PathBuf, String> {
         None => find(DEFAULT_MODEL)
             .and_then(on_disk)
             .or_else(|| MODELS.iter().rev().find_map(on_disk))
-            .ok_or_else(|| "no Whisper model is downloaded — download one in Settings → Transcription".into()),
+            .ok_or_else(|| {
+                "no Whisper model is downloaded — download one in Settings → Transcription".into()
+            }),
     }
 }
 
@@ -221,7 +260,12 @@ pub fn pick(dir: &Path, chosen: Option<&str>) -> Result<PathBuf, String> {
 static DOWNLOADS: Mutex<Option<HashMap<String, Arc<AtomicBool>>>> = Mutex::new(None);
 
 fn in_flight() -> Vec<String> {
-    DOWNLOADS.lock().unwrap().as_ref().map(|d| d.keys().cloned().collect()).unwrap_or_default()
+    DOWNLOADS
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|d| d.keys().cloned().collect())
+        .unwrap_or_default()
 }
 
 /// One download's place in [`DOWNLOADS`], released however it ends so a
@@ -281,8 +325,13 @@ fn download_from(
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let vad = dir.join(VAD_FILE);
     if !vad.is_file() {
-        fetch(vad_url, &vad, 0, &|_, _| {}, &cancelled)
-            .map_err(|e| if e == CANCELLED { e } else { format!("the voice-detection model: {e}") })?;
+        fetch(vad_url, &vad, 0, &|_, _| {}, &cancelled).map_err(|e| {
+            if e == CANCELLED {
+                e
+            } else {
+                format!("the voice-detection model: {e}")
+            }
+        })?;
     }
     let dest = dir.join(model.file);
     fetch(model_url, &dest, model.bytes, &progress, &cancelled)?;
@@ -311,10 +360,13 @@ fn fetch(
             ureq::Error::Status(status, _) => format!("Hugging Face answered {status} for {url}"),
             e => format!("could not reach Hugging Face: {e}"),
         })?;
-        let length = response.header("content-length").and_then(|s| s.parse::<u64>().ok());
+        let length = response
+            .header("content-length")
+            .and_then(|s| s.parse::<u64>().ok());
         let total = length.unwrap_or(expected);
         let mut reader = response.into_reader();
-        let mut file = std::fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
+        let mut file =
+            std::fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
         let mut buf = vec![0u8; 1 << 16];
         let mut received = 0u64;
         let mut last = Instant::now();
@@ -329,7 +381,8 @@ fn fetch(
             if n == 0 {
                 break;
             }
-            file.write_all(&buf[..n]).map_err(|e| format!("{}: {e}", part.display()))?;
+            file.write_all(&buf[..n])
+                .map_err(|e| format!("{}: {e}", part.display()))?;
             received += n as u64;
             if last.elapsed() >= Duration::from_millis(150) {
                 last = Instant::now();
@@ -337,9 +390,12 @@ fn fetch(
             }
         }
         if length.is_some_and(|length| received != length) {
-            return Err(format!("the download stopped at {received} of {total} bytes"));
+            return Err(format!(
+                "the download stopped at {received} of {total} bytes"
+            ));
         }
-        file.sync_all().map_err(|e| format!("{}: {e}", part.display()))?;
+        file.sync_all()
+            .map_err(|e| format!("{}: {e}", part.display()))?;
         drop(file);
         std::fs::rename(&part, dest).map_err(|e| format!("{}: {e}", dest.display()))?;
         progress(received, total);
@@ -379,11 +435,19 @@ mod tests {
     }
 
     fn recommended(total: u64, gpu: bool) -> &'static str {
-        fit_of(total, gpu).into_iter().find(|(_, f)| *f == Fit::Recommended).unwrap().0
+        fit_of(total, gpu)
+            .into_iter()
+            .find(|(_, f)| *f == Fit::Recommended)
+            .unwrap()
+            .0
     }
 
     fn too_large(total: u64, gpu: bool) -> Vec<&'static str> {
-        fit_of(total, gpu).into_iter().filter(|(_, f)| *f == Fit::TooLarge).map(|(id, _)| id).collect()
+        fit_of(total, gpu)
+            .into_iter()
+            .filter(|(_, f)| *f == Fit::TooLarge)
+            .map(|(id, _)| id)
+            .collect()
     }
 
     #[test]
@@ -392,7 +456,11 @@ mod tests {
             for gpu in [true, false] {
                 let fits = fits(total, gpu);
                 assert_eq!(fits.len(), MODELS.len());
-                assert_eq!(fits.iter().filter(|f| **f == Fit::Recommended).count(), 1, "{total} {gpu}");
+                assert_eq!(
+                    fits.iter().filter(|f| **f == Fit::Recommended).count(),
+                    1,
+                    "{total} {gpu}"
+                );
             }
         }
     }
@@ -408,7 +476,10 @@ mod tests {
     #[test]
     fn small_machines_fall_back_and_mark_what_will_not_fit() {
         assert_eq!(recommended(2 * GB, true), "base");
-        assert_eq!(too_large(2 * GB, true), vec!["medium", "large-v3-turbo", "large-v3"]);
+        assert_eq!(
+            too_large(2 * GB, true),
+            vec!["medium", "large-v3-turbo", "large-v3"]
+        );
         assert_eq!(too_large(4 * GB, true), vec!["large-v3"]);
         assert_eq!(recommended(GB / 2, true), "tiny");
     }
@@ -432,15 +503,24 @@ mod tests {
     #[test]
     fn a_run_uses_the_chosen_model_else_the_default_else_the_best_on_disk() {
         let dir = Scratch::new("whisper-pick");
-        assert!(pick(&dir, None).unwrap_err().contains("no Whisper model is downloaded"));
+        assert!(pick(&dir, None)
+            .unwrap_err()
+            .contains("no Whisper model is downloaded"));
         std::fs::write(dir.join("ggml-tiny.bin"), b"x").unwrap();
         std::fs::write(dir.join("ggml-small.bin"), b"x").unwrap();
         assert_eq!(pick(&dir, None).unwrap(), dir.join("ggml-small.bin"));
         std::fs::write(dir.join("ggml-large-v3-turbo-q5_0.bin"), b"x").unwrap();
-        assert_eq!(pick(&dir, None).unwrap(), dir.join("ggml-large-v3-turbo-q5_0.bin"));
+        assert_eq!(
+            pick(&dir, None).unwrap(),
+            dir.join("ggml-large-v3-turbo-q5_0.bin")
+        );
         assert_eq!(pick(&dir, Some("tiny")).unwrap(), dir.join("ggml-tiny.bin"));
-        assert!(pick(&dir, Some("medium")).unwrap_err().contains("Medium is not downloaded"));
-        assert!(pick(&dir, Some("huge")).unwrap_err().contains("no Whisper model called huge"));
+        assert!(pick(&dir, Some("medium"))
+            .unwrap_err()
+            .contains("Medium is not downloaded"));
+        assert!(pick(&dir, Some("huge"))
+            .unwrap_err()
+            .contains("no Whisper model called huge"));
     }
 
     #[test]
@@ -449,12 +529,21 @@ mod tests {
         std::fs::write(dir.join("ggml-base.bin"), b"x").unwrap();
         std::fs::write(dir.join("ggml-small.bin.part"), b"x").unwrap();
         let listed = list(&dir);
-        let downloaded: Vec<&str> = listed.models.iter().filter(|m| m.downloaded).map(|m| m.id).collect();
+        let downloaded: Vec<&str> = listed
+            .models
+            .iter()
+            .filter(|m| m.downloaded)
+            .map(|m| m.id)
+            .collect();
         assert_eq!(downloaded, vec!["base"]);
         assert!(!listed.vad_downloaded);
         let json = serde_json::to_value(&listed).unwrap();
         assert!(json["models"][0].get("ramBytes").is_some());
-        assert!(json["models"].as_array().unwrap().iter().any(|m| m["fit"] == "recommended"));
+        assert!(json["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["fit"] == "recommended"));
     }
 
     #[test]
@@ -485,9 +574,18 @@ mod tests {
         assert_eq!(seen.last(), Some(&(300_000, model.bytes)));
         // The VAD model is on disk now, so a second download skips it.
         std::fs::remove_file(&path).unwrap();
-        download_from(&dir, model, &format!("{}/model.bin", server.origin()), "http://unused.invalid", |_, _| {})
-            .unwrap();
-        assert_eq!(server.hits().iter().filter(|h| h.url == "/vad.bin").count(), 1);
+        download_from(
+            &dir,
+            model,
+            &format!("{}/model.bin", server.origin()),
+            "http://unused.invalid",
+            |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(
+            server.hits().iter().filter(|h| h.url == "/vad.bin").count(),
+            1
+        );
     }
 
     #[test]

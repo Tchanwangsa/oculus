@@ -68,7 +68,10 @@ struct WaitNotice<'a> {
 
 impl<'a> WaitNotice<'a> {
     fn new(on_wait: &'a dyn Fn(Option<Wait>)) -> Self {
-        Self { on_wait, shown_until_ms: None }
+        Self {
+            on_wait,
+            shown_until_ms: None,
+        }
     }
 
     /// Reported unless it ends within the threshold of the one already shown.
@@ -317,11 +320,12 @@ impl VoyageCloud {
         let mut notice = WaitNotice::new(on_wait);
 
         while retry.attempts_left() {
-            self.gate.admit_reporting(cost.tokens, &mut |wait, limiter| {
-                if wait > REPORTED_WAIT {
-                    notice.show(Wait::after(wait, limiter));
-                }
-            });
+            self.gate
+                .admit_reporting(cost.tokens, &mut |wait, limiter| {
+                    if wait > REPORTED_WAIT {
+                        notice.show(Wait::after(wait, limiter));
+                    }
+                });
             notice.clear();
             let response = match self.post(&encoded) {
                 Ok(response) => response,
@@ -413,7 +417,9 @@ impl VoyageCloud {
             // Not `Document`: that would fail the file for something transient.
             return Some(EmbedError::Offline(format!("http {status}")));
         }
-        Some(EmbedError::Document { code: format!("http-{status}") })
+        Some(EmbedError::Document {
+            code: format!("http-{status}"),
+        })
     }
 }
 
@@ -443,29 +449,42 @@ fn decode_response(payload: &Value, expected: usize) -> Result<Vec<Vec<f32>>, Em
     let data = payload
         .get("data")
         .and_then(Value::as_array)
-        .ok_or(EmbedError::Document { code: "invalid-response".into() })?;
+        .ok_or(EmbedError::Document {
+            code: "invalid-response".into(),
+        })?;
     if data.len() != expected {
-        return Err(EmbedError::Document { code: "embedding-count-mismatch".into() });
+        return Err(EmbedError::Document {
+            code: "embedding-count-mismatch".into(),
+        });
     }
 
     let mut slots: Vec<Option<Vec<f32>>> = vec![None; expected];
     for (position, item) in data.iter().enumerate() {
-        let index = item.get("index").and_then(Value::as_u64).unwrap_or(position as u64) as usize;
-        let slot = slots
-            .get_mut(index)
-            .ok_or(EmbedError::Document { code: "embedding-index-out-of-range".into() })?;
+        let index = item
+            .get("index")
+            .and_then(Value::as_u64)
+            .unwrap_or(position as u64) as usize;
+        let slot = slots.get_mut(index).ok_or(EmbedError::Document {
+            code: "embedding-index-out-of-range".into(),
+        })?;
         if slot.is_some() {
-            return Err(EmbedError::Document { code: "embedding-index-repeated".into() });
+            return Err(EmbedError::Document {
+                code: "embedding-index-repeated".into(),
+            });
         }
-        *slot = Some(decode_embedding(
-            item.get("embedding").ok_or(EmbedError::Document {
+        *slot = Some(decode_embedding(item.get("embedding").ok_or(
+            EmbedError::Document {
                 code: "embedding-missing".into(),
-            })?,
-        )?);
+            },
+        )?)?);
     }
     slots
         .into_iter()
-        .map(|slot| slot.ok_or(EmbedError::Document { code: "embedding-missing".into() }))
+        .map(|slot| {
+            slot.ok_or(EmbedError::Document {
+                code: "embedding-missing".into(),
+            })
+        })
         .collect()
 }
 
@@ -477,9 +496,13 @@ fn decode_embedding(value: &Value) -> Result<Vec<f32>, EmbedError> {
         Value::String(encoded) => {
             let raw = base64::engine::general_purpose::STANDARD
                 .decode(encoded.trim())
-                .map_err(|_| EmbedError::Document { code: "embedding-not-base64".into() })?;
+                .map_err(|_| EmbedError::Document {
+                    code: "embedding-not-base64".into(),
+                })?;
             if raw.len() % 4 != 0 {
-                return Err(EmbedError::Document { code: "embedding-not-f32".into() });
+                return Err(EmbedError::Document {
+                    code: "embedding-not-f32".into(),
+                });
             }
             Ok(raw
                 .chunks_exact(4)
@@ -492,10 +515,14 @@ fn decode_embedding(value: &Value) -> Result<Vec<f32>, EmbedError> {
                 number
                     .as_f64()
                     .map(|value| value as f32)
-                    .ok_or(EmbedError::Document { code: "embedding-not-numeric".into() })
+                    .ok_or(EmbedError::Document {
+                        code: "embedding-not-numeric".into(),
+                    })
             })
             .collect(),
-        _ => Err(EmbedError::Document { code: "embedding-wrong-type".into() }),
+        _ => Err(EmbedError::Document {
+            code: "embedding-wrong-type".into(),
+        }),
     }
 }
 
@@ -518,8 +545,10 @@ impl RequestRun for VoyageCloud {
         pages: &[RenderedPage],
         on_wait: &dyn Fn(Option<Wait>),
     ) -> Result<Vec<Vec<f32>>, EmbedError> {
-        let costs: Vec<u64> =
-            pages.iter().map(|page| batch::tokens_for(page.width, page.height)).collect();
+        let costs: Vec<u64> = pages
+            .iter()
+            .map(|page| batch::tokens_for(page.width, page.height))
+            .collect();
         let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(pages.len());
         let mut offset = 0;
 
@@ -540,9 +569,17 @@ impl RequestRun for VoyageCloud {
             }
 
             let chunk = &pages[offset..end];
-            let cost =
-                Cost { tokens: spent, pixels: chunk.iter().map(batch::billed_pixels).sum() };
-            match self.send(image_inputs(chunk), INPUT_TYPE_DOCUMENT, chunk.len(), cost, on_wait) {
+            let cost = Cost {
+                tokens: spent,
+                pixels: chunk.iter().map(batch::billed_pixels).sum(),
+            };
+            match self.send(
+                image_inputs(chunk),
+                INPUT_TYPE_DOCUMENT,
+                chunk.len(),
+                cost,
+                on_wait,
+            ) {
                 Ok(part) => {
                     vectors.extend(part);
                     offset = end;
@@ -567,7 +604,9 @@ impl Embedder for VoyageCloud {
         // before a pixel is billed rather than file vectors under wrong pages.
         let theirs = raster::page_count(pdf)?;
         if page_count > 0 && theirs != page_count {
-            return Err(EmbedError::Document { code: "page-count-mismatch".into() });
+            return Err(EmbedError::Document {
+                code: "page-count-mismatch".into(),
+            });
         }
         let expected = if page_count > 0 { page_count } else { theirs };
 
@@ -581,7 +620,9 @@ impl Embedder for VoyageCloud {
         // so drifted page numbers would otherwise leave one short.
         let output = EmbedOutput::new(pdf, expected, pages);
         if output.page_count as u32 != expected {
-            return Err(EmbedError::Document { code: "incomplete".into() });
+            return Err(EmbedError::Document {
+                code: "incomplete".into(),
+            });
         }
         Ok(output)
     }
@@ -589,19 +630,28 @@ impl Embedder for VoyageCloud {
     fn embed_query(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
         let text = text.trim();
         if text.is_empty() {
-            return Err(EmbedError::Document { code: "empty-query".into() });
+            return Err(EmbedError::Document {
+                code: "empty-query".into(),
+            });
         }
         // ~4 characters a token, only to pace and reserve; the response's
         // `usage.total_tokens` settles it.
-        let cost = Cost { tokens: (text.len() as u64 / 4) + 1, pixels: 0 };
+        let cost = Cost {
+            tokens: (text.len() as u64 / 4) + 1,
+            pixels: 0,
+        };
         let inputs = json!([{ "content": [{ "type": "text", "text": text }] }]);
-        let vectors = self.send(inputs, INPUT_TYPE_QUERY, 1, cost, &|_| {}).map_err(|failure| {
-            match failure {
-                SendFailure::Embed(error) => error,
-                // Unreachable: `send` only resizes multi-input requests.
-                SendFailure::Resize => EmbedError::RateLimited { retry_after_secs: None },
-            }
-        })?;
+        let vectors = self
+            .send(inputs, INPUT_TYPE_QUERY, 1, cost, &|_| {})
+            .map_err(|failure| {
+                match failure {
+                    SendFailure::Embed(error) => error,
+                    // Unreachable: `send` only resizes multi-input requests.
+                    SendFailure::Resize => EmbedError::RateLimited {
+                        retry_after_secs: None,
+                    },
+                }
+            })?;
         let raw = vectors.into_iter().next().ok_or(EmbedError::Document {
             code: "embedding-missing".into(),
         })?;
@@ -650,7 +700,11 @@ mod tests {
             .unwrap()
             .with_ledger(ledger.clone())
             // A private gate so one test cannot pace another.
-            .with_gate(Arc::new(RateGate::with_pace(ledger, Duration::from_secs(3_600), TEST_PACE)))
+            .with_gate(Arc::new(RateGate::with_pace(
+                ledger,
+                Duration::from_secs(3_600),
+                TEST_PACE,
+            )))
             .with_time_scale(0.002)
     }
 
@@ -703,8 +757,18 @@ mod tests {
         let client = client(&fake, &scratch);
 
         let pages = vec![
-            RenderedPage { page_no: 1, width: 100, height: 100, png: b"\x89PNGone".to_vec() },
-            RenderedPage { page_no: 2, width: 100, height: 100, png: b"\x89PNGtwo".to_vec() },
+            RenderedPage {
+                page_no: 1,
+                width: 100,
+                height: 100,
+                png: b"\x89PNGone".to_vec(),
+            },
+            RenderedPage {
+                page_no: 2,
+                width: 100,
+                height: 100,
+                png: b"\x89PNGtwo".to_vec(),
+            },
         ];
         let vectors = client.run(&pages, &|_| {}).unwrap();
         assert_eq!(vectors.len(), 2);
@@ -722,10 +786,16 @@ mod tests {
         let first = &body["inputs"][0]["content"][0];
         assert_eq!(first["type"], "image_base64");
         assert!(
-            first["image_base64"].as_str().unwrap().starts_with("data:image/png;base64,"),
+            first["image_base64"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,"),
             "{first}"
         );
-        assert_eq!(hit.header("authorization"), Some(format!("Bearer {TEST_KEY}").as_str()));
+        assert_eq!(
+            hit.header("authorization"),
+            Some(format!("Bearer {TEST_KEY}").as_str())
+        );
     }
 
     #[test]
@@ -749,7 +819,9 @@ mod tests {
     #[test]
     fn base64_is_f32_little_endian_at_two_thousand_and_forty_eight_bytes() {
         let encoded = wire_vector(0);
-        let raw = base64::engine::general_purpose::STANDARD.decode(&encoded).unwrap();
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(&encoded)
+            .unwrap();
         assert_eq!(raw.len(), 2_048);
         assert_eq!(raw.len(), EMBED_DIM * 4);
 
@@ -759,7 +831,11 @@ mod tests {
         assert_eq!(decoded[1], (31.0 - 48.0) / 64.0);
 
         // Decoding must not normalise; that is `pack_vector`'s job.
-        let norm = decoded.iter().map(|value| value * value).sum::<f32>().sqrt();
+        let norm = decoded
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
         assert!(norm > 2.0, "decode must not normalise: {norm}");
     }
 
@@ -792,8 +868,14 @@ mod tests {
             ],
         });
         let vectors = decode_response(&payload, 2).unwrap();
-        assert_eq!(vectors[0], decode_embedding(&json!(wire_vector(0))).unwrap());
-        assert_eq!(vectors[1], decode_embedding(&json!(wire_vector(11))).unwrap());
+        assert_eq!(
+            vectors[0],
+            decode_embedding(&json!(wire_vector(0))).unwrap()
+        );
+        assert_eq!(
+            vectors[1],
+            decode_embedding(&json!(wire_vector(11))).unwrap()
+        );
 
         // Short, repeated and out-of-range answers are refused.
         assert!(decode_response(&payload, 3).is_err());
@@ -826,8 +908,15 @@ mod tests {
         let error = client.embed_query("anything").unwrap_err();
         assert_eq!(error.kind(), "rejected_credentials");
         assert!(!error.retryable());
-        assert!(error.latching(), "every other file would hit the same rejection");
-        assert_eq!(fake.hits().len(), 1, "a rejected key cannot be retried into working");
+        assert!(
+            error.latching(),
+            "every other file would hit the same rejection"
+        );
+        assert_eq!(
+            fake.hits().len(),
+            1,
+            "a rejected key cannot be retried into working"
+        );
     }
 
     #[test]
@@ -837,28 +926,44 @@ mod tests {
         });
         let scratch = Scratch::new("voyage-expired");
         let error = client(&fake, &scratch).embed_query("x").unwrap_err();
-        assert!(matches!(error, EmbedError::RejectedCredentials { expired: true, .. }), "{error:?}");
+        assert!(
+            matches!(error, EmbedError::RejectedCredentials { expired: true, .. }),
+            "{error:?}"
+        );
     }
 
     #[test]
     fn money_latches_the_ledger_but_pace_does_not() {
         let fake = FakeServer::start(|_| {
-            Reply::status(403, json!({ "detail": "Your account has run out of credit." }))
+            Reply::status(
+                403,
+                json!({ "detail": "Your account has run out of credit." }),
+            )
         });
         let scratch = Scratch::new("voyage-credit");
         let ledger = Arc::new(UsageLedger::at(scratch.join("voyage-usage.json")));
         let client = VoyageCloud::new(&format!("{}/v1", fake.origin()), TEST_KEY)
             .unwrap()
             .with_ledger(ledger.clone())
-            .with_gate(Arc::new(RateGate::with_pace(ledger.clone(), Duration::from_secs(3_600), TEST_PACE)))
+            .with_gate(Arc::new(RateGate::with_pace(
+                ledger.clone(),
+                Duration::from_secs(3_600),
+                TEST_PACE,
+            )))
             .with_time_scale(0.002);
 
         let error = client.embed_query("x").unwrap_err();
         assert_eq!(error.kind(), "quota_exhausted");
         assert!(error.latching(), "every file draws on the same allowance");
-        assert!(error.retryable(), "and it repairs itself when the account is topped up");
+        assert!(
+            error.retryable(),
+            "and it repairs itself when the account is topped up"
+        );
         assert!(ledger.snapshot().latched());
-        assert!(matches!(ledger.ensure_available(0), Err(EmbedError::QuotaExhausted)));
+        assert!(matches!(
+            ledger.ensure_available(0),
+            Err(EmbedError::QuotaExhausted)
+        ));
     }
 
     #[test]
@@ -877,8 +982,11 @@ mod tests {
         });
         let scratch = Scratch::new("voyage-throttle");
         let ledger = Arc::new(UsageLedger::at(scratch.join("voyage-usage.json")));
-        let gate =
-            Arc::new(RateGate::with_pace(ledger.clone(), Duration::from_secs(3_600), TEST_PACE));
+        let gate = Arc::new(RateGate::with_pace(
+            ledger.clone(),
+            Duration::from_secs(3_600),
+            TEST_PACE,
+        ));
         let client = VoyageCloud::new(&format!("{}/v1", fake.origin()), TEST_KEY)
             .unwrap()
             .with_ledger(ledger.clone())
@@ -907,8 +1015,12 @@ mod tests {
         });
         let scratch = Scratch::new("voyage-wait-notice");
         let client = client(&fake, &scratch);
-        let pages =
-            vec![RenderedPage { page_no: 1, width: 100, height: 100, png: b"\x89PNG".to_vec() }];
+        let pages = vec![RenderedPage {
+            page_no: 1,
+            width: 100,
+            height: 100,
+            png: b"\x89PNG".to_vec(),
+        }];
 
         let before = Wait::after(Duration::ZERO, Limiter::Throttled).until_ms;
         let told = Mutex::new(Vec::new());
@@ -941,7 +1053,11 @@ mod tests {
         let client = VoyageCloud::new(&format!("{}/v1", fake.origin()), TEST_KEY)
             .unwrap()
             .with_ledger(ledger.clone())
-            .with_gate(Arc::new(RateGate::with_pace(ledger, Duration::from_secs(3_600), TEST_PACE)))
+            .with_gate(Arc::new(RateGate::with_pace(
+                ledger,
+                Duration::from_secs(3_600),
+                TEST_PACE,
+            )))
             .with_time_scale(0.000_02);
 
         let error = client.embed_query("x").unwrap_err();
@@ -1021,7 +1137,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(output.page_count, 5);
-        assert_eq!(output.pages.iter().map(|p| p.page_no).collect::<Vec<_>>(), vec![1, 2, 3, 4, 5]);
+        assert_eq!(
+            output.pages.iter().map(|p| p.page_no).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5]
+        );
         assert_eq!(output.model, EMBED_MODEL);
         assert_eq!(output.dim, EMBED_DIM);
         assert_eq!(fake.hits().len(), 3, "5 pages at 2 per request");
@@ -1057,7 +1176,10 @@ mod tests {
         });
         let error = client.embed(&pdf, 4, &|_| {}).unwrap_err();
         assert_eq!(error.kind(), "document");
-        assert!(!error.latching(), "one bad document must not condemn the run");
+        assert!(
+            !error.latching(),
+            "one bad document must not condemn the run"
+        );
         assert!(!crate::embed::emb_path(&pdf).exists());
     }
 
@@ -1082,8 +1204,11 @@ mod tests {
         write_a4_pdf(&pdf, 4);
 
         let ledger = Arc::new(UsageLedger::at(scratch.join("voyage-usage.json")));
-        let gate =
-            Arc::new(RateGate::with_pace(ledger.clone(), Duration::from_secs(3_600), TEST_PACE));
+        let gate = Arc::new(RateGate::with_pace(
+            ledger.clone(),
+            Duration::from_secs(3_600),
+            TEST_PACE,
+        ));
         let client = VoyageCloud::new(&format!("{}/v1", fake.origin()), TEST_KEY)
             .unwrap()
             .with_ledger(ledger.clone())
@@ -1093,9 +1218,14 @@ mod tests {
         // Packed optimistically into one over-TPM request.
         assert_eq!(client.max_tokens(), batch::MAX_TOKENS_PER_REQUEST);
 
-        let output = client.embed(&pdf, 4, &|_| {}).expect("the run must make progress");
+        let output = client
+            .embed(&pdf, 4, &|_| {})
+            .expect("the run must make progress");
         assert_eq!(output.page_count, 4);
-        assert_eq!(output.pages.iter().map(|p| p.page_no).collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+        assert_eq!(
+            output.pages.iter().map(|p| p.page_no).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4]
+        );
 
         assert_eq!(gate.tier().tpm, 10_000.0);
         assert_eq!(gate.tier().rpm, 3.0);
@@ -1130,7 +1260,10 @@ mod tests {
         // The parse record says four pages; pdfium finds three.
         let error = client(&fake, &scratch).embed(&pdf, 4, &|_| {}).unwrap_err();
         assert_eq!(error.kind(), "document");
-        assert!(format!("{error:?}").contains("page-count-mismatch"), "{error:?}");
+        assert!(
+            format!("{error:?}").contains("page-count-mismatch"),
+            "{error:?}"
+        );
         assert!(fake.hits().is_empty());
     }
 
@@ -1420,7 +1553,11 @@ mod tests {
             let vector = crate::embed::decode_vector(&page.vector).unwrap();
             assert_eq!(vector.len(), EMBED_DIM);
             let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();
-            assert!((norm - 1.0).abs() < 2e-3, "page {}: ‖v‖ = {norm}", page.page_no);
+            assert!(
+                (norm - 1.0).abs() < 2e-3,
+                "page {}: ‖v‖ = {norm}",
+                page.page_no
+            );
         }
     }
 }

@@ -76,7 +76,11 @@ impl TokenBucket {
             let refill = (want - state.tokens) / state.rate;
             on_wait(Duration::from_secs_f64(refill));
             let wait = Duration::from_secs_f64(refill.clamp(0.001, 60.0));
-            state = self.wake.wait_timeout(state, wait).unwrap_or_else(PoisonError::into_inner).0;
+            state = self
+                .wake
+                .wait_timeout(state, wait)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
         }
     }
 
@@ -97,7 +101,11 @@ impl TokenBucket {
         let mut state = hold(&self.state);
         state.capacity = per_minute;
         state.rate = per_minute / 60.0;
-        state.tokens = if drain { 0.0 } else { state.tokens.min(per_minute) };
+        state.tokens = if drain {
+            0.0
+        } else {
+            state.tokens.min(per_minute)
+        };
         state.updated = Instant::now();
         drop(state);
         self.wake.notify_all();
@@ -118,7 +126,10 @@ pub struct Permits {
 
 impl Permits {
     pub fn new(count: usize) -> Self {
-        Self { free: Mutex::new(count), wake: Condvar::new() }
+        Self {
+            free: Mutex::new(count),
+            wake: Condvar::new(),
+        }
     }
 
     pub fn acquire(&self) {
@@ -152,7 +163,12 @@ pub struct Retry {
 
 impl Retry {
     pub fn new(attempts: u32, time_scale: f64) -> Self {
-        Self { attempt: 0, attempts, delay: FIRST_RETRY, time_scale }
+        Self {
+            attempt: 0,
+            attempts,
+            delay: FIRST_RETRY,
+            time_scale,
+        }
     }
 
     pub fn attempts_left(&self) -> bool {
@@ -203,11 +219,17 @@ mod tests {
         for _ in 0..600 {
             bucket.acquire();
         }
-        assert!(start.elapsed() < Duration::from_millis(500), "a full bucket should not wait");
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "a full bucket should not wait"
+        );
 
         let paced = Instant::now();
         bucket.acquire();
-        assert!(paced.elapsed() >= Duration::from_millis(50), "an empty bucket must wait");
+        assert!(
+            paced.elapsed() >= Duration::from_millis(50),
+            "an empty bucket must wait"
+        );
     }
 
     #[test]
@@ -215,7 +237,11 @@ mod tests {
         let bucket = TokenBucket::new(6_000.0);
         let start = Instant::now();
         bucket.acquire_n(320_000.0);
-        assert!(start.elapsed() < Duration::from_millis(200), "{:?}", start.elapsed());
+        assert!(
+            start.elapsed() < Duration::from_millis(200),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     #[test]
@@ -226,17 +252,28 @@ mod tests {
         let start = Instant::now();
         bucket.acquire_n(100.0);
         // Drained: even a token has to be waited for.
-        assert!(start.elapsed() >= Duration::from_millis(500), "{:?}", start.elapsed());
+        assert!(
+            start.elapsed() >= Duration::from_millis(500),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     #[test]
     fn a_blocked_acquire_says_how_long_the_refill_takes_before_it_blocks() {
         let bucket = TokenBucket::new(6_000.0);
-        assert_eq!(bucket.shortfall(100.0), Duration::ZERO, "a full bucket owes nothing");
+        assert_eq!(
+            bucket.shortfall(100.0),
+            Duration::ZERO,
+            "a full bucket owes nothing"
+        );
         bucket.retune(6_000.0, true);
         // 100 a second: 50 tokens is half a second away.
         let owed = bucket.shortfall(50.0);
-        assert!(owed > Duration::from_millis(400) && owed <= Duration::from_millis(500), "{owed:?}");
+        assert!(
+            owed > Duration::from_millis(400) && owed <= Duration::from_millis(500),
+            "{owed:?}"
+        );
 
         let mut told = Vec::new();
         bucket.acquire_n_reporting(50.0, &mut |wait| told.push(wait));
@@ -257,7 +294,11 @@ mod tests {
     #[test]
     fn transport_detail_keeps_the_cause() {
         // A port nobody listens on: the cause is only in the source chain.
-        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
         let url = format!("http://127.0.0.1:{port}/secret?signature=x");
         let Err(ureq::Error::Transport(transport)) = ureq::get(&url).call() else {
             panic!("expected a transport error");

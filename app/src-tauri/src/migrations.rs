@@ -63,8 +63,7 @@ CREATE TABLE IF NOT EXISTS settings (
         },
         Migration {
             version: 2,
-            description:
-                "file metadata: category, source_url, canvas_id, modified_at",
+            description: "file metadata: category, source_url, canvas_id, modified_at",
             sql: r#"
 ALTER TABLE files ADD COLUMN category    TEXT;
 ALTER TABLE files ADD COLUMN source_url  TEXT;
@@ -798,18 +797,34 @@ UPDATE settings SET value = json_remove(value, '$.lectureReading')
 mod tests {
     #[test]
     fn versions_strictly_increase() {
-        let versions: Vec<i64> = super::all().iter().map(|migration| migration.version).collect();
-        assert!(versions.windows(2).all(|pair| pair[0] < pair[1]), "{versions:?}");
+        let versions: Vec<i64> = super::all()
+            .iter()
+            .map(|migration| migration.version)
+            .collect();
+        assert!(
+            versions.windows(2).all(|pair| pair[0] < pair[1]),
+            "{versions:?}"
+        );
     }
 
     #[test]
     fn applied_task_rebuild_sql_keeps_its_checksum() {
-        let migration = super::all().into_iter().find(|migration| migration.version == 37).unwrap();
+        let migration = super::all()
+            .into_iter()
+            .find(|migration| migration.version == 37)
+            .unwrap();
         let migration = sqlx::migrate::Migration::new(
-            migration.version, migration.description.into(),
-            sqlx::migrate::MigrationType::Simple, migration.sql.into(), false,
+            migration.version,
+            migration.description.into(),
+            sqlx::migrate::MigrationType::Simple,
+            migration.sql.into(),
+            false,
         );
-        let checksum: String = migration.checksum.iter().map(|byte| format!("{byte:02x}")).collect();
+        let checksum: String = migration
+            .checksum
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         assert_eq!(checksum, "5b74e95b4722a907975ca2d3987acc2450993baeb45734c2b327c92821c54bf18243b1ff91d7225967de9ec955470809",
             "SQL comments and whitespace are part of an applied migration's identity");
     }
@@ -818,17 +833,23 @@ mod tests {
     /// malformed registry passes through instead of failing the migration.
     #[tokio::test]
     async fn the_reading_copy_leaves_the_job_registry() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1)
-            .connect("sqlite::memory:").await.unwrap();
-        let (before, after): (Vec<_>, Vec<_>) =
-            super::all().into_iter().partition(|migration| migration.version < 43);
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let (before, after): (Vec<_>, Vec<_>) = super::all()
+            .into_iter()
+            .partition(|migration| migration.version < 43);
         for migration in before {
             sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
         }
         sqlx::query("INSERT INTO settings (key, value) VALUES ('job_models', ?1), ('other', ?2)")
             .bind(r#"{"lectureReading":{"model":"a"},"lectureEnd":{"model":"b"}}"#)
             .bind(r#"{"lectureReading":1}"#)
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         for migration in after {
             sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
         }
@@ -836,15 +857,27 @@ mod tests {
             let pool = pool.clone();
             async move {
                 sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = ?1")
-                    .bind(key).fetch_one(&pool).await.unwrap()
+                    .bind(key)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
             }
         };
         assert_eq!(value("job_models").await, r#"{"lectureEnd":{"model":"b"}}"#);
-        assert_eq!(value("other").await, r#"{"lectureReading":1}"#, "only the job registry");
+        assert_eq!(
+            value("other").await,
+            r#"{"lectureReading":1}"#,
+            "only the job registry"
+        );
 
         sqlx::query("UPDATE settings SET value = 'not json' WHERE key = 'job_models'")
-            .execute(&pool).await.unwrap();
-        let reading = super::all().into_iter().find(|migration| migration.version == 43).unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
+        let reading = super::all()
+            .into_iter()
+            .find(|migration| migration.version == 43)
+            .unwrap();
         let update = &reading.sql[reading.sql.find("UPDATE settings").unwrap()..];
         sqlx::raw_sql(update).execute(&pool).await.unwrap();
         assert_eq!(value("job_models").await, "not json");

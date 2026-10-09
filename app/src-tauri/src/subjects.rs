@@ -23,8 +23,10 @@ pub async fn sync_subjects(app: AppHandle) -> Result<(), String> {
         let engine = Engine::new(&data_dir, Box::new(Silent));
         match engine.list_courses() {
             Ok(courses) => {
-                let payload: Vec<serde_json::Value> =
-                    courses.iter().map(crate::sync::Course::to_canvas_json).collect();
+                let payload: Vec<serde_json::Value> = courses
+                    .iter()
+                    .map(crate::sync::Course::to_canvas_json)
+                    .collect();
                 let current = courses.iter().filter(|c| c.is_current).count();
                 eprintln!(
                     "[oculus] subjects: {} total, {current} current",

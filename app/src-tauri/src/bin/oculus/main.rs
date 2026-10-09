@@ -117,7 +117,9 @@ fn read_line(prompt: &str) -> Result<String, String> {
     print!("{prompt}");
     std::io::stdout().flush().ok();
     let mut line = String::new();
-    std::io::stdin().read_line(&mut line).map_err(|e| e.to_string())?;
+    std::io::stdin()
+        .read_line(&mut line)
+        .map_err(|e| e.to_string())?;
     Ok(line.trim().to_string())
 }
 
@@ -138,7 +140,10 @@ fn read_secret(prompt: &str) -> Result<String, String> {
     print!("{prompt}");
     std::io::stdout().flush().ok();
 
-    let hidden = std::process::Command::new("stty").arg("-echo").status().is_ok();
+    let hidden = std::process::Command::new("stty")
+        .arg("-echo")
+        .status()
+        .is_ok();
     let mut line = String::new();
     let read = std::io::stdin().read_line(&mut line);
     if hidden {
@@ -201,4 +206,3 @@ impl Ctx {
         }
     }
 }
-

@@ -26,17 +26,21 @@ pub(super) struct Apple {
 
 impl Apple {
     /// The engine as Settings has it, or why it cannot run here.
-    pub(super) fn configured(settings: &Settings, resource_dir: Option<PathBuf>) -> Result<Self, String> {
+    pub(super) fn configured(
+        settings: &Settings,
+        resource_dir: Option<PathBuf>,
+    ) -> Result<Self, String> {
         if !cfg!(target_os = "macos") {
             return Err("on-device speech is macOS only".into());
         }
         if !settings.apple {
-            return Err(
-                "on-device speech is turned off in Settings → Transcription".into(),
-            );
+            return Err("on-device speech is turned off in Settings → Transcription".into());
         }
         let helper = helper(resource_dir)?;
-        Ok(Self { helper, locale: settings.language.apple() })
+        Ok(Self {
+            helper,
+            locale: settings.language.apple(),
+        })
     }
 }
 
@@ -81,13 +85,16 @@ fn answer(code: Option<i32>, stdout: &str, stderr: &str) -> Result<Vec<Segment>,
     match code {
         Some(0) => Ok(cues(parse_reply(stdout)?)),
         Some(UNAVAILABLE) => Err(EngineError::NotConfigured(
-            said.unwrap_or("on-device speech is not available on this Mac").to_string(),
+            said.unwrap_or("on-device speech is not available on this Mac")
+                .to_string(),
         )),
         Some(code) => Err(EngineError::Failed(match said {
             Some(line) => line.to_string(),
             None => format!("the on-device speech helper exited with code {code}"),
         })),
-        None => Err(EngineError::Failed("the on-device speech helper was killed".into())),
+        None => Err(EngineError::Failed(
+            "the on-device speech helper was killed".into(),
+        )),
     }
 }
 
@@ -117,7 +124,11 @@ pub(super) fn parse_reply(body: &str) -> Result<Vec<Utterance>, EngineError> {
     }
     serde_json::from_str::<Reply>(body)
         .map(|reply| reply.segments)
-        .map_err(|e| EngineError::Failed(format!("on-device speech's reply was not a transcript: {e}")))
+        .map_err(|e| {
+            EngineError::Failed(format!(
+                "on-device speech's reply was not a transcript: {e}"
+            ))
+        })
 }
 
 pub(super) fn cues(utterances: Vec<Utterance>) -> Vec<Segment> {
@@ -129,7 +140,11 @@ pub(super) fn cues(utterances: Vec<Utterance>) -> Vec<Segment> {
 /// half of the window, else wherever leaves the pieces closest to even.
 /// No piece under [`MIN_CUE`] unless the words allow nothing else.
 fn split(utterance: &Utterance) -> Vec<Segment> {
-    let words: Vec<&Word> = utterance.words.iter().filter(|w| !w.text.trim().is_empty()).collect();
+    let words: Vec<&Word> = utterance
+        .words
+        .iter()
+        .filter(|w| !w.text.trim().is_empty())
+        .collect();
     if utterance.end - utterance.start <= MAX_CUE || words.len() < 2 {
         return vec![Segment {
             start: utterance.start,
@@ -149,8 +164,16 @@ fn split(utterance: &Utterance) -> Vec<Segment> {
         .iter()
         .enumerate()
         .map(|(k, &(from, to))| Segment {
-            start: if k == 0 { utterance.start.min(words[from].start) } else { words[from].start },
-            end: if k == last { utterance.end.max(words[to].end) } else { words[to].end },
+            start: if k == 0 {
+                utterance.start.min(words[from].start)
+            } else {
+                words[from].start
+            },
+            end: if k == last {
+                utterance.end.max(words[to].end)
+            } else {
+                words[to].end
+            },
             text: words[from..=to]
                 .iter()
                 .map(|w| w.text.trim())
@@ -194,7 +217,10 @@ fn cut_after(words: &[&Word]) -> usize {
 
 /// The word's last character, past any closing quote or bracket.
 fn final_mark(word: &str) -> Option<char> {
-    word.trim().chars().rev().find(|c| !matches!(c, '"' | '\'' | ')' | ']' | '”' | '’'))
+    word.trim()
+        .chars()
+        .rev()
+        .find(|c| !matches!(c, '"' | '\'' | ')' | ']' | '”' | '’'))
 }
 
 fn ends_sentence(word: &str) -> bool {
@@ -242,7 +268,9 @@ pub(super) fn status(resource_dir: Option<PathBuf>) -> Status {
     };
     let output = match Command::new(&helper).arg("locales").output() {
         Ok(output) => output,
-        Err(e) => return Status::unavailable(format!("could not run the on-device speech helper: {e}")),
+        Err(e) => {
+            return Status::unavailable(format!("could not run the on-device speech helper: {e}"))
+        }
     };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -250,7 +278,9 @@ pub(super) fn status(resource_dir: Option<PathBuf>) -> Status {
         return Status::unavailable(said.unwrap_or("the on-device speech helper failed"));
     }
     serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
-        Status::unavailable(format!("the on-device speech helper's reply was unreadable: {e}"))
+        Status::unavailable(format!(
+            "the on-device speech helper's reply was unreadable: {e}"
+        ))
     })
 }
 
@@ -259,7 +289,11 @@ mod tests {
     use super::*;
 
     fn word(start: f64, end: f64, text: &str) -> Word {
-        Word { start, end, text: text.into() }
+        Word {
+            start,
+            end,
+            text: text.into(),
+        }
     }
 
     /// Words of `step` seconds each, back to back from `start`.
@@ -269,7 +303,12 @@ mod tests {
             .enumerate()
             .map(|(i, w)| word(start + step * i as f64, start + step * (i + 1) as f64, w))
             .collect();
-        Utterance { start, end: words.last().unwrap().end, text: text.into(), words }
+        Utterance {
+            start,
+            end: words.last().unwrap().end,
+            text: text.into(),
+            words,
+        }
     }
 
     fn texts(segments: &[Segment]) -> Vec<&str> {
@@ -295,15 +334,35 @@ mod tests {
         );
         assert!(parse_reply(r#"{"segments":[]}"#).unwrap().is_empty());
         assert!(parse_reply("{}").unwrap().is_empty());
-        assert!(matches!(parse_reply("downloading"), Err(EngineError::Failed(_))));
+        assert!(matches!(
+            parse_reply("downloading"),
+            Err(EngineError::Failed(_))
+        ));
     }
 
     #[test]
     fn a_short_utterance_is_one_cue_with_its_own_times() {
-        let u = Utterance { start: 3.0, end: 9.5, text: " Hello there. ".into(), words: vec![] };
-        assert_eq!(cues(vec![u]), vec![Segment { start: 3.0, end: 9.5, text: "Hello there.".into() }]);
+        let u = Utterance {
+            start: 3.0,
+            end: 9.5,
+            text: " Hello there. ".into(),
+            words: vec![],
+        };
+        assert_eq!(
+            cues(vec![u]),
+            vec![Segment {
+                start: 3.0,
+                end: 9.5,
+                text: "Hello there.".into()
+            }]
+        );
         // Long, but with no word timings to cut on.
-        let u = Utterance { start: 0.0, end: 30.0, text: "a long one".into(), words: vec![] };
+        let u = Utterance {
+            start: 0.0,
+            end: 30.0,
+            text: "a long one".into(),
+            words: vec![],
+        };
         assert_eq!(texts(&cues(vec![u])), vec!["a long one"]);
     }
 
@@ -340,7 +399,9 @@ mod tests {
         let long = utterance(0.0, 0.5, &["w"; 60].join(" "));
         let pieces = cues(vec![long]);
         assert_eq!(pieces.len(), 5);
-        assert!(pieces.iter().all(|p| (MIN_CUE..=MAX_CUE).contains(&(p.end - p.start))));
+        assert!(pieces
+            .iter()
+            .all(|p| (MIN_CUE..=MAX_CUE).contains(&(p.end - p.start))));
     }
 
     #[test]
@@ -348,7 +409,10 @@ mod tests {
         // "done." at 6.5 s would leave a 1 s tail; the cut moves earlier.
         let u = utterance(0.0, 0.5, "a b c d e f g h i j k l done. m n");
         let pieces = cues(vec![u]);
-        assert!(pieces.iter().all(|p| p.end - p.start >= MIN_CUE), "{pieces:?}");
+        assert!(
+            pieces.iter().all(|p| p.end - p.start >= MIN_CUE),
+            "{pieces:?}"
+        );
         assert!(pieces.iter().all(|p| p.end - p.start <= MAX_CUE));
     }
 
@@ -381,10 +445,24 @@ mod tests {
             answer(Some(1), "", "downloading the speech model for en_US\nno such file: /x.ogg\n"),
             Err(EngineError::Failed(m)) if m == "no such file: /x.ogg"
         ));
-        assert!(matches!(answer(Some(1), "", ""), Err(EngineError::Failed(m)) if m.contains("code 1")));
+        assert!(
+            matches!(answer(Some(1), "", ""), Err(EngineError::Failed(m)) if m.contains("code 1"))
+        );
         assert!(matches!(answer(None, "", ""), Err(EngineError::Failed(_))));
-        let ok = answer(Some(0), r#"{"segments":[{"start":1,"end":2,"text":"Hi.","words":[]}]}"#, "").unwrap();
-        assert_eq!(ok, vec![Segment { start: 1.0, end: 2.0, text: "Hi.".into() }]);
+        let ok = answer(
+            Some(0),
+            r#"{"segments":[{"start":1,"end":2,"text":"Hi.","words":[]}]}"#,
+            "",
+        )
+        .unwrap();
+        assert_eq!(
+            ok,
+            vec![Segment {
+                start: 1.0,
+                end: 2.0,
+                text: "Hi.".into()
+            }]
+        );
     }
 
     #[cfg(unix)]
@@ -401,7 +479,10 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let apple = Apple { helper: script, locale: Some("en_AU".into()) };
+        let apple = Apple {
+            helper: script,
+            locale: Some("en_AU".into()),
+        };
         let found = apple.transcribe(Path::new("/tmp/audio.ogg")).unwrap();
         assert_eq!(found[0].text, "transcribe --locale en_AU /tmp/audio.ogg");
         assert_eq!(apple.max_upload_bytes(), None);

@@ -78,9 +78,7 @@ impl AntigravitySession {
         let expecting = Arc::new(AtomicBool::new(false));
         let session = Arc::new(AntigravitySession {
             proc,
-            pending_brief: Mutex::new(
-                (!cfg.brief.trim().is_empty()).then(|| cfg.brief.clone()),
-            ),
+            pending_brief: Mutex::new((!cfg.brief.trim().is_empty()).then(|| cfg.brief.clone())),
             interrupting: interrupting.clone(),
             expecting: expecting.clone(),
         });
@@ -98,9 +96,11 @@ impl AntigravitySession {
                     sink(ev);
                 }
             });
-            reader_session.proc.finish(&sink, Provider::Antigravity, || {
-                expecting.swap(false, Ordering::SeqCst) || state.turn_open
-            });
+            reader_session
+                .proc
+                .finish(&sink, Provider::Antigravity, || {
+                    expecting.swap(false, Ordering::SeqCst) || state.turn_open
+                });
         });
 
         Ok(session)
@@ -138,9 +138,11 @@ impl AntigravitySession {
     /// Refuses: agy 1.2.9 has no headless rewind (`/rewind` is not available
     /// in print mode), and the manager deletes rows on an `Ok`.
     pub fn rewind(&self, _anchor: &str) -> Result<(), String> {
-        Err("Antigravity cannot take a question back out of a conversation — \
+        Err(
+            "Antigravity cannot take a question back out of a conversation — \
              edit it in a new thread instead"
-            .into())
+                .into(),
+        )
     }
 
     pub fn kill(&self) {
@@ -222,7 +224,8 @@ impl Translator {
                         .into_iter()
                         .flatten()
                     {
-                        let field = |k: &str| d.get(k).and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let field =
+                            |k: &str| d.get(k).and_then(|s| s.as_str()).unwrap_or("").to_string();
                         out.push(HarnessEvent::PermissionNeeded {
                             tool: field("display_name"),
                             action: field("action"),
@@ -400,7 +403,10 @@ fn refusal(tool: &str, params: &Value, message: &str) -> (String, Option<String>
         });
     let by_tool = match tool {
         "run_command" => "command",
-        "write_to_file" | "replace_file_content" | "multi_replace_file_content" | "sed_file"
+        "write_to_file"
+        | "replace_file_content"
+        | "multi_replace_file_content"
+        | "sed_file"
         | "notebook_edit" => "write_file",
         "view_file" | "read_resource" | "list_dir" | "find_by_name" | "grep_search" => "read_file",
         "read_url_content" | "open_browser_url" => "read_url",
@@ -413,7 +419,14 @@ fn refusal(tool: &str, params: &Value, message: &str) -> (String, Option<String>
     let target = match action.as_str() {
         "command" => param(&["CommandLine", "Command"]),
         "read_url" => param(&["Url", "URL"]),
-        _ => param(&["TargetFile", "AbsolutePath", "DirectoryPath", "SearchDirectory", "SearchPath", "Path"]),
+        _ => param(&[
+            "TargetFile",
+            "AbsolutePath",
+            "DirectoryPath",
+            "SearchDirectory",
+            "SearchPath",
+            "Path",
+        ]),
     }
     .or_else(|| said.map(|(_, t)| t).filter(|t| !t.is_empty()));
     let rule = target.as_deref().and_then(|t| match action.as_str() {
@@ -421,7 +434,11 @@ fn refusal(tool: &str, params: &Value, message: &str) -> (String, Option<String>
         "write_file" | "read_file" => {
             // A folder is granted as itself; a file by the folder it is in.
             let p = std::path::Path::new(t);
-            let dir = if tool == "list_dir" || p.is_dir() { Some(p) } else { p.parent() };
+            let dir = if tool == "list_dir" || p.is_dir() {
+                Some(p)
+            } else {
+                p.parent()
+            };
             dir.filter(|d| d.is_absolute() && d.parent().is_some())
                 .map(|d| format!("{action}({})", d.display()))
         }
@@ -476,7 +493,10 @@ pub struct ModelInfo {
 
 /// What this account can use, off `agy models` — a listing, nothing billed.
 /// No `--json`, so lines are parsed (see [`parse_models`]).
-pub fn list_models(bin: &std::path::Path, env: &[(String, String)]) -> Result<Vec<ModelInfo>, String> {
+pub fn list_models(
+    bin: &std::path::Path,
+    env: &[(String, String)],
+) -> Result<Vec<ModelInfo>, String> {
     let out = run_models(bin, env)?;
     if !out.success {
         let said = [out.stderr.trim(), out.stdout.trim()]
@@ -667,7 +687,8 @@ fn display_name(slug: &str) -> String {
 fn is_slug(w: &str) -> bool {
     w.len() >= 3
         && w.contains('-')
-        && w.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
+        && w.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
         && w.chars().any(|c| c.is_ascii_alphanumeric())
 }
 
@@ -688,9 +709,11 @@ mod tests {
             .collect();
 
         let session = events.iter().find_map(|e| match e {
-            HarnessEvent::SessionStarted { provider_session_id, cwd, .. } => {
-                Some((provider_session_id.clone(), cwd.clone()))
-            }
+            HarnessEvent::SessionStarted {
+                provider_session_id,
+                cwd,
+                ..
+            } => Some((provider_session_id.clone(), cwd.clone())),
             _ => None,
         });
         let (id, cwd) = session.expect("conversation_id and cwd off the init event");
@@ -701,15 +724,19 @@ mod tests {
         let tools: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                HarnessEvent::ToolStarted { kind, title, name, .. } => {
-                    Some((*kind, title.clone(), name.clone()))
-                }
+                HarnessEvent::ToolStarted {
+                    kind, title, name, ..
+                } => Some((*kind, title.clone(), name.clone())),
                 _ => None,
             })
             .collect();
         assert_eq!(
             tools,
-            vec![(ToolKind::Bash, "ls -a".to_string(), "run_command".to_string())]
+            vec![(
+                ToolKind::Bash,
+                "ls -a".to_string(),
+                "run_command".to_string()
+            )]
         );
 
         let finished: Vec<_> = events
@@ -738,14 +765,19 @@ mod tests {
         assert!(messages >= 1);
 
         assert_eq!(
-            events.iter().filter(|e| matches!(e, HarnessEvent::TurnStarted)).count(),
+            events
+                .iter()
+                .filter(|e| matches!(e, HarnessEvent::TurnStarted))
+                .count(),
             1
         );
         assert!(matches!(
             events.last(),
             Some(HarnessEvent::TurnFinished { status }) if status == "completed"
         ));
-        assert!(!events.iter().any(|e| matches!(e, HarnessEvent::Error { .. })));
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, HarnessEvent::Error { .. })));
     }
 
     #[test]
@@ -823,7 +855,11 @@ claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n";
                     "Gemini 3.8 Flash".to_string(),
                     vec!["high".to_string(), "low".to_string()]
                 ),
-                ("claude-sonnet-4-6".to_string(), "Claude Sonnet 4.6 (Thinking)".to_string(), vec![]),
+                (
+                    "claude-sonnet-4-6".to_string(),
+                    "Claude Sonnet 4.6 (Thinking)".to_string(),
+                    vec![]
+                ),
             ]
         );
     }
@@ -842,27 +878,68 @@ gpt-oss-120b-medium
 ";
         let got: Vec<(String, String, Vec<String>, Option<String>)> = parse_models(out)
             .into_iter()
-            .map(|m| (m.id, m.display_name, m.reasoning_efforts, m.default_reasoning_effort))
+            .map(|m| {
+                (
+                    m.id,
+                    m.display_name,
+                    m.reasoning_efforts,
+                    m.default_reasoning_effort,
+                )
+            })
             .collect();
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         assert_eq!(
             got,
             vec![
-                ("gemini-3.8-flash".into(), "Gemini 3.8 Flash".into(), s(&["high", "medium", "low"]), Some("medium".into())),
-                ("gemini-3.1-pro".into(), "Gemini 3.1 Pro".into(), s(&["high", "low"]), Some("high".into())),
-                ("claude-sonnet-4-6".into(), "Claude Sonnet 4.6".into(), vec![], None),
-                ("claude-opus-4-6-thinking".into(), "Claude Opus 4.6 Thinking".into(), vec![], None),
-                ("gpt-oss-120b".into(), "GPT-OSS 120B".into(), s(&["medium"]), Some("medium".into())),
+                (
+                    "gemini-3.8-flash".into(),
+                    "Gemini 3.8 Flash".into(),
+                    s(&["high", "medium", "low"]),
+                    Some("medium".into())
+                ),
+                (
+                    "gemini-3.1-pro".into(),
+                    "Gemini 3.1 Pro".into(),
+                    s(&["high", "low"]),
+                    Some("high".into())
+                ),
+                (
+                    "claude-sonnet-4-6".into(),
+                    "Claude Sonnet 4.6".into(),
+                    vec![],
+                    None
+                ),
+                (
+                    "claude-opus-4-6-thinking".into(),
+                    "Claude Opus 4.6 Thinking".into(),
+                    vec![],
+                    None
+                ),
+                (
+                    "gpt-oss-120b".into(),
+                    "GPT-OSS 120B".into(),
+                    s(&["medium"]),
+                    Some("medium".into())
+                ),
             ]
         );
     }
 
     #[test]
     fn the_level_is_folded_back_into_the_slug() {
-        assert_eq!(model_slug("gemini-3.8-flash", Some("high")), "gemini-3.8-flash-high");
+        assert_eq!(
+            model_slug("gemini-3.8-flash", Some("high")),
+            "gemini-3.8-flash-high"
+        );
         assert_eq!(model_slug("claude-sonnet-4-6", None), "claude-sonnet-4-6");
-        assert_eq!(model_slug("gemini-3.8-flash-low", Some("high")), "gemini-3.8-flash-low");
-        assert_eq!(model_slug("gemini-3.8-flash-low", None), "gemini-3.8-flash-low");
+        assert_eq!(
+            model_slug("gemini-3.8-flash-low", Some("high")),
+            "gemini-3.8-flash-low"
+        );
+        assert_eq!(
+            model_slug("gemini-3.8-flash-low", None),
+            "gemini-3.8-flash-low"
+        );
     }
 
     #[test]
@@ -921,9 +998,12 @@ gpt-oss-120b-medium
         let needed: Vec<_> = out
             .iter()
             .filter_map(|e| match e {
-                HarnessEvent::PermissionNeeded { tool, action, target, rule } => {
-                    Some((tool.clone(), action.clone(), target.clone(), rule.clone()))
-                }
+                HarnessEvent::PermissionNeeded {
+                    tool,
+                    action,
+                    target,
+                    rule,
+                } => Some((tool.clone(), action.clone(), target.clone(), rule.clone())),
                 _ => None,
             })
             .collect();
@@ -936,7 +1016,9 @@ gpt-oss-120b-medium
                 Some("command(python3)".to_string()),
             )]
         );
-        assert!(matches!(out.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed"));
+        assert!(
+            matches!(out.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed")
+        );
         assert!(!out.iter().any(|e| matches!(e, HarnessEvent::Error { .. })));
     }
 
@@ -955,8 +1037,12 @@ gpt-oss-120b-medium
                 },
             },
         }));
-        assert!(out.iter().any(|e| matches!(e, HarnessEvent::ToolFinished { ok: false, .. })));
-        assert!(!out.iter().any(|e| matches!(e, HarnessEvent::PermissionNeeded { .. })));
+        assert!(out
+            .iter()
+            .any(|e| matches!(e, HarnessEvent::ToolFinished { ok: false, .. })));
+        assert!(!out
+            .iter()
+            .any(|e| matches!(e, HarnessEvent::PermissionNeeded { .. })));
         assert!(!is_question(
             "permission check failed for unsandboxed \"sqlite3 /lib/oculus.db 'select 1'\": denied"
         ));
@@ -994,8 +1080,14 @@ gpt-oss-120b-medium
     #[test]
     fn a_command_rule_is_its_first_real_word() {
         assert_eq!(command_word("python3 -c 'x'").as_deref(), Some("python3"));
-        assert_eq!(command_word("FOO=1 BAR_2=x node a.js").as_deref(), Some("node"));
-        assert_eq!(command_word("/opt/bin/tool --flag").as_deref(), Some("/opt/bin/tool"));
+        assert_eq!(
+            command_word("FOO=1 BAR_2=x node a.js").as_deref(),
+            Some("node")
+        );
+        assert_eq!(
+            command_word("/opt/bin/tool --flag").as_deref(),
+            Some("/opt/bin/tool")
+        );
         assert_eq!(command_word("  ").as_deref(), None);
     }
 }

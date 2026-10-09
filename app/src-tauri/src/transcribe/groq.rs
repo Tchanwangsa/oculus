@@ -21,7 +21,11 @@ pub(super) struct Groq {
 
 impl Groq {
     pub(super) fn new(key: String, language: Option<String>) -> Self {
-        Self { key, base_url: BASE_URL.into(), language }
+        Self {
+            key,
+            base_url: BASE_URL.into(),
+            language,
+        }
     }
 }
 
@@ -65,22 +69,34 @@ impl Engine for Groq {
         // No timeout: an hour of audio is a long upload and a long answer.
         match ureq::post(&format!("{}/audio/transcriptions", self.base_url))
             .set("Authorization", &format!("Bearer {}", self.key))
-            .set("Content-Type", &format!("multipart/form-data; boundary={boundary}"))
+            .set(
+                "Content-Type",
+                &format!("multipart/form-data; boundary={boundary}"),
+            )
             .send_bytes(&body)
         {
             Ok(response) => {
-                let text = response
-                    .into_string()
-                    .map_err(|e| EngineError::Failed(format!("Groq's reply could not be read: {e}")))?;
+                let text = response.into_string().map_err(|e| {
+                    EngineError::Failed(format!("Groq's reply could not be read: {e}"))
+                })?;
                 parse_segments(&text)
             }
             Err(ureq::Error::Status(status, response)) => {
                 let retry_after = response.header("retry-after").map(str::to_string);
-                let reset = response.header("x-ratelimit-reset-requests").map(str::to_string);
+                let reset = response
+                    .header("x-ratelimit-reset-requests")
+                    .map(str::to_string);
                 let body = response.into_string().unwrap_or_default();
-                Err(refusal(status, retry_after.as_deref(), reset.as_deref(), &body))
+                Err(refusal(
+                    status,
+                    retry_after.as_deref(),
+                    reset.as_deref(),
+                    &body,
+                ))
             }
-            Err(error) => Err(EngineError::Failed(format!("could not reach Groq: {error}"))),
+            Err(error) => Err(EngineError::Failed(format!(
+                "could not reach Groq: {error}"
+            ))),
         }
     }
 }
@@ -137,7 +153,11 @@ pub(super) fn parse_segments(body: &str) -> Result<Vec<Segment>, EngineError> {
     Ok(verbose
         .segments
         .into_iter()
-        .map(|r| Segment { start: r.start, end: r.end, text: r.text })
+        .map(|r| Segment {
+            start: r.start,
+            end: r.end,
+            text: r.text,
+        })
         .collect())
 }
 
@@ -197,7 +217,12 @@ mod tests {
         let body = multipart(
             "B",
             &[("model", "whisper-large-v3-turbo"), ("temperature", "0")],
-            &File { field: "file", name: "audio.ogg", content_type: "audio/ogg", bytes: b"\x00OggS\xff" },
+            &File {
+                field: "file",
+                name: "audio.ogg",
+                content_type: "audio/ogg",
+                bytes: b"\x00OggS\xff",
+            },
         );
         let mut expected = b"--B\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n\
 whisper-large-v3-turbo\r\n\
@@ -229,9 +254,19 @@ Content-Type: audio/ogg\r\n\r\n"
         )
         .unwrap();
         assert_eq!(segments.len(), 2);
-        assert_eq!(segments[1], Segment { start: 4.5, end: 12.0, text: " World.".into() });
+        assert_eq!(
+            segments[1],
+            Segment {
+                start: 4.5,
+                end: 12.0,
+                text: " World.".into()
+            }
+        );
         assert!(parse_segments(r#"{"text":""}"#).unwrap().is_empty());
-        assert!(matches!(parse_segments("<html>"), Err(EngineError::Failed(_))));
+        assert!(matches!(
+            parse_segments("<html>"),
+            Err(EngineError::Failed(_))
+        ));
     }
 
     #[test]
@@ -273,20 +308,35 @@ Content-Type: audio/ogg\r\n\r\n"
         let audio = dir.join("part.ogg");
         std::fs::write(&audio, b"OggS-audio").unwrap();
 
-        let groq = Groq { key: "gsk_test".into(), base_url: server.origin(), language: Some("en".into()) };
+        let groq = Groq {
+            key: "gsk_test".into(),
+            base_url: server.origin(),
+            language: Some("en".into()),
+        };
         let segments = groq.transcribe(&audio).unwrap();
-        assert_eq!(segments, vec![Segment { start: 1.0, end: 2.0, text: " Hi.".into() }]);
+        assert_eq!(
+            segments,
+            vec![Segment {
+                start: 1.0,
+                end: 2.0,
+                text: " Hi.".into()
+            }]
+        );
 
         let hit = &server.hits()[0];
         assert_eq!(hit.method, "POST");
         assert_eq!(hit.url, "/audio/transcriptions");
         assert_eq!(hit.header("authorization"), Some("Bearer gsk_test"));
-        assert!(hit.header("content-type").unwrap().starts_with("multipart/form-data; boundary="));
+        assert!(hit
+            .header("content-type")
+            .unwrap()
+            .starts_with("multipart/form-data; boundary="));
         let body = String::from_utf8_lossy(&hit.body);
         assert!(body.contains("name=\"response_format\"\r\n\r\nverbose_json\r\n"));
         assert!(body.contains("name=\"timestamp_granularities[]\"\r\n\r\nsegment\r\n"));
         assert!(body.contains("name=\"language\"\r\n\r\nen\r\n"));
-        assert!(body.contains("filename=\"audio.ogg\"\r\nContent-Type: audio/ogg\r\n\r\nOggS-audio\r\n"));
+        assert!(body
+            .contains("filename=\"audio.ogg\"\r\nContent-Type: audio/ogg\r\n\r\nOggS-audio\r\n"));
     }
 
     #[test]
@@ -299,7 +349,11 @@ Content-Type: audio/ogg\r\n\r\n"
         let audio = dir.join("part.ogg");
         std::fs::write(&audio, b"OggS").unwrap();
 
-        let groq = Groq { key: "gsk_test".into(), base_url: server.origin(), language: None };
+        let groq = Groq {
+            key: "gsk_test".into(),
+            base_url: server.origin(),
+            language: None,
+        };
         match groq.transcribe(&audio) {
             Err(EngineError::RateLimited(message)) => assert!(message.contains("2 minutes")),
             other => panic!("expected a rate limit, got {other:?}"),

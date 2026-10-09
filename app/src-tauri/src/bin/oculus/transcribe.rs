@@ -9,7 +9,11 @@ impl Ctx {
         // An agent's cwd is inside the library, so a path relative to it wins
         // when it exists; `transcribe::resolve` still refuses anything outside.
         let given = std::path::Path::new(&args.video);
-        let video = match given.is_relative().then(|| given.canonicalize().ok()).flatten() {
+        let video = match given
+            .is_relative()
+            .then(|| given.canonicalize().ok())
+            .flatten()
+        {
             Some(here) => here.to_string_lossy().into_owned(),
             None => args.video.clone(),
         };
@@ -33,10 +37,16 @@ impl Ctx {
             }
             let line = match step {
                 Step::Extracting => "extracting the audio".to_string(),
-                Step::Transcribing { engine, chunks: 1, .. } => {
+                Step::Transcribing {
+                    engine, chunks: 1, ..
+                } => {
                     format!("transcribing with {}", transcribe::engine_label(engine))
                 }
-                Step::Transcribing { engine, chunk, chunks } => format!(
+                Step::Transcribing {
+                    engine,
+                    chunk,
+                    chunks,
+                } => format!(
                     "transcribing part {chunk} of {chunks} with {}",
                     transcribe::engine_label(engine)
                 ),

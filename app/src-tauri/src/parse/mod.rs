@@ -37,7 +37,10 @@ pub fn pages_path(pdf: &Path) -> PathBuf {
 }
 
 pub fn images_dir_for(pdf: &Path) -> PathBuf {
-    let stem = pdf.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = pdf
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     pdf.with_file_name(format!("{stem}_images"))
 }
 
@@ -103,14 +106,20 @@ impl ParseOutput {
             }
         }
         Self {
-            pdf: pdf.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+            pdf: pdf
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
             mode: MODE.to_string(),
             parser_version: PARSER_VERSION,
             page_count,
             pages: slots
                 .into_iter()
                 .enumerate()
-                .map(|(i, markdown)| ParsePage { page_no: i as u32 + 1, markdown })
+                .map(|(i, markdown)| ParsePage {
+                    page_no: i as u32 + 1,
+                    markdown,
+                })
                 .collect(),
             backend,
             image_count,
@@ -119,7 +128,11 @@ impl ParseOutput {
 
     /// The full-document markdown: pages joined by a blank line.
     pub fn document_markdown(&self) -> String {
-        self.pages.iter().map(|p| p.markdown.as_str()).collect::<Vec<_>>().join("\n\n")
+        self.pages
+            .iter()
+            .map(|p| p.markdown.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")
     }
 
     /// Put the artifacts on disk. `.pages.json` is the only evidence a parse
@@ -177,7 +190,10 @@ pub struct InFlightClaim<'a> {
 
 impl InFlight {
     pub const fn new() -> Self {
-        Self { running: Mutex::new(BTreeSet::new()), freed: Condvar::new() }
+        Self {
+            running: Mutex::new(BTreeSet::new()),
+            freed: Condvar::new(),
+        }
     }
 
     /// The process-wide set every parse goes through.
@@ -193,13 +209,20 @@ impl InFlight {
             running = self.freed.wait(running).unwrap_or_else(|p| p.into_inner());
         }
         running.insert(pdf.to_path_buf());
-        InFlightClaim { owner: self, pdf: pdf.to_path_buf() }
+        InFlightClaim {
+            owner: self,
+            pdf: pdf.to_path_buf(),
+        }
     }
 }
 
 impl Drop for InFlightClaim<'_> {
     fn drop(&mut self) {
-        self.owner.running.lock().unwrap_or_else(|p| p.into_inner()).remove(&self.pdf);
+        self.owner
+            .running
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.pdf);
         self.owner.freed.notify_all();
     }
 }
@@ -230,7 +253,11 @@ impl ImageStaging {
         let scratch = pdf.with_file_name(format!(".{name}-staging-{}-{stamp}", std::process::id()));
         fs::create_dir_all(scratch.join(&name))
             .map_err(|e| ParseError::Io(format!("stage {}: {e}", scratch.display())))?;
-        Ok(Self { staged: scratch.join(&name), destination, rel: name })
+        Ok(Self {
+            staged: scratch.join(&name),
+            destination,
+            rel: name,
+        })
     }
 
     /// Where the backend writes extracted images.
@@ -302,8 +329,12 @@ impl Progress {
     /// The engine is extracting: pages only.
     pub fn processing(pages_done: u32, total_pages: u32, backend: &'static str) -> Self {
         Self {
-            pages_done, total_pages, backend,
-            phase: Phase::Processing, bytes_done: 0, bytes_total: 0,
+            pages_done,
+            total_pages,
+            backend,
+            phase: Phase::Processing,
+            bytes_done: 0,
+            bytes_total: 0,
         }
     }
 }
@@ -319,7 +350,9 @@ pub struct Skips {
 
 impl Skips {
     pub const fn new() -> Self {
-        Self { marked: Mutex::new(BTreeSet::new()) }
+        Self {
+            marked: Mutex::new(BTreeSet::new()),
+        }
     }
 
     pub fn shared() -> &'static Skips {
@@ -328,15 +361,24 @@ impl Skips {
     }
 
     pub fn mark(&self, pdf: &Path) {
-        self.marked.lock().unwrap_or_else(|p| p.into_inner()).insert(pdf.to_path_buf());
+        self.marked
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(pdf.to_path_buf());
     }
 
     pub fn clear(&self, pdf: &Path) {
-        self.marked.lock().unwrap_or_else(|p| p.into_inner()).remove(pdf);
+        self.marked
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(pdf);
     }
 
     pub fn is_marked(&self, pdf: &Path) -> bool {
-        self.marked.lock().unwrap_or_else(|p| p.into_inner()).contains(pdf)
+        self.marked
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains(pdf)
     }
 }
 
@@ -369,7 +411,9 @@ impl Health {
             });
         }
         if !self.ready {
-            return Err(ParseError::NotReady { backend: self.backend.clone() });
+            return Err(ParseError::NotReady {
+                backend: self.backend.clone(),
+            });
         }
         Ok(())
     }
@@ -494,10 +538,16 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParseError::MissingCredentials => {
-                write!(f, "No MinerU API token is saved — add one in Settings to parse PDFs.")
+                write!(
+                    f,
+                    "No MinerU API token is saved — add one in Settings to parse PDFs."
+                )
             }
             ParseError::RejectedCredentials { code, expired } => {
-                let code = code.as_deref().map(|c| format!(" ({c})")).unwrap_or_default();
+                let code = code
+                    .as_deref()
+                    .map(|c| format!(" ({c})"))
+                    .unwrap_or_default();
                 if *expired {
                     write!(
                         f,
@@ -544,7 +594,10 @@ impl fmt::Display for ParseError {
                  {app}. Update whichever is older before parsing."
             ),
             ParseError::NotReady { backend } => {
-                write!(f, "The {backend} parser is not ready yet. Try again in a moment.")
+                write!(
+                    f,
+                    "The {backend} parser is not ready yet. Try again in a moment."
+                )
             }
             ParseError::Io(detail) => write!(f, "Could not save the parsed output: {detail}"),
             ParseError::Cancelled => write!(f, "Skipped — parse it again from File Activity."),
@@ -662,7 +715,11 @@ struct StoredParseSettings {
 /// or nonsense settings resolve to the cloud default.
 pub fn parse_config() -> ParseConfig {
     let stored = stored_settings().unwrap_or_default();
-    let engine = stored.engine.as_deref().and_then(Engine::parse).unwrap_or(Engine::Cloud);
+    let engine = stored
+        .engine
+        .as_deref()
+        .and_then(Engine::parse)
+        .unwrap_or(Engine::Cloud);
     let base_url = stored
         .engine_url
         .filter(|u| !u.trim().is_empty())
@@ -672,7 +729,12 @@ pub fn parse_config() -> ParseConfig {
         Engine::Local => CredentialSource::None,
     };
     let accept_expired_result_cert = stored.accept_expired_result_cert.unwrap_or(true);
-    ParseConfig { engine, base_url, credentials, accept_expired_result_cert }
+    ParseConfig {
+        engine,
+        base_url,
+        credentials,
+        accept_expired_result_cert,
+    }
 }
 
 /// The parser this install is configured for; every caller about to parse
@@ -706,7 +768,10 @@ mod tests {
             .build()
             .unwrap();
         let base = runtime.block_on(async { parse_config().base_url });
-        assert!(!base.is_empty(), "a backend always resolves to some API root");
+        assert!(
+            !base.is_empty(),
+            "a backend always resolves to some API root"
+        );
     }
 
     /// A real scratch folder: the staging rename must be same-filesystem.
@@ -724,8 +789,14 @@ mod tests {
     fn artifact_names_match_the_records_already_on_disk() {
         let pdf = Path::new("/library/subj/Lecture 3.pdf");
         assert_eq!(md_path(pdf), Path::new("/library/subj/Lecture 3.md"));
-        assert_eq!(pages_path(pdf), Path::new("/library/subj/Lecture 3.pages.json"));
-        assert_eq!(images_dir_for(pdf), Path::new("/library/subj/Lecture 3_images"));
+        assert_eq!(
+            pages_path(pdf),
+            Path::new("/library/subj/Lecture 3.pages.json")
+        );
+        assert_eq!(
+            images_dir_for(pdf),
+            Path::new("/library/subj/Lecture 3_images")
+        );
     }
 
     #[test]
@@ -735,17 +806,29 @@ mod tests {
             pdf,
             4,
             vec![
-                ParsePage { page_no: 3, markdown: "three".into() },
-                ParsePage { page_no: 1, markdown: "one".into() },
+                ParsePage {
+                    page_no: 3,
+                    markdown: "three".into(),
+                },
+                ParsePage {
+                    page_no: 1,
+                    markdown: "one".into(),
+                },
                 // Out of range: a backend that split the document and got its
                 // offsets wrong must not be able to corrupt the join key.
-                ParsePage { page_no: 9, markdown: "nine".into() },
+                ParsePage {
+                    page_no: 9,
+                    markdown: "nine".into(),
+                },
             ],
             Some("mineru-cloud".into()),
             2,
         );
         assert_eq!(out.page_count, 4);
-        assert_eq!(out.pages.iter().map(|p| p.page_no).collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+        assert_eq!(
+            out.pages.iter().map(|p| p.page_no).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4]
+        );
         assert_eq!(out.pages[1].markdown, "");
         // Blank pages keep their slot, so the `.md` and the records stay in step.
         assert_eq!(out.document_markdown(), "one\n\n\n\nthree\n\n");
@@ -754,7 +837,16 @@ mod tests {
     #[test]
     fn record_keeps_the_python_wire_shape() {
         let pdf = Path::new("/library/Lecture 3.pdf");
-        let out = ParseOutput::new(pdf, 1, vec![ParsePage { page_no: 1, markdown: "ψ".into() }], None, 0);
+        let out = ParseOutput::new(
+            pdf,
+            1,
+            vec![ParsePage {
+                page_no: 1,
+                markdown: "ψ".into(),
+            }],
+            None,
+            0,
+        );
         let json = serde_json::to_string(&out).unwrap();
         // Non-ASCII unescaped, as `ensure_ascii=False` wrote it.
         assert!(json.contains("\"ψ\""), "{json}");
@@ -779,7 +871,10 @@ mod tests {
         let out = ParseOutput::new(
             &pdf,
             1,
-            vec![ParsePage { page_no: 1, markdown: "![](Lecture 3_images/new.jpg)".into() }],
+            vec![ParsePage {
+                page_no: 1,
+                markdown: "![](Lecture 3_images/new.jpg)".into(),
+            }],
             Some("mineru-cloud".into()),
             1,
         );
@@ -911,8 +1006,14 @@ mod tests {
             &pdf,
             2,
             vec![
-                ParsePage { page_no: 1, markdown: "one".into() },
-                ParsePage { page_no: 2, markdown: "two".into() },
+                ParsePage {
+                    page_no: 1,
+                    markdown: "one".into(),
+                },
+                ParsePage {
+                    page_no: 2,
+                    markdown: "two".into(),
+                },
             ],
             None,
             0,
@@ -931,7 +1032,9 @@ mod tests {
 
     #[test]
     fn a_failed_conversion_is_a_document_failure_that_does_not_blame_mineru() {
-        let error = ParseError::Document { code: CONVERSION_FAILED.into() };
+        let error = ParseError::Document {
+            code: CONVERSION_FAILED.into(),
+        };
         assert_eq!(error.kind(), "document");
         assert!(!error.retryable());
         assert!(!error.latching());
@@ -940,7 +1043,9 @@ mod tests {
 
     #[test]
     fn an_unreadable_spreadsheet_is_a_document_failure_that_does_not_blame_mineru() {
-        let error = ParseError::Document { code: SHEET_UNREADABLE.into() };
+        let error = ParseError::Document {
+            code: SHEET_UNREADABLE.into(),
+        };
         assert_eq!(error.kind(), "document");
         assert!(!error.retryable());
         assert!(!error.to_string().contains("MinerU"), "{error}");
@@ -981,13 +1086,19 @@ mod tests {
         let pdf = dir.join("big.pdf");
         fs::write(&pdf, vec![0u8; 2048]).unwrap();
         let error = check_size(&pdf, 1024).unwrap_err();
-        assert!(matches!(error, ParseError::TooLarge { bytes: 2048, limit_bytes: 1024 }));
+        assert!(matches!(
+            error,
+            ParseError::TooLarge {
+                bytes: 2048,
+                limit_bytes: 1024
+            }
+        ));
         assert!(!error.retryable());
         assert!(error.to_string().contains("MB"), "{error}");
         assert_eq!(check_size(&pdf, 4096).unwrap(), 2048);
     }
 }
 
-pub mod mineru;
-pub mod events;
 pub mod commands;
+pub mod events;
+pub mod mineru;

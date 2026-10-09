@@ -102,7 +102,10 @@ pub struct Hit {
 
 impl Hit {
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(field, _)| field == name).map(|(_, value)| value.as_str())
+        self.headers
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value.as_str())
     }
 
     pub fn json(&self) -> Value {
@@ -137,7 +140,11 @@ impl Reply {
 
 impl From<(u16, Vec<u8>)> for Reply {
     fn from((status, body): (u16, Vec<u8>)) -> Self {
-        Self { status, body, headers: Vec::new() }
+        Self {
+            status,
+            body,
+            headers: Vec::new(),
+        }
     }
 }
 
@@ -157,7 +164,10 @@ impl FakeServer {
         R: Into<Reply>,
     {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
-        let origin = format!("http://127.0.0.1:{}", server.server_addr().to_ip().unwrap().port());
+        let origin = format!(
+            "http://127.0.0.1:{}",
+            server.server_addr().to_ip().unwrap().port()
+        );
         let hits: Arc<Mutex<Vec<Hit>>> = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
         let handle = {
@@ -205,7 +215,12 @@ impl FakeServer {
                 }
             })
         };
-        Self { origin, hits, stop, handle: Some(handle) }
+        Self {
+            origin,
+            hits,
+            stop,
+            handle: Some(handle),
+        }
     }
 
     pub fn origin(&self) -> String {

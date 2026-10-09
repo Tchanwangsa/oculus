@@ -162,7 +162,9 @@ pub fn confirm_browser_sign_in(app: &AppHandle) {
                 eprintln!("[oculus] signed in from a browser tab as {name}");
                 session_established(&app, &dir, Via::Browser);
             }
-            Err(e) => eprintln!("[oculus] browser tab looked signed in, but Canvas refused the session: {e}"),
+            Err(e) => eprintln!(
+                "[oculus] browser tab looked signed in, but Canvas refused the session: {e}"
+            ),
         }
         CONFIRMING.store(false, Ordering::SeqCst);
     });

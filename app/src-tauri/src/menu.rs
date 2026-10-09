@@ -86,13 +86,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, NEW_TAB, "New Tab", true, Some("CmdOrCtrl+T"))?,
             // The side panel of the tab in front, not a second tab.
-            &MenuItem::with_id(
-                app,
-                SIDE_PANEL,
-                "Side Panel",
-                true,
-                Some("Alt+CmdOrCtrl+T"),
-            )?,
+            &MenuItem::with_id(app, SIDE_PANEL, "Side Panel", true, Some("Alt+CmdOrCtrl+T"))?,
             &MenuItem::with_id(app, CLOSE_TAB, "Close Tab", true, Some("CmdOrCtrl+W"))?,
             // Always enabled: only the frontend knows if there is anything
             // to reopen.
@@ -105,13 +99,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             )?,
             // Ignored by the frontend outside a browser tab, rather than
             // disabled, so Rust needn't track which tab is in front.
-            &MenuItem::with_id(
-                app,
-                ADDRESS,
-                "Open Location…",
-                true,
-                Some("CmdOrCtrl+L"),
-            )?,
+            &MenuItem::with_id(app, ADDRESS, "Open Location…", true, Some("CmdOrCtrl+L"))?,
             &PredefinedMenuItem::separator(app)?,
             // Not the predefined item: muda hard-wires ⌘W onto that one.
             &MenuItem::with_id(

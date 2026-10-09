@@ -47,7 +47,12 @@ pub struct Usage {
 
 impl Default for Usage {
     fn default() -> Self {
-        Self { date: beijing_day(), files: 0, pages: 0, quota_exhausted: false }
+        Self {
+            date: beijing_day(),
+            files: 0,
+            pages: 0,
+            quota_exhausted: false,
+        }
     }
 }
 
@@ -59,7 +64,10 @@ pub struct UsageLedger {
 
 impl UsageLedger {
     pub fn at(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into(), guard: Mutex::new(()) }
+        Self {
+            path: path.into(),
+            guard: Mutex::new(()),
+        }
     }
 
     /// The one ledger the app uses, beside the database.
@@ -67,7 +75,9 @@ impl UsageLedger {
         static SHARED: OnceLock<Arc<UsageLedger>> = OnceLock::new();
         SHARED
             .get_or_init(|| {
-                Arc::new(UsageLedger::at(crate::paths::data_dir().join("mineru-usage.json")))
+                Arc::new(UsageLedger::at(
+                    crate::paths::data_dir().join("mineru-usage.json"),
+                ))
             })
             .clone()
     }
@@ -122,7 +132,10 @@ impl UsageLedger {
             .and_then(|text| serde_json::from_str::<Usage>(&text).ok())
             .unwrap_or_default();
         if usage.date != today {
-            return Usage { date: today, ..Usage::default() };
+            return Usage {
+                date: today,
+                ..Usage::default()
+            };
         }
         usage
     }
@@ -145,12 +158,16 @@ fn beijing_day() -> String {
 /// Process-global, or concurrent batches would each spend the whole limit.
 pub fn submit_bucket() -> Arc<TokenBucket> {
     static BUCKET: OnceLock<Arc<TokenBucket>> = OnceLock::new();
-    BUCKET.get_or_init(|| Arc::new(TokenBucket::new(SUBMIT_PER_MINUTE))).clone()
+    BUCKET
+        .get_or_init(|| Arc::new(TokenBucket::new(SUBMIT_PER_MINUTE)))
+        .clone()
 }
 
 pub fn poll_bucket() -> Arc<TokenBucket> {
     static BUCKET: OnceLock<Arc<TokenBucket>> = OnceLock::new();
-    BUCKET.get_or_init(|| Arc::new(TokenBucket::new(POLL_PER_MINUTE))).clone()
+    BUCKET
+        .get_or_init(|| Arc::new(TokenBucket::new(POLL_PER_MINUTE)))
+        .clone()
 }
 
 #[cfg(test)]
@@ -179,7 +196,10 @@ mod tests {
         let ledger = UsageLedger::at(dir.join("mineru-usage.json"));
         ledger.record(DAILY_FILES, 2_001).unwrap();
 
-        assert!(matches!(ledger.record(1, 1), Err(ParseError::QuotaExhausted)));
+        assert!(matches!(
+            ledger.record(1, 1),
+            Err(ParseError::QuotaExhausted)
+        ));
         // A refused reservation leaves both counters where they were.
         let usage = ledger.snapshot();
         assert_eq!(usage.pages, 2_001);
@@ -195,8 +215,14 @@ mod tests {
         ledger.latch_exhausted();
 
         let reopened = UsageLedger::at(&path);
-        assert!(matches!(reopened.ensure_available(0), Err(ParseError::QuotaExhausted)));
-        assert!(matches!(reopened.record(1, 1), Err(ParseError::QuotaExhausted)));
+        assert!(matches!(
+            reopened.ensure_available(0),
+            Err(ParseError::QuotaExhausted)
+        ));
+        assert!(matches!(
+            reopened.record(1, 1),
+            Err(ParseError::QuotaExhausted)
+        ));
     }
 
     #[test]

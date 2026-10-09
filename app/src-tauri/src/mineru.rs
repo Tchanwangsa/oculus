@@ -72,4 +72,3 @@ pub fn mineru_has_api_key() -> Result<bool, String> {
 pub fn mineru_delete_api_key() -> Result<(), String> {
     KEY.delete()
 }
-
