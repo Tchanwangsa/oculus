@@ -154,8 +154,9 @@ in the side panel beside the conversation, so the student reads it where they
 are.
 
 - Start the path at `courses/`: no `../`, and no absolute `/Users/…` prefix.
-- For a whole file, cite the file the library has — the PDF or the Office
-  document — rather than the `.md` beside it, which is the parser's output.
+- For a whole file, cite the file the library has — the PDF, the Office
+  document or the spreadsheet — rather than the `.md` beside it, which is
+  derived from it.
 - **For a passage, cite its line in that `.md`**:
   `courses/<CODE>/files/week-3.md:97`, or `:97-104` for a range — the line
   numbers your own file tool shows. The app opens the *PDF* at the page that

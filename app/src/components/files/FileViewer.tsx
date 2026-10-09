@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
 import { PDFViewer } from "@/components/files/PDFViewer";
-import { docPdfRelPath, isPdfBacked, isVideoFile, parsedMdRelPath } from "@/lib/fileTypes";
+import { docPdfRelPath, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath } from "@/lib/fileTypes";
 import { filePageHref, type FileLocate } from "@/lib/openFile";
 import { libraryImageSrc, libraryLinkTarget } from "@/lib/libraryLinks";
 import { useDataDir } from "@/hooks/useDataDir";
@@ -100,8 +100,8 @@ interface FileViewerProps {
 }
 
 /**
- * Renders one scraped file: markdown pages/announcements, PDFs, images, and
- * videos (in the media player, `VideoFileViewer`).
+ * Renders one scraped file: markdown pages/announcements, PDFs, spreadsheets
+ * (as their text), images, and videos (in the media player, `VideoFileViewer`).
  * Chrome-free — the host owns the header (title + PdfMdToggle).
  */
 export function FileViewer({
@@ -136,6 +136,11 @@ export function FileViewer({
   }
 
   if (isVideoFile(file.filename)) return <VideoFileViewer file={file} />;
+
+  // A spreadsheet is shown as the text Rust converted it to, a table per sheet.
+  if (isSheetFile(file.filename) && mdRelPath) {
+    return <FileMarkdown relPath={mdRelPath} components={components} />;
+  }
 
   if (pdfRelPath) {
     return (

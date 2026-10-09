@@ -62,7 +62,7 @@ const COURSE_RELATIVE =
 
 /** A bare filename with a document or picture extension. */
 const BARE_NAME =
-  /^[^\s/\\:]+\.(?:pdf|md|docx?|pptx?|xlsx?|txt|csv|png|jpe?g|gif|webp|svg)$/i;
+  /^[^\s/\\:]+\.(?:pdf|md|docx?|pptx?|xls[xm]?|ods|txt|csv|png|jpe?g|gif|webp|svg)$/i;
 
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 

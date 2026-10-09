@@ -1,7 +1,6 @@
 import { memo, useCallback, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { CaretRight, Play, SidebarSimple, SkipForward } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -11,13 +10,14 @@ import {
 import { usePagedRows } from "@/components/ui/TablePagination";
 import { GridTable } from "@/components/ui/GridTable";
 import { displayCode, fmtAgo, fmtClock } from "@/lib/format";
-import { fileIconFor } from "@/lib/fileTypes";
+import { fileIconFor, isSheetFile } from "@/lib/fileTypes";
 import { getFileByRelativePath } from "@/lib/db";
 import { filePagePath, openFileSmart } from "@/lib/openFile";
 import { openBeside } from "@/lib/tabRouters";
 import { summaryOf } from "@/lib/parseState";
 import { useNow } from "@/hooks/useNow";
 import {
+  embedsIn,
   fmtEta,
   fmtMb,
   statusOf,
@@ -31,11 +31,13 @@ import {
 
 /**
  * The ingest ledger: one row per PDF through Download → Parse → Embed, live
- * work ranked first. A row is the file, one segmented track with a caption
- * saying what is happening, when the file last moved, and its status pill;
- * actions take the time's place on hover. It expands into the facts the row
+ * work ranked first. A row is the file, one segmented track — itself the
+ * status — with a caption saying what is happening, and when the file last
+ * moved; actions take the time's place on hover. It expands into the facts the row
  * leaves out. With no Voyage key the embed segment isn't drawn (`embedStage`
- * in `pipelineStore`, set from `indexStore`), so a parsed file is done at two.
+ * in `pipelineStore`, set from `indexStore`), so a parsed file is done at two;
+ * a spreadsheet is never embedded, so its row is two stages, its parse being
+ * the conversion to text (`embedsIn`).
  */
 
 type StageKey = "download" | "parse" | "embed";
@@ -50,19 +52,12 @@ function stageKeys(embedStage: boolean): StageKey[] {
   return embedStage ? ["download", "parse", "embed"] : ["download", "parse"];
 }
 
-const STATE_WORD: Record<StageState, string> = {
-  pending: "not started",
-  queued: "queued",
-  active: "in progress",
-  done: "done",
-  error: "failed",
-  skipped: "skipped",
-};
-
 /** Shared by header and rows. The time column also holds the hover actions
- *  (three `icon-xs` buttons); the status column fits "Rate-limited". */
+ *  (three `icon-xs` buttons). Sized by the table's own width (`@container`):
+ *  narrow, the caption folds into the track's tooltip and the name keeps the
+ *  room. */
 const COLS =
-  "grid grid-cols-[minmax(0,1fr)_minmax(200px,300px)_80px_92px] items-center gap-4 px-5";
+  "grid grid-cols-[minmax(0,1fr)_minmax(180px,260px)_80px] @max-2xl:grid-cols-[minmax(0,1fr)_96px_80px] items-center gap-4 @max-2xl:gap-3 px-5";
 
 /** Diagonal stripes: a stage the user skipped, distinct from one not reached. */
 const HATCH: CSSProperties = {
@@ -132,9 +127,12 @@ function actionsOf(
     else if (s.phase === "paused") run = { label: "Resume", hint: "Resume where it left off" };
     else if (embedNow) run = { label: "Embed", hint: "Embed this file now" };
   }
-  // Anything short of a finished parse, once the bytes are on disk.
+  // Anything short of a finished parse, once the bytes are on disk. A
+  // spreadsheet's conversion takes moments and bills nothing, so it is not
+  // skipped.
   const skip =
     canSkip &&
+    !isSheetFile(item.filename) &&
     item.download === "done" &&
     (item.parse === "pending" ||
       item.parse === "queued" ||
@@ -161,18 +159,20 @@ function Segment({
   state,
   percent,
   held,
-  label,
+  paused,
 }: {
   state: StageState;
   /** Only for the moving stage; null draws an indeterminate pulse. */
   percent: number | null;
   /** In flight but not moving (waiting for its upload turn, rate-limited). */
   held: boolean;
-  label: string;
+  /** The stage a paused file stops at. */
+  paused: boolean;
 }) {
   let fill: ReactNode = null;
   let track = "bg-secondary";
-  if (state === "done") fill = <span className="absolute inset-0 bg-success/80" />;
+  if (paused) track = "bg-warning/50";
+  else if (state === "done") fill = <span className="absolute inset-0 bg-success/80" />;
   else if (state === "error") fill = <span className="absolute inset-0 bg-destructive" />;
   else if (state === "queued") track = "bg-brand/20";
   else if (state === "active" && percent != null) {
@@ -190,23 +190,17 @@ function Segment({
     track = held ? "bg-brand/20" : "bg-brand/40 animate-pulse will-change-[opacity]";
   }
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        {/* The padding is the hover target; the bar itself is 6px. */}
-        <span className="flex-1 py-1.5">
-          <span
-            className={cn("relative block h-1.5 overflow-hidden rounded-full", track)}
-            style={state === "skipped" ? HATCH : undefined}
-          >
-            {fill}
-          </span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <span
+      className={cn("relative block h-1.5 flex-1 overflow-hidden rounded-full", track)}
+      style={state === "skipped" ? HATCH : undefined}
+    >
+      {fill}
+    </span>
   );
 }
 
+/** The row's status: one segment per stage. Its tooltip is the whole
+ *  caption, which the row drops when the table is narrow. */
 function Track({
   item,
   s,
@@ -217,28 +211,30 @@ function Track({
   embedStage: boolean;
 }) {
   const held = uploadWaiting(item) || isRateLimited(item);
+  const keys = stageKeys(embedStage);
+  const pausedAt = s.phase === "paused" ? keys.find((k) => item[k] !== "done") : undefined;
   return (
-    <div className="flex w-24 shrink-0 items-center gap-[3px]">
-      {stageKeys(embedStage).map((key) => {
-        const state = item[key];
-        const moving = state === "active" && s.phase === "active";
-        const word =
-          key === "parse" && state === "active" && item.parsePhase === "uploading"
-            ? "uploading"
-            : key === "parse" && uploadWaiting(item)
-              ? "waiting for upload"
-              : STATE_WORD[state];
-        return (
-          <Segment
-            key={key}
-            state={state}
-            percent={moving ? s.percent : null}
-            held={moving && held}
-            label={`${STAGE_LABEL[key]} — ${word}`}
-          />
-        );
-      })}
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* The padding is the hover target; the bar itself is 6px. */}
+        <div className="flex w-24 shrink-0 items-center gap-[3px] py-1.5">
+          {keys.map((key) => {
+            const state = item[key];
+            const moving = state === "active" && s.phase === "active";
+            return (
+              <Segment
+                key={key}
+                state={state}
+                percent={moving ? s.percent : null}
+                held={moving && held}
+                paused={key === pausedAt}
+              />
+            );
+          })}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>{hintOf(item, s, embedStage)}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -248,11 +244,20 @@ function captionOf(item: PipelineItem, s: StatusView): string {
   if (s.phase === "failed") {
     const stage = failedStage(item);
     if (stage === "download") return "Download failed — the next sync retries it";
+    // The failure vocabulary is MinerU's; a spreadsheet's sentence is in the detail.
+    if (stage === "parse" && isSheetFile(item.filename)) return "Conversion failed";
     const why = summaryOf(item.errorKind).replace(/\.$/, "");
     return `${STAGE_LABEL[stage]} failed${why ? ` — ${why}` : ""}`;
   }
   const eta = uploadEta(item);
   return eta != null ? `${s.label} · ${fmtEta(eta)}` : s.label;
+}
+
+/** The track's tooltip: the caption, with a finished file's page count. */
+function hintOf(item: PipelineItem, s: StatusView, embedStage: boolean): string {
+  if (s.phase !== "done") return captionOf(item, s);
+  const pages = embedStage && item.embed === "done" ? item.embedTotalPages : item.totalPages;
+  return pages > 0 ? `${s.label} · ${pages} page${pages === 1 ? "" : "s"}` : s.label;
 }
 
 /** A held embed's caption counts down by the second; only this row ticks. */
@@ -265,7 +270,7 @@ function CaptionText({ text, tone }: { text: string; tone?: "bad" }) {
   return (
     <span
       className={cn(
-        "min-w-0 truncate text-[11px] tabular-nums",
+        "min-w-0 truncate text-[11px] tabular-nums @max-2xl:hidden",
         tone === "bad" ? "text-destructive" : "text-muted-foreground",
       )}
     >
@@ -303,44 +308,6 @@ function IconAction({
         </Button>
       </TooltipTrigger>
       <TooltipContent>{hint}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-// ── Status pill ───────────────────────────────────────────────────────────────
-
-const BADGE_VARIANT: Record<
-  PipelinePhase,
-  "default" | "secondary" | "success" | "destructive" | "warning" | "outline"
-> = {
-  active: "default",
-  waiting: "secondary",
-  paused: "warning",
-  failed: "destructive",
-  skipped: "outline",
-  done: "success",
-};
-
-function StatusPill({ item, s }: { item: PipelineItem; s: StatusView }) {
-  // A file waiting for its upload turn reads as waiting, not as work.
-  const variant = isRateLimited(item)
-    ? "warning"
-    : uploadWaiting(item)
-      ? "secondary"
-      : BADGE_VARIANT[s.phase];
-  const pill = (
-    <Badge
-      variant={variant}
-      className={cn("text-[11px]", s.phase === "skipped" && "text-muted-foreground")}
-    >
-      {s.short}
-    </Badge>
-  );
-  if (!isRateLimited(item)) return pill;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{pill}</TooltipTrigger>
-      <TooltipContent>{item.embedWaitingReason || "Rate-limited"}</TooltipContent>
     </Tooltip>
   );
 }
@@ -399,16 +366,17 @@ function detailSteps(item: PipelineItem, embedStage: boolean): Step[] {
   // While its upload runs, the parse itself has not started.
   const uploadingNow = p === "active" && item.parsePhase !== undefined && item.parsePhase !== "processing";
   const parseState: StageState = uploadingNow ? "pending" : p;
+  const sheet = isSheetFile(item.filename);
   const parseLabel =
     parseState === "done"
-      ? "Parsed"
+      ? sheet ? "Converted" : "Parsed"
       : parseState === "active"
-        ? "Parsing"
+        ? sheet ? "Converting" : "Parsing"
         : parseState === "error"
-          ? "Parse failed"
+          ? sheet ? "Conversion failed" : "Parse failed"
           : parseState === "skipped"
             ? "Skipped"
-            : "Parse";
+            : sheet ? "Convert" : "Parse";
   const parseValue =
     parseState === "done"
       ? fmtClock(item.parsedAt) || undefined
@@ -555,8 +523,10 @@ const Row = memo(function Row({
   onResume?: (item: PipelineItem) => void;
   onSkip?: (item: PipelineItem) => void;
 }) {
-  const s = statusOf(item, embedStage, now);
-  const actions = actionsOf(item, s, embedStage, !!onResume, !!onSkip);
+  // A spreadsheet has no embed stage whatever the app's setting.
+  const stages = embedsIn(item, embedStage);
+  const s = statusOf(item, stages, now);
+  const actions = actionsOf(item, s, stages, !!onResume, !!onSkip);
   const run = onResume && (() => onResume(item));
   const skip = onSkip && (() => onSkip(item));
   const latest = latestStageAt(item);
@@ -601,16 +571,16 @@ const Row = memo(function Row({
             {item.filename}
           </button>
           {item.code && (
-            <span className="shrink-0 text-[11px] text-muted-foreground/70">
+            <span className="shrink-0 text-[11px] text-muted-foreground/70 @max-lg:hidden">
               {displayCode(item.code)}
             </span>
           )}
         </div>
 
         <div className="flex min-w-0 items-center gap-3">
-          <Track item={item} s={s} embedStage={embedStage} />
+          <Track item={item} s={s} embedStage={stages} />
           {isRateLimited(item) ? (
-            <RateLimitedCaption item={item} embedStage={embedStage} />
+            <RateLimitedCaption item={item} embedStage={stages} />
           ) : (
             <CaptionText text={captionOf(item, s)} tone={s.phase === "failed" ? "bad" : undefined} />
           )}
@@ -639,14 +609,10 @@ const Row = memo(function Row({
             </IconAction>
           </div>
         </div>
-
-        <div className="justify-self-end">
-          <StatusPill item={item} s={s} />
-        </div>
       </div>
 
       {expanded && (
-        <Detail item={item} embedStage={embedStage} actions={actions} onRun={run} onSkip={skip} />
+        <Detail item={item} embedStage={stages} actions={actions} onRun={run} onSkip={skip} />
       )}
     </div>
   );
@@ -685,7 +651,6 @@ const HEADER = (
     <span className="text-[11px] font-medium text-muted-foreground">File</span>
     <span className="text-[11px] font-medium text-muted-foreground">Progress</span>
     <span className="justify-self-end text-[11px] font-medium text-muted-foreground">Updated</span>
-    <span className="justify-self-end text-[11px] font-medium text-muted-foreground">Status</span>
   </>
 );
 
@@ -716,26 +681,28 @@ export const PipelineTable = memo(function PipelineTable({
   const { page, pageCount, setPage, pageRows } = usePagedRows(sorted, PAGE_SIZE);
 
   return (
-    <GridTable
-      cols={COLS}
-      header={HEADER}
-      empty={sorted.length === 0 && "Nothing in the pipeline — run a sync to pull new files."}
-      pagination={{ page, pageCount, onPage: setPage, total: sorted.length, unit: "file" }}
-    >
-      <div className="divide-y divide-border-subtle">
-        {pageRows.map((it) => (
-          <Row
-            key={it.relativePath}
-            item={it}
-            embedStage={embedStage}
-            expanded={expanded.has(it.relativePath)}
-            now={now}
-            onToggle={toggle}
-            onResume={onResume}
-            onSkip={onSkip}
-          />
-        ))}
-      </div>
-    </GridTable>
+    <div className="@container h-full">
+      <GridTable
+        cols={COLS}
+        header={HEADER}
+        empty={sorted.length === 0 && "Nothing in the pipeline — run a sync to pull new files."}
+        pagination={{ page, pageCount, onPage: setPage, total: sorted.length, unit: "file" }}
+      >
+        <div className="divide-y divide-border-subtle">
+          {pageRows.map((it) => (
+            <Row
+              key={it.relativePath}
+              item={it}
+              embedStage={embedStage}
+              expanded={expanded.has(it.relativePath)}
+              now={now}
+              onToggle={toggle}
+              onResume={onResume}
+              onSkip={onSkip}
+            />
+          ))}
+        </div>
+      </GridTable>
+    </div>
   );
 });

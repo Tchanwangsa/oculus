@@ -4,7 +4,7 @@ import Database from "@tauri-apps/plugin-sql";
 // while `isProvider` is called inside function bodies — hoisting it to module
 // scope reads `PROVIDERS` in its TDZ and throws at import time.
 import { isProvider, type Provider } from "@/lib/harness";
-import { PDF_BACKED_SQL_LIST } from "@/lib/fileTypes";
+import { PDF_BACKED_SQL_LIST, PIPELINE_SQL_LIST } from "@/lib/fileTypes";
 import { compareTermsNewestFirst, TERM_RANK_SQL } from "@/lib/terms";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -922,7 +922,7 @@ export async function searchPageText(
   }
 }
 
-/** Every PDF-backed file's stage — seeds the Sync page's pipeline table. */
+/** One file's stages as the DB holds them. */
 export interface PdfPipelineRow {
   subject_id: number;
   relative_path: string;
@@ -937,15 +937,26 @@ export interface PdfPipelineRow {
   embedded_at: string | null;
 }
 
-export async function getPdfPipelineRows(): Promise<PdfPipelineRow[]> {
+async function pipelineRows(types: string): Promise<PdfPipelineRow[]> {
   const db = await getDb();
   return db.select<PdfPipelineRow[]>(
     `SELECT subject_id, relative_path, parse_status, embed_status,
             scraped_at, first_seen_at, content_changed_at, parsed_at, embedded_at
      FROM files
-     WHERE lower(file_type) IN ${PDF_BACKED_SQL_LIST}
+     WHERE lower(file_type) IN ${types}
      ORDER BY relative_path ASC`,
   );
+}
+
+/** Every PDF-backed file's stages — the parse counts in Settings. */
+export function getPdfPipelineRows(): Promise<PdfPipelineRow[]> {
+  return pipelineRows(PDF_BACKED_SQL_LIST);
+}
+
+/** Every file with a File Activity row (PDF-backed, and spreadsheets) —
+ *  seeds the Sync page's pipeline table. */
+export function getPipelineRows(): Promise<PdfPipelineRow[]> {
+  return pipelineRows(PIPELINE_SQL_LIST);
 }
 
 /** status: 'queued' | 'running' | 'quality' | 'error'; `'quality'` is the

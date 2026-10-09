@@ -13,7 +13,7 @@ import { reportEmbedPages, useIndexStore } from "@/stores/indexStore";
 import { embedReady } from "@/lib/retrieval";
 import type { SyncProgress } from "@/stores/syncStore";
 import type { ParseJob } from "@/stores/parseStore";
-import { isPdfBacked } from "@/lib/fileTypes";
+import { isPdfBacked, isPipelineFile } from "@/lib/fileTypes";
 import { CALENDAR_UPDATED_EVENT, syncCalendar } from "@/lib/calendar";
 import { FILE_SCRAPED_EVENT, type FileScraped } from "@/lib/syncRunner";
 import { notifyProjectsUpdated } from "@/lib/projects";
@@ -49,7 +49,6 @@ interface EmbedJob {
 /** Every embed event that is not a wait ends one. */
 const NO_WAIT = { embedWaitingUntil: undefined, embedWaitingReason: undefined } as const;
 
-const isPipelinePdf = (path: string) => isPdfBacked(path);
 const pipeline = () => usePipelineStore.getState();
 
 const NO_ERROR = {
@@ -113,7 +112,7 @@ export function useBackendEvents() {
     "scrape-file-start",
     (e) => {
       const { subject_id, relative_path } = e.payload;
-      if (!isPipelinePdf(relative_path)) return;
+      if (!isPipelineFile(relative_path)) return;
       pipeline().touch(relative_path, subject_id, { download: "active" });
     },
   );
@@ -122,7 +121,7 @@ export function useBackendEvents() {
     "scrape-file-failed",
     (e) => {
       const { subject_id, relative_path, error } = e.payload;
-      if (!isPipelinePdf(relative_path)) return;
+      if (!isPipelineFile(relative_path)) return;
       pipeline().touch(relative_path, subject_id, {
         download: "error",
         error,
@@ -136,7 +135,7 @@ export function useBackendEvents() {
     "scrape-file",
     async (e) => {
       const { subject_id, relative_path, size_bytes, category, canvas_id, source_url, action } = e.payload;
-      if (isPipelinePdf(relative_path)) {
+      if (isPipelineFile(relative_path)) {
         if (action === "unchanged") {
           pipeline().confirmDownload(relative_path);
         } else if (action === "updated") {
@@ -173,7 +172,8 @@ export function useBackendEvents() {
             await markFileContentChanged(subject_id, relative_path);
           }
           // Rust purged the parse artifacts; clear stale statuses and pages
-          // so search never serves the old text.
+          // so search never serves the old text. A spreadsheet's are replaced
+          // by Rust as it converts, which may already have happened.
           if (action === "updated" && isPdfBacked(relative_path)) {
             await resetFilePipeline(subject_id, relative_path);
           }
@@ -302,9 +302,10 @@ export function useBackendEvents() {
           ...(prev?.parse !== "done" ? { parsedAt: Date.now() } : {}),
           ...clearErrorUnless(path, "embed"),
         });
-        // Auto-embed (gated on a Voyage key). The queue needs the file
-        // row's `id`, and this event carries only a path.
-        if (useIndexStore.getState().ready && prev?.embed !== "done") {
+        // Auto-embed (gated on a Voyage key; a spreadsheet's text is never
+        // embedded). The queue needs the file row's `id`, and this event
+        // carries only a path.
+        if (useIndexStore.getState().ready && prev?.embed !== "done" && isPdfBacked(path)) {
           persisted.then(() => getFileByRelativePath(path))
             .then((file) => {
               if (file) useIndexStore.getState().enqueueFile(file);
