@@ -2,13 +2,13 @@
 //!
 //! The uid comes from `getpeereid`. The code comes from the audit token
 //! (`LOCAL_PEERTOKEN`, which names a process instance, not a reusable pid)
-//! through `SecCodeCopyGuestWithAttributes`. A bundled keyd admits only
-//! executables inside its own app bundle, and only while that bundle's seal
-//! verifies strictly; a `dev` build admits any same-user caller, because
-//! dev builds have no bundle (docs/architecture.md).
+//! through `SecCodeCopyGuestWithAttributes`. Under `Policy::Install` keyd
+//! admits only executables inside its own app bundle, and only while that
+//! bundle's seal verifies strictly; under `SameUser` (dev builds, which have
+//! no bundle) any same-user caller (docs/architecture.md).
 
 use std::ffi::c_void;
-use std::os::fd::RawFd;
+use std::os::fd::{AsRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::ptr;
 
@@ -21,6 +21,8 @@ use core_foundation_sys::base::{CFGetTypeID, CFRelease, CFTypeRef, OSStatus};
 use core_foundation_sys::dictionary::{CFDictionaryGetValue, CFDictionaryRef};
 use core_foundation_sys::string::{CFStringGetTypeID, CFStringRef};
 use core_foundation_sys::url::CFURLRef;
+
+use crate::platform::{Caller, Conn, PeerCheck, Policy, Role, Stream};
 
 type SecCodeRef = *const c_void;
 type SecStaticCodeRef = *const c_void;
@@ -47,52 +49,56 @@ extern "C" {
     fn SecStaticCodeCheckValidity(static_code: SecStaticCodeRef, flags: u32, requirement: *const c_void) -> OSStatus;
 }
 
-/// What keyd learned about a peer. Each lookup that failed leaves its field
-/// empty and says why in `problems`.
-#[derive(Debug, Default)]
-pub struct Caller {
-    pub uid: Option<u32>,
-    pub pid: Option<u32>,
-    pub path: Option<PathBuf>,
-    /// The signing identifier (`com.tchan.oculus`, `com.tchan.oculus.cli`):
-    /// what later ops are tiered by.
-    pub identifier: Option<String>,
-    pub valid: bool,
-    pub problems: Vec<String>,
+pub(crate) struct Check {
+    pub(crate) policy: Policy,
 }
 
-impl Caller {
-    /// For the log: identifier, then path, then pid.
-    pub fn label(&self) -> String {
-        let path = self.path.as_ref().map(|p| p.display().to_string());
-        match (&self.identifier, path) {
-            (Some(id), Some(p)) => format!("{id} ({p})"),
-            (Some(id), None) => id.clone(),
-            (None, Some(p)) => p,
-            (None, None) => format!("pid {}", self.pid.map_or("?".to_string(), |p| p.to_string())),
-        }
+impl PeerCheck for Check {
+    fn inspect(&self, conn: &Conn) -> Caller {
+        let fd = match &conn.0 {
+            Stream::Os(stream) => stream.as_raw_fd(),
+            #[cfg(test)]
+            Stream::Memory(_) => return Caller { problems: vec!["not a socket".into()], ..Caller::default() },
+        };
+        let mut caller = inspect(fd);
+        caller.role = role(self.policy, caller.path.as_deref());
+        caller
+    }
+
+    fn admit(&self, caller: &Caller) -> Result<(), String> {
+        admit(self.policy, caller)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Policy {
-    /// Same uid is enough. Dev builds only.
-    SameUser,
-    /// Same uid, and an executable inside keyd's own sealed bundle.
-    Bundle,
-}
-
-impl Policy {
-    pub const fn compiled() -> Policy {
-        if cfg!(feature = "dev") {
-            Policy::SameUser
-        } else {
-            Policy::Bundle
-        }
+/// Under `Install`, the app is the bundle itself (as `SecCodeCopyPath`
+/// reports a main executable) and the CLI is `Contents/MacOS/oculus`. A dev
+/// build has no bundle, so its binaries are told apart by file name.
+fn role(policy: Policy, path: Option<&Path>) -> Role {
+    let Some(path) = path else { return Role::Unknown };
+    match policy {
+        Policy::Install => match my_bundle() {
+            Ok(bundle) => role_in_bundle(&bundle, &path.canonicalize().unwrap_or_else(|_| path.to_path_buf())),
+            Err(_) => Role::Unknown,
+        },
+        Policy::SameUser => match path.file_name().and_then(|n| n.to_str()) {
+            Some("oculus") => Role::Cli,
+            Some("app") => Role::App,
+            _ => Role::Unknown,
+        },
     }
 }
 
-pub fn inspect(fd: RawFd) -> Caller {
+fn role_in_bundle(bundle: &Path, path: &Path) -> Role {
+    if path == bundle {
+        Role::App
+    } else if path == bundle.join("Contents/MacOS/oculus") {
+        Role::Cli
+    } else {
+        Role::Unknown
+    }
+}
+
+fn inspect(fd: RawFd) -> Caller {
     let mut c = Caller::default();
 
     let (mut uid, mut gid) = (0 as libc::uid_t, 0 as libc::gid_t);
@@ -170,7 +176,7 @@ unsafe fn dict_string(dict: CFDictionaryRef, key: CFStringRef) -> Option<String>
 }
 
 /// `Ok` to serve the caller, or why not. Runs before any request is read.
-pub fn admit(policy: Policy, caller: &Caller) -> Result<(), String> {
+fn admit(policy: Policy, caller: &Caller) -> Result<(), String> {
     let me = unsafe { libc::geteuid() };
     match caller.uid {
         Some(uid) if uid == me => {}
@@ -245,7 +251,7 @@ mod tests {
         let me = unsafe { libc::geteuid() };
         let other = Caller { uid: Some(me + 1), valid: true, ..Caller::default() };
         let unknown = Caller { uid: None, valid: true, ..Caller::default() };
-        for policy in [Policy::SameUser, Policy::Bundle] {
+        for policy in [Policy::SameUser, Policy::Install] {
             assert!(admit(policy, &other).is_err());
             assert!(admit(policy, &unknown).is_err());
         }
@@ -257,7 +263,45 @@ mod tests {
         let me = unsafe { libc::geteuid() };
         let exe = std::env::current_exe().unwrap();
         let caller = Caller { uid: Some(me), path: Some(exe), valid: true, ..Caller::default() };
-        let err = admit(Policy::Bundle, &caller).unwrap_err();
+        let err = admit(Policy::Install, &caller).unwrap_err();
         assert!(err.contains("not inside an app bundle"), "{err}");
+    }
+
+    #[test]
+    fn roles_come_from_the_bundle_or_in_dev_from_the_file_name() {
+        let b = Path::new("/Applications/Oculus.app");
+        assert_eq!(role_in_bundle(b, b), Role::App);
+        assert_eq!(role_in_bundle(b, Path::new("/Applications/Oculus.app/Contents/MacOS/oculus")), Role::Cli);
+        assert_eq!(role_in_bundle(b, Path::new("/Applications/Oculus.app/Contents/MacOS/oculus-keyd")), Role::Unknown);
+        assert_eq!(role_in_bundle(b, Path::new("/elsewhere/oculus")), Role::Unknown);
+
+        let dev = |p: &str| role(Policy::SameUser, Some(Path::new(p)));
+        assert_eq!(dev("/x/target/debug/oculus"), Role::Cli);
+        assert_eq!(dev("/x/target/debug/app"), Role::App);
+        assert_eq!(dev("/usr/bin/python3"), Role::Unknown);
+        assert_eq!(role(Policy::SameUser, None), Role::Unknown);
+        // The test binary is in no bundle, so the install policy knows no one.
+        assert_eq!(role(Policy::Install, Some(Path::new("/Applications/Oculus.app"))), Role::Unknown);
+    }
+
+    /// The whole check over a real socket: this test process is the caller.
+    #[test]
+    fn a_connection_from_this_process_is_inspected_and_judged_by_policy() {
+        let dir = std::env::temp_dir().join(format!("keyd-peer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("k.sock");
+        let listener = crate::platform::Listener::bind(&sock).unwrap();
+        let _client = crate::platform::connect(&sock).unwrap();
+        let conn = listener.accept().unwrap();
+
+        let me = unsafe { libc::geteuid() };
+        let dev = Check { policy: Policy::SameUser };
+        let caller = dev.inspect(&conn);
+        assert_eq!(caller.uid, Some(me), "{:?}", caller.problems);
+        assert_eq!(caller.role, Role::Unknown, "a test binary is neither the app nor the CLI");
+        assert!(dev.admit(&caller).is_ok());
+        let err = Check { policy: Policy::Install }.admit(&caller).unwrap_err();
+        assert!(err.contains("not inside an app bundle"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

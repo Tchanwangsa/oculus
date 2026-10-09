@@ -1,5 +1,5 @@
 //! The login keychain: the master key's one item, and plain reads of the
-//! items that predate the vault (for keyd's migration).
+//! items that predate the vault (for import on use).
 //!
 //! The master key is added with `SecItemAdd` and never updated: if another
 //! writer got there first, its key is the one read back and used.
@@ -8,7 +8,7 @@ use core_foundation::data::CFData;
 use security_framework::item::{ItemAddOptions, ItemAddValue, ItemClass};
 use security_framework::passwords::{generic_password, PasswordOptions};
 
-use crate::{KeyError, KeySource, MasterKey, MASTER_ACCOUNT, MASTER_LABEL, MASTER_SERVICE};
+use crate::vault::{KeyError, KeySource, LegacySource, MasterKey, MASTER_ACCOUNT, MASTER_LABEL, MASTER_SERVICE};
 
 // SecBase.h
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
@@ -20,7 +20,7 @@ const ERR_SEC_NO_ACCESS_FOR_ITEM: i32 = -25243;
 
 /// The master key's item: `com.tchan.oculus.keyd` / `master`, labelled
 /// "Oculus keys".
-pub struct MasterItem;
+pub(crate) struct MasterItem;
 
 impl KeySource for MasterItem {
     fn get_or_create(&self) -> Result<MasterKey, KeyError> {
@@ -51,8 +51,17 @@ fn read_master() -> Result<Option<MasterKey>, KeyError> {
     }
 }
 
+/// The old per-service items, read as they are.
+pub(crate) struct LegacyKeychain;
+
+impl LegacySource for LegacyKeychain {
+    fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
+        read_password(service, account)
+    }
+}
+
 /// A generic password as UTF-8. `Ok(None)` only when no such item exists.
-pub fn read_password(service: &str, account: &str) -> Result<Option<String>, KeyError> {
+fn read_password(service: &str, account: &str) -> Result<Option<String>, KeyError> {
     match generic_password(PasswordOptions::new_generic_password(service, account)) {
         Ok(bytes) => String::from_utf8(bytes)
             .map(Some)

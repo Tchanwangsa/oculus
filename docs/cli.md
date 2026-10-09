@@ -16,7 +16,7 @@ agent queries and plans through. Flags are in
 | `transcribe` | `app/src-tauri/src/bin/oculus/transcribe.rs`, `app/src-tauri/src/transcribe/` |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/docs.rs`, `app/src-tauri/src/agents.rs` |
 | The memory store | `app/src-tauri/src/memory.rs` |
-| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/keyd.rs`, `app/src-tauri/src/keyd.rs` |
+| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/keyd.rs`, `app/src-tauri/src/keyd.rs`; the LaunchAgent itself in `app/keyd/core/src/platform/macos/registrar.rs` |
 | Headless writes to the scrape tables | `app/src-tauri/src/store.rs` |
 | Repo copy of the reference | `app/scripts/gen-cli-docs.mjs` |
 
@@ -74,6 +74,9 @@ output of `bun run keyd` in the checkout it was built from
   uninstall wait until `launchctl print` stops finding the label.
 - The stamp is written last, so a failed load is retried by the next
   preflight.
+- `--if-changed` installs nothing when the stamp already holds the
+  candidate's source hash and the agent already runs the program it would
+  register: the preflight's call, and the app's own check at startup.
 - `status` compares the installed stamp, the stamp of the keyd this CLI would
   install, and the source hash the running keyd reports.
 

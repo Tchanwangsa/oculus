@@ -7,14 +7,15 @@
 use std::path::PathBuf;
 
 /// `identifier` in tauri.conf.json; a test holds them together.
-pub const IDENTIFIER: &str = "com.tchan.oculus";
+pub use keyd_core::paths::IDENTIFIER;
 
 pub const CANVAS_BASE: &str = "https://canvas.lms.unimelb.edu.au";
 
 /// Tauri's `app.path().app_data_dir()`, reachable without an `AppHandle`; the
-/// one way every module and the CLI find the data directory.
+/// one way every module and the CLI find the data directory. Defined in
+/// `keyd_core`, so `oculus-keyd` agrees.
 pub fn data_dir() -> PathBuf {
-    dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join(IDENTIFIER)
+    keyd_core::paths::data_dir()
 }
 
 pub fn cookie_path(data_dir: &std::path::Path) -> PathBuf {
@@ -159,21 +160,11 @@ pub fn iso8601_utc(secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}")
 }
 
-/// The socket launchd owns for `oculus-keyd` (`keyd.rs`). Short on purpose:
-/// `sun_path` holds 104 bytes.
+/// `oculus-keyd`'s endpoint (`keyd.rs`).
 pub fn keyd_socket_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("keyd.sock")
+    keyd_core::paths::socket(data_dir)
 }
 
-/// Where a dev install puts `oculus-keyd` and its source-hash stamp.
-pub fn keyd_bin_dir(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("bin")
-}
-
-/// Every secret, sealed under the master key only keyd reads.
-pub fn vault_path(data_dir: &std::path::Path) -> PathBuf {
-    data_dir.join("vault.bin")
-}
 
 pub fn db_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("oculus.db")

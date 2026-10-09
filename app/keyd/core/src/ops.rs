@@ -10,19 +10,26 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde_json::{json, Value};
-use vault::{names, KeyError, KeySource, MasterKey, Vault, VaultError};
 
-use crate::caller::Caller;
 use crate::forward::{Call, Routes, Upstream};
+use crate::names;
+use crate::platform::Caller;
+use crate::vault::{KeyError, KeySource, LegacySource, MasterKey, Vault, VaultError};
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const SOURCE_HASH: &str = env!("KEYD_SOURCE_HASH");
+/// What `ping` reports: keyd's version and the source hash its build script
+/// computed, which only the binary knows.
+#[derive(Debug, Clone, Copy)]
+pub struct Build {
+    pub version: &'static str,
+    pub source_hash: &'static str,
+}
 
 /// Secrets whose old keychain item keyd copies into the vault the first time
 /// an op touches them (`State::import_once`).
 const IMPORTED_ON_USE: &[&str] = &[names::VOYAGE];
 
 pub struct State {
+    build: Build,
     data_dir: PathBuf,
     keys: Box<dyn KeySource>,
     master: Mutex<Option<MasterKey>>,
@@ -83,10 +90,11 @@ impl From<Value> for Reply {
 }
 
 impl State {
-    /// `legacy` is where `import_once` reads old items: the keychain in
-    /// production, never in tests.
-    pub fn new(data_dir: PathBuf, keys: Box<dyn KeySource>, legacy: Box<dyn LegacySource>) -> Self {
+    /// `legacy` is where `import_once` reads old items: the OS secret store
+    /// in production, never in tests.
+    pub fn new(build: Build, data_dir: PathBuf, keys: Box<dyn KeySource>, legacy: Box<dyn LegacySource>) -> Self {
         State {
+            build,
             data_dir,
             keys,
             master: Mutex::new(None),
@@ -115,19 +123,19 @@ impl State {
     }
 
     fn vault(&self) -> Result<Vault, OpError> {
-        Ok(Vault::new(vault::path_in(&self.data_dir), self.master()?))
+        Ok(Vault::new(crate::paths::vault(&self.data_dir), self.master()?))
     }
 
     /// One request. `body` is the raw bytes after the header line; only
     /// `forward` takes any. No reply carries a secret value. `_caller` is who
-    /// asked: no op is limited by it yet, and `forward` is open to any
+    /// asked: no op checks its role yet, and `forward` is open to any
     /// admitted caller.
     pub fn dispatch(&self, _caller: &Caller, op: &str, req: &Value, body: &[u8]) -> Result<Reply, OpError> {
         if !body.is_empty() && op != "forward" {
             return Err(OpError::new("request", format!("{op} takes no body")));
         }
         match op {
-            "ping" => Ok(json!({"version": VERSION, "source_hash": SOURCE_HASH, "pid": std::process::id()}).into()),
+            "ping" => Ok(json!({"version": self.build.version, "source_hash": self.build.source_hash, "pid": std::process::id()}).into()),
             "has" => {
                 let name = secret_name(req)?;
                 let vault = self.vault()?;
@@ -239,30 +247,6 @@ fn secret_name(req: &Value) -> Result<&str, OpError> {
 
 // ── Migration ────────────────────────────────────────────────────────────────
 
-/// Reads one pre-vault keychain item. The keychain in production; a map in tests.
-pub trait LegacySource: Send + Sync {
-    fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError>;
-}
-
-pub struct LegacyKeychain;
-
-impl LegacySource for LegacyKeychain {
-    fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
-        vault::keychain::read_password(service, account)
-    }
-}
-
-/// No old items: for a keyd whose master key is not the keychain's either.
-#[cfg(debug_assertions)]
-pub struct NoLegacy;
-
-#[cfg(debug_assertions)]
-impl LegacySource for NoLegacy {
-    fn read(&self, _service: &str, _account: &str) -> Result<Option<String>, KeyError> {
-        Ok(None)
-    }
-}
-
 #[derive(Debug, Default, PartialEq, Eq)]
 #[cfg_attr(not(test), allow(dead_code))]
 pub struct Migrated {
@@ -311,16 +295,16 @@ pub fn migrate(vault: &Vault, legacy: &dyn LegacySource) -> Result<Migrated, Vau
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{Answer, FakeOrigin, Scratch};
+    use crate::test_support::{Answer, FakeOrigin, Scratch, BUILD};
+    use crate::vault::{NoLegacy, StaticKey};
     use std::collections::HashMap;
-    use vault::StaticKey;
 
     fn key() -> MasterKey {
         MasterKey::from_bytes([9; 32])
     }
 
     fn state_in(dir: &Scratch) -> State {
-        State::new(dir.0.clone(), Box::new(StaticKey(key())), Box::new(NoLegacy))
+        State::new(BUILD, dir.0.clone(), Box::new(StaticKey(key())), Box::new(NoLegacy))
     }
 
     /// The reply's header, for ops that answer without a body.
@@ -352,18 +336,18 @@ mod tests {
     #[test]
     fn ping_never_reads_the_master_key() {
         let dir = Scratch::new("ping");
-        let state = State::new(dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
+        let state = State::new(BUILD, dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
         let reply = call(&state, "ping", json!({"op": "ping"})).unwrap();
-        assert_eq!(reply["source_hash"], SOURCE_HASH);
+        assert_eq!(reply["source_hash"], BUILD.source_hash);
         assert_eq!(reply["source_hash"].as_str().unwrap().len(), 64);
         assert_eq!(reply["pid"], std::process::id());
-        assert_eq!(reply["version"], VERSION);
+        assert_eq!(reply["version"], BUILD.version);
     }
 
     #[test]
     fn a_refused_master_key_is_a_keychain_error_and_is_retried() {
         let dir = Scratch::new("refused");
-        let state = State::new(dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
+        let state = State::new(BUILD, dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
         let err = state.dispatch(&Caller::default(), "has", &json!({"secret": "voyage"}), b"").unwrap_err();
         assert_eq!(err.kind, "keychain");
         assert_eq!(err.to_json()["error"], "keychain");
@@ -374,7 +358,7 @@ mod tests {
     fn the_master_key_is_read_once_across_racing_connections() {
         let dir = Scratch::new("single-flight");
         let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let state = std::sync::Arc::new(State::new(dir.0.clone(), Box::new(Counting(reads.clone())), Box::new(NoLegacy)));
+        let state = std::sync::Arc::new(State::new(BUILD, dir.0.clone(), Box::new(Counting(reads.clone())), Box::new(NoLegacy)));
         let threads: Vec<_> = (0..6)
             .map(|_| {
                 let s = state.clone();
@@ -415,7 +399,7 @@ mod tests {
             let err = state.dispatch(&Caller::default(), op, &req, body).unwrap_err();
             assert_eq!(err.kind, "request", "{op} {req}");
         }
-        assert!(!vault::path_in(&dir.0).exists(), "nothing was written");
+        assert!(!crate::paths::vault(&dir.0).exists(), "nothing was written");
     }
 
     struct Items(HashMap<(&'static str, &'static str), Result<Option<String>, KeyError>>);
@@ -433,7 +417,7 @@ mod tests {
     #[test]
     fn migration_copies_missing_names_and_keeps_existing_ones() {
         let dir = Scratch::new("migrate");
-        let v = Vault::new(vault::path_in(&dir.0), key());
+        let v = Vault::new(crate::paths::vault(&dir.0), key());
         v.store(names::GROQ, "gsk-new").unwrap();
         let legacy = Items(HashMap::from([
             (("com.tchan.oculus.voyage", "voyage"), Ok(Some("pa-old".to_string()))),
@@ -565,7 +549,7 @@ mod tests {
     #[test]
     fn a_bad_forward_is_refused_before_the_master_key_is_read() {
         let dir = Scratch::new("fwd-bad");
-        let state = State::new(dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
+        let state = State::new(BUILD, dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
         for req in [
             json!({"secret": "voyage", "method": "POST", "path": "/v2/x"}),
             json!({"secret": "voyage", "method": "DELETE", "path": "/v1/x"}),
@@ -593,7 +577,7 @@ mod tests {
 
     fn with_old(dir: &Scratch, old: Result<Option<String>, KeyError>) -> (State, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
         let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let state = State::new(dir.0.clone(), Box::new(StaticKey(key())), Box::new(OldVoyage(old, reads.clone())));
+        let state = State::new(BUILD, dir.0.clone(), Box::new(StaticKey(key())), Box::new(OldVoyage(old, reads.clone())));
         (state, reads)
     }
 
@@ -604,7 +588,7 @@ mod tests {
         assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
         assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
-        let v = Vault::new(vault::path_in(&dir.0), key());
+        let v = Vault::new(crate::paths::vault(&dir.0), key());
         assert_eq!(v.get("voyage").unwrap().as_deref(), Some("pa-old"));
 
         assert_eq!(call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"], true);
@@ -624,7 +608,7 @@ mod tests {
         call(&state, "store", json!({"secret": "voyage", "value": "pa-new"})).unwrap();
         assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
-        assert_eq!(Vault::new(vault::path_in(&dir.0), key()).get("voyage").unwrap().as_deref(), Some("pa-new"));
+        assert_eq!(Vault::new(crate::paths::vault(&dir.0), key()).get("voyage").unwrap().as_deref(), Some("pa-new"));
     }
 
     #[test]

@@ -7,11 +7,11 @@ build = "build.rs"
 
 # Standalone, and never a member of any workspace: a shared Cargo.lock bump
 # would relink keyd, change its cdhash and bring back the keychain prompt
-# (docs/development.md). `vault` sits inside this root because cargo hashes a
+# (docs/development.md). `core` sits inside this root because cargo hashes a
 # path dependency outside it by absolute path, which would give each checkout
 # different bytes. Excluded, because it is a root of its own for its tests.
 [workspace]
-exclude = ["vault"]
+exclude = ["core"]
 
 [[bin]]
 name = "oculus-keyd"
@@ -19,20 +19,16 @@ path = "src/main.rs"
 
 [features]
 # Admit any caller running as this user instead of requiring one inside
-# keyd's own app bundle. `bun run keyd` builds with it; a bundled release
-# must not.
+# keyd's own install. `bun run keyd` builds with it; a bundled release must
+# not.
 dev = []
 
 [dependencies]
-vault = { package = "oculus-vault", path = "vault" }
-libc = "=0.2.190"
-core-foundation = "=0.10.1"
-core-foundation-sys = "=0.8.7"
+# Everything but `main`: the ops, the server loop and the OS adapter.
+keyd_core = { package = "oculus-keyd-core", path = "core", features = ["server"] }
+
+[dev-dependencies]
 serde_json = "=1.0.151"
-# `forward`'s HTTPS client: rustls with the webpki roots (`tls`), and no
-# `gzip`, so the answer's bytes pass through as the origin sent them. Never
-# `proxy-from-env`: an environment variable must not move where a key goes.
-ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
 
 [build-dependencies]
 sha2 = "=0.10.9"

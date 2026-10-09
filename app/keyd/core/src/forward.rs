@@ -12,10 +12,10 @@ use std::io::Read;
 use std::time::Duration;
 
 use serde_json::Value;
-use vault::names;
 
+use crate::framing::MAX_BODY;
+use crate::names;
 use crate::ops::OpError;
-use crate::server::MAX_BODY;
 
 /// Where a secret may be sent: `origin` (scheme and host, no trailing slash)
 /// and the prefix every forwarded path must start with.

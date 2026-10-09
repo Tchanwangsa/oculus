@@ -20,7 +20,7 @@ cookie.
 | Frontend auth state | `app/src/hooks/useAuth.ts`, `app/src/hooks/useKeepalive.ts` |
 | Handing the session to the in-app browser | `app/src-tauri/src/browser.rs` |
 | Keychain entry lifecycle (also used by MinerU, Voyage and Groq) | `app/src-tauri/src/credentials.rs` |
-| The `oculus-keyd` client, which Voyage's key goes through when keyd is installed | `app/src-tauri/src/credentials/broker.rs` |
+| The `oculus-keyd` client, which Voyage's key goes through when keyd is installed | `app/keyd/core/src/client.rs` (`credentials::Credentialed`) |
 | Credential entry UI | `app/src/components/settings/AutoSignIn.tsx` |
 
 ## Canvas authenticates by session cookie only

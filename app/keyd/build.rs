@@ -1,6 +1,6 @@
 //! Embeds `KEYD_SOURCE_HASH`: a sha256 over every input that decides keyd's
-//! bytes — keyd's and the vault's sources and manifests, keyd's Cargo.lock
-//! and its cargo config. Paths are hashed relative to this crate, so every
+//! bytes — keyd's and core's sources and manifests, keyd's Cargo.lock and
+//! its cargo config. Paths are hashed relative to this crate, so every
 //! checkout of the same commit agrees. The installer compares this, not the
 //! binary, because a toolchain change alters bytes without a source change
 //! (docs/development.md).
@@ -13,10 +13,10 @@ fn main() {
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
 
     let mut files = Vec::new();
-    for top in ["Cargo.toml", "Cargo.lock", "build.rs", ".cargo/config.toml", "vault/Cargo.toml"] {
+    for top in ["Cargo.toml", "Cargo.lock", "build.rs", ".cargo/config.toml", "core/Cargo.toml"] {
         files.push(root.join(top));
     }
-    for dir in ["src", "vault/src"] {
+    for dir in ["src", "core/src"] {
         println!("cargo:rerun-if-changed={}", root.join(dir).display());
         walk(&root.join(dir), &mut files);
     }

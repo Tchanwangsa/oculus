@@ -246,6 +246,10 @@ Options:
           The signed keyd to install. Defaults to the one beside this binary in the app
           bundle, or, in a debug build, `bun run keyd`'s output
 
+      --if-changed
+          Do nothing when the installed keyd was built from the same source and the
+          agent already runs it
+
   -h, --help
           Print help (see a summary with '-h')
 ```

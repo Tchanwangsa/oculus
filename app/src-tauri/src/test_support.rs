@@ -248,27 +248,20 @@ impl FakeKeyd {
     where
         H: Fn(&Value, &[u8]) -> (Value, Vec<u8>) + Send + 'static,
     {
-        use std::io::{BufRead, BufReader, Read, Write};
+        use keyd_core::framing;
 
-        let listener = std::os::unix::net::UnixListener::bind(crate::paths::keyd_socket_path(dir)).unwrap();
+        let listener = keyd_core::platform::Listener::bind(&crate::paths::keyd_socket_path(dir)).unwrap();
         let requests: Arc<Mutex<Vec<(Value, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
         let log = requests.clone();
         std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(stream) = stream else { continue };
-                let mut reader = BufReader::new(&stream);
-                let mut line = String::new();
-                while reader.read_line(&mut line).unwrap_or(0) > 0 {
-                    let header: Value = serde_json::from_str(&line).unwrap();
-                    let len = header.get("body_len").and_then(Value::as_u64).unwrap_or(0) as usize;
-                    let mut body = vec![0; len];
-                    reader.read_exact(&mut body).unwrap();
+            while let Ok(conn) = listener.accept() {
+                let mut stream = std::io::BufReader::new(conn);
+                while let Ok(Some(line)) = framing::read_line(&mut stream, framing::MAX_LINE) {
+                    let (header, len) = framing::parse_header(&line).unwrap();
+                    let body = framing::read_body(&mut stream, len).unwrap();
                     let (reply, out) = handler(&header, &body);
                     hold(&log).push((header, body));
-                    let mut writer = &stream;
-                    writer.write_all(format!("{reply}\n").as_bytes()).ok();
-                    writer.write_all(&out).ok();
-                    line.clear();
+                    framing::write_frame(stream.get_mut(), &reply, &out).ok();
                 }
             }
         });

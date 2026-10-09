@@ -1,45 +1,35 @@
 //! The secret store behind `oculus-keyd`: every secret as one AEAD-sealed JSON
 //! map in `<data_dir>/vault.bin`, under one 256-bit master key that lives in
-//! the login keychain. A crate of its own so keyd links it without the app,
-//! and so the app and CLI can open the vault themselves when keyd is absent.
-//! See docs/architecture.md.
+//! the OS secret store (`platform::master_key`). See docs/architecture.md.
 //!
 //! `vault.bin` is a version byte, a 12-byte nonce, then the ChaCha20-Poly1305
 //! ciphertext (tag included) of a JSON object of strings. The version byte is
 //! the associated data. Every write draws a fresh nonce and replaces the file
-//! by rename; read-modify-write runs under an `flock` on `vault.bin.lock`.
+//! by rename; read-modify-write runs under an exclusive lock on
+//! `vault.bin.lock`.
 //!
 //! No value is ever logged or Debug-printed: `Entries` and `MasterKey` print
 //! names and nothing else.
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 
-#[cfg(target_os = "macos")]
-pub mod keychain;
-pub mod names;
+use crate::platform::files;
 
-pub const FILE_NAME: &str = "vault.bin";
 const VERSION: u8 = 1;
 const NONCE_LEN: usize = 12;
 const TAG_LEN: usize = 16;
 
-/// The master key's keychain item. The label is what the access prompt quotes.
+/// The master key's item in the OS secret store. The label is what an
+/// access prompt quotes.
 pub const MASTER_SERVICE: &str = "com.tchan.oculus.keyd";
 pub const MASTER_ACCOUNT: &str = "master";
 pub const MASTER_LABEL: &str = "Oculus keys";
-
-pub fn path_in(data_dir: &Path) -> PathBuf {
-    data_dir.join(FILE_NAME)
-}
 
 // ── Master key ───────────────────────────────────────────────────────────────
 
@@ -57,7 +47,7 @@ impl MasterKey {
         Ok(MasterKey(bytes))
     }
 
-    /// The keychain holds the key as 64 lowercase hex characters.
+    /// The secret store holds the key as 64 lowercase hex characters.
     pub fn to_hex(&self) -> String {
         self.0.iter().map(|b| format!("{b:02x}")).collect()
     }
@@ -81,8 +71,9 @@ impl fmt::Debug for MasterKey {
     }
 }
 
-/// Why the master key could not be had. `Refused` is the user or the sandbox
-/// saying no (a cancelled prompt, no access); `Platform` is anything else.
+/// Why the master key, or an old item, could not be had. `Refused` is the
+/// user or the sandbox saying no (a cancelled prompt, no access); `Platform`
+/// is anything else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyError {
     Refused(String),
@@ -98,8 +89,8 @@ impl fmt::Display for KeyError {
     }
 }
 
-/// Where the master key comes from: the keychain in production, a fixed key
-/// in tests.
+/// Where the master key comes from: the OS secret store in production
+/// (`platform::master_key`), a fixed key in tests.
 pub trait KeySource: Send + Sync {
     /// Reads the key, creating it on first use. Never replaces one that exists.
     fn get_or_create(&self) -> Result<MasterKey, KeyError>;
@@ -111,6 +102,24 @@ pub struct StaticKey(pub MasterKey);
 impl KeySource for StaticKey {
     fn get_or_create(&self) -> Result<MasterKey, KeyError> {
         Ok(self.0.clone())
+    }
+}
+
+/// Reads one item that predates the vault (`names::LEGACY`): the OS secret
+/// store in production (`platform::legacy_items`), a map in tests.
+/// `Ok(None)` only when no such item exists.
+pub trait LegacySource: Send + Sync {
+    fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError>;
+}
+
+/// No old items: for a keyd whose master key is not the store's either.
+#[cfg(debug_assertions)]
+pub struct NoLegacy;
+
+#[cfg(debug_assertions)]
+impl LegacySource for NoLegacy {
+    fn read(&self, _service: &str, _account: &str) -> Result<Option<String>, KeyError> {
+        Ok(None)
     }
 }
 
@@ -236,30 +245,15 @@ impl Vault {
         Ok(out)
     }
 
-    fn lock(&self) -> Result<File, VaultError> {
+    fn lock(&self) -> Result<files::FileLock, VaultError> {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| VaultError::Io(format!("creating {}: {e}", dir.display())))?;
         }
         let mut name = self.path.clone().into_os_string();
         name.push(".lock");
         let lock_path = PathBuf::from(name);
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .mode(0o600)
-            .open(&lock_path)
-            .map_err(|e| VaultError::Io(format!("opening {}: {e}", lock_path.display())))?;
         // Blocks until the holder closes its descriptor; released on drop.
-        loop {
-            if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
-                return Ok(file);
-            }
-            let e = std::io::Error::last_os_error();
-            if e.kind() != std::io::ErrorKind::Interrupted {
-                return Err(VaultError::Io(format!("locking {}: {e}", lock_path.display())));
-            }
-        }
+        files::lock(&lock_path).map_err(|e| VaultError::Io(format!("locking {}: {e}", lock_path.display())))
     }
 
     /// Writes a temp file beside the vault and renames it over: a reader sees
@@ -269,10 +263,11 @@ impl Vault {
         let mut suffix = [0u8; 6];
         getrandom::getrandom(&mut suffix).map_err(|e| VaultError::Io(format!("getrandom: {e}")))?;
         let suffix: String = suffix.iter().map(|b| format!("{b:02x}")).collect();
-        let tmp = dir.join(format!(".{FILE_NAME}.{}.{suffix}.tmp", std::process::id()));
+        let file_name = self.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let tmp = dir.join(format!(".{file_name}.{}.{suffix}.tmp", std::process::id()));
 
         let written = (|| {
-            let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+            let mut f = files::create_private(&tmp)?;
             f.write_all(bytes)?;
             f.sync_all()?;
             std::fs::rename(&tmp, &self.path)
@@ -282,9 +277,7 @@ impl Vault {
             return Err(VaultError::Io(format!("writing {}: {e}", self.path.display())));
         }
         // The rename is durable once the directory is flushed.
-        if let Ok(d) = File::open(dir) {
-            d.sync_all().ok();
-        }
+        files::sync_dir(dir).ok();
         Ok(())
     }
 }
@@ -326,6 +319,9 @@ fn open_sealed(key: &MasterKey, bytes: &[u8]) -> Result<Entries, VaultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::names;
+    use crate::paths::vault as path_in;
+    use std::fs::File;
     use std::io::Read;
 
     struct Scratch(PathBuf);
@@ -335,7 +331,7 @@ mod tests {
             let mut r = [0u8; 4];
             getrandom::getrandom(&mut r).unwrap();
             let dir = std::env::temp_dir().join(format!(
-                "oculus-vault-{name}-{}-{:08x}",
+                "keyd-vault-{name}-{}-{:08x}",
                 std::process::id(),
                 u32::from_ne_bytes(r)
             ));
@@ -454,10 +450,7 @@ mod tests {
             .collect();
         leftovers.sort();
         assert_eq!(leftovers, ["vault.bin", "vault.bin.lock"], "no temp file left behind");
-
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
+        // Its mode is the platform's to test (`platform/unix.rs`).
     }
 
     #[test]

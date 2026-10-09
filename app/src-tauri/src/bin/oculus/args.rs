@@ -163,6 +163,10 @@ pub(crate) enum KeydAction {
         /// in the app bundle, or, in a debug build, `bun run keyd`'s output.
         #[arg(long, value_name = "PATH")]
         from: Option<PathBuf>,
+        /// Do nothing when the installed keyd was built from the same source
+        /// and the agent already runs it
+        #[arg(long)]
+        if_changed: bool,
     },
     /// Whether keyd is installed, loaded, current and answering
     ///

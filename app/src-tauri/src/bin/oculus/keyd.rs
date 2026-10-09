@@ -9,15 +9,23 @@ fn short(hash: &str) -> &str {
 }
 
 impl Ctx {
-    pub(crate) fn keyd_install(&self, from: Option<&std::path::Path>) -> Result<(), String> {
+    pub(crate) fn keyd_install(&self, from: Option<&std::path::Path>, if_changed: bool) -> Result<(), String> {
         let from = match from {
             Some(p) => p.to_path_buf(),
             None => keyd::candidate().ok_or("no built oculus-keyd found — run `bun run keyd`, or pass --from")?,
         };
-        let installed = keyd::install(&self.data_dir, &from)?;
+        let installed = if if_changed {
+            keyd::install_if_changed(&self.data_dir, &from)?
+        } else {
+            Some(keyd::install(&self.data_dir, &from)?)
+        };
         if self.json {
             return self.emit(&installed);
         }
+        let Some(installed) = installed else {
+            println!("{}", paint("the installed keyd is this source — nothing to install", DIM));
+            return Ok(());
+        };
         println!("{} source {}", paint("installed", GREEN), short(&installed.source_hash));
         println!("  program  {}", installed.program.display());
         println!("  agent    {}", installed.plist.display());

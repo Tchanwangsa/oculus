@@ -20,8 +20,8 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Shared parse/embed event payload and channels | `app/src-tauri/src/pipeline_events.rs` |
 | Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
-| Credential broker `oculus-keyd`, its vault, and its installer | `app/keyd/`, `app/keyd/vault/`; `app/src-tauri/src/keyd.rs` |
-| Credential storage (keychain), the keyd client; provider probes | `app/src-tauri/src/credentials.rs`, `app/src-tauri/src/credentials/broker.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
+| Credential broker `oculus-keyd`: its `main`, its core (vault, wire format, ops, server loop, client), its OS adapters, and its installer | `app/keyd/src/main.rs`, `app/keyd/core/src/`, `app/keyd/core/src/platform/`; `app/src-tauri/src/keyd.rs` |
+| Credential storage (keychain), the keyd client; provider probes | `app/src-tauri/src/credentials.rs`, `app/keyd/core/src/client.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
 | Lecture video server | `app/src-tauri/src/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
 | Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
@@ -71,10 +71,23 @@ its failure rules are in [parsing.md](./parsing.md).
 A separate binary from its own crate (`app/keyd/`), so its code signature only
 changes when its own source does and one keychain approval sticks
 ([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
+The binary is `main.rs` over `oculus-keyd-core` (`app/keyd/core/`), which the
+app links too, for the client and the installer only.
 
-- **Started by launchd, not the app.** The LaunchAgent `com.tchan.oculus.keyd`
-  owns `keyd.sock` (mode 0600) and starts keyd on the first connect; keyd
-  exits after 60 s with no request in flight. A client that connects and
+- **Every OS call is in an adapter.** `app/keyd/core/src/platform/mod.rs`
+  is the contract: an endpoint and its `Conn`, activation, the peer check,
+  the secret store, the registrar, and the file helpers. `platform/macos/`
+  is the only adapter; `platform/unsupported.rs` builds everywhere else with
+  every seam refusing and `connect` finding keyd absent. The ops, `forward`,
+  the server loop and the client never name an OS
+  ([development.md](./development.md#keyds-os-code-lives-in-one-adapter)).
+- **Started by the OS, not the app.** On macOS the LaunchAgent
+  `com.tchan.oculus.keyd` owns `keyd.sock` (mode 0600) and starts keyd on the
+  first connect. One thread accepts and decides to exit
+  (`app/keyd/core/src/server.rs`): it waits a tick for a client on any
+  listener, and only when none came does it exit after 60 s with no request
+  in flight, so a client that arrives then stays queued in launchd's socket
+  for the next keyd instead of being dropped. A client that connects and
   sends nothing does not keep it alive.
 - **One keychain item.** The master key, `com.tchan.oculus.keyd` / `master`,
   labelled "Oculus keys" because the access prompt quotes the label. keyd
@@ -82,18 +95,19 @@ changes when its own source does and one keychain approval sticks
   is never read at start or for `ping`, so installing keyd prompts for
   nothing. Concurrent first requests wait on one read.
 - **`vault.bin`** holds the secrets as one ChaCha20-Poly1305-sealed JSON map
-  (`app/keyd/vault/src/lib.rs`): a fresh nonce per write, replaced by rename,
-  read-modify-write under `flock`. A file that fails to decrypt is never
+  (`app/keyd/core/src/vault.rs`): a fresh nonce per write, replaced by rename,
+  read-modify-write under an exclusive lock. A file that fails to decrypt is never
   overwritten.
 - **The wire format** is one JSON line, then `body_len` raw bytes if the
-  header names them; replies have the same shape. Ops: `ping` (version, source
+  header names them; replies have the same shape. One module writes and reads
+  it for keyd and every client (`app/keyd/core/src/framing.rs`). Ops: `ping` (version, source
   hash, pid), `has`, `store`, `delete`, `forward`. No op returns a value, and
   only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
   `request`, `caller`, `keychain` (the master key or an old item refused or
   failed), `vault`, `missing` and `upstream`.
 - **`forward` sends one request with the key added; the key never leaves.**
   The request names a `secret`, `method` (GET or POST), `path` and `headers`;
-  keyd sends it to that secret's fixed origin (`app/keyd/src/forward.rs`:
+  keyd sends it to that secret's fixed origin (`app/keyd/core/src/forward.rs`:
   only `voyage` → `https://api.voyageai.com`, under `/v1/`) with
   `Authorization: Bearer <key>`. The path is held to plain characters with no
   `%`, dot segment or `//`, and only `Content-Type` and `Accept` may be set.
@@ -107,15 +121,19 @@ changes when its own source does and one keychain approval sticks
   unless the vault already holds a key, then records `keyd.imported.voyage`
   in the vault; `store` and `delete` record it too, so a deleted key never
   comes back from the old item, which stays in the keychain. Entries under
-  `keyd.` are bookkeeping no op can name (`app/keyd/vault/src/names.rs`).
+  `keyd.` are bookkeeping no op can name (`app/keyd/core/src/names.rs`).
 - **The caller check runs before any request is read.** The peer's uid must
   be keyd's. A bundled keyd then admits only executables inside its own app
-  bundle whose seal verifies strictly (`app/keyd/src/caller.rs`); a `dev`
-  build admits any same-user caller. Each connection records the caller's
-  signing identifier.
+  bundle whose seal verifies strictly
+  (`app/keyd/core/src/platform/macos/peer.rs`); a `dev` build admits any
+  same-user caller. The adapter also gives each caller a role — `app` (the
+  bundle itself), `cli` (its `Contents/MacOS/oculus`) or `unknown`; a dev
+  build goes by file name, `app` or `oculus` — which the log records beside
+  the signing identifier. Ops are to check the role, never a path; none
+  does yet.
 - **Voyage goes through it; nothing else does yet.** `credentials::Credentialed`
-  (`app/src-tauri/src/credentials/broker.rs`) is the client, one connection
-  per call. It treats a missing socket or a refused connect as keyd not
+  (`keyd_core::client::Client`, `app/keyd/core/src/client.rs`) is the client,
+  one connection per call. It treats a missing socket or a refused connect as keyd not
   installed (`KeydError::Absent`), the only case in which a caller reads the
   keychain itself; every other error surfaces. The Voyage client and its
   Settings commands use it ([retrieval.md](./retrieval.md#with-oculus-keyd-installed-no-oculus-process-holds-the-voyage-key)).
@@ -124,6 +142,9 @@ changes when its own source does and one keychain approval sticks
   once, is not called.
 - `keyd::ensure_installed` runs at app startup and does nothing in a dev
   build; a dev install is the preflight's ([cli.md](./cli.md)).
+- **One data dir.** `keyd_core::paths::data_dir` (the OS data dir plus
+  `com.tchan.oculus`) is the only definition; the app's `paths::data_dir`
+  and keyd's `main` both call it. Only a debug keyd reads an override.
 
 ## Scraping lives in Rust because hidden WebViews freeze
 
@@ -272,7 +293,7 @@ JavaScript.
 - Background work in a hidden WebView freezes silently — keep it in Rust ([above](#scraping-lives-in-rust-because-hidden-webviews-freeze)).
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
-- Reaching the data dir any way but `paths::data_dir()` lets the CLI and app diverge; keyd, which links none of the app, spells the same path out in `app/keyd/src/main.rs`.
+- Reaching the data dir any way but `paths::data_dir()` (itself `keyd_core::paths::data_dir`) lets the CLI, the app and keyd diverge.
 - A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
 - A `subject_id` that cascades on user-owned tables deletes the student's work with a course.

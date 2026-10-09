@@ -18,7 +18,7 @@ over the same pages sits beside it.
 | Cost of an outstanding run, before it runs | `app/src-tauri/src/embed/estimate.rs` |
 | Engine selection, throwing the index away, `embed_blocked` | `app/src-tauri/src/embed/commands.rs` |
 | The `embed-status` event and shared wire payload | `app/src-tauri/src/embed/events.rs`, `app/src-tauri/src/pipeline_events.rs` |
-| API key: through `oculus-keyd` when installed, else the keychain | `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/credentials/broker.rs` |
+| API key: through `oculus-keyd` when installed, else the keychain | `app/src-tauri/src/voyage.rs`, `app/keyd/core/src/client.rs` |
 | Ingest, brute-force cosine search, `PAGES_FTS_SQL` + `fts_tests` | `app/src-tauri/src/retrieval.rs` |
 | Who writes `pages.markdown` (`store::upsert_pages`, `store::replace_pages`) | `app/src-tauri/src/sync.rs`, `app/src-tauri/src/sheets.rs`, `app/src-tauri/src/store.rs` |
 | `pages` table schema | `app/src-tauri/src/migrations.rs` |

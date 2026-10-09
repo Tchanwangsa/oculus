@@ -38,7 +38,7 @@ the root `CLAUDE.md` holds only the rules.
 | `app/src/` | React 19 frontend (Vite, Tailwind v4, shadcn/ui) |
 | `app/src-tauri/src/` | Rust: Tauri commands, scrape engine, parsing, embedding, retrieval, the harness |
 | `app/src-tauri/src/bin/oculus/` | The headless CLI over the same engine |
-| `app/keyd/` | `oculus-keyd`, the credential broker, and its vault crate — a separate cargo root |
+| `app/keyd/` | `oculus-keyd`, the credential broker, and `core/`, its OS-free logic and OS adapters — a separate cargo root |
 | `app/src-tauri/templates/` | The agent-facing docs and skills written into the library |
 | `app/scripts/` | Dev preflight, native-binary fetchers, CLI staging and reference generation |
 | `docs/` | These pages |

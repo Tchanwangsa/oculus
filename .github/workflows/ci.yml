@@ -1,6 +1,8 @@
 # Checks every push to master and every pull request on a fresh macOS checkout:
-# the frontend tests and bundle, the Rust tests, and that the generated CLI
-# reference matches the binary. See docs/development.md#ci-and-releases.
+# the frontend tests and bundle, the Rust tests (the app's, keyd's and keyd
+# core's), and that the generated CLI reference matches the binary; and on
+# Linux, that keyd builds with no OS adapter. See
+# docs/development.md#ci-proves-a-fresh-checkout-builds-releases-are-cut-by-hand.
 name: CI
 
 on:
@@ -59,8 +61,33 @@ jobs:
       - name: Rust tests
         working-directory: app/src-tauri
         run: cargo test --release --locked
+      - name: keyd core tests
+        working-directory: app/keyd/core
+        run: cargo test --locked --all-features
+      - name: keyd tests, release policy and dev
+        working-directory: app/keyd
+        run: cargo test --locked && cargo test --locked --features dev
 
       - name: CLI reference matches the binary
         run: |
           bun run docs:cli
           git diff --exit-code -- ../docs/cli-reference.md
+
+  # keyd's core and keyd itself on a target with no adapter: the build
+  # proves no OS call has leaked out of app/keyd/core/src/platform/, and
+  # core's tests run there over the in-memory endpoint.
+  keyd-linux:
+    name: keyd seams (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check and test keyd core
+        working-directory: app/keyd/core
+        run: cargo check --locked --all-features && cargo test --locked --all-features
+      - name: Check keyd
+        working-directory: app/keyd
+        run: cargo check --locked

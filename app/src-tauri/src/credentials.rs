@@ -1,10 +1,8 @@
 //! Keychain storage shared by cloud keys and university sign-in credentials,
-//! and `Credentialed`, the client of `oculus-keyd` (`broker.rs`). Callers own
-//! validation and probing; values never leave the keychain here.
+//! and `Credentialed`, the client of `oculus-keyd` (`keyd_core::client`).
+//! Callers own validation and probing; values never leave the keychain here.
 
-mod broker;
-
-pub(crate) use broker::{Credentialed, KeydError, RawResponse};
+pub(crate) use keyd_core::client::{Client as Credentialed, KeydError, RawResponse};
 
 pub(crate) struct Secret<'a> {
     service: &'a str,

@@ -17,6 +17,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | Compiles the on-device speech helper | `app/scripts/build-speech.mjs`, `app/src-tauri/speech/main.swift` |
 | Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
 | Builds, signs and (main checkout only) installs `oculus-keyd` | `app/scripts/build-keyd.mjs`, `app/keyd/.cargo/config.toml` |
+| Keeps keyd's OS calls inside its adapters | `app/scripts/keyd-seams.test.mjs` |
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
 | How an agent thread finds `oculus` | `app/src-tauri/src/harness/discover.rs` |
@@ -132,9 +133,12 @@ current release binary is guaranteed to exist.
 
 `ci.yml` runs on every push to `master` and every pull request, on a macOS
 runner with nothing cached but crates: `bun run test`, `bun run build`, the
-two native fetches, the speech helper and `whisper-cli`, `stage-cli`, `cargo test --release --locked`, then
+two native fetches, the speech helper and `whisper-cli`, `stage-cli`, `cargo test --release --locked`,
+keyd core's tests with every feature and keyd's with and without `dev`, then
 `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
-reference fails. `stage-cli` comes before any cargo call because tauri-build
+reference fails. A second job, `keyd-linux`, checks and tests keyd core and
+checks keyd on Ubuntu, where only the unsupported adapter exists
+([below](#keyds-os-code-lives-in-one-adapter)). `stage-cli` comes before any cargo call because tauri-build
 refuses to compile until every `externalBin` exists, and it is what writes the
 placeholder sidecar on a clean tree. The release profile is shared with that
 CLI build, so the tests reuse its artifacts. sccache is installed because
@@ -171,9 +175,13 @@ is built to give the same bytes for the same source:
 
 - **Its own crate, never a workspace member.** `app/keyd/` has its own
   `Cargo.lock`, target dir and exact-pinned dependencies, so a bump in the
-  app's lock never relinks it. `app/keyd/vault/` sits inside keyd's root (and
-  is excluded from it) because cargo hashes a path dependency outside the root
-  by its absolute path, which gives each checkout different bytes.
+  app's lock never relinks it. Its logic is `app/keyd/core/`
+  (`oculus-keyd-core`), which sits inside keyd's root (and is excluded from
+  it) because cargo hashes a path dependency outside the root by its absolute
+  path, which gives each checkout different bytes. The app links core with
+  only its `client` feature (the client and the registrar); keyd links it
+  with `server` (the vault, the ops, `forward`, the server loop). So an app
+  edit never touches keyd, and a core edit is a keyd source change.
 - **Reproducible flags.** `-Wl,-S` in `app/keyd/.cargo/config.toml` keeps the
   object paths out of LC_UUID; `build-keyd.mjs` adds `--remap-path-prefix` for
   the crate, `~/.cargo` and `~/.rustup` through `--config`, which cargo joins
@@ -183,20 +191,49 @@ is built to give the same bytes for the same source:
   com.tchan.oculus.keyd` on a temp file renamed into `target/signed/`.
   Re-signing a file that has already run leaves the kernel's cached signature
   stale, and `-i` keeps the cdhash independent of the file name.
-- **Installed by source hash, not bytes.** `build.rs` hashes keyd's and the
-  vault's sources, manifests, `Cargo.lock` and cargo config; `oculus-keyd
-  source-hash` prints it and `oculus keyd install` writes it to
-  `bin/oculus-keyd.stamp` in the data dir. The script installs only when that
-  stamp differs **and** it runs in the main checkout (`git rev-parse
-  --git-dir` equals `--git-common-dir`), so a worktree build never takes over
-  the LaunchAgent. `oculus keyd install --from <path>` works anywhere.
+- **Installed by source hash, not bytes.** `build.rs` hashes keyd's and
+  core's sources and manifests, keyd's `Cargo.lock` and its cargo config;
+  `oculus-keyd source-hash` prints it and `oculus keyd install` writes it to
+  `bin/oculus-keyd.stamp` in the data dir. The script installs only from the
+  main checkout (`git rev-parse --git-dir` equals `--git-common-dir`), so a
+  worktree build never takes over the LaunchAgent, and then through `oculus
+  keyd install --if-changed`, which does nothing when the stamp already
+  matches and the agent already runs that program. `oculus keyd install
+  --from <path>` works anywhere.
 - **`--features dev`** is what `bun run keyd` builds: it admits any same-user
   caller, because a dev keyd has no bundle to check callers against. Test
   hooks (`serve-local`, a data-dir override, an injected key that also turns
   off reading old keychain items, a loopback Voyage origin) exist only in
   debug builds.
-- Checks: `cargo test` in `app/keyd` with and without `--features dev`, and in
-  `app/keyd/vault`. No test touches launchd or the keychain.
+- Checks: `cargo test` in `app/keyd` with and without `--features dev`, and
+  `cargo test --all-features` in `app/keyd/core`. No test touches launchd or
+  the keychain.
+
+## keyd's OS code lives in one adapter
+
+keyd behaves the same on every OS; what differs is how. Each OS call — the
+socket, launchd's activation, the caller's audit token and signature, the
+keychain, the LaunchAgent, `flock` and file modes — sits under
+`app/keyd/core/src/platform/`, whose `mod.rs` states the contract and picks
+the adapter by `cfg(target_os)`. Everything else in core, keyd's `main`, and
+the app's `credentials.rs`, `keyd.rs` and `bin/oculus/keyd.rs` stay OS-free.
+
+- **The build step** is the adapter's too: `build-keyd.mjs` keeps one
+  function per OS (`buildForMacos`, the reproducible build and the ad-hoc
+  signature above) and builds nothing on an OS without one.
+- **Core's tests run anywhere.** The server loop and the client are tested
+  over an in-memory `Conn` (`platform/memory.rs`); the macOS adapter tests
+  its socket, caller check, keychain errors and plist itself. The POSIX file
+  helpers (`platform/unix.rs`) serve every Unix, so the vault works in
+  Linux CI.
+- **Enforced twice.** `keyd-seams.test.mjs` (in `bun run test`) fails on any
+  `std::os::unix`, `libc::`, framework, `extern "C"`, `launchctl` or
+  `Library/Application Support` outside `platform/` in those files, comments
+  included; the `keyd-linux` CI job builds core and keyd against the
+  unsupported adapter.
+- **Adding an OS** is a `platform/<os>.rs` written to the contract, its
+  build step in `build-keyd.mjs`, and a CI row. If anything outside
+  `platform/` has to change, the seam is wrong: fix it in core first.
 
 ## Template edits reach the library only through `oculus docs`
 
@@ -245,5 +282,6 @@ variable.
 - A dev rebuild SIGTERMs the app past Tauri's Exit event, so agent subprocesses can outlive it ([harness.md](./harness.md)).
 - A pdfium from the wrong Chromium revision builds fine and fails at bind time.
 - Adding `app/keyd` to a workspace, or building it outside `app/keyd`, changes its bytes and brings back the keychain prompt.
+- An OS call outside `app/keyd/core/src/platform/` in keyd's or the app's keyd code fails `bun run test`, and on Linux CI fails the build.
 - Deleting `~/Library/Application Support/com.tchan.oculus` is a full reset, sign-in included.
 - `data/`, `*.db` and `app/src-tauri/binaries/` are gitignored — never commit them.

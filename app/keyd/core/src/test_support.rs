@@ -1,5 +1,5 @@
-//! A temp directory per test, removed on drop, and a fake HTTP origin for
-//! `forward`.
+//! A temp directory per test, removed on drop, a fixed `ping` identity, a
+//! caller check that answers as told, and a fake HTTP origin for `forward`.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -7,7 +7,13 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::ops::Build;
+use crate::platform::{Caller, Conn, PeerCheck, Role};
+
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+/// What a test keyd reports from `ping`.
+pub const BUILD: Build = Build { version: "0.0.0-test", source_hash: "5555555555555555555555555555555555555555555555555555555555555555" };
 
 pub struct Scratch(pub PathBuf);
 
@@ -23,6 +29,33 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+/// Admits or refuses every caller, counting the connections it inspected.
+pub struct Peers {
+    verdict: Result<(), String>,
+    pub seen: Arc<AtomicUsize>,
+}
+
+impl Peers {
+    pub fn admit() -> Peers {
+        Peers { verdict: Ok(()), seen: Arc::new(AtomicUsize::new(0)) }
+    }
+
+    pub fn refuse(why: &str) -> Peers {
+        Peers { verdict: Err(why.to_string()), seen: Arc::new(AtomicUsize::new(0)) }
+    }
+}
+
+impl PeerCheck for Peers {
+    fn inspect(&self, _conn: &Conn) -> Caller {
+        self.seen.fetch_add(1, Ordering::SeqCst);
+        Caller { pid: Some(std::process::id()), role: Role::Cli, ..Caller::default() }
+    }
+
+    fn admit(&self, _caller: &Caller) -> Result<(), String> {
+        self.verdict.clone()
     }
 }
 
