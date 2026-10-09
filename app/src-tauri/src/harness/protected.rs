@@ -1,5 +1,6 @@
-//! What no agent may write, whichever CLI runs it. Claude (`claude.rs`) and
-//! Antigravity (`antigravity_rules.rs`) render these into their own rule
+//! What no agent may write, whichever CLI runs it. Claude
+//! (`providers/claude/settings.rs`) and Antigravity
+//! (`providers/antigravity/rules.rs`) render these into their own rule
 //! syntax; opencode's copy is static in `templates/OPENCODE.template.json`,
 //! held to these by the test below.
 
@@ -11,7 +12,7 @@ pub const LIBRARY_DIRS: [&str; 3] = ["courses", "lectures", "canvas-session"];
 pub const WORKSPACE_DIRS: [&str; 3] = ["skills", ".claude", ".agents"];
 
 /// Library-root files, by suffix; agy's rules name the files instead. Never
-/// `oculus.db*`: see `claude.rs`.
+/// `oculus.db*`: see `providers/claude/settings.rs`.
 pub const ROOT_FILE_GLOBS: [&str; 4] = ["*.cookie", "*.token", "*.json", "*.log"];
 
 #[cfg(test)]

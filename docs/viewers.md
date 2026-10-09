@@ -8,29 +8,29 @@ video's transcript, and a web page.
 
 | Piece | Location |
 | --- | --- |
-| Markdown, maths, mermaid, lightbox, PDF | `app/src/components/markdown/`, `app/src/components/ui/Lightbox.tsx`, `app/src/components/files/PDFViewer.tsx` |
-| Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/media.ts`, `app/src/stores/playerPrefsStore.ts`, `app/src/hooks/useTranscriptDock.ts` |
-| Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lecturePlayback.ts`, `app/src/lib/playbackOwner.ts` |
-| Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectureEnd.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/chapters.rs` |
-| Library videos | `app/src/components/files/VideoFileViewer.tsx`, `app/src/lib/openFile.ts` |
-| Transcribe from a player | `app/src/hooks/useTranscription.ts`, `app/src/components/media/TranscribeEmpty.tsx` |
-| Transcript search and source-index mapping | `app/src/hooks/useTranscriptSearch.ts` |
-| Transcription of videos without captions | `app/src-tauri/src/transcribe/`, `app/src-tauri/src/groq.rs`, `app/src/lib/transcribe.ts` |
-| Settings → Transcription: the language, the engine list and each engine's dialog | `app/src/components/settings/TranscriptionSection.tsx`, `app/src/components/settings/GroqDialog.tsx`, `app/src/components/settings/OnDeviceSpeech.tsx`, `app/src/components/settings/LocalWhisper.tsx` |
-| The on-device speech helper | `app/src-tauri/speech/main.swift`, `app/scripts/build-speech.mjs`, `app/src-tauri/src/transcribe/apple.rs` |
-| Local Whisper: the engine, its model files | `app/src-tauri/src/transcribe/whisper.rs`, `app/src-tauri/src/transcribe/whisper_models.rs`, `app/scripts/build-whisper.mjs` |
-| In-app browser | `app/src/pages/BrowserPage.tsx`, `app/src/hooks/useBrowserTabs.ts`, `app/src/lib/browserHistory.ts`, `app/src-tauri/src/browser.rs` |
+| Markdown, maths, mermaid, lightbox, PDF | `app/src/components/markdown/`, `app/src/components/ui/lightbox/Lightbox.tsx`, `app/src/components/files/PDFViewer.tsx` |
+| Media player: clock, controls, keys, fullscreen, captions, dock frame, cue list | `app/src/components/media/`, `app/src/lib/lectures/media/`, `app/src/stores/lectures/playerPrefsStore.ts`, `app/src/hooks/lectures/useTranscriptDock.ts` |
+| Lecture player: two sources, playback owner, chapters, chat | `app/src/components/lectures/`, `app/src/lib/lectures/playback/`, `app/src/lib/lectures/playbackOwner.ts` |
+| Done and Up Next: the lecture's end, the card, its thumbnail | `app/src/lib/lectures/end.ts`, `app/src/components/lectures/UpNext.tsx`, `lecture_thumbnail` in `app/src-tauri/src/lectures/chapters/app.rs` |
+| Library videos | `app/src/components/files/VideoFileViewer.tsx`, `app/src/lib/files/openFile.ts` |
+| Transcribe from a player | `app/src/hooks/lectures/useTranscription.ts`, `app/src/components/media/TranscribeEmpty.tsx` |
+| Transcript search and source-index mapping | `app/src/hooks/lectures/useTranscriptSearch.ts` |
+| Transcription of videos without captions | `app/src-tauri/src/transcribe/`, `app/src-tauri/src/providers/groq.rs`, `app/src/lib/lectures/transcribe/` |
+| Settings → Transcription: the language, the engine list and each engine's dialog | `app/src/components/settings/transcription/TranscriptionSection.tsx`, `app/src/components/settings/transcription/GroqDialog.tsx`, `app/src/components/settings/transcription/OnDeviceSpeech.tsx`, `app/src/components/settings/transcription/LocalWhisper.tsx` |
+| The on-device speech helper | `app/src-tauri/speech/main.swift`, `app/scripts/build-speech.mjs`, `app/src-tauri/src/transcribe/engines/apple.rs` |
+| Local Whisper: the engine, its model files | `app/src-tauri/src/transcribe/engines/whisper.rs`, `app/src-tauri/src/transcribe/engines/whisper_models/`, `app/scripts/build-whisper.mjs` |
+| In-app browser | `app/src/pages/tools/BrowserPage.tsx`, `app/src/hooks/shell/useBrowserTabs.ts`, `app/src/lib/browser/history/`, `app/src-tauri/src/shell/browser/` |
 
 ## One markdown renderer serves every surface
 
-`app/src/lib/mathMarkdown.ts` owns delimiter detection and source normalization.
+`app/src/lib/markdown/math.ts` owns delimiter detection and source normalization.
 Library file rendering always applies KaTeX so math fences and HTML math
 classes work even when there are no dollar delimiters.
 
 - **`app/src/components/markdown/MdComponents.tsx`** renders Canvas bodies,
   parsed PDFs, Ed threads and replies with KaTeX. `normalizeMath` rewrites
   `\(…\)` / `\[…\]` to `$…$` / `$$…$$` because CommonMark eats the backslash
-  first. An inline `<code>` holding only a citation (`app/src/lib/citations.ts`)
+  first. An inline `<code>` holding only a citation (`app/src/lib/citations/`)
   renders as `FileChip`. `![alt](path)` naming a library picture or HTML
   page renders it in place (`OutputEmbed.tsx`).
 - **A reply goes through `CompactMd`**, whose `.md-compact` rules in `index.css`
@@ -38,21 +38,21 @@ classes work even when there are no dollar delimiters.
   utilities they override. **`InlineMd` flattens blocks** because chapter
   summaries sit inside buttons, and a `<p>` in a `<button>` closes it early.
 - **A spreadsheet opens as its text** (`marks.xlsx.md`, a table per sheet),
-  in-app like a PDF rather than in the system viewer (`openFile.ts`), with no
+  in-app like a PDF rather than in the system viewer (`lib/files/openFile.ts`), with no
   PDF ↔ Markdown toggle.
 - **`FileViewer` resolves in-file links locally** — relative links and Canvas
   `/files/<id>` or `/pages/<slug>` URLs, by `canvas_id`, path or `source_url`
-  (`app/src/lib/libraryLinks.ts`, shared with the note editor). A selection
+  (`app/src/lib/files/libraryLinks.ts`, shared with the note editor). A selection
   in its rendered markdown copies or drags out as markdown, maths as TeX
-  (`app/src/lib/selectionMarkdown.ts`, shared with the chat timeline).
+  (`app/src/lib/markdown/selection.ts`, shared with the chat timeline).
   Rendered maths is one unit to a selection from the prose around it, as in
   the note editor: an end inside a formula copies the whole formula, and
   `watchMathSelection` paints it as one fill (`data-math-selected` in
   `index.css`) instead of KaTeX's per-glyph highlight. A press on a formula
-  swaps it for a read-only MathLive field (`app/src/lib/mathSelect.ts`), so
+  swaps it for a read-only MathLive field (`app/src/lib/markdown/mathSelect.ts`), so
   a drag selects by structure — a cell, a matrix, a run of atoms — and copies
   that part's LaTeX, through the editor's own hit-test, widening and copy
-  (`mathField.ts`); a press outside it, Esc or focus leaving puts the KaTeX
+  (`components/documents/editor/math/field/mathField/`); a press outside it, Esc or focus leaving puts the KaTeX
   back. MathLive loads as the pointer first reaches a formula.
 - **A ```mermaid fence is caught at `pre`** (`Mermaid.tsx`), and the original
   `<pre>` shows until it renders or if it never parses. Config and drawing are
@@ -72,7 +72,7 @@ classes work even when there are no dollar delimiters.
 - **`Lightbox.tsx` pans with its container's scroll and zooms with a
   `transform`**; every input moves a target the painted scale eases toward, so
   bursts compose.
-- **`PDFViewer` mounts pdf.js's own viewer**, loaded by `app/src/lib/pdfjs.ts`
+- **`PDFViewer` mounts pdf.js's own viewer**, loaded by `app/src/lib/pdf/pdfjs.ts`
   through awaited dynamic imports because `pdf_viewer.mjs` reads
   `globalThis.pdfjsLib` at evaluation. `index.css` pins `color-scheme` to
   `.dark`, overriding the `:root` rule pdf.js's stylesheet adds. A pinch arrives
@@ -80,7 +80,7 @@ classes work even when there are no dollar delimiters.
   - **Selection and cursor are pdf.js's own**: a drag selects text and the
     trackpad scrolls. `index.css` only recolours `::selection` to the accent.
   - **A selection copies as the parse's markdown** when the file has one
-    (`app/src/lib/pdfSelectionMarkdown.ts`). Text layer and `.pages.json`
+    (`app/src/lib/pdf/pdfSelectionMarkdown/`). Text layer and `.pages.json`
     meet in `normalizeText` form and are aligned patience-diff style; the
     selection's ends land in the pages joined as one document, because
     MinerU files a paragraph that runs onto the next page under the page it
@@ -89,7 +89,7 @@ classes work even when there are no dollar delimiters.
     walkers), figure links match the Markdown view's copy, and an end on an
     unparsed or unalignable page copies that page's text. It is bound in the
     **capture** phase: pdf.js's text layer writes its own copy and stops it.
-  - **Find is pdf.js's `PDFFindController` behind `ui/FindBar.tsx`**; each
+  - **Find is pdf.js's `PDFFindController` behind `ui/search/FindBar.tsx`**; each
     viewer is a find target, and which one ⌘F reaches is
     [find routing](./shell.md#f-reaches-one-registered-find).
   - **The page box names the pages on screen** (`shownPages`: a spread, or in
@@ -101,7 +101,7 @@ classes work even when there are no dollar delimiters.
     reads as 0.87, so the selectable text ran 13% short of the glyphs. The
     probe is clamped to at least 1.
 
-Chat's composer (`MentionInput.tsx` sends chips as backticked library paths),
+Chat's composer (`harness/mentions/MentionInput.tsx` sends chips as backticked library paths),
 picker and timeline are [harness.md](./harness.md).
 
 ## One media player plays lectures and library videos
@@ -113,7 +113,7 @@ element and the dock's tabs. It hands its element over with `attach(v)` from
 its own effect and calls the returned detach on cleanup; it passes slots for
 what only it has — frames, an overlay, bar buttons, the line above the scrub
 bar. Every video streams from Rust's media server via `mediaSrc()`
-(`app/src/lib/media.ts`, absolute or library-relative), not `convertFileSrc`
+(`app/src/lib/lectures/media/src.ts`, absolute or library-relative), not `convertFileSrc`
 ([architecture.md](./architecture.md)).
 
 - **`LecturePlayer` adds the lecture's layers**: the shared elements and their
@@ -128,7 +128,7 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
 - **One sound at a time**: a library video playing pauses the lecture
   (`pauseLecturePlayback`) and other library videos; a lecture's leader
   playing pauses every registered library video (`registerLibraryVideo` in
-  `app/src/lib/media.ts`).
+  `app/src/lib/lectures/media/library.ts`).
 - **A video without a transcript offers Transcribe** in its Transcript tab
   (`TranscribeEmpty`). Runs live in `useTranscription`, outside React, so a
   player opened mid-run shows the run; a finished run fires
@@ -140,7 +140,7 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
 
 ## The lecture player's elements outlive the page
 
-- **`app/src/lib/lecturePlayback.ts` owns the `<video>` elements**, so playback
+- **`app/src/lib/lectures/playback/` owns the `<video>` elements**, so playback
   survives tab switches. Between players they park in a 480×270 off-screen
   host — `display: none` lets WebKit stop playback, and a tiny host decodes
   tiny. Progress saves every 5s and on pause, seek, end and `pagehide`,
@@ -148,7 +148,7 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
 - **Done is the lecture's end, not the file's.** A progress write within 10 s
   of the found content end ([chapters.md](./chapters.md#where-the-lecture-ends))
   marks the lecture complete; without one, within 30 s of the file's end.
-  `lectureEnd` in `app/src/lib/lectureEnd.ts` is the one place that end is
+  `lectureEnd` in `app/src/lib/lectures/end.ts` is the one place that end is
   chosen, from the latest state of the end job rather than the player's row,
   and Up Next reads it too. So does `progressLabel`, the lists' "x left",
   counted to that end.
@@ -156,7 +156,7 @@ bar. Every video streams from Rust's media server via `mediaSrc()`
   marks the lecture Done or not (`setLectureDone`). Marking keeps the
   position, since it may not have been watched; unmarking one watched to its
   end starts it over, or the next progress save would mark it Done again.
-- **One player owns the elements** (`app/src/lib/playbackOwner.ts`). A tab's
+- **One player owns the elements** (`app/src/lib/lectures/playbackOwner.ts`). A tab's
   main page and its side panel can both be lecture pages; a player never takes
   the elements on mount from an owner in its own tab — only a player in the tab
   now in front, or any player once nobody owns them (a stop, or a paused owner
@@ -239,11 +239,11 @@ lecture player shows bottom-right in the frame once the lecture is over.
 ## Videos without captions are transcribed
 
 Echo360 publishes WebVTT captions; other videos in the library have none.
-`transcribe_video` (`app/src-tauri/src/transcribe/mod.rs`) takes one video —
+`transcribe_video` (`app/src-tauri/src/transcribe/app.rs`) takes one video —
 absolute, or relative to the data directory — and writes its transcript beside
 it as `<video>.vtt` (`Week 1.mp4` → `Week 1.mp4.vtt`), returning that path. It
 knows nothing of lectures or the database: a caller that tracks transcripts
-records the path itself. `transcribe` in `app/src/lib/transcribe.ts` is the
+records the path itself. `transcribe` in `app/src/lib/lectures/transcribe/engines.ts` is the
 frontend's call; `oculus transcribe` is the terminal's.
 
 1. The path is canonicalised and must land inside the data directory, so
@@ -267,7 +267,7 @@ frontend's call; `oculus transcribe` is the terminal's.
 **Engines are tried in the order set in Settings → Transcription** — Groq,
 local Whisper, then on-device speech until the user drags them into another.
 An `Engine` turns one audio file into timed segments; the pipeline owns
-everything else. `engines()` in `app/src-tauri/src/transcribe/mod.rs` lists
+everything else. `engines()` in `app/src-tauri/src/transcribe/settings/mod.rs` lists
 the configured ones in that order before any decoding: Groq when it is on and
 the keychain has its key, whisper.cpp when it is on, a model is downloaded
 and `whisper-cli` is found, Apple's on-device recogniser on macOS when it is
@@ -278,8 +278,8 @@ one up in Settings → Transcription.
   engine's switch:
   `{"order": ["groq", "whisper", "apple"], "language", "groq": {"enabled"},
   "whisper": {"enabled", "model"}, "apple": {"enabled"}}`, parsed once per
-  run by `settings_from` in `mod.rs` and mirrored by `parseTranscribeSettings`
-  in `app/src/lib/transcribe.ts`. A missing row, key or mistyped value reads
+  run by `settings_from` in `settings/mod.rs` and mirrored by `parseTranscribeSettings`
+  in `app/src/lib/lectures/transcribe/settings.ts`. A missing row, key or mistyped value reads
   as its default — the default order, every engine on, the default language,
   the model `pick` chooses. An order keeps known names once each and appends
   any missing in the default order. Unknown keys survive both Rust and
@@ -288,7 +288,7 @@ one up in Settings → Transcription.
   `en_AU`, or a bare code; absent, it is the default, English in the Mac's
   region. A row without it reads the older `apple.locale`, then
   `whisper.language`; Settings writes only the top-level key and drops those.
-  Each engine derives its own form (`Language` in `mod.rs`): Whisper's `-l`
+  Each engine derives its own form (`Language` in `settings/mod.rs`): Whisper's `-l`
   and Groq's `language` take the language part (`en`), Groq omitting it for
   `auto`; on-device speech takes the whole locale, and for the default, `auto`
   or a bare `en` its helper's default locale, since Apple has no
@@ -305,7 +305,7 @@ one up in Settings → Transcription.
   runs the whole order.
 - **No timeout sits above any engine**, for the reason parsing has none
   ([parsing.md](./parsing.md#a-parse-takes-minutes-and-only-the-engine-bounds-it)).
-- **Cues carry no identifiers**: `parseVtt` (`app/src/lib/media.ts`) would
+- **Cues carry no identifiers**: `parseVtt` (`app/src/lib/lectures/media/vtt.ts`) would
   join a bare number line into the cue's text.
 - One run per video per process, so a double click cannot spend the allowance
   twice.
@@ -324,7 +324,7 @@ one up in Settings → Transcription.
 ### Groq: Whisper over HTTPS
 
 `whisper-large-v3-turbo`, one multipart upload per span, naming the language
-unless it is `auto` (`app/src-tauri/src/transcribe/groq.rs`).
+unless it is `auto` (`app/src-tauri/src/transcribe/engines/groq.rs`).
 
 - **Groq's free tier refuses uploads over 25 MB**; the budget is 20 MB
   (`UPLOAD_BUDGET`) because a cut by time can give one span more than its
@@ -334,13 +334,13 @@ unless it is `auto` (`app/src-tauri/src/transcribe/groq.rs`).
   again in", else the reset header.
 - **Saving the key lists Groq's models, which is free** — Settings never
   transcribes ([harness.md](./harness.md#no-model-is-ever-probed)). The key is
-  keychain-only, in `app/src-tauri/src/groq.rs`, shaped like `voyage.rs`.
+  keychain-only, in `app/src-tauri/src/providers/groq.rs`, shaped like `providers/voyage.rs`.
 
 ### On-device speech: a Swift helper
 
 macOS 26's `SpeechAnalyzer` has no Rust binding, so a single-file Swift
 program, `apple-speech`, wraps it and the engine
-(`app/src-tauri/src/transcribe/apple.rs`) spawns it like ffmpeg. It is free,
+(`app/src-tauri/src/transcribe/engines/apple.rs`) spawns it like ffmpeg. It is free,
 offline after the language's model is on the Mac, needs no permission prompt,
 and reads the pipeline's Ogg Opus in one call — an hour of audio in about a
 minute — so its cap is `None` and a run never splits.
@@ -369,7 +369,7 @@ minute — so its cap is `None` and a run never splits.
 - **The helper launches on any macOS the app does** (built for 10.15, with a
   synchronous `main`), so an older Mac gets exit 3 rather than a dyld crash.
   It ships as an `externalBin` from `app/src-tauri/tauri.macos.conf.json`,
-  found by `app/src-tauri/src/bundled.rs` beside the executable or in dev's
+  found by `app/src-tauri/src/runtime/bundled.rs` beside the executable or in dev's
   `binaries/`
   ([development.md](./development.md#the-speech-helper-is-compiled-not-fetched)).
 
@@ -379,7 +379,7 @@ minute — so its cap is `None` and a run never splits.
 ([development.md](./development.md#whisper-cli-is-built-from-a-pinned-release)),
 runs a ggml model on this Mac — on the GPU through Metal on Apple Silicon —
 free and offline once the model is on disk
-(`app/src-tauri/src/transcribe/whisper.rs`). It windows the audio itself, so
+(`app/src-tauri/src/transcribe/engines/whisper.rs`). It windows the audio itself, so
 its cap is `None` and a run never splits; there is no timeout, since a long
 recording on a large model takes minutes.
 
@@ -420,7 +420,7 @@ recording on a large model takes minutes.
 ## The in-app browser is a native page per tab, owned by Rust
 
 A browser tab is `/browse/<id>`, naming a WKWebView that
-`app/src-tauri/src/browser.rs` parks over an empty slot in `BrowserPage` (Canvas
+`app/src-tauri/src/shell/browser/` parks over an empty slot in `BrowserPage` (Canvas
 refuses iframes).
 
 - **Rust owns the tab list** and pushes `browser-state` on every change;

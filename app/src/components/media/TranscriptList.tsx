@@ -1,8 +1,10 @@
 import { useCallback } from "react";
 import { cn } from "@/lib/utils";
-import type { TranscriptSearch } from "@/hooks/useTranscriptSearch";
-import { fmtClockSecs, type Cue } from "@/lib/media";
-import { FollowList, Highlight, SearchField } from "@/components/media/FollowList";
+import type { TranscriptSearch } from "@/hooks/lectures/useTranscriptSearch";
+import { fmtClockSecs, type Cue } from "@/lib/lectures/media";
+import { FollowList } from "@/components/media/FollowList";
+import { Highlight } from "@/components/media/follow/Highlight";
+import { SearchField } from "@/components/media/follow/SearchField";
 
 export interface TranscriptListProps {
   cues: Cue[];

@@ -23,14 +23,14 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # `unstable` is what enables multiwebview (`Window::add_child`) — every
-# in-app browser tab is a child WebView of the main window, see src/browser.rs.
+# in-app browser tab is a child WebView of the main window, see src/shell/browser/mod.rs.
 tauri = { version = "2", features = ["protocol-asset", "devtools", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
-# Tauri's own `app_data_dir()` base, so `paths::data_dir` is that path with no AppHandle.
+# Tauri's own `app_data_dir()` base, so `library::paths::data_dir` is that path with no AppHandle.
 dirs = "6"
 serde = { version = "1", features = ["derive"] }
-# `raw_value`: `harness/antigravity_rules.rs` rewrites two lists in agy's
+# `raw_value`: `harness/providers/antigravity/rules.rs` rewrites two lists in agy's
 # settings file and hands every other value back verbatim, in file order.
 serde_json = { version = "1", features = ["raw_value"] }
 tiny_http = "0.12"
@@ -51,8 +51,8 @@ half = "2"
 keyring = { version = "3", features = ["apple-native"] }
 
 # `sync` is the browser's: a WKWebView snapshot answers on a completion
-# block, and the command awaits a oneshot for it (see src/browser.rs). `time`
-# is the usage ticker's interval (src/usage.rs).
+# block, and the command awaits a oneshot for it (see src/shell/browser/still.rs). `time`
+# is the usage ticker's interval (src/shell/usage/ticker.rs).
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 # Local time for the usage table's hour keys; already built for pdfium-render.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -76,11 +76,11 @@ imagesize = "0.13"
 pdfium-render = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Spreadsheets (xlsx/xlsm/xls/ods) become markdown text in-process
-# (`src/sheets.rs`); no LibreOffice, no parse service, no embedding.
+# (`src/pages/sheets/`); no LibreOffice, no parse service, no embedding.
 calamine = "0.36"
 
 # The in-app browser seeds WebKit's cookie jar with the Canvas session (see
-# `seed_canvas_session` in src/browser.rs) — Tauri exposes no cookie setter, so
+# `seed_sessions` in src/shell/browser/seed.rs) — Tauri exposes no cookie setter, so
 # that goes through WKHTTPCookieStore directly. These are the same crates wry
 # already builds on.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -88,9 +88,9 @@ block2 = "0.6"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSDictionary", "NSHTTPCookie", "NSString"] }
 # A local key-down monitor gives a focused browser page ⌘-keys before the
-# menu, and Undo/Redo/Select All reach it as AppKit actions (see `src/keys.rs`).
+# menu, and Undo/Redo/Select All reach it as AppKit actions (see `src/shell/keys.rs`).
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSResponder", "NSWindow"] }
 # `WKWebView` and the two `WKFind*` types are the browser toolbar's: the
 # back/forward list and find-in-page have no Tauri API, so they are read
-# and driven on the WKWebView directly (see `src/browser.rs`).
+# and driven on the WKWebView directly (see `src/shell/browser/page.rs`).
 objc2-web-kit = { version = "0.3", features = ["block2", "WKHTTPCookieStore", "WKWebsiteDataStore", "WKWebView", "WKNavigation", "WKFindConfiguration", "WKFindResult"] }

@@ -18,7 +18,7 @@ target; you need bun (never npm — see the root `CLAUDE.md`) and stable Rust.
 | Builds whisper.cpp's `whisper-cli` from a pinned release | `app/scripts/build-whisper.mjs` |
 | Stages the CLI into the bundle | `app/scripts/stage-cli.mjs` |
 | Regenerates `docs/cli-reference.md` | `app/scripts/gen-cli-docs.mjs` |
-| How an agent thread finds `oculus` | `app/src-tauri/src/harness/discover.rs` |
+| How an agent thread finds `oculus` | `app/src-tauri/src/harness/cli/discover/` |
 | CI checks and the release bundle | `.github/workflows/ci.yml`, `.github/workflows/release.yml` |
 
 ## Commands
@@ -95,7 +95,7 @@ Its floor is macOS 13.3, upstream's own. Like `apple-speech` it is a macOS-only
 
 `tauri dev` issues a bare `cargo run`, which builds the `app` bin and no other.
 Yet `target/debug/oculus` sits beside the running app, so `child_env` in
-`app/src-tauri/src/harness/discover.rs` puts it first on every agent thread's
+`app/src-tauri/src/harness/cli/discover/env.rs` puts it first on every agent thread's
 PATH. Four pieces keep it current:
 
 - `app/scripts/predev.mjs` builds it at each dev start, in the debug profile
@@ -170,7 +170,7 @@ rebuild. Which files are overwritten versus merged is in
 
 ## `libpdfium` is pinned to `pdfium-render`'s Chromium revision
 
-It rasterizes pages for embedding (`app/src-tauri/src/embed/raster.rs`) and has
+It rasterizes pages for embedding (`app/src-tauri/src/embed/raster/`) and has
 no crates.io source, so `app/scripts/fetch-pdfium.mjs` downloads a prebuilt one.
 Its release tag must match the revision `pdfium-render`'s feature flag binds
 against: a mismatch fails at *bind* time, not compile time, so bump both
@@ -184,7 +184,7 @@ the path.
   frontend logic and offline script regressions: `bun run test`.
 - Rust: `cargo fmt`, `cargo check` / `cargo test` in `app/src-tauri`. None of
   the tests touch the network: the cloud clients run against a fake server, and the
-  renderer tests in `app/src-tauri/src/parse/mineru/render.rs` pin output
+  renderer tests in `app/src-tauri/src/parse/mineru/render/` pin output
   against the renderer it was ported from.
 - Real parse regressions: the gitignored golden fixtures in
   `data/parse-fixtures/` ([parsing.md](./parsing.md)).

@@ -5,15 +5,15 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MD_COMPONENTS } from "@/components/markdown/MdComponents";
 import { PDFViewer } from "@/components/files/PDFViewer";
-import { docPdfRelPath, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath } from "@/lib/fileTypes";
-import { filePageHref, type FileLocate } from "@/lib/openFile";
-import { libraryImageSrc, libraryLinkTarget } from "@/lib/libraryLinks";
-import { useDataDir } from "@/hooks/useDataDir";
+import { docPdfRelPath, isPdfBacked, isSheetFile, isVideoFile, parsedMdRelPath } from "@/lib/files/fileTypes";
+import { filePageHref, type FileLocate } from "@/lib/files/openFile";
+import { libraryImageSrc, libraryLinkTarget } from "@/lib/files/libraryLinks";
+import { useDataDir } from "@/hooks/backend/useDataDir";
 import type { DbFile } from "@/lib/db";
-import { courseFileHasContent } from "@/lib/courseFiles";
+import { courseFileHasContent } from "@/lib/files/courseFiles";
 import { FileMarkdown } from "@/components/files/FileMarkdown";
 import { VideoFileViewer } from "@/components/files/VideoFileViewer";
-import { useParseStore } from "@/stores/parseStore";
+import { useParseStore } from "@/stores/sync/parseStore";
 
 /**
  * PDF ↔ parsed-markdown toggle state, lifted out so the host renders the
@@ -161,7 +161,7 @@ export function FileViewer({
  * `MD_COMPONENTS` for a library file: links to files we hold locally (`../`
  * paths and raw Canvas `/files/<id>` / `/pages/<slug>` URLs) go to
  * `onOpenFile`, others open externally, and relative images resolve against the
- * file's directory (`app/src/lib/libraryLinks.ts`). Also draws a note's
+ * file's directory (`app/src/lib/files/libraryLinks.ts`). Also draws a note's
  * saved versions (`HistoryPanel`).
  */
 export function useLibraryMdComponents(

@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use app_lib::agents;
-use app_lib::paths;
-use app_lib::projects;
-use app_lib::store;
+use app_lib::db::projects;
+use app_lib::db::store;
+use app_lib::library::paths;
 use app_lib::sync::{self, Engine, FileEvent, Progress, Reporter};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use serde::Serialize;
@@ -20,19 +20,12 @@ use sqlx::{Row, SqlitePool};
 use tokio::runtime::Runtime;
 
 mod args;
-mod auth;
-mod docs;
-mod lecture;
-mod memory;
+mod commands;
 mod output;
-mod planning;
-mod query;
-mod run;
-mod transcribe;
 
 use args::*;
+use commands::query::*;
 use output::*;
-use query::*;
 
 fn main() {
     restore_sigpipe();
@@ -50,7 +43,7 @@ fn main() {
             AuthAction::Tick => ctx.auth_tick(),
             AuthAction::Forget => ctx.auth_forget(),
             AuthAction::Diagnose => {
-                print!("{}", app_lib::okta::diagnose());
+                print!("{}", app_lib::auth::okta::diagnose());
                 Ok(())
             }
             AuthAction::Ed { token } => ctx.auth_ed(token.as_deref()),
@@ -161,8 +154,8 @@ fn restore_sigpipe() {
     }
 }
 
-// ── Shared context ───────────────────────────────────────────────────────────
-
+/// What every command shares: the data directory, the async runtime and
+/// whether to print JSON.
 struct Ctx {
     data_dir: PathBuf,
     rt: Runtime,
@@ -172,7 +165,7 @@ struct Ctx {
 impl Ctx {
     fn new(json: bool) -> Self {
         Ctx {
-            data_dir: app_lib::paths::data_dir(),
+            data_dir: app_lib::library::paths::data_dir(),
             rt: Runtime::new().expect("tokio runtime"),
             json,
         }

@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
-import { ListCard } from "@/components/ui/PageParts";
+import { ListCard } from "@/components/ui/layout/PageParts";
 
 /**
  * The "next few things" list shape — a plain label, then a bordered column of
- * hairline rows — shared by `app/src/pages/NewTabPage.tsx` and
- * `app/src/components/projects/ProjectOverview.tsx`. Rows match `EventRow`'s
+ * hairline rows — shared by `app/src/pages/start/NewTabPage.tsx` and
+ * `app/src/components/projects/page/ProjectOverview.tsx`. Rows match `EventRow`'s
  * padding so they read as one list beside calendar rows.
  */
 export function Section({

@@ -1,66 +1,35 @@
 pub mod agents;
-mod atomic_write;
-mod auth;
-mod blocking;
-pub mod browser;
-mod bundled;
-pub mod calendar;
-pub mod canvas;
-pub mod chapters;
-pub mod clock;
-mod credentials;
-pub mod echo360;
-pub mod ed;
+pub mod auth;
+pub mod db;
 pub mod embed;
-mod files;
-pub mod groq;
 pub mod harness;
-pub mod keepalive;
-#[cfg(target_os = "macos")]
-mod keys;
-pub mod lecture_end;
-pub(crate) mod lecture_jobs;
-mod lectures;
-pub mod md;
-mod media;
-pub mod memory;
-pub mod menu;
-mod migrations;
-pub mod mineru;
-pub mod okta;
+pub mod lectures;
+pub mod library;
+pub mod pages;
 pub mod parse;
-pub mod paths;
-mod pipeline_events;
-pub mod projects;
-mod ratelimit;
-pub mod retrieval;
-mod scrape;
-pub mod sheets;
-mod storage;
-pub mod store;
-mod subjects;
+pub mod providers;
+pub mod runtime;
+pub mod shell;
+pub mod sources;
 pub mod sync;
-pub mod terms;
 #[cfg(test)]
 mod test_support;
 pub mod transcribe;
-mod usage;
-pub mod voyage;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 
 use auth::{auth_flag_path, saved_session_probe, AuthProbe, AuthState};
 use lectures::Echo360Cache;
-use scrape::ScrapeCancel;
-use subjects::SubjectsState;
+use sync::scrape::ScrapeCancel;
+use sync::subjects::SubjectsState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // ⌘T / ⌘W reach the app as menu events, not key events — see menu.rs.
-        .menu(menu::build)
-        .on_menu_event(menu::handle)
+        // ⌘T / ⌘W reach the app as menu events, not key events — see shell/menu.rs.
+        .menu(shell::menu::build)
+        .on_menu_event(shell::menu::handle)
         .manage(AuthState(Arc::new(Mutex::new(false))))
         .manage(SubjectsState(Arc::new(Mutex::new(vec![]))))
         .manage(Echo360Cache(Arc::new(Mutex::new(
@@ -68,38 +37,40 @@ pub fn run() {
         ))))
         .manage(lectures::DownloadCancels::default())
         .manage(ScrapeCancel::default())
-        .manage(scrape::VideoCancels::default())
-        .manage(browser::BrowserState::default())
-        .manage(usage::UsageState::default())
+        .manage(sync::scrape::VideoCancels::default())
+        .manage(shell::browser::BrowserState::default())
+        .manage(shell::usage::UsageState::default())
         .setup(|app| {
             // Give the parse and embed seams a window to emit progress to;
             // headless (CLI) runs never bind, so their emits are no-ops.
             parse::events::bind(app.handle().clone());
             embed::events::bind(app.handle().clone());
 
-            // WebKit won't play <video> from the asset protocol (see media.rs).
-            app.manage(media::start_media_server(paths::data_dir()));
+            // WebKit won't play <video> from the asset protocol (see lectures/media.rs).
+            app.manage(lectures::media::start_media_server(
+                library::paths::data_dir(),
+            ));
 
-            echo360::cleanup_partial_downloads(&paths::data_dir());
+            sources::echo360::cleanup_partial_downloads(&library::paths::data_dir());
 
             // Seeds WebKit with the Canvas session and follows window resizes.
-            browser::init(app.handle());
+            shell::browser::init(app.handle());
             // A focused browser page gets ⌘-keys before the menu.
             #[cfg(target_os = "macos")]
-            keys::install(app.handle());
+            shell::keys::install(app.handle());
 
             app.manage(harness::app::init(app.handle()));
             harness::app::reconcile(app.handle());
             // opencode servers left behind by an app that was killed, not quit.
             harness::app::sweep_strays();
             // Clear `running` markers left by lecture job runs cut short.
-            chapters::app::reconcile(app.handle());
-            lecture_end::app::reconcile(app.handle());
+            lectures::chapters::app::reconcile(app.handle());
+            lectures::lecture_end::app::reconcile(app.handle());
             // Spreadsheets on record without their text (`docs/parsing.md`).
-            sheets::reconcile_in_background();
+            pages::sheets::reconcile_in_background();
 
             // Open and active time per hour, from the window and the frontend's pings.
-            usage::start(app.handle());
+            shell::usage::start(app.handle());
 
             // Session restore: replay the saved cookie with a server-side
             // ping. Rejected → try auto-recover, else sign out; unreachable →
@@ -120,7 +91,7 @@ pub fn run() {
                     }
                     AuthProbe::Rejected(_) => {
                         // `try_auto_recover` emits its own success event.
-                        if okta::try_auto_recover(&app_handle, okta::Trigger::Startup) {
+                        if auth::okta::try_auto_recover(&app_handle, auth::okta::Trigger::Startup) {
                             *mem.lock().unwrap() = true;
                         } else {
                             eprintln!("[oculus] session rejected — reset to disconnected");
@@ -139,7 +110,7 @@ pub fn run() {
 
             // The LaunchAgent plist holds the CLI's absolute path; re-point it
             // if the bundle moved.
-            keepalive::repair_path();
+            auth::keepalive::repair_path();
 
             // Canvas refreshes the session on each request, so a periodic ping
             // holds it open while the app runs (the LaunchAgent covers closed).
@@ -150,7 +121,7 @@ pub fn run() {
                     continue;
                 }
                 if let AuthProbe::Rejected(_) = saved_session_probe() {
-                    if okta::try_auto_recover(&ka_handle, okta::Trigger::KeepAlive) {
+                    if auth::okta::try_auto_recover(&ka_handle, auth::okta::Trigger::KeepAlive) {
                         eprintln!("[oculus] keep-alive: session renewed automatically");
                         continue;
                     }
@@ -177,63 +148,63 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_sql::Builder::new()
-                .add_migrations("sqlite:oculus.db", migrations::all())
+                .add_migrations("sqlite:oculus.db", db::migrations::all())
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
-            auth::get_auth_status,
-            auth::check_canvas_session,
-            auth::launch_canvas_auth,
-            auth::disconnect_canvas,
-            okta::okta_credential_status,
-            okta::okta_save_credentials,
-            okta::okta_clear_credentials,
-            okta::okta_sign_in,
-            keepalive::keepalive_status,
-            keepalive::keepalive_enable,
-            keepalive::keepalive_disable,
-            subjects::sync_subjects,
-            subjects::get_subjects,
-            scrape::scrape_content,
-            scrape::cancel_scrape,
-            scrape::canvas_download_video,
-            scrape::canvas_cancel_video,
-            scrape::parse_file,
-            scrape::parse_skip,
-            files::read_course_file,
-            files::course_file_has_content,
-            files::open_course_file,
-            files::scan_parsed_files,
-            files::import_uploads,
-            files::delete_upload,
-            files::create_document,
-            files::write_document,
-            files::rename_document,
-            files::delete_document,
-            files::list_documents,
-            files::attach_document_image,
-            files::attach_document_file,
-            calendar::calendar_sync_events,
-            lectures::echo360_sync_lectures,
-            lectures::echo360_download_video,
-            lectures::echo360_cancel_download,
-            lectures::echo360_delete_video,
-            lectures::echo360_download_transcript,
-            lectures::echo360_read_transcript,
-            lectures::echo360_clear_transcripts,
+            auth::commands::get_auth_status,
+            auth::commands::check_canvas_session,
+            auth::commands::launch_canvas_auth,
+            auth::commands::disconnect_canvas,
+            auth::okta::commands::okta_credential_status,
+            auth::okta::commands::okta_save_credentials,
+            auth::okta::commands::okta_clear_credentials,
+            auth::okta::commands::okta_sign_in,
+            auth::keepalive::commands::keepalive_status,
+            auth::keepalive::commands::keepalive_enable,
+            auth::keepalive::commands::keepalive_disable,
+            sync::subjects::sync_subjects,
+            sync::subjects::get_subjects,
+            sync::scrape::scrape_content,
+            sync::scrape::cancel_scrape,
+            sync::scrape::videos::canvas_download_video,
+            sync::scrape::videos::canvas_cancel_video,
+            sync::scrape::parse_file,
+            sync::scrape::parse_skip,
+            library::files::commands::read_course_file,
+            library::files::commands::course_file_has_content,
+            library::files::commands::open_course_file,
+            library::files::commands::scan_parsed_files,
+            library::files::uploads::import_uploads,
+            library::files::uploads::delete_upload,
+            library::files::documents::create_document,
+            library::files::documents::write_document,
+            library::files::documents::rename_document,
+            library::files::documents::delete_document,
+            library::files::documents::list_documents,
+            library::files::documents::attach_document_image,
+            library::files::documents::attach_document_file,
+            sources::calendar::command::calendar_sync_events,
+            lectures::commands::echo360_sync_lectures,
+            lectures::commands::echo360_download_video,
+            lectures::commands::echo360_cancel_download,
+            lectures::commands::echo360_delete_video,
+            lectures::commands::echo360_download_transcript,
+            lectures::commands::echo360_read_transcript,
+            lectures::commands::echo360_clear_transcripts,
             transcribe::app::transcribe_video,
             transcribe::app::apple_speech_status,
             transcribe::app::whisper_models,
             transcribe::app::whisper_download_model,
             transcribe::app::whisper_cancel_download,
             transcribe::app::whisper_delete_model,
-            media::media_server_info,
-            retrieval::embed_file,
-            retrieval::search_pages,
-            retrieval::embedding_stats,
-            mineru::mineru_set_api_key,
-            mineru::mineru_has_api_key,
-            mineru::mineru_delete_api_key,
+            lectures::media::media_server_info,
+            pages::retrieval::commands::embed_file,
+            pages::retrieval::commands::search_pages,
+            pages::retrieval::commands::embedding_stats,
+            providers::mineru::mineru_set_api_key,
+            providers::mineru::mineru_has_api_key,
+            providers::mineru::mineru_delete_api_key,
             embed::commands::embed_settings,
             embed::commands::embed_set_engine,
             embed::commands::embed_set_budget,
@@ -245,66 +216,66 @@ pub fn run() {
             parse::commands::parse_set_accept_expired_result_cert,
             parse::commands::parse_result_cert,
             parse::commands::parse_probe_local,
-            voyage::voyage_set_api_key,
-            voyage::voyage_has_api_key,
-            voyage::voyage_delete_api_key,
-            groq::groq_set_api_key,
-            groq::groq_has_api_key,
-            groq::groq_delete_api_key,
-            harness::app::harness_health,
-            harness::app::harness_install_offer,
-            harness::app::harness_install_run,
-            harness::app::harness_updates,
-            harness::app::harness_update_run,
-            harness::app::harness_sign_in_status,
-            harness::app::harness_sign_in_start,
-            harness::app::harness_sign_in_code,
-            harness::app::harness_sign_in_cancel,
-            harness::app::harness_claude_models,
-            harness::app::harness_codex_models,
-            harness::app::harness_antigravity_models,
-            harness::app::harness_antigravity_allow,
-            harness::app::harness_antigravity_rules,
-            harness::app::harness_antigravity_revoke,
-            harness::app::harness_opencode_models,
-            harness::app::harness_opencode_providers,
-            harness::app::harness_opencode_set_key,
-            harness::app::harness_opencode_disconnect,
-            harness::app::harness_opencode_oauth_start,
-            harness::app::harness_opencode_oauth_finish,
-            harness::app::harness_refresh_rate_limits,
-            harness::app::harness_send,
-            harness::app::harness_edit_resend,
-            harness::app::harness_rewind,
-            harness::app::harness_queued,
-            harness::app::harness_unqueue,
-            harness::app::harness_edit_queued,
-            harness::app::harness_interrupt,
-            harness::app::harness_delete_thread,
-            harness::app::document_suggest,
-            harness::app::document_suggest_cancel,
+            providers::voyage::voyage_set_api_key,
+            providers::voyage::voyage_has_api_key,
+            providers::voyage::voyage_delete_api_key,
+            providers::groq::groq_set_api_key,
+            providers::groq::groq_has_api_key,
+            providers::groq::groq_delete_api_key,
+            harness::app::setup::harness_health,
+            harness::app::setup::harness_install_offer,
+            harness::app::setup::harness_install_run,
+            harness::app::setup::harness_updates,
+            harness::app::setup::harness_update_run,
+            harness::app::setup::harness_sign_in_status,
+            harness::app::setup::harness_sign_in_start,
+            harness::app::setup::harness_sign_in_code,
+            harness::app::setup::harness_sign_in_cancel,
+            harness::app::models::harness_claude_models,
+            harness::app::models::harness_codex_models,
+            harness::app::models::harness_antigravity_models,
+            harness::app::models::harness_antigravity_allow,
+            harness::app::models::harness_antigravity_rules,
+            harness::app::models::harness_antigravity_revoke,
+            harness::app::models::harness_opencode_models,
+            harness::app::models::harness_opencode_providers,
+            harness::app::models::harness_opencode_set_key,
+            harness::app::models::harness_opencode_disconnect,
+            harness::app::models::harness_opencode_oauth_start,
+            harness::app::models::harness_opencode_oauth_finish,
+            harness::app::setup::harness_refresh_rate_limits,
+            harness::app::turns::harness_send,
+            harness::app::turns::harness_edit_resend,
+            harness::app::turns::harness_rewind,
+            harness::app::turns::harness_queued,
+            harness::app::turns::harness_unqueue,
+            harness::app::turns::harness_edit_queued,
+            harness::app::turns::harness_interrupt,
+            harness::app::turns::harness_delete_thread,
+            harness::app::suggest::document_suggest,
+            harness::app::suggest::document_suggest_cancel,
             harness::attach::harness_attach_image,
             harness::attach::harness_attach_file,
-            chapters::app::lecture_find_chapters,
-            chapters::app::lecture_grab_frames,
-            chapters::app::lecture_thumbnail,
-            lecture_end::app::lecture_find_end,
-            storage::storage_report,
-            usage::usage_activity,
-            browser::browser_open_url,
-            browser::browser_state,
-            browser::browser_place,
-            browser::browser_set_viewport,
-            browser::browser_hide_tab,
-            browser::browser_snapshot,
-            browser::browser_hide,
-            browser::browser_navigate,
-            browser::browser_history,
-            browser::browser_reload,
-            browser::browser_set_zoom,
-            browser::browser_find,
-            browser::browser_find_clear,
-            browser::browser_close_tab,
+            lectures::chapters::app::lecture_find_chapters,
+            lectures::chapters::app::lecture_grab_frames,
+            lectures::chapters::app::lecture_thumbnail,
+            lectures::lecture_end::app::lecture_find_end,
+            library::storage::storage_report,
+            shell::usage::usage_activity,
+            shell::browser::commands::browser_open_url,
+            shell::browser::commands::browser_state,
+            shell::browser::commands::browser_place,
+            shell::browser::commands::browser_set_viewport,
+            shell::browser::commands::browser_hide_tab,
+            shell::browser::commands::browser_snapshot,
+            shell::browser::commands::browser_hide,
+            shell::browser::commands::browser_navigate,
+            shell::browser::commands::browser_history,
+            shell::browser::commands::browser_reload,
+            shell::browser::commands::browser_set_zoom,
+            shell::browser::commands::browser_find,
+            shell::browser::commands::browser_find_clear,
+            shell::browser::commands::browser_close_tab,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

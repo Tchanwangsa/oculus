@@ -5,10 +5,10 @@ import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeKatex from "rehype-katex";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { hasMath, normalizeMath } from "@/lib/mathMarkdown";
-import { LoadingFill } from "@/components/ui/PageParts";
-import { readCourseFile } from "@/lib/courseFiles";
-import { copyAsMarkdown, dragAsMarkdown } from "@/lib/selectionMarkdown";
+import { hasMath, normalizeMath } from "@/lib/markdown/math";
+import { LoadingFill } from "@/components/ui/layout/PageParts";
+import { readCourseFile } from "@/lib/files/courseFiles";
+import { copyAsMarkdown, dragAsMarkdown } from "@/lib/markdown/selection";
 
 const PLAIN = [remarkGfm];
 const WITH_MATH = [remarkGfm, remarkMath];

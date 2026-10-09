@@ -19,15 +19,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DateTimeField } from "@/components/projects/DateTimeField";
+import { DateTimeField } from "@/components/projects/fields/DateTimeField";
 import { createLocalEvent, getSubjects, updateLocalEvent } from "@/lib/db";
-import { displayCode, sameDay } from "@/lib/format";
+import { displayCode, sameDay } from "@/lib/format/format";
 import {
   CALENDAR_UPDATED_EVENT,
   NO_SUBJECT,
   NO_SUBJECT_LABEL,
-} from "@/lib/calendar";
-import { useEventEditor } from "@/stores/eventEditorStore";
+} from "@/lib/planning/calendar";
+import { useEventEditor } from "@/stores/planning/eventEditorStore";
 
 /**
  * Layers a user-written row can join. Only `class` has a span, so the end
@@ -57,7 +57,7 @@ function defaultStart(day: Date | null): Date {
 /**
  * Create/edit a row in `local_events`, the one calendar layer Oculus owns.
  * Mounted in `AppLayout` because its Edit trigger (`EventPopover`) appears in
- * every calendar view and on Home — see `app/src/stores/eventEditorStore.ts`.
+ * every calendar view and on Home — see `app/src/stores/planning/eventEditorStore.ts`.
  */
 export function EventDialog() {
   const open = useEventEditor((s) => s.open);

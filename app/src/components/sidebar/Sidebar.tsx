@@ -9,12 +9,12 @@ import {
   GearSix,
   House,
 } from "@phosphor-icons/react";
-import { anyRunning, useHarnessStore } from "@/stores/harnessStore";
-import { useIndexStore } from "@/stores/indexStore";
-import { newCountForSubject, useNewFilesStore } from "@/stores/newFilesStore";
-import { usePaletteStore } from "@/stores/paletteStore";
-import { useRailOrder, type RailSection } from "@/stores/railOrderStore";
-import { DRAG_SURFACE, useStripReorder } from "@/hooks/usePointerDrag";
+import { anyRunning, useHarnessStore } from "@/stores/chat/harnessStore";
+import { useIndexStore } from "@/stores/sync/indexStore";
+import { newCountForSubject, useNewFilesStore } from "@/stores/sync/newFilesStore";
+import { usePaletteStore } from "@/stores/shell/paletteStore";
+import { useRailOrder, type RailSection } from "@/stores/shell/railOrderStore";
+import { DRAG_SURFACE, useStripReorder } from "@/hooks/gestures/usePointerDrag";
 import { cn } from "@/lib/utils";
 import RailItem, { railButton, railIdle } from "./RailItem";
 import {

@@ -7,15 +7,16 @@ Read this before any UI work.
 
 | Piece | Location |
 | --- | --- |
-| Tokens, base resets, utilities (`page-scroll`, scroll fades) | `app/src/index.css` |
-| Text selection scopes | `app/src/index.css`, `app/src/lib/selectScope.ts` |
-| shadcn primitives | `app/src/components/ui/` |
-| Persisted view state and collapsed groups | `app/src/hooks/useStoredState.ts` |
-| Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/PageParts.tsx` |
-| A page's nav column (Settings, subjects, Chat) | `app/src/components/ui/SideNav.tsx` |
-| Drag gestures | `app/src/hooks/usePointerDrag.ts`, `app/src/hooks/useCardDrag.ts`, `app/src/hooks/useFileDrop.ts` |
-| Subject grouping and persisted collapsed groups | `app/src/lib/subjectGroups.ts`, `app/src/hooks/useCollapsedGroups.ts` |
-| Table chrome | `app/src/components/ui/GridTable.tsx`, `app/src/components/ui/ViewTabs.tsx`, `app/src/components/ui/TablePagination.tsx` |
+| Tokens, base resets, utilities (`page-scroll`, scroll fades) | `app/src/styles/colors.css`, `app/src/styles/dark.css`, `app/src/styles/base.css`, `app/src/styles/utilities.css`, `app/src/styles/scroll-fade.css` (`app/src/index.css` only imports them) |
+| Text selection scopes | `app/src/styles/base.css`, `app/src/lib/ui/selectScope.ts` |
+| shadcn primitives (flat) | `app/src/components/ui/` |
+| Composites built on them | `app/src/components/ui/layout/`, `app/src/components/ui/table/`, `app/src/components/ui/search/`, `app/src/components/ui/lightbox/` |
+| Persisted view state and collapsed groups | `app/src/hooks/ui/useStoredState.ts` |
+| Subject page width, loading rows and empty views | `app/src/components/subjects/SubjectPage.tsx`, `app/src/components/ui/layout/PageParts.tsx` |
+| A page's nav column (Settings, subjects, Chat) | `app/src/components/ui/layout/SideNav.tsx` |
+| Drag gestures | `app/src/hooks/gestures/usePointerDrag.ts`, `app/src/hooks/gestures/useCardDrag.ts`, `app/src/hooks/gestures/useFileDrop.ts` |
+| Subject grouping and persisted collapsed groups | `app/src/lib/ui/subjectGroups.ts`, `app/src/hooks/shell/useCollapsedGroups.ts` |
+| Table chrome | `app/src/components/ui/table/GridTable.tsx`, `app/src/components/ui/table/ViewTabs.tsx`, `app/src/components/ui/table/TablePagination.tsx` |
 
 ## One colour, two fonts, and a floating card
 
@@ -40,10 +41,10 @@ headings and Inter for everything else, Notion-style layout.
   `shadcn add` generates.
 - **Monospace is for code and terminal output only** — the one `font-mono` file is
   `app/src/components/markdown/MdComponents.tsx`; the note editor's theme
-  (`app/src/components/documents/editor/theme.ts`) gives `--font-mono` to code
+  (`app/src/components/documents/editor/theme/`) gives `--font-mono` to code
   and LaTeX source. A command's output (`AnsiText`, the one-line
   `TerminalLine` on a running install or update) keeps its colours via
-  `lib/ansi.ts`, which drops every escape but SGR. Timestamps, counts, IDs and badges take the body font,
+  `app/src/lib/format/ansi.ts`, which drops every escape but SGR. Timestamps, counts, IDs and badges take the body font,
   with `tabular-nums` when digits hold a column.
 - Headings get Manrope from an `h1–h4` rule in `@layer base`; a title that
   isn't a heading element takes `font-display`. A reply's headings
@@ -55,7 +56,7 @@ headings and Inter for everything else, Notion-style layout.
 - **Icons are Phosphor.** One Phosphor lacks is drawn in
   `app/src/components/icons/` on its `IconBase`, so it takes the same `size`
   and `weight` props.
-- **Colours go through the semantic tokens in `app/src/index.css`.** In
+- **Colours go through the semantic tokens in `app/src/styles/colors.css`** (dark values in `dark.css`). In
   shadcn's vocabulary `accent` is the quiet hover surface, not the brand. The
   indigo has two tokens: `primary` is the *fill* (buttons, active underline,
   today), `brand` is the *accent* (links, selection, in-flight progress,
@@ -70,17 +71,17 @@ headings and Inter for everything else, Notion-style layout.
   cards, lists, tables, the sidebar) never highlights. Mark a new surface
   `data-selectable` only if its text is worth copying. A drag-select stays in
   the scope it starts in — a pane's root in `TabPane` (`data-select-scope`), a
-  dialog, a popover: `app/src/lib/selectScope.ts` turns every other scope off
+  dialog, a popover: `app/src/lib/ui/selectScope.ts` turns every other scope off
   while the button is held, so a drag across the split divider stops at its
   own pane.
 - **Dark mode is a `.dark` class on `<html>`** written only by `applyTheme`
-  (`app/src/lib/theme.ts`); `@custom-variant dark` follows the class, not the OS.
+  (`app/src/lib/ui/theme.ts`); `@custom-variant dark` (in `app/src/index.css`) follows the class, not the OS.
 - **Full pages scroll through `page-scroll`**, which reserves the scrollbar
   gutter so a page that starts overflowing doesn't jog sideways.
 - **Every scroller fades its overflowing edges through `useScrollFade`**
-  (`app/src/hooks/useScrollFade.ts`; `syncScrollFade` in
-  `app/src/lib/scrollFade.ts` for non-React callers like the maths palette).
-  It marks the element `data-scroll-fade="x|y|xy"` and `index.css` turns that
+  (`app/src/hooks/ui/useScrollFade.ts`; `syncScrollFade` in
+  `app/src/lib/ui/scrollFade.ts` for non-React callers like the maths palette).
+  It marks the element `data-scroll-fade="x|y|xy"` and `app/src/styles/scroll-fade.css` turns that
   into a mask, so no overlay and no background colour. Unchanged edge states
   skip style writes. Set `--scroll-fade` for a ramp other than 24px, and keep
   the scroller flush against what it sits on — padding between them leaves a
@@ -109,7 +110,7 @@ headings and Inter for everything else, Notion-style layout.
   section-header icons or filler; stat cards only where the figures are the
   point (Home's Activity).
 - Slugs display through `humanizeSlug`, Canvas codes through `displayCode`
-  ("MULT20015", not "MULT20015_2026_SM2"), both in `app/src/lib/format.ts`.
+  ("MULT20015", not "MULT20015_2026_SM2"), both in `app/src/lib/format/format.ts`.
 
 Subject glyphs load the full Phosphor catalogue (`loadIconCatalogue` in
 `app/src/components/subjects/SubjectIcon.tsx`, cached for every glyph) only
@@ -125,7 +126,8 @@ mounts on open and loads through the same cache.
   for leaving the window.
 - **HTML5 drag needs `dataTransfer.setData()`** or WebKit cancels it silently,
   and `preventDefault()` on `dragstart` cancels it outright — see the drag-out
-  in `app/src/components/harness/Timeline.tsx`.
+  in `dragAsMarkdown` (`app/src/lib/markdown/selection.ts`), wired up in
+  `app/src/components/harness/timeline/Timeline.tsx`.
 - **A text selection pre-empts an element drag in WebKit** — hold it off with
   `DRAG_SURFACE`, or a press on a card's text selects instead of lifting.
 - **`usePointerDrag` captures only past the threshold** — a capture on the
@@ -136,11 +138,11 @@ mounts on open and loads through the same cache.
   clamping, a centre never passes an equal-width end tab.
 - **Finder drops are webview events**: listen on `getCurrentWebview()` (a window
   listener never fires) and measure the scale, since the position is in points
-  despite `PhysicalPosition` (`app/src/hooks/useFileDrop.ts`).
+  despite `PhysicalPosition` (`app/src/hooks/gestures/useFileDrop.ts`).
 - **No `md:` text size on a base field** — variants emit after plain utilities,
   so `md:text-sm` beats every call-site size; `input.tsx`/`textarea.tsx` carry
   one `text-[13px]`.
-- **Every base reset in `index.css` goes inside `@layer base`** — unlayered CSS
+- **Every base reset in `app/src/styles/base.css` goes inside `@layer base`** — unlayered CSS
   beats every utility, killing `border-*` and `select-*` app-wide.
 - **WebKit only reads `-webkit-user-select`** — the unprefixed property is
   ignored, and the dev server doesn't autoprefix (only the production build
@@ -150,7 +152,7 @@ mounts on open and loads through the same cache.
   pointer coords with layout rects, breaking popups and drags.
 - **No native date/time inputs** — segmented hover, an OS picker in Buddhist-era
   years, and a half-typed value reads empty. Use
-  `app/src/components/projects/DateTimeField.tsx`; bare `type="time"` is fine.
+  `app/src/components/projects/fields/DateTimeField.tsx`; bare `type="time"` is fine.
 - **`scrollbar-gutter` is a no-op in WebKit** — reserve the gutter with
   `overflow-y: scroll` (`page-scroll`, `GridTable`, the lightbox).
 - **Icons jitter half a pixel when a layer is promoted or dropped** — recurring.
@@ -158,9 +160,9 @@ mounts on open and loads through the same cache.
   pixel whenever an element gains or loses its own compositing layer, so icons
   step on a hover, a fade or an expand while the text beside them stays put.
   Known triggers: a scroller that only starts to overflow after something
-  expands (`SwitcherList` in `SubjectNav.tsx`), and anything that transitions
+  expands (`SwitcherList` in `app/src/components/subjects/nav/SubjectSwitcher.tsx`), and anything that transitions
   `opacity` or `transform` — a hover-reveal button (`MessageActions` in
-  `Timeline.tsx`, `ThreadRow`'s delete), a caret that fades and rotates, the
+  `app/src/components/harness/timeline/`, `ThreadRow`'s delete), a caret that fades and rotates, the
   label fade `SIDE_NAV_FOLDS`. All carry `will-change`, which keeps the layer on
   from the start. Whole-pixel row heights do not help. **Every new
   `transition-opacity` / `transition-transform` on an icon, or on a row holding

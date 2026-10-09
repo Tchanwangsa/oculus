@@ -5,7 +5,7 @@
 use tauri::AppHandle;
 
 use super::{ParseError, Phase, Progress};
-use crate::pipeline_events::{Channel, Status};
+use crate::runtime::pipeline_events::{Channel, Status};
 
 static CHANNEL: Channel = Channel::new("parse-status");
 

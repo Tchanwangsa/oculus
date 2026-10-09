@@ -12,7 +12,7 @@ the root `CLAUDE.md` holds only the rules.
 
 | Page | What it covers |
 | --- | --- |
-| [architecture.md](./architecture.md) | The two processes, how they talk, the data directory, `oculus.db` |
+| [architecture.md](./architecture.md) | The two processes, how they talk, the data directory, `oculus.db`, the code layout |
 | [sync.md](./sync.md) | The scrape engine: Canvas modules, Ed threads, Echo360 lectures, HTML→md |
 | [auth.md](./auth.md) | Canvas session cookie, keep-alive, Okta sign-in and its attempt guard, Ed `x-token`, Echo360 LTI |
 | [parsing.md](./parsing.md) | PDFs to markdown: the parser seam, the two MinerU engines, failures |

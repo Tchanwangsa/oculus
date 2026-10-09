@@ -1,11 +1,11 @@
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { FileChip } from "@/components/markdown/FileChip";
-import { ImageLightbox } from "@/components/ui/Lightbox";
-import { attachmentSrc } from "@/lib/attachments";
+import { ImageLightbox } from "@/components/ui/lightbox/Lightbox";
+import { attachmentSrc } from "@/lib/harness/attachments";
 import { parseCitation, type Citation, type CitationShape } from "@/lib/citations";
-import { openCitation } from "@/lib/openFile";
-import { useCitation } from "@/hooks/useCitation";
-import { useDataDir } from "@/hooks/useDataDir";
+import { openCitation } from "@/lib/files/openFile";
+import { useCitation } from "@/hooks/agents/useCitation";
+import { useDataDir } from "@/hooks/backend/useDataDir";
 
 const PICTURE = /\.(?:png|jpe?g|gif|webp|svg|avif)$/i;
 

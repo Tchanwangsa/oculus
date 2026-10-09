@@ -10,26 +10,43 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Piece | Location |
 | --- | --- |
 | App entry, startup, command registry | `app/src-tauri/src/lib.rs` |
-| Schema migrations | `app/src-tauri/src/migrations.rs` |
-| Data-dir and library path rules | `app/src-tauri/src/paths.rs` |
+| Schema migrations | `app/src-tauri/src/db/migrations.rs` |
+| Data-dir and library path rules | `app/src-tauri/src/library/paths/` |
 | Parse seam and its two MinerU clients | `app/src-tauri/src/parse/mod.rs`, `app/src-tauri/src/parse/mineru/` |
-| Embed seam, Voyage client, page rasterizer | `app/src-tauri/src/embed/mod.rs`, `app/src-tauri/src/embed/voyage/`, `app/src-tauri/src/embed/raster.rs` |
-| Ingest and search over `pages` | `app/src-tauri/src/retrieval.rs` |
-| Rate limiting both cloud clients share | `app/src-tauri/src/ratelimit.rs` |
-| Shared parse/embed event payload and channels | `app/src-tauri/src/pipeline_events.rs` |
-| Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
-| Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
-| Credential storage (keychain only); provider probes | `app/src-tauri/src/credentials.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
-| Lecture video server | `app/src-tauri/src/media.rs` |
+| Embed seam, Voyage client, page rasterizer | `app/src-tauri/src/embed/mod.rs`, `app/src-tauri/src/embed/voyage/`, `app/src-tauri/src/embed/raster/` |
+| Ingest and search over `pages` | `app/src-tauri/src/pages/retrieval/` |
+| Rate limiting both cloud clients share | `app/src-tauri/src/providers/ratelimit/` |
+| Shared parse/embed event payload and channels | `app/src-tauri/src/runtime/pipeline_events.rs` |
+| Blocking-command adapter | `app/src-tauri/src/runtime/blocking.rs` |
+| Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/runtime/atomic_write.rs`, `app/src-tauri/src/runtime/clock.rs`, `app/src-tauri/src/test_support/` |
+| Credential storage (keychain only); provider probes | `app/src-tauri/src/providers/credentials.rs`; `app/src-tauri/src/providers/mineru.rs`, `app/src-tauri/src/providers/voyage.rs`, `app/src-tauri/src/providers/groq.rs`, `app/src-tauri/src/auth/okta/store.rs` |
+| Lecture video server | `app/src-tauri/src/lectures/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
-| Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/bundled.rs` |
-| In-app browser | `app/src-tauri/src/browser.rs`, `app/src-tauri/capabilities/default.json` |
+| Locating the shipped native helpers (ffmpeg, `apple-speech`, `whisper-cli`) | `app/src-tauri/src/runtime/bundled.rs` |
+| In-app browser | `app/src-tauri/src/shell/browser/`, `app/src-tauri/capabilities/default.json` |
 | CLI-agent harness | `app/src-tauri/src/harness/mod.rs` |
-| Headless DB writes | `app/src-tauri/src/store.rs`, `app/src-tauri/src/projects.rs` |
-| App-usage ticker and its pinger | `app/src-tauri/src/usage.rs`, `app/src/hooks/useActivityPing.ts`, `app/src/lib/usageContext.ts` |
-| File-pipeline event payload and bound channels | `app/src-tauri/src/pipeline_events.rs` |
-| Frontend DB access and event folding | `app/src/lib/db.ts`, `app/src/hooks/useBackendEvents.ts` |
+| Headless DB writes | `app/src-tauri/src/db/store/`, `app/src-tauri/src/db/projects/` |
+| App-usage ticker and its pinger | `app/src-tauri/src/shell/usage/`, `app/src/hooks/backend/useActivityPing.ts`, `app/src/lib/activity/usageContext.ts` |
+| File-pipeline event payload and bound channels | `app/src-tauri/src/runtime/pipeline_events.rs` |
+| Frontend DB access and event folding | `app/src/lib/db/`, `app/src/hooks/backend/useBackendEvents.ts` |
 | The CLI over the same engine | `app/src-tauri/src/bin/oculus/` |
+
+## Code layout: domain directories, folder modules, tests beside the code
+
+- Rust loose files sit in group directories under `app/src-tauri/src/`:
+  `auth/`, `sources/`, `sync/`, `pages/`, `library/`, `db/`, `lectures/`,
+  `agents/`, `shell/`, `runtime/`, `providers/`; `harness/`, `parse/`,
+  `embed/` and `transcribe/` are their own groups.
+- The frontend groups the same way: `app/src/lib/` (`activity`, `citations`,
+  `db`, `files`, `format`, `harness`, `lectures`, `notes`, `pipeline`,
+  `planning`, `search`, `shell`, …), `app/src/hooks/` (`agents`, `backend`,
+  `data`, `lectures`, `shell`, `sync`, `ui`, …) and `app/src/stores/` (`chat`,
+  `documents`, `lectures`, `planning`, `shell`, `sync`).
+- A file that outgrows one concern becomes a folder module whose `mod.rs` (TS:
+  `index.ts`) only declares and re-exports.
+- No section-banner comments: a file that wants them is split instead.
+- Tests live beside the code in Rust (`tests.rs`) and mirror the tree under
+  `app/tests/` in TypeScript.
 
 ## Oculus starts no child process for parsing or embedding
 
@@ -43,15 +60,15 @@ its failure rules are in [parsing.md](./parsing.md).
 ## The frontend and Rust talk only through commands and events
 
 - Tauri commands go in; events come out. Scrape, parse and embed progress
-  arrive as events that `app/src/hooks/useBackendEvents.ts` folds into zustand
+  arrive as events that `app/src/hooks/backend/useBackendEvents.ts` folds into zustand
   stores. Parse and embed share the optional-field payload in
-  `pipeline_events`, while their channels keep separate success and error vocabularies.
+  `runtime::pipeline_events`, while their channels keep separate success and error vocabularies.
 - `parse::events` and `embed::events` bind the app handle once, first thing in
   `setup`, instead of threading it through the call path. The CLI never binds,
   so the same parse and embed code runs headless and its emits are no-ops.
 - Library text reads, bulk parse-artifact scans, upload import/conversion,
   Canvas calendar sync, Echo360's HTTP, downloads and ffmpeg, and video
-  transcription run through `blocking::run`, so synchronous I/O cannot hold
+  transcription run through `runtime::blocking::run`, so synchronous I/O cannot hold
   Tauri's command thread.
   Upload batches serialize their name allocation.
 - Credentials go keychain → in-process client. No key enters SQLite, the
@@ -66,21 +83,21 @@ its failure rules are in [parsing.md](./parsing.md).
 
 macOS suspends an off-screen WKWebView's content process, which freezes
 anything running in it mid-run with nothing to catch. So the scrape engine is
-`app/src-tauri/src/sync.rs`, and the headless Okta sign-in
-(`app/src-tauri/src/okta.rs`) runs in Rust too. Never move background work into
+`app/src-tauri/src/sync/`, and the headless Okta sign-in
+(`app/src-tauri/src/auth/okta/`) runs in Rust too. Never move background work into
 a WebView.
 
 ## Lecture video streams over localhost HTTP
 
 WebKit refuses `<video>` sources on custom URL schemes: an `asset://` URL
 fetches but the media element fails with error code 4 (macOS 26). So
-`app/src-tauri/src/media.rs` serves lecture video on an ephemeral localhost
+`app/src-tauri/src/lectures/media.rs` serves lecture video on an ephemeral localhost
 port with a per-launch token and Range support, scoped to `lectures/` and
-`courses/`. The frontend gets URLs from `mediaSrc()` in `app/src/lib/media.ts`.
+`courses/`. The frontend gets URLs from `mediaSrc()` in `app/src/lib/lectures/media/src.ts`.
 
 ## One data directory, resolved without a Tauri handle
 
-`paths::data_dir()` computes the directory Tauri would
+`library::paths::data_dir()` computes the directory Tauri would
 (`~/Library/Application Support/com.tchan.oculus`) with no `AppHandle`, and is
 the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
 
@@ -90,8 +107,8 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   `.emb.json`. Two subfolders are the student's own, never written by a sync:
   `uploads/` (copied in by `import_uploads`) and `documents/` (notes written in
   the app by `create_document`, with pasted images in `documents/assets/`),
-  both in `app/src-tauri/src/files.rs`. Rename and delete commands are scoped
-  to those shapes (`is_document_rel` in `app/src-tauri/src/paths.rs`), which is
+  both in `app/src-tauri/src/library/files/`. Rename and delete commands are scoped
+  to those shapes (`is_document_rel` in `app/src-tauri/src/library/paths/own_files.rs`), which is
   what makes deleting there safe.
 - `lectures/<uuid>/` — Echo360 media (`source1.mp4`, optionally
   `source2.mp4`) and `transcript.vtt`, plus regenerable `frames/` and
@@ -112,11 +129,11 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
 ## The database has one schema owner and two writers
 
 Schema is the append-only, numbered migration list in
-`app/src-tauri/src/migrations.rs`; the highest `version` is the current schema.
+`app/src-tauri/src/db/migrations.rs`; the highest `version` is the current schema.
 An applied migration's SQL, comments and whitespace included, is frozen;
 editing it fails `Database.load` with a checksum mismatch.
 In the app the *frontend* writes the scrape tables, upserting through
-`app/src/lib/db.ts` as scrape events arrive. Headless, `store.rs` writes the
+`app/src/lib/db/` as scrape events arrive. Headless, `app/src-tauri/src/db/store/` writes the
 same rows with the same SQL, so a CLI sync looks like an app sync. The CLI
 never creates the database, so a fresh machine opens the app once first.
 
@@ -133,22 +150,22 @@ never creates the database, so a fresh machine opens the app once first.
 - `projects`, `project_tasks` and `local_events` hold the student's own rows,
   which nothing upstream has a copy of. Their `subject_id` is nullable and
   `ON DELETE SET NULL`, so dropping a course never takes the user's work with
-  it. Written by `app/src/lib/projects.ts` in the app and
-  `app/src-tauri/src/projects.rs` headless ([projects.md](./projects.md)).
+  it. Written by `app/src/lib/planning/projects/` in the app and
+  `app/src-tauri/src/db/projects/` headless ([projects.md](./projects.md)).
 - `document_versions` holds a note's checkpoints and snapshots, written only by
-  `app/src/lib/documentVersions.ts` ([editor.md](./editor.md#a-notes-versions-live-in-the-database-never-on-disk)).
+  `app/src/lib/notes/documentVersions.ts` ([editor.md](./editor.md#a-notes-versions-live-in-the-database-never-on-disk)).
 - `harness_threads`/`harness_items` are the chat timeline
   ([harness.md](./harness.md)).
 - `usage_hours` and `usage_context_hours` are written only by Rust, as the
   next section describes.
 - Parse and embed settings are the `parse` and `embed` rows of `settings`, read
-  by `parse_config` and `embed_config`. `store::edit_setting` preserves unknown
+  by `parse_config` and `embed_config`. `db::store::edit_setting` preserves unknown
   keys when changing either object; malformed records start from defaults.
 
 ## Rust counts app usage; the frontend only pings
 
 `usage_hours` holds open and active seconds per local hour, keyed
-`YYYY-MM-DD HH`. A ticker in `app/src-tauri/src/usage.rs`, started in `setup`,
+`YYYY-MM-DD HH`. A ticker in `app/src-tauri/src/shell/usage/`, started in `setup`,
 reads the main window every 30 s and adds 30 to the current hour's row:
 
 - **Open**: the window is visible and not minimized.
@@ -164,9 +181,9 @@ clock because `Instant` pauses through macOS sleep and a pre-sleep ping would
 look fresh on wake.
 
 Each ping carries a context, `{ kind, subjectId }` from `usageContext` in
-`app/src/lib/usageContext.ts`: what sort of page it came from (lecture, file,
+`app/src/lib/activity/usageContext.ts`: what sort of page it came from (lecture, file,
 document, course, chat, browser, planning, other) and the subject it belongs
-to. `useActivityPing` (`app/src/hooks/useActivityPing.ts`) sends the focused
+to. `useActivityPing` (`app/src/hooks/backend/useActivityPing.ts`) sends the focused
 pane's context with input, and pings at once, past the throttle, whenever
 navigation, a tab switch or a focus move between main page and side panel
 changes it within a few seconds of real input — a tab restoring at launch is
@@ -196,7 +213,7 @@ JavaScript.
   would hand every Tauri command to whatever page the user browsed to.
 - Back-list state, find matches and zoom live only in the page, and
   `with_webview` dispatches to the main thread and returns nothing. So
-  `browser.rs` *pushes* each answer as an event rather than returning it.
+  `shell::browser` *pushes* each answer as an event rather than returning it.
 - WebKit has no public favicon API, so Rust fetches the icon beside each page
   load and emits `browser-favicon`; the frontend owns the `browser_favicons`
   rows. Rust sees events, the frontend owns rows — the same split as history.
@@ -206,6 +223,6 @@ JavaScript.
 - Background work in a hidden WebView freezes silently — keep it in Rust ([above](#scraping-lives-in-rust-because-hidden-webviews-freeze)).
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
-- Reaching the data dir any way but `paths::data_dir()` lets the CLI and app diverge.
+- Reaching the data dir any way but `library::paths::data_dir()` lets the CLI and app diverge.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
 - A `subject_id` that cascades on user-owned tables deletes the student's work with a course.

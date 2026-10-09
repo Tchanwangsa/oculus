@@ -3,7 +3,7 @@
 //! Nothing is defaulted out of sight: a non-chat job names its provider, model
 //! and level, set in Settings → AI with the composer's `ModelPicker`. Stored as
 //! one JSON value under [`SETTINGS_KEY`] (`getJobModels`/`setJobModels` in
-//! `app/src/lib/db.ts`); an unreadable value costs the job its config, not its run.
+//! `app/src/lib/db/jobModels.ts`); an unreadable value costs the job its config, not its run.
 
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -86,7 +86,7 @@ pub fn default_selection(job: Job) -> JobSelection {
 /// The job's configured selection, or its default when anything about the
 /// stored row is unreadable.
 pub async fn selection(pool: &SqlitePool, job: Job) -> JobSelection {
-    let stored = crate::store::setting(pool, SETTINGS_KEY)
+    let stored = crate::db::store::setting(pool, SETTINGS_KEY)
         .await
         .ok()
         .flatten();

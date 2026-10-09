@@ -9,22 +9,22 @@ beside each tab's page, every window shortcut, ⌘F, and search.
 | --- | --- |
 | Route table | `app/src/routes.tsx` |
 | Shell: sidebar rail, tab strip, floating card, zoom | `app/src/layouts/AppLayout.tsx`, `app/src/components/sidebar/`, `app/src/components/tabs/TopTabBar.tsx` |
-| Tabs, side panels, per-pane routers, titles from paths | `app/src/stores/tabStore.ts`, `app/src/lib/sideStack.ts`, `app/src/components/tabs/TabPane.tsx`, `app/src/components/tabs/SidePanelHeader.tsx`, `app/src/components/tabs/PaneHeader.tsx`, `app/src/lib/tabRouters.ts`, `app/src/components/tabs/tabInfo.tsx` |
-| Window shortcuts (all menu items) | `app/src-tauri/src/menu.rs` |
-| ⌘-click → a new tab, app-wide | `app/src/lib/newTabClicks.ts` |
-| Search (⌘K and the new-tab field), the new-tab page's Recent list | `app/src/lib/search.ts`, `app/src/lib/searchFilters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/recentTabsStore.ts` |
-| Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/openFile.ts`, `app/src/pages/subject/FilePage.tsx`, `app/src/hooks/useLocateHighlight.ts` |
-| ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/find.ts`, `app/src/hooks/useDomFind.ts`, `app/src/lib/findText.ts`, `app/src/components/ui/FindBar.tsx`, `app/src/components/ui/PageFind.tsx`, `app/src/components/documents/editor/useEditorFind.ts` |
-| Subject page: the nav column, subject switcher and `/subjects` redirect | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx`, `app/src/pages/SubjectsRedirect.tsx` |
-| Home: sections, the Recent row's query, the Activity chart and its pings | `app/src/pages/HomePage.tsx`, `app/src/components/home/`, `app/src/lib/home.ts`, `app/src/lib/usage.ts`, `app/src/lib/usageContext.ts`, `app/src/hooks/useActivityPing.ts` |
-| Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/settingsSearch.ts` |
+| Tabs, side panels, per-pane routers, titles from paths | `app/src/stores/shell/tabStore.ts`, `app/src/lib/shell/sideStack.ts`, `app/src/components/tabs/TabPane.tsx`, `app/src/components/tabs/SidePanelHeader.tsx`, `app/src/components/tabs/PaneHeader.tsx`, `app/src/lib/shell/tabRouters.ts`, `app/src/components/tabs/tabInfo.tsx` |
+| Window shortcuts (all menu items) | `app/src-tauri/src/shell/menu.rs` |
+| ⌘-click → a new tab, app-wide | `app/src/lib/shell/newTabClicks.ts` |
+| Search (⌘K and the new-tab field), the new-tab page's Recent list | `app/src/lib/search/`, `app/src/lib/search/filters.ts`, `app/src/components/search/SearchList.tsx`, `app/src/stores/shell/recentTabsStore.ts` |
+| Opening beside (file rows, citations, lecture rows) and a cited spot | `app/src/lib/files/openFile.ts`, `app/src/pages/subject/files/FilePage.tsx`, `app/src/hooks/find/useLocateHighlight.ts` |
+| ⌘F: routing, find in rendered DOM, the find bar | `app/src/lib/menu/find.ts`, `app/src/hooks/find/useDomFind.ts`, `app/src/lib/menu/findText.ts`, `app/src/components/ui/search/FindBar.tsx`, `app/src/components/ui/search/PageFind.tsx`, `app/src/components/documents/editor/chrome/useEditorFind.ts` |
+| Subject page: the nav column, subject switcher and `/subjects` redirect | `app/src/layouts/SubjectLayout.tsx`, `app/src/components/subjects/SubjectNav.tsx`, `app/src/pages/start/SubjectsRedirect.tsx` |
+| Home: sections, the Recent row's query, the Activity chart and its pings | `app/src/pages/start/HomePage.tsx`, `app/src/components/home/`, `app/src/lib/activity/home.ts`, `app/src/lib/activity/usage/`, `app/src/lib/activity/usageContext.ts`, `app/src/hooks/backend/useActivityPing.ts` |
+| Settings: the nav column, its search and section jumps | `app/src/layouts/SettingsLayout.tsx`, `app/src/components/settings/SettingsNav.tsx`, `app/src/lib/search/settings.ts` |
 
 ## Each pane has its own router, and the path is its only state
 
 `app/src/routes.tsx` is the route table, and each **pane** — a tab's main page,
 or an item in its side panel — builds its own memory router over it
 (`app/src/components/tabs/TabPane.tsx`). Routers live in a registry keyed by
-pane id (`app/src/lib/tabRouters.ts`) and outlive the mount, so a side panel
+pane id (`app/src/lib/shell/tabRouters.ts`) and outlive the mount, so a side panel
 item sent to the back keeps its history. Paths are available synchronously for
 matching and ⌘-click; page modules load through route `lazy` only when
 visited, except Home, `/new` and the `/subjects` redirect, which are in the
@@ -34,7 +34,7 @@ module loads.
 those panes skip shell-driven renders. Display clocks pause in inactive panes
 and refresh when the pane returns; downloads and agent jobs continue globally.
 The shell sits above all of them and navigates through `navigateActive` /
-`goInActiveTab` in `app/src/lib/tabRouters.ts`, which resolve to the focused
+`goInActiveTab` in `app/src/lib/shell/tabRouters.ts`, which resolve to the focused
 pane and hold the departure rules: keep a browser tab pinned to its page, ask
 before leaving a playing lecture.
 
@@ -47,7 +47,7 @@ before leaving a playing lecture.
   and a restored tab or Recent row reopens its own; a bare `/chat` is a
   new thread ([harness.md](./harness.md#each-chat-tab-owns-its-conversation-in-its-route)).
 - **`/projects` and `/tasks` are one section**, switched by
-  `app/src/components/projects/SectionHeader.tsx`, which *navigates* because
+  `app/src/components/projects/page/SectionHeader.tsx`, which *navigates* because
   crumbs, ⌘-click, restored tabs and `tabInfo` all key off the path; `RailItem`'s
   `match` lights one sidebar item for both. A project is top-level because it may
   have no subject; a filed task sits under its project, an unfiled one at
@@ -68,7 +68,7 @@ before leaving a playing lecture.
 - **`/subjects` is a redirect, not a page** (`SubjectsRedirect`): it replaces
   itself with the Overview of the last subject `SubjectLayout` resolved
   (`localStorage`, `oculus-last-subject`), else the first current subject,
-  else the first past one. A remembered id no longer in the list is skipped,
+  else the first past one. A remembered id missing from the list is skipped,
   so a stale-id bounce from `SubjectLayout` cannot loop. It renders only with
   no subjects synced, as an empty view pointing at Sync. Every other way to a
   subject is the switcher, ⌘K or a crumb.
@@ -95,7 +95,7 @@ indexing, and a brand dot on Subjects while any subject has never-opened files
 
 `/settings` is one route with a page per nav row; `SettingsLayout` puts
 `SettingsNav` beside the page, the rows grouped from `SETTINGS_PAGES`. Its
-search reads a hand-kept list in `app/src/lib/settingsSearch.ts`, because the
+search reads a hand-kept list in `app/src/lib/search/settings.ts`, because the
 pages are lazy and unmounted: entry titles are the on-screen text, and each
 names the `Section` title it jumps to. Rename a section or row and update the
 list. A jump travels as router state, and the layout scrolls the section's id
@@ -106,7 +106,7 @@ section names.
 
 ## The shell owns tabs, side panels and every window shortcut
 
-- **Window shortcuts are menu items** (`app/src-tauri/src/menu.rs`): macOS
+- **Window shortcuts are menu items** (`app/src-tauri/src/shell/menu.rs`): macOS
   gives the menu bar every ⌘-key before the app's webview sees it. They reach
   the frontend as `menu-*` events and the frontend owns what each means.
   Close Window is ⇧⌘W, and the Edit submenu must stay or ⌘C/⌘V die in every
@@ -115,13 +115,13 @@ section names.
   own ⌘Z/⌘A/⌘F (Google Docs) work; a key the page doesn't take falls through
   to the menu. The app's tab and window keys (⌘T, ⌘W, ⌘N, ⌘K, ⌘L, ⌘1–9 and
   their ⇧/⌥ variants) never go to the page. The monitor is Rust's
-  (`app/src-tauri/src/keys.rs`).
+  (`app/src-tauri/src/shell/keys.rs`).
 - **Undo and Redo are menu items that emit, not the predefined ones.** The
   predefined items hand ⌘Z to WebKit's own undo stack, which a note's
   CodeMirror history never fills. While a browser page holds focus Rust sends
   it the stock `undo:` / `redo:`; otherwise `menu-undo` / `menu-redo` go to
-  `routeEdit` (`app/src/lib/editRouting.ts`): a note editor's history
-  (`undoRouting.ts`, which also remembers the last focused note and acts only
+  `routeEdit` (`app/src/lib/menu/editRouting.ts`): a note editor's history
+  (`app/src/components/documents/editor/core/undoRouting.ts`, which also remembers the last focused note and acts only
   while it is visible), else `execCommand` on the focused input.
 - **Select All is a custom item too**, because WebKit's `selectAll:` with no
   field focused selects the whole window. A focused browser page gets the
@@ -129,7 +129,7 @@ section names.
   the focused control's own ⌘A (replayed as a keydown, which CodeMirror and a
   table's cell block take; a maths field's `select()`), else a focused input's
   contents, else the dialog or popover holding focus, else the target ⌘F
-  would search (`currentFindTarget` in `app/src/lib/find.ts`) — never the
+  would search (`currentFindTarget` in `app/src/lib/menu/find.ts`) — never the
   whole window. Within that, `selectContents` spans only its first to last
   `data-selectable` block (`ui.md`), since WebKit paints a scripted selection
   over `user-select: none` text; a page with no content selects nothing.
@@ -148,7 +148,7 @@ section names.
 - **Strip tabs are fixed-width** (`TAB_W` down to `TAB_MIN_W`), and the column
   between them (`SEPARATOR_W`) always renders because the reorder maths counts it.
 - **The history arrows follow the focused pane's own history.** A memory
-  router has no `window.history` index, so `track` in `app/src/lib/tabRouters.ts`
+  router has no `window.history` index, so `track` in `app/src/lib/shell/tabRouters.ts`
   keeps each router's location keys and a cursor for `canBack`/`canForward`;
   on a browser tab they read Rust's snapshot (`can_back`/`can_forward`).
 - **Zoom is the webview's page zoom** (`setZoom` in `AppLayout`); on a browser
@@ -157,11 +157,11 @@ section names.
   tied to the strip's height and `DEFAULT_ZOOM`, so move one and re-measure all
   three.
 - **⌘-click opens a new tab everywhere, and no call site knows it.**
-  `app/src/lib/newTabClicks.ts` is one capture-phase listener that walks up to
+  `app/src/lib/shell/newTabClicks.ts` is one capture-phase listener that walks up to
   an `href` or a `data-tab-href`, stops at `data-tab-skip`, and matches against
   the real route table (an agent's absolute file paths are not routes). A file
   chip is the one exception, carried by `openCitation` in
-  `app/src/lib/openFile.ts`. Plain external links open in the in-app browser
+  `app/src/lib/files/openFile.ts`. Plain external links open in the in-app browser
   through a capture handler in `AppLayout` (`openExternal`).
 - **A new tab lands on `/new`**, not Home: a search field, a browser door, a
   chat door and the Recent trail.
@@ -196,7 +196,7 @@ section names.
 ## The side panel is a stack of items beside the page
 
 Left is the tab's main page; right is its side panel (`tab.side`, pure logic in
-`app/src/lib/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. ⌥⌘T on a
+`app/src/lib/shell/sideStack.ts`), a stack of up to `SIDE_CAP` (8) panes. ⌥⌘T on a
 closed panel opens one on `/new`.
 
 - **`openBeside` is what file rows, citations and lecture rows call**
@@ -248,7 +248,7 @@ closed panel opens one on `/new`.
 ## ⌘F reaches one registered find
 
 Edit ▸ Find, Find Next and Find Previous emit `menu-find*`, which `AppLayout`
-hands to `routeFind` (`app/src/lib/find.ts`). Every mounted find registers a
+hands to `routeFind` (`app/src/lib/menu/find.ts`). Every mounted find registers a
 target: a PDF viewer, a browser tab, a note editor, and a DOM find over each
 pane — a tab's main page and its side panel's front item alike.
 
@@ -274,7 +274,7 @@ pane — a tab's main page and its side panel's front item alike.
 - **DOM find paints with the CSS Custom Highlight API** (`find-match` /
   `find-current` in `index.css`, shared by every instance), never the DOM.
   Text nodes join into one string with a separator at each block boundary
-  (`app/src/lib/findText.ts`), so a match never crosses blocks. It skips
+  (`app/src/lib/menu/findText.ts`), so a match never crosses blocks. It skips
   `[data-find-skip]`, other targets' roots, collapsed `<details>` and
   undrawn elements; `FollowList` is marked because it is virtualised and its
   panels have their own search.
@@ -288,7 +288,7 @@ pane — a tab's main page and its side panel's front item alike.
 
 ## Search is one module behind two fields
 
-`app/src/lib/search.ts` serves ⌘K, the new-tab field and the subject nav's
+`app/src/lib/search/` serves ⌘K, the new-tab field and the subject nav's
 search; it returns data and
 `openSearchItem` dispatches, because the palette drives the shell from outside
 every router while the field drives its own pane. Titles match every typed word
@@ -303,15 +303,15 @@ subject, after any of its tabs whose name matches; while the field has text the
 results replace the tab rows, and Enter opens the first. A file or lecture
 opens beside the page (`openBeside`), as a file row does; anything else
 navigates the pane. Its field is `SideNavSearch`
-(`app/src/components/ui/SideNav.tsx`), shared with Settings.
+(`app/src/components/ui/layout/SideNav.tsx`), shared with Settings.
 
-`app/src/lib/searchFilters.ts` owns the filter catalogue, tokens and resolution
+`app/src/lib/search/filters.ts` owns the filter catalogue, tokens and resolution
 without database or navigation effects. ⌘K takes Discord-style filters: `in:<subject>` and `type:<kind>`. Typing
 the colon turns the key into a chip with the caret inside it, and the list shows
 only its values; picking one (or a space after an unambiguous value) fixes the
 chip, one per key. Backspace at a field's start drops the chip being typed, or
 else the last chip. Chips scope the SQL (`SearchScope` in
-`app/src/lib/db.ts`) and drop the Web and Go to sections; `runSearch`'s
+`app/src/lib/db/search.ts`) and drop the Web and Go to sections; `runSearch`'s
 `offerFilters` is what the new-tab field leaves off.
 
 ## Gotchas
@@ -322,7 +322,7 @@ else the last chip. Chips scope the SQL (`SearchScope` in
   ⌘B (sidebar) checks `defaultPrevented`, since the note editor's ⌘B is bold.
   ⌘K is a menu item, so it never reaches a keymap: the palette's `menu-search`
   handler asks `linkInFocusedNote` first, and a focused note makes a link.
-  `app/src/lib/noteShortcuts.ts` holds callbacks registered by mounted editors,
+  `app/src/lib/notes/noteShortcuts.ts` holds callbacks registered by mounted editors,
   so listening for the menu does not load CodeMirror.
 - **`data-tauri-drag-region` needs `core:window:allow-start-dragging`**
   (`app/src-tauri/capabilities/default.json`) or it silently does nothing.

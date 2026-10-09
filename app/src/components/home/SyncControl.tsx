@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowsClockwise } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/sync/useAuth";
 import { getSyncRunSummaries, type SyncRun } from "@/lib/db";
-import { fmtSynced, sqliteUtcToMs } from "@/lib/format";
-import { triggerSync } from "@/lib/syncRunner";
-import { useSyncStore } from "@/stores/syncStore";
+import { fmtSynced, sqliteUtcToMs } from "@/lib/format/format";
+import { triggerSync } from "@/lib/pipeline/syncRunner";
+import { useSyncStore } from "@/stores/sync/syncStore";
 import { useHomeSection } from "./useHomeSection";
 
 /** A finished run bumps `completedAt` instead; see the effect below. */

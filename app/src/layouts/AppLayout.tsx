@@ -14,15 +14,15 @@ import {
   openExternal,
   stepZoom,
 } from "@/lib/browser";
-import { useActivityPing } from "@/hooks/useActivityPing";
-import { useBrowserTabs } from "@/hooks/useBrowserTabs";
-import { useTauriEvent, useWindowEvent } from "@/hooks/useEvents";
-import { routeEdit, routeSelectAll } from "@/lib/editRouting";
-import { routeFind } from "@/lib/find";
-import { containSelection } from "@/lib/selectScope";
-import { useNewTabClicks } from "@/lib/newTabClicks";
-import { useBrowserStore } from "@/stores/browserStore";
-import { activePane, useTabStore } from "@/stores/tabStore";
+import { useActivityPing } from "@/hooks/backend/useActivityPing";
+import { useBrowserTabs } from "@/hooks/shell/useBrowserTabs";
+import { useTauriEvent, useWindowEvent } from "@/hooks/backend/useEvents";
+import { routeEdit, routeSelectAll } from "@/lib/menu/editRouting";
+import { routeFind } from "@/lib/menu/find";
+import { containSelection } from "@/lib/ui/selectScope";
+import { useNewTabClicks } from "@/lib/shell/newTabClicks";
+import { useBrowserStore } from "@/stores/shell/browserStore";
+import { activePane, useTabStore } from "@/stores/shell/tabStore";
 
 const SIDEBAR_KEY = "oculus-sidebar-collapsed";
 const ZOOM_KEY = "oculus-zoom";
@@ -33,7 +33,7 @@ const ZOOM_MAX = 1.8;
 /**
  * The shell, and the one place every tab is mounted. Not a route element: each
  * tab has its own router (`TabPane.tsx`), so the chrome here navigates through
- * `lib/tabRouters.ts`.
+ * `lib/shell/tabRouters.ts`.
  */
 export default function AppLayout() {
   const tabs = useTabStore((s) => s.tabs);
@@ -116,7 +116,7 @@ export default function AppLayout() {
   }, []);
 
   // Menu events, not key presses: a browser page's native WebView takes every
-  // ⌘-key, so the app's webview never sees them (`app/src-tauri/src/menu.rs`).
+  // ⌘-key, so the app's webview never sees them (`app/src-tauri/src/shell/menu.rs`).
   useTauriEvent("menu-zoom-in", () => zoomBy(1));
   useTauriEvent("menu-zoom-out", () => zoomBy(-1));
   useTauriEvent("menu-zoom-reset", () => zoomBy(0));
