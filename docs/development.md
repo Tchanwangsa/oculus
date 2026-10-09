@@ -35,7 +35,7 @@ bun run predev        # the dev preflight, by hand
 bun run cli           # release `oculus`
 bun run cli:dev       # debug `oculus` — the one the dev app's agents run
 bun run cli:install   # release build, symlink into ~/.local/bin, then `oculus docs`
-bun run docs:cli      # regenerate docs/cli-reference.md from the binary's help
+bun run docs:cli      # rebuild the release CLI, regenerate docs/cli-reference.md from its help
 bun run pdfium        # fetch libpdfium into app/src-tauri/binaries/
 bun run ffmpeg        # fetch ffmpeg into app/src-tauri/binaries/
 bun run speech        # compile the on-device speech helper there (macOS)
@@ -118,9 +118,9 @@ PATH. Four pieces keep it current:
   `target/` is older than the sources beside it.
 
 `runtime.mjs` owns CLI paths, cargo arguments and the sidecar copy. The
-preflight, bundle staging, watcher and `bun run cli`/`cli:dev` **delete the
-binary before building**, so a build that leaves nothing behind fails loudly
-instead of passing on an old file. `oculus_cli` ranks every candidate it finds
+preflight, bundle staging, watcher, `bun run cli`/`cli:dev` and `docs:cli`
+**delete the binary before building**, so a build that leaves nothing behind
+fails loudly instead of passing on an old file. `oculus_cli` ranks every candidate it finds
 by mtime rather than trusting one, which covers the seconds when the dev path
 has no binary at all.
 
