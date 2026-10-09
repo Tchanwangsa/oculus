@@ -111,6 +111,9 @@ IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
 - Both probe sites in `lib.rs` call `okta::try_auto_recover` before declaring
   a session expired, and `useAuth().connect()` tries it before opening the
   login window. Credentials come from Settings → Canvas or `oculus auth setup`.
+- A keychain read that is refused is `LoginError::UnreadableCredentials`,
+  never `NotConfigured`: no attempt is made or recorded, `try_auto_recover`
+  logs it, and Settings → Canvas shows it.
 - Password and TOTP seed share one keychain, so against code already running
   as this user the second factor is not a second factor — the same posture as
   a password manager that stores TOTP.
