@@ -120,7 +120,7 @@ pub fn run() {
                     }
                     AuthProbe::Rejected(_) => {
                         // `try_auto_recover` emits its own success event.
-                        if okta::try_auto_recover(&app_handle) {
+                        if okta::try_auto_recover(&app_handle, okta::Trigger::Startup) {
                             *mem.lock().unwrap() = true;
                         } else {
                             eprintln!("[oculus] session rejected — reset to disconnected");
@@ -150,7 +150,7 @@ pub fn run() {
                     continue;
                 }
                 if let AuthProbe::Rejected(_) = saved_session_probe() {
-                    if okta::try_auto_recover(&ka_handle) {
+                    if okta::try_auto_recover(&ka_handle, okta::Trigger::KeepAlive) {
                         eprintln!("[oculus] keep-alive: session renewed automatically");
                         continue;
                     }

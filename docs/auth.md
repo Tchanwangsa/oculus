@@ -10,7 +10,7 @@ cookie.
 | Canvas sign-in, session persistence | `app/src-tauri/src/auth.rs` |
 | Session probe (`Valid`/`Rejected`/`Unreachable`) | `app/src-tauri/src/canvas.rs` |
 | Cookie (Canvas and Okta), auth-flag and keep-alive log paths | `app/src-tauri/src/paths.rs` |
-| Headless Okta sign-in, TOTP, stored credentials | `app/src-tauri/src/okta.rs` |
+| Headless Okta sign-in, TOTP, stored credentials, the attempt guard | `app/src-tauri/src/okta.rs` |
 | LaunchAgent keep-alive (app closed) | `app/src-tauri/src/keepalive.rs` |
 | The `auth tick` the agent runs | `app/src-tauri/src/bin/oculus/auth.rs` |
 | Staging the CLI into the bundle | `app/scripts/stage-cli.mjs` |
@@ -59,7 +59,8 @@ passes straight through.
   sign-in form when Okta has no session) asks `/api/v1/sessions/me` with the
   browser's Okta cookies. On a 404 it runs the
   [headless sign-in](#okta-sign-in-runs-headless-in-rust), seeds the Okta
-  session it saved and reloads the page — at most once per ten minutes.
+  session it saved and reloads the page, subject to the
+  [attempt guard](#every-sign-in-attempt-goes-through-one-guard).
 - A signed-in Canvas page (`auth::is_authenticated_url`) re-snapshots both,
   deduped by name, so the scraper inherits the fresher cookie. A signed-out
   page never does: it would save Canvas's anonymous cookie over the good one.
@@ -109,6 +110,24 @@ IdP is Okta Identity Engine at `sso.unimelb.edu.au`, a JSON state machine at
   as this user the second factor is not a second factor — the same posture as
   a password manager that stores TOTP.
 
+## Every sign-in attempt goes through one guard
+
+The startup probe, the in-app 6 h thread, the browser and `oculus auth tick`
+each sign in on their own, in two processes, and Okta locks the account after
+too many attempts. So `okta::sign_in` checks one record,
+`canvas-session/sign-in.json`, under a file lock before each attempt, and logs
+every attempt with its caller to `okta-sign-in.log`.
+
+- An automatic attempt waits 10 min after any attempt, then 1 h after two
+  failures in a row and 6 h after three. A success resets the count.
+- A network failure waits but does not count: Okta gave no verdict.
+- A lockout, a rejected password or a factor it cannot answer pauses automatic
+  sign-in until a manual one succeeds (`Trigger::Manual`: Connect, saving
+  credentials, `oculus auth auto`) or the login window does. Saving
+  credentials also clears the pause.
+- Manual attempts skip the wait, because a person is waiting on the answer,
+  but are still recorded.
+
 ## Ed mints its `x-token` from Canvas
 
 Ed has no third-party OAuth; every API call carries the web app's `x-token`
@@ -132,7 +151,7 @@ course's LTI external-tool form (see
 - Answer `currentAuthenticator`'s challenge before reading the chooser — OIE offers `select-authenticator-authenticate` beside every challenge, and taking it loops forever.
 - The login page names `stateToken` several times; the first is a fragment introspect rejects as "session has expired", so `state_token_candidates` tries every plausible one.
 - Only `/idp/idx/introspect` takes `stateToken`; every later call sends `stateHandle`.
-- A rejected password is cleared, or the keep-alive replays it every six hours until Okta locks the account.
+- A rejected password is cleared and automatic sign-in paused, or every automatic path would replay it until Okta locks the account.
 - A TOTP seed cannot be recovered from codes; getting it means re-enrolling the factor.
 - `setCookies:completionHandler:` must get a real block — nil segfaults the app seconds later from a WebKit-only stack.
 - WebKit drops an API-set cookie that would replace an HttpOnly one a server set, with no error. Once Canvas hands the browser an anonymous `canvas_session`, re-seeding does nothing until the old cookie is deleted — so seeding deletes same-named cookies first.

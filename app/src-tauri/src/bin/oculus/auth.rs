@@ -226,6 +226,7 @@ impl Ctx {
         let secret = read_secret("Authenticator setup key: ")?;
 
         app_lib::okta::store_credentials(&username, &password, &secret)?;
+        app_lib::okta::resume_automatic_sign_in(&self.data_dir);
         let code = app_lib::okta::totp_now(&secret)?;
 
         println!();
@@ -240,7 +241,7 @@ impl Ctx {
 
     /// Run the headless sign-in and report precisely why it failed.
     pub(crate) fn auth_auto(&self) -> Result<(), String> {
-        match app_lib::okta::sign_in(&self.data_dir) {
+        match app_lib::okta::sign_in(&self.data_dir, app_lib::okta::Trigger::Manual) {
             Ok(_) => {
                 let name = app_lib::canvas::Canvas::open(&self.data_dir).whoami()?;
                 // Without the flag the app treats this as never signed in.
@@ -249,7 +250,6 @@ impl Ctx {
                 Ok(())
             }
             Err(e @ app_lib::okta::LoginError::BadPassword(_)) => {
-                app_lib::okta::clear_password().ok();
                 Err(format!("{e}\nThe stored password has been discarded — run `oculus auth setup` again."))
             }
             Err(e) => Err(e.to_string()),
@@ -280,7 +280,7 @@ impl Ctx {
             SessionProbe::Rejected(why) => log(&format!("session rejected — {why}")),
         }
 
-        match app_lib::okta::sign_in(&self.data_dir) {
+        match app_lib::okta::sign_in(&self.data_dir, app_lib::okta::Trigger::KeepAlive) {
             Ok(_) => match app_lib::canvas::Canvas::open(&self.data_dir).whoami() {
                 Ok(name) => {
                     app_lib::paths::mark_authenticated(&self.data_dir);
@@ -290,9 +290,10 @@ impl Ctx {
                 Err(e) => log(&format!("signed in but could not verify: {e}")),
             },
             Err(e @ app_lib::okta::LoginError::BadPassword(_)) => {
-                // Replaying a wrong password unattended locks the account.
-                app_lib::okta::clear_password().ok();
                 log(&format!("{e} — stored password discarded, run `oculus auth setup`"));
+            }
+            Err(e @ (app_lib::okta::LoginError::Waiting(_) | app_lib::okta::LoginError::Paused(_))) => {
+                log(&format!("automated sign-in skipped: {e}"));
             }
             Err(e) => log(&format!("automated sign-in failed: {e}")),
         }
