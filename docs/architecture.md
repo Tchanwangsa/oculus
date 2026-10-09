@@ -56,6 +56,9 @@ its failure rules are in [parsing.md](./parsing.md).
   Upload batches serialize their name allocation.
 - Credentials go keychain → in-process client. No key enters SQLite, the
   WebView, a health response or a progress event. The local engine needs none.
+  A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
+  sandbox, which fails right after the prompt is approved) is reported as
+  unreadable, never as a missing key (`Secret::fetch`).
 
 ## Scraping lives in Rust because hidden WebViews freeze
 

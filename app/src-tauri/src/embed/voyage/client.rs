@@ -121,7 +121,7 @@ impl VoyageCloud {
     }
 
     pub fn with_config(config: &EmbedConfig) -> Result<Self, EmbedError> {
-        let key = config.credentials.key().unwrap_or_default();
+        let key = config.credentials.key()?.unwrap_or_default();
         Self::new(&config.base_url, &key)
     }
 
