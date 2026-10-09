@@ -1202,19 +1202,13 @@ fn run_sign_in(app: &tauri::AppHandle, dir: &std::path::Path, trigger: Trigger) 
     signed_in(app, dir)
 }
 
-/// Set the auth flag, state and event exactly as the interactive sign-in does,
-/// returning the account name.
+/// End the headless sign-in the way every sign-in ends, returning the account
+/// name.
 fn signed_in(app: &tauri::AppHandle, dir: &std::path::Path) -> Result<String, String> {
-    use tauri::{Emitter, Manager};
-
-    crate::paths::mark_authenticated(dir);
-    if let Some(state) = app.try_state::<crate::auth::AuthState>() {
-        *state.0.lock().unwrap() = true;
-    }
+    crate::auth::session_established(app, dir, crate::auth::Via::Headless);
     // The headless path works on this account, so a re-authenticating
     // LaunchAgent is worth installing.
     crate::keepalive::ensure_installed();
-    app.emit("canvas-auth-success", "ok").ok();
     crate::canvas::Canvas::open(dir).whoami()
 }
 

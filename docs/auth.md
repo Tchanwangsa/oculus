@@ -79,6 +79,19 @@ passes straight through.
 - A signed-in Canvas page (`auth::is_authenticated_url`) re-snapshots both,
   deduped by name, so the scraper inherits the fresher cookie. A signed-out
   page never does: it would save Canvas's anonymous cookie over the good one.
+- If the app is not connected when that happens, someone signed in by hand in
+  the tab. `auth::confirm_browser_sign_in` checks the saved cookie with Canvas
+  and, if Canvas accepts it, connects the app.
+
+## Every sign-in ends in one place
+
+The login window, a browser tab and the headless flow each put their cookies
+on disk their own way, then call `auth::session_established`. It sets the
+auth flag (which also removes the signed-out marker), the in-memory state and
+`canvas-auth-success`. A sign-in by a person (window or tab) also clears the
+attempt guard's wait and pause; the headless one has already updated the
+guard. The CLI has no app to update, so `oculus auth auto` sets only the flag
+(`paths::mark_authenticated`).
 
 ## Keep-alive runs in two layers
 
@@ -142,7 +155,8 @@ every attempt with its caller to `okta-sign-in.log`.
 - A network failure waits but does not count: Okta gave no verdict.
 - A lockout, a rejected password or a factor it cannot answer pauses automatic
   sign-in until a manual one succeeds (`Trigger::Manual`: Connect, saving
-  credentials, `oculus auth auto`) or the login window does. Saving
+  credentials, `oculus auth auto`) or a person signs in in the login window
+  or a browser tab. Saving
   credentials also clears the pause.
 - Manual attempts skip the wait, because a person is waiting on the answer,
   but are still recorded.
@@ -168,7 +182,7 @@ course's LTI external-tool form (see
 
 ## Gotchas
 
-- Every path that establishes a session must call `paths::mark_authenticated` — the startup probe reads the flag first, and without it a valid cookie opens disconnected.
+- Every path that establishes a session must end in `auth::session_established` (the CLI: `paths::mark_authenticated`) — the startup probe reads the flag first, and without it a valid cookie opens disconnected.
 - Holding a `canvas_session` is not success: Canvas issues an anonymous one before auth, so `complete_saml` accepts one only after posting an assertion and `sign_in` verifies it against `/api/v1/users/self` before writing it.
 - Answer `currentAuthenticator`'s challenge before reading the chooser — OIE offers `select-authenticator-authenticate` beside every challenge, and taking it loops forever.
 - The login page names `stateToken` several times; the first is a fragment introspect rejects as "session has expired", so `state_token_candidates` tries every plausible one.

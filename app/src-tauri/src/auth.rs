@@ -120,6 +120,54 @@ pub fn saved_session_probe() -> AuthProbe {
     probe
 }
 
+// ── Session established ─────────────────────────────────────────────────────
+
+/// How a sign-in happened, for the one place every sign-in in the app ends.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    Window,
+    Browser,
+    Headless,
+}
+
+/// Every sign-in in the app ends here once its cookie is on disk: the auth
+/// flag (which also lifts a sign-out), the in-memory state and the UI event.
+/// A person's sign-in also clears the attempt guard's wait and pause; a
+/// headless one has already settled the guard.
+pub fn session_established(app: &AppHandle, dir: &std::path::Path, via: Via) {
+    crate::paths::mark_authenticated(dir);
+    if via != Via::Headless {
+        crate::okta::resume_automatic_sign_in(dir);
+    }
+    if let Some(state) = app.try_state::<AuthState>() {
+        *state.0.lock().unwrap() = true;
+    }
+    app.emit("canvas-auth-success", "ok").ok();
+}
+
+static CONFIRMING: AtomicBool = AtomicBool::new(false);
+
+/// A browser tab reached a signed-in Canvas page while the app is not
+/// connected: someone signed in by hand there. Its snapshot is already saved;
+/// once Canvas accepts it, connect the app as the login window would.
+pub fn confirm_browser_sign_in(app: &AppHandle) {
+    if auth_flag_path().exists() || CONFIRMING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let dir = crate::paths::data_dir();
+        match crate::canvas::Canvas::open(&dir).whoami() {
+            Ok(name) => {
+                eprintln!("[oculus] signed in from a browser tab as {name}");
+                session_established(&app, &dir, Via::Browser);
+            }
+            Err(e) => eprintln!("[oculus] browser tab looked signed in, but Canvas refused the session: {e}"),
+        }
+        CONFIRMING.store(false, Ordering::SeqCst);
+    });
+}
+
 // ── Login window (interactive only) ──────────────────────────────────────────
 
 /// Opens the visible Canvas SAML login window. On success it writes the auth
@@ -157,16 +205,16 @@ pub fn open_canvas_window(app: AppHandle, auth_flag: Arc<Mutex<bool>>) {
         if is_authenticated_url(&url) {
             let was_resolved = resolved_nav.swap(true, Ordering::SeqCst);
             if !was_resolved {
+                // Now, so closing the window meanwhile is not a cancel.
                 *auth_flag_nav.lock().unwrap() = true;
-                crate::paths::mark_authenticated(&dir);
-                crate::okta::resume_automatic_sign_in(&dir);
 
                 // Give Canvas a moment to set the session cookie first.
                 let app_delayed = app_nav.clone();
+                let dir = dir.clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_secs(2));
                     save_session_cookie(&app_delayed);
-                    app_delayed.emit("canvas-auth-success", "ok").ok();
+                    session_established(&app_delayed, &dir, Via::Window);
                     if let Some(w) = app_delayed.get_webview_window("canvas-auth") {
                         w.hide().ok();
                     }
