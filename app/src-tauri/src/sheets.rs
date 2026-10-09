@@ -191,12 +191,12 @@ fn csv_section(filename: &str, bytes: &[u8]) -> String {
 {body}", filename.trim())
 }
 
-/// Whichever of `,` `;` or tab the first line uses most: Excel writes `;` in
-/// locales whose decimal mark is a comma.
+/// Whichever of `,` `;` tab or `|` the first line uses most: Excel writes `;`
+/// in locales whose decimal mark is a comma.
 fn delimiter(text: &str) -> char {
     let first = text.lines().next().unwrap_or("");
     let count = |d: char| first.chars().filter(|&c| c == d).count();
-    [',', ';', '\t'].into_iter().max_by_key(|&d| (count(d), d == ',')).unwrap_or(',')
+    [',', ';', '\t', '|'].into_iter().max_by_key(|&d| (count(d), d == ',')).unwrap_or(',')
 }
 
 /// RFC 4180 rows: quoted fields may hold the delimiter, line breaks and `""`
@@ -724,6 +724,7 @@ mod tests {
         ]);
         assert_eq!(delimiter("name;mark;note, if any\n"), ';');
         assert_eq!(delimiter("a\tb\tc\n"), '\t');
+        assert_eq!(delimiter("a|b|c\n"), '|');
         assert_eq!(delimiter("single\n"), ',');
     }
 
