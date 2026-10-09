@@ -77,7 +77,8 @@ app links too, for the client and the installer only.
   is the contract: an endpoint and its `Conn`, activation, the peer check,
   the secret store, the registrar, and the file helpers. `platform/macos/`
   is the only adapter; `platform/unsupported.rs` builds everywhere else with
-  every seam refusing and `connect` finding keyd absent. The ops, `forward`,
+  every seam refusing and `connect` finding keyd absent; off Unix that includes
+  the file helpers, so `lock` and `write_private` refuse too. The ops, `forward`,
   the server loop and the client never name an OS
   ([development.md](./development.md#keyds-os-code-lives-in-one-adapter)).
 - **Started by the OS, not the app.** On macOS the LaunchAgent
