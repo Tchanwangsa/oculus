@@ -134,8 +134,7 @@ pub async fn estimate(db_file: &Path, base: &Path) -> Result<EmbedEstimate, Stri
     out.kinds = kinds;
 
     out.billable_pixels = out.pixels.saturating_sub(out.free_pixels_left);
-    out.cost_usd =
-        out.billable_pixels as f64 / 1_000_000_000.0 * ledger::USD_PER_BILLION_PIXELS;
+    out.cost_usd = out.billable_pixels as f64 / 1_000_000_000.0 * ledger::USD_PER_BILLION_PIXELS;
     out.seconds = seconds_for(out.tokens, out.requests, tier.tpm, tier.rpm);
     // Tier 1 packs more pages per request, so its request count is its own.
     let tier1_ceiling = batch::MAX_TOKENS_PER_REQUEST.min(ledger::TIER1_TPM as u64);
@@ -143,8 +142,12 @@ pub async fn estimate(db_file: &Path, base: &Path) -> Result<EmbedEstimate, Stri
         .iter()
         .map(|costs| batch::plan(costs, batch::MAX_INPUTS_PER_REQUEST, tier1_ceiling).len() as u32)
         .sum();
-    out.seconds_tier1 =
-        seconds_for(out.tokens, tier1_requests, ledger::TIER1_TPM, ledger::TIER1_RPM);
+    out.seconds_tier1 = seconds_for(
+        out.tokens,
+        tier1_requests,
+        ledger::TIER1_TPM,
+        ledger::TIER1_RPM,
+    );
     Ok(out)
 }
 
@@ -154,7 +157,11 @@ fn bump(buckets: &mut Vec<Bucket>, label: &str, files: u32, pages: u32) {
             bucket.files += files;
             bucket.pages += pages;
         }
-        None => buckets.push(Bucket { label: label.to_string(), files, pages }),
+        None => buckets.push(Bucket {
+            label: label.to_string(),
+            files,
+            pages,
+        }),
     }
 }
 
@@ -194,11 +201,11 @@ async fn backlog(db_file: &Path) -> Result<Vec<Outstanding>, String> {
         crate::paths::pdf_backed_sql_list()
     );
     let rows = sqlx::query(&sql)
-    .bind(EMBED_MODEL)
-    .bind(EMBED_DIM as i64)
-    .fetch_all(&db)
-    .await
-    .map_err(|e| e.to_string())?;
+        .bind(EMBED_MODEL)
+        .bind(EMBED_DIM as i64)
+        .fetch_all(&db)
+        .await
+        .map_err(|e| e.to_string())?;
     db.close().await;
 
     Ok(rows
@@ -206,7 +213,10 @@ async fn backlog(db_file: &Path) -> Result<Vec<Outstanding>, String> {
         .filter_map(|row| {
             let relative: String = row.try_get("relative_path").ok()?;
             let kind: String = row.try_get("kind").unwrap_or_default();
-            Some(Outstanding { pdf: crate::paths::doc_pdf_rel(&relative)?.into(), kind })
+            Some(Outstanding {
+                pdf: crate::paths::doc_pdf_rel(&relative)?.into(),
+                kind,
+            })
         })
         .collect())
 }
@@ -227,20 +237,29 @@ mod tests {
             free > 60.0 * 60.0 * 17.0 && free < 60.0 * 60.0 * 19.0,
             "a free-tier re-index of this library is ~18 hours, got {free}s"
         );
-        assert!(free > requests as f64 / ledger::FREE_RPM * 60.0, "TPM must be the binding limit");
+        assert!(
+            free > requests as f64 / ledger::FREE_RPM * 60.0,
+            "TPM must be the binding limit"
+        );
     }
 
     #[test]
     fn tier_one_turns_the_same_run_into_minutes() {
         let tokens = 2_980 * batch::tokens_for(2339, 1653);
         let paid = seconds_for(tokens, 34, ledger::TIER1_TPM, ledger::TIER1_RPM);
-        assert!(paid < 10.0 * 60.0, "tier 1 is single-digit minutes, got {paid}s");
+        assert!(
+            paid < 10.0 * 60.0,
+            "tier 1 is single-digit minutes, got {paid}s"
+        );
     }
 
     /// The banner's claim about money, checked against the constants.
     #[test]
     fn this_library_fits_inside_the_free_grant() {
         let pixels = 2_980u64 * batch::BILLED_PIXEL_CAP;
-        assert!(pixels < ledger::FREE_PIXELS / 10, "the grant is not the constraint here");
+        assert!(
+            pixels < ledger::FREE_PIXELS / 10,
+            "the grant is not the constraint here"
+        );
     }
 }

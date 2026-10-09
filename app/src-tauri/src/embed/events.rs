@@ -36,8 +36,14 @@ pub fn embedded(relative_path: &str, subject_id: i64, pages: u32) {
 }
 
 pub fn failed(relative_path: &str, subject_id: i64, error: &EmbedError) {
-    failed_with(relative_path, subject_id, error.to_string(), Some(error.kind()),
-        Some(error.retryable()), Some(error.latching()));
+    failed_with(
+        relative_path,
+        subject_id,
+        error.to_string(),
+        Some(error.kind()),
+        Some(error.retryable()),
+        Some(error.latching()),
+    );
 }
 
 /// A failure before reaching a backend keeps its unknown discriminants absent.
@@ -51,6 +57,7 @@ pub fn failed_with(
 ) {
     // The UI keeps only the error status, so the sentence also goes to stderr.
     eprintln!("[oculus] embed failed: {relative_path}: {message}");
-    CHANNEL.emit(Status::new(relative_path, subject_id, "error")
-        .failure(message, kind, retryable, latching));
+    CHANNEL.emit(
+        Status::new(relative_path, subject_id, "error").failure(message, kind, retryable, latching),
+    );
 }

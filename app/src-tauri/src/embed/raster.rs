@@ -12,9 +12,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{ExtendedColorType, ImageEncoder};
-use pdfium_render::prelude::{
-    Pdfium, PdfiumError, PdfiumInternalError, PdfRenderConfig, Pixels,
-};
+use pdfium_render::prelude::{PdfRenderConfig, Pdfium, PdfiumError, PdfiumInternalError, Pixels};
 
 /// Rendered above the model's own pixel cap and left for it to downscale, so
 /// the raster is never the bottleneck. Not a tuning knob: lowering it silently
@@ -102,8 +100,11 @@ fn pixels_for(points: f32, dpi: u32) -> u32 {
 /// downscales far below that ceiling before it bills. Rounded down and then
 /// verified, because [`pixels_for`] rounds up.
 fn dpi_for_page(width_pt: f32, height_pt: f32, dpi: u32, max_pixels: Option<u64>) -> u32 {
-    let Some(max_pixels) = max_pixels.filter(|max| *max > 0) else { return dpi };
-    let pixels = |at: u32| u64::from(pixels_for(width_pt, at)) * u64::from(pixels_for(height_pt, at));
+    let Some(max_pixels) = max_pixels.filter(|max| *max > 0) else {
+        return dpi;
+    };
+    let pixels =
+        |at: u32| u64::from(pixels_for(width_pt, at)) * u64::from(pixels_for(height_pt, at));
     if pixels(dpi) <= max_pixels {
         return dpi;
     }
@@ -140,7 +141,12 @@ where
     }
 
     for index in 0..count {
-        on_page(render_one(&pages, index as u32 + 1, RENDER_DPI, max_pixels)?)?;
+        on_page(render_one(
+            &pages,
+            index as u32 + 1,
+            RENDER_DPI,
+            max_pixels,
+        )?)?;
     }
 
     Ok(count as u32)
@@ -156,7 +162,10 @@ fn render_one(
 ) -> Result<RenderedPage, RasterError> {
     let page = pages
         .get(page_no as i32 - 1)
-        .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?;
+        .map_err(|error| RasterError::Page {
+            page_no,
+            message: error.to_string(),
+        })?;
 
     let dpi = dpi_for_page(page.width().value, page.height().value, dpi, max_pixels);
     let width = pixels_for(page.width().value, dpi);
@@ -168,12 +177,18 @@ fn render_one(
 
     let bitmap = page
         .render_with_config(&config)
-        .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?;
+        .map_err(|error| RasterError::Page {
+            page_no,
+            message: error.to_string(),
+        })?;
 
     // `as_image` normalises pdfium's reversed channel order.
     let rgb = bitmap
         .as_image()
-        .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?
+        .map_err(|error| RasterError::Page {
+            page_no,
+            message: error.to_string(),
+        })?
         .into_rgb8();
 
     let mut png = Vec::new();
@@ -183,10 +198,23 @@ fn render_one(
         CompressionType::Fast,
         FilterType::Adaptive,
     )
-    .write_image(rgb.as_raw(), rgb.width(), rgb.height(), ExtendedColorType::Rgb8)
-    .map_err(|error| RasterError::Page { page_no, message: error.to_string() })?;
+    .write_image(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        ExtendedColorType::Rgb8,
+    )
+    .map_err(|error| RasterError::Page {
+        page_no,
+        message: error.to_string(),
+    })?;
 
-    Ok(RenderedPage { page_no, width: rgb.width(), height: rgb.height(), png })
+    Ok(RenderedPage {
+        page_no,
+        width: rgb.width(),
+        height: rgb.height(),
+        png,
+    })
 }
 
 /// Every page's size in pixels at [`RENDER_DPI`], from the page boxes without
@@ -315,7 +343,11 @@ fn library_candidates() -> Vec<PathBuf> {
     }
 
     // What `cargo test` normally hits; absent in release builds.
-    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries").join(&file_name));
+    candidates.push(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("binaries")
+            .join(&file_name),
+    );
 
     candidates
 }
@@ -358,8 +390,10 @@ mod tests {
                     lopdf::content::Operation::new("ET", vec![]),
                 ],
             };
-            let content_id =
-                document.add_object(lopdf::Stream::new(dictionary! {}, content.encode().unwrap()));
+            let content_id = document.add_object(lopdf::Stream::new(
+                dictionary! {},
+                content.encode().unwrap(),
+            ));
             let page_id = document.add_object(dictionary! {
                 "Type" => "Page",
                 "Parent" => pages_id,
@@ -425,14 +459,17 @@ mod tests {
         const MAX: u64 = 16_000_000;
 
         // A0 landscape.
-        let raw = u64::from(pixels_for(3370.0, RENDER_DPI)) * u64::from(pixels_for(2384.0, RENDER_DPI));
+        let raw =
+            u64::from(pixels_for(3370.0, RENDER_DPI)) * u64::from(pixels_for(2384.0, RENDER_DPI));
         assert!(raw > MAX, "fixture is not actually oversized: {raw}");
 
         let dpi = dpi_for_page(3370.0, 2384.0, RENDER_DPI, Some(MAX));
         assert!(dpi < RENDER_DPI);
-        let clamped =
-            u64::from(pixels_for(3370.0, dpi)) * u64::from(pixels_for(2384.0, dpi));
-        assert!(clamped <= MAX, "still over the ceiling: {clamped} at {dpi} DPI");
+        let clamped = u64::from(pixels_for(3370.0, dpi)) * u64::from(pixels_for(2384.0, dpi));
+        assert!(
+            clamped <= MAX,
+            "still over the ceiling: {clamped} at {dpi} DPI"
+        );
         // Only just under: one DPI more must not fit.
         let over = u64::from(pixels_for(3370.0, dpi + 1)) * u64::from(pixels_for(2384.0, dpi + 1));
         assert!(over > MAX, "clamped further than it had to: {dpi} DPI");
@@ -441,8 +478,14 @@ mod tests {
 
     #[test]
     fn an_ordinary_page_is_untouched_by_the_clamp() {
-        assert_eq!(dpi_for_page(842.0, 595.0, RENDER_DPI, Some(16_000_000)), RENDER_DPI);
-        assert_eq!(dpi_for_page(612.0, 792.0, RENDER_DPI, Some(16_000_000)), RENDER_DPI);
+        assert_eq!(
+            dpi_for_page(842.0, 595.0, RENDER_DPI, Some(16_000_000)),
+            RENDER_DPI
+        );
+        assert_eq!(
+            dpi_for_page(612.0, 792.0, RENDER_DPI, Some(16_000_000)),
+            RENDER_DPI
+        );
         assert_eq!(dpi_for_page(3370.0, 2384.0, RENDER_DPI, None), RENDER_DPI);
     }
 
@@ -462,7 +505,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(count, 3);
-        assert_eq!(seen, vec![(1, 1700, 2200), (2, 1700, 2200), (3, 1700, 2200)]);
+        assert_eq!(
+            seen,
+            vec![(1, 1700, 2200), (2, 1700, 2200), (3, 1700, 2200)]
+        );
     }
 
     /// The estimator's sizes are the renderer's sizes.
@@ -496,9 +542,7 @@ mod tests {
         let workers: Vec<_> = (0..4)
             .map(|_| {
                 let path = pdf.clone();
-                std::thread::spawn(move || {
-                    (0..12).map(|_| page_sizes(&path)).collect::<Vec<_>>()
-                })
+                std::thread::spawn(move || (0..12).map(|_| page_sizes(&path)).collect::<Vec<_>>())
             })
             .collect();
 
@@ -607,7 +651,12 @@ mod tests {
 
         let first = first.expect("no page 1");
         assert!(first.png.len() > 1024, "page 1 PNG is suspiciously small");
-        eprintln!("page 1: {} x {} ({} bytes)", first.width, first.height, first.png.len());
+        eprintln!(
+            "page 1: {} x {} ({} bytes)",
+            first.width,
+            first.height,
+            first.png.len()
+        );
 
         // `OCULUS_RASTER_OUT` keeps page 1 for a visual check.
         if let Some(out) = std::env::var_os("OCULUS_RASTER_OUT") {

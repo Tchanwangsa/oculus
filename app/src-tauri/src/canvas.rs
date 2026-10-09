@@ -82,7 +82,11 @@ impl Canvas {
     /// rotates the HttpOnly `canvas_session` server-side, so the login snapshot
     /// alone goes stale.
     fn absorb(&self, resp: &ureq::Response) {
-        let set: Vec<String> = resp.all("set-cookie").into_iter().map(str::to_string).collect();
+        let set: Vec<String> = resp
+            .all("set-cookie")
+            .into_iter()
+            .map(str::to_string)
+            .collect();
         if set.is_empty() {
             return;
         }
@@ -191,7 +195,8 @@ impl Canvas {
             .unwrap_or(0);
 
         let mut reader = resp.into_reader();
-        let mut file = std::fs::File::create(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
+        let mut file =
+            std::fs::File::create(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
         let mut buf = vec![0u8; 256 * 1024];
         let mut done = 0u64;
         let mut last_pct = u8::MAX;
@@ -205,7 +210,8 @@ impl Canvas {
             if n == 0 {
                 break;
             }
-            file.write_all(&buf[..n]).map_err(|e| format!("write failed after {done} bytes: {e}"))?;
+            file.write_all(&buf[..n])
+                .map_err(|e| format!("write failed after {done} bytes: {e}"))?;
             done += n as u64;
             if total > 0 {
                 let pct = (done * 100 / total).min(100) as u8;
@@ -290,7 +296,12 @@ fn collect(resp: ureq::Response) -> Res {
     let next = resp.header("Link").and_then(parse_next_link);
     let mut body = Vec::new();
     let _ = resp.into_reader().read_to_end(&mut body);
-    Res { status, body, content_type, next }
+    Res {
+        status,
+        body,
+        content_type,
+        next,
+    }
 }
 
 /// `<https://…?page=2>; rel="next", <…>; rel="last"` → the next URL.
@@ -332,8 +343,12 @@ pub fn merged_cookie_header(current: &str, set_cookies: &[String]) -> Option<Str
 
     for raw in set_cookies {
         // "name=value; Path=/; HttpOnly" → we only care about the first pair.
-        let Some(first) = raw.split(';').next() else { continue };
-        let Some((name, value)) = first.trim().split_once('=') else { continue };
+        let Some(first) = raw.split(';').next() else {
+            continue;
+        };
+        let Some((name, value)) = first.trim().split_once('=') else {
+            continue;
+        };
         let (name, value) = (name.trim(), value.trim());
         if name.is_empty() {
             continue;
@@ -381,7 +396,10 @@ mod tests {
 
     #[test]
     fn appends_cookies_not_seen_before() {
-        assert_eq!(merged_cookie_header("a=1", &sc(&["b=2; path=/"])).unwrap(), "a=1; b=2");
+        assert_eq!(
+            merged_cookie_header("a=1", &sc(&["b=2; path=/"])).unwrap(),
+            "a=1; b=2"
+        );
     }
 
     #[test]
@@ -416,20 +434,31 @@ mod tests {
     }
 
     fn signed_out() -> Canvas {
-        Canvas { cookie: Mutex::new(String::new()), cookie_path: PathBuf::new() }
+        Canvas {
+            cookie: Mutex::new(String::new()),
+            cookie_path: PathBuf::new(),
+        }
     }
 
     #[test]
     fn a_download_streams_to_disk_and_refuses_a_short_body() {
         let dir = crate::test_support::Scratch::new("canvas-download");
         let body = vec![7u8; 300_000];
-        let mut whole = format!("HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: {}\r\n\r\n", body.len())
-            .into_bytes();
+        let mut whole = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
         whole.extend_from_slice(&body);
         let seen = Mutex::new(Vec::new());
         let dest = dir.join("whole.mp4");
         let n = signed_out()
-            .download_to(&serve_once(whole), &dest, &|p| seen.lock().unwrap().push(p), &|| false)
+            .download_to(
+                &serve_once(whole),
+                &dest,
+                &|p| seen.lock().unwrap().push(p),
+                &|| false,
+            )
             .unwrap();
         assert_eq!(n, 300_000);
         assert_eq!(std::fs::read(&dest).unwrap(), body);
@@ -437,7 +466,9 @@ mod tests {
 
         let short = b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nonly this".to_vec();
         let err = signed_out()
-            .download_to(&serve_once(short), &dir.join("short.mp4"), &|_| {}, &|| false)
+            .download_to(&serve_once(short), &dir.join("short.mp4"), &|_| {}, &|| {
+                false
+            })
             .unwrap_err();
         assert_ne!(err, CANCELLED);
     }

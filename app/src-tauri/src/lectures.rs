@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
-pub use crate::echo360::Lecture as LectureData;
 use crate::clock::now_secs;
+pub use crate::echo360::Lecture as LectureData;
 use crate::echo360::{self, Session};
 
 // ── Session cache (in-memory, per course) ─────────────────────────────────────
@@ -47,7 +47,10 @@ fn get_or_auth(cache: &Echo360Cache, course_id: i64) -> Result<Session, String> 
     let session = echo360::connect(&crate::auth::saved_cookie_header(), course_id)?;
     cache.0.lock().unwrap().insert(
         course_id,
-        CachedSession { session: session.clone_fields(), saved_unix: now_secs() },
+        CachedSession {
+            session: session.clone_fields(),
+            saved_unix: now_secs(),
+        },
     );
     Ok(session)
 }
@@ -89,7 +92,11 @@ pub async fn echo360_download_video(
         // Removed on every exit path, so a late cancel cannot poison a retry.
         let key = cancel_key(&media_id, source);
         let flag = Arc::new(AtomicBool::new(false));
-        cancels.0.lock().unwrap().insert(key.clone(), Arc::clone(&flag));
+        cancels
+            .0
+            .lock()
+            .unwrap()
+            .insert(key.clone(), Arc::clone(&flag));
 
         let dir = echo360::lecture_dir(&crate::paths::data_dir(), &media_id);
         let raw = echo360::partial_path(&dir, source);
@@ -111,13 +118,13 @@ pub async fn echo360_download_video(
         // On ANY error, clean up partial files so a retry starts fresh.
         let result = (|| -> Result<String, String> {
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let bytes = echo360::stream_to_file(
-                &url,
-                &raw,
-                &|p| emit(p, "downloading"),
-                &|| flag.load(Ordering::Relaxed),
-            )?;
-            eprintln!("[oculus] downloaded source {source}: {} MB", bytes / 1_000_000);
+            let bytes = echo360::stream_to_file(&url, &raw, &|p| emit(p, "downloading"), &|| {
+                flag.load(Ordering::Relaxed)
+            })?;
+            eprintln!(
+                "[oculus] downloaded source {source}: {} MB",
+                bytes / 1_000_000
+            );
 
             emit(100, "trimming");
             let ffmpeg = echo360::find_ffmpeg(app.path().resource_dir().ok())
@@ -137,7 +144,14 @@ pub async fn echo360_download_video(
             std::fs::remove_file(&raw).ok();
             std::fs::remove_file(&final_).ok();
             // Not a fault: the frontend clears its bar without showing a failure.
-            emit(0, if e == echo360::CANCELLED { "cancelled" } else { "error" });
+            emit(
+                0,
+                if e == echo360::CANCELLED {
+                    "cancelled"
+                } else {
+                    "error"
+                },
+            );
         }
         result
     })
@@ -186,7 +200,10 @@ pub async fn echo360_delete_video(
             if let Some(flag) = cancels.0.lock().unwrap().get(&cancel_key(&media_id, s)) {
                 flag.store(true, Ordering::Relaxed);
             }
-            for path in [echo360::source_path(&dir, s), echo360::partial_path(&dir, s)] {
+            for path in [
+                echo360::source_path(&dir, s),
+                echo360::partial_path(&dir, s),
+            ] {
                 if let Ok(meta) = std::fs::metadata(&path) {
                     if std::fs::remove_file(&path).is_ok() {
                         freed += meta.len();
@@ -195,7 +212,10 @@ pub async fn echo360_delete_video(
             }
         }
 
-        eprintln!("[oculus] deleted lecture video {media_id}: {} MB freed", freed / 1_000_000);
+        eprintln!(
+            "[oculus] deleted lecture video {media_id}: {} MB freed",
+            freed / 1_000_000
+        );
         Ok(freed)
     })
     .await
@@ -225,10 +245,7 @@ pub async fn echo360_download_transcript(
 
 #[tauri::command]
 pub async fn echo360_read_transcript(path: String) -> Result<String, String> {
-    crate::blocking::run(move || {
-        std::fs::read_to_string(&path).map_err(|e| e.to_string())
-    })
-    .await
+    crate::blocking::run(move || std::fs::read_to_string(&path).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]

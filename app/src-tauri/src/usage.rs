@@ -27,7 +27,9 @@ const INPUT_WINDOW_SECS: u64 = 120;
 const MEDIA_WINDOW_SECS: u64 = 60;
 
 /// The `UsageKind`s of `app/src/lib/usageContext.ts`, stored as written.
-const KINDS: [&str; 8] = ["lecture", "file", "document", "course", "chat", "browser", "planning", "other"];
+const KINDS: [&str; 8] = [
+    "lecture", "file", "document", "course", "chat", "browser", "planning", "other",
+];
 
 /// The page a ping came from: its usage kind and the subject it belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
@@ -41,7 +43,10 @@ pub struct UsageContext {
 impl UsageContext {
     /// Where active time goes before any ping has carried a context.
     fn other() -> Self {
-        UsageContext { kind: "other".into(), subject_id: None }
+        UsageContext {
+            kind: "other".into(),
+            subject_id: None,
+        }
     }
 }
 
@@ -82,7 +87,10 @@ impl UsageState {
             Presence::Input => &self.input_context,
             Presence::Media => &self.media_context,
         };
-        held.lock().unwrap().clone().unwrap_or_else(UsageContext::other)
+        held.lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(UsageContext::other)
     }
 }
 
@@ -121,7 +129,8 @@ pub fn classify(
     last_input: Option<u64>,
     last_media: Option<u64>,
 ) -> Tick {
-    let within = |at: Option<u64>, window: u64| at.is_some_and(|at| now.saturating_sub(at) <= window);
+    let within =
+        |at: Option<u64>, window: u64| at.is_some_and(|at| now.saturating_sub(at) <= window);
     let open = visible && !minimized;
     let active = if !open {
         None
@@ -141,7 +150,12 @@ pub fn hour_key(local: chrono::NaiveDateTime) -> String {
 }
 
 /// Add seconds to an hour's row, creating it if needed.
-pub async fn add<'e, E>(executor: E, hour: &str, open_seconds: i64, active_seconds: i64) -> Result<(), String>
+pub async fn add<'e, E>(
+    executor: E,
+    hour: &str,
+    open_seconds: i64,
+    active_seconds: i64,
+) -> Result<(), String>
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
@@ -195,7 +209,13 @@ pub async fn credit(
 ) -> Result<(), String> {
     let seconds = |counted: bool| if counted { TICK_SECS as i64 } else { 0 };
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    add(&mut *tx, hour, seconds(tick.open), seconds(tick.active.is_some())).await?;
+    add(
+        &mut *tx,
+        hour,
+        seconds(tick.open),
+        seconds(tick.active.is_some()),
+    )
+    .await?;
     if let (Some(_), Some(context)) = (tick.active, context) {
         add_context(&mut *tx, hour, context, TICK_SECS as i64).await?;
     }
@@ -216,7 +236,9 @@ pub fn start(app: &AppHandle) {
         let mut failing = false;
         loop {
             interval.tick().await;
-            let Some((tick, context)) = sample(&app).await else { continue };
+            let Some((tick, context)) = sample(&app).await else {
+                continue;
+            };
             // Active implies open, so a closed tick has nothing to add.
             if !tick.open {
                 continue;
@@ -242,7 +264,11 @@ async fn sample(app: &AppHandle) -> Option<(Tick, Option<UsageContext>)> {
     // Each getter blocks on a round trip to the main thread, so keep them off
     // the async workers.
     let (visible, minimized, focused) = tauri::async_runtime::spawn_blocking(move || {
-        Some((window.is_visible().ok()?, window.is_minimized().ok()?, window.is_focused().ok()?))
+        Some((
+            window.is_visible().ok()?,
+            window.is_minimized().ok()?,
+            window.is_focused().ok()?,
+        ))
     })
     .await
     .ok()??;
@@ -267,7 +293,9 @@ async fn record(
     if pool.is_none() {
         *pool = Some(crate::store::open_pool().await?);
     }
-    let Some(pool) = pool.as_ref() else { return Ok(()) };
+    let Some(pool) = pool.as_ref() else {
+        return Ok(());
+    };
     let hour = hour_key(chrono::Local::now().naive_local());
     credit(pool, &hour, tick, context).await
 }
@@ -290,42 +318,82 @@ mod tests {
 
     #[test]
     fn active_needs_focus_with_recent_input_or_recent_media() {
-        let active = |focused, input, media| classify(true, false, focused, NOW, input, media).active;
+        let active =
+            |focused, input, media| classify(true, false, focused, NOW, input, media).active;
         assert_eq!(active(true, Some(NOW - 120), None), Some(Presence::Input));
         assert_eq!(active(true, Some(NOW - 121), None), None);
-        assert_eq!(active(false, Some(NOW), None), None, "input in an unfocused window is not presence");
-        assert_eq!(active(false, None, Some(NOW - 60)), Some(Presence::Media), "playing media counts without focus");
+        assert_eq!(
+            active(false, Some(NOW), None),
+            None,
+            "input in an unfocused window is not presence"
+        );
+        assert_eq!(
+            active(false, None, Some(NOW - 60)),
+            Some(Presence::Media),
+            "playing media counts without focus"
+        );
         assert_eq!(active(true, None, Some(NOW - 61)), None);
         assert_eq!(active(true, None, None), None);
     }
 
     #[test]
     fn input_wins_over_media_and_media_covers_an_unfocused_window() {
-        let active = |focused, input, media| classify(true, false, focused, NOW, input, media).active;
+        let active =
+            |focused, input, media| classify(true, false, focused, NOW, input, media).active;
         assert_eq!(active(true, Some(NOW), Some(NOW)), Some(Presence::Input));
         assert_eq!(active(false, Some(NOW), Some(NOW)), Some(Presence::Media));
-        assert_eq!(active(true, Some(NOW - 121), Some(NOW)), Some(Presence::Media));
+        assert_eq!(
+            active(true, Some(NOW - 121), Some(NOW)),
+            Some(Presence::Media)
+        );
     }
 
     #[test]
     fn nothing_is_active_while_closed() {
-        assert_eq!(classify(false, false, true, NOW, Some(NOW), Some(NOW)), Tick { open: false, active: None });
-        assert_eq!(classify(true, true, false, NOW, None, Some(NOW)), Tick { open: false, active: None });
+        assert_eq!(
+            classify(false, false, true, NOW, Some(NOW), Some(NOW)),
+            Tick {
+                open: false,
+                active: None
+            }
+        );
+        assert_eq!(
+            classify(true, true, false, NOW, None, Some(NOW)),
+            Tick {
+                open: false,
+                active: None
+            }
+        );
     }
 
     fn context(kind: &str, subject_id: Option<i64>) -> UsageContext {
-        UsageContext { kind: kind.into(), subject_id }
+        UsageContext {
+            kind: kind.into(),
+            subject_id,
+        }
     }
 
     #[test]
     fn each_ping_kind_keeps_its_own_latest_context() {
         let state = UsageState::default();
-        assert_eq!(state.credited(Presence::Input), context("other", None), "nothing reported yet");
+        assert_eq!(
+            state.credited(Presence::Input),
+            context("other", None),
+            "nothing reported yet"
+        );
 
-        state.ping("input", Some(context("file", Some(7))), NOW).unwrap();
-        state.ping("media", Some(context("lecture", Some(3))), NOW).unwrap();
+        state
+            .ping("input", Some(context("file", Some(7))), NOW)
+            .unwrap();
+        state
+            .ping("media", Some(context("lecture", Some(3))), NOW)
+            .unwrap();
         state.ping("input", None, NOW + 30).unwrap();
-        assert_eq!(state.credited(Presence::Input), context("file", Some(7)), "a bare ping keeps the context");
+        assert_eq!(
+            state.credited(Presence::Input),
+            context("file", Some(7)),
+            "a bare ping keeps the context"
+        );
         assert_eq!(state.credited(Presence::Media), context("lecture", Some(3)));
         assert_eq!(state.last_input.load(Ordering::Relaxed), NOW + 30);
     }
@@ -334,32 +402,45 @@ mod tests {
     fn unknown_kinds_are_refused_without_recording_the_ping() {
         let state = UsageState::default();
         assert!(state.ping("scroll", None, NOW).is_err());
-        assert!(state.ping("input", Some(context("game", None)), NOW).is_err());
+        assert!(state
+            .ping("input", Some(context("game", None)), NOW)
+            .is_err());
         assert_eq!(state.last_input.load(Ordering::Relaxed), 0);
         assert_eq!(state.credited(Presence::Input), context("other", None));
     }
 
     #[test]
     fn contexts_deserialize_from_the_frontend_shape() {
-        let parsed: UsageContext = serde_json::from_str(r#"{"kind":"course","subjectId":12}"#).unwrap();
+        let parsed: UsageContext =
+            serde_json::from_str(r#"{"kind":"course","subjectId":12}"#).unwrap();
         assert_eq!(parsed, context("course", Some(12)));
-        let parsed: UsageContext = serde_json::from_str(r#"{"kind":"chat","subjectId":null}"#).unwrap();
+        let parsed: UsageContext =
+            serde_json::from_str(r#"{"kind":"chat","subjectId":null}"#).unwrap();
         assert_eq!(parsed, context("chat", None));
     }
 
     #[test]
     fn hour_keys_are_zero_padded_local_hours() {
         let at = |y, m, d, h, min| {
-            chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, min, 59).unwrap()
+            chrono::NaiveDate::from_ymd_opt(y, m, d)
+                .unwrap()
+                .and_hms_opt(h, min, 59)
+                .unwrap()
         };
         assert_eq!(hour_key(at(2026, 3, 4, 5, 59)), "2026-03-04 05");
         assert_eq!(hour_key(at(2026, 12, 31, 23, 0)), "2026-12-31 23");
     }
 
     async fn pool_with(versions: &[i64]) -> SqlitePool {
-        let pool = SqlitePoolOptions::new().max_connections(1)
-            .connect("sqlite::memory:").await.unwrap();
-        for migration in crate::migrations::all().into_iter().filter(|m| versions.contains(&m.version)) {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for migration in crate::migrations::all()
+            .into_iter()
+            .filter(|m| versions.contains(&m.version))
+        {
             sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
         }
         pool
@@ -373,48 +454,95 @@ mod tests {
         add(&pool, "2026-10-06 14", 30, 0).await.unwrap();
         add(&pool, "2026-10-06 15", 30, 0).await.unwrap();
 
-        let rows = sqlx::query("SELECT hour, open_seconds, active_seconds FROM usage_hours ORDER BY hour")
-            .fetch_all(&pool).await.unwrap();
-        let rows: Vec<(String, i64, i64)> =
-            rows.iter().map(|r| (r.get(0), r.get(1), r.get(2))).collect();
-        assert_eq!(rows, vec![("2026-10-06 14".into(), 60, 30), ("2026-10-06 15".into(), 30, 0)]);
+        let rows =
+            sqlx::query("SELECT hour, open_seconds, active_seconds FROM usage_hours ORDER BY hour")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let rows: Vec<(String, i64, i64)> = rows
+            .iter()
+            .map(|r| (r.get(0), r.get(1), r.get(2)))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("2026-10-06 14".into(), 60, 30),
+                ("2026-10-06 15".into(), 30, 0)
+            ]
+        );
     }
 
     #[tokio::test]
     async fn crediting_sums_active_time_per_hour_kind_and_subject() {
         let pool = pool_with(&[40, 41]).await;
-        let active = Tick { open: true, active: Some(Presence::Input) };
-        let idle = Tick { open: true, active: None };
+        let active = Tick {
+            open: true,
+            active: Some(Presence::Input),
+        };
+        let idle = Tick {
+            open: true,
+            active: None,
+        };
         let lecture = context("lecture", Some(3));
 
-        credit(&pool, "2026-10-06 14", active, Some(&lecture)).await.unwrap();
-        credit(&pool, "2026-10-06 14", active, Some(&lecture)).await.unwrap();
-        credit(&pool, "2026-10-06 14", active, Some(&context("chat", None))).await.unwrap();
+        credit(&pool, "2026-10-06 14", active, Some(&lecture))
+            .await
+            .unwrap();
+        credit(&pool, "2026-10-06 14", active, Some(&lecture))
+            .await
+            .unwrap();
+        credit(&pool, "2026-10-06 14", active, Some(&context("chat", None)))
+            .await
+            .unwrap();
         credit(&pool, "2026-10-06 14", idle, None).await.unwrap();
 
-        let hours: (i64, i64) = sqlx::query_as("SELECT open_seconds, active_seconds FROM usage_hours")
-            .fetch_one(&pool).await.unwrap();
+        let hours: (i64, i64) =
+            sqlx::query_as("SELECT open_seconds, active_seconds FROM usage_hours")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(hours, (120, 90));
         let rows: Vec<(String, i64, i64)> = sqlx::query_as(
             "SELECT kind, subject_id, active_seconds FROM usage_context_hours ORDER BY kind",
         )
-        .fetch_all(&pool).await.unwrap();
-        assert_eq!(rows, vec![("chat".into(), 0, 30), ("lecture".into(), 3, 60)]);
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![("chat".into(), 0, 30), ("lecture".into(), 3, 60)]
+        );
     }
 
     #[tokio::test]
     async fn crediting_without_the_context_table_writes_nothing() {
         let pool = pool_with(&[40]).await;
-        let active = Tick { open: true, active: Some(Presence::Media) };
-        assert!(credit(&pool, "2026-10-06 14", active, Some(&context("lecture", Some(3)))).await.is_err());
-        let hours: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usage_hours").fetch_one(&pool).await.unwrap();
+        let active = Tick {
+            open: true,
+            active: Some(Presence::Media),
+        };
+        assert!(credit(
+            &pool,
+            "2026-10-06 14",
+            active,
+            Some(&context("lecture", Some(3)))
+        )
+        .await
+        .is_err());
+        let hours: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM usage_hours")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(hours, 0, "the hour's row rolls back with the context's");
     }
 
     #[tokio::test]
     async fn adding_before_the_table_exists_is_an_error_not_a_panic() {
-        let pool = SqlitePoolOptions::new().max_connections(1)
-            .connect("sqlite::memory:").await.unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
         assert!(add(&pool, "2026-10-06 14", 30, 0).await.is_err());
     }
 }

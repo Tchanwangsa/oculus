@@ -50,7 +50,9 @@ fn page_idx(item: &Value) -> i64 {
 
 /// `img_path`, when non-empty: an empty one falls through to `table_body`.
 fn img_path(item: &Value) -> Option<&str> {
-    item.get("img_path").and_then(Value::as_str).filter(|path| !path.is_empty())
+    item.get("img_path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
 }
 
 /// Python-style truthiness: `text_level: 0` is level-less, `3` is a heading.
@@ -67,7 +69,10 @@ fn truthy(value: Option<&Value>) -> bool {
 
 /// The link is the basename, so the archive's layout never leaks.
 fn basename(path: &str) -> String {
-    Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
+    Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// The caption/footnote list, space-joined and trimmed.
@@ -86,7 +91,10 @@ fn join_parts(item: &Value, key: &str) -> String {
 
 /// The comparison form for boilerplate: whitespace-collapsed and lowercased.
 fn norm(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 // ── Rendering one item ───────────────────────────────────────────────────────
@@ -123,7 +131,12 @@ fn render_item(
             // Dropped by the size filter, caption with it.
             Some(path) if dropped.contains(&basename(path)) => String::new(),
             Some(path) => format!("![{caption}]({images_rel}/{})", basename(path)),
-            None => item.get("table_body").and_then(Value::as_str).unwrap_or("").trim().to_string(),
+            None => item
+                .get("table_body")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string(),
         };
 
         let joined = [block, footnote]
@@ -158,9 +171,14 @@ fn sort_key(item: &Value) -> (u8, f64, f64) {
     if kind_of(item) != "header" {
         return (1, 0.0, 0.0);
     }
-    let bbox = item.get("bbox").and_then(Value::as_array).filter(|values| !values.is_empty());
+    let bbox = item
+        .get("bbox")
+        .and_then(Value::as_array)
+        .filter(|values| !values.is_empty());
     let at = |index: usize| {
-        bbox.and_then(|values| values.get(index)).and_then(Value::as_f64).unwrap_or(0.0)
+        bbox.and_then(|values| values.get(index))
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
     };
     (0, at(1), at(0))
 }
@@ -241,7 +259,11 @@ pub fn render(
                 continue;
             }
             fs::copy(&source, images_dir.join(name)).map_err(|e| {
-                ParseError::Io(format!("copy {} -> {}: {e}", source.display(), images_dir.display()))
+                ParseError::Io(format!(
+                    "copy {} -> {}: {e}",
+                    source.display(),
+                    images_dir.display()
+                ))
             })?;
             image_count += 1;
         }
@@ -251,13 +273,15 @@ pub fn render(
     //    page count (the last is short).
     let mut windows: BTreeMap<i64, Vec<&Value>> = BTreeMap::new();
     for item in content_list {
-        windows.entry(page_idx(item).div_euclid(RENDER_GROUP_PAGES)).or_default().push(item);
+        windows
+            .entry(page_idx(item).div_euclid(RENDER_GROUP_PAGES))
+            .or_default()
+            .push(item);
     }
 
     let mut by_page: BTreeMap<i64, String> = BTreeMap::new();
     for (window, items) in windows {
-        let window_pages =
-            RENDER_GROUP_PAGES.min(total_pages as i64 - window * RENDER_GROUP_PAGES);
+        let window_pages = RENDER_GROUP_PAGES.min(total_pages as i64 - window * RENDER_GROUP_PAGES);
         let boilerplate = find_boilerplate(&items, window_pages);
 
         let mut per_page: BTreeMap<i64, Vec<&Value>> = BTreeMap::new();
@@ -287,7 +311,10 @@ pub fn render(
         .into_iter()
         // A broken offset below the first page has nowhere to attach.
         .filter(|(page_no, _)| *page_no >= 1)
-        .map(|(page_no, markdown)| ParsePage { page_no: page_no as u32, markdown })
+        .map(|(page_no, markdown)| ParsePage {
+            page_no: page_no as u32,
+            markdown,
+        })
         .collect();
     Ok((pages, image_count))
 }
@@ -462,7 +489,10 @@ mod tests {
             json!({"type": "text", "text": "Learning outcomes", "text_level": 2, "page_idx": 0}),
             json!({"type": "text", "page_idx": 0}),
         ];
-        assert_eq!(markdown(&rendered(&content, 1)), vec!["## Learning outcomes"]);
+        assert_eq!(
+            markdown(&rendered(&content, 1)),
+            vec!["## Learning outcomes"]
+        );
     }
 
     /// The size filter, end to end: the undersized crop is dropped along with
@@ -530,9 +560,9 @@ mod tests {
         let mut content: Vec<Value> = (0..2)
             .map(|page| json!({"type": "header", "text": "MAST20004  Probability", "page_idx": page}))
             .collect();
-        content.extend((2..4).map(|page| {
-            json!({"type": "header", "text": "mast20004\n probability", "page_idx": page})
-        }));
+        content.extend((2..4).map(
+            |page| json!({"type": "header", "text": "mast20004\n probability", "page_idx": page}),
+        ));
         content.push(json!({"type": "text", "text": "Mast20004 Probability", "page_idx": 0}));
         // Every spelling goes, including a plain text item with the same key.
         assert_eq!(markdown(&rendered(&content, 4)), vec!["", "", "", ""]);

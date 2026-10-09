@@ -43,13 +43,21 @@ impl Ctx {
 
         let canvas = app_lib::canvas::Canvas::open(&self.data_dir);
         let canvas_status = match canvas.whoami() {
-            Ok(name) => Service { connected: true, user: Some(name), detail: None },
+            Ok(name) => Service {
+                connected: true,
+                user: Some(name),
+                detail: None,
+            },
             Err(_) if !canvas.has_session() => Service {
                 connected: false,
                 user: None,
                 detail: Some("signed out — run `oculus auth login`".to_string()),
             },
-            Err(e) => Service { connected: false, user: None, detail: Some(e) },
+            Err(e) => Service {
+                connected: false,
+                user: None,
+                detail: Some(e),
+            },
         };
 
         let ed = app_lib::ed::Ed::open(&self.data_dir);
@@ -61,8 +69,16 @@ impl Ctx {
             }
         } else {
             match ed.whoami() {
-                Ok(name) => Service { connected: true, user: Some(name), detail: None },
-                Err(e) => Service { connected: false, user: None, detail: Some(e) },
+                Ok(name) => Service {
+                    connected: true,
+                    user: Some(name),
+                    detail: None,
+                },
+                Err(e) => Service {
+                    connected: false,
+                    user: None,
+                    detail: Some(e),
+                },
             }
         };
 
@@ -104,12 +120,11 @@ impl Ctx {
                     .fetch_one(pool)
                     .await
                     .unwrap_or(0);
-                let parsed: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM files WHERE parse_status = 'quality'",
-                )
-                .fetch_one(pool)
-                .await
-                .unwrap_or(0);
+                let parsed: i64 =
+                    sqlx::query_scalar("SELECT COUNT(*) FROM files WHERE parse_status = 'quality'")
+                        .fetch_one(pool)
+                        .await
+                        .unwrap_or(0);
                 (Some(counts), Some(FileCounts { total, parsed }))
             }),
             None => (None, None),
@@ -117,7 +132,9 @@ impl Ctx {
 
         let index = pool.as_ref().and_then(|_| {
             self.rt
-                .block_on(app_lib::retrieval::stats(&app_lib::paths::db_path(&self.data_dir)))
+                .block_on(app_lib::retrieval::stats(&app_lib::paths::db_path(
+                    &self.data_dir,
+                )))
                 .ok()
         });
 
@@ -165,7 +182,12 @@ impl Ctx {
             );
         }
         if let Some(f) = &files {
-            println!("{}    {} ({} parsed)", paint("files", DIM), f.total, f.parsed);
+            println!(
+                "{}    {} ({} parsed)",
+                paint("files", DIM),
+                f.total,
+                f.parsed
+            );
         }
         if let Some(i) = &index {
             println!(
@@ -217,7 +239,10 @@ impl Ctx {
         println!("  1. Open https://sso.unimelb.edu.au/enduser/settings");
         println!("  2. Google Authenticator → remove it, then set it up again");
         println!("  3. On the QR page click \"Can't scan?\" to reveal the setup key");
-        println!("  4. {} scan the QR with your phone as well, so you keep", paint("Also", YELLOW));
+        println!(
+            "  4. {} scan the QR with your phone as well, so you keep",
+            paint("Also", YELLOW)
+        );
         println!("     a working authenticator if this Mac is ever unavailable.");
         println!();
 
@@ -249,9 +274,9 @@ impl Ctx {
                 println!("{} as {name}", paint("connected", GREEN));
                 Ok(())
             }
-            Err(e @ app_lib::okta::LoginError::BadPassword(_)) => {
-                Err(format!("{e}\nThe stored password has been discarded — run `oculus auth setup` again."))
-            }
+            Err(e @ app_lib::okta::LoginError::BadPassword(_)) => Err(format!(
+                "{e}\nThe stored password has been discarded — run `oculus auth setup` again."
+            )),
             Err(e) => Err(e.to_string()),
         }
     }
@@ -295,9 +320,13 @@ impl Ctx {
                 Err(e) => log(&format!("signed in but could not verify: {e}")),
             },
             Err(e @ app_lib::okta::LoginError::BadPassword(_)) => {
-                log(&format!("{e} — stored password discarded, run `oculus auth setup`"));
+                log(&format!(
+                    "{e} — stored password discarded, run `oculus auth setup`"
+                ));
             }
-            Err(e @ (app_lib::okta::LoginError::Waiting(_) | app_lib::okta::LoginError::Paused(_))) => {
+            Err(
+                e @ (app_lib::okta::LoginError::Waiting(_) | app_lib::okta::LoginError::Paused(_)),
+            ) => {
                 log(&format!("automated sign-in skipped: {e}"));
             }
             Err(e) => log(&format!("automated sign-in failed: {e}")),
@@ -343,7 +372,10 @@ impl Ctx {
 
         println!("opening Oculus for Canvas sign-in…");
         #[cfg(target_os = "macos")]
-        let launched = std::process::Command::new("open").args(["-a", "Oculus"]).status().is_ok_and(|s| s.success());
+        let launched = std::process::Command::new("open")
+            .args(["-a", "Oculus"])
+            .status()
+            .is_ok_and(|s| s.success());
         #[cfg(not(target_os = "macos"))]
         let launched = false;
 
@@ -372,7 +404,14 @@ impl Ctx {
         // Drops the Okta session too, so the next login is a fresh one.
         let had = app_lib::paths::sign_out(&self.data_dir).map_err(|e| e.to_string())?;
 
-        println!("{}", if had { paint("signed out", GREEN) } else { paint("no session to clear", DIM) });
+        println!(
+            "{}",
+            if had {
+                paint("signed out", GREEN)
+            } else {
+                paint("no session to clear", DIM)
+            }
+        );
         Ok(())
     }
 }

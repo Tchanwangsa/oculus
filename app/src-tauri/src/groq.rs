@@ -62,15 +62,17 @@ fn interpret(status: u16, body: &str) -> Result<Verdict, String> {
     }
 
     let lowered = message.as_deref().unwrap_or_default().to_lowercase();
-    Err(if lowered.contains("header") || lowered.contains("malformed") {
-        "Groq could not read this key — paste the key on its own, with \
+    Err(
+        if lowered.contains("header") || lowered.contains("malformed") {
+            "Groq could not read this key — paste the key on its own, with \
          nothing around it"
-            .to_string()
-    } else {
-        "Groq rejected this key — check you copied all of it, including the \
+                .to_string()
+        } else {
+            "Groq rejected this key — check you copied all of it, including the \
          gsk_ prefix"
-            .to_string()
-    })
+                .to_string()
+        },
+    )
 }
 
 /// Ask Groq whether it accepts this key. `Err` is a key Groq actively
@@ -160,7 +162,10 @@ mod tests {
 
     #[test]
     fn a_malformed_header_gets_its_own_wording() {
-        let message = refusal(401, r#"{"error":{"message":"Authorization header is malformed."}}"#);
+        let message = refusal(
+            401,
+            r#"{"error":{"message":"Authorization header is malformed."}}"#,
+        );
         assert!(message.contains("paste the key on its own"));
     }
 
@@ -186,7 +191,10 @@ mod tests {
     #[test]
     fn anything_that_got_past_the_gateway_is_good() {
         assert!(is_good(200, r#"{"object":"list","data":[]}"#));
-        assert!(is_good(404, r#"{"error":{"message":"Unknown request URL"}}"#));
+        assert!(is_good(
+            404,
+            r#"{"error":{"message":"Unknown request URL"}}"#
+        ));
         assert!(is_good(500, "upstream error"));
     }
 }

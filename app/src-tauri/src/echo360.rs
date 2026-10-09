@@ -28,8 +28,12 @@ impl Session {
         format!(
             "ECHO_JWT={}; PLAY_SESSION={}; CloudFront-Key-Pair-Id={}; \
              CloudFront-Policy={}; CloudFront-Signature={}; CloudFront-Tracking2={}",
-            self.jwt, self.play_session, self.cf_key_pair_id,
-            self.cf_policy, self.cf_signature, self.cf_tracking
+            self.jwt,
+            self.play_session,
+            self.cf_key_pair_id,
+            self.cf_policy,
+            self.cf_signature,
+            self.cf_tracking
         )
     }
 
@@ -125,7 +129,9 @@ pub fn connect(canvas_cookie: &str, course_id: i64) -> Result<Session, String> {
         }
     }
     if s.jwt.is_empty() {
-        return Err("Echo360 auth failed — no ECHO_JWT cookie; the LTI POST was rejected".to_string());
+        return Err(
+            "Echo360 auth failed — no ECHO_JWT cookie; the LTI POST was rejected".to_string(),
+        );
     }
 
     eprintln!("[oculus] echo360 auth done: section={}", s.section_id);
@@ -191,7 +197,10 @@ fn extract_section_id(path: &str) -> Result<String, String> {
 /// Every past lesson with a finished recording — one still processing has a
 /// media id but its download 404s.
 pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
-    let url = format!("https://echo360.net.au/section/{}/syllabus", session.section_id);
+    let url = format!(
+        "https://echo360.net.au/section/{}/syllabus",
+        session.section_id
+    );
     let raw = ureq::get(&url)
         .set("Cookie", &session.cookie_header())
         .call()
@@ -210,8 +219,12 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
         let inner = &lesson["lesson"];
 
         if !lesson["hasVideo"].as_bool().unwrap_or(false)
-            || !lesson["medias"][0]["isAvailable"].as_bool().unwrap_or(false)
-            || lesson["medias"][0]["isProcessing"].as_bool().unwrap_or(true)
+            || !lesson["medias"][0]["isAvailable"]
+                .as_bool()
+                .unwrap_or(false)
+            || lesson["medias"][0]["isProcessing"]
+                .as_bool()
+                .unwrap_or(true)
             || !lesson["isPast"].as_bool().unwrap_or(false)
         {
             continue;
@@ -244,7 +257,10 @@ pub fn syllabus(session: &Session) -> Result<Vec<Lecture>, String> {
         });
     }
     let dual = out.iter().filter(|l| l.has_second_source).count();
-    eprintln!("[oculus] echo360 syllabus: {} lectures ({dual} with a second source)", out.len());
+    eprintln!(
+        "[oculus] echo360 syllabus: {} lectures ({dual} with a second source)",
+        out.len()
+    );
     if probed > 0 {
         eprintln!(
             "[oculus] warn: syllabus carried no file lists for {probed} lecture(s) — \
@@ -283,13 +299,20 @@ fn duration_between(start: &str, end: &str) -> i64 {
     fn secs(s: &str) -> Option<i64> {
         let t = s.split('T').nth(1)?;
         // Keep only HH:MM:SS, dropping any fraction and zone.
-        let t: String = t.chars().take_while(|c| c.is_ascii_digit() || *c == ':').collect();
+        let t: String = t
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == ':')
+            .collect();
         let p: Vec<i64> = t.split(':').filter_map(|x| x.parse().ok()).collect();
         (p.len() >= 3).then(|| p[0] * 3600 + p[1] * 60 + p[2])
     }
     let s = secs(start).unwrap_or(0);
     let e = secs(end).unwrap_or(0);
-    if e >= s { e - s } else { e + 86400 - s }
+    if e >= s {
+        e - s
+    } else {
+        e + 86400 - s
+    }
 }
 
 // ── Media ────────────────────────────────────────────────────────────────────
@@ -323,7 +346,11 @@ pub fn download_url(
         "https://echo360.net.au/media/download/{media_id}/hd{source}.mp4?lessonId={lesson_id}"
     );
     let agent = ureq::AgentBuilder::new().redirects(0).build();
-    match agent.get(&url).set("Cookie", &session.cookie_header()).call() {
+    match agent
+        .get(&url)
+        .set("Cookie", &session.cookie_header())
+        .call()
+    {
         Ok(r) => {
             let status = r.status();
             if (301..=303).contains(&status) {
@@ -334,7 +361,9 @@ pub fn download_url(
                 Err(format!("Expected a redirect from Echo360, got {status}"))
             }
         }
-        Err(ureq::Error::Status(code, _)) => Err(format!("Echo360 download endpoint returned HTTP {code}")),
+        Err(ureq::Error::Status(code, _)) => {
+            Err(format!("Echo360 download endpoint returned HTTP {code}"))
+        }
         Err(e) => Err(format!("Download redirect request failed: {e}")),
     }
 }
@@ -350,14 +379,17 @@ pub fn stream_to_file(
     on_progress: &dyn Fn(u8),
     should_cancel: &dyn Fn() -> bool,
 ) -> Result<u64, String> {
-    let resp = ureq::get(url).call().map_err(|e| format!("HTTP request failed: {e}"))?;
+    let resp = ureq::get(url)
+        .call()
+        .map_err(|e| format!("HTTP request failed: {e}"))?;
     let total = resp
         .header("content-length")
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0);
 
     let mut reader = resp.into_reader();
-    let mut file = std::fs::File::create(dest).map_err(|e| format!("Failed to create file: {e}"))?;
+    let mut file =
+        std::fs::File::create(dest).map_err(|e| format!("Failed to create file: {e}"))?;
     let mut buf = [0u8; 65536];
     let mut done = 0u64;
     let mut last_pct = u8::MAX;
@@ -369,7 +401,8 @@ pub fn stream_to_file(
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                file.write_all(&buf[..n]).map_err(|e| format!("Write error after {done} bytes: {e}"))?;
+                file.write_all(&buf[..n])
+                    .map_err(|e| format!("Write error after {done} bytes: {e}"))?;
                 done += n as u64;
                 if total > 0 {
                     let pct = (done * 100 / total) as u8;
@@ -444,14 +477,21 @@ pub fn trim_video(ffmpeg: &Path, raw: &Path, out: &Path) -> bool {
 /// Remove untrimmed `raw*.mp4` downloads left by an interrupted run.
 pub fn cleanup_partial_downloads(data_dir: &Path) {
     let dir = data_dir.join("lectures");
-    let Ok(lectures) = std::fs::read_dir(&dir) else { return };
+    let Ok(lectures) = std::fs::read_dir(&dir) else {
+        return;
+    };
     for lecture in lectures.flatten() {
-        let Ok(files) = std::fs::read_dir(lecture.path()) else { continue };
+        let Ok(files) = std::fs::read_dir(lecture.path()) else {
+            continue;
+        };
         for file in files.flatten() {
             let name = file.file_name();
             let name = name.to_string_lossy();
             if name.starts_with("raw") && name.ends_with(".mp4") {
-                eprintln!("[oculus] cleanup: removing orphaned {}", file.path().display());
+                eprintln!(
+                    "[oculus] cleanup: removing orphaned {}",
+                    file.path().display()
+                );
                 std::fs::remove_file(file.path()).ok();
             }
         }
@@ -494,10 +534,13 @@ mod tests {
             <input type="submit" value="Go"/></form></div>"#;
         let (action, fields) = parse_lti_form(html).unwrap();
         assert_eq!(action, "https://echo360.net.au/lti");
-        assert_eq!(fields, vec![
-            ("oauth_nonce".to_string(), "abc&1".to_string()),
-            ("lti_version".to_string(), "LTI-1p0".to_string()),
-        ]);
+        assert_eq!(
+            fields,
+            vec![
+                ("oauth_nonce".to_string(), "abc&1".to_string()),
+                ("lti_version".to_string(), "LTI-1p0".to_string()),
+            ]
+        );
     }
 
     #[test]
@@ -507,8 +550,14 @@ mod tests {
 
     #[test]
     fn durations_handle_midnight_rollover() {
-        assert_eq!(duration_between("2026-01-01T10:00:00Z", "2026-01-01T11:30:00Z"), 5400);
-        assert_eq!(duration_between("2026-01-01T23:30:00Z", "2026-01-02T00:30:00Z"), 3600);
+        assert_eq!(
+            duration_between("2026-01-01T10:00:00Z", "2026-01-01T11:30:00Z"),
+            5400
+        );
+        assert_eq!(
+            duration_between("2026-01-01T23:30:00Z", "2026-01-02T00:30:00Z"),
+            3600
+        );
     }
 
     #[test]
@@ -535,8 +584,17 @@ mod tests {
 
     #[test]
     fn durations_read_every_timestamp_shape_echo360_sends() {
-        assert_eq!(duration_between("2026-01-01T10:00:00.000Z", "2026-01-01T10:50:00.000Z"), 3000);
-        assert_eq!(duration_between("2026-01-01T10:00:00+11:00", "2026-01-01T10:50:00+11:00"), 3000);
-        assert_eq!(duration_between("2026-01-01T10:00:00", "2026-01-01T10:50:00"), 3000);
+        assert_eq!(
+            duration_between("2026-01-01T10:00:00.000Z", "2026-01-01T10:50:00.000Z"),
+            3000
+        );
+        assert_eq!(
+            duration_between("2026-01-01T10:00:00+11:00", "2026-01-01T10:50:00+11:00"),
+            3000
+        );
+        assert_eq!(
+            duration_between("2026-01-01T10:00:00", "2026-01-01T10:50:00"),
+            3000
+        );
     }
 }

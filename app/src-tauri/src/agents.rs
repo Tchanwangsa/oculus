@@ -94,7 +94,8 @@ pub fn ensure_library_docs(data_dir: &Path) -> Result<LibraryDocs, String> {
 
     // Generated: overwritten every time.
     let path = dir.join(AGENTS_DOC_NAME);
-    std::fs::write(&path, AGENTS_DOC).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    std::fs::write(&path, AGENTS_DOC)
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     docs.generated.push(AGENTS_DOC_NAME);
 
     // Stubs: written once, then the user's. The memory index is stubbed so an
@@ -127,10 +128,10 @@ pub fn ensure_library_docs(data_dir: &Path) -> Result<LibraryDocs, String> {
     let skills = skills_dir(data_dir);
     for (name, body) in SKILLS {
         let dir = skills.join(name);
-        std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
         let path = dir.join(SKILL_DOC_NAME);
-        std::fs::write(&path, body)
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        std::fs::write(&path, body).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         docs.generated.push(name);
     }
     link_agent_skills(data_dir)?;
@@ -230,7 +231,12 @@ fn link_agent_skills(data_dir: &Path) -> Result<(), String> {
             .map_err(|e| format!("cannot create {}: {e}", into.display()))?;
         for (name, body) in SKILLS {
             // Up out of `<scanned>/skills`, back down into `skills/` beside it.
-            link_skill(&into.join(name), &format!("../../{SKILLS_DIR}/{name}"), name, body)?;
+            link_skill(
+                &into.join(name),
+                &format!("../../{SKILLS_DIR}/{name}"),
+                name,
+                body,
+            )?;
         }
     }
     Ok(())
@@ -329,7 +335,8 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
             if std::fs::read_link(&old).is_ok_and(|t| t == want) {
                 return Ok(());
             }
-            std::fs::remove_file(&old).map_err(|e| format!("cannot relink {name}/agents/memories: {e}"))?;
+            std::fs::remove_file(&old)
+                .map_err(|e| format!("cannot relink {name}/agents/memories: {e}"))?;
         }
         Ok(meta) if meta.is_dir() => {
             for entry in std::fs::read_dir(&old).into_iter().flatten().flatten() {
@@ -337,14 +344,25 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
                 if to.exists() {
                     continue;
                 }
-                std::fs::rename(entry.path(), &to)
-                    .map_err(|e| format!("cannot move {name}/agents/memories/{:?}: {e}", entry.file_name()))?;
+                std::fs::rename(entry.path(), &to).map_err(|e| {
+                    format!(
+                        "cannot move {name}/agents/memories/{:?}: {e}",
+                        entry.file_name()
+                    )
+                })?;
             }
             // Only if emptied: a folder beats a link that hides unplaced files.
-            if std::fs::read_dir(&old).into_iter().flatten().flatten().next().is_some() {
+            if std::fs::read_dir(&old)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .next()
+                .is_some()
+            {
                 return Ok(());
             }
-            std::fs::remove_dir(&old).map_err(|e| format!("cannot replace {name}/agents/memories: {e}"))?;
+            std::fs::remove_dir(&old)
+                .map_err(|e| format!("cannot replace {name}/agents/memories: {e}"))?;
         }
         // A real file called `memories` is somebody's.
         Ok(_) => return Ok(()),
@@ -361,7 +379,11 @@ fn adopt_course_memories(course_agents: &Path, bucket: &Path, name: &str) -> Res
 
 /// A relative symlink, skipped rather than clobbered when a real file is there.
 fn link_dir(data_dir: &Path, dir: &Path) -> Result<Link, String> {
-    let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let name = dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let bucket = subject_memories(data_dir, &name);
     std::fs::create_dir_all(&bucket)
         .map_err(|e| format!("cannot create agents/memories/{name}: {e}"))?;
@@ -462,11 +484,16 @@ mod tests {
         );
         // The bucket is under `agents/`; the course folder gets a link to it.
         assert!(root.join("agents/memories/fresh").is_dir());
-        assert!(std::fs::symlink_metadata(courses.join("fresh/agents/memories"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert!(courses.join("fresh/agents/memories").is_dir(), "the link resolves");
+        assert!(
+            std::fs::symlink_metadata(courses.join("fresh/agents/memories"))
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            courses.join("fresh/agents/memories").is_dir(),
+            "the link resolves"
+        );
         // Named for the subject, so the bucket a memory lands in is unambiguous.
         let index = std::fs::read_to_string(root.join("agents/memories/fresh/MEMORY.md")).unwrap();
         assert!(index.starts_with("# Memories — fresh"));
@@ -484,7 +511,11 @@ mod tests {
         let old = root.join("courses/INFO30006_2026_SM2/agents/memories");
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("info30006-mst.md"), "the MST is week 7").unwrap();
-        std::fs::write(old.join("MEMORY.md"), "# Memories — INFO30006\n\n- [MST](info30006-mst.md)").unwrap();
+        std::fs::write(
+            old.join("MEMORY.md"),
+            "# Memories — INFO30006\n\n- [MST](info30006-mst.md)",
+        )
+        .unwrap();
 
         link_all(&root).unwrap();
 
@@ -494,10 +525,15 @@ mod tests {
             "the MST is week 7"
         );
         // The course's own index came across, so the stub never overwrote it.
-        assert!(std::fs::read_to_string(bucket.join("MEMORY.md")).unwrap().contains("[MST]"));
+        assert!(std::fs::read_to_string(bucket.join("MEMORY.md"))
+            .unwrap()
+            .contains("[MST]"));
         // And the old path resolves to the same file.
         assert!(old.join("info30006-mst.md").is_file());
-        assert!(std::fs::symlink_metadata(&old).unwrap().file_type().is_symlink());
+        assert!(std::fs::symlink_metadata(&old)
+            .unwrap()
+            .file_type()
+            .is_symlink());
 
         // Idempotent: a second sync neither re-moves nor re-links.
         link_all(&root).unwrap();
@@ -510,11 +546,20 @@ mod tests {
         let root = Scratch::new("agents-course");
         std::fs::create_dir_all(root.join("courses/COMP30026_2026_SM2")).unwrap();
 
-        assert_eq!(link_course(&root, "COMP30026_2026_SM2").unwrap(), Link::Linked);
-        assert_eq!(link_course(&root, "COMP30026_2026_SM2").unwrap(), Link::Current);
+        assert_eq!(
+            link_course(&root, "COMP30026_2026_SM2").unwrap(),
+            Link::Linked
+        );
+        assert_eq!(
+            link_course(&root, "COMP30026_2026_SM2").unwrap(),
+            Link::Current
+        );
 
         // A scrape that wrote nothing must not leave an empty course folder.
-        assert_eq!(link_course(&root, "NEW10001_2026_SM2").unwrap(), Link::Absent);
+        assert_eq!(
+            link_course(&root, "NEW10001_2026_SM2").unwrap(),
+            Link::Absent
+        );
         assert!(!root.join("courses/NEW10001_2026_SM2").exists());
     }
 
@@ -601,14 +646,22 @@ mod tests {
     fn stubs_are_written_once_and_then_left_alone() {
         let root = Scratch::new("agents-stubs");
         let first = ensure_library_docs(&root).unwrap();
-        assert_eq!(first.created, ["OCULUS.md", "TASTE.md", "memories/MEMORY.md"]);
+        assert_eq!(
+            first.created,
+            ["OCULUS.md", "TASTE.md", "memories/MEMORY.md"]
+        );
 
         std::fs::write(agents_dir(&root).join("TASTE.md"), "my notes").unwrap();
         let second = ensure_library_docs(&root).unwrap();
         assert!(second.created.is_empty());
         assert_eq!(
             second.generated,
-            [AGENTS_DOC_NAME, "oculus-lectures", "oculus-library", "oculus-plan"]
+            [
+                AGENTS_DOC_NAME,
+                "oculus-lectures",
+                "oculus-library",
+                "oculus-plan"
+            ]
         );
         assert_eq!(
             std::fs::read_to_string(agents_dir(&root).join("TASTE.md")).unwrap(),
@@ -624,11 +677,15 @@ mod tests {
 
         let plan = skills_dir(&root).join("oculus-plan/SKILL.md");
         assert!(plan.is_file());
-        assert!(std::fs::read_to_string(&plan).unwrap().contains("name: oculus-plan"));
+        assert!(std::fs::read_to_string(&plan)
+            .unwrap()
+            .contains("name: oculus-plan"));
 
         std::fs::write(&plan, "do whatever you like").unwrap();
         ensure_library_docs(&root).unwrap();
-        assert!(std::fs::read_to_string(&plan).unwrap().contains("name: oculus-plan"));
+        assert!(std::fs::read_to_string(&plan)
+            .unwrap()
+            .contains("name: oculus-plan"));
     }
 
     /// Three CLIs, three discovery paths, one directory.
@@ -639,7 +696,9 @@ mod tests {
 
         // Both scan up from the cwd, which is `agents/` for every thread and job.
         for scanned in SCANNED_SKILL_DIRS {
-            let link = agents_dir(&root).join(scanned).join("skills/oculus-lectures");
+            let link = agents_dir(&root)
+                .join(scanned)
+                .join("skills/oculus-lectures");
             assert_eq!(
                 std::fs::read_link(&link).unwrap(),
                 PathBuf::from("../../skills/oculus-lectures"),
@@ -653,12 +712,17 @@ mod tests {
         }
 
         // opencode takes a config key instead (`opencode.rs`).
-        assert!(skills_dir(&root).join("oculus-lectures").join(SKILL_DOC_NAME).is_file());
+        assert!(skills_dir(&root)
+            .join("oculus-lectures")
+            .join(SKILL_DOC_NAME)
+            .is_file());
 
         // Idempotent.
         ensure_library_docs(&root).unwrap();
         for scanned in SCANNED_SKILL_DIRS {
-            let link = agents_dir(&root).join(scanned).join("skills/oculus-lectures");
+            let link = agents_dir(&root)
+                .join(scanned)
+                .join("skills/oculus-lectures");
             assert!(link.join(SKILL_DOC_NAME).is_file(), "{scanned}");
         }
     }
@@ -677,7 +741,9 @@ mod tests {
             "reached into {}",
             home.join(".codex/skills").display()
         );
-        assert!(agents_dir(&root).join(".agents/skills/oculus-plan").is_symlink());
+        assert!(agents_dir(&root)
+            .join(".agents/skills/oculus-plan")
+            .is_symlink());
     }
 
     /// A link is ours and gets repointed; a real file is somebody's.
@@ -692,7 +758,10 @@ mod tests {
 
         ensure_library_docs(&root).unwrap();
 
-        assert_eq!(std::fs::read_to_string(into.join("oculus-plan")).unwrap(), "mine");
+        assert_eq!(
+            std::fs::read_to_string(into.join("oculus-plan")).unwrap(),
+            "mine"
+        );
         assert_eq!(
             std::fs::read_link(into.join("oculus-lectures")).unwrap(),
             PathBuf::from("../../skills/oculus-lectures")

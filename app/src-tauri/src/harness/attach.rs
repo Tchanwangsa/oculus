@@ -60,7 +60,9 @@ fn filename(ext: &str) -> String {
     let now = crate::clock::now_nanos();
     let secs = (now / 1_000_000_000) as u64;
     // `20260918-034512`, UTC.
-    let stamp = crate::paths::iso8601_utc(secs).replace(['-', ':'], "").replace('T', "-");
+    let stamp = crate::paths::iso8601_utc(secs)
+        .replace(['-', ':'], "")
+        .replace('T', "-");
     // Sub-second nanos: unique within a second without a random crate.
     let tail = (now % 1_000_000_000) as u32;
     format!("{stamp}-{tail:08x}.{ext}")
@@ -122,7 +124,8 @@ pub async fn harness_attach_image(data: String) -> Result<String, String> {
     crate::blocking::run(move || {
         let dir = attachments_dir(&crate::paths::data_dir());
         write_image(&dir, &bytes).map(|name| attachment_ref(&name))
-    }).await
+    })
+    .await
 }
 
 /// A picture dropped onto the composer from Finder, by path.
@@ -132,7 +135,8 @@ pub async fn harness_attach_file(path: String) -> Result<String, String> {
         let bytes = read_dropped(&path)?;
         let dir = attachments_dir(&crate::paths::data_dir());
         write_image(&dir, &bytes).map(|name| attachment_ref(&name))
-    }).await
+    })
+    .await
 }
 
 #[cfg(test)]

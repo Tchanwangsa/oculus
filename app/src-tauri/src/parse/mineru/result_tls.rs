@@ -87,14 +87,20 @@ fn record(seen: u8, not_after: u64) {
 // ── The verifier ─────────────────────────────────────────────────────────────
 
 fn webpki() -> Arc<WebPkiServerVerifier> {
-    let roots = RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+    let roots = RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
     WebPkiServerVerifier::builder_with_provider(Arc::new(roots), Arc::new(ring::default_provider()))
         .build()
         .expect("the webpki root set is not empty")
 }
 
 fn config(accept_expired: bool) -> rustls::ClientConfig {
-    let verifier = ExpiredResultCert { inner: webpki(), host: RESULT_HOST, accept_expired };
+    let verifier = ExpiredResultCert {
+        inner: webpki(),
+        host: RESULT_HOST,
+        accept_expired,
+    };
     rustls::ClientConfig::builder_with_provider(Arc::new(ring::default_provider()))
         .with_protocol_versions(&[&rustls::version::TLS12, &rustls::version::TLS13])
         .expect("ring supports TLS 1.2 and 1.3")
@@ -135,8 +141,13 @@ impl ServerCertVerifier for ExpiredResultCert {
         ocsp_response: &[u8],
         now: UnixTime,
     ) -> Result<ServerCertVerified, Error> {
-        let verdict =
-            self.inner.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now);
+        let verdict = self.inner.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        );
         if !self.is_ours(server_name) {
             return verdict;
         }
@@ -211,7 +222,11 @@ mod tests {
 
     #[test]
     fn only_the_result_host_is_ours() {
-        let verifier = ExpiredResultCert { inner: webpki(), host: RESULT_HOST, accept_expired: true };
+        let verifier = ExpiredResultCert {
+            inner: webpki(),
+            host: RESULT_HOST,
+            accept_expired: true,
+        };
         let name = |host: &str| ServerName::try_from(host.to_string()).unwrap();
         assert!(verifier.is_ours(&name(RESULT_HOST)));
         assert!(!verifier.is_ours(&name("mineru.net")));
@@ -224,10 +239,16 @@ mod tests {
     fn live_cdn_connects_only_when_allowed() {
         let url = format!("https://{RESULT_HOST}/");
         let strict = agent(false).head(&url).call();
-        assert!(matches!(strict, Err(ureq::Error::Transport(_))), "{strict:?}");
+        assert!(
+            matches!(strict, Err(ureq::Error::Transport(_))),
+            "{strict:?}"
+        );
         assert_eq!(state(false).certificate, "expired");
         let allowed = agent(true).head(&url).call();
-        assert!(!matches!(allowed, Err(ureq::Error::Transport(_))), "{allowed:?}");
+        assert!(
+            !matches!(allowed, Err(ureq::Error::Transport(_))),
+            "{allowed:?}"
+        );
         assert!(state(true).bypassing);
     }
 }

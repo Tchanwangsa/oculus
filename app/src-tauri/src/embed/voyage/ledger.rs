@@ -89,13 +89,23 @@ impl Default for Tier {
     /// Optimistic: guessing high costs one 429, which teaches the real limits;
     /// guessing low costs hours and teaches nothing.
     fn default() -> Self {
-        Self { rpm: TIER1_RPM, tpm: TIER1_TPM, source: TierSource::Assumed, learned_at: now_secs() }
+        Self {
+            rpm: TIER1_RPM,
+            tpm: TIER1_TPM,
+            source: TierSource::Assumed,
+            learned_at: now_secs(),
+        }
     }
 }
 
 impl Tier {
     pub fn free() -> Self {
-        Self { rpm: FREE_RPM, tpm: FREE_TPM, source: TierSource::Stated, learned_at: now_secs() }
+        Self {
+            rpm: FREE_RPM,
+            tpm: FREE_TPM,
+            source: TierSource::Stated,
+            learned_at: now_secs(),
+        }
     }
 
     /// Clamped from disk and the wire: zero would park every request forever.
@@ -152,7 +162,9 @@ pub fn stated_limits(text: &str) -> (Option<f64>, Option<f64>) {
             if decimal {
                 continue;
             }
-            let Ok(mut parsed) = value.parse::<f64>() else { continue };
+            let Ok(mut parsed) = value.parse::<f64>() else {
+                continue;
+            };
 
             // Voyage writes "10K TPM". A suffix counts only as a whole word,
             // so "10kb" is still ten.
@@ -193,8 +205,13 @@ pub fn stated_limits(text: &str) -> (Option<f64>, Option<f64>) {
             .next()
     };
 
-    let rpm = find(&["rpm", "requests per minute", "requests/min", "request per minute"])
-        .filter(|value| (1.0..=100_000.0).contains(value));
+    let rpm = find(&[
+        "rpm",
+        "requests per minute",
+        "requests/min",
+        "request per minute",
+    ])
+    .filter(|value| (1.0..=100_000.0).contains(value));
     let tpm = find(&["tpm", "tokens per minute", "tokens/min", "token per minute"])
         .filter(|value| (1_000.0..=100_000_000.0).contains(value));
     (rpm, tpm)
@@ -204,9 +221,16 @@ pub fn stated_limits(text: &str) -> (Option<f64>, Option<f64>) {
 /// a wait, money is a stop.
 pub fn is_about_credit(text: &str) -> bool {
     let text = text.to_lowercase();
-    ["out of credit", "insufficient", "exceeded your quota", "quota exceeded", "balance", "billing"]
-        .iter()
-        .any(|needle| text.contains(needle))
+    [
+        "out of credit",
+        "insufficient",
+        "exceeded your quota",
+        "quota exceeded",
+        "balance",
+        "billing",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
 }
 
 // ── The file on disk ─────────────────────────────────────────────────────────
@@ -271,7 +295,10 @@ pub struct UsageLedger {
 
 impl UsageLedger {
     pub fn at(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into(), guard: Mutex::new(()) }
+        Self {
+            path: path.into(),
+            guard: Mutex::new(()),
+        }
     }
 
     /// The one ledger the app uses, beside the database and beside MinerU's.
@@ -279,7 +306,9 @@ impl UsageLedger {
         static SHARED: OnceLock<Arc<UsageLedger>> = OnceLock::new();
         SHARED
             .get_or_init(|| {
-                Arc::new(UsageLedger::at(crate::paths::data_dir().join("voyage-usage.json")))
+                Arc::new(UsageLedger::at(
+                    crate::paths::data_dir().join("voyage-usage.json"),
+                ))
             })
             .clone()
     }
@@ -305,7 +334,9 @@ impl UsageLedger {
         }
         if let Some(ceiling) = usage.budget() {
             if usage.pixels.saturating_add(pixels) > ceiling {
-                return Err(EmbedError::BudgetReached { percent: usage.stop_at_percent.min(100) });
+                return Err(EmbedError::BudgetReached {
+                    percent: usage.stop_at_percent.min(100),
+                });
             }
         }
         Ok(())
@@ -361,7 +392,10 @@ impl UsageLedger {
     pub fn store_tier(&self, tier: Tier) {
         let _guard = hold(&self.guard);
         let mut usage = self.read();
-        usage.tier = Tier { learned_at: now_secs(), ..tier.sane() };
+        usage.tier = Tier {
+            learned_at: now_secs(),
+            ..tier.sane()
+        };
         self.write(&usage);
     }
 
@@ -372,7 +406,10 @@ impl UsageLedger {
             .ok()
             .and_then(|text| serde_json::from_str::<Usage>(&text).ok())
             .unwrap_or_default();
-        Usage { tier: usage.tier.sane(), ..usage }
+        Usage {
+            tier: usage.tier.sane(),
+            ..usage
+        }
     }
 
     /// Temp file (pid + nanos suffix) then rename, so a crash leaves the
@@ -445,7 +482,9 @@ impl RateGate {
     /// The process-wide gate: one account, one set of per-minute limits.
     pub fn shared() -> Arc<RateGate> {
         static SHARED: OnceLock<Arc<RateGate>> = OnceLock::new();
-        SHARED.get_or_init(|| Arc::new(RateGate::new(UsageLedger::shared()))).clone()
+        SHARED
+            .get_or_init(|| Arc::new(RateGate::new(UsageLedger::shared())))
+            .clone()
     }
 
     pub fn tier(&self) -> Tier {
@@ -463,7 +502,9 @@ impl RateGate {
     pub fn admit_reporting(&self, tokens: u64, on_wait: &mut dyn FnMut(Duration, Limiter)) {
         loop {
             let mut state = hold(&self.inner);
-            let Some(until) = state.paused_until else { break };
+            let Some(until) = state.paused_until else {
+                break;
+            };
             let now = Instant::now();
             if now >= until {
                 state.paused_until = None;
@@ -476,10 +517,20 @@ impl RateGate {
         }
         let tier = self.tier();
         self.requests.acquire_n_reporting(1.0, &mut |wait| {
-            on_wait(wait, Limiter::Requests { per_minute: tier.rpm.round() as u32 })
+            on_wait(
+                wait,
+                Limiter::Requests {
+                    per_minute: tier.rpm.round() as u32,
+                },
+            )
         });
         self.tokens.acquire_n_reporting(tokens as f64, &mut |wait| {
-            on_wait(wait, Limiter::Tokens { per_minute: tier.tpm.round() as u32 })
+            on_wait(
+                wait,
+                Limiter::Tokens {
+                    per_minute: tier.tpm.round() as u32,
+                },
+            )
         });
     }
 
@@ -494,7 +545,9 @@ impl RateGate {
     }
 
     fn refill(&self, tokens: u64) -> Duration {
-        self.requests.shortfall(1.0).max(self.tokens.shortfall(tokens as f64))
+        self.requests
+            .shortfall(1.0)
+            .max(self.tokens.shortfall(tokens as f64))
     }
 
     /// Voyage said 429 — routine, not a failure. Returns the wait decided on.
@@ -612,7 +665,10 @@ mod tests {
         ledger.store_tier(Tier::free());
         ledger.record(1, 3_572, FREE_PIXELS).unwrap();
 
-        assert!(matches!(ledger.record(1, 3_572, 1), Err(EmbedError::BudgetReached { .. })));
+        assert!(matches!(
+            ledger.record(1, 3_572, 1),
+            Err(EmbedError::BudgetReached { .. })
+        ));
         let usage = ledger.snapshot();
         assert_eq!(usage.pixels, FREE_PIXELS);
         assert_eq!(usage.tokens, 3_572);
@@ -686,8 +742,14 @@ mod tests {
         UsageLedger::at(&path).latch_exhausted();
 
         let reopened = UsageLedger::at(&path);
-        assert!(matches!(reopened.ensure_available(0), Err(EmbedError::QuotaExhausted)));
-        assert!(matches!(reopened.record(1, 1, 1), Err(EmbedError::QuotaExhausted)));
+        assert!(matches!(
+            reopened.ensure_available(0),
+            Err(EmbedError::QuotaExhausted)
+        ));
+        assert!(matches!(
+            reopened.record(1, 1, 1),
+            Err(EmbedError::QuotaExhausted)
+        ));
 
         let stale = Usage {
             quota_exhausted: true,
@@ -727,8 +789,11 @@ mod tests {
     fn a_nonsense_tier_on_disk_never_parks_a_run_forever() {
         let dir = scratch("insane");
         let path = dir.join("voyage-usage.json");
-        fs::write(&path, br#"{"tier":{"rpm":0,"tpm":-4,"source":"stated","learned_at":1}}"#)
-            .unwrap();
+        fs::write(
+            &path,
+            br#"{"tier":{"rpm":0,"tpm":-4,"source":"stated","learned_at":1}}"#,
+        )
+        .unwrap();
         let tier = UsageLedger::at(&path).tier();
         assert!(tier.rpm >= 1.0 && tier.tpm >= 1_000.0, "{tier:?}");
     }
@@ -750,12 +815,18 @@ mod tests {
 
     #[test]
     fn the_verbatim_live_429_body_yields_the_free_programme() {
-        assert_eq!(stated_limits(LIVE_FREE_TIER_429), (Some(FREE_RPM), Some(FREE_TPM)));
+        assert_eq!(
+            stated_limits(LIVE_FREE_TIER_429),
+            (Some(FREE_RPM), Some(FREE_TPM))
+        );
     }
 
     #[test]
     fn a_suffixed_number_is_only_scaled_when_it_is_a_whole_word() {
-        assert_eq!(stated_limits("limit of 2 RPM and 2M TPM"), (Some(2.0), Some(2_000_000.0)));
+        assert_eq!(
+            stated_limits("limit of 2 RPM and 2M TPM"),
+            (Some(2.0), Some(2_000_000.0))
+        );
         // "10kb" is ten, which is out of range, so nothing is learned.
         assert_eq!(stated_limits("payload of 10kb exceeded (tpm)").1, None);
     }
@@ -765,11 +836,17 @@ mod tests {
         let dir = scratch("fallback");
         let gate = RateGate::with_calm(ledger_at(&dir), Duration::from_secs(3_600));
         // No header (the live path): one request interval at 3 RPM.
-        assert_eq!(gate.throttled(None, LIVE_FREE_TIER_429), Duration::from_secs(20));
+        assert_eq!(
+            gate.throttled(None, LIVE_FREE_TIER_429),
+            Duration::from_secs(20)
+        );
         assert_eq!(gate.tier().tpm, FREE_TPM);
 
         // An explicit header wins.
-        assert_eq!(gate.throttled(Some(5.0), LIVE_FREE_TIER_429), Duration::from_secs(5));
+        assert_eq!(
+            gate.throttled(Some(5.0), LIVE_FREE_TIER_429),
+            Duration::from_secs(5)
+        );
     }
 
     #[test]
@@ -783,7 +860,10 @@ mod tests {
         assert_eq!(stated_limits("Too Many Requests"), (None, None));
         assert_eq!(stated_limits(""), (None, None));
         // A model id is not a rate limit, however close it sits to the word.
-        assert_eq!(stated_limits("voyage-multimodal-3.5 rpm exceeded"), (None, None));
+        assert_eq!(
+            stated_limits("voyage-multimodal-3.5 rpm exceeded"),
+            (None, None)
+        );
         // Nor is a distant number.
         let far = format!("512 dimensions.{} rate limited (rpm)", " ".repeat(60));
         assert_eq!(stated_limits(&far), (None, None));
@@ -887,7 +967,11 @@ mod tests {
 
         let start = Instant::now();
         gate.admit(1);
-        assert!(start.elapsed() >= Duration::from_millis(900), "{:?}", start.elapsed());
+        assert!(
+            start.elapsed() >= Duration::from_millis(900),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     #[test]

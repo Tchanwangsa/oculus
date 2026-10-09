@@ -61,7 +61,10 @@ fn failure_status(relative_path: &str, subject_id: i64, error: &ParseError) -> S
         return Status::new(relative_path, subject_id, "skipped");
     }
     Status::new(relative_path, subject_id, "error").failure(
-        error.to_string(), Some(error.kind()), Some(error.retryable()), Some(error.latching()),
+        error.to_string(),
+        Some(error.kind()),
+        Some(error.retryable()),
+        Some(error.latching()),
     )
 }
 
@@ -73,7 +76,10 @@ mod tests {
     #[test]
     fn a_cancelled_parse_is_reported_as_skipped_not_as_an_error() {
         let skipped = to_value(failure_status("a.pdf", 4, &ParseError::Cancelled)).unwrap();
-        assert_eq!(skipped, json!({ "relative_path": "a.pdf", "subject_id": 4, "status": "skipped" }));
+        assert_eq!(
+            skipped,
+            json!({ "relative_path": "a.pdf", "subject_id": 4, "status": "skipped" })
+        );
         let failed = to_value(failure_status("a.pdf", 4, &ParseError::Io("x".into()))).unwrap();
         assert_eq!(failed["status"], "error");
         assert_eq!(failed["kind"], "io");
@@ -82,15 +88,28 @@ mod tests {
     #[test]
     fn each_phase_sends_only_its_own_byte_counts() {
         let at = |phase| Progress {
-            pages_done: 0, total_pages: 9, backend: "test", phase, bytes_done: 10, bytes_total: 40,
+            pages_done: 0,
+            total_pages: 9,
+            backend: "test",
+            phase,
+            bytes_done: 10,
+            bytes_total: 40,
         };
         let wait = to_value(running_status("a.pdf", 4, at(Phase::UploadWait))).unwrap();
         assert_eq!(wait["phase"], "upload_wait");
         assert!(wait.get("bytes_done").is_none());
         assert_eq!(wait["bytes_total"], 40);
         let up = to_value(running_status("a.pdf", 4, at(Phase::Uploading))).unwrap();
-        assert_eq!((up["bytes_done"].clone(), up["bytes_total"].clone()), (json!(10), json!(40)));
-        let busy = to_value(running_status("a.pdf", 4, Progress::processing(3, 9, "test"))).unwrap();
+        assert_eq!(
+            (up["bytes_done"].clone(), up["bytes_total"].clone()),
+            (json!(10), json!(40))
+        );
+        let busy = to_value(running_status(
+            "a.pdf",
+            4,
+            Progress::processing(3, 9, "test"),
+        ))
+        .unwrap();
         assert_eq!(busy["phase"], "processing");
         assert_eq!(busy["pages_done"], 3);
         assert!(busy.get("bytes_total").is_none());

@@ -47,19 +47,37 @@ pub struct ChildProc {
 impl ChildProc {
     /// Spawn `cmd` with stdout and stderr piped, and stdin too when `stdin`
     /// (else `/dev/null`). stderr feeds the tail; stdout is the caller's.
-    pub fn spawn(who: &'static str, cmd: &mut Command, stdin: bool) -> Result<(Self, ChildStdout), String> {
+    pub fn spawn(
+        who: &'static str,
+        cmd: &mut Command,
+        stdin: bool,
+    ) -> Result<(Self, ChildStdout), String> {
         cmd.stdin(if stdin { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("cannot start {}: {e}", Path::new(cmd.get_program()).display()))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            format!(
+                "cannot start {}: {e}",
+                Path::new(cmd.get_program()).display()
+            )
+        })?;
         let pipe = match stdin {
-            true => Some(Mutex::new(child.stdin.take().ok_or_else(|| format!("no stdin on {who} child"))?)),
+            true => Some(Mutex::new(
+                child
+                    .stdin
+                    .take()
+                    .ok_or_else(|| format!("no stdin on {who} child"))?,
+            )),
             false => None,
         };
-        let stdout = child.stdout.take().ok_or_else(|| format!("no stdout on {who} child"))?;
-        let stderr = child.stderr.take().ok_or_else(|| format!("no stderr on {who} child"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| format!("no stdout on {who} child"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| format!("no stderr on {who} child"))?;
 
         let tail = Arc::new(Mutex::new(VecDeque::new()));
         {
@@ -100,12 +118,20 @@ impl ChildProc {
     /// After stdout's EOF: mark dead and reap.
     pub fn reap(&self) -> Option<i32> {
         self.alive.store(false, Ordering::SeqCst);
-        self.child.lock().unwrap().wait().ok().and_then(|s| s.code())
+        self.child
+            .lock()
+            .unwrap()
+            .wait()
+            .ok()
+            .and_then(|s| s.code())
     }
 
     /// One JSON value as one line on stdin.
     pub fn write_line(&self, v: &Value) -> Result<(), String> {
-        let stdin = self.stdin.as_ref().ok_or_else(|| format!("no stdin on {} child", self.who))?;
+        let stdin = self
+            .stdin
+            .as_ref()
+            .ok_or_else(|| format!("no stdin on {} child", self.who))?;
         let mut stdin = stdin.lock().unwrap();
         let line = serde_json::to_string(v).map_err(|e| e.to_string())?;
         stdin
@@ -117,7 +143,14 @@ impl ChildProc {
 
     /// `msg`, then the stderr tail after a colon when there is one.
     pub fn with_tail(&self, msg: String) -> String {
-        let tail = self.tail.lock().unwrap().iter().map(String::as_str).collect::<Vec<_>>().join("\n");
+        let tail = self
+            .tail
+            .lock()
+            .unwrap()
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
         if tail.trim().is_empty() {
             msg
         } else {
@@ -146,7 +179,11 @@ impl Drop for ChildProc {
 }
 
 /// Each stdout line that parses as JSON, raw-logged first; returns at EOF.
-pub fn read_json_lines(stdout: ChildStdout, raw_log: Option<&RawLog>, mut on_value: impl FnMut(Value)) {
+pub fn read_json_lines(
+    stdout: ChildStdout,
+    raw_log: Option<&RawLog>,
+    mut on_value: impl FnMut(Value),
+) {
     for line in BufReader::new(stdout).lines().map_while(Result::ok) {
         if let Some(log) = raw_log {
             log.write(&line);
@@ -167,5 +204,8 @@ pub fn fail_turn(sink: &Sink, provider: Provider, msg: String) {
 
 /// A string field, empty when missing or not a string.
 pub fn str_of(v: &Value, key: &str) -> String {
-    v.get(key).and_then(|s| s.as_str()).unwrap_or("").to_string()
+    v.get(key)
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string()
 }

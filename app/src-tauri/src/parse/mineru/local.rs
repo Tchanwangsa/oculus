@@ -77,7 +77,9 @@ impl MinerULocal {
     }
 
     pub fn new(base_url: &str) -> Self {
-        Self { base_url: base_url.trim().trim_end_matches('/').to_string() }
+        Self {
+            base_url: base_url.trim().trim_end_matches('/').to_string(),
+        }
     }
 
     /// One multipart POST, streamed. `ureq` 2 has no multipart, so the head,
@@ -90,7 +92,10 @@ impl MinerULocal {
             .metadata()
             .map_err(|e| ParseError::Io(format!("stat {}: {e}", pdf.display())))?
             .len();
-        let name = pdf.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = pdf
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
 
         let boundary = boundary();
         let (head, tail) = envelope(&boundary, &name);
@@ -101,10 +106,15 @@ impl MinerULocal {
             .chain(BufReader::with_capacity(COPY_CHUNK, file).take(size))
             .chain(Cursor::new(tail));
 
-        let agent = ureq::AgentBuilder::new().timeout_connect(CONNECT_TIMEOUT).build();
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(CONNECT_TIMEOUT)
+            .build();
         let sent = agent
             .post(&format!("{}{PARSE_PATH}", self.base_url))
-            .set("Content-Type", &format!("multipart/form-data; boundary={boundary}"))
+            .set(
+                "Content-Type",
+                &format!("multipart/form-data; boundary={boundary}"),
+            )
             .set("Content-Length", &length.to_string())
             .send(body);
 
@@ -127,7 +137,8 @@ impl MinerULocal {
             .map_err(|e| ParseError::Io(format!("read the result: {e}")))?;
         // Flushed by hand: `BufWriter`'s `Drop` flush swallows the error, and a
         // truncated archive would read as a permanent `Document` failure.
-        out.flush().map_err(|e| ParseError::Io(format!("write {}: {e}", destination.display())))
+        out.flush()
+            .map_err(|e| ParseError::Io(format!("write {}: {e}", destination.display())))
     }
 }
 
@@ -150,7 +161,9 @@ impl Parser for MinerULocal {
         let extracted = scratch.path().join("result");
         {
             // Held until the result ZIP is read off the socket.
-            let _permit = PARSE_GATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let _permit = PARSE_GATE
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             check_skipped(pdf)?;
             // `/file_parse` blocks with nothing to subscribe to, so progress is
             // the page count and then the finish — never an estimate between.
@@ -169,7 +182,13 @@ impl Parser for MinerULocal {
             render::render(&items, total, &source_images, images_dir, images_rel)?;
 
         on_progress(Progress::processing(total, total, BACKEND));
-        Ok(ParseOutput::new(pdf, total, pages, Some(BACKEND.to_string()), image_count))
+        Ok(ParseOutput::new(
+            pdf,
+            total,
+            pages,
+            Some(BACKEND.to_string()),
+            image_count,
+        ))
     }
 
     /// `parser_version` is ours by construction (`render` runs here); the skew
@@ -238,9 +257,13 @@ pub fn probe(base_url: &str) -> LocalHealth {
 /// retryable `NotReady` rather than the permanent `Document`.
 fn http_failure(status: u16) -> ParseError {
     if (400..500).contains(&status) {
-        ParseError::Document { code: format!("local-http-{status}") }
+        ParseError::Document {
+            code: format!("local-http-{status}"),
+        }
     } else {
-        ParseError::NotReady { backend: BACKEND.to_string() }
+        ParseError::NotReady {
+            backend: BACKEND.to_string(),
+        }
     }
 }
 
@@ -257,14 +280,19 @@ fn envelope(boundary: &str, filename: &str) -> (Vec<u8>, Vec<u8>) {
          Content-Type: application/pdf\r\n\r\n",
         header_safe(filename)
     ));
-    (head.into_bytes(), format!("\r\n--{boundary}--\r\n").into_bytes())
+    (
+        head.into_bytes(),
+        format!("\r\n--{boundary}--\r\n").into_bytes(),
+    )
 }
 
 /// Drop the characters that could end a quoted header value early. Dropped,
 /// not escaped: RFC 2183 escaping is read inconsistently, and the name only
 /// labels a directory inside the ZIP.
 fn header_safe(name: &str) -> String {
-    name.chars().filter(|c| !matches!(c, '"' | '\\' | '\r' | '\n')).collect()
+    name.chars()
+        .filter(|c| !matches!(c, '"' | '\\' | '\r' | '\n'))
+        .collect()
 }
 
 /// Unique among concurrent requests without a random source.
@@ -334,9 +362,17 @@ mod tests {
         assert_eq!(hit.url, "/file_parse");
 
         let content_type = hit.header("content-type").unwrap_or_default();
-        let boundary = content_type.split("boundary=").nth(1).expect(content_type).to_string();
+        let boundary = content_type
+            .split("boundary=")
+            .nth(1)
+            .expect(content_type)
+            .to_string();
         let body = String::from_utf8_lossy(&hit.body);
-        assert!(body.starts_with(&format!("--{boundary}\r\n")), "{}", &body[..80]);
+        assert!(
+            body.starts_with(&format!("--{boundary}\r\n")),
+            "{}",
+            &body[..80]
+        );
         assert!(body.ends_with(&format!("\r\n--{boundary}--\r\n")));
 
         for (name, value) in FIELDS {
@@ -345,7 +381,10 @@ mod tests {
                 "{name} is not in the body"
             );
         }
-        assert!(body.contains("name=\"files\"; filename=\"Lecture 3.pdf\""), "no file part");
+        assert!(
+            body.contains("name=\"files\"; filename=\"Lecture 3.pdf\""),
+            "no file part"
+        );
         assert!(
             hit.body.windows(bytes.len()).any(|window| window == bytes),
             "the PDF is not in the body"
@@ -372,15 +411,32 @@ mod tests {
         let seen: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
         let output = MinerULocal::new(&server.origin())
             .parse(&pdf, &images, "Lecture 3_images", &|progress| {
-                seen.lock().unwrap().push((progress.pages_done, progress.total_pages));
+                seen.lock()
+                    .unwrap()
+                    .push((progress.pages_done, progress.total_pages));
             })
             .unwrap();
 
         assert_eq!(output.page_count, 3);
         assert_eq!(output.pages.len(), 3);
-        assert_eq!(output.pages.iter().map(|page| page.page_no).collect::<Vec<_>>(), vec![1, 2, 3]);
-        assert!(output.pages[0].markdown.contains("First slide"), "{:?}", output.pages[0]);
-        assert!(output.pages[1].markdown.contains("Second slide"), "{:?}", output.pages[1]);
+        assert_eq!(
+            output
+                .pages
+                .iter()
+                .map(|page| page.page_no)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert!(
+            output.pages[0].markdown.contains("First slide"),
+            "{:?}",
+            output.pages[0]
+        );
+        assert!(
+            output.pages[1].markdown.contains("Second slide"),
+            "{:?}",
+            output.pages[1]
+        );
         assert_eq!(output.pages[2].markdown, "");
         assert_eq!(output.backend.as_deref(), Some(BACKEND));
         assert_eq!(output.parser_version, PARSER_VERSION);
@@ -441,7 +497,10 @@ mod tests {
         let dir = Scratch::new("local-skip-during");
         let pdf = dir.join("Late.pdf");
         write_pdf(&pdf, 1);
-        let zip = result_zip("Late", json!([{ "type": "text", "text": "x", "page_idx": 0 }]));
+        let zip = result_zip(
+            "Late",
+            json!([{ "type": "text", "text": "x", "page_idx": 0 }]),
+        );
         let server = {
             let pdf = pdf.clone();
             // The skip arrives while the server is still parsing.
@@ -484,7 +543,8 @@ mod tests {
         let pdf = dir.join("Lecture 3.pdf");
         write_pdf(&pdf, 1);
 
-        let refused = FakeServer::start(|_| (409, b"{\"detail\":\"http://signed.example\"}".to_vec()));
+        let refused =
+            FakeServer::start(|_| (409, b"{\"detail\":\"http://signed.example\"}".to_vec()));
         let error = MinerULocal::new(&refused.origin())
             .parse(&pdf, &dir.join("images"), "images", &|_| {})
             .unwrap_err();
@@ -496,7 +556,10 @@ mod tests {
             .parse(&pdf, &dir.join("images"), "images", &|_| {})
             .unwrap_err();
         assert_eq!(error.kind(), "not_ready");
-        assert!(error.retryable(), "a 500 is the server's, and the file deserves another go");
+        assert!(
+            error.retryable(),
+            "a 500 is the server's, and the file deserves another go"
+        );
     }
 
     #[test]
@@ -510,20 +573,38 @@ mod tests {
         let error = MinerULocal::new(&moved.origin())
             .parse(&pdf, &dir.join("images"), "images", &|_| {})
             .unwrap_err();
-        assert_eq!(error.kind(), "not_ready", "a redirect says nothing about the PDF");
-        assert!(error.retryable(), "fixing the address must be enough to recover the file");
+        assert_eq!(
+            error.kind(),
+            "not_ready",
+            "a redirect says nothing about the PDF"
+        );
+        assert!(
+            error.retryable(),
+            "fixing the address must be enough to recover the file"
+        );
     }
 
     // ── Probing ──────────────────────────────────────────────────────────────
 
     #[test]
     fn health_reads_minerus_own_status_word() {
-        let healthy =
-            FakeServer::start(|_| (200, json!({ "status": "healthy", "version": "3.4.5" }).to_string().into_bytes()));
+        let healthy = FakeServer::start(|_| {
+            (
+                200,
+                json!({ "status": "healthy", "version": "3.4.5" })
+                    .to_string()
+                    .into_bytes(),
+            )
+        });
         assert_eq!(probe(&healthy.origin()), LocalHealth::Ready);
         assert!(MinerULocal::new(&healthy.origin()).health().ready);
 
-        let starting = FakeServer::start(|_| (503, json!({ "status": "unhealthy" }).to_string().into_bytes()));
+        let starting = FakeServer::start(|_| {
+            (
+                503,
+                json!({ "status": "unhealthy" }).to_string().into_bytes(),
+            )
+        });
         assert_eq!(probe(&starting.origin()), LocalHealth::NotServing);
 
         assert_eq!(probe(&dead_origin()), LocalHealth::Unreachable);
@@ -580,8 +661,11 @@ mod tests {
                                 length = value;
                             }
                         }
-                        std::io::copy(&mut reader.by_ref().take(length as u64), &mut std::io::sink())
-                            .unwrap();
+                        std::io::copy(
+                            &mut reader.by_ref().take(length as u64),
+                            &mut std::io::sink(),
+                        )
+                        .unwrap();
 
                         // In flight from here to the response.
                         let now = live.fetch_add(1, Ordering::SeqCst) + 1;
@@ -611,7 +695,9 @@ mod tests {
                     let pdf = root.join(format!("Doc{n}.pdf"));
                     write_pdf(&pdf, 1);
                     let images = root.join(format!("images{n}"));
-                    MinerULocal::new(&origin).parse(&pdf, &images, "images", &|_| {}).unwrap();
+                    MinerULocal::new(&origin)
+                        .parse(&pdf, &images, "images", &|_| {})
+                        .unwrap();
                 })
             })
             .collect();
@@ -620,7 +706,11 @@ mod tests {
         }
         served.join().ok();
 
-        assert_eq!(peak.load(Ordering::SeqCst), 1, "both parses were in flight at once");
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            1,
+            "both parses were in flight at once"
+        );
     }
 
     /// A file waiting for the gate has reported nothing, so it still reads as
@@ -634,14 +724,21 @@ mod tests {
         let server = FakeServer::start(move |_| (200, zip.clone()));
 
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let held = PARSE_GATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let held = PARSE_GATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let parse = {
             let (origin, seen, root) = (server.origin(), seen.clone(), dir.to_path_buf());
             std::thread::spawn(move || {
                 MinerULocal::new(&origin)
-                    .parse(&root.join("Doc.pdf"), &root.join("images"), "images", &|progress| {
-                        seen.lock().unwrap().push(progress.pages_done);
-                    })
+                    .parse(
+                        &root.join("Doc.pdf"),
+                        &root.join("images"),
+                        "images",
+                        &|progress| {
+                            seen.lock().unwrap().push(progress.pages_done);
+                        },
+                    )
                     .unwrap();
             })
         };
@@ -715,10 +812,13 @@ mod tests {
     #[test]
     #[ignore = "needs a MinerU 3.x server on 127.0.0.1:8000 — see the doc comment"]
     fn a_real_mineru_answers_the_way_this_client_expects() {
-        let base =
-            std::env::var("OCULUS_MINERU_URL")
-                .unwrap_or_else(|_| crate::parse::LOCAL_BASE_URL.to_string());
-        assert_eq!(probe(&base), LocalHealth::Ready, "no healthy MinerU at {base}");
+        let base = std::env::var("OCULUS_MINERU_URL")
+            .unwrap_or_else(|_| crate::parse::LOCAL_BASE_URL.to_string());
+        assert_eq!(
+            probe(&base),
+            LocalHealth::Ready,
+            "no healthy MinerU at {base}"
+        );
 
         let dir = Scratch::new("local-live");
         let pdf = match std::env::var("OCULUS_MINERU_PDF") {
@@ -727,7 +827,11 @@ mod tests {
                 let path = dir.join("Live.pdf");
                 write_text_pdf(
                     &path,
-                    &["Chapter One", "The quick brown fox", "jumps over the lazy dog."],
+                    &[
+                        "Chapter One",
+                        "The quick brown fox",
+                        "jumps over the lazy dog.",
+                    ],
                 );
                 path
             }
@@ -745,8 +849,15 @@ mod tests {
         assert_eq!(output.pages.len(), output.page_count as usize);
         assert!(output.page_count > 0, "no pages");
         // At least one page with text proves the form fields landed.
-        let written = output.pages.iter().filter(|p| !p.markdown.trim().is_empty()).count();
-        assert!(written > 0, "every page came back empty — check the form fields");
+        let written = output
+            .pages
+            .iter()
+            .filter(|p| !p.markdown.trim().is_empty())
+            .count();
+        assert!(
+            written > 0,
+            "every page came back empty — check the form fields"
+        );
         eprintln!(
             "{} pages, {written} with markdown, {} images",
             output.page_count, output.image_count

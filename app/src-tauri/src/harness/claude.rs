@@ -82,7 +82,10 @@ impl ClaudeSession {
                 .arg("--no-session-persistence");
         }
         cmd.args(["--add-dir", &base.library.display().to_string()]);
-        cmd.args(["--settings", &settings_json(&base.library, &base.cwd, cfg.oculus.as_deref())]);
+        cmd.args([
+            "--settings",
+            &settings_json(&base.library, &base.cwd, cfg.oculus.as_deref()),
+        ]);
         cmd.current_dir(&base.cwd)
             .env_clear()
             .envs(base.env.iter().map(|(k, v)| (k, v)))
@@ -198,7 +201,10 @@ impl ClaudeSession {
                 .unwrap_or("refused");
             return Err(format!("claude would not rewind: {why}"));
         }
-        if v.pointer("/response/response/rewound").and_then(|b| b.as_bool()) == Some(false) {
+        if v.pointer("/response/response/rewound")
+            .and_then(|b| b.as_bool())
+            == Some(false)
+        {
             return Err("claude found nothing to rewind to".into());
         }
         Ok(())
@@ -284,7 +290,9 @@ pub fn list_models(
     let code = proc.kill();
     match answer? {
         Some(result) => result,
-        None => Err(proc.with_tail(format!("claude exited (code {code:?}) before listing its models"))),
+        None => Err(proc.with_tail(format!(
+            "claude exited (code {code:?}) before listing its models"
+        ))),
     }
 }
 
@@ -303,7 +311,10 @@ fn models_from_response(v: &Value, request_id: &str) -> Option<Result<Vec<ModelI
             .unwrap_or("refused");
         return Some(Err(format!("claude would not initialize: {why}")));
     }
-    let Some(rows) = v.pointer("/response/response/models").and_then(|m| m.as_array()) else {
+    let Some(rows) = v
+        .pointer("/response/response/models")
+        .and_then(|m| m.as_array())
+    else {
         return Some(Err("claude's initialize answer has no models".into()));
     };
     Some(Ok(rows
@@ -316,7 +327,11 @@ fn models_from_response(v: &Value, request_id: &str) -> Option<Result<Vec<ModelI
             supported_effort_levels: m
                 .get("supportedEffortLevels")
                 .and_then(|a| a.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
         })
         .filter(|m| !m.value.is_empty() || !m.resolved_model.is_empty())
@@ -473,12 +488,15 @@ impl Translator {
                     return out;
                 };
                 if self.turn_first_assistant.is_none() {
-                    self.turn_first_assistant = v.get("uuid").and_then(|u| u.as_str()).map(String::from);
+                    self.turn_first_assistant =
+                        v.get("uuid").and_then(|u| u.as_str()).map(String::from);
                 }
                 self.open_turn(&mut out);
                 if let Some(u) = v.pointer("/message/usage") {
                     let n = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
-                    let ctx = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+                    let ctx = n("input_tokens")
+                        + n("cache_read_input_tokens")
+                        + n("cache_creation_input_tokens");
                     if ctx > 0 {
                         self.last_context_tokens = Some(ctx);
                     }
@@ -535,7 +553,10 @@ impl Translator {
                         continue;
                     }
                     let id = str_of(block, "tool_use_id");
-                    let is_error = block.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false);
+                    let is_error = block
+                        .get("is_error")
+                        .and_then(|b| b.as_bool())
+                        .unwrap_or(false);
                     let output = tool_result_text(block, v.get("tool_use_result"));
                     out.push(HarnessEvent::ToolFinished {
                         id,
@@ -566,10 +587,14 @@ impl Translator {
                     let n = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
                     let input = n("input_tokens");
                     let cached = n("cache_read_input_tokens") + n("cache_creation_input_tokens");
-                    let context_window = v
-                        .get("modelUsage")
-                        .and_then(|m| m.as_object())
-                        .and_then(|m| m.values().filter_map(|x| x.get("contextWindow")?.as_u64()).max());
+                    let context_window =
+                        v.get("modelUsage")
+                            .and_then(|m| m.as_object())
+                            .and_then(|m| {
+                                m.values()
+                                    .filter_map(|x| x.get("contextWindow")?.as_u64())
+                                    .max()
+                            });
                     out.push(HarnessEvent::Usage {
                         input_tokens: input + cached,
                         output_tokens: n("output_tokens"),
@@ -585,9 +610,12 @@ impl Translator {
                         .filter(|s| !s.is_empty())
                         .map(String::from)
                         .or_else(|| {
-                            v.get("errors")
-                                .and_then(|e| e.as_array())
-                                .map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join("\n"))
+                            v.get("errors").and_then(|e| e.as_array()).map(|a| {
+                                a.iter()
+                                    .filter_map(|x| x.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            })
                         })
                         .filter(|s| !s.is_empty())
                         .unwrap_or_else(|| format!("claude: {subtype}"));
@@ -615,7 +643,10 @@ impl Translator {
                 });
             }
             "rate_limit_event" => {
-                if let Some(w) = v.pointer("/rate_limit_info/unifiedWindows").and_then(|w| w.as_object()) {
+                if let Some(w) = v
+                    .pointer("/rate_limit_info/unifiedWindows")
+                    .and_then(|w| w.as_object())
+                {
                     let mut windows = Vec::new();
                     for (k, win) in w {
                         let label = match k.as_str() {
@@ -627,7 +658,11 @@ impl Translator {
                         };
                         windows.push(RateWindow {
                             label: label.to_string(),
-                            used_percent: win.get("utilization").and_then(|u| u.as_f64()).unwrap_or(0.0) * 100.0,
+                            used_percent: win
+                                .get("utilization")
+                                .and_then(|u| u.as_f64())
+                                .unwrap_or(0.0)
+                                * 100.0,
                             resets_at: win.get("resetsAt").and_then(|r| r.as_i64()),
                         });
                     }
@@ -695,7 +730,10 @@ fn anchor_for(path: &Path, first_assistant: Option<&str>) -> Option<String> {
         by_uuid.insert(
             uuid.to_string(),
             Row {
-                parent: v.get("parentUuid").and_then(|p| p.as_str()).map(String::from),
+                parent: v
+                    .get("parentUuid")
+                    .and_then(|p| p.as_str())
+                    .map(String::from),
                 question,
             },
         );
@@ -863,7 +901,10 @@ mod tests {
         std::env::set_var("CLAUDE_CONFIG_DIR", &*dir);
 
         let found = transcript_path("/tmp/a b/.claude/c_d", "sess");
-        assert_eq!(found.as_deref(), Some(projects.join("sess.jsonl").as_path()));
+        assert_eq!(
+            found.as_deref(),
+            Some(projects.join("sess.jsonl").as_path())
+        );
         assert_eq!(transcript_path("/tmp/a b/.claude/c_d", "gone"), None);
 
         std::env::remove_var("CLAUDE_CONFIG_DIR");
@@ -881,7 +922,10 @@ mod tests {
             .collect();
 
         let session = events.iter().find_map(|e| match e {
-            HarnessEvent::SessionStarted { provider_session_id, .. } => Some(provider_session_id.clone()),
+            HarnessEvent::SessionStarted {
+                provider_session_id,
+                ..
+            } => Some(provider_session_id.clone()),
             _ => None,
         });
         assert!(session.is_some(), "session id from system/init");
@@ -895,7 +939,10 @@ mod tests {
             .collect();
         assert_eq!(tools, vec![(ToolKind::Bash, "ls -a".to_string())]);
 
-        let finished = events.iter().filter(|e| matches!(e, HarnessEvent::ToolFinished { ok: true, .. })).count();
+        let finished = events
+            .iter()
+            .filter(|e| matches!(e, HarnessEvent::ToolFinished { ok: true, .. }))
+            .count();
         assert_eq!(finished, 1);
 
         let deltas: String = events
@@ -909,11 +956,25 @@ mod tests {
             HarnessEvent::AssistantMessage { text } => Some(text.clone()),
             _ => None,
         });
-        assert_eq!(message.as_deref(), Some(deltas.as_str()), "deltas add up to the message");
+        assert_eq!(
+            message.as_deref(),
+            Some(deltas.as_str()),
+            "deltas add up to the message"
+        );
 
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed"));
-        assert!(events.iter().any(|e| matches!(e, HarnessEvent::Usage { cost_usd: Some(_), .. })));
-        assert!(events.iter().any(|e| matches!(e, HarnessEvent::RateLimits { windows } if windows.len() == 2)));
+        assert!(
+            matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed")
+        );
+        assert!(events.iter().any(|e| matches!(
+            e,
+            HarnessEvent::Usage {
+                cost_usd: Some(_),
+                ..
+            }
+        )));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, HarnessEvent::RateLimits { windows } if windows.len() == 2)));
     }
 
     /// Recorded: the stop's `result` calls itself an error, with zeroed usage.
@@ -928,11 +989,15 @@ mod tests {
             .collect();
 
         assert!(
-            !events.iter().any(|e| matches!(e, HarnessEvent::Error { .. })),
+            !events
+                .iter()
+                .any(|e| matches!(e, HarnessEvent::Error { .. })),
             "the CLI's own diagnostic is not something the student did"
         );
         assert!(
-            !events.iter().any(|e| matches!(e, HarnessEvent::Usage { .. })),
+            !events
+                .iter()
+                .any(|e| matches!(e, HarnessEvent::Usage { .. })),
             "an interrupted result reports zeros; folding them in blanks the meter"
         );
         let deltas: String = events
@@ -947,7 +1012,9 @@ mod tests {
             _ => None,
         });
         assert_eq!(message.as_deref(), Some(deltas.trim()));
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted"));
+        assert!(
+            matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted")
+        );
     }
 
     /// `initialize` from CLI 2.1.281, cut to its models. Haiku declares no
@@ -962,9 +1029,16 @@ mod tests {
         ]}}}"#;
         let v: Value = serde_json::from_str(line).unwrap();
 
-        assert!(models_from_response(&v, "someone-else").is_none(), "another request's answer");
+        assert!(
+            models_from_response(&v, "someone-else").is_none(),
+            "another request's answer"
+        );
         let models = models_from_response(&v, "oculus-models").unwrap().unwrap();
-        assert_eq!(models.len(), 3, "a row with neither name is dropped, not fatal");
+        assert_eq!(
+            models.len(),
+            3,
+            "a row with neither name is dropped, not fatal"
+        );
         assert_eq!(models[0].value, "default");
         assert_eq!(models[0].resolved_model, "claude-opus-5-5[1m]");
         assert_eq!(models[0].supported_effort_levels.len(), 5);
@@ -976,7 +1050,9 @@ mod tests {
             r#"{"type":"control_response","response":{"subtype":"error","request_id":"oculus-models","error":"not logged in"}}"#,
         )
         .unwrap();
-        assert!(models_from_response(&refused, "oculus-models").unwrap().is_err());
+        assert!(models_from_response(&refused, "oculus-models")
+            .unwrap()
+            .is_err());
     }
 
     /// Needs an installed CLI: `cargo test --lib list_models_from_the_real_cli -- --ignored`.
@@ -987,7 +1063,11 @@ mod tests {
         let cwd = std::env::temp_dir();
         let started = std::time::Instant::now();
         let models = list_models(&bin, &cwd, &crate::harness::discover::child_env()).unwrap();
-        eprintln!("{} models in {:?}: {models:#?}", models.len(), started.elapsed());
+        eprintln!(
+            "{} models in {:?}: {models:#?}",
+            models.len(),
+            started.elapsed()
+        );
         assert!(!models.is_empty());
     }
 }

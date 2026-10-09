@@ -22,7 +22,13 @@ use std::collections::BTreeMap;
 // collisions; HMAC-SHA1 is not, and is what authenticator apps implement.
 
 fn sha1(msg: &[u8]) -> [u8; 20] {
-    let mut h: [u32; 5] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476, 0xC3D2_E1F0];
+    let mut h: [u32; 5] = [
+        0x6745_2301,
+        0xEFCD_AB89,
+        0x98BA_DCFE,
+        0x1032_5476,
+        0xC3D2_E1F0,
+    ];
     let bit_len = (msg.len() as u64).wrapping_mul(8);
 
     let mut data = msg.to_vec();
@@ -77,7 +83,11 @@ fn sha1(msg: &[u8]) -> [u8; 20] {
 
 fn hmac_sha1(key: &[u8], msg: &[u8]) -> [u8; 20] {
     const BLOCK: usize = 64;
-    let mut k = if key.len() > BLOCK { sha1(key).to_vec() } else { key.to_vec() };
+    let mut k = if key.len() > BLOCK {
+        sha1(key).to_vec()
+    } else {
+        key.to_vec()
+    };
     k.resize(BLOCK, 0);
 
     let mut inner = Vec::with_capacity(BLOCK + msg.len());
@@ -177,10 +187,20 @@ impl Credentials {
     /// `UnreadableCredentials`, never "not set up".
     pub fn load() -> Result<Option<Credentials>, LoginError> {
         let get = |account| read(account).map_err(LoginError::UnreadableCredentials);
-        let Some(username) = get("username")? else { return Ok(None) };
-        let Some(password) = get("password")? else { return Ok(None) };
-        let Some(totp_secret) = get("totp_secret")? else { return Ok(None) };
-        Ok(Some(Credentials { username, password, totp_secret }))
+        let Some(username) = get("username")? else {
+            return Ok(None);
+        };
+        let Some(password) = get("password")? else {
+            return Ok(None);
+        };
+        let Some(totp_secret) = get("totp_secret")? else {
+            return Ok(None);
+        };
+        Ok(Some(Credentials {
+            username,
+            password,
+            totp_secret,
+        }))
     }
 }
 
@@ -341,7 +361,11 @@ impl std::fmt::Display for LoginError {
                 f,
                 "Okta asked for a factor this app cannot answer. It offered: {}. \
                  Automated sign-in needs Google Authenticator (TOTP) enrolled.",
-                if opts.is_empty() { "nothing recognisable".to_string() } else { opts.join(", ") }
+                if opts.is_empty() {
+                    "nothing recognisable".to_string()
+                } else {
+                    opts.join(", ")
+                }
             ),
             LoginError::Locked(m) => write!(f, "The account is locked or blocked: {m}"),
             LoginError::Network(m) => write!(f, "Could not reach the sign-in service: {m}"),
@@ -405,7 +429,9 @@ fn walk(jar: &mut Jar, start: &str, max: usize) -> Result<(url::Url, String), Lo
         let body = resp.into_string().unwrap_or_default();
         return Ok((url, body));
     }
-    Err(LoginError::Unexpected("redirect loop during sign-in".into()))
+    Err(LoginError::Unexpected(
+        "redirect loop during sign-in".into(),
+    ))
 }
 
 /// Start the SAML flow and pull the IDX state token out of the login page.
@@ -453,7 +479,9 @@ fn state_token_candidates(html: &str) -> Vec<String> {
             continue;
         };
         let rest = &tail[sep.len()..];
-        let Some(end) = rest.find(quote) else { continue };
+        let Some(end) = rest.find(quote) else {
+            continue;
+        };
 
         let raw = unescape_js(&rest[..end]);
         if looks_like_state_token(&raw) && !out.contains(&raw) {
@@ -496,7 +524,9 @@ fn idx(jar: &mut Jar, url: &str, body: serde_json::Value) -> Result<serde_json::
         Err(e) => return Err(LoginError::Network(e.to_string())),
     };
     jar.absorb(SSO_HOST, &resp);
-    let text = resp.into_string().map_err(|e| LoginError::Network(e.to_string()))?;
+    let text = resp
+        .into_string()
+        .map_err(|e| LoginError::Network(e.to_string()))?;
     serde_json::from_str(&text)
         .map_err(|e| LoginError::Unexpected(format!("unreadable IDX response: {e}")))
 }
@@ -504,11 +534,16 @@ fn idx(jar: &mut Jar, url: &str, body: serde_json::Value) -> Result<serde_json::
 // ── Remediation helpers ──────────────────────────────────────────────────────
 
 fn remediations(state: &serde_json::Value) -> Vec<&serde_json::Value> {
-    state["remediation"]["value"].as_array().map(|a| a.iter().collect()).unwrap_or_default()
+    state["remediation"]["value"]
+        .as_array()
+        .map(|a| a.iter().collect())
+        .unwrap_or_default()
 }
 
 fn remediation<'a>(state: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
-    remediations(state).into_iter().find(|r| r["name"].as_str() == Some(name))
+    remediations(state)
+        .into_iter()
+        .find(|r| r["name"].as_str() == Some(name))
 }
 
 fn remediation_names(state: &serde_json::Value) -> Vec<String> {
@@ -538,7 +573,11 @@ fn option_fields(option: &serde_json::Value) -> (Option<String>, Option<String>)
 fn authenticator_options(rem: &serde_json::Value) -> Vec<&serde_json::Value> {
     rem["value"]
         .as_array()
-        .and_then(|fields| fields.iter().find(|f| f["name"].as_str() == Some("authenticator")))
+        .and_then(|fields| {
+            fields
+                .iter()
+                .find(|f| f["name"].as_str() == Some("authenticator"))
+        })
         .and_then(|f| f["options"].as_array())
         .map(|o| o.iter().collect())
         .unwrap_or_default()
@@ -587,7 +626,10 @@ fn select_payload(rem: &serde_json::Value, want: Factor) -> Option<serde_json::V
 /// some failures as `messages`, others as a bare `errorSummary`.
 fn summarise(state: &serde_json::Value) -> String {
     if let Some(messages) = state["messages"]["value"].as_array() {
-        let joined: Vec<&str> = messages.iter().filter_map(|m| m["message"].as_str()).collect();
+        let joined: Vec<&str> = messages
+            .iter()
+            .filter_map(|m| m["message"].as_str())
+            .collect();
         if !joined.is_empty() {
             return joined.join(" ");
         }
@@ -609,7 +651,11 @@ fn challenged_factor(state: &serde_json::Value, password_done: bool) -> Option<F
         .map(|v| v.get("value").unwrap_or(v));
 
     let Some(cur) = current else {
-        return Some(if password_done { Factor::Totp } else { Factor::Password });
+        return Some(if password_done {
+            Factor::Totp
+        } else {
+            Factor::Password
+        });
     };
 
     let key = cur["key"].as_str().unwrap_or("");
@@ -730,7 +776,11 @@ fn settle(r: &mut AttemptRecord, result: &Result<String, LoginError>) {
         }
         // Okta gave no verdict, so it does not count against the account.
         Err(LoginError::Network(_)) => {}
-        Err(e @ (LoginError::Locked(_) | LoginError::BadPassword(_) | LoginError::UnsupportedFactor(_))) => {
+        Err(
+            e @ (LoginError::Locked(_)
+            | LoginError::BadPassword(_)
+            | LoginError::UnsupportedFactor(_)),
+        ) => {
             r.failures += 1;
             r.paused = Some(e.to_string());
         }
@@ -851,7 +901,10 @@ fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<St
         // Username, and on some policies the password with it.
         if !identified {
             if let Some(rem) = remediation(&state, "identify") {
-                let href = rem["href"].as_str().unwrap_or(&format!("{idx_base}/identify")).to_string();
+                let href = rem["href"]
+                    .as_str()
+                    .unwrap_or(&format!("{idx_base}/identify"))
+                    .to_string();
                 let takes_password = rem["value"]
                     .as_array()
                     .is_some_and(|f| f.iter().any(|x| x["name"].as_str() == Some("credentials")));
@@ -876,27 +929,27 @@ fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<St
         // taking it re-picks the same authenticator forever.
         if let Some(rem) = remediation(&state, "challenge-authenticator") {
             if let Some(kind) = challenged_factor(&state, password_done) {
-            let passcode = match kind {
-                Factor::Password => creds.password.clone(),
-                Factor::Totp => {
-                    wait_for_fresh_code();
-                    totp_now(&creds.totp_secret).map_err(LoginError::Unexpected)?
+                let passcode = match kind {
+                    Factor::Password => creds.password.clone(),
+                    Factor::Totp => {
+                        wait_for_fresh_code();
+                        totp_now(&creds.totp_secret).map_err(LoginError::Unexpected)?
+                    }
+                };
+                let href = rem["href"]
+                    .as_str()
+                    .unwrap_or(&format!("{idx_base}/challenge/answer"))
+                    .to_string();
+                state = idx(
+                    &mut jar,
+                    &href,
+                    serde_json::json!({ "stateHandle": handle, "credentials": { "passcode": passcode } }),
+                )?;
+                check_messages(&state, Some(kind))?;
+                if kind == Factor::Password {
+                    password_done = true;
                 }
-            };
-            let href = rem["href"]
-                .as_str()
-                .unwrap_or(&format!("{idx_base}/challenge/answer"))
-                .to_string();
-            state = idx(
-                &mut jar,
-                &href,
-                serde_json::json!({ "stateHandle": handle, "credentials": { "passcode": passcode } }),
-            )?;
-            check_messages(&state, Some(kind))?;
-            if kind == Factor::Password {
-                password_done = true;
-            }
-            continue;
+                continue;
             }
             // Challenged for push or a security key: fall through to the
             // chooser and switch to something answerable.
@@ -904,7 +957,11 @@ fn attempt_sign_in(data_dir: &std::path::Path, creds: &Credentials) -> Result<St
 
         // Pick the next factor: password first, then TOTP.
         if let Some(rem) = remediation(&state, "select-authenticator-authenticate") {
-            let want = if password_done { Factor::Totp } else { Factor::Password };
+            let want = if password_done {
+                Factor::Totp
+            } else {
+                Factor::Password
+            };
             // Selecting the same factor twice means the answer never landed.
             if switched_to == Some(want) {
                 return Err(LoginError::Unexpected(format!(
@@ -1014,8 +1071,7 @@ fn complete_saml(jar: &mut Jar, saml_url: &str) -> Result<String, LoginError> {
         .unwrap_or_default();
 
     let agent = agent();
-    let mut url =
-        url::Url::parse(saml_url).map_err(|e| LoginError::Unexpected(e.to_string()))?;
+    let mut url = url::Url::parse(saml_url).map_err(|e| LoginError::Unexpected(e.to_string()))?;
     let mut form: Option<String> = None;
     let mut posted_assertion = false;
 
@@ -1060,15 +1116,16 @@ fn complete_saml(jar: &mut Jar, saml_url: &str) -> Result<String, LoginError> {
         }
 
         let body = resp.into_string().unwrap_or_default();
-        let (action, fields) = parse_saml_form(&body).ok_or_else(|| {
-            LoginError::Unexpected(format!("no SAML assertion form at {url}"))
-        })?;
+        let (action, fields) = parse_saml_form(&body)
+            .ok_or_else(|| LoginError::Unexpected(format!("no SAML assertion form at {url}")))?;
         url = url
             .join(&action)
             .map_err(|e| LoginError::Unexpected(format!("bad form action: {e}")))?;
-        form = Some(url::form_urlencoded::Serializer::new(String::new())
-            .extend_pairs(&fields)
-            .finish());
+        form = Some(
+            url::form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(&fields)
+                .finish(),
+        );
         posted_assertion = true;
     }
     Err(LoginError::Unexpected(
@@ -1086,7 +1143,10 @@ fn parse_saml_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
         let fields: Vec<(String, String)> = form
             .select(&input_sel)
             .filter_map(|i| {
-                Some((i.value().attr("name")?.to_string(), i.value().attr("value").unwrap_or("").to_string()))
+                Some((
+                    i.value().attr("name")?.to_string(),
+                    i.value().attr("value").unwrap_or("").to_string(),
+                ))
             })
             .collect();
         if fields.iter().any(|(k, _)| k == "SAMLResponse") {
@@ -1126,10 +1186,18 @@ pub fn diagnose() -> String {
         "signin-container",
         "OktaUtil",
     ];
-    let seen: Vec<&str> = markers.iter().copied().filter(|m| body.contains(m)).collect();
+    let seen: Vec<&str> = markers
+        .iter()
+        .copied()
+        .filter(|m| body.contains(m))
+        .collect();
     out.push_str(&format!(
         "markers     {}\n",
-        if seen.is_empty() { "none".to_string() } else { seen.join(", ") }
+        if seen.is_empty() {
+            "none".to_string()
+        } else {
+            seen.join(", ")
+        }
     ));
 
     let candidates = state_token_candidates(&body);
@@ -1194,10 +1262,15 @@ pub fn okta_clear_credentials() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn okta_sign_in(app: tauri::AppHandle) -> Result<String, String> {
-    crate::blocking::run(move || run_sign_in(&app, &crate::paths::data_dir(), Trigger::Manual)).await
+    crate::blocking::run(move || run_sign_in(&app, &crate::paths::data_dir(), Trigger::Manual))
+        .await
 }
 
-fn run_sign_in(app: &tauri::AppHandle, dir: &std::path::Path, trigger: Trigger) -> Result<String, String> {
+fn run_sign_in(
+    app: &tauri::AppHandle,
+    dir: &std::path::Path,
+    trigger: Trigger,
+) -> Result<String, String> {
     sign_in(dir, trigger).map_err(|e| e.to_string())?;
     signed_in(app, dir)
 }
@@ -1243,11 +1316,17 @@ mod tests {
         let mut r = AttemptRecord::default();
         assert!(admit(&mut r, Trigger::Startup, 1_000_000).is_ok());
         settle(&mut r, &Err(LoginError::BadTotp(String::new())));
-        assert!(matches!(admit(&mut r, Trigger::Browser, 1_000_599), Err(LoginError::Waiting(1))));
+        assert!(matches!(
+            admit(&mut r, Trigger::Browser, 1_000_599),
+            Err(LoginError::Waiting(1))
+        ));
         assert!(admit(&mut r, Trigger::KeepAlive, 1_000_600).is_ok());
         settle(&mut r, &Err(LoginError::Unexpected(String::new())));
         // Two failures in a row: an hour.
-        assert!(matches!(admit(&mut r, Trigger::KeepAlive, 1_003_000), Err(LoginError::Waiting(_))));
+        assert!(matches!(
+            admit(&mut r, Trigger::KeepAlive, 1_003_000),
+            Err(LoginError::Waiting(_))
+        ));
         assert!(admit(&mut r, Trigger::Manual, 1_003_000).is_ok());
         settle(&mut r, &Err(LoginError::BadTotp(String::new())));
         assert_eq!(wait_after(r.failures), 6 * 3600);
@@ -1261,7 +1340,10 @@ mod tests {
         admit(&mut r, Trigger::Startup, 5_000).unwrap();
         settle(&mut r, &Err(LoginError::Network(String::new())));
         assert_eq!(r.failures, 0);
-        assert!(matches!(admit(&mut r, Trigger::Startup, 5_100), Err(LoginError::Waiting(500))));
+        assert!(matches!(
+            admit(&mut r, Trigger::Startup, 5_100),
+            Err(LoginError::Waiting(500))
+        ));
     }
 
     #[test]
@@ -1269,7 +1351,10 @@ mod tests {
         let mut r = AttemptRecord::default();
         admit(&mut r, Trigger::KeepAlive, 10_000).unwrap();
         settle(&mut r, &Err(LoginError::Locked("Too many attempts".into())));
-        assert!(matches!(admit(&mut r, Trigger::KeepAlive, 1_000_000), Err(LoginError::Paused(_))));
+        assert!(matches!(
+            admit(&mut r, Trigger::KeepAlive, 1_000_000),
+            Err(LoginError::Paused(_))
+        ));
         assert!(admit(&mut r, Trigger::Manual, 1_000_000).is_ok());
         settle(&mut r, &Ok(String::new()));
         assert!(r.paused.is_none());
@@ -1286,7 +1371,11 @@ mod tests {
         ];
         for (counter, want) in expected.iter().enumerate() {
             // TOTP with step 1 at time == counter is exactly HOTP(counter).
-            assert_eq!(&totp_at(secret, counter as u64, 1, 6), want, "counter {counter}");
+            assert_eq!(
+                &totp_at(secret, counter as u64, 1, 6),
+                want,
+                "counter {counter}"
+            );
         }
     }
 
@@ -1307,7 +1396,10 @@ mod tests {
 
     #[test]
     fn decodes_base32_the_way_authenticator_apps_write_it() {
-        assert_eq!(base32_decode("GEZDGNBVGY3TQOJQ").unwrap(), b"12345678901234567890"[..10].to_vec());
+        assert_eq!(
+            base32_decode("GEZDGNBVGY3TQOJQ").unwrap(),
+            b"12345678901234567890"[..10].to_vec()
+        );
         // Okta shows the setup key in spaced, lowercase groups.
         assert_eq!(
             base32_decode("gezd gnbv gy3t qojq").unwrap(),
@@ -1380,7 +1472,10 @@ mod tests {
             option("Google Authenticator", "aut_ga", "otp"),
         ]));
 
-        assert_eq!(select_payload(&rem, Factor::Password).unwrap()["id"], "aut_pw");
+        assert_eq!(
+            select_payload(&rem, Factor::Password).unwrap()["id"],
+            "aut_pw"
+        );
 
         // Google Authenticator wins over Okta Verify's TOTP (different seed).
         let totp = select_payload(&rem, Factor::Totp).unwrap();
@@ -1461,7 +1556,10 @@ mod tests {
         let state = serde_json::json!({
             "messages": { "value": [{ "class": "ERROR", "message": "Your account is locked." }] }
         });
-        assert!(matches!(check_messages(&state, Some(Factor::Totp)), Err(LoginError::Locked(_))));
+        assert!(matches!(
+            check_messages(&state, Some(Factor::Totp)),
+            Err(LoginError::Locked(_))
+        ));
     }
 
     #[test]
@@ -1489,8 +1587,14 @@ mod tests {
     #[test]
     fn cookies_are_filed_per_host() {
         let mut jar = Jar::default();
-        jar.0.entry("a.example".into()).or_default().insert("sid".into(), "1".into());
-        jar.0.entry("b.example".into()).or_default().insert("other".into(), "2".into());
+        jar.0
+            .entry("a.example".into())
+            .or_default()
+            .insert("sid".into(), "1".into());
+        jar.0
+            .entry("b.example".into())
+            .or_default()
+            .insert("other".into(), "2".into());
         assert_eq!(jar.header("a.example"), "sid=1");
         assert!(!jar.has("b.example", "sid"));
         assert_eq!(jar.header("nowhere.example"), "");

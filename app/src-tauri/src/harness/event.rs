@@ -100,13 +100,21 @@ pub enum HarnessEvent {
     /// The provider began working on the last user message.
     TurnStarted,
     /// Live assistant text, superseded by the [`Self::AssistantMessage`] that follows.
-    AssistantDelta { text: String },
+    AssistantDelta {
+        text: String,
+    },
     /// Live reasoning text.
-    ThinkingDelta { text: String },
+    ThinkingDelta {
+        text: String,
+    },
     /// A finished block of assistant text: persisted, where deltas are display only.
-    AssistantMessage { text: String },
+    AssistantMessage {
+        text: String,
+    },
     /// A finished block of reasoning text. Persisted, collapsed by default.
-    Thinking { text: String },
+    Thinking {
+        text: String,
+    },
     ToolStarted {
         /// Provider's id for the call; [`Self::ToolFinished`] closes on it.
         id: String,
@@ -118,7 +126,10 @@ pub enum HarnessEvent {
         input: serde_json::Value,
     },
     /// Streamed tool output (command stdout so far).
-    ToolOutputDelta { id: String, text: String },
+    ToolOutputDelta {
+        id: String,
+        text: String,
+    },
     ToolFinished {
         id: String,
         ok: bool,
@@ -137,16 +148,27 @@ pub enum HarnessEvent {
         context_window: Option<u64>,
         cost_usd: Option<f64>,
     },
-    RateLimits { windows: Vec<RateWindow> },
+    RateLimits {
+        windows: Vec<RateWindow>,
+    },
     /// The answer to the naming turn ([`super::Harness::name_thread`]).
-    ThreadTitled { title: String },
+    ThreadTitled {
+        title: String,
+    },
     /// A message typed mid-turn, waiting in `Queue`; no row is written for it.
-    Queued { id: String, text: String },
+    Queued {
+        id: String,
+        text: String,
+    },
     /// Left the queue: cancelled, cleared, or sent (its `UserMessage` follows).
-    Unqueued { id: String },
+    Unqueued {
+        id: String,
+    },
     /// The provider's handle for the turn just sent (Claude's message uuid,
     /// Codex's turn id), kept on the user row: a rewind names it, no CLI re-issues it.
-    TurnAnchor { anchor: String },
+    TurnAnchor {
+        anchor: String,
+    },
     /// Rows from `from_item_id` on are gone: an edited question rewound the thread.
     Rewound {
         from_item_id: i64,
@@ -176,7 +198,9 @@ pub enum HarnessEvent {
         auth: Option<Provider>,
     },
     /// The process is gone; the thread stays and the next message resumes it.
-    Exited { code: Option<i32> },
+    Exited {
+        code: Option<i32>,
+    },
 }
 
 impl HarnessEvent {
@@ -201,7 +225,13 @@ impl HarnessEvent {
 /// spells argument keys differently (Claude `file_path`, opencode `path` despite
 /// its registry saying `filePath`), so names share an arm only where the key does.
 pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
-    let s = |k: &str| input.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let s = |k: &str| {
+        input
+            .get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
     // Antigravity PascalCases its parameters (`CommandLine`, `AbsolutePath` on
     // agy 1.2.9); the other keys in each list follow that convention unconfirmed.
     let any = |ks: &[&str]| {
@@ -215,16 +245,33 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
         // Antigravity's names, from its `init` event's `tools`.
         "run_command" => {
             let cmd = any(&["CommandLine", "Command"]);
-            let kind = if is_oculus_cli(&cmd) { ToolKind::OculusCli } else { ToolKind::Bash };
+            let kind = if is_oculus_cli(&cmd) {
+                ToolKind::OculusCli
+            } else {
+                ToolKind::Bash
+            };
             (kind, cmd)
         }
-        "view_file" | "read_resource" => (ToolKind::Read, base(&any(&["AbsolutePath", "TargetFile", "Path"]))),
-        "write_to_file" => (ToolKind::Write, base(&any(&["AbsolutePath", "TargetFile", "Path"]))),
-        "replace_file_content" | "multi_replace_file_content" | "sed_file" | "notebook_edit" => {
-            (ToolKind::Edit, base(&any(&["AbsolutePath", "TargetFile", "Path"])))
-        }
-        "list_dir" => (ToolKind::Search, base(&any(&["DirectoryPath", "AbsolutePath", "Path"]))),
-        "find_by_name" => (ToolKind::Search, any(&["Pattern", "Query", "SearchDirectory"])),
+        "view_file" | "read_resource" => (
+            ToolKind::Read,
+            base(&any(&["AbsolutePath", "TargetFile", "Path"])),
+        ),
+        "write_to_file" => (
+            ToolKind::Write,
+            base(&any(&["AbsolutePath", "TargetFile", "Path"])),
+        ),
+        "replace_file_content" | "multi_replace_file_content" | "sed_file" | "notebook_edit" => (
+            ToolKind::Edit,
+            base(&any(&["AbsolutePath", "TargetFile", "Path"])),
+        ),
+        "list_dir" => (
+            ToolKind::Search,
+            base(&any(&["DirectoryPath", "AbsolutePath", "Path"])),
+        ),
+        "find_by_name" => (
+            ToolKind::Search,
+            any(&["Pattern", "Query", "SearchDirectory"]),
+        ),
         "grep_search" => (ToolKind::Search, any(&["Query", "SearchTerm", "Pattern"])),
         "read_url_content" | "open_browser_url" => (ToolKind::Web, any(&["Url", "URL"])),
         "search_web" => (ToolKind::Web, any(&["Query", "SearchTerm"])),
@@ -289,7 +336,12 @@ pub fn classify(name: &str, input: &serde_json::Value) -> (ToolKind, String) {
 fn patch_target(patch: &str) -> String {
     for line in patch.lines() {
         let line = line.trim();
-        for verb in ["*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"] {
+        for verb in [
+            "*** Add File:",
+            "*** Update File:",
+            "*** Delete File:",
+            "*** Move to:",
+        ] {
             if let Some(rest) = line.strip_prefix(verb) {
                 return rest.trim().to_string();
             }
@@ -326,10 +378,16 @@ mod tests {
 
     #[test]
     fn classifies_oculus_commands_by_word() {
-        let (k, t) = classify("Bash", &serde_json::json!({"command": "oculus grep foo -s COMP30026"}));
+        let (k, t) = classify(
+            "Bash",
+            &serde_json::json!({"command": "oculus grep foo -s COMP30026"}),
+        );
         assert_eq!(k, ToolKind::OculusCli);
         assert_eq!(t, "oculus grep foo -s COMP30026");
-        let (k, _) = classify("Bash", &serde_json::json!({"command": "/usr/local/bin/oculus files X"}));
+        let (k, _) = classify(
+            "Bash",
+            &serde_json::json!({"command": "/usr/local/bin/oculus files X"}),
+        );
         assert_eq!(k, ToolKind::OculusCli);
         let (k, _) = classify("Bash", &serde_json::json!({"command": "ls myoculus"}));
         assert_eq!(k, ToolKind::Bash);
@@ -338,21 +396,45 @@ mod tests {
     #[test]
     fn opencode_tool_names_are_titled_off_their_own_arguments() {
         use serde_json::json;
-        assert_eq!(classify("read", &json!({"path": "../courses/COMP30026/w1.md"})), (ToolKind::Read, "w1.md".into()));
-        assert_eq!(classify("write", &json!({"path": "memories/a.md"})), (ToolKind::Write, "a.md".into()));
-        assert_eq!(classify("edit", &json!({"path": "memories/a.md"})), (ToolKind::Edit, "a.md".into()));
-        assert_eq!(classify("glob", &json!({"pattern": "**/*.md"})), (ToolKind::Search, "**/*.md".into()));
-        assert_eq!(classify("todowrite", &json!({"todos": []})), (ToolKind::Plan, String::new()));
-        assert_eq!(classify("skill", &json!({"name": "customize-opencode"})), (ToolKind::Other, "customize-opencode".into()));
+        assert_eq!(
+            classify("read", &json!({"path": "../courses/COMP30026/w1.md"})),
+            (ToolKind::Read, "w1.md".into())
+        );
+        assert_eq!(
+            classify("write", &json!({"path": "memories/a.md"})),
+            (ToolKind::Write, "a.md".into())
+        );
+        assert_eq!(
+            classify("edit", &json!({"path": "memories/a.md"})),
+            (ToolKind::Edit, "a.md".into())
+        );
+        assert_eq!(
+            classify("glob", &json!({"pattern": "**/*.md"})),
+            (ToolKind::Search, "**/*.md".into())
+        );
+        assert_eq!(
+            classify("todowrite", &json!({"todos": []})),
+            (ToolKind::Plan, String::new())
+        );
+        assert_eq!(
+            classify("skill", &json!({"name": "customize-opencode"})),
+            (ToolKind::Other, "customize-opencode".into())
+        );
         assert_eq!(
             classify("bash", &json!({"command": "oculus files COMP30026"})),
             (ToolKind::OculusCli, "oculus files COMP30026".into())
         );
         assert_eq!(
-            classify("apply_patch", &json!({"patchText": "*** Begin Patch\n*** Update File: memories/x.md\n@@\n-a\n+b\n*** End Patch"})),
+            classify(
+                "apply_patch",
+                &json!({"patchText": "*** Begin Patch\n*** Update File: memories/x.md\n@@\n-a\n+b\n*** End Patch"})
+            ),
             (ToolKind::Edit, "x.md".into())
         );
-        assert_eq!(classify("Read", &json!({"file_path": "/a/b.md"})), (ToolKind::Read, "b.md".into()));
+        assert_eq!(
+            classify("Read", &json!({"file_path": "/a/b.md"})),
+            (ToolKind::Read, "b.md".into())
+        );
     }
 
     #[test]

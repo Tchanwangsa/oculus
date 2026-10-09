@@ -23,17 +23,30 @@ mod tests {
     fn the_opencode_template_denies_the_same_paths() {
         let raw = include_str!("../../templates/OPENCODE.template.json");
         let v: serde_json::Value = serde_json::from_str(raw).expect("the template is JSON");
-        let edit = v.pointer("/permission/edit").and_then(|e| e.as_object()).unwrap();
+        let edit = v
+            .pointer("/permission/edit")
+            .and_then(|e| e.as_object())
+            .unwrap();
         let denied: Vec<&str> = edit
             .iter()
             .filter(|(_, v)| v.as_str() == Some("deny"))
             .map(|(k, _)| k.as_str())
             .collect();
 
-        let mut want: Vec<String> = LIBRARY_DIRS.iter().map(|d| format!("{{{{LIBRARY}}}}/{d}/**")).collect();
-        want.extend(ROOT_FILE_GLOBS.iter().map(|g| format!("{{{{LIBRARY}}}}/{g}")));
+        let mut want: Vec<String> = LIBRARY_DIRS
+            .iter()
+            .map(|d| format!("{{{{LIBRARY}}}}/{d}/**"))
+            .collect();
+        want.extend(
+            ROOT_FILE_GLOBS
+                .iter()
+                .map(|g| format!("{{{{LIBRARY}}}}/{g}")),
+        );
         for w in &want {
-            assert!(denied.contains(&w.as_str()), "the template does not deny {w}");
+            assert!(
+                denied.contains(&w.as_str()),
+                "the template does not deny {w}"
+            );
         }
         for d in WORKSPACE_DIRS {
             assert!(

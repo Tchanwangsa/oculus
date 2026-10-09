@@ -483,9 +483,18 @@ mod tests {
         assert!(offer(Provider::Antigravity, curl).runnable);
         // Homebrew and node buy nothing here.
         for have in [
-            Managers { brew: true, ..Default::default() },
-            Managers { npm: true, ..Default::default() },
-            Managers { bun: true, ..Default::default() },
+            Managers {
+                brew: true,
+                ..Default::default()
+            },
+            Managers {
+                npm: true,
+                ..Default::default()
+            },
+            Managers {
+                bun: true,
+                ..Default::default()
+            },
         ] {
             let o = offer(Provider::Antigravity, have);
             assert!(!o.runnable);
@@ -524,7 +533,11 @@ mod tests {
         for p in ALL {
             let mut seen = std::collections::HashSet::new();
             for r in routes(p) {
-                assert!(seen.insert(r.manager), "{p:?} has two {:?} routes", r.manager);
+                assert!(
+                    seen.insert(r.manager),
+                    "{p:?} has two {:?} routes",
+                    r.manager
+                );
                 assert_eq!(command_for(p, r.manager), Some(r.command));
             }
         }
@@ -536,9 +549,13 @@ mod tests {
     #[test]
     fn runner_streams_then_reports_the_exit() {
         let (tx, rx) = mpsc::channel::<Line>();
-        run_command("echo hello; echo trouble 1>&2; exit 3", "installed", move |l| {
-            let _ = tx.send(l);
-        })
+        run_command(
+            "echo hello; echo trouble 1>&2; exit 3",
+            "installed",
+            move |l| {
+                let _ = tx.send(l);
+            },
+        )
         .unwrap();
         let lines: Vec<Line> = rx.iter().collect();
         let (last, body) = lines.split_last().expect("at least the done line");

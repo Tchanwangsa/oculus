@@ -92,7 +92,12 @@ impl From<embed::EmbedError> for IngestError {
 
 impl From<String> for IngestError {
     fn from(message: String) -> Self {
-        Self { message, kind: None, retryable: None, latching: None }
+        Self {
+            message,
+            kind: None,
+            retryable: None,
+            latching: None,
+        }
     }
 }
 
@@ -199,9 +204,16 @@ pub async fn ingest_reporting(
         let expected_pages = parsed.as_ref().map(|record| record.page_count);
         let page_count = expected_pages.unwrap_or(0);
         let markdown: HashMap<i64, String> = parsed
-            .map(|p| p.pages.into_iter().map(|page| (page.page_no as i64, page.markdown)).collect())
+            .map(|p| {
+                p.pages
+                    .into_iter()
+                    .map(|page| (page.page_no as i64, page.markdown))
+                    .collect()
+            })
             .unwrap_or_default();
-        let cached = if force { None } else {
+        let cached = if force {
+            None
+        } else {
             embed::read_record(&pdf).filter(|record| record.is_current(expected_pages))
         };
         let skipped = cached.is_some();
@@ -222,13 +234,19 @@ pub async fn ingest_reporting(
     .map_err(|e| IngestError::from(e.to_string()))??;
 
     let db = pool(db_file).await.map_err(IngestError::from)?;
-    let mut tx = db.begin().await.map_err(|e| IngestError::from(e.to_string()))?;
+    let mut tx = db
+        .begin()
+        .await
+        .map_err(|e| IngestError::from(e.to_string()))?;
     let mut with_md = 0usize;
 
     for page in &record.pages {
         let vec_bytes = blob_from_wire(page.page_no, &page.vector).map_err(IngestError::from)?;
         let page_no = page.page_no as i64;
-        let md = markdown.get(&page_no).map(String::as_str).unwrap_or_default();
+        let md = markdown
+            .get(&page_no)
+            .map(String::as_str)
+            .unwrap_or_default();
         if !md.is_empty() {
             with_md += 1;
         }
@@ -257,13 +275,17 @@ pub async fn ingest_reporting(
         .map_err(|e| IngestError::from(format!("upsert page {}: {e}", page.page_no)))?;
     }
 
-    sqlx::query("UPDATE files SET embed_status = 'done', embedded_at = datetime('now') WHERE id = ?1")
-        .bind(file_id)
-        .execute(&mut *tx)
+    sqlx::query(
+        "UPDATE files SET embed_status = 'done', embedded_at = datetime('now') WHERE id = ?1",
+    )
+    .bind(file_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| IngestError::from(e.to_string()))?;
+
+    tx.commit()
         .await
         .map_err(|e| IngestError::from(e.to_string()))?;
-
-    tx.commit().await.map_err(|e| IngestError::from(e.to_string()))?;
     db.close().await;
 
     Ok(IngestSummary {
@@ -311,16 +333,24 @@ pub async fn search_in(
     .map_err(|e| e.to_string())?;
 
     if qvec.len() != dim {
-        return Err(format!("query vector is {} dims, the backend claims {dim}", qvec.len()));
+        return Err(format!(
+            "query vector is {} dims, the backend claims {dim}",
+            qvec.len()
+        ));
     }
     rank(db_file, &qvec, &model, dim as i64, limit, subject_ids).await
 }
 
 fn score_blob(blob: &[u8], qvec: &[f32]) -> Option<f32> {
-    if blob.len() / 2 != qvec.len() { return None; }
-    Some(blob.chunks_exact(2).zip(qvec)
-        .map(|(bytes, query)| half::f16::from_le_bytes([bytes[0], bytes[1]]).to_f32() * query)
-        .sum())
+    if blob.len() / 2 != qvec.len() {
+        return None;
+    }
+    Some(
+        blob.chunks_exact(2)
+            .zip(qvec)
+            .map(|(bytes, query)| half::f16::from_le_bytes([bytes[0], bytes[1]]).to_f32() * query)
+            .sum(),
+    )
 }
 
 /// Score on a blocking worker, keep only the requested matches, and hydrate
@@ -365,28 +395,43 @@ async fn rank(
         let mut scored: Vec<(i64, f32)> = Vec::with_capacity(rows.len());
         for row in rows {
             let blob: &[u8] = row.try_get("embedding").map_err(|e| e.to_string())?;
-            let Some(score) = score_blob(blob, &qvec) else { continue; };
+            let Some(score) = score_blob(blob, &qvec) else {
+                continue;
+            };
             scored.push((row.try_get("id").map_err(|e| e.to_string())?, score));
         }
         // Stable, so equal scores keep the scan's order.
         scored.sort_by(|a, b| b.1.total_cmp(&a.1));
         scored.truncate(limit);
         Ok::<_, String>(scored)
-    }).await.map_err(|e| e.to_string())??;
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     let mut hits = Vec::with_capacity(best.len());
     if !best.is_empty() {
-        let ids = best.iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>().join(",");
+        let ids = best
+            .iter()
+            .map(|(id, _)| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         let sql = format!(
             "SELECT p.id, p.file_id, p.page_no, p.markdown, f.filename, f.relative_path, f.subject_id
              FROM pages p JOIN files f ON f.id = p.file_id WHERE p.id IN ({ids})"
         );
-        let rows = sqlx::query(&sql).fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
-        let mut rows: HashMap<i64, _> = rows.into_iter()
+        let rows = sqlx::query(&sql)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut rows: HashMap<i64, _> = rows
+            .into_iter()
             .map(|row| row.try_get("id").map(|id| (id, row)))
-            .collect::<Result<_, _>>().map_err(|e| e.to_string())?;
+            .collect::<Result<_, _>>()
+            .map_err(|e| e.to_string())?;
         for (id, score) in best {
-            let row = rows.remove(&id).ok_or_else(|| format!("ranked page {id} vanished"))?;
+            let row = rows
+                .remove(&id)
+                .ok_or_else(|| format!("ranked page {id} vanished"))?;
             hits.push(SearchHit {
                 file_id: row.try_get("file_id").map_err(|e| e.to_string())?,
                 page_no: row.try_get("page_no").map_err(|e| e.to_string())?,
@@ -447,8 +492,11 @@ pub async fn stats(db_file: &Path) -> Result<IndexStats, String> {
     .collect();
     db.close().await;
 
-    let pages_embedded: i64 =
-        row.try_get::<Option<i64>, _>("pages_embedded").ok().flatten().unwrap_or(0);
+    let pages_embedded: i64 = row
+        .try_get::<Option<i64>, _>("pages_embedded")
+        .ok()
+        .flatten()
+        .unwrap_or(0);
     let pages_stored: i64 = row.try_get("pages_stored").unwrap_or(0);
 
     Ok(IndexStats {
@@ -489,7 +537,14 @@ pub async fn embed_file(
         Some(rel) => rel,
         None => {
             let message = format!("{relative_path}: no PDF representation to embed");
-            embed::events::failed_with(&relative_path, subject_id, message.clone(), None, None, None);
+            embed::events::failed_with(
+                &relative_path,
+                subject_id,
+                message.clone(),
+                None,
+                None,
+                None,
+            );
             return Err(message);
         }
     };
@@ -559,7 +614,9 @@ mod tests {
 
     /// Just enough schema for the scan; this tests the predicate, not the schema.
     async fn fixture(path: &Path) -> SqlitePool {
-        let options = SqliteConnectOptions::new().filename(path).create_if_missing(true);
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true);
         let db = SqlitePool::connect_with(options).await.unwrap();
         sqlx::query(
             "CREATE TABLE files (
@@ -583,14 +640,16 @@ mod tests {
     }
 
     async fn add_file(db: &SqlitePool, id: i64, subject_id: i64, name: &str) {
-        sqlx::query("INSERT INTO files (id, subject_id, filename, relative_path) VALUES (?1, ?2, ?3, ?4)")
-            .bind(id)
-            .bind(subject_id)
-            .bind(name)
-            .bind(format!("courses/X/{name}"))
-            .execute(db)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO files (id, subject_id, filename, relative_path) VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(id)
+        .bind(subject_id)
+        .bind(name)
+        .bind(format!("courses/X/{name}"))
+        .execute(db)
+        .await
+        .unwrap();
     }
 
     /// A unit vector along one axis, so every score is predictable.
@@ -633,14 +692,29 @@ mod tests {
         // Current space, a middling match.
         let mut lukewarm = axis(0);
         lukewarm[1] = 1.0;
-        add_page(&db, 1, 1, &lukewarm, embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
+        add_page(
+            &db,
+            1,
+            1,
+            &lukewarm,
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+        )
+        .await;
         // Retired space, a perfect match — and it must still lose.
         add_page(&db, 2, 1, &axis(0), RETIRED_MODEL, embed::EMBED_DIM as i64).await;
         db.close().await;
 
-        let hits = rank(&scratch.join("oculus.db"), &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 5, &[])
-            .await
-            .unwrap();
+        let hits = rank(
+            &scratch.join("oculus.db"),
+            &axis(0),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+            5,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(hits.len(), 1, "a retired model's vectors were ranked");
         assert_eq!(hits[0].file_id, 1);
     }
@@ -654,9 +728,16 @@ mod tests {
         add_page(&db, 1, 1, &axis(0), embed::EMBED_MODEL, 256).await;
         db.close().await;
 
-        let hits = rank(&scratch.join("oculus.db"), &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 5, &[])
-            .await
-            .unwrap();
+        let hits = rank(
+            &scratch.join("oculus.db"),
+            &axis(0),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+            5,
+            &[],
+        )
+        .await
+        .unwrap();
         assert!(hits.is_empty(), "a vector of another width was ranked");
     }
 
@@ -666,14 +747,36 @@ mod tests {
         let db = fixture(&scratch.join("oculus.db")).await;
         add_file(&db, 1, 10, "mine.pdf").await;
         add_file(&db, 2, 20, "theirs.pdf").await;
-        add_page(&db, 1, 1, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
-        add_page(&db, 2, 1, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
+        add_page(
+            &db,
+            1,
+            1,
+            &axis(0),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+        )
+        .await;
+        add_page(
+            &db,
+            2,
+            1,
+            &axis(0),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+        )
+        .await;
         db.close().await;
 
-        let hits =
-            rank(&scratch.join("oculus.db"), &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 5, &[20])
-                .await
-                .unwrap();
+        let hits = rank(
+            &scratch.join("oculus.db"),
+            &axis(0),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+            5,
+            &[20],
+        )
+        .await
+        .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].subject_id, 20);
     }
@@ -685,29 +788,68 @@ mod tests {
         let pdf = scratch.join("cached.pdf");
         std::fs::write(&pdf, b"fixture: no PDF rendering is needed").unwrap();
         let parsed = crate::parse::ParseOutput::new(&pdf, 1, vec![], None, 0);
-        std::fs::write(crate::parse::pages_path(&pdf), serde_json::to_vec(&parsed).unwrap()).unwrap();
-        embed::EmbedOutput::new(&pdf, 1, vec![embed::EmbedPage {
-            page_no: 1, vector: embed::encode_vector(&axis(0)).unwrap(),
-        }]).write(&pdf).unwrap();
+        std::fs::write(
+            crate::parse::pages_path(&pdf),
+            serde_json::to_vec(&parsed).unwrap(),
+        )
+        .unwrap();
+        embed::EmbedOutput::new(
+            &pdf,
+            1,
+            vec![embed::EmbedPage {
+                page_no: 1,
+                vector: embed::encode_vector(&axis(0)).unwrap(),
+            }],
+        )
+        .write(&pdf)
+        .unwrap();
         let db = fixture(&path).await;
         add_file(&db, 1, 10, "cached.pdf").await;
-        add_page(&db, 1, 1, &axis(1), embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
+        add_page(
+            &db,
+            1,
+            1,
+            &axis(1),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+        )
+        .await;
         db.close().await;
-        let summary = ingest(&path, 1, pdf.to_string_lossy().into_owned(), false).await.unwrap();
+        let summary = ingest(&path, 1, pdf.to_string_lossy().into_owned(), false)
+            .await
+            .unwrap();
         assert!(summary.skipped);
         assert_eq!(summary.pages_embedded, 1);
         assert_eq!(summary.pages_with_markdown, 0);
-        let hits = rank(&path, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 1, &[]).await.unwrap();
+        let hits = rank(
+            &path,
+            &axis(0),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+            1,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(hits[0].score, 1.0);
         assert_eq!(hits[0].markdown, "page 1 of 1");
     }
 
     #[test]
     fn packed_dot_product_matches_decoding_without_allocating_a_vector() {
-        let vector: Vec<_> = (0..embed::EMBED_DIM).map(|i| (i as f32 - 256.0) / 257.0).collect();
+        let vector: Vec<_> = (0..embed::EMBED_DIM)
+            .map(|i| (i as f32 - 256.0) / 257.0)
+            .collect();
         let blob = embed::pack_vector(&vector).unwrap();
-        let expected: f32 = embed::unpack_vector(&blob).iter().zip(&vector).map(|(a, b)| a * b).sum();
-        assert_eq!(score_blob(&blob, &vector).unwrap().to_bits(), expected.to_bits());
+        let expected: f32 = embed::unpack_vector(&blob)
+            .iter()
+            .zip(&vector)
+            .map(|(a, b)| a * b)
+            .sum();
+        assert_eq!(
+            score_blob(&blob, &vector).unwrap().to_bits(),
+            expected.to_bits()
+        );
         assert!(score_blob(&blob[..blob.len() - 2], &vector).is_none());
     }
 
@@ -720,15 +862,46 @@ mod tests {
         for page in 1..=80 {
             let mut vector = axis(0);
             vector[1] = (80 - page) as f32;
-            add_page(&db, 1, page, &vector, embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
+            add_page(
+                &db,
+                1,
+                page,
+                &vector,
+                embed::EMBED_MODEL,
+                embed::EMBED_DIM as i64,
+            )
+            .await;
         }
         // Claims the right space, but its blob has the wrong width.
-        add_page(&db, 1, 81, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
+        add_page(
+            &db,
+            1,
+            81,
+            &axis(0),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+        )
+        .await;
         sqlx::query("UPDATE pages SET embedding = ?1 WHERE page_no = 81")
-            .bind(vec![0u8; 4]).execute(&db).await.unwrap();
+            .bind(vec![0u8; 4])
+            .execute(&db)
+            .await
+            .unwrap();
         db.close().await;
-        let hits = rank(&path, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64, 3, &[]).await.unwrap();
-        assert_eq!(hits.iter().map(|hit| hit.page_no).collect::<Vec<_>>(), vec![80, 79, 78]);
+        let hits = rank(
+            &path,
+            &axis(0),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+            3,
+            &[],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            hits.iter().map(|hit| hit.page_no).collect::<Vec<_>>(),
+            vec![80, 79, 78]
+        );
         assert_eq!(hits[0].markdown, "page 80 of 1");
         assert!(hits.windows(2).all(|pair| pair[0].score >= pair[1].score));
     }
@@ -740,9 +913,25 @@ mod tests {
         add_file(&db, 1, 10, "old.pdf").await;
         add_file(&db, 2, 10, "new.pdf").await;
         for page in 1..=3 {
-            add_page(&db, 1, page, &axis(0), RETIRED_MODEL, embed::EMBED_DIM as i64).await;
+            add_page(
+                &db,
+                1,
+                page,
+                &axis(0),
+                RETIRED_MODEL,
+                embed::EMBED_DIM as i64,
+            )
+            .await;
         }
-        add_page(&db, 2, 1, &axis(0), embed::EMBED_MODEL, embed::EMBED_DIM as i64).await;
+        add_page(
+            &db,
+            2,
+            1,
+            &axis(0),
+            embed::EMBED_MODEL,
+            embed::EMBED_DIM as i64,
+        )
+        .await;
         db.close().await;
 
         let stats = stats(&scratch.join("oculus.db")).await.unwrap();
@@ -775,7 +964,7 @@ mod fts_tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::SqlitePool;
 
-    use super::{PAGES_FTS_SQL, PAGES_FTS_CHANGED_SQL};
+    use super::{PAGES_FTS_CHANGED_SQL, PAGES_FTS_SQL};
 
     /// A `pages` table and the FTS index over it, from the SQL migrations 35 and 38 run.
     async fn pool() -> SqlitePool {
@@ -802,7 +991,10 @@ mod fts_tests {
             .execute(&pool)
             .await
             .expect("pages_fts");
-        sqlx::raw_sql(PAGES_FTS_CHANGED_SQL).execute(&pool).await.expect("changed-only trigger");
+        sqlx::raw_sql(PAGES_FTS_CHANGED_SQL)
+            .execute(&pool)
+            .await
+            .expect("changed-only trigger");
         pool
     }
 
@@ -837,7 +1029,11 @@ mod fts_tests {
             .execute(&pool)
             .await
             .expect("embed");
-        assert_eq!(hits(&pool, "nash").await, vec![1], "blob write left the index alone");
+        assert_eq!(
+            hits(&pool, "nash").await,
+            vec![1],
+            "blob write left the index alone"
+        );
 
         // A re-parse replaces the text: the old terms must stop matching.
         sqlx::query("UPDATE pages SET markdown = ?1 WHERE page_no = 1")
@@ -845,8 +1041,15 @@ mod fts_tests {
             .execute(&pool)
             .await
             .expect("reparse");
-        assert!(hits(&pool, "nash").await.is_empty(), "update trigger cleared the old terms");
-        assert_eq!(hits(&pool, "dominant").await, vec![1], "update trigger indexed the new ones");
+        assert!(
+            hits(&pool, "nash").await.is_empty(),
+            "update trigger cleared the old terms"
+        );
+        assert_eq!(
+            hits(&pool, "dominant").await,
+            vec![1],
+            "update trigger indexed the new ones"
+        );
 
         sqlx::query("DELETE FROM pages WHERE page_no = 1")
             .execute(&pool)
@@ -860,15 +1063,39 @@ mod fts_tests {
         let pool = pool().await;
         let upsert = "INSERT INTO pages (file_id, page_no, markdown) VALUES (1, 1, ?1)
                       ON CONFLICT(file_id, page_no) DO UPDATE SET markdown = excluded.markdown";
-        sqlx::query(upsert).bind("Shannon entropy").execute(&pool).await.unwrap();
-        let before: i64 = sqlx::query_scalar("SELECT total_changes()").fetch_one(&pool).await.unwrap();
-        sqlx::query(upsert).bind("Shannon entropy").execute(&pool).await.unwrap();
-        let unchanged: i64 = sqlx::query_scalar("SELECT total_changes()").fetch_one(&pool).await.unwrap();
+        sqlx::query(upsert)
+            .bind("Shannon entropy")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let before: i64 = sqlx::query_scalar("SELECT total_changes()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        sqlx::query(upsert)
+            .bind("Shannon entropy")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let unchanged: i64 = sqlx::query_scalar("SELECT total_changes()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(unchanged - before, 1, "only the page row should be written");
         assert_eq!(hits(&pool, "entropy").await, vec![1]);
-        sqlx::query(upsert).bind("Nash equilibrium").execute(&pool).await.unwrap();
-        let changed: i64 = sqlx::query_scalar("SELECT total_changes()").fetch_one(&pool).await.unwrap();
-        assert!(changed - unchanged > 1, "changed text must update the FTS index");
+        sqlx::query(upsert)
+            .bind("Nash equilibrium")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let changed: i64 = sqlx::query_scalar("SELECT total_changes()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(
+            changed - unchanged > 1,
+            "changed text must update the FTS index"
+        );
         assert!(hits(&pool, "entropy").await.is_empty());
         assert_eq!(hits(&pool, "nash").await, vec![1]);
     }

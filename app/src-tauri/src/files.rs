@@ -42,8 +42,11 @@ pub async fn read_course_file(relative_path: String) -> Result<String, String> {
 }
 
 fn file_has_content(root: &Path, relative_path: &str) -> Result<bool, String> {
-    if relative_path.is_empty() || Path::new(relative_path).components()
-        .any(|part| !matches!(part, std::path::Component::Normal(_))) {
+    if relative_path.is_empty()
+        || Path::new(relative_path)
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
         return Err("expected a path relative to the library".into());
     }
     let path = match root.join(relative_path).canonicalize() {
@@ -52,7 +55,9 @@ fn file_has_content(root: &Path, relative_path: &str) -> Result<bool, String> {
         Err(error) => return Err(error.to_string()),
     };
     let root = root.canonicalize().map_err(|error| error.to_string())?;
-    if !path.starts_with(&root) { return Err("path is outside the library".into()); }
+    if !path.starts_with(&root) {
+        return Err("path is outside the library".into());
+    }
     let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
     Ok(metadata.is_file() && metadata.len() > 0)
 }
@@ -60,10 +65,7 @@ fn file_has_content(root: &Path, relative_path: &str) -> Result<bool, String> {
 /// Check a parsed sibling's presence without transferring its markdown.
 #[tauri::command]
 pub async fn course_file_has_content(relative_path: String) -> Result<bool, String> {
-    crate::blocking::run(move || {
-        file_has_content(&crate::paths::data_dir(), &relative_path)
-    })
-    .await
+    crate::blocking::run(move || file_has_content(&crate::paths::data_dir(), &relative_path)).await
 }
 
 #[tauri::command]
@@ -108,7 +110,9 @@ pub async fn import_uploads(
         // Imports share name allocation; keep simultaneous batches from choosing
         // the same unused upload name while conversion runs off the command thread.
         static IMPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = IMPORT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = IMPORT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let data_dir = crate::paths::data_dir();
         Ok(paths
             .iter()
@@ -119,8 +123,16 @@ pub async fn import_uploads(
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| p.clone());
                 match store_upload(&data_dir, &subject_code, src) {
-                    Ok((file, error)) => ImportOutcome { source, file: Some(file), error },
-                    Err(e) => ImportOutcome { source, file: None, error: Some(e) },
+                    Ok((file, error)) => ImportOutcome {
+                        source,
+                        file: Some(file),
+                        error,
+                    },
+                    Err(e) => ImportOutcome {
+                        source,
+                        file: None,
+                        error: Some(e),
+                    },
                 }
             })
             .collect())
@@ -179,7 +191,15 @@ fn store_upload(
         .map(|(_, e)| e.to_ascii_lowercase())
         .unwrap_or_default();
 
-    Ok((ImportedFile { filename: name, relative_path: rel, file_type, size_bytes: size }, warning))
+    Ok((
+        ImportedFile {
+            filename: name,
+            relative_path: rel,
+            file_type,
+            size_bytes: size,
+        },
+        warning,
+    ))
 }
 
 /// A name in `dir` for these bytes: never overwrites a different file
@@ -196,7 +216,11 @@ fn step_aside(dir: &Path, name: &str, ours: impl Fn(&[u8]) -> bool) -> String {
         _ => (name, String::new()),
     };
     for n in 1..1000 {
-        let candidate = if n == 1 { name.to_string() } else { format!("{stem}-{n}{ext}") };
+        let candidate = if n == 1 {
+            name.to_string()
+        } else {
+            format!("{stem}-{n}{ext}")
+        };
         match std::fs::read(dir.join(&candidate)) {
             Err(_) => return candidate,
             Ok(existing) if ours(&existing) => return candidate,
@@ -239,7 +263,11 @@ pub fn delete_upload(relative_path: String) -> Result<(), String> {
 fn document_name(title: &str) -> String {
     let stem = crate::paths::safe_filename(title.trim());
     let stem = stem.trim_end_matches('.');
-    let stem = if stem.trim_matches('_').is_empty() { "Untitled" } else { stem };
+    let stem = if stem.trim_matches('_').is_empty() {
+        "Untitled"
+    } else {
+        stem
+    };
     format!("{stem}.md")
 }
 
@@ -262,7 +290,9 @@ fn document_path(relative_path: &str) -> Result<std::path::PathBuf, String> {
 /// for every reader (`useLibraryMdComponents` in `FileViewer.tsx`). Takes the
 /// path `document_path` guarded.
 fn document_assets_dir(note: &Path) -> Result<std::path::PathBuf, String> {
-    let dir = note.parent().ok_or_else(|| format!("{} has no folder", note.display()))?;
+    let dir = note
+        .parent()
+        .ok_or_else(|| format!("{} has no folder", note.display()))?;
     Ok(dir.join(crate::paths::DOCUMENT_ASSETS_DIR))
 }
 
@@ -272,8 +302,17 @@ fn document_asset_ref(name: &str) -> String {
 }
 
 fn document_file(relative_path: String, size_bytes: u64) -> ImportedFile {
-    let filename = relative_path.rsplit('/').next().unwrap_or_default().to_string();
-    ImportedFile { filename, relative_path, file_type: "md".to_string(), size_bytes }
+    let filename = relative_path
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    ImportedFile {
+        filename,
+        relative_path,
+        file_type: "md".to_string(),
+        size_bytes,
+    }
 }
 
 /// Whether `wanted` already names the file at `current` — on a
@@ -296,10 +335,7 @@ fn same_entry(current: &Path, wanted: &Path) -> bool {
 
 /// Create an empty note under a subject.
 #[tauri::command]
-pub fn create_document(
-    subject_code: String,
-    title: String,
-) -> Result<ImportedFile, String> {
+pub fn create_document(subject_code: String, title: String) -> Result<ImportedFile, String> {
     let data_dir = crate::paths::data_dir();
     let dir = documents_dir(&data_dir, &subject_code);
     // Never "ours": an existing empty note is still another note.
@@ -316,9 +352,18 @@ pub fn create_document(
 /// The hidden sibling a note's text is staged in. It ends in `.tmp`, never
 /// `.md`, so `is_document_rel` rejects a leftover and it never becomes a row.
 fn note_temp_path(note: &Path) -> Result<std::path::PathBuf, String> {
-    let dir = note.parent().ok_or_else(|| format!("{} has no folder", note.display()))?;
-    let name = note.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
-    Ok(dir.join(format!(".{name}.{}-{}.tmp", std::process::id(), crate::clock::now_nanos())))
+    let dir = note
+        .parent()
+        .ok_or_else(|| format!("{} has no folder", note.display()))?;
+    let name = note
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    Ok(dir.join(format!(
+        ".{name}.{}-{}.tmp",
+        std::process::id(),
+        crate::clock::now_nanos()
+    )))
 }
 
 /// Replace a note's text whole: a reader, or a crash, sees the old note or
@@ -334,10 +379,7 @@ fn write_note(note: &Path, content: &[u8]) -> Result<(), String> {
 
 /// Save a note's text; returns the byte count for `size_bytes`.
 #[tauri::command]
-pub async fn write_document(
-    relative_path: String,
-    content: String,
-) -> Result<u64, String> {
+pub async fn write_document(relative_path: String, content: String) -> Result<u64, String> {
     let path = document_path(&relative_path)?;
     crate::blocking::run(move || {
         write_note(&path, content.as_bytes())?;
@@ -348,10 +390,7 @@ pub async fn write_document(
 
 /// Retitle (rename) a note; a title another note holds steps aside.
 #[tauri::command]
-pub fn rename_document(
-    relative_path: String,
-    title: String,
-) -> Result<ImportedFile, String> {
+pub fn rename_document(relative_path: String, title: String) -> Result<ImportedFile, String> {
     let path = document_path(&relative_path)?;
     let size = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
     let (dir_rel, current) = relative_path
@@ -361,7 +400,9 @@ pub fn rename_document(
     if wanted == current {
         return Ok(document_file(relative_path, size));
     }
-    let dir = path.parent().ok_or_else(|| format!("{relative_path} has no folder"))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| format!("{relative_path} has no folder"))?;
     let name = if same_entry(&path, &dir.join(&wanted)) {
         wanted
     } else {
@@ -389,11 +430,16 @@ pub fn list_documents(subject_code: String) -> Result<Vec<ImportedFile>, String>
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e.to_string()),
     };
-    let dir_rel =
-        format!("courses/{}/{}", crate::paths::safe_dir(&subject_code), crate::paths::DOCUMENTS_DIR);
+    let dir_rel = format!(
+        "courses/{}/{}",
+        crate::paths::safe_dir(&subject_code),
+        crate::paths::DOCUMENTS_DIR
+    );
     let mut out = Vec::new();
     for entry in entries.flatten() {
-        let Ok(name) = entry.file_name().into_string() else { continue };
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
         let rel = format!("{dir_rel}/{name}");
         if !crate::paths::is_document_rel(&rel) {
             continue;
@@ -412,10 +458,7 @@ pub fn list_documents(subject_code: String) -> Result<Vec<ImportedFile>, String>
 /// returned as the link. A tag later deleted leaves an orphan file — accepted.
 /// Cap, sniff and naming are `crate::harness::attach`'s.
 #[tauri::command]
-pub async fn attach_document_image(
-    relative_path: String,
-    data: String,
-) -> Result<String, String> {
+pub async fn attach_document_image(relative_path: String, data: String) -> Result<String, String> {
     let dir = document_assets_dir(&document_path(&relative_path)?)?;
     let bytes = crate::harness::attach::decode(&data)?;
     crate::blocking::run(move || {
@@ -426,10 +469,7 @@ pub async fn attach_document_image(
 
 /// The same, for a picture dropped from Finder (a path, read here).
 #[tauri::command]
-pub async fn attach_document_file(
-    relative_path: String,
-    path: String,
-) -> Result<String, String> {
+pub async fn attach_document_file(relative_path: String, path: String) -> Result<String, String> {
     let dir = document_assets_dir(&document_path(&relative_path)?)?;
     crate::blocking::run(move || {
         let bytes = crate::harness::attach::read_dropped(&path)?;
@@ -474,10 +514,12 @@ mod tests {
         assert!(!file_has_content(&scratch, "directory").unwrap());
         assert!(file_has_content(&scratch, "../outside.md").is_err());
         assert!(file_has_content(&scratch, "/etc/passwd").is_err());
-        #[cfg(unix)] {
+        #[cfg(unix)]
+        {
             let outside = crate::test_support::Scratch::new("file-content-outside");
             std::fs::write(outside.join("private.md"), b"outside").unwrap();
-            std::os::unix::fs::symlink(outside.join("private.md"), scratch.join("escape.md")).unwrap();
+            std::os::unix::fs::symlink(outside.join("private.md"), scratch.join("escape.md"))
+                .unwrap();
             assert!(file_has_content(&scratch, "escape.md").is_err());
         }
     }
@@ -491,9 +533,15 @@ mod tests {
             Path::new("/data/courses/MULT20015/documents/assets")
         );
         let other = Path::new("/data/courses/MULT20015/documents/Ideas.md");
-        assert_eq!(document_assets_dir(note).unwrap(), document_assets_dir(other).unwrap());
+        assert_eq!(
+            document_assets_dir(note).unwrap(),
+            document_assets_dir(other).unwrap()
+        );
 
-        assert_eq!(document_asset_ref("20260922-101112-0a1b2c3d.png"), "assets/20260922-101112-0a1b2c3d.png");
+        assert_eq!(
+            document_asset_ref("20260922-101112-0a1b2c3d.png"),
+            "assets/20260922-101112-0a1b2c3d.png"
+        );
         assert!(!crate::paths::is_document_rel(
             "courses/MULT20015/documents/assets/20260922-101112-0a1b2c3d.png"
         ));
@@ -512,8 +560,13 @@ mod tests {
 
         let tmp = note_temp_path(&note).unwrap();
         let name = tmp.file_name().unwrap().to_str().unwrap();
-        assert!(name.starts_with(".Week 3.md.") && name.ends_with(".tmp"), "{name}");
-        assert!(!crate::paths::is_document_rel(&format!("courses/X/documents/{name}")));
+        assert!(
+            name.starts_with(".Week 3.md.") && name.ends_with(".tmp"),
+            "{name}"
+        );
+        assert!(!crate::paths::is_document_rel(&format!(
+            "courses/X/documents/{name}"
+        )));
     }
 
     #[test]

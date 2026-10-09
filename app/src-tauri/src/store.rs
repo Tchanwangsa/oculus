@@ -80,7 +80,9 @@ pub async fn edit_setting(
     let stored = setting(pool, key).await?;
     let mut object = stored
         .as_deref()
-        .and_then(|raw| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(raw).ok())
+        .and_then(|raw| {
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(raw).ok()
+        })
         .unwrap_or_default();
     edit(&mut object);
     let value = serde_json::to_string(&object).map_err(|e| e.to_string())?;
@@ -103,7 +105,10 @@ pub fn setting_blocking(key: &str) -> Option<String> {
     let key = key.to_string();
 
     std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
         runtime.block_on(async move {
             use sqlx::Connection;
             let options = SqliteConnectOptions::new()
@@ -209,8 +214,15 @@ pub async fn upsert_file(
     source_url: Option<&str>,
     changed: bool,
 ) -> Result<(), String> {
-    let filename = relative_path.rsplit('/').next().unwrap_or(relative_path).to_string();
-    let file_type = filename.rsplit_once('.').map(|(_, e)| e.to_string()).unwrap_or_else(|| "md".into());
+    let filename = relative_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(relative_path)
+        .to_string();
+    let file_type = filename
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_string())
+        .unwrap_or_else(|| "md".into());
 
     // `changed` is the engine's action; content_changed_at moves only on new bytes.
     sqlx::query(
@@ -344,7 +356,12 @@ pub async fn pdf_files(
 
     Ok(rows
         .iter()
-        .map(|r| (r.get::<i64, _>("subject_id"), r.get::<String, _>("relative_path")))
+        .map(|r| {
+            (
+                r.get::<i64, _>("subject_id"),
+                r.get::<String, _>("relative_path"),
+            )
+        })
         .filter(|(sid, rel)| {
             crate::paths::doc_pdf_rel(rel).is_some()
                 && (subject_ids.is_empty() || subject_ids.contains(sid))
@@ -774,8 +791,7 @@ pub async fn lectures(pool: &SqlitePool, subject_id: i64) -> Result<Vec<LectureR
 // ── Run bookkeeping ──────────────────────────────────────────────────────────
 
 pub async fn start_run(pool: &SqlitePool, subject_codes: &[String]) -> Result<i64, String> {
-    let codes_json =
-        serde_json::to_string(subject_codes).unwrap_or_else(|_| "[]".to_string());
+    let codes_json = serde_json::to_string(subject_codes).unwrap_or_else(|_| "[]".to_string());
     sqlx::query("INSERT INTO sync_runs (status, subject_codes) VALUES ('running', ?1)")
         .bind(codes_json)
         .execute(pool)
@@ -806,7 +822,12 @@ pub async fn finish_run(
     Ok(())
 }
 
-pub async fn add_log(pool: &SqlitePool, level: &str, message: &str, run_id: Option<i64>) -> Result<(), String> {
+pub async fn add_log(
+    pool: &SqlitePool,
+    level: &str,
+    message: &str,
+    run_id: Option<i64>,
+) -> Result<(), String> {
     sqlx::query("INSERT INTO sync_log (run_id, level, message) VALUES (?1, ?2, ?3)")
         .bind(run_id)
         .bind(level)
@@ -824,8 +845,11 @@ mod tests {
     use super::*;
 
     async fn migrated_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new().max_connections(1)
-            .connect("sqlite::memory:").await.unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
         for migration in crate::migrations::all() {
             sqlx::raw_sql(migration.sql).execute(&pool).await.unwrap();
         }
@@ -835,34 +859,66 @@ mod tests {
     #[tokio::test]
     async fn setting_edits_keep_unknown_keys_and_transactions_can_roll_back() {
         let pool = migrated_pool().await;
-        set_setting(&pool, "parse", r#"{"engineUrl":"http://old","unknown":{"enabled":true}}"#).await.unwrap();
-        set_setting(&pool, "embed", r#"{"engine":"cloud"}"#).await.unwrap();
+        set_setting(
+            &pool,
+            "parse",
+            r#"{"engineUrl":"http://old","unknown":{"enabled":true}}"#,
+        )
+        .await
+        .unwrap();
+        set_setting(&pool, "embed", r#"{"engine":"cloud"}"#)
+            .await
+            .unwrap();
         edit_setting(&pool, "parse", |object| {
             object.insert("engine".into(), "local".into());
             object.remove("engineUrl");
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         let raw = setting(&pool, "parse").await.unwrap().unwrap();
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
-            serde_json::json!({"engine":"local", "unknown":{"enabled":true}}));
-        assert_eq!(setting(&pool, "embed").await.unwrap().as_deref(), Some(r#"{"engine":"cloud"}"#));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&raw).unwrap(),
+            serde_json::json!({"engine":"local", "unknown":{"enabled":true}})
+        );
+        assert_eq!(
+            setting(&pool, "embed").await.unwrap().as_deref(),
+            Some(r#"{"engine":"cloud"}"#)
+        );
         assert_eq!(setting(&pool, "missing").await.unwrap(), None);
 
         let mut tx = pool.begin().await.unwrap();
         set_setting(&mut *tx, "parse", "replacement").await.unwrap();
-        assert_eq!(setting(&mut *tx, "parse").await.unwrap().as_deref(), Some("replacement"));
+        assert_eq!(
+            setting(&mut *tx, "parse").await.unwrap().as_deref(),
+            Some("replacement")
+        );
         tx.rollback().await.unwrap();
         assert_eq!(setting(&pool, "parse").await.unwrap(), Some(raw));
 
-        for invalid in [None, Some("invalid json"), Some("{broken"), Some("null"), Some("[]"), Some("42")] {
-            sqlx::query("DELETE FROM settings WHERE key = 'embed'").execute(&pool).await.unwrap();
+        for invalid in [
+            None,
+            Some("invalid json"),
+            Some("{broken"),
+            Some("null"),
+            Some("[]"),
+            Some("42"),
+        ] {
+            sqlx::query("DELETE FROM settings WHERE key = 'embed'")
+                .execute(&pool)
+                .await
+                .unwrap();
             if let Some(raw) = invalid {
                 set_setting(&pool, "embed", raw).await.unwrap();
             }
             edit_setting(&pool, "embed", |object| {
                 object.insert("engine".into(), "cloud".into());
-            }).await.unwrap();
-            assert_eq!(setting(&pool, "embed").await.unwrap().as_deref(),
-                Some(r#"{"engine":"cloud"}"#));
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                setting(&pool, "embed").await.unwrap().as_deref(),
+                Some(r#"{"engine":"cloud"}"#)
+            );
         }
     }
 
@@ -871,7 +927,9 @@ mod tests {
         let pool = migrated_pool().await;
         let dir = crate::test_support::Scratch::new("reconcile-parse");
         sqlx::query("INSERT INTO subjects (id, code, name) VALUES (1, 'SUBJ', 'Subject')")
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         let rows = [
             ("courses/SUBJ/files/failed.pdf", "error"),
             ("courses/SUBJ/files/skipped.pdf", "skipped"),
@@ -888,7 +946,9 @@ mod tests {
             .bind(rel.rsplit('/').next().unwrap())
             .bind(rel)
             .bind(status)
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         }
         // Only `done.pdf` has a record on disk.
         let done = dir.join("courses/SUBJ/files/done.pdf");
@@ -904,37 +964,83 @@ mod tests {
                     "SELECT parse_status FROM files WHERE relative_path = ?1",
                 )
                 .bind(rel)
-                .fetch_one(&pool).await.unwrap()
+                .fetch_one(&pool)
+                .await
+                .unwrap()
             }
         };
-        assert_eq!(status("courses/SUBJ/files/failed.pdf").await.as_deref(), Some("error"));
-        assert_eq!(status("courses/SUBJ/files/skipped.pdf").await.as_deref(), Some("skipped"));
+        assert_eq!(
+            status("courses/SUBJ/files/failed.pdf").await.as_deref(),
+            Some("error")
+        );
+        assert_eq!(
+            status("courses/SUBJ/files/skipped.pdf").await.as_deref(),
+            Some("skipped")
+        );
         assert_eq!(status("courses/SUBJ/files/queued.pdf").await, None);
         assert_eq!(status("courses/SUBJ/files/running.pdf").await, None);
         assert_eq!(status("courses/SUBJ/files/gone.pdf").await, None);
-        assert_eq!(status("courses/SUBJ/files/done.pdf").await.as_deref(), Some("quality"));
+        assert_eq!(
+            status("courses/SUBJ/files/done.pdf").await.as_deref(),
+            Some("quality")
+        );
     }
 
     #[tokio::test]
     async fn file_upserts_preserve_content_time_unless_bytes_changed() {
         let pool = migrated_pool().await;
         sqlx::query("INSERT INTO subjects (id, code, name) VALUES (1, 'SUBJ', 'Subject')")
-            .execute(&pool).await.unwrap();
-        upsert_file(&pool, 1, "courses/SUBJ/files/a.pdf", 4, "files", Some(7), None, false)
-            .await.unwrap();
-        let id = file_id(&pool, 1, "courses/SUBJ/files/a.pdf").await.unwrap().unwrap();
-        let stamp: Option<String> = sqlx::query_scalar("SELECT content_changed_at FROM files WHERE id = ?1")
-            .bind(id).fetch_one(&pool).await.unwrap();
-        assert_eq!(stamp, None, "an unchanged insert has no content-change stamp");
+            .execute(&pool)
+            .await
+            .unwrap();
+        upsert_file(
+            &pool,
+            1,
+            "courses/SUBJ/files/a.pdf",
+            4,
+            "files",
+            Some(7),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+        let id = file_id(&pool, 1, "courses/SUBJ/files/a.pdf")
+            .await
+            .unwrap()
+            .unwrap();
+        let stamp: Option<String> =
+            sqlx::query_scalar("SELECT content_changed_at FROM files WHERE id = ?1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            stamp, None,
+            "an unchanged insert has no content-change stamp"
+        );
         sqlx::query("UPDATE files SET first_seen_at = 'first', content_changed_at = 'content' WHERE id = ?1")
             .bind(id).execute(&pool).await.unwrap();
         for changed in [false, true] {
-            upsert_file(&pool, 1, "courses/SUBJ/files/a.pdf", 8, "files", Some(9), Some("https://source"), changed)
-                .await.unwrap();
+            upsert_file(
+                &pool,
+                1,
+                "courses/SUBJ/files/a.pdf",
+                8,
+                "files",
+                Some(9),
+                Some("https://source"),
+                changed,
+            )
+            .await
+            .unwrap();
             let row = sqlx::query("SELECT first_seen_at, content_changed_at, size_bytes, canvas_id, source_url FROM files WHERE id = ?1")
                 .bind(id).fetch_one(&pool).await.unwrap();
             assert_eq!(row.get::<String, _>("first_seen_at"), "first");
-            assert_eq!(row.get::<String, _>("content_changed_at") == "content", !changed);
+            assert_eq!(
+                row.get::<String, _>("content_changed_at") == "content",
+                !changed
+            );
             assert_eq!(row.get::<i64, _>("size_bytes"), 8);
             assert_eq!(row.get::<i64, _>("canvas_id"), 9);
             assert_eq!(row.get::<String, _>("source_url"), "https://source");
@@ -945,7 +1051,9 @@ mod tests {
     async fn content_end_claims_saves_backfills_done_and_reconciles() {
         let pool = migrated_pool().await;
         sqlx::query("INSERT INTO subjects (id, code, name) VALUES (1, 'SUBJ', 'Subject')")
-            .execute(&pool).await.unwrap();
+            .execute(&pool)
+            .await
+            .unwrap();
         for (id, progress) in [("watched", 1910), ("early", 1000)] {
             sqlx::query(
                 "INSERT INTO lectures (id, lesson_id, subject_id, title, date, duration_seconds, progress_seconds)
@@ -969,12 +1077,23 @@ mod tests {
             async move { claim_content_end(&pool, id, force).await.unwrap() }
         };
         assert_eq!(claim("watched", false).await, EndClaim::Claimed);
-        assert_eq!(claim("watched", true).await, EndClaim::Running, "force never takes a running claim");
-        assert!(save_content_end(&pool, "watched", Some((1915, "see you tomorrow"))).await.unwrap(),
-            "1910 s watched is within 10 s of a 1915 s end");
+        assert_eq!(
+            claim("watched", true).await,
+            EndClaim::Running,
+            "force never takes a running claim"
+        );
+        assert!(
+            save_content_end(&pool, "watched", Some((1915, "see you tomorrow")))
+                .await
+                .unwrap(),
+            "1910 s watched is within 10 s of a 1915 s end"
+        );
         let saved = row("watched").await;
         assert_eq!(saved.get::<i64, _>("content_end_seconds"), 1915);
-        assert_eq!(saved.get::<String, _>("content_end_quote"), "see you tomorrow");
+        assert_eq!(
+            saved.get::<String, _>("content_end_quote"),
+            "see you tomorrow"
+        );
         assert_eq!(saved.get::<String, _>("content_end_status"), "ready");
         assert_eq!(saved.get::<i64, _>("completed"), 1);
         assert_eq!(claim("watched", false).await, EndClaim::Found);
@@ -982,18 +1101,34 @@ mod tests {
         assert_eq!(reconcile_content_end_status(&pool).await.unwrap(), 1);
         let swept = row("watched").await;
         assert_eq!(swept.get::<Option<String>, _>("content_end_status"), None);
-        assert_eq!(swept.get::<i64, _>("content_end_seconds"), 1915, "the found end survives a sweep");
+        assert_eq!(
+            swept.get::<i64, _>("content_end_seconds"),
+            1915,
+            "the found end survives a sweep"
+        );
 
         assert_eq!(claim("early", false).await, EndClaim::Claimed);
-        assert!(!save_content_end(&pool, "early", Some((1915, "that's it"))).await.unwrap());
+        assert!(!save_content_end(&pool, "early", Some((1915, "that's it")))
+            .await
+            .unwrap());
         assert_eq!(row("early").await.get::<i64, _>("completed"), 0);
         assert_eq!(claim("early", true).await, EndClaim::Claimed);
-        set_content_end_error(&pool, "early", "bad reply").await.unwrap();
+        set_content_end_error(&pool, "early", "bad reply")
+            .await
+            .unwrap();
         let failed = row("early").await;
         assert_eq!(failed.get::<String, _>("content_end_status"), "error");
         assert_eq!(failed.get::<String, _>("content_end_error"), "bad reply");
-        assert_eq!(failed.get::<i64, _>("content_end_seconds"), 1915, "a failed re-run keeps the end");
-        assert_eq!(claim("early", false).await, EndClaim::Claimed, "an error re-runs without force");
+        assert_eq!(
+            failed.get::<i64, _>("content_end_seconds"),
+            1915,
+            "a failed re-run keeps the end"
+        );
+        assert_eq!(
+            claim("early", false).await,
+            EndClaim::Claimed,
+            "an error re-runs without force"
+        );
         assert!(!save_content_end(&pool, "early", None).await.unwrap());
         let none = row("early").await;
         assert_eq!(none.get::<String, _>("content_end_status"), "none");
@@ -1030,7 +1165,10 @@ mod tests {
     }
 
     fn page(page_no: u32, markdown: &str) -> crate::parse::ParsePage {
-        crate::parse::ParsePage { page_no, markdown: markdown.to_string() }
+        crate::parse::ParsePage {
+            page_no,
+            markdown: markdown.to_string(),
+        }
     }
 
     #[tokio::test]
@@ -1061,7 +1199,10 @@ mod tests {
         assert_eq!(rows[0].get::<String, _>("markdown"), "one, better");
         assert_eq!(rows[1].get::<String, _>("markdown"), "two");
         assert_eq!(rows[2].get::<String, _>("markdown"), "");
-        assert_eq!(rows[0].get::<Option<String>, _>("embed_model").as_deref(), Some("qwen"));
+        assert_eq!(
+            rows[0].get::<Option<String>, _>("embed_model").as_deref(),
+            Some("qwen")
+        );
     }
 
     // ── Parse status reconciliation ──────────────────────────────────────────
@@ -1107,7 +1248,9 @@ mod tests {
         .await
         .expect("rows");
 
-        let updated = reconcile_parse_status(&pool, &data_dir).await.expect("reconcile");
+        let updated = reconcile_parse_status(&pool, &data_dir)
+            .await
+            .expect("reconcile");
         assert_eq!(updated, 2);
 
         let status = |rel: &'static str| {
@@ -1122,7 +1265,10 @@ mod tests {
                 .unwrap()
             }
         };
-        assert_eq!(status("courses/SUBJ/files/done.pdf").await.as_deref(), Some("quality"));
+        assert_eq!(
+            status("courses/SUBJ/files/done.pdf").await.as_deref(),
+            Some("quality")
+        );
         assert_eq!(status("courses/SUBJ/files/gone.pdf").await, None);
     }
 }

@@ -152,8 +152,9 @@ pub async fn parse_set_engine_url(url: String) -> Result<ParseSettings, String> 
         if !matches!(parsed.scheme(), "http" | "https")
             || parsed.host_str().unwrap_or_default().is_empty()
         {
-            return Err("That is not an address — it needs to look like http://127.0.0.1:8000."
-                .to_string());
+            return Err(
+                "That is not an address — it needs to look like http://127.0.0.1:8000.".to_string(),
+            );
         }
     }
 
@@ -193,14 +194,20 @@ pub async fn parse_result_cert(probe: Option<bool>) -> Result<CertState, String>
     if !probe.unwrap_or(false) {
         return Ok(result_tls::state(accept));
     }
-    tokio::task::spawn_blocking(move || result_tls::probe(accept)).await.map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || result_tls::probe(accept))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Ask what is listening, at `url` (so the field is testable before it is
 /// saved) or at whatever is configured.
 #[tauri::command]
 pub async fn parse_probe_local(url: Option<String>) -> Result<LocalProbe, String> {
-    let base = match url.as_deref().map(str::trim).filter(|candidate| !candidate.is_empty()) {
+    let base = match url
+        .as_deref()
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+    {
         Some(candidate) => candidate.trim_end_matches('/').to_string(),
         None => configured_local_url(),
     };

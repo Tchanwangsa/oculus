@@ -36,8 +36,8 @@ impl Whisper {
         }
         let dir = whisper_models::dir();
         let model = whisper_models::pick(&dir, settings.whisper_model.as_deref())?;
-        let helper =
-            helper(resource_dir).ok_or("the Whisper helper is missing — run `bun run whisper` in app/")?;
+        let helper = helper(resource_dir)
+            .ok_or("the Whisper helper is missing — run `bun run whisper` in app/")?;
         let vad = Some(dir.join(whisper_models::VAD_FILE)).filter(|p| p.is_file());
         Ok(Self {
             helper,
@@ -52,12 +52,17 @@ impl Whisper {
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get().min(8));
         let mut command = Command::new(&self.helper);
         command
-            .arg("-m").arg(&self.model)
-            .arg("-f").arg(wav)
-            .arg("-l").arg(&self.language)
-            .arg("-t").arg(threads.to_string())
+            .arg("-m")
+            .arg(&self.model)
+            .arg("-f")
+            .arg(wav)
+            .arg("-l")
+            .arg(&self.language)
+            .arg("-t")
+            .arg(threads.to_string())
             .args(["-oj", "-np", "-sns"])
-            .arg("-of").arg(out);
+            .arg("-of")
+            .arg(out);
         if let Some(vad) = &self.vad {
             command.arg("--vad").arg("-vm").arg(vad);
         }
@@ -89,24 +94,43 @@ impl Engine for Whisper {
         // No timeout: a long recording on a large model takes minutes.
         let output = self.command(&wav, &out).output();
         std::fs::remove_file(&wav).ok();
-        let output =
-            output.map_err(|e| EngineError::Failed(format!("could not run the Whisper helper: {e}")))?;
-        let reply = std::fs::read(&json).ok().map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+        let output = output
+            .map_err(|e| EngineError::Failed(format!("could not run the Whisper helper: {e}")))?;
+        let reply = std::fs::read(&json)
+            .ok()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
         std::fs::remove_file(&json).ok();
-        answer(output.status.code(), reply.as_deref(), &String::from_utf8_lossy(&output.stderr))
+        answer(
+            output.status.code(),
+            reply.as_deref(),
+            &String::from_utf8_lossy(&output.stderr),
+        )
     }
 }
 
 /// whisper-cli's exit, read. It exits 0 without writing the JSON when it
 /// cannot read the audio or knows no such language, so a missing reply is a
 /// failure too, named by its last `error` line.
-fn answer(code: Option<i32>, reply: Option<&str>, stderr: &str) -> Result<Vec<Segment>, EngineError> {
-    let lines = || stderr.lines().rev().map(str::trim).filter(|l| !l.is_empty());
-    let said = lines().find(|l| l.to_lowercase().contains("error")).or_else(|| lines().next());
+fn answer(
+    code: Option<i32>,
+    reply: Option<&str>,
+    stderr: &str,
+) -> Result<Vec<Segment>, EngineError> {
+    let lines = || {
+        stderr
+            .lines()
+            .rev()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+    };
+    let said = lines()
+        .find(|l| l.to_lowercase().contains("error"))
+        .or_else(|| lines().next());
     match (code, reply) {
         (Some(0), Some(reply)) => parse_reply(reply),
         (Some(0), None) => Err(EngineError::Failed(
-            said.unwrap_or("the Whisper helper wrote no transcript").to_string(),
+            said.unwrap_or("the Whisper helper wrote no transcript")
+                .to_string(),
         )),
         (Some(code), _) => Err(EngineError::Failed(match said {
             Some(line) => line.to_string(),
@@ -192,12 +216,23 @@ mod tests {
         assert_eq!(
             segments,
             vec![
-                Segment { start: 30.0, end: 33.25, text: "Good morning, everyone.".into() },
-                Segment { start: 38.0, end: 41.5, text: "Today: the \"proof\".".into() },
+                Segment {
+                    start: 30.0,
+                    end: 33.25,
+                    text: "Good morning, everyone.".into()
+                },
+                Segment {
+                    start: 38.0,
+                    end: 41.5,
+                    text: "Today: the \"proof\".".into()
+                },
             ]
         );
         assert!(parse_reply(r#"{"transcription":[]}"#).unwrap().is_empty());
-        assert!(matches!(parse_reply("whisper_init: loading"), Err(EngineError::Failed(_))));
+        assert!(matches!(
+            parse_reply("whisper_init: loading"),
+            Err(EngineError::Failed(_))
+        ));
     }
 
     #[test]
@@ -213,9 +248,20 @@ mod tests {
 
     #[test]
     fn the_helpers_exit_and_output_decide_the_answer() {
-        let ok = answer(Some(0), Some(r#"{"transcription":[{"offsets":{"from":1000,"to":2000},"text":" Hi."}]}"#), "")
-            .unwrap();
-        assert_eq!(ok, vec![Segment { start: 1.0, end: 2.0, text: "Hi.".into() }]);
+        let ok = answer(
+            Some(0),
+            Some(r#"{"transcription":[{"offsets":{"from":1000,"to":2000},"text":" Hi."}]}"#),
+            "",
+        )
+        .unwrap();
+        assert_eq!(
+            ok,
+            vec![Segment {
+                start: 1.0,
+                end: 2.0,
+                text: "Hi.".into()
+            }]
+        );
         // An unknown language exits 0, prints usage after the error, and writes nothing.
         assert!(matches!(
             answer(Some(0), None, "error: unknown language 'xx'\n\nusage: whisper-cli [options]\n  -h, --help\n"),
@@ -225,8 +271,12 @@ mod tests {
             answer(Some(3), None, "error: failed to initialize whisper context\n"),
             Err(EngineError::Failed(m)) if m.contains("initialize whisper context")
         ));
-        assert!(matches!(answer(Some(10), None, ""), Err(EngineError::Failed(m)) if m.contains("code 10")));
-        assert!(matches!(answer(None, None, ""), Err(EngineError::Failed(m)) if m.contains("killed")));
+        assert!(
+            matches!(answer(Some(10), None, ""), Err(EngineError::Failed(m)) if m.contains("code 10"))
+        );
+        assert!(
+            matches!(answer(None, None, ""), Err(EngineError::Failed(m)) if m.contains("killed"))
+        );
     }
 
     #[cfg(unix)]
@@ -244,7 +294,11 @@ mod tests {
         .unwrap();
         // Stands in for ffmpeg: creates its last argument.
         let ffmpeg = dir.join("ffmpeg");
-        std::fs::write(&ffmpeg, "#!/bin/sh\nfor a; do last=\"$a\"; done\n: > \"$last\"\n").unwrap();
+        std::fs::write(
+            &ffmpeg,
+            "#!/bin/sh\nfor a; do last=\"$a\"; done\n: > \"$last\"\n",
+        )
+        .unwrap();
         for path in [&script, &ffmpeg] {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
@@ -261,8 +315,20 @@ mod tests {
         let found = whisper.transcribe(&audio).unwrap();
         let wav = dir.join("audio.wav");
         let text = &found[0].text;
-        assert!(text.starts_with(&format!("-m /models/ggml-tiny.bin -f {} -l en -t ", wav.display())), "{text}");
-        assert!(text.ends_with(&format!("-oj -np -sns -of {} --vad -vm /models/vad.bin", dir.join("audio.whisper").display())), "{text}");
+        assert!(
+            text.starts_with(&format!(
+                "-m /models/ggml-tiny.bin -f {} -l en -t ",
+                wav.display()
+            )),
+            "{text}"
+        );
+        assert!(
+            text.ends_with(&format!(
+                "-oj -np -sns -of {} --vad -vm /models/vad.bin",
+                dir.join("audio.whisper").display()
+            )),
+            "{text}"
+        );
         assert_eq!(found[0].end, 1.5);
         // The WAV and the JSON are cleaned up after each call.
         assert!(!wav.exists() && !dir.join("audio.whisper.json").exists());
@@ -275,7 +341,8 @@ mod tests {
     #[test]
     #[ignore]
     fn end_to_end_on_a_real_video() {
-        let video = PathBuf::from(std::env::var("OCULUS_WHISPER_E2E").expect("OCULUS_WHISPER_E2E=<video>"));
+        let video =
+            PathBuf::from(std::env::var("OCULUS_WHISPER_E2E").expect("OCULUS_WHISPER_E2E=<video>"));
         let models = crate::test_support::Scratch::new("whisper-e2e-models");
         let work = crate::test_support::Scratch::new("whisper-e2e-work");
         let tiny = whisper_models::find("tiny").unwrap();

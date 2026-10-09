@@ -280,8 +280,19 @@ impl DocumentState {
 }
 
 fn same_progress(a: &Progress, b: &Progress) -> bool {
-    (a.phase, a.pages_done, a.total_pages, a.bytes_done, a.bytes_total)
-        == (b.phase, b.pages_done, b.total_pages, b.bytes_done, b.bytes_total)
+    (
+        a.phase,
+        a.pages_done,
+        a.total_pages,
+        a.bytes_done,
+        a.bytes_total,
+    ) == (
+        b.phase,
+        b.pages_done,
+        b.total_pages,
+        b.bytes_done,
+        b.bytes_total,
+    )
 }
 
 // ── Tasks ────────────────────────────────────────────────────────────────────
@@ -427,7 +438,9 @@ impl MinerUCloud {
             let sent = match &body {
                 Some(value) => {
                     let encoded = serde_json::to_vec(value).unwrap_or_default();
-                    request.set("Content-Type", "application/json").send_bytes(&encoded)
+                    request
+                        .set("Content-Type", "application/json")
+                        .send_bytes(&encoded)
                 }
                 None => request.call(),
             };
@@ -444,13 +457,17 @@ impl MinerUCloud {
                     continue;
                 }
                 Err(ureq::Error::Status(401 | 403, response)) => {
-                    return Err(auth_error(response.into_string().unwrap_or_default().as_str()))
+                    return Err(auth_error(
+                        response.into_string().unwrap_or_default().as_str(),
+                    ))
                 }
                 Err(ureq::Error::Status(status, _)) => {
                     if status >= 500 && retry.back_off() {
                         continue;
                     }
-                    return Err(ParseError::Document { code: format!("http-{status}") });
+                    return Err(ParseError::Document {
+                        code: format!("http-{status}"),
+                    });
                 }
                 Err(ureq::Error::Transport(transport)) => {
                     if retry.back_off() {
@@ -467,7 +484,9 @@ impl MinerUCloud {
                 None => return Err(ParseError::Offline("unreadable response".into())),
             };
             if !payload.is_object() {
-                return Err(ParseError::Document { code: "invalid-response".into() });
+                return Err(ParseError::Document {
+                    code: "invalid-response".into(),
+                });
             }
 
             let code = payload.get("code");
@@ -487,7 +506,9 @@ impl MinerUCloud {
                 continue;
             }
             // Only the code. The message beside it can quote a signed URL.
-            return Err(ParseError::Document { code: safe_code(code) });
+            return Err(ParseError::Document {
+                code: safe_code(code),
+            });
         }
         Err(ParseError::Offline("request failed".into()))
     }
@@ -526,15 +547,19 @@ impl MinerUCloud {
             report,
             cancelled,
         );
-        match agent.put(url).set("Content-Length", &size.to_string()).send(body) {
+        match agent
+            .put(url)
+            .set("Content-Length", &size.to_string())
+            .send(body)
+        {
             Err(_) if cancelled() => Err(ParseError::Cancelled),
             Ok(response) if (200..300).contains(&response.status()) => Ok(()),
-            Ok(response) => {
-                Err(ParseError::Document { code: format!("upload-http-{}", response.status()) })
-            }
-            Err(ureq::Error::Status(status, _)) => {
-                Err(ParseError::Document { code: format!("upload-http-{status}") })
-            }
+            Ok(response) => Err(ParseError::Document {
+                code: format!("upload-http-{}", response.status()),
+            }),
+            Err(ureq::Error::Status(status, _)) => Err(ParseError::Document {
+                code: format!("upload-http-{status}"),
+            }),
             Err(ureq::Error::Transport(transport)) => {
                 Err(ParseError::Offline(transport_detail(&transport)))
             }
@@ -546,9 +571,10 @@ impl MinerUCloud {
         let mut last = ParseError::Offline("result download failed".into());
         for attempt in 0..3u32 {
             let agent = result_tls::agent(parse_config().accept_expired_result_cert);
-            let attempted = agent.get(url).call().and_then(|response| {
-                Ok((response.status(), response.into_reader()))
-            });
+            let attempted = agent
+                .get(url)
+                .call()
+                .and_then(|response| Ok((response.status(), response.into_reader())));
             match attempted {
                 Ok((status, mut reader)) if (200..300).contains(&status) => {
                     let file = fs::File::create(destination).map_err(|e| {
@@ -560,10 +586,14 @@ impl MinerUCloud {
                         .map_err(|e| ParseError::Io(format!("download: {e}")));
                 }
                 Ok((status, _)) => {
-                    last = ParseError::Document { code: format!("result-http-{status}") }
+                    last = ParseError::Document {
+                        code: format!("result-http-{status}"),
+                    }
                 }
                 Err(ureq::Error::Status(status, _)) => {
-                    last = ParseError::Document { code: format!("result-http-{status}") }
+                    last = ParseError::Document {
+                        code: format!("result-http-{status}"),
+                    }
                 }
                 Err(ureq::Error::Transport(transport)) => {
                     last = ParseError::Offline(transport_detail(&transport))
@@ -585,7 +615,10 @@ impl MinerUCloud {
         let total = document.count_pages()?;
         document.set_total_pages(total);
 
-        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let suffix = path
             .extension()
             .map(|s| format!(".{}", s.to_string_lossy()))
@@ -606,8 +639,7 @@ impl MinerUCloud {
                 page_count: end - start,
                 // Absent for a document that fits in one task: the server
                 // treats "no range" as the whole file.
-                page_ranges: (total > self.pages_per_task)
-                    .then(|| format!("{}-{end}", start + 1)),
+                page_ranges: (total > self.pages_per_task).then(|| format!("{}-{end}", start + 1)),
             });
             start = end;
         }
@@ -676,9 +708,9 @@ impl MinerUCloud {
                     .iter()
                     .any(|task| task.document == index && !completed.contains(&task.data_id));
                 if outstanding {
-                    return Err(batch_error
-                        .clone()
-                        .unwrap_or(ParseError::Document { code: "incomplete".into() }));
+                    return Err(batch_error.clone().unwrap_or(ParseError::Document {
+                        code: "incomplete".into(),
+                    }));
                 }
                 let total = document.total_pages();
                 render::render(
@@ -688,7 +720,11 @@ impl MinerUCloud {
                     &document.images_dir,
                     &document.images_rel,
                 )
-                .map(|(pages, image_count)| DocumentOutput { pages, image_count, total_pages: total })
+                .map(|(pages, image_count)| DocumentOutput {
+                    pages,
+                    image_count,
+                    total_pages: total,
+                })
             })
             .collect()
     }
@@ -716,8 +752,10 @@ impl MinerUCloud {
             }
         }
         // Documents that already failed earlier in this batch are not sent.
-        let live: Vec<&Task> =
-            tasks.iter().filter(|task| failures[task.document].is_none()).collect();
+        let live: Vec<&Task> = tasks
+            .iter()
+            .filter(|task| failures[task.document].is_none())
+            .collect();
         if live.is_empty() {
             return Ok(());
         }
@@ -735,7 +773,10 @@ impl MinerUCloud {
 
         // Reserved before the call and never given back: the server may have
         // counted the work. See `ledger`.
-        self.ledger.record(live.len() as u64, live.iter().map(|t| u64::from(t.page_count)).sum())?;
+        self.ledger.record(
+            live.len() as u64,
+            live.iter().map(|t| u64::from(t.page_count)).sum(),
+        )?;
 
         let data = self.api_json("POST", "/file-urls/batch", Some(body), &self.submit)?;
         let urls: Vec<&str> = data
@@ -744,11 +785,18 @@ impl MinerUCloud {
             .map(|values| values.iter().filter_map(Value::as_str).collect())
             .unwrap_or_default();
         if urls.len() != live.len() {
-            return Err(ParseError::Document { code: "upload-url-count".into() });
+            return Err(ParseError::Document {
+                code: "upload-url-count".into(),
+            });
         }
-        let batch_id = data.get("batch_id").and_then(Value::as_str).unwrap_or_default();
+        let batch_id = data
+            .get("batch_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
         if batch_id.is_empty() {
-            return Err(ParseError::Document { code: "missing-batch-id".into() });
+            return Err(ParseError::Document {
+                code: "missing-batch-id".into(),
+            });
         }
 
         // Smallest file first: extraction starts only once every PUT is in,
@@ -796,8 +844,10 @@ impl MinerUCloud {
             }
         }
 
-        let by_name: HashMap<&str, &Task> =
-            live.iter().map(|task| (task.upload_name.as_str(), *task)).collect();
+        let by_name: HashMap<&str, &Task> = live
+            .iter()
+            .map(|task| (task.upload_name.as_str(), *task))
+            .collect();
         let deadline = Instant::now() + POLL_DEADLINE.mul_f64(self.time_scale);
         let mut delay = FIRST_POLL_DELAY;
         loop {
@@ -815,7 +865,9 @@ impl MinerUCloud {
             }
             if Instant::now() >= deadline {
                 // Not `Document`: a stall is worth retrying later.
-                return Err(ParseError::Offline("batch timed out after 60 minutes".into()));
+                return Err(ParseError::Offline(
+                    "batch timed out after 60 minutes".into(),
+                ));
             }
             let data = self.api_json(
                 "GET",
@@ -824,16 +876,19 @@ impl MinerUCloud {
                 &self.poll,
             )?;
 
-            for result in data.get("extract_result").and_then(Value::as_array).cloned().unwrap_or_default() {
+            for result in data
+                .get("extract_result")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+            {
                 let by_id = result.get("data_id").and_then(Value::as_str);
-                let task = by_id
-                    .and_then(|id| remaining.get(id).copied())
-                    .or_else(|| {
-                        result
-                            .get("file_name")
-                            .and_then(Value::as_str)
-                            .and_then(|name| by_name.get(name).copied())
-                    });
+                let task = by_id.and_then(|id| remaining.get(id).copied()).or_else(|| {
+                    result
+                        .get("file_name")
+                        .and_then(Value::as_str)
+                        .and_then(|name| by_name.get(name).copied())
+                });
                 let Some(task) = task else { continue };
                 if !remaining.contains_key(task.data_id.as_str()) {
                     continue;
@@ -843,7 +898,10 @@ impl MinerUCloud {
                     fail_document(failures, &mut remaining, task, ParseError::Cancelled);
                     continue;
                 }
-                let state = result.get("state").and_then(Value::as_str).unwrap_or_default();
+                let state = result
+                    .get("state")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
 
                 if state == "running" {
                     let extracted = result
@@ -855,20 +913,33 @@ impl MinerUCloud {
                     continue;
                 }
                 if state == "failed" {
-                    fail_document(failures, &mut remaining, task, ParseError::Document {
-                        code: "task-failed".into(),
-                    });
+                    fail_document(
+                        failures,
+                        &mut remaining,
+                        task,
+                        ParseError::Document {
+                            code: "task-failed".into(),
+                        },
+                    );
                     continue;
                 }
                 if state != "done" {
                     continue;
                 }
 
-                let zip_url = result.get("full_zip_url").and_then(Value::as_str).unwrap_or_default();
+                let zip_url = result
+                    .get("full_zip_url")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 if zip_url.is_empty() {
-                    fail_document(failures, &mut remaining, task, ParseError::Document {
-                        code: "missing-result".into(),
-                    });
+                    fail_document(
+                        failures,
+                        &mut remaining,
+                        task,
+                        ParseError::Document {
+                            code: "missing-result".into(),
+                        },
+                    );
                     continue;
                 }
                 match self.collect_result(task, document, zip_url, workspace) {
@@ -907,7 +978,6 @@ impl MinerUCloud {
 
         let (content_path, items) = super::content_list(&result_dir)?;
 
-
         let source_images = content_path.parent().unwrap_or(&result_dir).join("images");
         let staging = document.source_images();
         fs::create_dir_all(&staging)
@@ -917,7 +987,9 @@ impl MinerUCloud {
         let mut rebased = Vec::with_capacity(items.len());
         for item in &items {
             let Some(object) = item.as_object() else {
-                return Err(ParseError::Document { code: "invalid-content-list".into() });
+                return Err(ParseError::Document {
+                    code: "invalid-content-list".into(),
+                });
             };
             let mut absolute = object.clone();
 
@@ -927,19 +999,26 @@ impl MinerUCloud {
                     .as_i64()
                     .or_else(|| value.as_f64().map(|f| f as i64))
                     .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
-                    .ok_or(ParseError::Document { code: "invalid-page-index".into() })?,
+                    .ok_or(ParseError::Document {
+                        code: "invalid-page-index".into(),
+                    })?,
             };
             // Hard error: `ParseOutput::new` would gap-fill a wrong offset
             // into a quietly half-empty document.
             if page_idx < 0 || page_idx >= i64::from(task.page_count) {
-                return Err(ParseError::Document { code: "page-index-out-of-range".into() });
+                return Err(ParseError::Document {
+                    code: "page-index-out-of-range".into(),
+                });
             }
             absolute.insert(
                 "page_idx".into(),
                 Value::from(page_idx + i64::from(task.page_offset)),
             );
 
-            if let Some(image) = object.get("img_path").and_then(Value::as_str).filter(|p| !p.is_empty())
+            if let Some(image) = object
+                .get("img_path")
+                .and_then(Value::as_str)
+                .filter(|p| !p.is_empty())
             {
                 let original = basename(image);
                 if let Some(target) = renamed.get(&original) {
@@ -994,7 +1073,15 @@ impl<'a, R: Read> UploadBody<'a, R> {
         report: &'a dyn Fn(u64),
         cancelled: &'a dyn Fn() -> bool,
     ) -> Self {
-        Self { inner, sent: 0, total, every, reported: None, report, cancelled }
+        Self {
+            inner,
+            sent: 0,
+            total,
+            every,
+            reported: None,
+            report,
+            cancelled,
+        }
     }
 }
 
@@ -1002,7 +1089,10 @@ impl<R: Read> Read for UploadBody<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if (self.cancelled)() {
             // Not `Interrupted`, which `io::copy` would retry.
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "upload skipped"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "upload skipped",
+            ));
         }
         let read = self.inner.read(buf)?;
         self.sent += read as u64;
@@ -1051,8 +1141,7 @@ impl Parser for MinerUCloud {
         let document = CloudDocument::new(pdf, images_dir, images_rel);
         document.count_pages()?;
         let runner: Arc<dyn BatchRun> = Arc::new(self.clone());
-        let output =
-            Batcher::shared().submit(self.batch_key(), document, runner, on_progress)?;
+        let output = Batcher::shared().submit(self.batch_key(), document, runner, on_progress)?;
         Ok(ParseOutput::new(
             pdf,
             output.total_pages,
@@ -1065,7 +1154,11 @@ impl Parser for MinerUCloud {
     /// Ready whenever it has a token, which `new` guarantees. Quota is not
     /// readiness: it surfaces as `QuotaExhausted` on the call that hits it.
     fn health(&self) -> Health {
-        Health { backend: BACKEND.to_string(), parser_version: PARSER_VERSION, ready: true }
+        Health {
+            backend: BACKEND.to_string(),
+            parser_version: PARSER_VERSION,
+            ready: true,
+        }
     }
 }
 
@@ -1073,13 +1166,15 @@ impl Parser for MinerUCloud {
 
 /// A0211 is an expired token; A0202 one MinerU never accepted.
 fn auth_error(body: &str) -> ParseError {
-    let code = serde_json::from_str::<Value>(body).ok().and_then(|payload| {
-        payload
-            .get("msgCode")
-            .or_else(|| payload.get("code"))
-            .and_then(Value::as_str)
-            .map(sanitise_code)
-    });
+    let code = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|payload| {
+            payload
+                .get("msgCode")
+                .or_else(|| payload.get("code"))
+                .and_then(Value::as_str)
+                .map(sanitise_code)
+        });
     let expired = code.as_deref() == Some("A0211");
     ParseError::RejectedCredentials { code, expired }
 }
@@ -1103,25 +1198,33 @@ fn safe_code(code: Option<&Value>) -> String {
 /// Signed URLs must be `https`; loopback is exempt so tests can drive the
 /// protocol, and cannot carry a signature off this machine.
 fn check_transfer_url(url: &str, what: &str) -> Result<(), ParseError> {
-    let parsed =
-        Url::parse(url).map_err(|_| ParseError::Document { code: format!("{what}-url-invalid") })?;
+    let parsed = Url::parse(url).map_err(|_| ParseError::Document {
+        code: format!("{what}-url-invalid"),
+    })?;
     let host = parsed
         .host_str()
         .filter(|host| !host.is_empty())
-        .ok_or(ParseError::Document { code: format!("{what}-url-invalid") })?;
+        .ok_or(ParseError::Document {
+            code: format!("{what}-url-invalid"),
+        })?;
     let loopback = matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]");
     if parsed.scheme() != "https" && !loopback {
-        return Err(ParseError::Document { code: format!("{what}-url-insecure") });
+        return Err(ParseError::Document {
+            code: format!("{what}-url-insecure"),
+        });
     }
     Ok(())
 }
 
 pub(super) fn page_count(pdf: &Path) -> Result<u32, ParseError> {
-    let document = lopdf::Document::load(pdf)
-        .map_err(|_| ParseError::Document { code: "unreadable-pdf".into() })?;
+    let document = lopdf::Document::load(pdf).map_err(|_| ParseError::Document {
+        code: "unreadable-pdf".into(),
+    })?;
     let pages = document.get_pages().len() as u32;
     if pages == 0 {
-        return Err(ParseError::Document { code: "empty-pdf".into() });
+        return Err(ParseError::Document {
+            code: "empty-pdf".into(),
+        });
     }
     Ok(pages)
 }
@@ -1140,7 +1243,11 @@ fn data_id() -> String {
     hasher.write_u64(nanos);
     hasher.write_u64(sequence);
     hasher.write_u32(std::process::id());
-    format!("oculus-{:016x}{:016x}", nanos ^ (sequence << 40), hasher.finish())
+    format!(
+        "oculus-{:016x}{:016x}",
+        nanos ^ (sequence << 40),
+        hasher.finish()
+    )
 }
 
 /// Extract with a zip-slip guard: every member must resolve inside the
@@ -1150,19 +1257,23 @@ pub(super) fn safe_extract(zip_path: &Path, destination: &Path) -> Result<(), Pa
         .map_err(|e| ParseError::Io(format!("create {}: {e}", destination.display())))?;
     let file = fs::File::open(zip_path)
         .map_err(|e| ParseError::Io(format!("open {}: {e}", zip_path.display())))?;
-    let mut archive = zip::ZipArchive::new(BufReader::new(file))
-        .map_err(|_| ParseError::Document { code: "invalid-result-zip".into() })?;
+    let mut archive =
+        zip::ZipArchive::new(BufReader::new(file)).map_err(|_| ParseError::Document {
+            code: "invalid-result-zip".into(),
+        })?;
 
     for index in 0..archive.len() {
-        let mut member = archive
-            .by_index(index)
-            .map_err(|_| ParseError::Document { code: "invalid-result-zip".into() })?;
-        let name = member
-            .enclosed_name()
-            .ok_or(ParseError::Document { code: "unsafe-zip-path".into() })?;
+        let mut member = archive.by_index(index).map_err(|_| ParseError::Document {
+            code: "invalid-result-zip".into(),
+        })?;
+        let name = member.enclosed_name().ok_or(ParseError::Document {
+            code: "unsafe-zip-path".into(),
+        })?;
         let target = destination.join(&name);
         if !target.starts_with(destination) {
-            return Err(ParseError::Document { code: "unsafe-zip-path".into() });
+            return Err(ParseError::Document {
+                code: "unsafe-zip-path".into(),
+            });
         }
         if member.is_dir() {
             fs::create_dir_all(&target)
@@ -1186,7 +1297,9 @@ pub(super) fn find_content_list(root: &Path) -> Option<PathBuf> {
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -1268,7 +1381,11 @@ mod tests {
                 &|| false,
             )
             .unwrap();
-        assert_eq!(hold(&reported).last().copied(), Some(3_000), "the last byte always reports");
+        assert_eq!(
+            hold(&reported).last().copied(),
+            Some(3_000),
+            "the last byte always reports"
+        );
 
         let hits = fake.hits();
         assert_eq!(hits.len(), 1);
@@ -1333,7 +1450,11 @@ mod tests {
         let error = document.wait(&|_| {}).unwrap_err();
         marker.join().unwrap();
         assert!(matches!(error, ParseError::Cancelled), "{error}");
-        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
         // A re-parse clears the mark; this abandoned document stays dropped.
         Skips::shared().clear(&pdf);
         assert!(document.cancelled());
@@ -1355,7 +1476,10 @@ mod tests {
     fn a_refused_token_is_never_retried() {
         for (code, expired) in [("A0211", true), ("A0202", false)] {
             let fake = FakeServer::start(move |_| {
-                Reply::status(401, json!({ "msgCode": code, "msg": "user authenticate failed" }))
+                Reply::status(
+                    401,
+                    json!({ "msgCode": code, "msg": "user authenticate failed" }),
+                )
             });
             let scratch = Scratch::new("cloud-auth");
             let client = client(&fake, ledger(&scratch));
@@ -1364,13 +1488,20 @@ mod tests {
                 .unwrap_err();
 
             match error {
-                ParseError::RejectedCredentials { code: seen, expired: seen_expired } => {
+                ParseError::RejectedCredentials {
+                    code: seen,
+                    expired: seen_expired,
+                } => {
                     assert_eq!(seen.as_deref(), Some(code));
                     assert_eq!(seen_expired, expired);
                 }
                 other => panic!("{other:?}"),
             }
-            assert_eq!(fake.hits().len(), 1, "a rejected token cannot be retried into working");
+            assert_eq!(
+                fake.hits().len(),
+                1,
+                "a rejected token cannot be retried into working"
+            );
         }
     }
 
@@ -1381,13 +1512,22 @@ mod tests {
         let book = ledger(&scratch);
         let client = client(&fake, book.clone());
 
-        let error =
-            client.api_json("GET", "/extract-results/batch/x", None, &client.poll.clone()).unwrap_err();
+        let error = client
+            .api_json(
+                "GET",
+                "/extract-results/batch/x",
+                None,
+                &client.poll.clone(),
+            )
+            .unwrap_err();
         assert!(matches!(error, ParseError::QuotaExhausted));
         assert!(book.snapshot().quota_exhausted);
         // A ledger reopened over the same file still refuses, offline.
         let reopened = UsageLedger::at(book.path());
-        assert!(matches!(reopened.ensure_available(1), Err(ParseError::QuotaExhausted)));
+        assert!(matches!(
+            reopened.ensure_available(1),
+            Err(ParseError::QuotaExhausted)
+        ));
     }
 
     #[test]
@@ -1403,7 +1543,12 @@ mod tests {
         let client = client(&fake, ledger(&scratch));
 
         let data = client
-            .api_json("GET", "/extract-results/batch/x", None, &client.poll.clone())
+            .api_json(
+                "GET",
+                "/extract-results/batch/x",
+                None,
+                &client.poll.clone(),
+            )
             .unwrap();
         assert_eq!(data["batch_id"], "late");
         // Six waits, past the four attempts a failure gets.
@@ -1420,7 +1565,9 @@ mod tests {
         });
         let scratch = Scratch::new("cloud-codes");
         let client = client(&fake, ledger(&scratch));
-        let error = client.api_json("GET", "/x", None, &client.poll.clone()).unwrap_err();
+        let error = client
+            .api_json("GET", "/x", None, &client.poll.clone())
+            .unwrap_err();
 
         let shown = error.to_string();
         assert!(shown.contains("-60099"), "{shown}");
@@ -1455,7 +1602,9 @@ mod tests {
         assert_eq!(document.total_pages(), 401);
         // Every task uploads the whole file; the range is the server's job.
         assert!(tasks.iter().all(|task| task.source == pdf));
-        assert!(tasks.iter().all(|task| task.api_entry()["is_ocr"] == json!(false)));
+        assert!(tasks
+            .iter()
+            .all(|task| task.api_entry()["is_ocr"] == json!(false)));
         assert!(tasks.iter().all(|task| task.data_id.starts_with("oculus-")));
 
         // A document that fits in one task carries no range at all.
@@ -1535,8 +1684,12 @@ mod tests {
                     return Reply::bytes(Vec::new());
                 }
                 if hit.url.starts_with("/result/") {
-                    let index: usize =
-                        hit.url.trim_start_matches("/result/").trim_end_matches(".zip").parse().unwrap();
+                    let index: usize = hit
+                        .url
+                        .trim_start_matches("/result/")
+                        .trim_end_matches(".zip")
+                        .parse()
+                        .unwrap();
                     return Reply::bytes(zips[index].clone());
                 }
                 assert_eq!(hit.url, "/api/v4/extract-results/batch/batch-1");
@@ -1587,7 +1740,9 @@ mod tests {
             Phase::Uploading => 1,
             Phase::Processing => 2,
         };
-        assert!(phases.windows(2).all(|pair| order(pair[0].phase) <= order(pair[1].phase)));
+        assert!(phases
+            .windows(2)
+            .all(|pair| order(pair[0].phase) <= order(pair[1].phase)));
         let size = fs::metadata(&pdf).unwrap().len();
         assert!(
             phases.iter().any(|p| p.phase == Phase::Uploading
@@ -1599,7 +1754,11 @@ mod tests {
 
         assert_eq!(output.total_pages, 3);
         assert_eq!(
-            output.pages.iter().map(|page| page.markdown.as_str()).collect::<Vec<_>>(),
+            output
+                .pages
+                .iter()
+                .map(|page| page.markdown.as_str())
+                .collect::<Vec<_>>(),
             vec!["page 1", "page 2", "page 3"]
         );
         assert_eq!(output.image_count, 0);
@@ -1632,9 +1791,11 @@ mod tests {
 
         // `a` comes back with a page index outside its own task; `b` fails
         // outright; `c` is fine.
-        let broken = Value::Array(vec![json!({ "type": "text", "text": "stray", "page_idx": 9 })])
-            .to_string()
-            .into_bytes();
+        let broken = Value::Array(vec![
+            json!({ "type": "text", "text": "stray", "page_idx": 9 }),
+        ])
+        .to_string()
+        .into_bytes();
         let zips = vec![
             zip_of(&[("r/a_content_list.json", broken)]),
             zip_of(&[("r/c_content_list.json", content_list(0, 1))]),
@@ -1660,8 +1821,12 @@ mod tests {
                     return Reply::bytes(Vec::new());
                 }
                 if hit.url.starts_with("/result/") {
-                    let index: usize =
-                        hit.url.trim_start_matches("/result/").trim_end_matches(".zip").parse().unwrap();
+                    let index: usize = hit
+                        .url
+                        .trim_start_matches("/result/")
+                        .trim_end_matches(".zip")
+                        .parse()
+                        .unwrap();
                     return Reply::bytes(zips[index].clone());
                 }
                 let ids = hold(&submitted).clone();
@@ -1690,7 +1855,9 @@ mod tests {
             "{:?}",
             results[1].as_ref().err().map(|e| e.to_string())
         );
-        let good = results[2].as_ref().expect("the third document was unaffected");
+        let good = results[2]
+            .as_ref()
+            .expect("the third document was unaffected");
         assert_eq!(good.pages.len(), 1);
         assert_eq!(good.pages[0].markdown, "page 1");
     }
@@ -1778,7 +1945,11 @@ mod tests {
         assert_eq!(hold(&submitted).len(), 1);
         assert_eq!(hold(&puts).len(), 1);
         let usage = book.snapshot();
-        assert_eq!((usage.files, usage.pages), (1, 1), "only the kept file was reserved");
+        assert_eq!(
+            (usage.files, usage.pages),
+            (1, 1),
+            "only the kept file was reserved"
+        );
     }
 
     #[test]
@@ -1796,8 +1967,14 @@ mod tests {
         let results = client.extract_documents(&documents);
         assert_eq!(results.len(), 2);
         for result in &results {
-            let error = result.as_ref().err().expect("credentials condemn every file");
-            assert!(matches!(error, ParseError::RejectedCredentials { expired: false, .. }));
+            let error = result
+                .as_ref()
+                .err()
+                .expect("credentials condemn every file");
+            assert!(matches!(
+                error,
+                ParseError::RejectedCredentials { expired: false, .. }
+            ));
             assert!(error.latching());
         }
     }

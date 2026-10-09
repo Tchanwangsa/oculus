@@ -193,7 +193,10 @@ pub async fn embed_set_budget(percent: u8) -> Result<EmbedSettings, String> {
 #[tauri::command]
 pub fn embed_blocked() -> Option<String> {
     match super::embed_config().engine {
-        Engine::Cloud => UsageLedger::shared().ensure_available(0).err().map(|e| e.to_string()),
+        Engine::Cloud => UsageLedger::shared()
+            .ensure_available(0)
+            .err()
+            .map(|e| e.to_string()),
         Engine::Local => None,
     }
 }
@@ -277,9 +280,9 @@ pub async fn embed_set_engine(engine: String) -> Result<EmbedSettings, String> {
         "UPDATE files SET embed_status = NULL, embedded_at = NULL
           WHERE embed_status IS NOT NULL AND embed_status != 'queued'",
     )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| format!("could not reset the index state: {e}"))?;
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("could not reset the index state: {e}"))?;
     tx.commit().await.map_err(|e| e.to_string())?;
 
     // 3. The setting.
@@ -297,15 +300,24 @@ async fn embeddable_paths(db: &sqlx::SqlitePool) -> Result<Vec<String>, String> 
         "SELECT relative_path FROM files WHERE lower(file_type) IN {}",
         crate::paths::pdf_backed_sql_list()
     );
-    let rows = sqlx::query(&sql).fetch_all(db).await.map_err(|e| e.to_string())?;
-    Ok(rows.iter().filter_map(|row| row.try_get::<String, _>("relative_path").ok()).collect())
+    let rows = sqlx::query(&sql)
+        .fetch_all(db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .iter()
+        .filter_map(|row| row.try_get::<String, _>("relative_path").ok())
+        .collect())
 }
 
 /// Write the engine into the `embed` row, editing the shared JSON blob in
 /// place. `engineUrl` is dropped: it pointed at the old engine.
 async fn write_engine(db: &sqlx::SqlitePool, engine: Engine) -> Result<(), String> {
     edit_setting(db, SETTINGS_KEY, |object| {
-        object.insert("engine".into(), serde_json::Value::String(engine.as_str().into()));
+        object.insert(
+            "engine".into(),
+            serde_json::Value::String(engine.as_str().into()),
+        );
         object.remove("engineUrl");
     })
     .await

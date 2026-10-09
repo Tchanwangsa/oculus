@@ -28,12 +28,14 @@ pub async fn create_thread(
     first_message: &str,
 ) -> Result<i64, String> {
     let subject_id = match lecture_id {
-        Some(id) => sqlx::query_scalar::<_, Option<i64>>("SELECT subject_id FROM lectures WHERE id = ?1")
-            .bind(id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("no lecture {id}"))?,
+        Some(id) => {
+            sqlx::query_scalar::<_, Option<i64>>("SELECT subject_id FROM lectures WHERE id = ?1")
+                .bind(id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("no lecture {id}"))?
+        }
         None => subject_id,
     };
     let title = title_from(first_message);
@@ -55,7 +57,11 @@ pub async fn create_thread(
 /// The first line of the first message, clipped: the name until the naming
 /// turn replaces it ([`claim_naming`]).
 fn title_from(text: &str) -> String {
-    let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+    let line = text
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
     let mut t: String = line.chars().take(72).collect();
     if line.chars().count() > 72 {
         t.push('…');
@@ -108,17 +114,24 @@ pub async fn thread(pool: &SqlitePool, id: i64) -> Result<ThreadRow, String> {
     .map_err(|e| e.to_string())?
     .ok_or_else(|| format!("no thread {id}"))?;
     let provider: String = r.get("provider");
-    let lecture = r.get::<Option<String>, _>("lecture_id").map(|lid| LectureRef {
-        id: lid,
-        title: r.get("lecture_title"),
-        date: r.get::<String, _>("lecture_date").chars().take(10).collect(),
-        has_transcript: r
-            .get::<Option<String>, _>("transcript_path")
-            .is_some_and(|p| std::path::Path::new(&p).exists()),
-    });
+    let lecture = r
+        .get::<Option<String>, _>("lecture_id")
+        .map(|lid| LectureRef {
+            id: lid,
+            title: r.get("lecture_title"),
+            date: r
+                .get::<String, _>("lecture_date")
+                .chars()
+                .take(10)
+                .collect(),
+            has_transcript: r
+                .get::<Option<String>, _>("transcript_path")
+                .is_some_and(|p| std::path::Path::new(&p).exists()),
+        });
     Ok(ThreadRow {
         id: r.get("id"),
-        provider: Provider::parse(&provider).ok_or_else(|| format!("unknown provider {provider}"))?,
+        provider: Provider::parse(&provider)
+            .ok_or_else(|| format!("unknown provider {provider}"))?,
         provider_session_id: r.get("provider_session_id"),
         model: r.get("model"),
         subject_code: r.get("subject_code"),
@@ -181,7 +194,11 @@ async fn set_status(pool: &SqlitePool, thread_id: i64, status: &str) -> Result<(
 
 /// Fold one event into the tables. Returns the id of the row it inserted,
 /// when it inserted one, so the frontend can key the timeline on it.
-pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Result<Option<i64>, String> {
+pub async fn apply(
+    pool: &SqlitePool,
+    thread_id: i64,
+    ev: &HarnessEvent,
+) -> Result<Option<i64>, String> {
     match ev {
         HarnessEvent::SessionStarted {
             provider_session_id,
@@ -204,7 +221,9 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             // `content` is only what the student typed; the playhead second is
             // a fact about the message, so it goes in `meta` ("at 3:40").
             let meta = at.map(|at| serde_json::json!({ "at": at }).to_string());
-            insert_item(pool, thread_id, "user", None, Some(text), meta).await.map(Some)
+            insert_item(pool, thread_id, "user", None, Some(text), meta)
+                .await
+                .map(Some)
         }
         HarnessEvent::TurnStarted => set_status(pool, thread_id, "running").await.map(|_| None),
         HarnessEvent::TurnAnchor { anchor } => {
@@ -222,10 +241,14 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             Ok(None)
         }
         HarnessEvent::AssistantMessage { text } => {
-            insert_item(pool, thread_id, "assistant", None, Some(text), None).await.map(Some)
+            insert_item(pool, thread_id, "assistant", None, Some(text), None)
+                .await
+                .map(Some)
         }
         HarnessEvent::Thinking { text } => {
-            insert_item(pool, thread_id, "thinking", None, Some(text), None).await.map(Some)
+            insert_item(pool, thread_id, "thinking", None, Some(text), None)
+                .await
+                .map(Some)
         }
         HarnessEvent::ToolStarted {
             id,
@@ -235,7 +258,12 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             input,
         } => {
             let meta = ToolMeta {
-                kind: Some(serde_json::to_value(kind).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default()),
+                kind: Some(
+                    serde_json::to_value(kind)
+                        .ok()
+                        .and_then(|v| v.as_str().map(String::from))
+                        .unwrap_or_default(),
+                ),
                 name: Some(name.clone()),
                 input: Some(input.clone()),
                 ok: None,
@@ -252,7 +280,12 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             .await
             .map(Some)
         }
-        HarnessEvent::ToolFinished { id, ok, output, title } => {
+        HarnessEvent::ToolFinished {
+            id,
+            ok,
+            output,
+            title,
+        } => {
             // Read-modify-write on the JSON rather than json_set.
             let row = sqlx::query(
                 "SELECT id, meta FROM harness_items WHERE thread_id = ?1 AND ref_id = ?2 ORDER BY id DESC LIMIT 1",
@@ -275,10 +308,12 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
             // A title learned on completion replaces the row's; absent or empty keeps it.
             let retitle = title.as_deref().filter(|t| !t.trim().is_empty());
             match retitle {
-                Some(t) => sqlx::query("UPDATE harness_items SET meta = ?2, content = ?3 WHERE id = ?1")
-                    .bind(item_id)
-                    .bind(serde_json::to_string(&meta).ok())
-                    .bind(t),
+                Some(t) => {
+                    sqlx::query("UPDATE harness_items SET meta = ?2, content = ?3 WHERE id = ?1")
+                        .bind(item_id)
+                        .bind(serde_json::to_string(&meta).ok())
+                        .bind(t)
+                }
                 None => sqlx::query("UPDATE harness_items SET meta = ?2 WHERE id = ?1")
                     .bind(item_id)
                     .bind(serde_json::to_string(&meta).ok()),
@@ -292,20 +327,34 @@ pub async fn apply(pool: &SqlitePool, thread_id: i64, ev: &HarnessEvent) -> Resu
         // redraw the sign-in card.
         HarnessEvent::Error { message, auth } => {
             let meta = auth.map(|p| serde_json::json!({ "auth": p.as_str() }).to_string());
-            insert_item(pool, thread_id, "error", None, Some(message), meta).await.map(Some)
+            insert_item(pool, thread_id, "error", None, Some(message), meta)
+                .await
+                .map(Some)
         }
         // Its own row, not an error: the turn ended normally, and a reload must
         // offer the rule again. `content` is the refused target.
-        HarnessEvent::PermissionNeeded { tool, action, target, rule } => {
+        HarnessEvent::PermissionNeeded {
+            tool,
+            action,
+            target,
+            rule,
+        } => {
             let meta = serde_json::json!({
                 "tool": tool,
                 "action": action,
                 "target": target,
                 "rule": rule,
             });
-            insert_item(pool, thread_id, "permission", None, target.as_deref(), Some(meta.to_string()))
-                .await
-                .map(Some)
+            insert_item(
+                pool,
+                thread_id,
+                "permission",
+                None,
+                target.as_deref(),
+                Some(meta.to_string()),
+            )
+            .await
+            .map(Some)
         }
         HarnessEvent::Usage {
             input_tokens,
@@ -372,14 +421,20 @@ pub struct Question {
     pub anchor: Option<String>,
 }
 
-pub async fn user_item(pool: &SqlitePool, thread_id: i64, item_id: i64) -> Result<Question, String> {
-    let row = sqlx::query("SELECT kind, content, anchor FROM harness_items WHERE id = ?1 AND thread_id = ?2")
-        .bind(item_id)
-        .bind(thread_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("no item {item_id} in thread {thread_id}"))?;
+pub async fn user_item(
+    pool: &SqlitePool,
+    thread_id: i64,
+    item_id: i64,
+) -> Result<Question, String> {
+    let row = sqlx::query(
+        "SELECT kind, content, anchor FROM harness_items WHERE id = ?1 AND thread_id = ?2",
+    )
+    .bind(item_id)
+    .bind(thread_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| format!("no item {item_id} in thread {thread_id}"))?;
     let kind: String = row.get("kind");
     if kind != "user" {
         return Err(format!("item {item_id} is a {kind} row, not a question"));
@@ -463,12 +518,19 @@ pub async fn claim_naming(pool: &SqlitePool, thread_id: i64) -> Result<Option<Na
     if claimed == 0 {
         return Ok(None);
     }
-    Ok(Some(NamingSeed { first_message, reply }))
+    Ok(Some(NamingSeed {
+        first_message,
+        reply,
+    }))
 }
 
 /// Rate limits are per provider account, not per thread, so they live in
 /// `settings` under the provider's key and the page reads them on load.
-pub async fn save_rate_limits(pool: &SqlitePool, provider: Provider, ev: &HarnessEvent) -> Result<(), String> {
+pub async fn save_rate_limits(
+    pool: &SqlitePool,
+    provider: Provider,
+    ev: &HarnessEvent,
+) -> Result<(), String> {
     let HarnessEvent::RateLimits { windows } = ev else {
         return Ok(());
     };
