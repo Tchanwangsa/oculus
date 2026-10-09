@@ -471,7 +471,7 @@ pub async fn stats(db_file: &Path) -> Result<IndexStats, String> {
 // ── Tauri commands ───────────────────────────────────────────────────────────
 //
 // Thin wrappers: the logic above takes a database path, not an AppHandle, so
-// it runs headlessly (`src/bin/retrieval_smoke.rs`, the CLI).
+// it runs headlessly in the CLI.
 
 /// `relative_path` is relative to the app data dir; the frontend never
 /// handles absolute paths. Narrates itself over `embed-status`, keyed on
