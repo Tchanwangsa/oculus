@@ -49,22 +49,44 @@ pub fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> 
     file.write_all(body.as_bytes())
 }
 
+/// Ed's `x-token`, minted from the Canvas session (`ed.rs`).
+pub fn ed_token_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("ed-session.token")
+}
+
 pub fn auth_flag_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("canvas-session").join("authenticated")
 }
 
-/// Drops the saved Canvas and Okta sessions and the auth flag, returning
-/// whether there was anything to drop. The attempt record beside the flag
-/// stays: forgetting a lockout pause would let automatic sign-in resume.
+/// Present from a sign-out until the next session (`mark_authenticated`).
+/// While it is, automatic sign-ins stand down (`okta::sign_in`).
+pub fn signed_out_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("canvas-session").join("signed-out")
+}
+
+/// Drops the saved Canvas, Okta and Ed sessions and the auth flag, and marks
+/// the app signed out; returns whether there was anything to drop. The attempt
+/// record beside the flag stays: forgetting a lockout pause would let
+/// automatic sign-in resume.
 pub fn sign_out(data_dir: &std::path::Path) -> std::io::Result<bool> {
     let mut had = false;
-    for path in [cookie_path(data_dir), sso_cookie_path(data_dir), auth_flag_path(data_dir)] {
+    for path in [
+        cookie_path(data_dir),
+        sso_cookie_path(data_dir),
+        ed_token_path(data_dir),
+        auth_flag_path(data_dir),
+    ] {
         match std::fs::remove_file(&path) {
             Ok(()) => had = true,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }
     }
+    let marker = signed_out_path(data_dir);
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&marker, b"1")?;
     Ok(had)
 }
 
@@ -78,6 +100,7 @@ pub fn mark_authenticated(data_dir: &std::path::Path) {
         std::fs::create_dir_all(parent).ok();
     }
     std::fs::write(&flag, b"1").ok();
+    std::fs::remove_file(signed_out_path(data_dir)).ok();
 }
 
 /// Where the LaunchAgent keep-alive logs; shown in Settings → Canvas.
@@ -390,14 +413,20 @@ mod tests {
         mark_authenticated(&dir);
         write_private(&cookie_path(&dir), "canvas_session=a").unwrap();
         write_private(&sso_cookie_path(&dir), "idx=b").unwrap();
+        write_private(&ed_token_path(&dir), "jwt").unwrap();
         std::fs::write(sign_in_record_path(&dir), r#"{"paused":"locked"}"#).unwrap();
 
         assert!(sign_out(&dir).unwrap());
         assert!(!cookie_path(&dir).exists());
         assert!(!sso_cookie_path(&dir).exists());
+        assert!(!ed_token_path(&dir).exists());
         assert!(!auth_flag_path(&dir).exists());
         assert!(sign_in_record_path(&dir).exists());
+        assert!(signed_out_path(&dir).exists());
         assert!(!sign_out(&dir).unwrap());
+
+        mark_authenticated(&dir);
+        assert!(!signed_out_path(&dir).exists());
     }
 
     #[cfg(unix)]

@@ -19,10 +19,6 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// A hard stop, not a target.
 const MAX_THREADS: usize = 1000;
 
-pub fn token_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("ed-session.token")
-}
-
 #[derive(Debug, Clone)]
 struct EdCourse {
     id: i64,
@@ -42,7 +38,7 @@ pub struct Ed {
 impl Ed {
     /// Load the persisted token; without one, [`Ed::has_session`] is false.
     pub fn open(data_dir: &Path) -> Self {
-        let token_path = token_path(data_dir);
+        let token_path = crate::paths::ed_token_path(data_dir);
         let token = std::fs::read_to_string(&token_path).unwrap_or_default();
         Ed {
             token: Mutex::new(token.trim().to_string()),
@@ -60,7 +56,7 @@ impl Ed {
         let token = token.trim();
         let user = get_json(token, "/user")?;
         let name = user["user"]["name"].as_str().unwrap_or("Ed user").to_string();
-        crate::paths::write_private(&token_path(data_dir), token).map_err(|e| e.to_string())?;
+        crate::paths::write_private(&crate::paths::ed_token_path(data_dir), token).map_err(|e| e.to_string())?;
         Ok(name)
     }
 

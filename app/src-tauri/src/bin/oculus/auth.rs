@@ -265,6 +265,11 @@ impl Ctx {
 
         let log = |m: &str| app_lib::paths::append_keepalive_log(&self.data_dir, m);
 
+        if app_lib::paths::signed_out_path(&self.data_dir).exists() {
+            log("skipped — signed out");
+            return Ok(());
+        }
+
         // The probe is the keep-alive: Canvas extends the session on use.
         match app_lib::canvas::Canvas::open(&self.data_dir).probe() {
             SessionProbe::Valid(name) => {
