@@ -173,8 +173,9 @@ typed.
   which is not a sign-in step.
 - **keyd validates a save.** The app sends the values as typed, and
   `validate_credentials` (the check the keychain route applies too) runs in
-  keyd; its message for bad input reaches the user unchanged. A save also
-  clears the attempt guard's wait and pause.
+  keyd; its message for bad input reaches the user unchanged, and for a bad
+  setup key never repeats any of it. A save also clears the attempt guard's
+  failures, pause and wait.
 - **The vault holds `okta.username`, `okta.password` and `okta.totp_secret`.**
   The first `okta_status` or sign-in copies the old keychain items in, one
   keychain prompt each, once; the items stay in the keychain, and a save or a

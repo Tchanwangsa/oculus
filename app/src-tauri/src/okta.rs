@@ -417,7 +417,7 @@ mod tests {
         for message in [
             "Username is required.",
             "Password is required.",
-            "That does not look like a TOTP setup key: '1' is not a base32 character",
+            "That does not look like a TOTP setup key: it may only contain the letters A–Z and the digits 2–7.",
         ] {
             let dir = Scratch::new("okta-save-invalid");
             let keyd = FakeKeyd::start(&dir, move |_, _| keyd_error("request", message));

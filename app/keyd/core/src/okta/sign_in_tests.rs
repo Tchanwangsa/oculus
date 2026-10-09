@@ -287,11 +287,33 @@ fn credentials_are_trimmed_and_validated_before_they_are_saved() {
     let refusal = |u, p, t| validate_credentials(u, p, t).err().unwrap();
     assert_eq!(refusal(" ", "pw", SEED), "Username is required.");
     assert_eq!(refusal("u", "", SEED), "Password is required.");
-    assert_eq!(
-        refusal("u", "pw", " "),
-        "That does not look like a TOTP setup key: secret is empty"
-    );
+    assert!(refusal("u", "pw", " ").starts_with("That does not look like a TOTP setup key:"));
     assert!(refusal("u", "pw", "GEZD1").starts_with("That does not look like a TOTP setup key:"));
+}
+
+#[test]
+fn a_refused_setup_key_is_never_echoed_not_even_one_character() {
+    // Characters the message's own words do not contain.
+    let message = validate_credentials("u", "pw", "GEZD!").err().unwrap();
+    for key in [
+        "1",
+        "!",
+        "8",
+        "9",
+        "0",
+        "@",
+        "é",
+        "☃",
+        "GEZD1",
+        "ZZZZ\u{7f}",
+    ] {
+        let message = validate_credentials("u", "pw", key).err().unwrap();
+        for c in key.chars().filter(|c| !c.is_alphabetic() || !c.is_ascii()) {
+            assert!(!message.contains(c), "{c:?} echoed in {message}");
+        }
+    }
+    assert_eq!(message, validate_credentials("u", "pw", "9").err().unwrap());
+    assert!(message.contains("A–Z") && message.contains("2–7"));
 }
 
 #[test]

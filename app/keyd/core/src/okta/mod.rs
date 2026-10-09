@@ -47,9 +47,12 @@ pub struct Credentials {
     pub totp_secret: String,
 }
 
+const BAD_SEED: &str = "That does not look like a TOTP setup key: it may only contain the letters \
+                        A–Z and the digits 2–7.";
+
 /// The one check on credentials before they are saved, wherever they are
 /// kept. An undecodable TOTP seed would otherwise surface mid sign-in as an
-/// indistinguishable "wrong code". Messages never contain a value.
+/// indistinguishable "wrong code". Messages never contain a value, not even one character of it.
 pub fn validate_credentials(
     username: &str,
     password: &str,
@@ -63,7 +66,8 @@ pub fn validate_credentials(
     if password.is_empty() {
         return Err("Password is required.".to_string());
     }
-    base32_decode(&secret).map_err(|e| format!("That does not look like a TOTP setup key: {e}"))?;
+    // The decoder's error names the offending character; a pasted key is a secret.
+    base32_decode(&secret).map_err(|_| BAD_SEED.to_string())?;
     Ok(Credentials {
         username: username.to_string(),
         password: password.to_string(),

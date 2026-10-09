@@ -445,21 +445,14 @@ mod tests {
         let dir = Scratch::new("okta-invalid");
         let fake = fake();
         let state = state(&dir, &fake);
+        const BAD_SEED: &str = "That does not look like a TOTP setup key: it may only contain the letters A–Z and the digits 2–7.";
         let cases = [
             (("  ", PASSWORD, SEED), "Username is required."),
             ((USERNAME, "", SEED), "Password is required."),
-            (
-                (USERNAME, PASSWORD, ""),
-                "That does not look like a TOTP setup key: secret is empty",
-            ),
-            (
-                (USERNAME, PASSWORD, "   "),
-                "That does not look like a TOTP setup key: secret is empty",
-            ),
-            (
-                (USERNAME, PASSWORD, "GEZD!NBV"),
-                "That does not look like a TOTP setup key: '!' is not a base32 character",
-            ),
+            ((USERNAME, PASSWORD, ""), BAD_SEED),
+            ((USERNAME, PASSWORD, "   "), BAD_SEED),
+            ((USERNAME, PASSWORD, "GEZD!NBV"), BAD_SEED),
+            ((USERNAME, PASSWORD, "GEZD1NBV"), BAD_SEED),
         ];
         for ((u, p, t), message) in cases {
             let err = save(&state, u, p, t).unwrap_err();
