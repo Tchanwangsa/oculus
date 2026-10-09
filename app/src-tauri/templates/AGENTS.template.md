@@ -37,14 +37,12 @@ Per-page PDF text is **not** on disk — it lives in the Oculus database. Plain
 `grep`/`rg` over this folder silently misses every slide deck; `oculus grep`
 reads both halves.
 
-A `.csv` is stored as-is; read or grep it like any text file.
-
-A spreadsheet (`.xlsx`, `.xlsm`, `.xls`, `.ods`) is text, not a PDF:
+A spreadsheet (`.xlsx`, `.xlsm`, `.xls`, `.ods`, `.csv`) is text, not a PDF:
 `marks.xlsx.md` holds one `##` section per sheet as a table of the values
 the sheet shows, a merged block's value repeated in each of its cells, then
 `Formulas:` listing how computed cells are worked out (`- D9:D14: =PROPER(G9)`
 for a formula copied down). A cell reading `=FORMULA` is one the file stored
-no result for. Read it like any markdown, or `oculus read marks.xlsx --pages 2`
+no result for; a `.csv` is a single table with no formulas. Read it like any markdown, or `oculus read marks.xlsx --pages 2`
 for its second sheet; `oculus grep` finds it too. `oculus search` does not
 rank it.
 
