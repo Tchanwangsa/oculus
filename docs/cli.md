@@ -16,6 +16,7 @@ agent queries and plans through. Flags are in
 | `transcribe` | `app/src-tauri/src/bin/oculus/transcribe.rs`, `app/src-tauri/src/transcribe/` |
 | `docs`: help rendering; agent docs, stubs and links | `app/src-tauri/src/bin/oculus/docs.rs`, `app/src-tauri/src/agents.rs` |
 | The memory store | `app/src-tauri/src/memory.rs` |
+| `keyd` and the app's startup install | `app/src-tauri/src/bin/oculus/keyd.rs`, `app/src-tauri/src/keyd.rs` |
 | Headless writes to the scrape tables | `app/src-tauri/src/store.rs` |
 | Repo copy of the reference | `app/scripts/gen-cli-docs.mjs` |
 
@@ -30,6 +31,8 @@ agent queries and plans through. Flags are in
 | `lecture chapters`, `lecture reading`, `lecture end` | Derived rows, regenerable from the recording | They spend model quota, so an existing result is kept unless `--force` |
 | `transcribe` | `<video>.vtt` beside a library video, nothing in the database | Tries the engines in the order set in Settings → Transcription (Groq, local Whisper, on-device speech by default); Groq spends the free-tier audio allowance, the other two run on this Mac. An existing `.vtt` is kept unless `--force` ([viewers.md](./viewers.md#videos-without-captions-are-transcribed)) |
 | `docs` | The library's `agents/` folder | [Below](#oculus-docs-writes-the-agents-folder) |
+| `keyd install`, `keyd uninstall` | The LaunchAgent `com.tchan.oculus.keyd`, `bin/oculus-keyd` and its stamp in the data dir; install also (re)loads the agent | Never touches `vault.bin` or the keychain, so uninstalling loses no key ([below](#keyd-install-never-points-the-agent-at-a-build-tree)) |
+| `keyd status` | Nothing | Pings keyd, which starts it; prints no secret |
 | `agent` | Nothing recorded | One turn through the app's own bridges; `--subject` appends the picker's scope ([harness.md](./harness.md)) |
 
 `lecture candidates` only decodes a recording on disk, so re-running it is the
@@ -56,6 +59,23 @@ migrations, so on a fresh machine the app must open once first; until then
   sync options to gate it ([calendar.md](./calendar.md)).
 - Subject codes match on prefix (`MULT20015` finds `MULT20015_2026_SM2`);
   lecture ids match on a unique prefix as `oculus list -l` prints them.
+
+## `keyd install` never points the agent at a build tree
+
+The LaunchAgent's program is fixed: a keyd inside an app bundle is registered
+in place, since its caller check needs its bundle, and any other is copied to
+`bin/oculus-keyd` in the data dir through a temp file and a rename. Without
+`--from` it takes the keyd beside the CLI in the bundle, or in a debug CLI the
+output of `bun run keyd` in the checkout it was built from
+([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
+
+- `launchctl bootout` returns before launchd lets go of the job, and a
+  `bootstrap` too soon after fails and leaves keyd unloaded. Install and
+  uninstall wait until `launchctl print` stops finding the label.
+- The stamp is written last, so a failed load is retried by the next
+  preflight.
+- `status` compares the installed stamp, the stamp of the keyd this CLI would
+  install, and the source hash the running keyd reports.
 
 ## `run` and `index` take minutes per file, and that is not a hang
 

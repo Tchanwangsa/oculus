@@ -110,6 +110,22 @@ pub fn iso8601_utc(secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}")
 }
 
+/// The socket launchd owns for `oculus-keyd` (`keyd.rs`). Short on purpose:
+/// `sun_path` holds 104 bytes.
+pub fn keyd_socket_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("keyd.sock")
+}
+
+/// Where a dev install puts `oculus-keyd` and its source-hash stamp.
+pub fn keyd_bin_dir(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("bin")
+}
+
+/// Every secret, sealed under the master key only keyd reads.
+pub fn vault_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("vault.bin")
+}
+
 pub fn db_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("oculus.db")
 }

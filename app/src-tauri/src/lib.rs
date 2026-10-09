@@ -16,6 +16,7 @@ mod files;
 pub mod groq;
 pub mod harness;
 pub mod keepalive;
+pub mod keyd;
 #[cfg(target_os = "macos")]
 mod keys;
 pub mod lecture_end;
@@ -140,6 +141,10 @@ pub fn run() {
             // The LaunchAgent plist holds the CLI's absolute path; re-point it
             // if the bundle moved.
             keepalive::repair_path();
+
+            // The credential broker's LaunchAgent; a release reinstalls its
+            // bundled keyd when it changed. Dev builds leave it to the preflight.
+            keyd::ensure_installed();
 
             // Canvas refreshes the session on each request, so a periodic ping
             // holds it open while the app runs (the LaunchAgent covers closed).

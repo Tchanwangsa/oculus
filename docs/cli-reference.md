@@ -14,6 +14,7 @@ Usage: oculus [OPTIONS] [COMMAND]
 Commands:
   status      Session, library and parse status
   auth        Sign in to Canvas, or sign out
+  keyd        Install, inspect or remove oculus-keyd, the credential broker
   list        List subjects or lectures
   run         Scrape Canvas content or sync lectures
   index       Re-parse and re-embed PDFs already on record
@@ -37,8 +38,8 @@ Options:
           Print machine-readable JSON instead of formatted text
 
           Honoured by every command that prints: status, list, search, grep, read,
-          files, calendar, project and task. On failure the JSON is `{"error": "..."}`
-          on stderr and the exit code is 1.
+          files, calendar, project, task and keyd. On failure the JSON is `{"error":
+          "..."}` on stderr and the exit code is 1.
 
   -h, --help
           Print help (see a summary with '-h')
@@ -204,6 +205,75 @@ Usage: oculus auth ed [TOKEN]
 Arguments:
   [TOKEN]
           An x-token JWT to save. Omit to check the current session
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+## `oculus keyd`
+
+```
+Install, inspect or remove oculus-keyd, the credential broker
+
+Usage: oculus keyd <COMMAND>
+
+Commands:
+  install    Install oculus-keyd and load its LaunchAgent
+  status     Whether keyd is installed, loaded, current and answering
+  uninstall  Unload keyd and remove its LaunchAgent, binary and stamp
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus keyd install`
+
+```
+Install oculus-keyd and load its LaunchAgent
+
+A keyd inside an app bundle is registered where it is; any other is copied to `bin/` in
+the data dir first, so the LaunchAgent never points into a build tree. Loading it
+prompts for nothing: keyd reads the keychain only when something first uses a stored
+key.
+
+Usage: oculus keyd install [OPTIONS]
+
+Options:
+      --from <PATH>
+          The signed keyd to install. Defaults to the one beside this binary in the app
+          bundle, or, in a debug build, `bun run keyd`'s output
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus keyd status`
+
+```
+Whether keyd is installed, loaded, current and answering
+
+Sends keyd a `ping`, which starts it if launchd has it loaded. Never reads or prints a
+stored key.
+
+Usage: oculus keyd status
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `oculus keyd uninstall`
+
+```
+Unload keyd and remove its LaunchAgent, binary and stamp
+
+The vault and the keychain's master key stay, so a reinstall finds every stored key
+again.
+
+Usage: oculus keyd uninstall
 
 Options:
   -h, --help

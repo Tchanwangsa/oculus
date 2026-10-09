@@ -12,7 +12,7 @@ pub(crate) struct Cli {
     /// Print machine-readable JSON instead of formatted text
     ///
     /// Honoured by every command that prints: status, list, search, grep,
-    /// read, files, calendar, project and task. On failure the JSON is
+    /// read, files, calendar, project, task and keyd. On failure the JSON is
     /// `{"error": "..."}` on stderr and the exit code is 1.
     #[arg(long, global = true)]
     pub(crate) json: bool,
@@ -28,6 +28,11 @@ pub(crate) enum Command {
     Auth {
         #[command(subcommand)]
         action: AuthAction,
+    },
+    /// Install, inspect or remove oculus-keyd, the credential broker
+    Keyd {
+        #[command(subcommand)]
+        action: KeydAction,
     },
     /// List subjects or lectures
     List(ListArgs),
@@ -143,6 +148,32 @@ pub(crate) enum AuthAction {
         /// An x-token JWT to save. Omit to check the current session.
         token: Option<String>,
     },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum KeydAction {
+    /// Install oculus-keyd and load its LaunchAgent
+    ///
+    /// A keyd inside an app bundle is registered where it is; any other is
+    /// copied to `bin/` in the data dir first, so the LaunchAgent never points
+    /// into a build tree. Loading it prompts for nothing: keyd reads the
+    /// keychain only when something first uses a stored key.
+    Install {
+        /// The signed keyd to install. Defaults to the one beside this binary
+        /// in the app bundle, or, in a debug build, `bun run keyd`'s output.
+        #[arg(long, value_name = "PATH")]
+        from: Option<PathBuf>,
+    },
+    /// Whether keyd is installed, loaded, current and answering
+    ///
+    /// Sends keyd a `ping`, which starts it if launchd has it loaded. Never
+    /// reads or prints a stored key.
+    Status,
+    /// Unload keyd and remove its LaunchAgent, binary and stamp
+    ///
+    /// The vault and the keychain's master key stay, so a reinstall finds
+    /// every stored key again.
+    Uninstall,
 }
 
 #[derive(Args)]

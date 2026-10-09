@@ -1,7 +1,8 @@
 # Architecture
 
 Two processes — a React frontend in a WebView and a Rust core — sharing one
-data directory. PDF parsing and page embedding are HTTP calls made in-process
+data directory, plus `oculus-keyd`, a small credential broker launchd starts
+on demand. PDF parsing and page embedding are HTTP calls made in-process
 from Rust, behind the seams in `app/src-tauri/src/parse/` and
 `app/src-tauri/src/embed/`.
 
@@ -19,6 +20,7 @@ from Rust, behind the seams in `app/src-tauri/src/parse/` and
 | Shared parse/embed event payload and channels | `app/src-tauri/src/pipeline_events.rs` |
 | Blocking-command adapter | `app/src-tauri/src/blocking.rs` |
 | Crash-safe file/JSON ledger replace, wall clock, test scaffolding | `app/src-tauri/src/atomic_write.rs`, `app/src-tauri/src/clock.rs`, `app/src-tauri/src/test_support.rs` |
+| Credential broker `oculus-keyd`, its vault, and its installer | `app/keyd/`, `app/keyd/vault/`; `app/src-tauri/src/keyd.rs` |
 | Credential storage (keychain only); provider probes | `app/src-tauri/src/credentials.rs`; `app/src-tauri/src/mineru.rs`, `app/src-tauri/src/voyage.rs`, `app/src-tauri/src/groq.rs`, `app/src-tauri/src/okta.rs` |
 | Lecture video server | `app/src-tauri/src/media.rs` |
 | Video transcription (Groq Whisper, then Apple's on-device speech, then local whisper.cpp) | `app/src-tauri/src/transcribe/`, `app/src-tauri/speech/main.swift` |
@@ -59,6 +61,41 @@ its failure rules are in [parsing.md](./parsing.md).
   A read the keychain refuses (a denied prompt, or `oculus` inside Claude's
   sandbox, which fails right after the prompt is approved) is reported as
   unreadable, never as a missing key (`Secret::fetch`).
+
+## `oculus-keyd` is the only process meant to read its key
+
+A separate binary from its own crate (`app/keyd/`), so its code signature only
+changes when its own source does and one keychain approval sticks
+([development.md](./development.md#oculus-keyd-is-built-apart-so-its-signature-only-changes-with-its-source)).
+
+- **Started by launchd, not the app.** The LaunchAgent `com.tchan.oculus.keyd`
+  owns `keyd.sock` (mode 0600) and starts keyd on the first connect; keyd
+  exits after 60 s with no request in flight. A client that connects and
+  sends nothing does not keep it alive.
+- **One keychain item.** The master key, `com.tchan.oculus.keyd` / `master`,
+  labelled "Oculus keys" because the access prompt quotes the label. keyd
+  creates it on the first op that needs the vault and never rewrites it; it
+  is never read at start or for `ping`, so installing keyd prompts for
+  nothing. Concurrent first requests wait on one read.
+- **`vault.bin`** holds the secrets as one ChaCha20-Poly1305-sealed JSON map
+  (`app/keyd/vault/src/lib.rs`): a fresh nonce per write, replaced by rename,
+  read-modify-write under `flock`. A file that fails to decrypt is never
+  overwritten.
+- **The wire format** is one JSON line, then `body_len` raw bytes if the
+  header names them; replies have the same shape. Ops: `ping` (version, source
+  hash, pid), `has`, `store`, `delete`. No op returns a value. Failures are
+  `{"error": kind, "detail": …}`, with kind `keychain` when the master key is
+  refused or fails.
+- **The caller check runs before any request is read.** The peer's uid must
+  be keyd's. A bundled keyd then admits only executables inside its own app
+  bundle whose seal verifies strictly (`app/keyd/src/caller.rs`); a `dev`
+  build admits any same-user caller. Each connection records the caller's
+  signing identifier.
+- **Nothing uses it yet.** The app and CLI still read the Voyage, MinerU, Groq
+  and Okta items themselves (the credentials bullet above). keyd's `migrate`
+  copies those items into the vault and is not called.
+- `keyd::ensure_installed` runs at app startup and does nothing in a dev
+  build; a dev install is the preflight's ([cli.md](./cli.md)).
 
 ## Scraping lives in Rust because hidden WebViews freeze
 
@@ -106,6 +143,9 @@ the only way Rust reaches it — so the CLI and the app cannot disagree. Inside:
   ([retrieval.md](./retrieval.md)).
 - The session cookie, auth flag, `session-keepalive.log`, and the sign-in
   attempt record and its `okta-sign-in.log` ([auth.md](./auth.md)).
+- `vault.bin` and its `vault.bin.lock`, `keyd.sock` (launchd's), and `bin/`
+  with a dev-installed `oculus-keyd` and its `oculus-keyd.stamp`
+  ([above](#oculus-keyd-is-the-only-process-meant-to-read-its-key)).
 
 ## The database has one schema owner and two writers
 
@@ -204,6 +244,7 @@ JavaScript.
 - Background work in a hidden WebView freezes silently — keep it in Rust ([above](#scraping-lives-in-rust-because-hidden-webviews-freeze)).
 - Video over `convertFileSrc`/`asset://` fails with media error 4 — use `mediaSrc()`.
 - A window-scoped capability exposes every command to browsed pages — keep `webviews: ["main"]`.
-- Reaching the data dir any way but `paths::data_dir()` lets the CLI and app diverge.
+- Reaching the data dir any way but `paths::data_dir()` lets the CLI and app diverge; keyd, which links none of the app, spells the same path out in `app/keyd/src/main.rs`.
+- A keyd op that echoes a value, or runs before the caller check, hands a secret to any same-user process.
 - Comparing vectors without filtering on `embed_model`/`embed_dim` returns confident garbage.
 - A `subject_id` that cascades on user-owned tables deletes the student's work with a course.

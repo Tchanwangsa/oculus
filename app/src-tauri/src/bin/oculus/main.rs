@@ -22,6 +22,7 @@ use tokio::runtime::Runtime;
 mod args;
 mod auth;
 mod docs;
+mod keyd;
 mod lecture;
 mod memory;
 mod output;
@@ -54,6 +55,11 @@ fn main() {
                 Ok(())
             }
             AuthAction::Ed { token } => ctx.auth_ed(token.as_deref()),
+        },
+        Some(Command::Keyd { action }) => match action {
+            KeydAction::Install { from } => ctx.keyd_install(from.as_deref()),
+            KeydAction::Status => ctx.keyd_status(),
+            KeydAction::Uninstall => ctx.keyd_uninstall(),
         },
         Some(Command::List(args)) => ctx.list(args),
         Some(Command::Run(args)) => ctx.run(args),

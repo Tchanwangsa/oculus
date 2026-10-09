@@ -1,0 +1,48 @@
+//! The names secrets are stored under, and the keychain items they came from.
+
+pub const VOYAGE: &str = "voyage";
+pub const MINERU: &str = "mineru";
+pub const GROQ: &str = "groq";
+pub const OKTA_USERNAME: &str = "okta.username";
+pub const OKTA_PASSWORD: &str = "okta.password";
+pub const OKTA_TOTP_SECRET: &str = "okta.totp_secret";
+
+/// Every name the vault accepts; anything else is refused before it is stored.
+pub const KNOWN: &[&str] = &[VOYAGE, MINERU, GROQ, OKTA_USERNAME, OKTA_PASSWORD, OKTA_TOTP_SECRET];
+
+pub fn is_known(name: &str) -> bool {
+    KNOWN.contains(&name)
+}
+
+/// A keychain item the app wrote before the vault existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Legacy {
+    pub service: &'static str,
+    pub account: &'static str,
+    pub secret: &'static str,
+}
+
+/// `voyage.rs`, `mineru.rs`, `groq.rs` and `okta.rs` in the app own these.
+pub const LEGACY: &[Legacy] = &[
+    Legacy { service: "com.tchan.oculus.voyage", account: "voyage", secret: VOYAGE },
+    Legacy { service: "com.tchan.oculus.mineru", account: "mineru", secret: MINERU },
+    Legacy { service: "com.tchan.oculus.groq", account: "groq", secret: GROQ },
+    Legacy { service: "com.oculus.unimelb-sso", account: "username", secret: OKTA_USERNAME },
+    Legacy { service: "com.oculus.unimelb-sso", account: "password", secret: OKTA_PASSWORD },
+    Legacy { service: "com.oculus.unimelb-sso", account: "totp_secret", secret: OKTA_TOTP_SECRET },
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_legacy_item_lands_on_a_known_name_once() {
+        let mut seen: Vec<&str> = LEGACY.iter().map(|l| l.secret).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), LEGACY.len());
+        assert!(LEGACY.iter().all(|l| is_known(l.secret)));
+        assert!(!is_known("session.canvas"));
+    }
+}
