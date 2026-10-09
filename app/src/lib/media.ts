@@ -99,8 +99,8 @@ export function fmtClockSecs(secs: number, forceHours = false): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-/** Index of the span `t` falls in over ordered `starts` (cues, chapters or
- *  reading lines), or -1 before the first. */
+/** Index of the span `t` falls in over ordered `starts` (cues or chapters),
+ *  or -1 before the first. */
 export function spanAt(starts: number[], t: number): number {
   if (Number.isNaN(t)) return -1;
   // Starts are chronological; the upper bound also selects the last duplicate.

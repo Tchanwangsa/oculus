@@ -6,7 +6,6 @@ import {
   usePlayerPrefs,
   type Dock,
   type DockTab,
-  type TranscriptMode,
 } from "@/stores/playerPrefsStore";
 import type { Cue } from "@/lib/media";
 import { MediaDock } from "@/components/media/MediaDock";
@@ -16,18 +15,12 @@ import {
   type TranscribeEmptyProps,
 } from "@/components/media/TranscribeEmpty";
 import { ChaptersPanel, type ChaptersPanelProps } from "@/components/lectures/ChaptersPanel";
-import { ReadingList, type ReadingListProps } from "@/components/lectures/ReadingList";
-import {
-  TranscriptModePicker,
-  type TranscriptModePickerProps,
-} from "@/components/lectures/TranscriptModePicker";
 import {
   LectureChatPanel,
   type LectureChatPanelProps,
 } from "@/components/lectures/LectureChatPanel";
 
-/** The dock's tabs. Enhanced text is a register of the transcript (see
- *  `TranscriptModePicker`), not a tab of its own. */
+/** The dock's tabs. */
 const TABS: ReadonlyArray<ViewTab<DockTab>> = [
   { value: "chapters", label: "Chapters" },
   { value: "transcript", label: "Transcript" },
@@ -40,16 +33,6 @@ export function tabInFront(tab: DockTab, hasTranscript: boolean): DockTab {
   return !hasTranscript && tab === "transcript" ? "chapters" : tab;
 }
 
-/** The register really in front: `enhanced` falls back to the cues when there
- *  is no enhanced copy, unless a run is filling it now. */
-function modeInFront(
-  mode: TranscriptMode,
-  hasLines: boolean,
-  running: boolean,
-): TranscriptMode {
-  return mode === "enhanced" && !hasLines && !running ? "standard" : mode;
-}
-
 interface TranscriptPanelProps {
   cues: Cue[];
   activeCueIdx: number;
@@ -60,9 +43,6 @@ interface TranscriptPanelProps {
    *  component is `memo`'d against a player that re-renders on every
    *  `timeupdate`, which keeps the virtualised list from re-rendering. */
   chapters: ChaptersPanelProps;
-  /** The Enhanced register's bag, memoised likewise. The mode and the picker
-   *  are built here, not carried. */
-  reading: Omit<ReadingListProps, "picker">;
   /** The Chat tab's bag, memoised likewise; the playhead arrives as a ref. */
   chat: LectureChatPanelProps;
   /** The Transcript tab of a lecture without a transcript, memoised likewise;
@@ -90,7 +70,7 @@ interface TranscriptPanelProps {
 
 /**
  * The lecture's dock (`MediaDock`) and its three tabs: Chapters, the
- * transcript in either register, and Chat.
+ * transcript and Chat.
  */
 export const TranscriptPanel = memo(function TranscriptPanel({
   cues,
@@ -98,7 +78,6 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   tab,
   onTabChange,
   chapters,
-  reading,
   chat,
   transcribe,
   dock,
@@ -130,41 +109,6 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   );
   const activeTab: DockTab = tabInFront(tab, hasTranscript);
 
-  // Read from the store here so the player's memoised bags need not carry it.
-  const storedMode = usePlayerPrefs((p) => p.transcriptMode);
-  const setMode = useCallback(
-    (transcriptMode: TranscriptMode) => setPrefs({ transcriptMode }),
-    [setPrefs],
-  );
-  const mode = modeInFront(storedMode, reading.lines.length > 0, reading.status === "running");
-
-  // The picker is also the enhanced copy's only Write button, so it carries the
-  // job's state. Memoised: `ReadingList` is memoised against it.
-  const picker: TranscriptModePickerProps = useMemo(
-    () => ({
-      value: mode,
-      onChange: setMode,
-      status: reading.status,
-      error: reading.error,
-      progress: reading.progress,
-      busy: reading.busy,
-      downloaded: reading.downloaded,
-      hasLines: reading.lines.length > 0,
-      onEnhance: reading.onWrite,
-    }),
-    [
-      mode,
-      setMode,
-      reading.status,
-      reading.error,
-      reading.progress,
-      reading.busy,
-      reading.downloaded,
-      reading.lines.length,
-      reading.onWrite,
-    ],
-  );
-
   // Held here, not in the list, so a query outlives a visit to another tab.
   const search = useTranscriptSearch(cues, activeCueIdx);
 
@@ -172,7 +116,6 @@ export const TranscriptPanel = memo(function TranscriptPanel({
   if (activeTab === "chat") body = <LectureChatPanel {...chat} />;
   else if (activeTab === "chapters") body = <ChaptersPanel {...chapters} />;
   else if (cues.length === 0 && transcribe) body = <TranscribeEmpty {...transcribe} />;
-  else if (mode === "enhanced") body = <ReadingList {...reading} picker={picker} />;
   else {
     body = (
       <TranscriptList
@@ -185,7 +128,6 @@ export const TranscriptPanel = memo(function TranscriptPanel({
         following={following}
         onScrollAway={onScrollAway}
         onBackToLive={onBackToLive}
-        tools={<TranscriptModePicker {...picker} />}
       />
     );
   }
