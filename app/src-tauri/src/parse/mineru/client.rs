@@ -189,7 +189,8 @@ impl CloudDocument {
     }
 
     /// Read the PDF's page count once. The caller's thread does it before
-    /// submitting, so a PDF that crashes `lopdf` fails alone, not its batch.
+    /// submitting, so a PDF that crashes `hayro-syntax` fails alone, not its
+    /// batch.
     fn count_pages(&self) -> Result<u32, ParseError> {
         if let Some(pages) = hold(&self.state).counted_pages {
             return Ok(pages);
@@ -1216,11 +1217,20 @@ fn check_transfer_url(url: &str, what: &str) -> Result<(), ParseError> {
     Ok(())
 }
 
+/// The page count must equal pdfium's (`embed::raster`), since `page_no` is
+/// the join key. hayro opens a PDF encrypted with an empty user password, as
+/// pdfium does, and takes no pdfium session, which an embed holds for minutes.
 pub(super) fn page_count(pdf: &Path) -> Result<u32, ParseError> {
-    let document = lopdf::Document::load(pdf).map_err(|_| ParseError::Document {
-        code: "unreadable-pdf".into(),
+    let bytes =
+        fs::read(pdf).map_err(|e| ParseError::Io(format!("read {}: {e}", pdf.display())))?;
+    let document = hayro_syntax::Pdf::new(bytes).map_err(|error| ParseError::Document {
+        code: match error {
+            hayro_syntax::LoadPdfError::Decryption(_) => "encrypted-pdf",
+            hayro_syntax::LoadPdfError::Invalid => "unreadable-pdf",
+        }
+        .into(),
     })?;
-    let pages = document.get_pages().len() as u32;
+    let pages = document.pages().len() as u32;
     if pages == 0 {
         return Err(ParseError::Document {
             code: "empty-pdf".into(),
@@ -1633,6 +1643,44 @@ mod tests {
         ));
         // Under the real limit the same file builds a task.
         assert_eq!(client.build_tasks(0, &document).unwrap().len(), 1);
+    }
+
+    // ── Page count ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn page_count_refuses_junk_and_pageless_files() {
+        let scratch = Scratch::new("cloud-count");
+        let pdf = scratch.join("three.pdf");
+        write_pdf(&pdf, 3);
+        assert_eq!(page_count(&pdf).unwrap(), 3);
+
+        let junk = scratch.join("junk.pdf");
+        fs::write(&junk, b"not a pdf at all").unwrap();
+        assert!(
+            matches!(page_count(&junk), Err(ParseError::Document { ref code }) if code == "unreadable-pdf")
+        );
+
+        let empty = scratch.join("empty.pdf");
+        write_pdf(&empty, 0);
+        assert!(
+            matches!(page_count(&empty), Err(ParseError::Document { ref code }) if code == "empty-pdf")
+        );
+    }
+
+    /// The count must match pdfium's, which rasterises the pages the embedder
+    /// files under the same `page_no`. Point it at a library PDF (read-only);
+    /// an encrypted one with an empty user password is the case worth trying.
+    #[test]
+    fn page_count_agrees_with_pdfium_on_a_real_pdf() {
+        let Some(path) = std::env::var_os("OCULUS_PARSE_PDF") else {
+            eprintln!("skipping: set OCULUS_PARSE_PDF to a real library PDF");
+            return;
+        };
+        let path = PathBuf::from(path);
+        let ours = page_count(&path);
+        let theirs = crate::embed::raster::page_count(&path);
+        eprintln!("pages: ours {ours:?}, pdfium {theirs:?}");
+        assert_eq!(ours.unwrap(), theirs.unwrap());
     }
 
     // ── A whole batch ────────────────────────────────────────────────────────

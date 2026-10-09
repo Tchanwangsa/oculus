@@ -64,7 +64,7 @@ dtype, instruction, page_count, pages}`), written temp-then-rename.
 
 Embedding and parsing meet **only** on `(file, page_no)` via `.pages.json`, so
 the Voyage client checks pdfium's page count against the parse record's before
-billing a pixel — pdfium and `lopdf` can disagree on a damaged xref.
+billing a pixel — pdfium and `hayro-syntax` can disagree on a damaged xref.
 
 ## One space, or the ranking is noise
 

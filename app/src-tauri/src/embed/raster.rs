@@ -244,10 +244,10 @@ pub fn page_sizes(pdf: &Path) -> Result<Vec<(u32, u32)>, RasterError> {
     Ok(sizes)
 }
 
-/// pdfium's page count. It can disagree with `lopdf`'s (which `parse/`
-/// counts with): pdfium repairs damaged xrefs and page trees the way a viewer
-/// does, and the two may read different revisions. Since `page_no` is the join
-/// key, callers treat a mismatch as a document error.
+/// pdfium's page count. It can disagree with `hayro-syntax`'s (which `parse/`
+/// counts with): the two repair damaged xrefs and page trees differently, and
+/// may read different revisions. Since `page_no` is the join key, callers
+/// treat a mismatch as a document error.
 pub fn page_count(pdf: &Path) -> Result<u32, RasterError> {
     let _session = session();
     let pdfium = pdfium()?;
@@ -426,6 +426,12 @@ mod tests {
     }
 
     /// Tests needing libpdfium skip without it (`bun run pdfium`).
+    /// The count `parse/` writes into the record.
+    fn hayro_page_count(pdf: &Path) -> u32 {
+        let bytes = std::fs::read(pdf).unwrap();
+        hayro_syntax::Pdf::new(bytes).unwrap().pages().len() as u32
+    }
+
     fn library_present() -> bool {
         let available = pdfium().is_ok();
         if !available {
@@ -562,13 +568,12 @@ mod tests {
     }
 
     #[test]
-    fn page_count_agrees_with_lopdf_on_a_well_formed_file() {
+    fn page_count_agrees_with_hayro_on_a_well_formed_file() {
         if !library_present() {
             return;
         }
         let (_dir, pdf) = synthetic_pdf(4);
-        let theirs = lopdf::Document::load(&pdf).unwrap().get_pages().len() as u32;
-        assert_eq!(page_count(&pdf).unwrap(), theirs);
+        assert_eq!(page_count(&pdf).unwrap(), hayro_page_count(&pdf));
     }
 
     #[test]
@@ -645,9 +650,9 @@ mod tests {
         .unwrap();
 
         assert!(count > 0);
-        let lopdf_count = lopdf::Document::load(&path).unwrap().get_pages().len() as u32;
-        eprintln!("pages: pdfium {count}, lopdf {lopdf_count}");
-        assert_eq!(count, lopdf_count);
+        let hayro_count = hayro_page_count(&path);
+        eprintln!("pages: pdfium {count}, hayro {hayro_count}");
+        assert_eq!(count, hayro_count);
 
         let first = first.expect("no page 1");
         assert!(first.png.len() > 1024, "page 1 PNG is suspiciously small");
