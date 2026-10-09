@@ -85,17 +85,35 @@ changes when its own source does and one keychain approval sticks
   overwritten.
 - **The wire format** is one JSON line, then `body_len` raw bytes if the
   header names them; replies have the same shape. Ops: `ping` (version, source
-  hash, pid), `has`, `store`, `delete`. No op returns a value. Failures are
-  `{"error": kind, "detail": …}`, with kind `keychain` when the master key is
-  refused or fails.
+  hash, pid), `has`, `store`, `delete`, `forward`. No op returns a value, and
+  only `forward` takes a body. Failures are `{"error": kind, "detail": …}`:
+  `request`, `caller`, `keychain` (the master key or an old item refused or
+  failed), `vault`, `missing` and `upstream`.
+- **`forward` sends one request with the key added; the key never leaves.**
+  The request names a `secret`, `method` (GET or POST), `path` and `headers`;
+  keyd sends it to that secret's fixed origin (`app/keyd/src/forward.rs`:
+  only `voyage` → `https://api.voyageai.com`, under `/v1/`) with
+  `Authorization: Bearer <key>`. The path is held to plain characters with no
+  `%`, dot segment or `//`, and only `Content-Type` and `Accept` may be set.
+  The reply is `{"status", "headers", "body_len"}` and the origin's body,
+  byte for byte, whatever the status: redirects come back unfollowed, and
+  `upstream` means no answer arrived (DNS, connect, TLS, reset). ureq runs
+  without gzip or proxy variables, and its 30 s connect timeout is the only
+  one. The log line names the status and byte counts, never a header or body.
+- **Voyage's old keychain item is imported on first use.** The first `has`
+  or `forward` for `voyage` copies `com.tchan.oculus.voyage` into the vault
+  unless the vault already holds a key, then records `keyd.imported.voyage`
+  in the vault; `store` and `delete` record it too, so a deleted key never
+  comes back from the old item, which stays in the keychain. Entries under
+  `keyd.` are bookkeeping no op can name (`app/keyd/vault/src/names.rs`).
 - **The caller check runs before any request is read.** The peer's uid must
   be keyd's. A bundled keyd then admits only executables inside its own app
   bundle whose seal verifies strictly (`app/keyd/src/caller.rs`); a `dev`
   build admits any same-user caller. Each connection records the caller's
   signing identifier.
 - **Nothing uses it yet.** The app and CLI still read the Voyage, MinerU, Groq
-  and Okta items themselves (the credentials bullet above). keyd's `migrate`
-  copies those items into the vault and is not called.
+  and Okta items themselves (the credentials bullet above). keyd's `migrate`,
+  which copies every old item at once, is not called.
 - `keyd::ensure_installed` runs at app startup and does nothing in a dev
   build; a dev install is the preflight's ([cli.md](./cli.md)).
 

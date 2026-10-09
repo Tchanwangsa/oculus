@@ -14,6 +14,16 @@ pub fn is_known(name: &str) -> bool {
     KNOWN.contains(&name)
 }
 
+/// keyd's own bookkeeping entries start with this. None is in `KNOWN`, so no
+/// op can read, store or delete one, and none is ever a secret.
+pub const KEYD_PREFIX: &str = "keyd.";
+
+/// Present once keyd has copied `name`'s old keychain item into the vault (or
+/// found nothing to copy), so a later delete is never undone by a re-import.
+pub fn imported(name: &str) -> String {
+    format!("{KEYD_PREFIX}imported.{name}")
+}
+
 /// A keychain item the app wrote before the vault existed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Legacy {
@@ -44,5 +54,13 @@ mod tests {
         assert_eq!(seen.len(), LEGACY.len());
         assert!(LEGACY.iter().all(|l| is_known(l.secret)));
         assert!(!is_known("session.canvas"));
+    }
+
+    #[test]
+    fn bookkeeping_entries_are_never_known_names() {
+        for name in KNOWN {
+            assert!(!is_known(&imported(name)));
+            assert!(!name.starts_with(KEYD_PREFIX));
+        }
     }
 }

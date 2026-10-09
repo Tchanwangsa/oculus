@@ -3,9 +3,10 @@
 //! A request is one JSON line, then `body_len` raw bytes when the header has
 //! that field; a reply has the same shape. A connection may carry several
 //! requests in turn. keyd exits after `idle` with no request in flight; a
-//! connection counts as busy only from a complete header line to its reply,
-//! so a client that connects and stalls cannot keep keyd alive. No read
-//! timeouts: parses and embeds forwarded in later stages take minutes.
+//! connection counts as busy from a complete header line until its reply is
+//! written, so a `forward` waiting on its origin holds keyd open, but a
+//! client that connects and stalls cannot. No read timeouts: a forwarded
+//! parse or embed takes minutes.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
@@ -18,7 +19,7 @@ use serde_json::{json, Value};
 
 use crate::caller::{self, Policy};
 use crate::log;
-use crate::ops::{OpError, State};
+use crate::ops::{OpError, Reply, State};
 
 /// Longest header line; a longer one is refused and the connection closed.
 pub const MAX_LINE: usize = 64 * 1024;
@@ -142,21 +143,27 @@ impl Server {
                     Err(e) => Err(e),
                     Ok(body) => {
                         in_step = true;
-                        self.state.dispatch(&op, &req, &body)
+                        self.state.dispatch(&caller, &op, &req, &body)
                     }
                 },
             };
 
-            let (header, outcome) = match &reply {
-                Ok(v) => (v.clone(), "ok".to_string()),
-                Err(e) => (e.to_json(), format!("error={}", e.kind)),
+            let (reply, outcome) = match reply {
+                Ok(r) => {
+                    let outcome = match &r.note {
+                        Some(note) => format!("ok {note}"),
+                        None => "ok".to_string(),
+                    };
+                    (r, outcome)
+                }
+                Err(e) => (Reply::from(e.to_json()), format!("error={}", e.kind)),
             };
             let admitted = if verdict.is_ok() { "admitted" } else { "refused" };
             match &verdict {
                 Err(why) => log(&format!("op={op} caller={who} {admitted} ({why}) {outcome}")),
                 Ok(()) => log(&format!("op={op} caller={who} {admitted} {outcome}")),
             }
-            if let Err(e) = write_frame(&mut writer, &header, &[]) {
+            if let Err(e) = write_frame(&mut writer, &reply.header, &reply.body) {
                 log(&format!("op={op} caller={who} reply failed: {e}"));
                 return;
             }
@@ -220,37 +227,44 @@ fn read_body(reader: &mut impl Read, len: u64) -> Result<Vec<u8>, OpError> {
     Ok(body)
 }
 
+/// The header line, then the body unbuffered: a body can be tens of MB.
 fn write_frame(w: &mut impl Write, header: &Value, body: &[u8]) -> std::io::Result<()> {
     let mut header = header.clone();
     if !body.is_empty() {
         header["body_len"] = json!(body.len());
     }
-    let mut out = header.to_string().into_bytes();
-    out.push(b'\n');
-    out.extend_from_slice(body);
-    w.write_all(&out)?;
+    let mut line = header.to_string().into_bytes();
+    line.push(b'\n');
+    w.write_all(&line)?;
+    w.write_all(body)?;
     w.flush()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::Scratch;
+    use crate::forward::Routes;
+    use crate::ops::NoLegacy;
+    use crate::test_support::{Answer, FakeOrigin, Scratch};
     use std::os::fd::IntoRawFd;
     use std::os::unix::net::UnixListener;
-    use vault::{KeyError, KeySource, MasterKey, StaticKey};
+    use vault::{KeyError, KeySource, MasterKey, StaticKey, Vault};
 
     fn serve(policy: Policy, idle: Duration) -> (Scratch, std::path::PathBuf, std::thread::JoinHandle<()>) {
         serve_with(policy, idle, Box::new(StaticKey(MasterKey::from_bytes([3; 32]))))
     }
 
     fn serve_with(policy: Policy, idle: Duration, keys: Box<dyn KeySource>) -> (Scratch, std::path::PathBuf, std::thread::JoinHandle<()>) {
+        serve_state(policy, idle, |dir| State::new(dir.to_path_buf(), keys, Box::new(NoLegacy)))
+    }
+
+    fn serve_state(policy: Policy, idle: Duration, state: impl FnOnce(&std::path::Path) -> State) -> (Scratch, std::path::PathBuf, std::thread::JoinHandle<()>) {
         let dir = Scratch::new("srv");
         let sock = dir.0.join("k.sock");
         let listener = UnixListener::bind(&sock).unwrap();
         listener.set_nonblocking(true).unwrap();
         let fd = listener.into_raw_fd();
-        let state = State::new(dir.0.clone(), keys);
+        let state = state(&dir.0);
         let server = Arc::new(Server::new(state, policy, idle));
         let handle = std::thread::spawn(move || server.run(&[fd]));
         (dir, sock, handle)
@@ -340,6 +354,62 @@ mod tests {
         let stream = UnixStream::connect(&sock).unwrap();
         let mut r = BufReader::new(&stream);
         assert_eq!(call(&stream, &mut r, &json!({"op": "has", "secret": "voyage"}))["has"], false);
+        assert!(!handle.is_finished(), "keyd answered, then idles from the reply");
+        handle.join().unwrap();
+    }
+
+    /// Serves `origin` as Voyage's, with a key already stored.
+    fn serve_forwarding(idle: Duration, origin: &FakeOrigin) -> (Scratch, std::path::PathBuf, std::thread::JoinHandle<()>) {
+        let origin = origin.origin.clone();
+        serve_state(Policy::SameUser, idle, move |dir| {
+            let state = State::new(dir.to_path_buf(), Box::new(StaticKey(MasterKey::from_bytes([3; 32]))), Box::new(NoLegacy))
+                .with_routes(Routes::compiled().with_origin("voyage", &origin).unwrap());
+            Vault::new(vault::path_in(dir), MasterKey::from_bytes([3; 32])).store("voyage", "pa-KEY").unwrap();
+            state
+        })
+    }
+
+    /// One request with a body; the reply's header and body.
+    fn exchange(stream: &UnixStream, reader: &mut BufReader<&UnixStream>, req: &Value, body: &[u8]) -> (Value, Vec<u8>) {
+        let mut w = stream;
+        w.write_all(format!("{req}\n").as_bytes()).unwrap();
+        w.write_all(body).unwrap();
+        let header: Value = serde_json::from_slice(&read_line(reader).unwrap().unwrap()).unwrap();
+        let len = header.get("body_len").and_then(Value::as_u64).unwrap_or(0);
+        (header, read_body(reader, len).unwrap())
+    }
+
+    fn forward_req(body_len: usize) -> Value {
+        json!({"op": "forward", "secret": "voyage", "method": "POST", "path": "/v1/multimodalembeddings",
+               "headers": [["Content-Type", "application/json"]], "body_len": body_len})
+    }
+
+    #[test]
+    fn a_forward_carries_bodies_both_ways_and_the_connection_goes_on() {
+        let origin = FakeOrigin::start(|hit| Answer { status: 200, headers: vec![], body: hit.body.iter().rev().copied().collect() });
+        let (_dir, sock, _h) = serve_forwarding(Duration::from_secs(60), &origin);
+        let stream = UnixStream::connect(&sock).unwrap();
+        let mut r = BufReader::new(&stream);
+        let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        let (header, body) = exchange(&stream, &mut r, &forward_req(big.len()), &big);
+        assert_eq!(header["status"], 200);
+        assert_eq!(body, big.iter().rev().copied().collect::<Vec<_>>());
+        assert_eq!(origin.hits()[0].body, big);
+        // Framing held: the next request on the same connection is answered.
+        assert_eq!(call(&stream, &mut r, &json!({"op": "has", "secret": "voyage"}))["has"], true);
+    }
+
+    #[test]
+    fn a_forward_waiting_on_its_origin_holds_keyd_open_past_the_idle_window() {
+        let origin = FakeOrigin::start(|_| {
+            std::thread::sleep(Duration::from_millis(2500));
+            Answer { status: 200, headers: vec![], body: b"late".to_vec() }
+        });
+        let (_dir, sock, handle) = serve_forwarding(Duration::from_secs(1), &origin);
+        let stream = UnixStream::connect(&sock).unwrap();
+        let mut r = BufReader::new(&stream);
+        let (header, body) = exchange(&stream, &mut r, &forward_req(2), b"{}");
+        assert_eq!((header["status"].as_u64(), body.as_slice()), (Some(200), &b"late"[..]));
         assert!(!handle.is_finished(), "keyd answered, then idles from the reply");
         handle.join().unwrap();
     }

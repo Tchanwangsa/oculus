@@ -10,9 +10,12 @@
 //!
 //! Debug builds add `serve-local <sock>`, which binds the socket itself, and
 //! read OCULUS_KEYD_DATA_DIR, OCULUS_KEYD_TEST_KEY (64 hex characters, in
-//! place of the keychain) and OCULUS_KEYD_IDLE_SECS. Release builds have none.
+//! place of the keychain; old keychain items are then never read either),
+//! OCULUS_KEYD_IDLE_SECS and OCULUS_KEYD_VOYAGE_ORIGIN (`http://127.0.0.1:<port>`,
+//! a fake Voyage). Release builds have none.
 
 mod caller;
+mod forward;
 mod ops;
 mod server;
 #[cfg(test)]
@@ -62,7 +65,19 @@ fn usage() -> ! {
 fn serve(listeners: Vec<RawFd>) {
     let policy = caller::Policy::compiled();
     log(&format!("started, source {}, {policy:?} policy, listeners {listeners:?}", &ops::SOURCE_HASH[..12]));
-    let state = ops::State::new(data_dir(), key_source());
+    let (keys, legacy) = key_sources();
+    let state = ops::State::new(data_dir(), keys, legacy);
+    #[cfg(debug_assertions)]
+    let state = match std::env::var("OCULUS_KEYD_VOYAGE_ORIGIN") {
+        Ok(origin) => match forward::Routes::compiled().with_origin(vault::names::VOYAGE, &origin) {
+            Ok(routes) => state.with_routes(routes),
+            Err(e) => {
+                log(&format!("OCULUS_KEYD_VOYAGE_ORIGIN: {e}"));
+                exit(64);
+            }
+        },
+        Err(_) => state,
+    };
     let server = Arc::new(server::Server::new(state, policy, idle()));
     server.run(&listeners);
 }
@@ -109,18 +124,19 @@ fn home() -> PathBuf {
     PathBuf::from(std::ffi::OsStr::new(&*dir.to_string_lossy()))
 }
 
-fn key_source() -> Box<dyn KeySource> {
+/// The master key's source, and where old items are imported from.
+fn key_sources() -> (Box<dyn KeySource>, Box<dyn ops::LegacySource>) {
     #[cfg(debug_assertions)]
     if let Ok(hex) = std::env::var("OCULUS_KEYD_TEST_KEY") {
         match vault::MasterKey::from_hex(&hex) {
-            Some(key) => return Box::new(vault::StaticKey(key)),
+            Some(key) => return (Box::new(vault::StaticKey(key)), Box::new(ops::NoLegacy)),
             None => {
                 log("OCULUS_KEYD_TEST_KEY is not 64 hex characters");
                 exit(64);
             }
         }
     }
-    Box::new(vault::keychain::MasterItem)
+    (Box::new(vault::keychain::MasterItem), Box::new(ops::LegacyKeychain))
 }
 
 fn idle() -> Duration {

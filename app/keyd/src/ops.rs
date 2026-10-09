@@ -12,18 +12,33 @@ use std::sync::Mutex;
 use serde_json::{json, Value};
 use vault::{names, KeyError, KeySource, MasterKey, Vault, VaultError};
 
+use crate::caller::Caller;
+use crate::forward::{Call, Routes, Upstream};
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const SOURCE_HASH: &str = env!("KEYD_SOURCE_HASH");
+
+/// Secrets whose old keychain item keyd copies into the vault the first time
+/// an op touches them (`State::import_once`).
+const IMPORTED_ON_USE: &[&str] = &[names::VOYAGE];
 
 pub struct State {
     data_dir: PathBuf,
     keys: Box<dyn KeySource>,
     master: Mutex<Option<MasterKey>>,
+    legacy: Box<dyn LegacySource>,
+    /// Held across one import, so racing first requests read the old item once.
+    importing: Mutex<()>,
+    routes: Routes,
+    upstream: Upstream,
 }
 
 /// An op's failure as it goes on the wire: `{"error": kind, "detail": …}`.
-/// Kinds: `request` (malformed, unknown op or name), `caller` (refused),
-/// `keychain` (the master key was refused or failed), `vault`.
+/// Kinds: `request` (malformed, unknown op or name, a refused path or header),
+/// `caller` (refused), `keychain` (the master key, or an old item being
+/// imported, was refused or failed), `vault`, `missing` (`forward` for a
+/// secret the vault does not hold), `upstream` (`forward` got no answer: DNS,
+/// connect, TLS or a reset).
 #[derive(Debug)]
 pub struct OpError {
     pub kind: &'static str,
@@ -52,9 +67,41 @@ impl From<VaultError> for OpError {
     }
 }
 
+/// A reply: the header line, the raw body after it, and what the log line
+/// may add (never a value, a header or a body).
+#[derive(Debug)]
+pub struct Reply {
+    pub header: Value,
+    pub body: Vec<u8>,
+    pub note: Option<String>,
+}
+
+impl From<Value> for Reply {
+    fn from(header: Value) -> Self {
+        Reply { header, body: Vec::new(), note: None }
+    }
+}
+
 impl State {
-    pub fn new(data_dir: PathBuf, keys: Box<dyn KeySource>) -> Self {
-        State { data_dir, keys, master: Mutex::new(None) }
+    /// `legacy` is where `import_once` reads old items: the keychain in
+    /// production, never in tests.
+    pub fn new(data_dir: PathBuf, keys: Box<dyn KeySource>, legacy: Box<dyn LegacySource>) -> Self {
+        State {
+            data_dir,
+            keys,
+            master: Mutex::new(None),
+            legacy,
+            importing: Mutex::new(()),
+            routes: Routes::compiled(),
+            upstream: Upstream::new(),
+        }
+    }
+
+    /// Debug builds only, like `Routes::with_origin`.
+    #[cfg(debug_assertions)]
+    pub fn with_routes(mut self, routes: Routes) -> Self {
+        self.routes = routes;
+        self
     }
 
     fn master(&self) -> Result<MasterKey, KeyError> {
@@ -71,28 +118,115 @@ impl State {
         Ok(Vault::new(vault::path_in(&self.data_dir), self.master()?))
     }
 
-    /// One request. `body` is the raw bytes after the header line; no stage-1
-    /// op takes any. A reply never carries a secret value.
-    pub fn dispatch(&self, op: &str, req: &Value, body: &[u8]) -> Result<Value, OpError> {
-        if !body.is_empty() {
+    /// One request. `body` is the raw bytes after the header line; only
+    /// `forward` takes any. No reply carries a secret value. `_caller` is who
+    /// asked: no op is limited by it yet, and `forward` is open to any
+    /// admitted caller.
+    pub fn dispatch(&self, _caller: &Caller, op: &str, req: &Value, body: &[u8]) -> Result<Reply, OpError> {
+        if !body.is_empty() && op != "forward" {
             return Err(OpError::new("request", format!("{op} takes no body")));
         }
         match op {
-            "ping" => Ok(json!({"version": VERSION, "source_hash": SOURCE_HASH, "pid": std::process::id()})),
-            "has" => Ok(json!({"has": self.vault()?.has(secret_name(req)?)?})),
+            "ping" => Ok(json!({"version": VERSION, "source_hash": SOURCE_HASH, "pid": std::process::id()}).into()),
+            "has" => {
+                let name = secret_name(req)?;
+                let vault = self.vault()?;
+                self.import_once(&vault, name)?;
+                Ok(json!({"has": vault.has(name)?}).into())
+            }
             "store" => {
                 let name = secret_name(req)?;
                 let value = req.get("value").and_then(Value::as_str).ok_or_else(|| OpError::new("request", "store needs a string \"value\""))?;
                 if value.is_empty() {
                     return Err(OpError::new("request", "store needs a non-empty value"));
                 }
-                self.vault()?.store(name, value)?;
-                Ok(json!({"stored": true}))
+                // Marked imported too: the stored key outranks any old item.
+                let marker = imported_marker(name);
+                self.vault()?.update(|e| {
+                    e.insert(name, value);
+                    if let Some(m) = &marker {
+                        e.insert(m, "1");
+                    }
+                })?;
+                Ok(json!({"stored": true}).into())
             }
-            "delete" => Ok(json!({"existed": self.vault()?.remove(secret_name(req)?)?})),
+            "delete" => {
+                let name = secret_name(req)?;
+                // Marked imported, so the old item still in the keychain never comes back.
+                let marker = imported_marker(name);
+                let existed = self.vault()?.update(|e| {
+                    if let Some(m) = &marker {
+                        e.insert(m, "1");
+                    }
+                    e.remove(name)
+                })?;
+                Ok(json!({"existed": existed}).into())
+            }
+            "forward" => self.forward(req, body),
             _ => Err(OpError::new("request", format!("unknown op {op:?}"))),
         }
     }
+
+    /// Sends one request to `secret`'s fixed origin with the key added. The
+    /// request is checked before the master key is read, so a bad one never
+    /// prompts. Any status the origin answers is a reply, not an error.
+    fn forward(&self, req: &Value, body: &[u8]) -> Result<Reply, OpError> {
+        let name = secret_name(req)?;
+        let route = self.routes.get(name).ok_or_else(|| OpError::new("request", format!("{name} cannot be forwarded")))?;
+        let call = Call::parse(req, route, body)?;
+        let vault = self.vault()?;
+        self.import_once(&vault, name)?;
+        let key = vault
+            .get(name)?
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| OpError::new("missing", format!("no {name} key is stored")))?;
+        let answer = self.upstream.send(&route.origin, &call, &key, body)?;
+        let headers: Vec<[&str; 2]> = answer.headers.iter().map(|(k, v)| [k.as_str(), v.as_str()]).collect();
+        Ok(Reply {
+            header: json!({"status": answer.status, "headers": headers, "body_len": answer.body.len()}),
+            note: Some(format!("secret={name} status={} bytes_out={} bytes_in={}", answer.status, body.len(), answer.body.len())),
+            body: answer.body,
+        })
+    }
+
+    /// Copies `name`'s old keychain item into the vault once, then marks it
+    /// imported. Copy-only: the old item stays, because the app still reads it
+    /// when keyd is absent. A value already in the vault wins, and is never
+    /// read over. A refused read of the old item is a `keychain` error.
+    fn import_once(&self, vault: &Vault, name: &str) -> Result<(), OpError> {
+        let Some(marker) = imported_marker(name) else { return Ok(()) };
+        let item = names::LEGACY.iter().find(|l| l.secret == name).ok_or_else(|| OpError::new("vault", format!("{name} has no old item")))?;
+        let _one = self.importing.lock().unwrap_or_else(|p| p.into_inner());
+        let entries = vault.load()?;
+        if entries.contains(&marker) {
+            return Ok(());
+        }
+        // May prompt, so it runs outside the vault's lock.
+        let old = if entries.contains(name) {
+            None
+        } else {
+            self.legacy.read(item.service, item.account).map_err(|e| match e {
+                KeyError::Refused(d) | KeyError::Platform(d) => OpError::new("keychain", d),
+            })?
+        };
+        vault.update(|e| {
+            // A store or delete that landed meanwhile has already decided.
+            if e.contains(&marker) {
+                return;
+            }
+            if !e.contains(name) {
+                if let Some(value) = old.as_deref().filter(|v| !v.is_empty()) {
+                    e.insert(name, value);
+                }
+            }
+            e.insert(&marker, "1");
+        })?;
+        Ok(())
+    }
+}
+
+fn imported_marker(name: &str) -> Option<String> {
+    IMPORTED_ON_USE.contains(&name).then(|| names::imported(name))
 }
 
 fn secret_name(req: &Value) -> Result<&str, OpError> {
@@ -106,17 +240,26 @@ fn secret_name(req: &Value) -> Result<&str, OpError> {
 // ── Migration ────────────────────────────────────────────────────────────────
 
 /// Reads one pre-vault keychain item. The keychain in production; a map in tests.
-#[cfg_attr(not(test), allow(dead_code))]
-pub trait LegacySource {
+pub trait LegacySource: Send + Sync {
     fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError>;
 }
 
-#[allow(dead_code)]
 pub struct LegacyKeychain;
 
 impl LegacySource for LegacyKeychain {
     fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
         vault::keychain::read_password(service, account)
+    }
+}
+
+/// No old items: for a keyd whose master key is not the keychain's either.
+#[cfg(debug_assertions)]
+pub struct NoLegacy;
+
+#[cfg(debug_assertions)]
+impl LegacySource for NoLegacy {
+    fn read(&self, _service: &str, _account: &str) -> Result<Option<String>, KeyError> {
+        Ok(None)
     }
 }
 
@@ -168,12 +311,24 @@ pub fn migrate(vault: &Vault, legacy: &dyn LegacySource) -> Result<Migrated, Vau
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::Scratch;
+    use crate::test_support::{Answer, FakeOrigin, Scratch};
     use std::collections::HashMap;
     use vault::StaticKey;
 
     fn key() -> MasterKey {
         MasterKey::from_bytes([9; 32])
+    }
+
+    fn state_in(dir: &Scratch) -> State {
+        State::new(dir.0.clone(), Box::new(StaticKey(key())), Box::new(NoLegacy))
+    }
+
+    /// The reply's header, for ops that answer without a body.
+    fn call(state: &State, op: &str, req: Value) -> Result<Value, OpError> {
+        state.dispatch(&Caller::default(), op, &req, b"").map(|r| {
+            assert!(r.body.is_empty());
+            r.header
+        })
     }
 
     struct Counting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
@@ -197,8 +352,8 @@ mod tests {
     #[test]
     fn ping_never_reads_the_master_key() {
         let dir = Scratch::new("ping");
-        let state = State::new(dir.0.clone(), Box::new(Refusing));
-        let reply = state.dispatch("ping", &json!({"op": "ping"}), b"").unwrap();
+        let state = State::new(dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
+        let reply = call(&state, "ping", json!({"op": "ping"})).unwrap();
         assert_eq!(reply["source_hash"], SOURCE_HASH);
         assert_eq!(reply["source_hash"].as_str().unwrap().len(), 64);
         assert_eq!(reply["pid"], std::process::id());
@@ -208,8 +363,8 @@ mod tests {
     #[test]
     fn a_refused_master_key_is_a_keychain_error_and_is_retried() {
         let dir = Scratch::new("refused");
-        let state = State::new(dir.0.clone(), Box::new(Refusing));
-        let err = state.dispatch("has", &json!({"secret": "voyage"}), b"").unwrap_err();
+        let state = State::new(dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
+        let err = state.dispatch(&Caller::default(), "has", &json!({"secret": "voyage"}), b"").unwrap_err();
         assert_eq!(err.kind, "keychain");
         assert_eq!(err.to_json()["error"], "keychain");
         assert!(state.master.lock().unwrap().is_none(), "a refusal is not cached");
@@ -219,11 +374,11 @@ mod tests {
     fn the_master_key_is_read_once_across_racing_connections() {
         let dir = Scratch::new("single-flight");
         let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let state = std::sync::Arc::new(State::new(dir.0.clone(), Box::new(Counting(reads.clone()))));
+        let state = std::sync::Arc::new(State::new(dir.0.clone(), Box::new(Counting(reads.clone())), Box::new(NoLegacy)));
         let threads: Vec<_> = (0..6)
             .map(|_| {
                 let s = state.clone();
-                std::thread::spawn(move || s.dispatch("has", &json!({"secret": "groq"}), b"").unwrap())
+                std::thread::spawn(move || s.dispatch(&Caller::default(), "has", &json!({"secret": "groq"}), b"").unwrap().header)
             })
             .collect();
         for t in threads {
@@ -235,19 +390,19 @@ mod tests {
     #[test]
     fn store_has_delete_and_never_echo_a_value() {
         let dir = Scratch::new("ops");
-        let state = State::new(dir.0.clone(), Box::new(StaticKey(key())));
-        let stored = state.dispatch("store", &json!({"secret": "voyage", "value": "pa-SECRET"}), b"").unwrap();
+        let state = state_in(&dir);
+        let stored = call(&state, "store", json!({"secret": "voyage", "value": "pa-SECRET"})).unwrap();
         assert!(!stored.to_string().contains("pa-SECRET"));
-        assert_eq!(state.dispatch("has", &json!({"secret": "voyage"}), b"").unwrap()["has"], true);
-        assert_eq!(state.dispatch("delete", &json!({"secret": "voyage"}), b"").unwrap()["existed"], true);
-        assert_eq!(state.dispatch("delete", &json!({"secret": "voyage"}), b"").unwrap()["existed"], false);
-        assert_eq!(state.dispatch("has", &json!({"secret": "voyage"}), b"").unwrap()["has"], false);
+        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
+        assert_eq!(call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"], true);
+        assert_eq!(call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"], false);
+        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], false);
     }
 
     #[test]
     fn malformed_requests_are_request_errors() {
         let dir = Scratch::new("bad");
-        let state = State::new(dir.0.clone(), Box::new(StaticKey(key())));
+        let state = state_in(&dir);
         for (op, req, body) in [
             ("get", json!({"secret": "voyage"}), &b""[..]),
             ("has", json!({}), b""),
@@ -257,7 +412,7 @@ mod tests {
             ("store", json!({"secret": "voyage", "value": 5}), b""),
             ("ping", json!({}), b"x"),
         ] {
-            let err = state.dispatch(op, &req, body).unwrap_err();
+            let err = state.dispatch(&Caller::default(), op, &req, body).unwrap_err();
             assert_eq!(err.kind, "request", "{op} {req}");
         }
         assert!(!vault::path_in(&dir.0).exists(), "nothing was written");
@@ -303,5 +458,210 @@ mod tests {
         let again = migrate(&v, &legacy).unwrap();
         assert!(again.copied.is_empty());
         assert_eq!(again.kept, [names::VOYAGE, names::GROQ, names::OKTA_USERNAME]);
+    }
+
+    // ── forward ──────────────────────────────────────────────────────────────
+
+    const KEY: &str = "pa-VAULT-KEY";
+
+    fn forwarding(dir: &Scratch, origin: &FakeOrigin) -> State {
+        let state = state_in(dir).with_routes(Routes::compiled().with_origin("voyage", &origin.origin).unwrap());
+        call(&state, "store", json!({"secret": "voyage", "value": KEY})).unwrap();
+        state
+    }
+
+    fn forward(state: &State, body: &[u8]) -> Result<Reply, OpError> {
+        let req = json!({
+            "op": "forward", "secret": "voyage", "method": "POST", "path": "/v1/multimodalembeddings",
+            "headers": [["Content-Type", "application/json"], ["Accept", "application/json"]],
+            "body_len": body.len(),
+        });
+        state.dispatch(&Caller::default(), "forward", &req, body)
+    }
+
+    fn header<'a>(reply: &'a Reply, name: &str) -> Option<&'a str> {
+        reply.header["headers"].as_array()?.iter().find(|h| h[0] == name).and_then(|h| h[1].as_str())
+    }
+
+    fn answer(status: u16, headers: Vec<(&'static str, String)>, body: &[u8]) -> Answer {
+        Answer { status, headers, body: body.to_vec() }
+    }
+
+    #[test]
+    fn forward_adds_the_vault_key_and_passes_the_answer_through() {
+        let origin = FakeOrigin::start(|_| answer(200, vec![("Content-Type", "application/json".into())], b"{\"usage\":{\"total_tokens\":7}}"));
+        let dir = Scratch::new("fwd-ok");
+        let state = forwarding(&dir, &origin);
+
+        let reply = forward(&state, b"{\"inputs\":[]}").unwrap();
+        assert_eq!(reply.header["status"], 200);
+        assert_eq!(reply.header["body_len"], reply.body.len());
+        assert_eq!(reply.body, b"{\"usage\":{\"total_tokens\":7}}");
+        assert_eq!(header(&reply, "content-type"), Some("application/json"));
+
+        let hit = &origin.hits()[0];
+        assert_eq!((hit.method.as_str(), hit.path.as_str()), ("POST", "/v1/multimodalembeddings"));
+        assert_eq!(hit.header("authorization"), Some(format!("Bearer {KEY}").as_str()));
+        assert_eq!(hit.header("content-type"), Some("application/json"));
+        assert_eq!(hit.header("accept-encoding"), None, "no gzip, so the body is the origin's bytes");
+        assert_eq!(hit.body, b"{\"inputs\":[]}");
+
+        let shown = format!("{} {} {:?}", reply.header, String::from_utf8_lossy(&reply.body), reply.note);
+        assert!(!shown.contains(KEY), "{shown}");
+        assert!(reply.note.unwrap().contains("status=200"));
+    }
+
+    #[test]
+    fn error_statuses_come_back_as_replies_byte_for_byte() {
+        let bodies: [(u16, &[u8]); 5] = [
+            (401, b"{\"detail\":\"Provided API key is invalid.\"}"),
+            (402, b"{\"detail\":\"credit\"}"),
+            (429, b"{\"detail\":\"3 RPM and 10K TPM\"}"),
+            (503, b"<html>upstream \xff</html>"),
+            (400, b""),
+        ];
+        for (status, body) in bodies {
+            let origin = FakeOrigin::start(move |_| answer(status, vec![("Retry-After", "17".into())], body));
+            let dir = Scratch::new("fwd-status");
+            let reply = forward(&forwarding(&dir, &origin), b"{}").unwrap();
+            assert_eq!(reply.header["status"], status);
+            assert_eq!(reply.body, body);
+            assert_eq!(header(&reply, "retry-after"), Some("17"));
+        }
+    }
+
+    #[test]
+    fn a_redirect_is_returned_not_followed() {
+        let origin = FakeOrigin::start(|_| answer(302, vec![("Location", "http://127.0.0.1:1/elsewhere".into())], b""));
+        let dir = Scratch::new("fwd-redirect");
+        let reply = forward(&forwarding(&dir, &origin), b"{}").unwrap();
+        assert_eq!(reply.header["status"], 302);
+        assert_eq!(header(&reply, "location"), Some("http://127.0.0.1:1/elsewhere"));
+        assert_eq!(origin.hits().len(), 1);
+    }
+
+    #[test]
+    fn no_stored_key_is_missing_and_nothing_is_sent() {
+        let origin = FakeOrigin::start(|_| answer(200, vec![], b""));
+        let dir = Scratch::new("fwd-missing");
+        let state = state_in(&dir).with_routes(Routes::compiled().with_origin("voyage", &origin.origin).unwrap());
+        assert_eq!(forward(&state, b"{}").unwrap_err().kind, "missing");
+        assert!(origin.hits().is_empty());
+    }
+
+    #[test]
+    fn an_unreachable_origin_is_upstream_and_names_nothing_sent() {
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let dir = Scratch::new("fwd-upstream");
+        let state = state_in(&dir).with_routes(Routes::compiled().with_origin("voyage", &format!("http://127.0.0.1:{port}")).unwrap());
+        call(&state, "store", json!({"secret": "voyage", "value": KEY})).unwrap();
+        let err = forward(&state, b"{\"inputs\":\"BODY-TEXT\"}").unwrap_err();
+        assert_eq!(err.kind, "upstream");
+        for leak in [KEY, "BODY-TEXT", "multimodal", &port.to_string()] {
+            assert!(!err.detail.contains(leak), "{leak} in {}", err.detail);
+        }
+    }
+
+    #[test]
+    fn a_bad_forward_is_refused_before_the_master_key_is_read() {
+        let dir = Scratch::new("fwd-bad");
+        let state = State::new(dir.0.clone(), Box::new(Refusing), Box::new(NoLegacy));
+        for req in [
+            json!({"secret": "voyage", "method": "POST", "path": "/v2/x"}),
+            json!({"secret": "voyage", "method": "DELETE", "path": "/v1/x"}),
+            json!({"secret": "voyage", "method": "POST", "path": "/v1/x", "headers": [["Authorization", "Bearer x"]]}),
+            json!({"secret": "mineru", "method": "POST", "path": "/api/v4/x"}),
+            json!({"secret": "okta.password", "method": "POST", "path": "/v1/x"}),
+        ] {
+            let err = state.dispatch(&Caller::default(), "forward", &req, b"").unwrap_err();
+            assert_eq!(err.kind, "request", "{req}");
+        }
+    }
+
+    // ── Import on first use ──────────────────────────────────────────────────
+
+    /// One old Voyage item, counting its reads.
+    struct OldVoyage(Result<Option<String>, KeyError>, std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    impl LegacySource for OldVoyage {
+        fn read(&self, service: &str, account: &str) -> Result<Option<String>, KeyError> {
+            assert_eq!((service, account), ("com.tchan.oculus.voyage", "voyage"));
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.0.clone()
+        }
+    }
+
+    fn with_old(dir: &Scratch, old: Result<Option<String>, KeyError>) -> (State, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let state = State::new(dir.0.clone(), Box::new(StaticKey(key())), Box::new(OldVoyage(old, reads.clone())));
+        (state, reads)
+    }
+
+    #[test]
+    fn the_old_item_is_imported_once_and_a_delete_is_not_undone() {
+        let dir = Scratch::new("import");
+        let (state, reads) = with_old(&dir, Ok(Some("pa-old".into())));
+        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
+        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let v = Vault::new(vault::path_in(&dir.0), key());
+        assert_eq!(v.get("voyage").unwrap().as_deref(), Some("pa-old"));
+
+        assert_eq!(call(&state, "delete", json!({"secret": "voyage"})).unwrap()["existed"], true);
+        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], false, "the old item stays gone");
+
+        // A fresh keyd over the same vault agrees.
+        let (again, reads) = with_old(&dir, Ok(Some("pa-old".into())));
+        assert_eq!(call(&again, "has", json!({"secret": "voyage"})).unwrap()["has"], false);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(call(&again, "has", json!({"secret": "keyd.imported.voyage"})).is_err(), "the marker is no secret");
+    }
+
+    #[test]
+    fn a_stored_key_outranks_the_old_item_and_skips_its_read() {
+        let dir = Scratch::new("import-store");
+        let (state, reads) = with_old(&dir, Ok(Some("pa-old".into())));
+        call(&state, "store", json!({"secret": "voyage", "value": "pa-new"})).unwrap();
+        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], true);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(Vault::new(vault::path_in(&dir.0), key()).get("voyage").unwrap().as_deref(), Some("pa-new"));
+    }
+
+    #[test]
+    fn no_old_item_is_imported_as_absent_and_not_read_again() {
+        let dir = Scratch::new("import-none");
+        let (state, reads) = with_old(&dir, Ok(None));
+        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], false);
+        assert_eq!(call(&state, "has", json!({"secret": "voyage"})).unwrap()["has"], false);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_refused_old_item_is_a_keychain_error_and_is_tried_again() {
+        let dir = Scratch::new("import-refused");
+        let (state, reads) = with_old(&dir, Err(KeyError::Refused("reading com.tchan.oculus.voyage/voyage: OSStatus -128".into())));
+        let err = call(&state, "has", json!({"secret": "voyage"})).unwrap_err();
+        assert_eq!(err.kind, "keychain");
+        assert!(err.detail.contains("-128"), "{}", err.detail);
+        assert!(call(&state, "has", json!({"secret": "voyage"})).is_err());
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2, "a refusal is not recorded as imported");
+    }
+
+    #[test]
+    fn forward_imports_the_old_item_first() {
+        let origin = FakeOrigin::start(|_| answer(200, vec![], b"{}"));
+        let dir = Scratch::new("import-forward");
+        let (state, _) = with_old(&dir, Ok(Some("pa-old".into())));
+        let state = state.with_routes(Routes::compiled().with_origin("voyage", &origin.origin).unwrap());
+        assert_eq!(forward(&state, b"{}").unwrap().header["status"], 200);
+        assert_eq!(origin.hits()[0].header("authorization"), Some("Bearer pa-old"));
+    }
+
+    #[test]
+    fn other_names_are_never_imported() {
+        let dir = Scratch::new("import-groq");
+        let (state, reads) = with_old(&dir, Ok(Some("x".into())));
+        assert_eq!(call(&state, "has", json!({"secret": "groq"})).unwrap()["has"], false);
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }
