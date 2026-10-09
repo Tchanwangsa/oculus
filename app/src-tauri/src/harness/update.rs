@@ -104,9 +104,24 @@ enum Body {
 
 /// Where the newest version for this install lives. `channel` is Claude's
 /// `autoUpdatesChannel`; `arch` is `arm64` or `amd64`.
-fn latest_endpoint(provider: Provider, source: Source, channel: &str, arch: &str) -> (String, Body) {
-    let npm = |pkg: &str| (format!("https://registry.npmjs.org/{pkg}/latest"), Body::JsonVersion);
-    let cask = |name: &str| (format!("https://formulae.brew.sh/api/cask/{name}.json"), Body::JsonVersion);
+fn latest_endpoint(
+    provider: Provider,
+    source: Source,
+    channel: &str,
+    arch: &str,
+) -> (String, Body) {
+    let npm = |pkg: &str| {
+        (
+            format!("https://registry.npmjs.org/{pkg}/latest"),
+            Body::JsonVersion,
+        )
+    };
+    let cask = |name: &str| {
+        (
+            format!("https://formulae.brew.sh/api/cask/{name}.json"),
+            Body::JsonVersion,
+        )
+    };
     match (provider, effective_source(provider, source)) {
         (Provider::Claude, Source::Brew) => cask("claude-code"),
         (Provider::Claude, Source::Npm) => npm("@anthropic-ai/claude-code"),
@@ -135,11 +150,19 @@ fn claude_channel(home: Option<&Path>) -> &'static str {
         .and_then(|h| std::fs::read_to_string(h.join(".claude/settings.json")).ok())
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .is_some_and(|v| v.get("autoUpdatesChannel").and_then(|c| c.as_str()) == Some("stable"));
-    if stable { "stable" } else { "latest" }
+    if stable {
+        "stable"
+    } else {
+        "latest"
+    }
 }
 
 fn arch() -> &'static str {
-    if std::env::consts::ARCH == "x86_64" { "amd64" } else { "arm64" }
+    if std::env::consts::ARCH == "x86_64" {
+        "amd64"
+    } else {
+        "arm64"
+    }
 }
 
 /// The numeric core of a version: `v` dropped, then everything from the
@@ -162,7 +185,10 @@ fn version_core(v: &str) -> Vec<u64> {
 pub fn is_newer(latest: &str, installed: &str) -> bool {
     let (a, b) = (version_core(latest), version_core(installed));
     for i in 0..a.len().max(b.len()) {
-        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        let (x, y) = (
+            a.get(i).copied().unwrap_or(0),
+            b.get(i).copied().unwrap_or(0),
+        );
         if x != y {
             return x > y;
         }
@@ -175,10 +201,16 @@ fn read_version(body: &str, shape: Body) -> Result<String, String> {
         Body::Text => body.trim().to_string(),
         Body::JsonVersion => serde_json::from_str::<serde_json::Value>(body)
             .ok()
-            .and_then(|j| j.get("version").and_then(|v| v.as_str()).map(str::to_string))
+            .and_then(|j| {
+                j.get("version")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
             .ok_or("the answer had no version")?,
     };
-    if v.trim_start_matches('v').starts_with(|c: char| c.is_ascii_digit()) {
+    if v.trim_start_matches('v')
+        .starts_with(|c: char| c.is_ascii_digit())
+    {
         Ok(v)
     } else {
         Err(format!("unexpected answer {v:?}"))
@@ -186,7 +218,9 @@ fn read_version(body: &str, shape: Body) -> Result<String, String> {
 }
 
 fn fetch(url: &str, shape: Body) -> Result<String, String> {
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(10)).build();
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(10))
+        .build();
     let body = agent
         .get(url)
         .call()
@@ -218,13 +252,20 @@ pub fn forget() {
 
 fn latest(url: &str, shape: Body) -> Result<String, String> {
     if let Some((at, hit)) = latest_cache().lock().unwrap().get(url) {
-        let ttl = if hit.is_ok() { FRESH_FOR } else { FAILURE_FRESH_FOR };
+        let ttl = if hit.is_ok() {
+            FRESH_FOR
+        } else {
+            FAILURE_FRESH_FOR
+        };
         if at.elapsed() < ttl {
             return hit.clone();
         }
     }
     let got = fetch(url, shape);
-    latest_cache().lock().unwrap().insert(url.to_string(), (Instant::now(), got.clone()));
+    latest_cache()
+        .lock()
+        .unwrap()
+        .insert(url.to_string(), (Instant::now(), got.clone()));
     got
 }
 
@@ -284,7 +325,10 @@ pub fn check_all() -> Vec<UpdateInfo> {
         .iter()
         .map(|&p| std::thread::spawn(move || check(p)))
         .collect();
-    handles.into_iter().filter_map(|h| h.join().ok().flatten()).collect()
+    handles
+        .into_iter()
+        .filter_map(|h| h.join().ok().flatten())
+        .collect()
 }
 
 /// Where an update's output reaches the webview.
@@ -309,7 +353,10 @@ where
     {
         let mut r = running().lock().unwrap();
         if let Some(busy) = *r {
-            return Err(format!("{} is updating; updates run one at a time", busy.label()));
+            return Err(format!(
+                "{} is updating; updates run one at a time",
+                busy.label()
+            ));
         }
         *r = Some(provider);
     }
@@ -344,16 +391,40 @@ mod tests {
 
     #[test]
     fn source_follows_the_real_path() {
-        assert_eq!(src("/opt/homebrew/Caskroom/codex/0.153.4/codex-aarch64-apple-darwin"), Source::Brew);
-        assert_eq!(src("/usr/local/Caskroom/claude-code/2.1.289/claude"), Source::Brew);
-        assert_eq!(src("/opt/homebrew/Cellar/opencode/1.18.31/bin/opencode"), Source::Brew);
+        assert_eq!(
+            src("/opt/homebrew/Caskroom/codex/0.153.4/codex-aarch64-apple-darwin"),
+            Source::Brew
+        );
+        assert_eq!(
+            src("/usr/local/Caskroom/claude-code/2.1.289/claude"),
+            Source::Brew
+        );
+        assert_eq!(
+            src("/opt/homebrew/Cellar/opencode/1.18.31/bin/opencode"),
+            Source::Brew
+        );
         // A formula that vendors a node package is still Homebrew's.
-        assert_eq!(src("/opt/homebrew/Cellar/x/1/libexec/lib/node_modules/x/cli.js"), Source::Brew);
+        assert_eq!(
+            src("/opt/homebrew/Cellar/x/1/libexec/lib/node_modules/x/cli.js"),
+            Source::Brew
+        );
         // npm's global prefix under Homebrew's node is npm's.
-        assert_eq!(src("/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js"), Source::Npm);
-        assert_eq!(src("/Users/s/.nvm/versions/node/v22.1.0/lib/node_modules/opencode-ai/bin/opencode"), Source::Npm);
-        assert_eq!(src("/Users/s/.bun/install/global/node_modules/opencode-ai/bin/opencode"), Source::Bun);
-        assert_eq!(src("/Users/s/.local/share/claude/versions/2.1.289"), Source::SelfManaged);
+        assert_eq!(
+            src("/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js"),
+            Source::Npm
+        );
+        assert_eq!(
+            src("/Users/s/.nvm/versions/node/v22.1.0/lib/node_modules/opencode-ai/bin/opencode"),
+            Source::Npm
+        );
+        assert_eq!(
+            src("/Users/s/.bun/install/global/node_modules/opencode-ai/bin/opencode"),
+            Source::Bun
+        );
+        assert_eq!(
+            src("/Users/s/.local/share/claude/versions/2.1.289"),
+            Source::SelfManaged
+        );
         assert_eq!(src("/Users/s/.opencode/bin/opencode"), Source::SelfManaged);
         assert_eq!(src("/Users/s/.local/bin/agy"), Source::SelfManaged);
         assert_eq!(src("/opt/homebrew/bin/codex"), Source::Brew);
@@ -379,25 +450,58 @@ mod tests {
     #[test]
     fn commands_match_the_install() {
         let p = Path::new("/Users/s/.local/bin/claude");
-        assert_eq!(command(Provider::Claude, Source::SelfManaged, p), "'/Users/s/.local/bin/claude' update");
-        assert_eq!(command(Provider::Codex, Source::Brew, p), "brew upgrade --cask codex");
-        assert_eq!(command(Provider::Claude, Source::Brew, p), "brew upgrade --cask claude-code");
-        assert_eq!(command(Provider::Opencode, Source::Brew, p), "brew upgrade anomalyco/tap/opencode");
-        assert_eq!(command(Provider::Codex, Source::Npm, p), "npm install -g @openai/codex@latest");
-        assert_eq!(command(Provider::Opencode, Source::Bun, p), "bun install -g opencode-ai@latest");
+        assert_eq!(
+            command(Provider::Claude, Source::SelfManaged, p),
+            "'/Users/s/.local/bin/claude' update"
+        );
+        assert_eq!(
+            command(Provider::Codex, Source::Brew, p),
+            "brew upgrade --cask codex"
+        );
+        assert_eq!(
+            command(Provider::Claude, Source::Brew, p),
+            "brew upgrade --cask claude-code"
+        );
+        assert_eq!(
+            command(Provider::Opencode, Source::Brew, p),
+            "brew upgrade anomalyco/tap/opencode"
+        );
+        assert_eq!(
+            command(Provider::Codex, Source::Npm, p),
+            "npm install -g @openai/codex@latest"
+        );
+        assert_eq!(
+            command(Provider::Opencode, Source::Bun, p),
+            "bun install -g opencode-ai@latest"
+        );
         let oc = Path::new("/Users/s/.opencode/bin/opencode");
-        assert_eq!(command(Provider::Opencode, Source::SelfManaged, oc), "'/Users/s/.opencode/bin/opencode' upgrade");
+        assert_eq!(
+            command(Provider::Opencode, Source::SelfManaged, oc),
+            "'/Users/s/.opencode/bin/opencode' upgrade"
+        );
         let quoted = Path::new("/Users/it's/bin/agy");
-        assert_eq!(command(Provider::Antigravity, Source::SelfManaged, quoted), r"'/Users/it'\''s/bin/agy' update");
+        assert_eq!(
+            command(Provider::Antigravity, Source::SelfManaged, quoted),
+            r"'/Users/it'\''s/bin/agy' update"
+        );
     }
 
     #[test]
     fn unknown_pairings_fall_back_to_the_cli() {
         let agy = Path::new("/opt/homebrew/bin/agy");
-        assert_eq!(command(Provider::Antigravity, Source::Brew, agy), "'/opt/homebrew/bin/agy' update");
-        assert_eq!(command(Provider::Antigravity, Source::Npm, agy), "'/opt/homebrew/bin/agy' update");
+        assert_eq!(
+            command(Provider::Antigravity, Source::Brew, agy),
+            "'/opt/homebrew/bin/agy' update"
+        );
+        assert_eq!(
+            command(Provider::Antigravity, Source::Npm, agy),
+            "'/opt/homebrew/bin/agy' update"
+        );
         let claude = Path::new("/Users/s/.bun/bin/claude");
-        assert_eq!(command(Provider::Claude, Source::Bun, claude), "'/Users/s/.bun/bin/claude' update");
+        assert_eq!(
+            command(Provider::Claude, Source::Bun, claude),
+            "'/Users/s/.bun/bin/claude' update"
+        );
         // And they are compared against what that command installs.
         let (url, _) = latest_endpoint(Provider::Claude, Source::Bun, "latest", "arm64");
         assert!(url.starts_with("https://downloads.claude.ai/"), "{url}");
@@ -418,23 +522,45 @@ mod tests {
     #[test]
     fn each_source_reads_its_own_registry() {
         let url = |p, s| latest_endpoint(p, s, "latest", "arm64").0;
-        assert_eq!(url(Provider::Codex, Source::Brew), "https://formulae.brew.sh/api/cask/codex.json");
-        assert_eq!(url(Provider::Codex, Source::Npm), "https://registry.npmjs.org/@openai/codex/latest");
-        assert_eq!(url(Provider::Claude, Source::Brew), "https://formulae.brew.sh/api/cask/claude-code.json");
-        assert_eq!(url(Provider::Claude, Source::Npm), "https://registry.npmjs.org/@anthropic-ai/claude-code/latest");
-        assert_eq!(url(Provider::Claude, Source::SelfManaged), "https://downloads.claude.ai/claude-code-releases/latest");
+        assert_eq!(
+            url(Provider::Codex, Source::Brew),
+            "https://formulae.brew.sh/api/cask/codex.json"
+        );
+        assert_eq!(
+            url(Provider::Codex, Source::Npm),
+            "https://registry.npmjs.org/@openai/codex/latest"
+        );
+        assert_eq!(
+            url(Provider::Claude, Source::Brew),
+            "https://formulae.brew.sh/api/cask/claude-code.json"
+        );
+        assert_eq!(
+            url(Provider::Claude, Source::Npm),
+            "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
+        );
+        assert_eq!(
+            url(Provider::Claude, Source::SelfManaged),
+            "https://downloads.claude.ai/claude-code-releases/latest"
+        );
         assert_eq!(
             latest_endpoint(Provider::Claude, Source::SelfManaged, "stable", "arm64").0,
             "https://downloads.claude.ai/claude-code-releases/stable"
         );
-        assert_eq!(url(Provider::Opencode, Source::Brew), "https://registry.npmjs.org/opencode-ai/latest");
-        assert!(url(Provider::Antigravity, Source::SelfManaged).ends_with("/manifests/darwin_arm64.json"));
+        assert_eq!(
+            url(Provider::Opencode, Source::Brew),
+            "https://registry.npmjs.org/opencode-ai/latest"
+        );
+        assert!(url(Provider::Antigravity, Source::SelfManaged)
+            .ends_with("/manifests/darwin_arm64.json"));
     }
 
     #[test]
     fn bodies_yield_a_version_or_an_error() {
         assert_eq!(read_version("2.1.289\n", Body::Text).unwrap(), "2.1.289");
-        assert_eq!(read_version(r#"{"name":"x","version":"1.18.34"}"#, Body::JsonVersion).unwrap(), "1.18.34");
+        assert_eq!(
+            read_version(r#"{"name":"x","version":"1.18.34"}"#, Body::JsonVersion).unwrap(),
+            "1.18.34"
+        );
         assert!(read_version("<html>", Body::Text).is_err());
         assert!(read_version(r#"{"error":"not found"}"#, Body::JsonVersion).is_err());
     }
@@ -444,7 +570,11 @@ mod tests {
         let dir = crate::test_support::Scratch::new("update-channel");
         assert_eq!(claude_channel(Some(&*dir)), "latest");
         std::fs::create_dir_all(dir.join(".claude")).unwrap();
-        std::fs::write(dir.join(".claude/settings.json"), r#"{"autoUpdatesChannel":"stable"}"#).unwrap();
+        std::fs::write(
+            dir.join(".claude/settings.json"),
+            r#"{"autoUpdatesChannel":"stable"}"#,
+        )
+        .unwrap();
         assert_eq!(claude_channel(Some(&*dir)), "stable");
     }
 

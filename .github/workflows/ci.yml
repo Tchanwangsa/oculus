@@ -1,6 +1,6 @@
 # Checks every push to master and every pull request on a fresh macOS checkout:
-# the frontend tests and bundle, the Rust tests, and that the generated CLI
-# reference matches the binary. See docs/development.md#ci-and-releases.
+# that the Rust is formatted, the frontend tests and bundle, the Rust tests,
+# and that the generated CLI reference matches the binary. See docs/development.md#ci-and-releases.
 name: CI
 
 on:
@@ -35,6 +35,8 @@ jobs:
         with:
           bun-version-file: app/package.json
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
       - uses: mozilla-actions/sccache-action@v0.0.11
       - uses: Swatinem/rust-cache@v2
         with:
@@ -42,6 +44,10 @@ jobs:
           # sccache already caches compiled crates; a multi-GB target/ would
           # crowd the repo's cache quota.
           cache-targets: false
+
+      - name: Rust is formatted
+        working-directory: app/src-tauri
+        run: cargo fmt --check
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile

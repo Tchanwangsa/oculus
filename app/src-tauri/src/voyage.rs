@@ -64,19 +64,21 @@ fn interpret(status: u16, body: &str) -> Result<Verdict, String> {
     }
 
     let lowered = detail.as_deref().unwrap_or_default().to_lowercase();
-    Err(if lowered.contains("expired") || lowered.contains("revoked") {
-        "Voyage says this key is no longer active — create a new one in your \
+    Err(
+        if lowered.contains("expired") || lowered.contains("revoked") {
+            "Voyage says this key is no longer active — create a new one in your \
          Voyage dashboard"
-            .to_string()
-    } else if lowered.contains("header") || lowered.contains("malformed") {
-        "Voyage could not read this key — paste the key on its own, with \
+                .to_string()
+        } else if lowered.contains("header") || lowered.contains("malformed") {
+            "Voyage could not read this key — paste the key on its own, with \
          nothing around it"
-            .to_string()
-    } else {
-        "Voyage rejected this key — check you copied all of it, including the \
+                .to_string()
+        } else {
+            "Voyage rejected this key — check you copied all of it, including the \
          pa- prefix"
-            .to_string()
-    })
+                .to_string()
+        },
+    )
 }
 
 /// Ask Voyage whether it accepts this key. `Err` is a key Voyage actively

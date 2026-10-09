@@ -106,8 +106,8 @@ fn launchctl(args: &[&str]) -> Result<(), String> {
 }
 
 fn last_log_line() -> Option<String> {
-    let text =
-        std::fs::read_to_string(crate::paths::keepalive_log_path(&crate::paths::data_dir())).ok()?;
+    let text = std::fs::read_to_string(crate::paths::keepalive_log_path(&crate::paths::data_dir()))
+        .ok()?;
     text.lines().last().map(str::to_string)
 }
 
@@ -250,12 +250,12 @@ pub fn repair_path() {
     }
 
     let hours = interval_from_plist(&plist);
-    std::thread::spawn(move || {
-        match tauri::async_runtime::block_on(keepalive_enable(hours)) {
+    std::thread::spawn(
+        move || match tauri::async_runtime::block_on(keepalive_enable(hours)) {
             Ok(()) => eprintln!("[oculus] keep-alive agent re-pointed at {cli}"),
             Err(e) => eprintln!("[oculus] could not re-point keep-alive agent: {e}"),
-        }
-    });
+        },
+    );
 }
 
 /// Install the agent after a headless sign-in has actually worked — not merely
@@ -314,8 +314,11 @@ mod tests {
     fn the_program_path_round_trips_through_the_plist() {
         let dir = crate::test_support::Scratch::new("plist");
         let p = dir.join("prog.plist");
-        std::fs::write(&p, plist_body("/Applications/Oculus.app/Contents/MacOS/oculus", 3600))
-            .unwrap();
+        std::fs::write(
+            &p,
+            plist_body("/Applications/Oculus.app/Contents/MacOS/oculus", 3600),
+        )
+        .unwrap();
         assert_eq!(
             program_from_plist(&p).as_deref(),
             Some("/Applications/Oculus.app/Contents/MacOS/oculus")

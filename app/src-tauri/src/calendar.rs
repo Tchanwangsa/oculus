@@ -270,9 +270,7 @@ fn markdown_of(html: Option<&str>) -> Option<String> {
 
 /// Fetch one course's calendar; the frontend's `upsertCalendarEvents` stores it.
 #[tauri::command]
-pub async fn calendar_sync_events(
-    canvas_course_id: i64,
-) -> Result<Vec<CalendarEvent>, String> {
+pub async fn calendar_sync_events(canvas_course_id: i64) -> Result<Vec<CalendarEvent>, String> {
     crate::blocking::run(move || {
         let canvas = Canvas::open(&crate::paths::data_dir());
         if !canvas.has_session() {
@@ -293,7 +291,10 @@ mod tests {
 
     #[test]
     fn numeric_and_prefixed_ids_both_normalise() {
-        assert_eq!(context_id(&ev(r#"{"id":12}"#), "event").unwrap(), "event_12");
+        assert_eq!(
+            context_id(&ev(r#"{"id":12}"#), "event").unwrap(),
+            "event_12"
+        );
         assert_eq!(
             context_id(&ev(r#"{"id":"assignment_9"}"#), "assignment").unwrap(),
             "assignment_9"
@@ -318,7 +319,10 @@ mod tests {
             "Lecture 2 (1)"
         );
         assert_eq!(
-            clean_title("Week 9 Tutorial Wireshark Monday 12pm", "Information Security"),
+            clean_title(
+                "Week 9 Tutorial Wireshark Monday 12pm",
+                "Information Security"
+            ),
             "Week 9 Tutorial Wireshark Monday 12pm"
         );
         assert_eq!(clean_title("(a) then (b)", ""), "(a) then (b)");
@@ -405,8 +409,10 @@ mod tests {
 
     #[test]
     fn a_childless_event_is_kept_as_itself() {
-        let raw = ev(r#"[{"id": 7, "title": "Lecture", "start_at": "2026-08-10T01:00:00Z",
-                          "end_at": "2026-08-10T02:00:00Z", "location_name": "  Alice Hoy 210 "}]"#);
+        let raw = ev(
+            r#"[{"id": 7, "title": "Lecture", "start_at": "2026-08-10T01:00:00Z",
+                          "end_at": "2026-08-10T02:00:00Z", "location_name": "  Alice Hoy 210 "}]"#,
+        );
         let kept = flatten_events(raw.as_array().unwrap(), &HashSet::new());
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].location.as_deref(), Some("Alice Hoy 210"));

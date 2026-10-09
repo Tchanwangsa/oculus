@@ -43,14 +43,19 @@ impl Drop for WorkDir {
 /// Both engines read the result archive by shape and share its refusal codes.
 /// The flat markdown cannot provide the per-page boundaries retrieval needs.
 fn content_list(root: &Path) -> Result<(PathBuf, Vec<serde_json::Value>), ParseError> {
-    let path = client::find_content_list(root)
-        .ok_or(ParseError::Document { code: "no-content-list".into() })?;
+    let path = client::find_content_list(root).ok_or(ParseError::Document {
+        code: "no-content-list".into(),
+    })?;
     let content: serde_json::Value = fs::read_to_string(&path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
-        .ok_or(ParseError::Document { code: "unreadable-content-list".into() })?;
+        .ok_or(ParseError::Document {
+            code: "unreadable-content-list".into(),
+        })?;
     match content {
         serde_json::Value::Array(items) => Ok((path, items)),
-        _ => Err(ParseError::Document { code: "invalid-content-list".into() }),
+        _ => Err(ParseError::Document {
+            code: "invalid-content-list".into(),
+        }),
     }
 }

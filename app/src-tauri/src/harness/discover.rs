@@ -109,7 +109,12 @@ fn ask_login_shell(name: &str) -> Option<PathBuf> {
 /// The same lookup order for provider CLIs and installer tools.
 fn find_executable(name: &str) -> Option<PathBuf> {
     search_path_env(name)
-        .or_else(|| well_known_dirs().into_iter().map(|d| d.join(name)).find(|p| is_executable(p)))
+        .or_else(|| {
+            well_known_dirs()
+                .into_iter()
+                .map(|d| d.join(name))
+                .find(|p| is_executable(p))
+        })
         .or_else(|| ask_login_shell(name))
 }
 
@@ -146,7 +151,9 @@ fn cache() -> &'static Mutex<std::collections::HashMap<Provider, Result<PathBuf,
 /// does not re-probe a login shell on every send; [`forget`] clears it.
 pub fn binary(provider: Provider) -> Result<PathBuf, String> {
     let mut c = cache().lock().unwrap();
-    c.entry(provider).or_insert_with(|| locate(provider)).clone()
+    c.entry(provider)
+        .or_insert_with(|| locate(provider))
+        .clone()
 }
 
 fn tool_cache() -> &'static Mutex<std::collections::HashMap<String, Option<PathBuf>>> {
@@ -162,7 +169,10 @@ pub fn tool(name: &str) -> Option<PathBuf> {
         return hit.clone();
     }
     let found = find_executable(name);
-    tool_cache().lock().unwrap().insert(name.to_string(), found.clone());
+    tool_cache()
+        .lock()
+        .unwrap()
+        .insert(name.to_string(), found.clone());
     found
 }
 
@@ -234,7 +244,9 @@ fn newest_rs_mtime(dir: &Path) -> Option<std::time::SystemTime> {
     let mut newest: Option<std::time::SystemTime> = None;
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
         for e in rd.flatten() {
             let p = e.path();
             let Ok(meta) = e.metadata() else { continue };
@@ -258,9 +270,15 @@ fn newest_rs_mtime(dir: &Path) -> Option<std::time::SystemTime> {
 fn warn_if_stale(bin: &Path) {
     static CHECKED: OnceLock<()> = OnceLock::new();
     CHECKED.get_or_init(|| {
-        let Some(src) = dev_checkout_src(bin) else { return };
-        let Ok(built) = std::fs::metadata(bin).and_then(|m| m.modified()) else { return };
-        let Some(newest) = newest_rs_mtime(&src) else { return };
+        let Some(src) = dev_checkout_src(bin) else {
+            return;
+        };
+        let Ok(built) = std::fs::metadata(bin).and_then(|m| m.modified()) else {
+            return;
+        };
+        let Some(newest) = newest_rs_mtime(&src) else {
+            return;
+        };
         if newest > built {
             eprintln!("[oculus] {} is older than {}", bin.display(), src.display());
             eprintln!("[oculus] agents this session will run a stale CLI — `bun run cli:dev`");

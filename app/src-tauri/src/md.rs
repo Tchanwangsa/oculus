@@ -25,7 +25,10 @@ pub fn to_markdown(html: &str, images: &ImageMap) -> String {
         .find(|n| is_tag(n, "body"))
         .unwrap_or_else(|| doc.tree.root());
 
-    let ctx = Ctx { images, in_cell: false };
+    let ctx = Ctx {
+        images,
+        in_cell: false,
+    };
     let out = block_md(body, &ctx);
     collapse_blank_lines(&out).trim().to_string()
 }
@@ -60,7 +63,9 @@ pub fn canvas_links(html: &str, course_id: i64) -> (Vec<String>, Vec<String>) {
         if !is_tag(&n, "a") {
             continue;
         }
-        let Some(href) = n.value().as_element().and_then(|e| e.attr("href")) else { continue };
+        let Some(href) = n.value().as_element().and_then(|e| e.attr("href")) else {
+            continue;
+        };
 
         if let Some(slug) = after_marker(href, "/pages/") {
             let slug = slug.split(['?', '#', '/']).next().unwrap_or("");
@@ -125,7 +130,9 @@ fn text_content(n: Ref<'_>) -> String {
 /// Decorative and accessibility cruft that must not reach the output. In a
 /// table cell the net is wider: an image or an icon there breaks the row.
 fn dropped(n: &Ref<'_>, in_cell: bool) -> bool {
-    let Some(el) = n.value().as_element() else { return false };
+    let Some(el) = n.value().as_element() else {
+        return false;
+    };
     let name = el.name();
 
     if SKIP_TAGS.contains(&name) {
@@ -164,7 +171,9 @@ fn escape_md(s: &str) -> String {
 fn is_marker_only(s: &str) -> bool {
     !s.is_empty()
         && s.chars().all(|c| {
-            matches!(c, '\\' | '*' | '†' | '‡' | '§' | '¶') || c.is_ascii_digit() || c.is_whitespace()
+            matches!(c, '\\' | '*' | '†' | '‡' | '§' | '¶')
+                || c.is_ascii_digit()
+                || c.is_whitespace()
         })
 }
 
@@ -205,7 +214,10 @@ fn inline_md(node: Ref<'_>, ctx: &Ctx) -> String {
             "img" => {
                 let src = attr(&n, "src").unwrap_or_default();
                 let src = ctx.images.get(src).map(String::as_str).unwrap_or(src);
-                out.push_str(&format!("![{}]({src})", attr(&n, "alt").unwrap_or_default()));
+                out.push_str(&format!(
+                    "![{}]({src})",
+                    attr(&n, "alt").unwrap_or_default()
+                ));
             }
             _ => out.push_str(&inline_md(n, ctx)),
         }
@@ -253,7 +265,11 @@ fn inline_md_self(n: Ref<'_>, ctx: &Ctx) -> String {
         return String::new();
     }
     match tag(&n) {
-        Some("a") => format!("[{}]({})", inline_md(n, ctx), attr(&n, "href").unwrap_or_default()),
+        Some("a") => format!(
+            "[{}]({})",
+            inline_md(n, ctx),
+            attr(&n, "href").unwrap_or_default()
+        ),
         Some("strong" | "b") => emphasis(n, ctx, "**"),
         Some("em" | "i") => emphasis(n, ctx, "*"),
         Some("sup") => escape_md(&text_content(n)),
@@ -279,7 +295,10 @@ fn is_cell_block(name: &str) -> bool {
 /// A GFM cell must be a single line. Block children become segments joined by
 /// " · "; lists collapse to "; "-joined items.
 fn cell_md(cell: Ref<'_>, images: &ImageMap) -> String {
-    let ctx = Ctx { images, in_cell: true };
+    let ctx = Ctx {
+        images,
+        in_cell: true,
+    };
     let mut segs: Vec<String> = Vec::new();
     let mut cur = String::new();
 
@@ -323,7 +342,11 @@ fn cell_md(cell: Ref<'_>, images: &ImageMap) -> String {
     }
     flush(&mut cur, &mut segs);
 
-    segs.join(" · ").replace(NBSP, " ").replace('|', "\\|").trim().to_string()
+    segs.join(" · ")
+        .replace(NBSP, " ")
+        .replace('|', "\\|")
+        .trim()
+        .to_string()
 }
 
 fn squeeze(s: &str) -> String {
@@ -332,9 +355,13 @@ fn squeeze(s: &str) -> String {
 
 fn table_md(node: Ref<'_>, images: &ImageMap) -> String {
     let rows: Vec<Ref<'_>> = node.descendants().filter(|d| is_tag(d, "tr")).collect();
-    let Some(first) = rows.first() else { return String::new() };
+    let Some(first) = rows.first() else {
+        return String::new();
+    };
 
-    let head: Vec<String> = element_children(*first).map(|c| cell_md(c, images)).collect();
+    let head: Vec<String> = element_children(*first)
+        .map(|c| cell_md(c, images))
+        .collect();
     let cols = head.len();
     if cols == 0 {
         return String::new();
@@ -373,7 +400,11 @@ fn block_md(node: Ref<'_>, ctx: &Ctx) -> String {
 
         if is_heading(name) {
             let level = name[1..].parse::<usize>().unwrap_or(1);
-            out.push_str(&format!("{} {}\n\n", "#".repeat(level), inline_md(n, ctx).trim()));
+            out.push_str(&format!(
+                "{} {}\n\n",
+                "#".repeat(level),
+                inline_md(n, ctx).trim()
+            ));
             continue;
         }
         match name {
@@ -462,7 +493,10 @@ mod tests {
 
     #[test]
     fn ordered_lists_number_from_one() {
-        assert_eq!(md("<ol><li>first</li><li>second</li></ol>"), "1. first\n2. second");
+        assert_eq!(
+            md("<ol><li>first</li><li>second</li></ol>"),
+            "1. first\n2. second"
+        );
     }
 
     #[test]
@@ -490,7 +524,8 @@ mod tests {
 
     #[test]
     fn screenreader_and_script_content_is_dropped() {
-        let out = md("<p>keep<span class='screenreader-only'>drop</span></p><script>bad()</script>");
+        let out =
+            md("<p>keep<span class='screenreader-only'>drop</span></p><script>bad()</script>");
         assert_eq!(out, "keep");
     }
 
@@ -517,7 +552,10 @@ mod tests {
     fn image_src_is_rewritten_to_the_local_copy() {
         let mut images = ImageMap::new();
         images.insert("/courses/1/files/9/preview".into(), "images/9.png".into());
-        let out = to_markdown("<p><img src='/courses/1/files/9/preview' alt='f'></p>", &images);
+        let out = to_markdown(
+            "<p><img src='/courses/1/files/9/preview' alt='f'></p>",
+            &images,
+        );
         assert_eq!(out, "![f](images/9.png)");
     }
 

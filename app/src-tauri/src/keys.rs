@@ -38,7 +38,9 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
 
     let handler = RcBlock::new(|event: std::ptr::NonNull<NSEvent>| -> *mut NSEvent {
         let event_ref = unsafe { event.as_ref() };
-        if !event_ref.modifierFlags().contains(NSEventModifierFlags::Command)
+        if !event_ref
+            .modifierFlags()
+            .contains(NSEventModifierFlags::Command)
             || RESERVED.contains(&event_ref.keyCode())
         {
             return event.as_ptr();
@@ -75,7 +77,9 @@ pub fn focused_page(mtm: MainThreadMarker) -> Option<Retained<NSResponder>> {
     if app_webview == 0 {
         return None;
     }
-    let responder = NSApplication::sharedApplication(mtm).keyWindow()?.firstResponder()?;
+    let responder = NSApplication::sharedApplication(mtm)
+        .keyWindow()?
+        .firstResponder()?;
     let is_page = responder.isKindOfClass(WKWebView::class())
         && Retained::as_ptr(&responder) as usize != app_webview;
     is_page.then_some(responder)

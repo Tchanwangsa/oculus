@@ -55,7 +55,9 @@ struct Queue {
 impl Batcher {
     pub fn shared() -> Arc<Batcher> {
         static SHARED: OnceLock<Arc<Batcher>> = OnceLock::new();
-        SHARED.get_or_init(|| Arc::new(Batcher::new(WINDOW, MAX_FILES, IN_FLIGHT))).clone()
+        SHARED
+            .get_or_init(|| Arc::new(Batcher::new(WINDOW, MAX_FILES, IN_FLIGHT)))
+            .clone()
     }
 
     pub fn new(window: Duration, max_files: usize, in_flight: usize) -> Self {
@@ -79,7 +81,11 @@ impl Batcher {
     ) -> Result<DocumentOutput, ParseError> {
         {
             let mut queue = hold(&self.queue);
-            queue.waiting.push(Queued { key, document: document.clone(), runner });
+            queue.waiting.push(Queued {
+                key,
+                document: document.clone(),
+                runner,
+            });
             if !queue.dispatching {
                 queue.dispatching = true;
                 let batcher = self.clone();
@@ -89,7 +95,9 @@ impl Batcher {
                     .spawn(move || batcher.dispatch())
                 {
                     queue.dispatching = false;
-                    queue.waiting.retain(|job| !Arc::ptr_eq(&job.document, &document));
+                    queue
+                        .waiting
+                        .retain(|job| !Arc::ptr_eq(&job.document, &document));
                     return Err(ParseError::Io(format!("start the MinerU batcher: {error}")));
                 }
             }
@@ -120,7 +128,10 @@ impl Batcher {
     fn next_batch(&self) -> Vec<Queued> {
         let mut queue = hold(&self.queue);
         while queue.waiting.is_empty() {
-            queue = self.wake.wait(queue).unwrap_or_else(std::sync::PoisonError::into_inner);
+            queue = self
+                .wake
+                .wait(queue)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
 
         // A large file has nothing to wait for: it goes now, alone.
@@ -133,8 +144,11 @@ impl Batcher {
         let opened = Instant::now();
         let key = queue.waiting[0].key;
         loop {
-            let compatible =
-                queue.waiting.iter().filter(|job| job.key == key && !job.solo()).count();
+            let compatible = queue
+                .waiting
+                .iter()
+                .filter(|job| job.key == key && !job.solo())
+                .count();
             let remaining = self.window.saturating_sub(opened.elapsed());
             if compatible >= self.max_files || remaining.is_zero() {
                 break;
@@ -195,7 +209,9 @@ fn run(batch: Vec<Queued>) {
         }
         Err(_) => {
             for document in &documents {
-                document.finish(Err(ParseError::Io("the MinerU batch worker panicked".into())));
+                document.finish(Err(ParseError::Io(
+                    "the MinerU batch worker panicked".into(),
+                )));
             }
         }
     }
@@ -246,7 +262,11 @@ mod tests {
             documents
                 .iter()
                 .map(|_| {
-                    Ok(DocumentOutput { pages: Vec::new(), image_count: 0, total_pages: 0 })
+                    Ok(DocumentOutput {
+                        pages: Vec::new(),
+                        image_count: 0,
+                        total_pages: 0,
+                    })
                 })
                 .collect()
         }
@@ -296,7 +316,11 @@ mod tests {
         for handle in submit_all(&batcher, recorder.clone(), 1, 4) {
             handle.join().unwrap();
         }
-        assert!(started.elapsed() < Duration::from_secs(9), "{:?}", started.elapsed());
+        assert!(
+            started.elapsed() < Duration::from_secs(9),
+            "{:?}",
+            started.elapsed()
+        );
         assert_eq!(recorder.sizes(), vec![2, 2]);
     }
 
@@ -311,7 +335,10 @@ mod tests {
         }
         let sizes = recorder.sizes();
         assert_eq!(sizes.iter().sum::<usize>(), 4);
-        assert!(sizes.len() >= 2, "two tokens cannot travel together: {sizes:?}");
+        assert!(
+            sizes.len() >= 2,
+            "two tokens cannot travel together: {sizes:?}"
+        );
     }
 
     #[test]
@@ -322,7 +349,11 @@ mod tests {
             handle.join().unwrap();
         }
         assert_eq!(recorder.sizes().len(), 6);
-        assert!(recorder.peak.load(Ordering::SeqCst) <= 2, "{}", recorder.peak.load(Ordering::SeqCst));
+        assert!(
+            recorder.peak.load(Ordering::SeqCst) <= 2,
+            "{}",
+            recorder.peak.load(Ordering::SeqCst)
+        );
     }
 
     /// Submit one document of `bytes` from its own thread, timing its answer.
@@ -358,7 +389,10 @@ mod tests {
         let mut batches = hold(&recorder.bytes).clone();
         batches.iter_mut().for_each(|batch| batch.sort_unstable());
         batches.sort();
-        assert_eq!(batches, vec![vec![1_000, 2_000], vec![SOLO_UPLOAD_BYTES + 1]]);
+        assert_eq!(
+            batches,
+            vec![vec![1_000, 2_000], vec![SOLO_UPLOAD_BYTES + 1]]
+        );
     }
 
     #[test]
@@ -366,7 +400,9 @@ mod tests {
         let recorder = Recorder::new(Duration::ZERO);
         let batcher = Arc::new(Batcher::new(Duration::from_secs(2), 20, 8));
         let (result, took) =
-            submit_sized(&batcher, recorder.clone(), "alone", SOLO_UPLOAD_BYTES * 2).join().unwrap();
+            submit_sized(&batcher, recorder.clone(), "alone", SOLO_UPLOAD_BYTES * 2)
+                .join()
+                .unwrap();
         result.unwrap();
         assert!(took < Duration::from_secs(1), "{took:?}");
     }
@@ -379,12 +415,21 @@ mod tests {
         crate::parse::Skips::shared().mark(skipped);
         let kept = submit_sized(&batcher, recorder.clone(), "batch-kept", 10);
         let error = batcher
-            .submit(5, document(&skipped.to_string_lossy()), recorder.clone(), &|_| {})
+            .submit(
+                5,
+                document(&skipped.to_string_lossy()),
+                recorder.clone(),
+                &|_| {},
+            )
             .unwrap_err();
         assert!(matches!(error, ParseError::Cancelled), "{error}");
         kept.join().unwrap().0.unwrap();
         crate::parse::Skips::shared().clear(skipped);
-        assert_eq!(hold(&recorder.bytes).concat(), vec![10], "only the kept file ran");
+        assert_eq!(
+            hold(&recorder.bytes).concat(),
+            vec![10],
+            "only the kept file ran"
+        );
     }
 
     #[test]

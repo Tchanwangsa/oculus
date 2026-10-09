@@ -12,11 +12,12 @@ impl Ctx {
     /// answer: an empty index names `index`, and a retired model's vectors are
     /// named as such. Both are errors, never a silent zero-hit success.
     pub(crate) fn search(&self, args: &SearchArgs) -> Result<(), String> {
-        let pool = self.db().ok_or("the retrieval index lives in the database")?;
+        let pool = self
+            .db()
+            .ok_or("the retrieval index lives in the database")?;
         let subjects = self.rt.block_on(store::subjects(&pool))?;
         let ids = subject_ids(&subjects, args.subject.as_slice())?;
-        let codes: HashMap<i64, String> =
-            subjects.iter().map(|s| (s.id, s.code.clone())).collect();
+        let codes: HashMap<i64, String> = subjects.iter().map(|s| (s.id, s.code.clone())).collect();
 
         let db_file = app_lib::paths::db_path(&self.data_dir);
         let stats = self.rt.block_on(app_lib::retrieval::stats(&db_file))?;
@@ -144,7 +145,10 @@ impl Ctx {
             } else {
                 std::fs::read_to_string(self.data_dir.join(&f.relative_path)).ok()
             };
-            let chunks = pages.get(&f.id).into_iter().flatten()
+            let chunks = pages
+                .get(&f.id)
+                .into_iter()
+                .flatten()
                 .map(|(page, text)| (Some(*page), text.as_str()))
                 .chain(disk.as_deref().map(|text| (None, text)));
             for (page_no, text) in chunks {
@@ -207,7 +211,10 @@ impl Ctx {
             println!();
             println!(
                 "{}",
-                paint(&format!("stopped at {limit} matches — raise it with -n"), DIM)
+                paint(
+                    &format!("stopped at {limit} matches — raise it with -n"),
+                    DIM
+                )
             );
         }
         Ok(())
@@ -259,7 +266,10 @@ impl Ctx {
                 let selected: Vec<Page> = rows
                     .iter()
                     .filter(|(n, _)| wanted.as_ref().is_none_or(|w| page_wanted(w, *n)))
-                    .map(|(n, md)| Page { page_no: *n, markdown: md.clone() })
+                    .map(|(n, md)| Page {
+                        page_no: *n,
+                        markdown: md.clone(),
+                    })
                     .collect();
                 if selected.is_empty() {
                     let last = rows.last().map(|(n, _)| *n).unwrap_or(0);
@@ -279,7 +289,9 @@ impl Ctx {
             }
             // A spreadsheet without page rows still has its text beside it.
             None if app_lib::paths::is_sheet(&file.relative_path) => {
-                let md = self.data_dir.join(app_lib::sheets::md_rel(&file.relative_path));
+                let md = self
+                    .data_dir
+                    .join(app_lib::sheets::md_rel(&file.relative_path));
                 let text = std::fs::read_to_string(&md).map_err(|_| {
                     format!(
                         "{} has not been converted to text yet.\n       \
@@ -305,8 +317,8 @@ impl Ctx {
                         abs.display()
                     ));
                 }
-                let text = std::fs::read_to_string(&abs)
-                    .map_err(|e| format!("{}: {e}", abs.display()))?;
+                let text =
+                    std::fs::read_to_string(&abs).map_err(|e| format!("{}: {e}", abs.display()))?;
                 Document {
                     path: &file.relative_path,
                     filename: &file.filename,
@@ -355,7 +367,9 @@ impl Ctx {
         let rows: Vec<&LibFile> = all
             .iter()
             .filter(|f| {
-                args.r#type.as_ref().is_none_or(|t| f.file_type.eq_ignore_ascii_case(t))
+                args.r#type
+                    .as_ref()
+                    .is_none_or(|t| f.file_type.eq_ignore_ascii_case(t))
                     && needle
                         .as_ref()
                         .is_none_or(|n| f.relative_path.to_lowercase().contains(n))
@@ -384,12 +398,19 @@ impl Ctx {
                 "-".to_string()
             };
             // The course prefix is already the section header.
-            let short = f.relative_path.splitn(3, '/').nth(2).unwrap_or(&f.relative_path);
+            let short = f
+                .relative_path
+                .splitn(3, '/')
+                .nth(2)
+                .unwrap_or(&f.relative_path);
             println!(
                 "  {} {} {} {}",
                 paint(&format!("{:<5}", truncate(&f.file_type, 5)), DIM),
                 paint(&format!("{indexed:>5}"), DIM),
-                paint(&format!("{:>9}", human_bytes(f.size_bytes.unwrap_or(0) as u64)), DIM),
+                paint(
+                    &format!("{:>9}", human_bytes(f.size_bytes.unwrap_or(0) as u64)),
+                    DIM
+                ),
                 short
             );
         }
@@ -439,7 +460,10 @@ impl Ctx {
             url: Option<String>,
         }
         let events: Vec<Event> = self.rt.block_on(async {
-            let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| e.to_string())?;
+            let rows = sqlx::query(&sql)
+                .fetch_all(&pool)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok::<_, String>(
                 rows.iter()
                     .map(|r| Event {
@@ -472,7 +496,11 @@ impl Ctx {
             println!(
                 "{} {} {:<20} {}{}",
                 paint(&e.starts_local, DIM),
-                if e.kind == "due" { paint("due  ", YELLOW) } else { paint("class", DIM) },
+                if e.kind == "due" {
+                    paint("due  ", YELLOW)
+                } else {
+                    paint("class", DIM)
+                },
                 truncate(&e.subject, 20),
                 truncate(&e.title, 44),
                 match e.location.as_deref().filter(|l| !l.is_empty()) {
@@ -487,7 +515,11 @@ impl Ctx {
     // ── shared loaders ───────────────────────────────────────────────────────
 
     /// Subject-prefix selection shared by the read commands and indexing.
-    pub(super) fn subject_ids(&self, pool: &SqlitePool, codes: &[String]) -> Result<Vec<i64>, String> {
+    pub(super) fn subject_ids(
+        &self,
+        pool: &SqlitePool,
+        codes: &[String],
+    ) -> Result<Vec<i64>, String> {
         subject_ids(&self.rt.block_on(store::subjects(pool))?, codes)
     }
 
@@ -511,7 +543,10 @@ impl Ctx {
                ORDER BY s.code, f.relative_path"#
         );
         self.rt.block_on(async {
-            let rows = sqlx::query(&sql).fetch_all(pool).await.map_err(|e| e.to_string())?;
+            let rows = sqlx::query(&sql)
+                .fetch_all(pool)
+                .await
+                .map_err(|e| e.to_string())?;
             Ok(rows
                 .iter()
                 .map(|r| LibFile {
@@ -573,7 +608,10 @@ impl Ctx {
                ORDER BY p.file_id, p.page_no"#
         );
         self.rt.block_on(async {
-            let rows = sqlx::query(&sql).fetch_all(pool).await.map_err(|e| e.to_string())?;
+            let rows = sqlx::query(&sql)
+                .fetch_all(pool)
+                .await
+                .map_err(|e| e.to_string())?;
             let mut out: HashMap<i64, Vec<(i64, String)>> = HashMap::new();
             for r in &rows {
                 let id: i64 = r.try_get("file_id").unwrap_or_default();
@@ -661,8 +699,16 @@ pub(crate) fn parse_page_spec(spec: &str) -> Result<Vec<(i64, i64)>, String> {
                 (n, n)
             }
             Some((from, to)) => {
-                let lo = if from.trim().is_empty() { 1 } else { from.trim().parse().map_err(|_| bad())? };
-                let hi = if to.trim().is_empty() { i64::MAX } else { to.trim().parse().map_err(|_| bad())? };
+                let lo = if from.trim().is_empty() {
+                    1
+                } else {
+                    from.trim().parse().map_err(|_| bad())?
+                };
+                let hi = if to.trim().is_empty() {
+                    i64::MAX
+                } else {
+                    to.trim().parse().map_err(|_| bad())?
+                };
                 (lo, hi)
             }
         };
@@ -681,8 +727,16 @@ pub(crate) fn page_wanted(ranges: &[(i64, i64)], page: i64) -> bool {
     ranges.iter().any(|(lo, hi)| page >= *lo && page <= *hi)
 }
 
-pub(crate) fn build_regex(pattern: &str, fixed: bool, case_sensitive: bool) -> Result<regex::Regex, String> {
-    let body = if fixed { regex::escape(pattern) } else { pattern.to_string() };
+pub(crate) fn build_regex(
+    pattern: &str,
+    fixed: bool,
+    case_sensitive: bool,
+) -> Result<regex::Regex, String> {
+    let body = if fixed {
+        regex::escape(pattern)
+    } else {
+        pattern.to_string()
+    };
     regex::RegexBuilder::new(&body)
         .case_insensitive(!case_sensitive)
         .build()
@@ -710,15 +764,35 @@ mod query_tests {
 
     #[test]
     fn query_scopes_include_every_term_and_never_hide_an_unknown_code() {
-        let subjects: Vec<store::SubjectRow> = ["COMP10001_2026_SM1", "COMP10001_2026_SM2", "MULT20015_2026_SM2"]
-            .iter().enumerate().map(|(n, code)| store::SubjectRow {
-                id: n as i64 + 1, code: code.to_string(), name: String::new(),
-                term_name: None, is_current: n != 0, selected: true, last_synced_at: None,
-            }).collect();
+        let subjects: Vec<store::SubjectRow> = [
+            "COMP10001_2026_SM1",
+            "COMP10001_2026_SM2",
+            "MULT20015_2026_SM2",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(n, code)| store::SubjectRow {
+            id: n as i64 + 1,
+            code: code.to_string(),
+            name: String::new(),
+            term_name: None,
+            is_current: n != 0,
+            selected: true,
+            last_synced_at: None,
+        })
+        .collect();
         assert!(subject_ids(&subjects, &[]).unwrap().is_empty());
-        assert_eq!(subject_ids(&subjects, &["COMP10001".into()]).unwrap(), [1, 2]);
-        assert_eq!(subject_ids(&subjects, &["COMP10001_2026_SM2".into()]).unwrap(), [2]);
-        assert!(subject_ids(&subjects, &["MISS10000".into()]).unwrap_err().contains("no subject matched"));
+        assert_eq!(
+            subject_ids(&subjects, &["COMP10001".into()]).unwrap(),
+            [1, 2]
+        );
+        assert_eq!(
+            subject_ids(&subjects, &["COMP10001_2026_SM2".into()]).unwrap(),
+            [2]
+        );
+        assert!(subject_ids(&subjects, &["MISS10000".into()])
+            .unwrap_err()
+            .contains("no subject matched"));
     }
 
     #[test]
@@ -760,16 +834,19 @@ mod query_tests {
     #[test]
     fn file_json_keeps_the_public_names_without_a_database_id() {
         let row = file("COMP30026", "courses/COMP30026/files/week-01.pdf");
-        assert_eq!(serde_json::to_value(&row).unwrap(), serde_json::json!({
-            "subject": "COMP30026",
-            "path": "courses/COMP30026/files/week-01.pdf",
-            "filename": "week-01.pdf",
-            "file_type": "pdf",
-            "category": null,
-            "size_bytes": null,
-            "parse_status": null,
-            "indexed_pages": 0
-        }));
+        assert_eq!(
+            serde_json::to_value(&row).unwrap(),
+            serde_json::json!({
+                "subject": "COMP30026",
+                "path": "courses/COMP30026/files/week-01.pdf",
+                "filename": "week-01.pdf",
+                "file_type": "pdf",
+                "category": null,
+                "size_bytes": null,
+                "parse_status": null,
+                "indexed_pages": 0
+            })
+        );
     }
 
     /// A filename shared by two subjects resolves by full path, and is reported
@@ -782,18 +859,26 @@ mod query_tests {
             file("MULT20015", "courses/MULT20015/files/notes.pdf"),
         ];
         assert_eq!(
-            resolve_file(&files, "courses/MULT20015/files/week-01.pdf").unwrap().code,
+            resolve_file(&files, "courses/MULT20015/files/week-01.pdf")
+                .unwrap()
+                .code,
             "MULT20015"
         );
         assert_eq!(resolve_file(&files, "notes.pdf").unwrap().code, "MULT20015");
         assert_eq!(resolve_file(&files, "NOTES.PDF").unwrap().code, "MULT20015");
-        assert_eq!(resolve_file(&files, "COMP30026/files/week").unwrap().code, "COMP30026");
+        assert_eq!(
+            resolve_file(&files, "COMP30026/files/week").unwrap().code,
+            "COMP30026"
+        );
         assert!(resolve_file(&files, "week-01.pdf").is_err());
         assert!(resolve_file(&files, "nothing-like-this").is_err());
     }
 
     fn filed(rel: &str, category: &str) -> LibFile {
-        LibFile { category: Some(category.to_string()), ..file("COMP30026", rel) }
+        LibFile {
+            category: Some(category.to_string()),
+            ..file("COMP30026", rel)
+        }
     }
 
     /// A category narrows before the match limit.
@@ -802,7 +887,10 @@ mod query_tests {
         let rows = || {
             vec![
                 filed("courses/COMP30026/ed/0001-teams.md", "ed"),
-                filed("courses/COMP30026/announcements/2026-07-14-welcome.md", "announcement"),
+                filed(
+                    "courses/COMP30026/announcements/2026-07-14-welcome.md",
+                    "announcement",
+                ),
                 filed("courses/COMP30026/files/week-01.pdf", "file"),
             ]
         };
@@ -812,7 +900,9 @@ mod query_tests {
         assert_eq!(kept[0].category.as_deref(), Some("ed"));
 
         // Repeatable, and case is not the caller's problem.
-        let pair = filter_categories(rows(), &["ED".into(), "announcement".into()]).ok().unwrap();
+        let pair = filter_categories(rows(), &["ED".into(), "announcement".into()])
+            .ok()
+            .unwrap();
         assert_eq!(pair.len(), 2);
 
         // No flag is every category, not none.
@@ -832,11 +922,17 @@ mod query_tests {
         assert!(err.contains("quiz"), "{err}");
 
         // Real category, none in these rows: empty, not an error.
-        assert!(filter_categories(rows(), &["quiz".into()]).ok().unwrap().is_empty());
+        assert!(filter_categories(rows(), &["quiz".into()])
+            .ok()
+            .unwrap()
+            .is_empty());
 
         // An empty row set does not excuse the typo.
         assert!(filter_categories(vec![], &["eds".into()]).is_err());
-        assert!(filter_categories(vec![], &["quiz".into()]).ok().unwrap().is_empty());
+        assert!(filter_categories(vec![], &["quiz".into()])
+            .ok()
+            .unwrap()
+            .is_empty());
     }
 
     /// Both commands must accept the same words and offer the same list.
@@ -862,7 +958,10 @@ pub(crate) fn matches_code(code: &str, wanted: &str) -> bool {
 /// not cover that". Validity is `paths::CATEGORIES`, not the rows' own
 /// categories, so a subject with no quizzes answers `--category quiz` with
 /// nothing rather than an error. Shared by `grep` and `files`.
-pub(crate) fn filter_categories(files: Vec<LibFile>, wanted: &[String]) -> Result<Vec<LibFile>, String> {
+pub(crate) fn filter_categories(
+    files: Vec<LibFile>,
+    wanted: &[String],
+) -> Result<Vec<LibFile>, String> {
     if wanted.is_empty() {
         return Ok(files);
     }
@@ -886,7 +985,10 @@ pub(crate) fn filter_categories(files: Vec<LibFile>, wanted: &[String]) -> Resul
 
 /// The `--category` help, built from the list the flag validates against.
 pub(crate) fn category_help() -> String {
-    format!("Only these categories ({}). Repeatable", paths::CATEGORIES.join(", "))
+    format!(
+        "Only these categories ({}). Repeatable",
+        paths::CATEGORIES.join(", ")
+    )
 }
 
 pub(crate) fn filter_subjects(
@@ -914,6 +1016,11 @@ pub(crate) fn filter_subjects(
 
 /// An empty set means all subjects to query loaders; a bare code includes every term.
 fn subject_ids(subjects: &[store::SubjectRow], codes: &[String]) -> Result<Vec<i64>, String> {
-    if codes.is_empty() { return Ok(Vec::new()); }
-    Ok(filter_subjects(subjects, codes, false)?.iter().map(|s| s.id).collect())
+    if codes.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(filter_subjects(subjects, codes, false)?
+        .iter()
+        .map(|s| s.id)
+        .collect())
 }

@@ -111,11 +111,19 @@ impl CodexServer {
             child::read_json_lines(stdout, raw_log.as_ref(), |v| reader.dispatch(v));
             let code = reader.proc.reap();
             reader.pending.lock().unwrap().clear();
-            let routes: Vec<Arc<ThreadRoute>> = reader.routes.lock().unwrap().drain().map(|(_, r)| r).collect();
+            let routes: Vec<Arc<ThreadRoute>> = reader
+                .routes
+                .lock()
+                .unwrap()
+                .drain()
+                .map(|(_, r)| r)
+                .collect();
             for r in routes {
                 let mid_turn = r.state.lock().unwrap().active_turn.take().is_some();
                 if mid_turn {
-                    let msg = reader.proc.with_tail(format!("codex app-server exited (code {code:?})"));
+                    let msg = reader
+                        .proc
+                        .with_tail(format!("codex app-server exited (code {code:?})"));
                     child::fail_turn(&r.sink, Provider::Codex, msg);
                 }
                 (r.sink)(HarnessEvent::Exited { code });
@@ -137,7 +145,10 @@ impl CodexServer {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();
         self.pending.lock().unwrap().insert(id, tx);
-        if let Err(error) = self.proc.write_line(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })) {
+        if let Err(error) = self
+            .proc
+            .write_line(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))
+        {
             self.pending.lock().unwrap().remove(&id);
             return Err(error);
         }
@@ -145,18 +156,26 @@ impl CodexServer {
             Ok(r) => r,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 self.pending.lock().unwrap().remove(&id);
-                Err(format!("codex {method}: no reply in {}s", REQUEST_TIMEOUT.as_secs()))
+                Err(format!(
+                    "codex {method}: no reply in {}s",
+                    REQUEST_TIMEOUT.as_secs()
+                ))
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(format!("codex {method}: server exited")),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(format!("codex {method}: server exited"))
+            }
         }
     }
 
     fn notify(&self, method: &str) -> Result<(), String> {
-        self.proc.write_line(&json!({ "jsonrpc": "2.0", "method": method }))
+        self.proc
+            .write_line(&json!({ "jsonrpc": "2.0", "method": method }))
     }
 
     fn respond(&self, id: &Value, result: Value) {
-        let _ = self.proc.write_line(&json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+        let _ = self
+            .proc
+            .write_line(&json!({ "jsonrpc": "2.0", "id": id, "result": result }));
     }
 
     fn respond_error(&self, id: &Value, code: i64, message: &str) {
@@ -179,7 +198,10 @@ impl CodexServer {
 
     pub fn list_models(&self) -> Result<Vec<ModelInfo>, String> {
         let r = self.request("model/list", json!({}))?;
-        let data = r.get("data").and_then(|d| d.as_array()).ok_or("model/list: no data")?;
+        let data = r
+            .get("data")
+            .and_then(|d| d.as_array())
+            .ok_or("model/list: no data")?;
         let mut out = Vec::new();
         for m in data {
             if m.get("hidden").and_then(|h| h.as_bool()).unwrap_or(false) {
@@ -199,19 +221,34 @@ impl CodexServer {
                 .and_then(|e| e.as_array())
                 .map(|a| {
                     a.iter()
-                        .filter_map(|x| x.get("reasoningEffort").and_then(|s| s.as_str()).map(String::from))
+                        .filter_map(|x| {
+                            x.get("reasoningEffort")
+                                .and_then(|s| s.as_str())
+                                .map(String::from)
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
             out.push(ModelInfo {
-                display_name: m.get("displayName").and_then(|s| s.as_str()).unwrap_or(&id).to_string(),
-                description: m.get("description").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+                display_name: m
+                    .get("displayName")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or(&id)
+                    .to_string(),
+                description: m
+                    .get("description")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 reasoning_efforts: efforts,
                 default_reasoning_effort: m
                     .get("defaultReasoningEffort")
                     .and_then(|s| s.as_str())
                     .map(String::from),
-                is_default: m.get("isDefault").and_then(|b| b.as_bool()).unwrap_or(false),
+                is_default: m
+                    .get("isDefault")
+                    .and_then(|b| b.as_bool())
+                    .unwrap_or(false),
                 id,
             });
         }
@@ -268,7 +305,10 @@ impl CodexServer {
                 ..Default::default()
             }),
         });
-        self.routes.lock().unwrap().insert(thread_id.to_string(), route);
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(thread_id.to_string(), route);
     }
 
     /// Start a thread; returns Codex's id for it.
@@ -280,13 +320,21 @@ impl CodexServer {
         self.route(&id, sink.clone(), false);
         sink(HarnessEvent::SessionStarted {
             provider_session_id: id.clone(),
-            model: r.pointer("/thread/model").and_then(|m| m.as_str()).map(String::from),
+            model: r
+                .pointer("/thread/model")
+                .and_then(|m| m.as_str())
+                .map(String::from),
             cwd: opts.cwd.display().to_string(),
         });
         Ok(id)
     }
 
-    pub fn resume_thread(&self, thread_id: &str, opts: &CodexThreadOpts, sink: Sink) -> Result<(), String> {
+    pub fn resume_thread(
+        &self,
+        thread_id: &str,
+        opts: &CodexThreadOpts,
+        sink: Sink,
+    ) -> Result<(), String> {
         let mut p = Self::thread_params(opts);
         p["threadId"] = json!(thread_id);
         // The turns are in our own database.
@@ -296,7 +344,10 @@ impl CodexServer {
         self.route(&id, sink.clone(), true);
         sink(HarnessEvent::SessionStarted {
             provider_session_id: id,
-            model: r.pointer("/thread/model").and_then(|m| m.as_str()).map(String::from),
+            model: r
+                .pointer("/thread/model")
+                .and_then(|m| m.as_str())
+                .map(String::from),
             cwd: opts.cwd.display().to_string(),
         });
         Ok(())
@@ -322,7 +373,12 @@ impl CodexServer {
         p
     }
 
-    pub fn start_turn(&self, thread_id: &str, text: &str, opts: &CodexThreadOpts) -> Result<(), String> {
+    pub fn start_turn(
+        &self,
+        thread_id: &str,
+        text: &str,
+        opts: &CodexThreadOpts,
+    ) -> Result<(), String> {
         let p = Self::turn_params(thread_id, text, opts);
         let r = self.request("turn/start", p)?;
         // Taken from the response: `turn/started` can lag while the server
@@ -330,9 +386,16 @@ impl CodexServer {
         if let Some(id) = r.pointer("/turn/id").and_then(|s| s.as_str()) {
             let route = self.routes.lock().unwrap().get(thread_id).cloned();
             if let Some(route) = route {
-                route.state.lock().unwrap().active_turn.get_or_insert(id.to_string());
+                route
+                    .state
+                    .lock()
+                    .unwrap()
+                    .active_turn
+                    .get_or_insert(id.to_string());
                 // What a later `thread/revert` names.
-                (route.sink)(HarnessEvent::TurnAnchor { anchor: id.to_string() });
+                (route.sink)(HarnessEvent::TurnAnchor {
+                    anchor: id.to_string(),
+                });
             }
         }
         Ok(())
@@ -348,7 +411,10 @@ impl CodexServer {
         let Some(turn_id) = turn else {
             return Ok(());
         };
-        self.request("turn/interrupt", json!({ "threadId": thread_id, "turnId": turn_id }))?;
+        self.request(
+            "turn/interrupt",
+            json!({ "threadId": thread_id, "turnId": turn_id }),
+        )?;
         Ok(())
     }
 
@@ -430,7 +496,12 @@ impl CodexServer {
             .get("threadId")
             .and_then(|t| t.as_str())
             .map(String::from)
-            .or_else(|| params.pointer("/thread/id").and_then(|t| t.as_str()).map(String::from));
+            .or_else(|| {
+                params
+                    .pointer("/thread/id")
+                    .and_then(|t| t.as_str())
+                    .map(String::from)
+            });
         let Some(thread_id) = thread_id else {
             return;
         };
@@ -449,7 +520,9 @@ impl CodexServer {
 }
 
 fn thread_id_of(r: &Value) -> Option<String> {
-    r.pointer("/thread/id").and_then(|s| s.as_str()).map(String::from)
+    r.pointer("/thread/id")
+        .and_then(|s| s.as_str())
+        .map(String::from)
 }
 
 // ── Translation ──────────────────────────────────────────────────────────────
@@ -471,7 +544,9 @@ fn translate_account(method: &str, p: &Value) -> Vec<HarnessEvent> {
 fn rate_windows(rl: &Value) -> Vec<RateWindow> {
     let mut windows = Vec::new();
     for (key, fallback) in [("primary", "5-hour"), ("secondary", "Weekly")] {
-        let Some(w) = rl.get(key).filter(|w| !w.is_null()) else { continue };
+        let Some(w) = rl.get(key).filter(|w| !w.is_null()) else {
+            continue;
+        };
         let mins = w.get("windowDurationMins").and_then(|m| m.as_u64());
         let label = match mins {
             Some(10080) => "Weekly",
@@ -492,7 +567,10 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
     let mut out = Vec::new();
     match method {
         "turn/started" => {
-            st.active_turn = p.pointer("/turn/id").and_then(|s| s.as_str()).map(String::from);
+            st.active_turn = p
+                .pointer("/turn/id")
+                .and_then(|s| s.as_str())
+                .map(String::from);
             st.ignore_usage_until_turn = false;
             st.open_items.clear();
             st.streamed_messages.clear();
@@ -637,7 +715,13 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
                     }
                 }
                 "commandExecution" => {
-                    ensure_open(&mut out, st, &id, "commandExecution", json!({ "command": s(item, "command"), "cwd": s(item, "cwd") }));
+                    ensure_open(
+                        &mut out,
+                        st,
+                        &id,
+                        "commandExecution",
+                        json!({ "command": s(item, "command"), "cwd": s(item, "cwd") }),
+                    );
                     let exit = item.get("exitCode").and_then(|c| c.as_i64());
                     let mut output = s(item, "aggregatedOutput");
                     if let Some(c) = exit.filter(|c| *c != 0) {
@@ -716,8 +800,14 @@ fn translate(method: &str, p: &Value, st: &mut ThreadState) -> Vec<HarnessEvent>
             });
         }
         "error" => {
-            let msg = p.pointer("/error/message").and_then(|m| m.as_str()).unwrap_or("codex error");
-            let will_retry = p.get("willRetry").and_then(|b| b.as_bool()).unwrap_or(false);
+            let msg = p
+                .pointer("/error/message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("codex error");
+            let will_retry = p
+                .get("willRetry")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false);
             if !will_retry {
                 out.push(HarnessEvent::error_for(Provider::Codex, msg));
             }
@@ -738,7 +828,12 @@ fn web_search_detail(item: &Value) -> (String, String) {
     let queries: Vec<String> = item
         .pointer("/action/queries")
         .and_then(|q| q.as_array())
-        .map(|a| a.iter().filter_map(|q| q.as_str()).map(String::from).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|q| q.as_str())
+                .map(String::from)
+                .collect()
+        })
         .unwrap_or_default();
     let title = match queries.split_first() {
         Some((first, [])) => first.clone(),
@@ -765,7 +860,13 @@ fn web_search_detail(item: &Value) -> (String, String) {
 }
 
 /// The server can complete an item it never announced; give it a row to close.
-fn ensure_open(out: &mut Vec<HarnessEvent>, st: &mut ThreadState, id: &str, name: &str, input: Value) {
+fn ensure_open(
+    out: &mut Vec<HarnessEvent>,
+    st: &mut ThreadState,
+    id: &str,
+    name: &str,
+    input: Value,
+) {
     if st.open_items.contains_key(id) {
         return;
     }
@@ -829,13 +930,22 @@ mod tests {
 
         let thread = CodexServer::thread_params(&opts);
         assert_eq!(thread["sandbox"], "workspace-write");
-        assert_eq!(thread["cwd"], library.join("agents").to_string_lossy().as_ref());
-        assert_eq!(thread["config"]["sandbox_workspace_write.writable_roots"], want);
+        assert_eq!(
+            thread["cwd"],
+            library.join("agents").to_string_lossy().as_ref()
+        );
+        assert_eq!(
+            thread["config"]["sandbox_workspace_write.writable_roots"],
+            want
+        );
 
         let turn = CodexServer::turn_params("t1", "hello", &opts);
         assert_eq!(turn["sandboxPolicy"]["writableRoots"], want);
         assert_eq!(turn["sandboxPolicy"]["type"], "workspaceWrite");
-        assert_eq!(turn["approvalPolicy"], "never", "a prompt has nowhere to go");
+        assert_eq!(
+            turn["approvalPolicy"], "never",
+            "a prompt has nowhere to go"
+        );
     }
 
     /// Recorded (0.153.4): a finished `webSearch` has no `status`, and
@@ -846,23 +956,34 @@ mod tests {
         let mut st = ThreadState::default();
         let mut events = Vec::new();
         for line in raw.lines() {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            let Some(method) = v.get("method").and_then(|m| m.as_str()) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
+                continue;
+            };
             events.extend(translate(method, &v["params"], &mut st));
         }
         assert!(matches!(
             events.first(),
             Some(HarnessEvent::ToolStarted { kind: ToolKind::Web, name, .. }) if name == "webSearch"
         ));
-        let Some(HarnessEvent::ToolFinished { ok, output, title, .. }) = events.last() else {
+        let Some(HarnessEvent::ToolFinished {
+            ok, output, title, ..
+        }) = events.last()
+        else {
             panic!("no finish: {events:?}");
         };
         assert!(*ok, "a search with results is not a failure");
         let title = title.as_deref().unwrap_or_default();
-        assert!(title.starts_with("site:torproject.org bridges obfs4"), "{title}");
+        assert!(
+            title.starts_with("site:torproject.org bridges obfs4"),
+            "{title}"
+        );
         assert!(title.ends_with("(+3 more)"), "{title}");
         assert_eq!(output.matches("search: ").count(), 4);
-        assert!(output.contains("https://support.torproject.org/little-t-tor/circumvention/using-bridges/"));
+        assert!(output
+            .contains("https://support.torproject.org/little-t-tor/circumvention/using-bridges/"));
     }
 
     /// Recorded from `codex app-server` 0.153.4 asked to `ls` the library.
@@ -872,8 +993,12 @@ mod tests {
         let mut st = ThreadState::default();
         let mut events = Vec::new();
         for line in raw.lines() {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            let Some(method) = v.get("method").and_then(|m| m.as_str()) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
+                continue;
+            };
             // As `handle_notification` routes them.
             let account = translate_account(method, &v["params"]);
             if !account.is_empty() {
@@ -892,11 +1017,24 @@ mod tests {
             .collect();
         assert_eq!(tools, vec![(ToolKind::Bash, "/bin/zsh -lc ls".to_string())]);
         assert!(events.iter().any(|e| matches!(e, HarnessEvent::ToolFinished { ok: true, output, .. } if output.contains("oculus.db"))));
-        let messages = events.iter().filter(|e| matches!(e, HarnessEvent::AssistantMessage { .. })).count();
+        let messages = events
+            .iter()
+            .filter(|e| matches!(e, HarnessEvent::AssistantMessage { .. }))
+            .count();
         assert_eq!(messages, 2);
-        assert!(events.iter().any(|e| matches!(e, HarnessEvent::Usage { context_window: Some(_), .. })));
-        assert!(events.iter().any(|e| matches!(e, HarnessEvent::RateLimits { windows } if windows.len() == 2)));
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed"));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            HarnessEvent::Usage {
+                context_window: Some(_),
+                ..
+            }
+        )));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, HarnessEvent::RateLimits { windows } if windows.len() == 2)));
+        assert!(
+            matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "completed")
+        );
     }
 
     /// Recorded: an interrupted turn never sends the `item/completed`.
@@ -906,8 +1044,12 @@ mod tests {
         let mut st = ThreadState::default();
         let mut events = Vec::new();
         for line in raw.lines() {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            let Some(method) = v.get("method").and_then(|m| m.as_str()) else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
+                continue;
+            };
             events.extend(translate(method, &v["params"], &mut st));
         }
         let deltas: String = events
@@ -922,7 +1064,13 @@ mod tests {
             HarnessEvent::AssistantMessage { text } => Some(text.clone()),
             _ => None,
         });
-        assert_eq!(message.as_deref(), Some(deltas.as_str()), "the partial is committed as a row");
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted"));
+        assert_eq!(
+            message.as_deref(),
+            Some(deltas.as_str()),
+            "the partial is committed as a row"
+        );
+        assert!(
+            matches!(events.last(), Some(HarnessEvent::TurnFinished { status }) if status == "interrupted")
+        );
     }
 }

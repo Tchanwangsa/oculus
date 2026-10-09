@@ -176,7 +176,10 @@ fn parse_claude_status(stdout: &str) -> Option<(bool, Option<String>)> {
     let start = stdout.find('{')?;
     let v: serde_json::Value = serde_json::from_str(stdout[start..].trim()).ok()?;
     let signed_in = v.get("loggedIn")?.as_bool()?;
-    let email = v.get("email").and_then(|e| e.as_str()).filter(|e| !e.is_empty());
+    let email = v
+        .get("email")
+        .and_then(|e| e.as_str())
+        .filter(|e| !e.is_empty());
     let method = v.get("authMethod").and_then(|m| m.as_str()).unwrap_or("");
     Some((signed_in, claude_account(signed_in, email, method)))
 }
@@ -241,14 +244,7 @@ const CLAUDE: &[&str] = &[
 /// only counts beside one of [`CODEX_ACCOUNT_TROUBLE`].
 const CODEX: &[&str] = &["codex login", "please sign in"];
 const CODEX_ACCOUNT_TROUBLE: &[&str] = &[
-    "expired",
-    "not ",
-    "no ",
-    "missing",
-    "invalid",
-    "failed",
-    "required",
-    "sign in",
+    "expired", "not ", "no ", "missing", "invalid", "failed", "required", "sign in",
 ];
 
 /// What an opencode provider answers when its key is wrong or absent.
@@ -460,7 +456,8 @@ pub fn submit_code(provider: Provider, code: &str) -> Result<(), String> {
         .as_mut()
         .ok_or_else(|| format!("{}'s sign-in is not reading input", provider.label()))?;
     writeln!(pipe, "{}", code.trim()).map_err(|e| format!("could not send the code: {e}"))?;
-    pipe.flush().map_err(|e| format!("could not send the code: {e}"))
+    pipe.flush()
+        .map_err(|e| format!("could not send the code: {e}"))
 }
 
 /// Kill a run the student abandoned — the only way a flow ends early. The
@@ -541,12 +538,18 @@ mod tests {
 
     #[test]
     fn each_provider_knows_its_own_wording() {
-        assert!(is_auth_failure(Provider::Claude, "Please run /login to authenticate"));
+        assert!(is_auth_failure(
+            Provider::Claude,
+            "Please run /login to authenticate"
+        ));
         assert!(is_auth_failure(
             Provider::Claude,
             "Credentials are invalid, run `claude auth login`"
         ));
-        assert!(is_auth_failure(Provider::Codex, "Not logged in. Run `codex login`."));
+        assert!(is_auth_failure(
+            Provider::Codex,
+            "Not logged in. Run `codex login`."
+        ));
         assert!(is_auth_failure(
             Provider::Codex,
             "Your ChatGPT account subscription has expired"
@@ -555,10 +558,16 @@ mod tests {
             Provider::Opencode,
             "AI_APICallError: incorrect API key provided"
         ));
-        assert!(is_auth_failure(Provider::Opencode, "no credentials for provider anthropic"));
+        assert!(is_auth_failure(
+            Provider::Opencode,
+            "no credentials for provider anthropic"
+        ));
         for p in [Provider::Claude, Provider::Codex, Provider::Opencode] {
             assert!(is_auth_failure(p, "OAuth token has expired"), "{p:?}");
-            assert!(is_auth_failure(p, "authentication_error: invalid x-api-key"), "{p:?}");
+            assert!(
+                is_auth_failure(p, "authentication_error: invalid x-api-key"),
+                "{p:?}"
+            );
         }
     }
 
@@ -586,7 +595,10 @@ mod tests {
     fn a_bare_401_is_not_enough() {
         assert!(!is_auth_failure(Provider::Claude, "server answered 401"));
         assert!(is_auth_failure(Provider::Claude, "401 Unauthorized"));
-        assert!(is_auth_failure(Provider::Codex, "HTTP 401 while refreshing auth token"));
+        assert!(is_auth_failure(
+            Provider::Codex,
+            "HTTP 401 while refreshing auth token"
+        ));
     }
 
     /// Claude's block, verbatim; the prompt carries no trailing newline.
@@ -674,7 +686,10 @@ mod tests {
 
     #[test]
     fn codex_status_line_names_the_account() {
-        assert_eq!(codex_account("Logged in using ChatGPT\n").as_deref(), Some("ChatGPT"));
+        assert_eq!(
+            codex_account("Logged in using ChatGPT\n").as_deref(),
+            Some("ChatGPT")
+        );
         assert_eq!(
             codex_account("Logged in using an API key\n").as_deref(),
             Some("an API key")

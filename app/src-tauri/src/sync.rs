@@ -20,8 +20,14 @@ const DOWNLOADABLE_TYPES: &[&str] = &["application/pdf"];
 /// Office formats kept as-is plus a LibreOffice-converted sibling PDF, mapped
 /// to the extension the converter needs on its input file.
 const OFFICE_TYPES: &[(&str, &str)] = &[
-    ("application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"),
-    ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"),
+    (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "pptx",
+    ),
+    (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docx",
+    ),
     ("application/vnd.ms-powerpoint", "ppt"),
     ("application/msword", "doc"),
 ];
@@ -204,7 +210,12 @@ pub struct SyncOptions {
 
 impl Default for SyncOptions {
     fn default() -> Self {
-        SyncOptions { announcements: true, assignments: true, modules: true, ed: true }
+        SyncOptions {
+            announcements: true,
+            assignments: true,
+            modules: true,
+            ed: true,
+        }
     }
 }
 
@@ -314,7 +325,8 @@ impl Engine {
 
         // Before the per-course links below, so they never dangle.
         if let Err(e) = agents::ensure_library_docs(&self.data_dir) {
-            self.reporter.log("warning", "", &format!("agent docs: {e}"));
+            self.reporter
+                .log("warning", "", &format!("agent docs: {e}"));
         }
 
         for (i, c) in subjects.iter().enumerate() {
@@ -326,7 +338,8 @@ impl Engine {
             }
             // Idempotent; gives a newly scraped subject its agent scaffold.
             if let Err(e) = agents::link_course(&self.data_dir, &c.code) {
-                self.reporter.log("warning", &c.code, &format!("agent docs: {e}"));
+                self.reporter
+                    .log("warning", &c.code, &format!("agent docs: {e}"));
             }
             self.save_manifest();
             self.reporter.progress(&Progress {
@@ -375,7 +388,8 @@ impl Engine {
                 return Ok(());
             }
             self.scrape_assignments(c, &mut crawl).unwrap_or_else(|e| {
-                self.reporter.log("warning", &c.code, &format!("assignments: {e}"));
+                self.reporter
+                    .log("warning", &c.code, &format!("assignments: {e}"));
                 TaskDocs::default()
             })
         } else {
@@ -423,7 +437,11 @@ impl Engine {
         let term = course["term"]["name"].as_str().unwrap_or("");
         let teachers: Vec<&str> = course["teachers"]
             .as_array()
-            .map(|a| a.iter().filter_map(|t| t["display_name"].as_str()).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|t| t["display_name"].as_str())
+                    .collect()
+            })
             .unwrap_or_default();
 
         let header = |title: &str, extra: &str| {
@@ -442,11 +460,17 @@ impl Engine {
         if let Some(syllabus) = course["syllabus_body"].as_str().filter(|s| !s.is_empty()) {
             crawl.absorb(md::canvas_links(syllabus, c.id));
             let body = self.convert(syllabus, c, "syllabus.md");
-            let md = format!("{}\n---\n\n{body}", header(&format!("{name} — Syllabus"), ""));
+            let md = format!(
+                "{}\n---\n\n{body}",
+                header(&format!("{name} — Syllabus"), "")
+            );
             self.write(c, "syllabus.md", md.as_bytes(), None)?;
         }
 
-        let (body, source) = match self.canvas.get(&format!("/api/v1/courses/{}/front_page", c.id)) {
+        let (body, source) = match self
+            .canvas
+            .get(&format!("/api/v1/courses/{}/front_page", c.id))
+        {
             Ok(r) if r.ok() => match r.json() {
                 Ok(j) => match j["body"].as_str() {
                     Some(b) if !b.is_empty() => (b.to_string(), "Front Page"),
@@ -457,7 +481,10 @@ impl Engine {
             _ => (String::new(), ""),
         };
         let (body, source) = if body.is_empty() {
-            match course["public_description"].as_str().filter(|s| !s.is_empty()) {
+            match course["public_description"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+            {
                 Some(d) => (format!("<p>{d}</p>"), "Description"),
                 None => (String::new(), ""),
             }
@@ -501,7 +528,9 @@ impl Engine {
                 label: title.to_string(),
             });
 
-            let Some(message) = a["message"].as_str().filter(|s| !s.is_empty()) else { continue };
+            let Some(message) = a["message"].as_str().filter(|s| !s.is_empty()) else {
+                continue;
+            };
             crawl.absorb(md::canvas_links(message, c.id));
             let date = a["posted_at"]
                 .as_str()
@@ -641,7 +670,10 @@ impl Engine {
                     .filter(|s| *s != "none" && *s != "not_graded")
                     .collect();
                 if !kinds.is_empty() {
-                    meta.push(format!("**Submission:** {}", kinds.join(", ").replace('_', " ")));
+                    meta.push(format!(
+                        "**Submission:** {}",
+                        kinds.join(", ").replace('_', " ")
+                    ));
                 }
             }
             if let Some(status) = submission_status(a) {
@@ -721,7 +753,9 @@ impl Engine {
                 Ok(md) => {
                     self.write(c, &path, md.as_bytes(), None)?;
                 }
-                Err(e) => self.reporter.log("warning", &c.code, &format!("ed thread {title}: {e}")),
+                Err(e) => self
+                    .reporter
+                    .log("warning", &c.code, &format!("ed thread {title}: {e}")),
             }
         }
         Ok(())
@@ -729,15 +763,26 @@ impl Engine {
 
     // ── Phase: modules (drives pages + files) ────────────────────────────────
 
-    fn scrape_modules(&self, c: &Subject, tasks: &TaskDocs, crawl: &mut LinkCrawl) -> Result<(), String> {
-        let modules = self
-            .canvas
-            .get_all(&format!("/api/v1/courses/{}/modules?include[]=items&per_page=100", c.id))?;
+    fn scrape_modules(
+        &self,
+        c: &Subject,
+        tasks: &TaskDocs,
+        crawl: &mut LinkCrawl,
+    ) -> Result<(), String> {
+        let modules = self.canvas.get_all(&format!(
+            "/api/v1/courses/{}/modules?include[]=items&per_page=100",
+            c.id
+        ))?;
 
         // Nested fetches are not counted, so the total holds still.
         let total_items: usize = modules
             .iter()
-            .map(|m| items_of(m).iter().filter(|it| it["type"] != "SubHeader").count())
+            .map(|m| {
+                items_of(m)
+                    .iter()
+                    .filter(|it| it["type"] != "SubHeader")
+                    .count()
+            })
             .sum();
         let mut processed = 0usize;
 
@@ -772,12 +817,18 @@ impl Engine {
 
                 match ty {
                     "Page" => {
-                        let Some(page_url) = item["page_url"].as_str() else { continue };
+                        let Some(page_url) = item["page_url"].as_str() else {
+                            continue;
+                        };
                         if crawl.seen_pages.insert(page_url.to_string()) {
                             match self.fetch_page(c, page_url, title) {
                                 Ok(Some(links)) => crawl.absorb(links),
                                 Ok(None) => {}
-                                Err(e) => self.reporter.log("warning", &c.code, &format!("page {page_url}: {e}")),
+                                Err(e) => self.reporter.log(
+                                    "warning",
+                                    &c.code,
+                                    &format!("page {page_url}: {e}"),
+                                ),
                             }
                         }
                         toc.push(format!(
@@ -787,25 +838,34 @@ impl Engine {
                         ));
                     }
                     "File" => {
-                        let Some(id) = item["content_id"].as_i64() else { continue };
+                        let Some(id) = item["content_id"].as_i64() else {
+                            continue;
+                        };
                         let mut fetched = Fetched::Skipped;
                         if crawl.seen_files.insert(id.to_string()) {
                             match self.fetch_file(c, id, Some(title)) {
                                 Ok(f) => fetched = f,
-                                Err(e) => self.reporter.log("warning", &c.code, &format!("file {id}: {e}")),
+                                Err(e) => self.reporter.log(
+                                    "warning",
+                                    &c.code,
+                                    &format!("file {id}: {e}"),
+                                ),
                             }
                         }
                         toc.push(file_toc_line(&indent, title, &fetched));
                     }
                     "Assignment" | "Quiz" => {
                         let kind = if ty == "Quiz" { "quiz" } else { "assignment" };
-                        let map = if ty == "Quiz" { &tasks.quizzes } else { &tasks.assignments };
+                        let map = if ty == "Quiz" {
+                            &tasks.quizzes
+                        } else {
+                            &tasks.assignments
+                        };
                         let local = item["content_id"].as_i64().and_then(|id| map.get(&id));
                         toc.push(match local {
-                            Some(path) => format!(
-                                "{indent}- [{}](../{path}) _({kind})_",
-                                escape_md(title)
-                            ),
+                            Some(path) => {
+                                format!("{indent}- [{}](../{path}) _({kind})_", escape_md(title))
+                            }
                             None => format!(
                                 "{indent}- [{}]({}) _({kind})_",
                                 escape_md(title),
@@ -816,7 +876,10 @@ impl Engine {
                     "ExternalUrl" => toc.push(format!(
                         "{indent}- [{}]({}) _(external)_",
                         escape_md(title),
-                        item["external_url"].as_str().or(item["html_url"].as_str()).unwrap_or("")
+                        item["external_url"]
+                            .as_str()
+                            .or(item["html_url"].as_str())
+                            .unwrap_or("")
                     )),
                     _ => {
                         let url = item["html_url"].as_str().unwrap_or("");
@@ -850,17 +913,24 @@ impl Engine {
                 match self.fetch_page(c, &page_url, &page_url) {
                     Ok(Some(links)) => crawl.absorb(links),
                     Ok(None) => {}
-                    Err(e) => self.reporter.log("warning", &c.code, &format!("page {page_url}: {e}")),
+                    Err(e) => {
+                        self.reporter
+                            .log("warning", &c.code, &format!("page {page_url}: {e}"))
+                    }
                 }
                 continue;
             }
-            let id = crawl.files.pop().expect("loop guard: one stack is non-empty");
+            let id = crawl
+                .files
+                .pop()
+                .expect("loop guard: one stack is non-empty");
             if !crawl.seen_files.insert(id.clone()) {
                 continue;
             }
             let Ok(fid) = id.parse::<i64>() else { continue };
             if let Err(e) = self.fetch_file(c, fid, None) {
-                self.reporter.log("warning", &c.code, &format!("file {id}: {e}"));
+                self.reporter
+                    .log("warning", &c.code, &format!("file {id}: {e}"));
             }
         }
     }
@@ -874,7 +944,9 @@ impl Engine {
         page_url: &str,
         title: &str,
     ) -> Result<Option<(Vec<String>, Vec<String>)>, String> {
-        let r = self.canvas.get(&format!("/api/v1/courses/{}/pages/{page_url}", c.id))?;
+        let r = self
+            .canvas
+            .get(&format!("/api/v1/courses/{}/pages/{page_url}", c.id))?;
         if !r.ok() {
             return Ok(None);
         }
@@ -890,7 +962,11 @@ impl Engine {
         let out = format!("pages/{}.md", slug(page_title));
         let md_body = format!(
             "# {page_title}\n\n{}---\n\n{}",
-            if updated.is_empty() { String::new() } else { format!("_Updated: {updated}_\n\n") },
+            if updated.is_empty() {
+                String::new()
+            } else {
+                format!("_Updated: {updated}_\n\n")
+            },
             self.convert(body, c, &out)
         );
         // The *requested* slug, not canonical `full["url"]`: old body links to
@@ -923,7 +999,11 @@ impl Engine {
         // uploader's browser claimed); those fall back to the extension.
         let ct = content_type_of(&info);
         let video = is_video(&ct, &name);
-        let office = office_ext(&ct).or_else(|| is_generic_binary(&ct).then(|| office_ext_of(&name)).flatten());
+        let office = office_ext(&ct).or_else(|| {
+            is_generic_binary(&ct)
+                .then(|| office_ext_of(&name))
+                .flatten()
+        });
         let sheet = is_sheet_type(&ct, &name) || is_csv_type(&ct, &name);
         let downloadable = DOWNLOADABLE_TYPES.contains(&ct.as_str())
             || (is_generic_binary(&ct) && paths::is_pdf(&name));
@@ -931,12 +1011,17 @@ impl Engine {
             return Ok(Fetched::Skipped);
         }
         if !video && info["size"].as_u64().unwrap_or(0) > MAX_FILE_BYTES {
-            self.reporter.log("warning", &c.code, &format!("file {file_id}: over size cap, skipped"));
+            self.reporter.log(
+                "warning",
+                &c.code,
+                &format!("file {file_id}: over size cap, skipped"),
+            );
             return Ok(Fetched::Skipped);
         }
         if let Some(until) = locked_until(&info) {
             let name = info["display_name"].as_str().or(display).unwrap_or("file");
-            self.reporter.log("info", &c.code, &format!("{name}: locked{until}, skipped"));
+            self.reporter
+                .log("info", &c.code, &format!("{name}: locked{until}, skipped"));
             return Ok(Fetched::Skipped);
         }
         let Some(rel) = paths::course_rel_path(&c.code, &format!("files/{name}")) else {
@@ -973,7 +1058,10 @@ impl Engine {
             if known && on_disk {
                 unchanged();
             }
-            return Ok(Fetched::Video { rel, canvas_id: file_id });
+            return Ok(Fetched::Video {
+                rel,
+                canvas_id: file_id,
+            });
         }
 
         if known && on_disk {
@@ -988,7 +1076,9 @@ impl Engine {
 
         // Resolved before the announcement: no URL means nothing to download,
         // and a file announced as downloading must end in an event.
-        let Some(url) = self.download_url(&info, file_id)? else { return Ok(Fetched::Skipped) };
+        let Some(url) = self.download_url(&info, file_id)? else {
+            return Ok(Fetched::Skipped);
+        };
 
         self.reporter.file_start(&FileStart {
             subject_id: c.id,
@@ -1006,7 +1096,9 @@ impl Engine {
             error
         };
 
-        let bytes = self.fetch_bytes(&url).map_err(|e| failed(format!("Download failed: {e}.")))?;
+        let bytes = self
+            .fetch_bytes(&url)
+            .map_err(|e| failed(format!("Download failed: {e}.")))?;
 
         // The original is the library file. Office documents get a derived
         // "deck.pptx.pdf" beside them — never announced, never a database row
@@ -1020,7 +1112,12 @@ impl Engine {
         if let Some(ext) = office {
             match office_to_pdf(&bytes, ext) {
                 Ok(pdf) => {
-                    paths::write_course_bytes(&self.data_dir, &c.code, &format!("files/{name}.pdf"), &pdf)?;
+                    paths::write_course_bytes(
+                        &self.data_dir,
+                        &c.code,
+                        &format!("files/{name}.pdf"),
+                        &pdf,
+                    )?;
                     if self.parse_pdfs {
                         self.trigger_parse(&rel, c.id);
                     }
@@ -1059,7 +1156,10 @@ impl Engine {
     ) -> Result<String, String> {
         let r = self.canvas.get(&format!("/api/v1/files/{file_id}"))?;
         if !r.ok() {
-            return Err(format!("Canvas answered HTTP {} for file {file_id}", r.status));
+            return Err(format!(
+                "Canvas answered HTTP {} for file {file_id}",
+                r.status
+            ));
         }
         let info = r.json()?;
         let name = file_name(&info, None);
@@ -1102,7 +1202,11 @@ impl Engine {
         let size = self
             .canvas
             .download_to(&url, &part, on_progress, cancelled)
-            .and_then(|n| std::fs::rename(&part, &dest).map(|_| n).map_err(|e| e.to_string()))
+            .and_then(|n| {
+                std::fs::rename(&part, &dest)
+                    .map(|_| n)
+                    .map_err(|e| e.to_string())
+            })
             .inspect_err(|_| {
                 let _ = std::fs::remove_file(&part);
             })?;
@@ -1133,7 +1237,9 @@ impl Engine {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         on_disk.insert(file_id.to_string(), entry.clone());
-        self.manifest.borrow_mut().insert(file_id.to_string(), entry);
+        self.manifest
+            .borrow_mut()
+            .insert(file_id.to_string(), entry);
         if let Ok(json) = serde_json::to_string(&on_disk) {
             let _ = std::fs::write(path, json);
         }
@@ -1142,8 +1248,15 @@ impl Engine {
     /// Canvas file URLs redirect to a CDN that rejects our cookie, so prefer
     /// the signed `public_url`. An empty `info.url` must be refused: it would
     /// resolve to the Canvas home page and be saved as the file.
-    fn download_url(&self, info: &serde_json::Value, file_id: i64) -> Result<Option<String>, String> {
-        if let Ok(r) = self.canvas.get(&format!("/api/v1/files/{file_id}/public_url")) {
+    fn download_url(
+        &self,
+        info: &serde_json::Value,
+        file_id: i64,
+    ) -> Result<Option<String>, String> {
+        if let Ok(r) = self
+            .canvas
+            .get(&format!("/api/v1/files/{file_id}/public_url"))
+        {
             if r.ok() {
                 if let Ok(j) = r.json() {
                     if let Some(u) = j["public_url"].as_str().filter(|u| !u.is_empty()) {
@@ -1152,13 +1265,19 @@ impl Engine {
                 }
             }
         }
-        Ok(info["url"].as_str().filter(|u| !u.is_empty()).map(str::to_string))
+        Ok(info["url"]
+            .as_str()
+            .filter(|u| !u.is_empty())
+            .map(str::to_string))
     }
 
     /// Errors never carry the URL: a download URL is signed, and these
     /// sentences reach the log and the UI.
     fn fetch_bytes(&self, url: &str) -> Result<Vec<u8>, String> {
-        let r = self.canvas.get(url).map_err(|_| "could not reach the file server".to_string())?;
+        let r = self
+            .canvas
+            .get(url)
+            .map_err(|_| "could not reach the file server".to_string())?;
         if !r.ok() {
             return Err(format!("the file server answered HTTP {}", r.status));
         }
@@ -1187,7 +1306,9 @@ impl Engine {
                     images.insert(src, format!("{up}{path}"));
                 }
                 Ok(None) => {}
-                Err(e) => self.reporter.log("warning", &c.code, &format!("image {endpoint}: {e}")),
+                Err(e) => self
+                    .reporter
+                    .log("warning", &c.code, &format!("image {endpoint}: {e}")),
             }
         }
         md::to_markdown(html, &images)
@@ -1236,7 +1357,9 @@ impl Engine {
             }
         }
 
-        let Some(url) = self.download_url(&info, fid)? else { return Ok(None) };
+        let Some(url) = self.download_url(&info, fid)? else {
+            return Ok(None);
+        };
         let bytes = self.fetch_bytes(&url)?;
         self.write(c, &path, &bytes, Some(fid))?;
         if !modified.is_empty() {
@@ -1250,7 +1373,13 @@ impl Engine {
     // ── Output ───────────────────────────────────────────────────────────────
 
     /// Write one artifact and announce it. Returns `courses/CODE/...`.
-    fn write(&self, c: &Subject, rel_path: &str, data: &[u8], canvas_id: Option<i64>) -> Result<String, String> {
+    fn write(
+        &self,
+        c: &Subject,
+        rel_path: &str,
+        data: &[u8],
+        canvas_id: Option<i64>,
+    ) -> Result<String, String> {
         self.write_from(c, rel_path, data, canvas_id, None)
     }
 
@@ -1262,7 +1391,8 @@ impl Engine {
         canvas_id: Option<i64>,
         source_url: Option<String>,
     ) -> Result<String, String> {
-        self.store(c, rel_path, data, canvas_id, source_url).map(|(rel, _)| rel)
+        self.store(c, rel_path, data, canvas_id, source_url)
+            .map(|(rel, _)| rel)
     }
 
     /// `write_from`, also saying what the write did to the file on disk.
@@ -1274,7 +1404,8 @@ impl Engine {
         canvas_id: Option<i64>,
         source_url: Option<String>,
     ) -> Result<(String, paths::WriteAction), String> {
-        let (rel, size, action) = paths::write_course_bytes(&self.data_dir, &c.code, rel_path, data)?;
+        let (rel, size, action) =
+            paths::write_course_bytes(&self.data_dir, &c.code, rel_path, data)?;
         // Purge the stale parse before the trigger below, or its skip check
         // would keep serving the old markdown and vectors.
         if action == paths::WriteAction::Updated {
@@ -1303,7 +1434,8 @@ impl Engine {
     fn convert_sheet(&self, code: &str, rel: &str, subject_id: i64) {
         if let Err(e) = crate::sheets::index(&self.data_dir, rel, subject_id) {
             let name = rel.rsplit('/').next().unwrap_or(rel);
-            self.reporter.log("warning", code, &format!("{name}: no text — {e}"));
+            self.reporter
+                .log("warning", code, &format!("{name}: no text — {e}"));
         }
     }
 
@@ -1312,7 +1444,9 @@ impl Engine {
     /// be parsed as current; the failure is the row's terminal parse status.
     /// Identical bytes keep a sibling that is still theirs.
     fn conversion_failed(&self, rel: &str, action: paths::WriteAction, subject_id: i64) {
-        let Some(pdf_rel) = paths::doc_pdf_rel(rel) else { return };
+        let Some(pdf_rel) = paths::doc_pdf_rel(rel) else {
+            return;
+        };
         let derived = self.data_dir.join(&pdf_rel);
         if action == paths::WriteAction::Unchanged && derived.is_file() {
             return;
@@ -1320,7 +1454,9 @@ impl Engine {
         paths::purge_parse_artifacts(&self.data_dir, rel);
         let _ = std::fs::remove_file(&derived);
         if self.parse_pdfs {
-            let error = parse::ParseError::Document { code: parse::CONVERSION_FAILED.into() };
+            let error = parse::ParseError::Document {
+                code: parse::CONVERSION_FAILED.into(),
+            };
             parse::events::failed(rel, subject_id, &error);
         }
     }
@@ -1332,12 +1468,12 @@ impl Engine {
         let data_dir = self.data_dir.clone();
         let rel = rel.to_string();
         // Not worth failing a scrape over — `oculus index` re-runs the parse.
-        let _ = std::thread::Builder::new().name("oculus-parse".into()).spawn(move || {
-            match parse_pdf(&data_dir, &rel, subject_id) {
+        let _ = std::thread::Builder::new()
+            .name("oculus-parse".into())
+            .spawn(move || match parse_pdf(&data_dir, &rel, subject_id) {
                 Ok(summary) => eprintln!("[oculus] parse-pdf {rel}: {summary}"),
                 Err(e) => eprintln!("[oculus] parse-pdf {rel}: {e}"),
-            }
-        });
+            });
     }
 }
 
@@ -1362,7 +1498,11 @@ impl std::fmt::Display for ParseSummary {
             }
             return write!(f, ")");
         }
-        write!(f, "{} pages, {} images, {} recorded", self.pages, self.images, self.pages_recorded)
+        write!(
+            f,
+            "{} pages, {} images, {} recorded",
+            self.pages, self.images, self.pages_recorded
+        )
     }
 }
 
@@ -1397,7 +1537,11 @@ pub fn parse_pdf_reporting(
         let _claim = parse::InFlight::shared().claim(&key);
         run_parse(data_dir, rel_path, subject_id, on_progress)
     }))
-    .unwrap_or_else(|_| Err(parse::ParseError::Io("the parser crashed on this file".into())));
+    .unwrap_or_else(|_| {
+        Err(parse::ParseError::Io(
+            "the parser crashed on this file".into(),
+        ))
+    });
     match outcome {
         Ok(summary) => Ok(summary),
         Err(error) => {
@@ -1426,7 +1570,10 @@ fn run_parse(
     })?;
     let pdf = data_dir.join(&pdf_rel);
     if !pdf.is_file() {
-        return Err(parse::ParseError::Io(format!("not on disk: {}", pdf.display())));
+        return Err(parse::ParseError::Io(format!(
+            "not on disk: {}",
+            pdf.display()
+        )));
     }
 
     if parse::parse_mode(&pdf).is_some() {
@@ -1438,16 +1585,22 @@ fn run_parse(
         }
         let pages = record.as_ref().map(|r| r.page_count).unwrap_or(0);
         let pages_recorded = match record {
-            Some(record) => backfill_pages(data_dir, rel_path, subject_id, &record)
-                .unwrap_or_else(|e| {
+            Some(record) => {
+                backfill_pages(data_dir, rel_path, subject_id, &record).unwrap_or_else(|e| {
                     eprintln!("[oculus] parse-pdf {rel_path}: page records not backfilled: {e}");
                     0
-                }),
+                })
+            }
             None => 0,
         };
         // A sweep that kicked this row is waiting for a terminal status.
         parse::events::parsed(rel_path, subject_id);
-        return Ok(ParseSummary { skipped: true, pages, images: 0, pages_recorded });
+        return Ok(ParseSummary {
+            skipped: true,
+            pages,
+            images: 0,
+            pages_recorded,
+        });
     }
 
     // Skipped by the user: nothing is sent. A parse already done stays done.
@@ -1566,7 +1719,10 @@ fn is_sheet_type(ct: &str, name: &str) -> bool {
 fn is_csv_type(ct: &str, name: &str) -> bool {
     let typed = matches!(
         ct,
-        "text/csv" | "application/csv" | "text/comma-separated-values" | "text/plain"
+        "text/csv"
+            | "application/csv"
+            | "text/comma-separated-values"
+            | "text/plain"
             | "application/vnd.ms-excel"
     );
     (typed || is_generic_binary(ct)) && name.to_ascii_lowercase().ends_with(".csv")
@@ -1713,7 +1869,11 @@ fn modified_of(info: &serde_json::Value) -> String {
 /// the app's on-demand download, and links where that download lands.
 fn file_toc_line(indent: &str, title: &str, fetched: &Fetched) -> String {
     match fetched {
-        Fetched::Saved(rel) => format!("{indent}- [{}](../{})", escape_md(title), rel_within_course(rel)),
+        Fetched::Saved(rel) => format!(
+            "{indent}- [{}](../{})",
+            escape_md(title),
+            rel_within_course(rel)
+        ),
         Fetched::Video { rel, canvas_id } => format!(
             "{indent}- [{}](../{}) _(video {canvas_id})_",
             escape_md(title),
@@ -1816,7 +1976,10 @@ mod tests {
 
     #[test]
     fn slugs_are_lowercase_dashed_and_capped() {
-        assert_eq!(slug("Welcome & Executive Summary"), "welcome-executive-summary");
+        assert_eq!(
+            slug("Welcome & Executive Summary"),
+            "welcome-executive-summary"
+        );
         assert_eq!(slug("  --Trim-- "), "trim");
         assert_eq!(slug(""), "untitled");
         assert_eq!(slug("!!!"), "untitled");
@@ -1825,7 +1988,10 @@ mod tests {
 
     #[test]
     fn module_links_are_relative_to_the_course_root() {
-        assert_eq!(rel_within_course("courses/ABC_2026/files/x.pdf"), "files/x.pdf");
+        assert_eq!(
+            rel_within_course("courses/ABC_2026/files/x.pdf"),
+            "files/x.pdf"
+        );
         assert_eq!(rel_within_course("files/x.pdf"), "files/x.pdf");
     }
 
@@ -1852,7 +2018,13 @@ mod tests {
 
     #[test]
     fn a_csv_is_a_sheet_whatever_canvas_labels_it() {
-        for ct in ["text/csv", "application/csv", "text/plain", "application/vnd.ms-excel", ""] {
+        for ct in [
+            "text/csv",
+            "application/csv",
+            "text/plain",
+            "application/vnd.ms-excel",
+            "",
+        ] {
             assert!(is_csv_type(ct, "Grades.CSV"), "{ct}");
         }
         assert!(!is_csv_type("text/csv", "grades.txt"));
@@ -1863,7 +2035,10 @@ mod tests {
     #[test]
     fn every_converted_type_is_a_pdf_backed_extension() {
         for (_, ext) in OFFICE_TYPES {
-            assert!(paths::OFFICE_EXTS.contains(&format!(".{ext}").as_str()), "{ext}");
+            assert!(
+                paths::OFFICE_EXTS.contains(&format!(".{ext}").as_str()),
+                "{ext}"
+            );
         }
         assert_eq!(OFFICE_TYPES.len(), paths::OFFICE_EXTS.len());
     }
@@ -1908,8 +2083,14 @@ mod tests {
             "  - [Matrices \\[Part 1\\]](../files/Matrices_Part_1.mp4) _(video 12345)_"
         );
         let saved = Fetched::Saved("courses/MAST_2026/files/w1.pdf".into());
-        assert_eq!(file_toc_line("", "Week 1", &saved), "- [Week 1](../files/w1.pdf)");
-        assert_eq!(file_toc_line("", "Gone", &Fetched::Skipped), "- Gone _(file)_");
+        assert_eq!(
+            file_toc_line("", "Week 1", &saved),
+            "- [Week 1](../files/w1.pdf)"
+        );
+        assert_eq!(
+            file_toc_line("", "Gone", &Fetched::Skipped),
+            "- Gone _(file)_"
+        );
     }
 
     #[test]

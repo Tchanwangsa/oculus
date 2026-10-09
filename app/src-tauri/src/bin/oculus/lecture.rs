@@ -96,13 +96,14 @@ impl Ctx {
                 "  {}  {}{}",
                 clock(c.seconds),
                 paint(&format!("{:>7.1}", c.score), DIM),
-                if c.pause { paint("  pause", DIM) } else { String::new() }
+                if c.pause {
+                    paint("  pause", DIM)
+                } else {
+                    String::new()
+                }
             );
         }
-        println!(
-            "{}",
-            paint(&format!("{} candidate(s)", found.len()), DIM)
-        );
+        println!("{}", paint(&format!("{} candidate(s)", found.len()), DIM));
         if let Some(frames) = &frames {
             if let Some(first) = frames.first().and_then(|p| p.parent()) {
                 println!("{}", paint(&format!("frames in {}", first.display()), DIM));
@@ -148,7 +149,12 @@ impl Ctx {
             },
             // Of the pipeline's steps only the candidate set gets a line.
             |step| {
-                if let app_lib::chapters::Step::Detected { title, duration, candidates } = step {
+                if let app_lib::chapters::Step::Detected {
+                    title,
+                    duration,
+                    candidates,
+                } = step
+                {
                     if !quiet {
                         println!(
                             "{}  {}  {}",
@@ -241,15 +247,24 @@ impl Ctx {
 
         if args.print_prompt {
             for id in &ids {
-                let lecture = self.rt.block_on(lecture_end::load(&pool, &self.data_dir, id))?;
+                let lecture = self
+                    .rt
+                    .block_on(lecture_end::load(&pool, &self.data_dir, id))?;
                 let prepared = lecture_end::prepare(&lecture)?;
-                println!("{}\n\n---\n\n{}", lecture_end::INSTRUCTIONS, prepared.prompt);
+                println!(
+                    "{}\n\n---\n\n{}",
+                    lecture_end::INSTRUCTIONS,
+                    prepared.prompt
+                );
             }
             return Ok(());
         }
         if ids.is_empty() {
             if !self.json {
-                println!("{}", paint("no lecture is waiting for its end to be found", DIM));
+                println!(
+                    "{}",
+                    paint("no lecture is waiting for its end to be found", DIM)
+                );
             }
             return Ok(());
         }
@@ -299,11 +314,18 @@ impl Ctx {
             };
             let mut marked_done = false;
             let outcome = (|| -> Result<Option<lecture_end::Found>, String> {
-                let lecture = self.rt.block_on(lecture_end::load(&pool, &self.data_dir, id))?;
+                let lecture = self
+                    .rt
+                    .block_on(lecture_end::load(&pool, &self.data_dir, id))?;
                 row.title = lecture.title.clone();
                 row.duration = Some(lecture.duration);
                 if !args.dry_run {
-                    self.rt.block_on(lecture_end::claim(&pool, &lecture, args.force, "`--force` re-runs it"))?;
+                    self.rt.block_on(lecture_end::claim(
+                        &pool,
+                        &lecture,
+                        args.force,
+                        "`--force` re-runs it",
+                    ))?;
                 }
                 let outcome = lecture_end::prepare(&lecture).and_then(|prepared| {
                     row.duration = Some(prepared.length);
@@ -333,7 +355,10 @@ impl Ctx {
             }
 
             if self.json {
-                println!("{}", serde_json::to_string(&row).map_err(|e| e.to_string())?);
+                println!(
+                    "{}",
+                    serde_json::to_string(&row).map_err(|e| e.to_string())?
+                );
                 continue;
             }
             // A lone lecture's error is the command's; `main` prints it.
@@ -343,7 +368,11 @@ impl Ctx {
             let length = paint(&row.duration.map(clock).unwrap_or_default(), DIM);
             let said = match (row.status, row.ends_at, &row.quote, &row.error) {
                 ("ready", Some(end), Some(quote), _) => {
-                    format!("ends {}  {}", paint(&clock(end), BOLD), paint(&format!("\"{quote}\""), DIM))
+                    format!(
+                        "ends {}  {}",
+                        paint(&clock(end), BOLD),
+                        paint(&format!("\"{quote}\""), DIM)
+                    )
                 }
                 ("none", ..) => paint("no end — cut off mid-lecture", DIM),
                 (_, _, _, Some(e)) => format!("{} {e}", paint("error:", RED)),

@@ -73,7 +73,11 @@ impl Ctx {
             return Ok(());
         }
         for s in &rows {
-            let mark = if s.is_current { paint("●", GREEN) } else { paint("○", DIM) };
+            let mark = if s.is_current {
+                paint("●", GREEN)
+            } else {
+                paint("○", DIM)
+            };
             let synced = s
                 .last_synced_at
                 .clone()
@@ -109,7 +113,12 @@ impl Ctx {
             let mut out: Vec<Lecture> = Vec::new();
             let rows: Vec<(String, Vec<store::LectureRow>)> = wanted
                 .iter()
-                .map(|s| Ok((s.code.clone(), self.rt.block_on(store::lectures(&pool, s.id))?)))
+                .map(|s| {
+                    Ok((
+                        s.code.clone(),
+                        self.rt.block_on(store::lectures(&pool, s.id))?,
+                    ))
+                })
                 .collect::<Result<_, String>>()?;
             for (code, lectures) in &rows {
                 out.extend(lectures.iter().map(|l| Lecture {
@@ -127,7 +136,11 @@ impl Ctx {
 
         for s in &wanted {
             let rows = self.rt.block_on(store::lectures(&pool, s.id))?;
-            println!("{}  {}", paint(&s.code, BOLD), paint(&format!("{} lectures", rows.len()), DIM));
+            println!(
+                "{}  {}",
+                paint(&s.code, BOLD),
+                paint(&format!("{} lectures", rows.len()), DIM)
+            );
             for l in &rows {
                 let mins = l.duration_seconds / 60;
                 let marks = format!(
@@ -188,7 +201,8 @@ impl Ctx {
                 }
             };
             let lectures = app_lib::echo360::syllabus(&session)?;
-            self.rt.block_on(store::upsert_lectures(&pool, s.id, &lectures))?;
+            self.rt
+                .block_on(store::upsert_lectures(&pool, s.id, &lectures))?;
             println!("  {} lecture(s)", lectures.len());
 
             for l in &lectures {
@@ -203,7 +217,10 @@ impl Ctx {
                             Ok(vtt) => {
                                 std::fs::write(&path, vtt).map_err(|e| e.to_string())?;
                                 self.rt.block_on(store::set_lecture_path(
-                                    &pool, &l.id, "transcript_path", &path.to_string_lossy(),
+                                    &pool,
+                                    &l.id,
+                                    "transcript_path",
+                                    &path.to_string_lossy(),
                                 ))?;
                                 println!("  {}  {date}  {}", paint("transcript", DIM), l.title);
                             }
@@ -241,7 +258,10 @@ impl Ctx {
                         Ok(bytes) => {
                             println!("{}", paint(&human_bytes(bytes), DIM));
                             self.rt.block_on(store::set_lecture_path(
-                                &pool, &l.id, "video_path", &final_.to_string_lossy(),
+                                &pool,
+                                &l.id,
+                                "video_path",
+                                &final_.to_string_lossy(),
                             ))?;
                         }
                         Err(e) => {
@@ -278,7 +298,10 @@ impl Ctx {
                 let rows = self.rt.block_on(store::subjects(p))?;
                 rows.iter()
                     .filter(|s| s.selected && (args.all || s.is_current))
-                    .map(|s| sync::Subject { id: s.id, code: s.code.clone() })
+                    .map(|s| sync::Subject {
+                        id: s.id,
+                        code: s.code.clone(),
+                    })
                     .collect()
             }
             _ => courses
@@ -290,7 +313,10 @@ impl Ctx {
                         args.codes.iter().any(|w| matches_code(&c.code, w))
                     }
                 })
-                .map(|c| sync::Subject { id: c.id, code: c.code.clone() })
+                .map(|c| sync::Subject {
+                    id: c.id,
+                    code: c.code.clone(),
+                })
                 .collect(),
         };
 
@@ -303,7 +329,15 @@ impl Ctx {
         }
 
         println!("{} as {who}", paint("canvas", DIM));
-        println!("syncing {} subject(s): {}", targets.len(), targets.iter().map(|s| s.code.as_str()).collect::<Vec<_>>().join(", "));
+        println!(
+            "syncing {} subject(s): {}",
+            targets.len(),
+            targets
+                .iter()
+                .map(|s| s.code.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         println!();
 
         let target_codes: Vec<String> = targets.iter().map(|s| s.code.clone()).collect();
@@ -323,13 +357,31 @@ impl Ctx {
         if let Some(p) = &pool {
             self.rt.block_on(async {
                 for f in &written {
-                    if let Err(e) = store::upsert_file(p, f.subject_id, &f.relative_path, f.size_bytes, &f.category, f.canvas_id, f.source_url.as_deref(), f.action != "unchanged").await {
+                    if let Err(e) = store::upsert_file(
+                        p,
+                        f.subject_id,
+                        &f.relative_path,
+                        f.size_bytes,
+                        &f.category,
+                        f.canvas_id,
+                        f.source_url.as_deref(),
+                        f.action != "unchanged",
+                    )
+                    .await
+                    {
                         eprintln!("{} {e}", paint("db:", YELLOW));
                     }
                 }
                 if let Some(id) = run_id {
                     store::finish_run(p, id, "completed", done, None).await.ok();
-                    store::add_log(p, "info", &format!("CLI synced {done} subject(s)"), Some(id)).await.ok();
+                    store::add_log(
+                        p,
+                        "info",
+                        &format!("CLI synced {done} subject(s)"),
+                        Some(id),
+                    )
+                    .await
+                    .ok();
                 }
             });
         }
@@ -349,8 +401,9 @@ impl Ctx {
                 match app_lib::calendar::fetch(&engine.canvas, t.id) {
                     Ok(events) => {
                         total += events.len();
-                        if let Err(e) =
-                            self.rt.block_on(store::replace_calendar_events(p, t.id, &events))
+                        if let Err(e) = self
+                            .rt
+                            .block_on(store::replace_calendar_events(p, t.id, &events))
                         {
                             eprintln!("{} {e}", paint("calendar:", YELLOW));
                         }
@@ -365,7 +418,10 @@ impl Ctx {
             return Ok(());
         }
         let Some(p) = &pool else {
-            println!("{}", paint("no database — skipping parse and index", YELLOW));
+            println!(
+                "{}",
+                paint("no database — skipping parse and index", YELLOW)
+            );
             return Ok(());
         };
 
@@ -385,7 +441,12 @@ impl Ctx {
     /// blocks for minutes and there is deliberately no deadline here — see
     /// `docs/parsing.md`. The two callbacks below
     /// keep a live counter instead.
-    fn index_pdfs(&self, pool: &SqlitePool, pdfs: &[(i64, String)], embed: bool) -> Result<(), String> {
+    fn index_pdfs(
+        &self,
+        pool: &SqlitePool,
+        pdfs: &[(i64, String)],
+        embed: bool,
+    ) -> Result<(), String> {
         if pdfs.is_empty() {
             return Ok(());
         }
@@ -426,7 +487,9 @@ impl Ctx {
                             format!("waiting to upload {:.1} MB", mb(p.bytes_total))
                         }
                         (app_lib::parse::Phase::Uploading, _) => format!(
-                            "uploading {:.1}/{:.1} MB", mb(p.bytes_done), mb(p.bytes_total)
+                            "uploading {:.1}/{:.1} MB",
+                            mb(p.bytes_done),
+                            mb(p.bytes_total)
                         ),
                         (_, 0) => format!("{} pages", p.pages_done),
                         (_, total) => format!("{}/{total} pages", p.pages_done),
@@ -485,7 +548,13 @@ impl Ctx {
                     pages_total += s.pages_embedded;
                     println!(
                         "{}",
-                        paint(&format!("{} pages, {} with text", s.pages_embedded, s.pages_with_markdown), DIM)
+                        paint(
+                            &format!(
+                                "{} pages, {} with text",
+                                s.pages_embedded, s.pages_with_markdown
+                            ),
+                            DIM
+                        )
                     );
                 }
                 Err(e) => {

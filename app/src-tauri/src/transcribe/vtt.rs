@@ -24,11 +24,18 @@ pub(super) fn render(segments: &[Segment]) -> (String, usize) {
 
 /// One line, and never the cue-timing arrow.
 fn clean(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ").replace("-->", "->")
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("-->", "->")
 }
 
 fn seconds(value: f64) -> f64 {
-    if value.is_finite() { value.max(0.0) } else { 0.0 }
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
 }
 
 /// `HH:MM:SS.mmm`; the hours field is always written.
@@ -48,7 +55,11 @@ mod tests {
     use super::*;
 
     fn seg(start: f64, end: f64, text: &str) -> Segment {
-        Segment { start, end, text: text.into() }
+        Segment {
+            start,
+            end,
+            text: text.into(),
+        }
     }
 
     #[test]

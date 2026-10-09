@@ -36,5 +36,7 @@ pub(crate) fn candidates(stem: &str, resource_dir: Option<PathBuf>) -> Vec<PathB
 
 /// The first of [`candidates`] that is a file.
 pub(crate) fn find(stem: &str, resource_dir: Option<PathBuf>) -> Option<PathBuf> {
-    candidates(stem, resource_dir).into_iter().find(|p| p.is_file())
+    candidates(stem, resource_dir)
+        .into_iter()
+        .find(|p| p.is_file())
 }

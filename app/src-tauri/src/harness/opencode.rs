@@ -382,7 +382,10 @@ impl OpencodeServer {
     /// On every instance-scoped call: an unscoped one binds to the server's
     /// own cwd, a different instance from ours.
     fn directory_query(&self) -> String {
-        format!("directory={}", urlencode(&self.directory.display().to_string()))
+        format!(
+            "directory={}",
+            urlencode(&self.directory.display().to_string())
+        )
     }
 
     pub fn is_alive(&self) -> bool {
@@ -412,7 +415,10 @@ impl OpencodeServer {
     }
 
     fn delete(&self, path: &str) -> Result<Value, String> {
-        self.finish(self.api.delete(&format!("{}{path}", self.base)).call(), path)
+        self.finish(
+            self.api.delete(&format!("{}{path}", self.base)).call(),
+            path,
+        )
     }
 
     /// 204 or an empty body is `Null`. Error text is [`scrub`]bed: response
@@ -490,8 +496,11 @@ impl OpencodeServer {
         if self.busy() {
             return false;
         }
-        self.post(&format!("/instance/dispose?{}", self.directory_query()), json!({}))
-            .is_ok()
+        self.post(
+            &format!("/instance/dispose?{}", self.directory_query()),
+            json!({}),
+        )
+        .is_ok()
     }
 
     /// Every provider opencode knows, whether it is connected, and its
@@ -529,7 +538,8 @@ impl OpencodeServer {
     }
 
     pub fn remove_auth(&self, provider: &str) -> Result<(), String> {
-        self.delete(&format!("/auth/{}", urlencode(provider))).map(|_| ())
+        self.delete(&format!("/auth/{}", urlencode(provider)))
+            .map(|_| ())
     }
 
     /// Start a browser flow. `method` is [`AuthMethod::index`].
@@ -544,7 +554,11 @@ impl OpencodeServer {
             body["inputs"] = json!(inputs);
         }
         let v = self.post(
-            &format!("/provider/{}/oauth/authorize?{}", urlencode(provider), self.directory_query()),
+            &format!(
+                "/provider/{}/oauth/authorize?{}",
+                urlencode(provider),
+                self.directory_query()
+            ),
             body,
         )?;
         Ok(Authorization {
@@ -556,13 +570,22 @@ impl OpencodeServer {
 
     /// Finish a `code` flow with what the student pasted. An `auto` flow
     /// completes server-side and is noticed by refreshing.
-    pub fn oauth_callback(&self, provider: &str, method: usize, code: Option<&str>) -> Result<(), String> {
+    pub fn oauth_callback(
+        &self,
+        provider: &str,
+        method: usize,
+        code: Option<&str>,
+    ) -> Result<(), String> {
         let mut body = json!({ "method": method });
         if let Some(c) = code {
             body["code"] = json!(c);
         }
         let v = self.post(
-            &format!("/provider/{}/oauth/callback?{}", urlencode(provider), self.directory_query()),
+            &format!(
+                "/provider/{}/oauth/callback?{}",
+                urlencode(provider),
+                self.directory_query()
+            ),
             body,
         )?;
         if v.as_bool() == Some(false) {
@@ -590,7 +613,10 @@ impl OpencodeServer {
     // ── Sessions ─────────────────────────────────────────────────────────
 
     fn route(&self, session: &str, route: SessionRoute) {
-        self.routes.lock().unwrap().insert(session.to_string(), Arc::new(route));
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(session.to_string(), Arc::new(route));
     }
 
     /// `POST /session`. The model is `{providerID, id}` here but
@@ -715,7 +741,10 @@ impl OpencodeServer {
 
     /// `POST /session/{id}/abort`; the stream's side is in [`translate`].
     pub fn interrupt(&self, session: &str) -> Result<(), String> {
-        self.post_empty(&format!("/session/{session}/abort?{}", self.directory_query()))?;
+        self.post_empty(&format!(
+            "/session/{session}/abort?{}",
+            self.directory_query()
+        ))?;
         Ok(())
     }
 
@@ -762,7 +791,10 @@ impl OpencodeServer {
             match self.stream.get(&url).call() {
                 Ok(resp) => {
                     backoff = Duration::from_millis(200);
-                    for line in BufReader::new(resp.into_reader()).lines().map_while(Result::ok) {
+                    for line in BufReader::new(resp.into_reader())
+                        .lines()
+                        .map_while(Result::ok)
+                    {
                         let Some(payload) = line.strip_prefix("data: ") else {
                             continue;
                         };
@@ -850,7 +882,8 @@ impl OpencodeServer {
     /// Close every open turn as failed, when the stream drops or the process
     /// dies.
     fn fail_open_turns(&self, why: &str) {
-        let routes: Vec<Arc<SessionRoute>> = self.routes.lock().unwrap().values().cloned().collect();
+        let routes: Vec<Arc<SessionRoute>> =
+            self.routes.lock().unwrap().values().cloned().collect();
         for r in routes {
             let events = {
                 let mut st = r.state.lock().unwrap();
@@ -868,8 +901,18 @@ impl OpencodeServer {
 
     fn on_exit(&self) {
         let code = self.proc.reap();
-        self.fail_open_turns(&self.proc.with_tail(format!("opencode serve exited (code {code:?})")));
-        let routes: Vec<Arc<SessionRoute>> = self.routes.lock().unwrap().drain().map(|(_, r)| r).collect();
+        self.fail_open_turns(
+            &self
+                .proc
+                .with_tail(format!("opencode serve exited (code {code:?})")),
+        );
+        let routes: Vec<Arc<SessionRoute>> = self
+            .routes
+            .lock()
+            .unwrap()
+            .drain()
+            .map(|(_, r)| r)
+            .collect();
         for r in routes {
             (r.sink)(HarnessEvent::Exited { code });
         }
@@ -969,7 +1012,8 @@ pub fn write_config(
     prompt: &str,
     one_off: &OneOffPrompts,
 ) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(directory).map_err(|e| format!("cannot create {}: {e}", directory.display()))?;
+    std::fs::create_dir_all(directory)
+        .map_err(|e| format!("cannot create {}: {e}", directory.display()))?;
     let path = directory.join(CONFIG_NAME);
     std::fs::write(&path, render_config(library, prompt, one_off))
         .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
@@ -981,11 +1025,17 @@ pub fn write_config(
 /// invert the containment. Values are JSON-escaped.
 fn render_config(library: &Path, prompt: &str, one_off: &OneOffPrompts) -> String {
     CONFIG_TEMPLATE
-        .replace("{{LIBRARY}}", &json_fragment(&library.display().to_string()))
+        .replace(
+            "{{LIBRARY}}",
+            &json_fragment(&library.display().to_string()),
+        )
         .replace("\"{{PROMPT}}\"", &json_string(prompt))
         .replace("\"{{NAMING_PROMPT}}\"", &json_string(one_off.naming))
         .replace("\"{{WRITER_PROMPT}}\"", &json_string(one_off.writer))
-        .replace("\"{{LECTURE_END_PROMPT}}\"", &json_string(one_off.lecture_end))
+        .replace(
+            "\"{{LECTURE_END_PROMPT}}\"",
+            &json_string(one_off.lecture_end),
+        )
 }
 
 fn json_string(s: &str) -> String {
@@ -1019,7 +1069,9 @@ pub fn split_model(model: &str) -> Option<(String, String)> {
 /// [`scrub`] does not catch: that field is never read, and the response is
 /// never quoted into an error.
 fn parse_providers(all: &Value, methods: &Value) -> Result<Vec<ProviderInfo>, String> {
-    let list = all["all"].as_array().ok_or("opencode /provider: no providers")?;
+    let list = all["all"]
+        .as_array()
+        .ok_or("opencode /provider: no providers")?;
     let connected: std::collections::HashSet<&str> = all["connected"]
         .as_array()
         .map(|a| a.iter().filter_map(Value::as_str).collect())
@@ -1034,7 +1086,12 @@ fn parse_providers(all: &Value, methods: &Value) -> Result<Vec<ProviderInfo>, St
                 source: p["source"].as_str().unwrap_or("custom").to_string(),
                 env: p["env"]
                     .as_array()
-                    .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_str)
+                            .map(String::from)
+                            .collect()
+                    })
                     .unwrap_or_default(),
                 model_count: p["models"].as_object().map_or(0, serde_json::Map::len),
                 connected: connected.contains(id.as_str()),
@@ -1272,7 +1329,10 @@ fn facts(m: &Value) -> ModelFacts {
 /// A model's reasoning levels: an object keyed by id, or an array of `{id}`.
 fn variant_ids(v: &Value) -> Vec<String> {
     if let Some(a) = v.as_array() {
-        return a.iter().filter_map(|x| x["id"].as_str().map(String::from)).collect();
+        return a
+            .iter()
+            .filter_map(|x| x["id"].as_str().map(String::from))
+            .collect();
     }
     match v.as_object() {
         Some(o) => o.keys().cloned().collect(),
@@ -1315,9 +1375,12 @@ fn session_of(v: &Value) -> Option<&str> {
         .or_else(|| p["info"]["sessionID"].as_str())
         .or_else(|| p["part"]["sessionID"].as_str())
         .or_else(|| {
-            matches!(v["type"].as_str(), Some("session.created" | "session.updated"))
-                .then(|| p["info"]["id"].as_str())
-                .flatten()
+            matches!(
+                v["type"].as_str(),
+                Some("session.created" | "session.updated")
+            )
+            .then(|| p["info"]["id"].as_str())
+            .flatten()
         })
 }
 
@@ -1361,7 +1424,9 @@ fn begin_turn(st: &mut SessionState) -> HarnessEvent {
 /// reads and `output` excludes reasoning, so both are added.
 fn usage(st: &mut SessionState, t: &Value, cost: f64) -> HarnessEvent {
     let n = |k: &str| t[k].as_u64().unwrap_or(0);
-    let input = n("input") + t["cache"]["read"].as_u64().unwrap_or(0) + t["cache"]["write"].as_u64().unwrap_or(0);
+    let input = n("input")
+        + t["cache"]["read"].as_u64().unwrap_or(0)
+        + t["cache"]["write"].as_u64().unwrap_or(0);
     let output = n("output") + n("reasoning");
     st.total_input += input;
     st.total_output += output;
@@ -1443,7 +1508,11 @@ fn ensure_open(out: &mut Vec<HarnessEvent>, st: &mut SessionState, id: &str, inp
     if st.open_tools.contains(id) {
         return;
     }
-    let name = st.tools.get(id).cloned().unwrap_or_else(|| "unknown".into());
+    let name = st
+        .tools
+        .get(id)
+        .cloned()
+        .unwrap_or_else(|| "unknown".into());
     let (kind, title) = classify(&name, input);
     st.open_tools.insert(id.to_string());
     out.push(HarnessEvent::ToolStarted {
@@ -1527,7 +1596,11 @@ fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent> {
             match part["type"].as_str() {
                 Some(kind @ ("text" | "reasoning")) => {
                     let thinking = kind == "reasoning";
-                    let map = if thinking { &mut st.reasoning } else { &mut st.text };
+                    let map = if thinking {
+                        &mut st.reasoning
+                    } else {
+                        &mut st.text
+                    };
                     if part["time"]["end"].is_null() {
                         map.entry(id).or_default();
                     } else {
@@ -1572,7 +1645,10 @@ fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent> {
                             let output = if ok {
                                 s(state, "output")
                             } else {
-                                state["error"].as_str().unwrap_or("the tool failed").to_string()
+                                state["error"]
+                                    .as_str()
+                                    .unwrap_or("the tool failed")
+                                    .to_string()
                             };
                             out.push(HarnessEvent::ToolFinished {
                                 id: call,
@@ -1585,7 +1661,11 @@ fn translate(ty: &str, p: &Value, st: &mut SessionState) -> Vec<HarnessEvent> {
                     }
                 }
                 Some("step-finish") => {
-                    out.push(usage(st, &part["tokens"], part["cost"].as_f64().unwrap_or(0.0)));
+                    out.push(usage(
+                        st,
+                        &part["tokens"],
+                        part["cost"].as_f64().unwrap_or(0.0),
+                    ));
                 }
                 _ => {}
             }
@@ -1663,8 +1743,12 @@ mod tests {
         let mut ours: Option<String> = None;
         let mut events = Vec::new();
         for line in raw.lines() {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-            let Some(ty) = v["type"].as_str() else { continue };
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            let Some(ty) = v["type"].as_str() else {
+                continue;
+            };
             match session_of(&v) {
                 None => events.extend(translate_server(ty, &v["properties"])),
                 Some(id) => {
@@ -1731,7 +1815,11 @@ mod tests {
     fn folds_a_recorded_v1_turn() {
         let events = replay(V1_LS);
         assert!(matches!(events.first(), Some(HarnessEvent::TurnStarted)));
-        assert_eq!(count(&events, |e| matches!(e, HarnessEvent::TurnStarted)), 1, "user re-emits open nothing");
+        assert_eq!(
+            count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+            1,
+            "user re-emits open nothing"
+        );
         let anchors: Vec<&str> = events
             .iter()
             .filter_map(|e| match e {
@@ -1739,22 +1827,42 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(anchors, vec!["msg_0add5cba9001dBRhWoUADhRh8h"], "the user msg id, once");
+        assert_eq!(
+            anchors,
+            vec!["msg_0add5cba9001dBRhWoUADhRh8h"],
+            "the user msg id, once"
+        );
 
         let tools: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                HarnessEvent::ToolStarted { id, kind, name, title, input } => {
-                    Some((id.clone(), *kind, name.clone(), title.clone(), input.clone()))
-                }
+                HarnessEvent::ToolStarted {
+                    id,
+                    kind,
+                    name,
+                    title,
+                    input,
+                } => Some((
+                    id.clone(),
+                    *kind,
+                    name.clone(),
+                    title.clone(),
+                    input.clone(),
+                )),
                 _ => None,
             })
             .collect();
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].0, "call_UnhBtW5By24FPWOwYzi30lZ6", "keyed by callID");
+        assert_eq!(
+            tools[0].0, "call_UnhBtW5By24FPWOwYzi30lZ6",
+            "keyed by callID"
+        );
         assert_eq!(tools[0].1, ToolKind::Bash);
         assert_eq!(tools[0].2, "bash");
-        assert!(tools[0].3.contains("ls"), "titled off the running snapshot's input, not pending's `{{}}`");
+        assert!(
+            tools[0].3.contains("ls"),
+            "titled off the running snapshot's input, not pending's `{{}}`"
+        );
         assert_eq!(tools[0].4["command"], "ls");
 
         // Two empty `running` snapshots, then the whole listing: one delta.
@@ -1783,46 +1891,79 @@ mod tests {
 
         let text = messages(&events);
         assert_eq!(text.len(), 1, "one answer, from the closing snapshot");
-        assert_eq!(deltas(&events), text[0], "the deltas add up to the snapshot");
+        assert_eq!(
+            deltas(&events),
+            text[0],
+            "the deltas add up to the snapshot"
+        );
         assert!(!text[0].is_empty());
-        assert!(!events.iter().any(|e| matches!(e, HarnessEvent::ThinkingDelta { .. } | HarnessEvent::Thinking { .. })));
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            HarnessEvent::ThinkingDelta { .. } | HarnessEvent::Thinking { .. }
+        )));
 
         // One `Usage` per `step-finish`, accumulating fresh + cached input.
         let usage: Vec<(u64, u64, Option<u64>)> = events
             .iter()
             .filter_map(|e| match e {
-                HarnessEvent::Usage { input_tokens, output_tokens, context_tokens, .. } => {
-                    Some((*input_tokens, *output_tokens, *context_tokens))
-                }
+                HarnessEvent::Usage {
+                    input_tokens,
+                    output_tokens,
+                    context_tokens,
+                    ..
+                } => Some((*input_tokens, *output_tokens, *context_tokens)),
                 _ => None,
             })
             .collect();
-        assert_eq!(usage, vec![(5827, 79, Some(5906)), (5827 + 160 + 5760, 79 + 17, Some(5937))]);
-        assert!(events.iter().any(|e| matches!(e, HarnessEvent::Usage { cost_usd: Some(c), .. } if *c > 0.003)));
+        assert_eq!(
+            usage,
+            vec![
+                (5827, 79, Some(5906)),
+                (5827 + 160 + 5760, 79 + 17, Some(5937))
+            ]
+        );
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, HarnessEvent::Usage { cost_usd: Some(c), .. } if *c > 0.003)));
 
         assert_eq!(finishes(&events), vec!["completed"]);
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })), "idle and the user re-emit after it add nothing");
+        assert!(
+            matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })),
+            "idle and the user re-emit after it add nothing"
+        );
         assert!(errors(&events).is_empty());
     }
 
     /// The smallest v1 turn: one step, one delta, `ok`.
     #[test]
     fn folds_a_recorded_v1_text_turn() {
-        let events = replay(include_str!("../../fixtures/harness/opencode-v1-text.ndjson"));
-        assert_eq!(count(&events, |e| matches!(e, HarnessEvent::TurnStarted)), 1);
+        let events = replay(include_str!(
+            "../../fixtures/harness/opencode-v1-text.ndjson"
+        ));
+        assert_eq!(
+            count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+            1
+        );
         assert_eq!(messages(&events), vec!["ok"]);
         assert_eq!(deltas(&events), "ok");
-        assert_eq!(count(&events, |e| matches!(e, HarnessEvent::Usage { .. })), 1);
+        assert_eq!(
+            count(&events, |e| matches!(e, HarnessEvent::Usage { .. })),
+            1
+        );
         assert_eq!(finishes(&events), vec!["completed"]);
         assert!(errors(&events).is_empty());
-        assert!(!events.iter().any(|e| matches!(e, HarnessEvent::ToolStarted { .. })));
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, HarnessEvent::ToolStarted { .. })));
     }
 
     /// Reasoning deltas say `field: "text"` too; only the opening snapshot's
     /// part type marks them as thinking.
     #[test]
     fn folds_a_recorded_v1_reasoning_turn() {
-        let events = replay(include_str!("../../fixtures/harness/opencode-v1-reasoning.ndjson"));
+        let events = replay(include_str!(
+            "../../fixtures/harness/opencode-v1-reasoning.ndjson"
+        ));
         let thinking_deltas: String = events
             .iter()
             .filter_map(|e| match e {
@@ -1841,51 +1982,104 @@ mod tests {
         assert!(thinking[0].starts_with("The user is asking"));
         assert_eq!(thinking_deltas, thinking[0]);
         assert_eq!(messages(&events), vec!["ok"]);
-        assert_eq!(deltas(&events), "ok", "the reasoning deltas were not read as answer text");
-        let think_at = events.iter().position(|e| matches!(e, HarnessEvent::Thinking { .. })).unwrap();
-        let answer_at = events.iter().position(|e| matches!(e, HarnessEvent::AssistantMessage { .. })).unwrap();
+        assert_eq!(
+            deltas(&events),
+            "ok",
+            "the reasoning deltas were not read as answer text"
+        );
+        let think_at = events
+            .iter()
+            .position(|e| matches!(e, HarnessEvent::Thinking { .. }))
+            .unwrap();
+        let answer_at = events
+            .iter()
+            .position(|e| matches!(e, HarnessEvent::AssistantMessage { .. }))
+            .unwrap();
         assert!(think_at < answer_at);
         // 0 output + 31 reasoning.
-        assert!(events.iter().any(|e| matches!(e, HarnessEvent::Usage { output_tokens: 31, .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            HarnessEvent::Usage {
+                output_tokens: 31,
+                ..
+            }
+        )));
         assert_eq!(finishes(&events), vec!["completed"]);
         assert!(errors(&events).is_empty());
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })));
+        assert!(matches!(
+            events.last(),
+            Some(HarnessEvent::TurnFinished { .. })
+        ));
     }
 
     /// The first idle of an abort must not close the turn, or the partial
     /// answer that follows it is lost.
     #[test]
     fn a_v1_abort_is_interrupted_not_failed() {
-        let events = replay(include_str!("../../fixtures/harness/opencode-v1-interrupt.ndjson"));
+        let events = replay(include_str!(
+            "../../fixtures/harness/opencode-v1-interrupt.ndjson"
+        ));
         let text = messages(&events);
         assert_eq!(text.len(), 1, "the partial answer is one row");
         assert!(!text[0].is_empty());
         assert_eq!(deltas(&events), text[0]);
         assert_eq!(finishes(&events), vec!["interrupted"]);
-        assert!(errors(&events).is_empty(), "stopping a turn is not an error");
-        let answer_at = events.iter().position(|e| matches!(e, HarnessEvent::AssistantMessage { .. })).unwrap();
-        let finish_at = events.iter().position(|e| matches!(e, HarnessEvent::TurnFinished { .. })).unwrap();
-        assert!(answer_at < finish_at, "the row lands before the turn closes");
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })), "the two idles add nothing");
+        assert!(
+            errors(&events).is_empty(),
+            "stopping a turn is not an error"
+        );
+        let answer_at = events
+            .iter()
+            .position(|e| matches!(e, HarnessEvent::AssistantMessage { .. }))
+            .unwrap();
+        let finish_at = events
+            .iter()
+            .position(|e| matches!(e, HarnessEvent::TurnFinished { .. }))
+            .unwrap();
+        assert!(
+            answer_at < finish_at,
+            "the row lands before the turn closes"
+        );
+        assert!(
+            matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })),
+            "the two idles add nothing"
+        );
     }
 
     /// An unknown model: no assistant row; the `session.error` closes the
     /// turn in the provider's words, and its stack-trace re-emit is dropped.
     #[test]
     fn a_v1_model_not_found_fails_once_with_the_providers_words() {
-        let events = replay(include_str!("../../fixtures/harness/opencode-v1-error.ndjson"));
-        assert_eq!(count(&events, |e| matches!(e, HarnessEvent::TurnStarted)), 1);
+        let events = replay(include_str!(
+            "../../fixtures/harness/opencode-v1-error.ndjson"
+        ));
+        assert_eq!(
+            count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+            1
+        );
         let errs = errors(&events);
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert!(errs[0].contains("Model not found"));
         assert!(errs[0].contains("Did you mean"));
         assert!(!errs[0].contains("\n    at "));
         assert_eq!(finishes(&events), vec!["failed"]);
-        let err_at = events.iter().position(|e| matches!(e, HarnessEvent::Error { .. })).unwrap();
-        let finish_at = events.iter().position(|e| matches!(e, HarnessEvent::TurnFinished { .. })).unwrap();
+        let err_at = events
+            .iter()
+            .position(|e| matches!(e, HarnessEvent::Error { .. }))
+            .unwrap();
+        let finish_at = events
+            .iter()
+            .position(|e| matches!(e, HarnessEvent::TurnFinished { .. }))
+            .unwrap();
         assert!(err_at < finish_at);
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })), "idle and the trace add nothing");
-        assert!(messages(&events).is_empty(), "the user's own text part is not an answer");
+        assert!(
+            matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })),
+            "idle and the trace add nothing"
+        );
+        assert!(
+            messages(&events).is_empty(),
+            "the user's own text part is not an answer"
+        );
     }
 
     /// A repeated completed row and a late idle add no second finish.
@@ -1909,8 +2103,14 @@ mod tests {
         );
         let events = replay(&again);
         assert_eq!(finishes(&events), vec!["completed"]);
-        assert_eq!(count(&events, |e| matches!(e, HarnessEvent::TurnStarted)), 1);
-        assert_eq!(count(&events, |e| matches!(e, HarnessEvent::Usage { .. })), 2);
+        assert_eq!(
+            count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+            1
+        );
+        assert_eq!(
+            count(&events, |e| matches!(e, HarnessEvent::Usage { .. })),
+            2
+        );
         assert!(errors(&events).is_empty());
     }
 
@@ -1919,13 +2119,27 @@ mod tests {
     fn a_v1_bad_agent_closes_on_the_error_because_no_idle_follows() {
         let mut st = SessionState::default();
         let go = |st: &mut SessionState, ty: &str, p: Value| translate(ty, &p, st);
-        let opened = go(&mut st, "message.updated", json!({"info": {"id": "msg_u1", "role": "user", "sessionID": "ses_1"}}));
-        assert!(matches!(opened.as_slice(), [HarnessEvent::TurnStarted, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1"));
+        let opened = go(
+            &mut st,
+            "message.updated",
+            json!({"info": {"id": "msg_u1", "role": "user", "sessionID": "ses_1"}}),
+        );
+        assert!(
+            matches!(opened.as_slice(), [HarnessEvent::TurnStarted, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1")
+        );
         let msg = "Agent not found: \"nope-agent\". Available agents: build, explore, general, oculus, plan";
-        let out = go(&mut st, "session.error", json!({"sessionID": "ses_1", "error": {"name": "UnknownError", "data": {"message": msg}}}));
+        let out = go(
+            &mut st,
+            "session.error",
+            json!({"sessionID": "ses_1", "error": {"name": "UnknownError", "data": {"message": msg}}}),
+        );
         assert_eq!(errors(&out), vec![msg]);
         assert_eq!(finishes(&out), vec!["failed"]);
-        let trace = go(&mut st, "session.error", json!({"sessionID": "ses_1", "error": {"name": "UnknownError", "data": {"message": format!("AgentNotFoundError: {msg}\n    at <anonymous> (/$bunfs/root/x.js:1:1)")}}}));
+        let trace = go(
+            &mut st,
+            "session.error",
+            json!({"sessionID": "ses_1", "error": {"name": "UnknownError", "data": {"message": format!("AgentNotFoundError: {msg}\n    at <anonymous> (/$bunfs/root/x.js:1:1)")}}}),
+        );
         assert!(trace.is_empty(), "{trace:?}");
     }
 
@@ -1935,18 +2149,46 @@ mod tests {
     fn a_v1_tool_that_never_ran_still_opens_a_row_off_its_input() {
         let mut st = SessionState::default();
         let go = |st: &mut SessionState, ty: &str, p: Value| translate(ty, &p, st);
-        go(&mut st, "message.updated", json!({"info": {"id": "msg_u1", "role": "user"}}));
-        go(&mut st, "message.updated", json!({"info": {"id": "msg_a1", "role": "assistant", "parentID": "msg_u1", "time": {"created": 1}}}));
-        let pending = go(&mut st, "message.part.updated", json!({"part": {"id": "prt_1", "messageID": "msg_a1", "type": "tool", "callID": "call_1", "tool": "read", "state": {"status": "pending", "input": {}}}}));
+        go(
+            &mut st,
+            "message.updated",
+            json!({"info": {"id": "msg_u1", "role": "user"}}),
+        );
+        go(
+            &mut st,
+            "message.updated",
+            json!({"info": {"id": "msg_a1", "role": "assistant", "parentID": "msg_u1", "time": {"created": 1}}}),
+        );
+        let pending = go(
+            &mut st,
+            "message.part.updated",
+            json!({"part": {"id": "prt_1", "messageID": "msg_a1", "type": "tool", "callID": "call_1", "tool": "read", "state": {"status": "pending", "input": {}}}}),
+        );
         assert!(pending.is_empty());
-        let done = go(&mut st, "message.part.updated", json!({"part": {"id": "prt_1", "messageID": "msg_a1", "type": "tool", "callID": "call_1", "tool": "read", "state": {"status": "completed", "input": {"path": "../courses/COMP30026/w1.md"}, "output": "# Week 1", "title": "w1.md"}}}));
-        assert!(matches!(&done[0], HarnessEvent::ToolStarted { id, kind: ToolKind::Read, name, title, .. } if id == "call_1" && name == "read" && title == "w1.md"));
-        assert!(matches!(&done[1], HarnessEvent::ToolFinished { id, ok: true, output, .. } if id == "call_1" && output == "# Week 1"));
+        let done = go(
+            &mut st,
+            "message.part.updated",
+            json!({"part": {"id": "prt_1", "messageID": "msg_a1", "type": "tool", "callID": "call_1", "tool": "read", "state": {"status": "completed", "input": {"path": "../courses/COMP30026/w1.md"}, "output": "# Week 1", "title": "w1.md"}}}),
+        );
+        assert!(
+            matches!(&done[0], HarnessEvent::ToolStarted { id, kind: ToolKind::Read, name, title, .. } if id == "call_1" && name == "read" && title == "w1.md")
+        );
+        assert!(
+            matches!(&done[1], HarnessEvent::ToolFinished { id, ok: true, output, .. } if id == "call_1" && output == "# Week 1")
+        );
         assert_eq!(done.len(), 2);
 
         let mut st = SessionState::default();
-        go(&mut st, "message.updated", json!({"info": {"id": "msg_u2", "role": "user"}}));
-        let out = go(&mut st, "session.error", json!({"error": {"name": "MessageAbortedError", "data": {"message": "Aborted"}}}));
+        go(
+            &mut st,
+            "message.updated",
+            json!({"info": {"id": "msg_u2", "role": "user"}}),
+        );
+        let out = go(
+            &mut st,
+            "session.error",
+            json!({"error": {"name": "MessageAbortedError", "data": {"message": "Aborted"}}}),
+        );
         assert_eq!(finishes(&out), vec!["interrupted"]);
         assert!(errors(&out).is_empty());
         assert!(go(&mut st, "session.idle", json!({"sessionID": "ses_1"})).is_empty());
@@ -1970,18 +2212,27 @@ mod tests {
         let last: Value = serde_json::from_str(cut[6]).unwrap();
         assert_eq!(last["type"], "message.updated");
         assert_eq!(last["properties"]["info"]["role"], "assistant");
-        assert!(last["properties"]["info"]["time"]["completed"].is_null(), "the bare row, not a completed one");
+        assert!(
+            last["properties"]["info"]["time"]["completed"].is_null(),
+            "the bare row, not a completed one"
+        );
         let raw = format!(
             "{}\n{{\"type\":\"session.idle\",\"properties\":{{\"sessionID\":\"ses_f522a3477ffeV1Sb54a1xq018p\"}}}}\n",
             cut.join("\n")
         );
         let events = replay(&raw);
-        assert_eq!(count(&events, |e| matches!(e, HarnessEvent::TurnStarted)), 1);
+        assert_eq!(
+            count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+            1
+        );
         assert_eq!(finishes(&events), vec!["failed"]);
         let errs = errors(&events);
         assert_eq!(errs.len(), 1, "{errs:?}");
         assert!(errs[0].contains("without answering"));
-        assert!(matches!(events.last(), Some(HarnessEvent::TurnFinished { .. })));
+        assert!(matches!(
+            events.last(),
+            Some(HarnessEvent::TurnFinished { .. })
+        ));
         let mut st = SessionState::default();
         for line in raw.lines() {
             let v: Value = serde_json::from_str(line).unwrap();
@@ -1998,9 +2249,18 @@ mod tests {
     fn a_v1_user_row_opens_on_its_id_not_on_the_absence_of_summary() {
         let mut st = SessionState::default();
         let go = |st: &mut SessionState, p: Value| translate("message.updated", &p, st);
-        let first = go(&mut st, json!({"info": {"id": "msg_u1", "role": "user", "summary": {"diffs": []}}}));
-        assert!(matches!(first.as_slice(), [HarnessEvent::TurnStarted, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1"));
-        assert!(go(&mut st, json!({"info": {"id": "msg_u1", "role": "user", "summary": {"diffs": []}}})).is_empty());
+        let first = go(
+            &mut st,
+            json!({"info": {"id": "msg_u1", "role": "user", "summary": {"diffs": []}}}),
+        );
+        assert!(
+            matches!(first.as_slice(), [HarnessEvent::TurnStarted, HarnessEvent::TurnAnchor { anchor }] if anchor == "msg_u1")
+        );
+        assert!(go(
+            &mut st,
+            json!({"info": {"id": "msg_u1", "role": "user", "summary": {"diffs": []}}})
+        )
+        .is_empty());
         assert!(go(&mut st, json!({"info": {"id": "msg_u1", "role": "user"}})).is_empty());
     }
 
@@ -2022,7 +2282,10 @@ mod tests {
         assert!(!models[0].tool_call, "a: toolcall false is read");
         assert!(models[0].text_input && models[0].text_output);
         assert!(models[1].tool_call);
-        assert!(!models[1].text_output, "b: an output it cannot write in text");
+        assert!(
+            !models[1].text_output,
+            "b: an output it cannot write in text"
+        );
         assert!(
             models[2].tool_call && models[2].text_input && models[2].text_output,
             "c: no capabilities block at all reads as capable, never as refused"
@@ -2052,25 +2315,57 @@ mod tests {
         assert_eq!(a.inputs, ["image", "pdf"]);
         assert_eq!(a.release_date.as_deref(), Some("2026-05-21"));
         assert_eq!(a.family.as_deref(), Some("qwen"));
-        assert_eq!(models[1].facts.cost.as_ref().unwrap().input, Some(0.0), "b: a stated zero is zero");
-        assert_eq!(models[2].facts, ModelFacts::default(), "c: nothing stated is all unknown");
+        assert_eq!(
+            models[1].facts.cost.as_ref().unwrap().input,
+            Some(0.0),
+            "b: a stated zero is zero"
+        );
+        assert_eq!(
+            models[2].facts,
+            ModelFacts::default(),
+            "c: nothing stated is all unknown"
+        );
     }
 
     /// `ModelFacts` in `app/src/lib/harness.ts` reads these names.
     #[test]
     fn a_model_s_facts_are_spelled_the_way_the_table_reads_them() {
         let json = serde_json::to_value(ModelFacts {
-            cost: Some(ModelCost { input: None, output: None, cache_read: None, cache_write: None }),
+            cost: Some(ModelCost {
+                input: None,
+                output: None,
+                cache_read: None,
+                cache_write: None,
+            }),
             ..ModelFacts::default()
         })
         .unwrap();
-        let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
         keys.sort_unstable();
         assert_eq!(
             keys,
-            ["attachment", "context", "cost", "family", "inputs", "maxOutput", "reasoning", "releaseDate"]
+            [
+                "attachment",
+                "context",
+                "cost",
+                "family",
+                "inputs",
+                "maxOutput",
+                "reasoning",
+                "releaseDate"
+            ]
         );
-        let mut cost: Vec<&str> = json["cost"].as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        let mut cost: Vec<&str> = json["cost"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
         cost.sort_unstable();
         assert_eq!(cost, ["cacheRead", "cacheWrite", "input", "output"]);
     }
@@ -2092,7 +2387,12 @@ mod tests {
             facts: ModelFacts::default(),
         })
         .unwrap();
-        let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
         keys.sort_unstable();
         assert_eq!(
             keys,
@@ -2121,14 +2421,20 @@ mod tests {
             parse_port("opencode server listening on http://127.0.0.1:54888/"),
             Some(54888)
         );
-        assert_eq!(parse_port("Warning: OPENCODE_SERVER_PASSWORD is not set"), None);
+        assert_eq!(
+            parse_port("Warning: OPENCODE_SERVER_PASSWORD is not set"),
+            None
+        );
     }
 
     #[test]
     fn a_model_is_split_on_its_first_slash_only() {
         assert_eq!(
             split_model("tss-nvidia-spark/nvidia/Qwen3.6-35B-A3B-NVFP4"),
-            Some(("tss-nvidia-spark".into(), "nvidia/Qwen3.6-35B-A3B-NVFP4".into()))
+            Some((
+                "tss-nvidia-spark".into(),
+                "nvidia/Qwen3.6-35B-A3B-NVFP4".into()
+            ))
         );
         assert_eq!(
             split_model("anthropic/claude-opus-4-5"),
@@ -2153,19 +2459,38 @@ mod tests {
         let v: Value = serde_json::from_str(&rendered).expect("the template renders valid JSON");
 
         let edit = v["permission"]["edit"].as_object().unwrap();
-        assert_eq!(edit["*"], "allow", "the root stays allowed; the siblings are named");
-        for sib in ["courses/**", "lectures/**", "canvas-session/**", "oculus.db*"] {
+        assert_eq!(
+            edit["*"], "allow",
+            "the root stays allowed; the siblings are named"
+        );
+        for sib in [
+            "courses/**",
+            "lectures/**",
+            "canvas-session/**",
+            "oculus.db*",
+        ] {
             let key = format!("/Users/x/Library/Application Support/oculus/{sib}");
             assert_eq!(edit[&key], "deny", "{sib}");
         }
         for inside in ["opencode.json", "skills/**", ".opencode/**"] {
-            assert_eq!(edit[inside], "deny", "{inside} is relative, being inside the cwd");
+            assert_eq!(
+                edit[inside], "deny",
+                "{inside} is relative, being inside the cwd"
+            );
         }
         assert_eq!(v["skills"]["paths"], json!(["skills"]));
 
-        let bash: Vec<(&String, &Value)> = v["permission"]["bash"].as_object().unwrap().iter().collect();
+        let bash: Vec<(&String, &Value)> = v["permission"]["bash"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .collect();
         assert_eq!(bash.first().unwrap().1, "deny", "the default is no");
-        assert_eq!(bash.last().unwrap().1, "allow", "or bash is removed from the tool list");
+        assert_eq!(
+            bash.last().unwrap().1,
+            "allow",
+            "or bash is removed from the tool list"
+        );
 
         // `deny` removes the tool, so nothing waits on an answerer.
         for key in ["question", "task"] {
@@ -2175,7 +2500,10 @@ mod tests {
         for key in ["webfetch", "websearch"] {
             assert_eq!(v["permission"][key], "allow", "{key}");
         }
-        assert_eq!(v["permission"]["read"], "allow", "the library stays readable");
+        assert_eq!(
+            v["permission"]["read"], "allow",
+            "the library stays readable"
+        );
 
         assert!(v["agent"][AGENT]["prompt"]
             .as_str()
@@ -2224,7 +2552,10 @@ mod tests {
     }
 
     fn answers(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
@@ -2232,18 +2563,26 @@ mod tests {
         let ms = parse_methods(&serde_json::from_str::<Value>(OPENAI_METHODS).unwrap());
         assert_eq!(ms.len(), 3);
         assert_eq!(
-            ms.iter().map(|m| (m.index, m.kind.as_str())).collect::<Vec<_>>(),
+            ms.iter()
+                .map(|m| (m.index, m.kind.as_str()))
+                .collect::<Vec<_>>(),
             vec![(0, "oauth"), (1, "oauth"), (2, "api")],
         );
         assert_eq!(ms[2].label, "Manually enter API Key");
-        assert!(ms[0].prompts.is_empty(), "the browser flow asks nothing up front");
+        assert!(
+            ms[0].prompts.is_empty(),
+            "the browser flow asks nothing up front"
+        );
     }
 
     #[test]
     fn an_unreadable_method_gives_up_the_list_rather_than_renumbering() {
-        let ms = parse_methods(&serde_json::from_str::<Value>(
-            r#"[{ "label": "no type here" }, { "type": "api", "label": "Key" }]"#,
-        ).unwrap());
+        let ms = parse_methods(
+            &serde_json::from_str::<Value>(
+                r#"[{ "label": "no type here" }, { "type": "api", "label": "Key" }]"#,
+            )
+            .unwrap(),
+        );
         assert_eq!(ms, vec![default_method()]);
     }
 
@@ -2263,23 +2602,37 @@ mod tests {
         assert_eq!(m.prompts.len(), 2);
         assert_eq!(m.prompts[0].kind, "select");
         assert_eq!(m.prompts[0].options.len(), 2);
-        assert_eq!(m.prompts[0].options[1].hint.as_deref(), Some("Data residency or self-hosted"));
+        assert_eq!(
+            m.prompts[0].options[1].hint.as_deref(),
+            Some("Data residency or self-hosted")
+        );
         assert_eq!(m.prompts[1].kind, "text");
         assert_eq!(m.prompts[1].placeholder.as_deref(), Some("company.ghe.com"));
         let when = m.prompts[1].when.clone().expect("a condition");
-        assert_eq!((when.key.as_str(), when.op.as_str(), when.value.as_str()),
-                   ("deploymentType", "eq", "enterprise"));
+        assert_eq!(
+            (when.key.as_str(), when.op.as_str(), when.value.as_str()),
+            ("deploymentType", "eq", "enterprise")
+        );
     }
 
     #[test]
     fn hidden_answers_are_dropped_on_the_way_out() {
         let m = method(COPILOT_METHODS, 0);
 
-        let enterprise = answers(&[("deploymentType", "enterprise"), ("enterpriseUrl", "acme.ghe.com")]);
+        let enterprise = answers(&[
+            ("deploymentType", "enterprise"),
+            ("enterpriseUrl", "acme.ghe.com"),
+        ]);
         assert_eq!(visible_answers(&m, &enterprise), enterprise);
 
-        let switched_back = answers(&[("deploymentType", "github.com"), ("enterpriseUrl", "acme.ghe.com")]);
-        assert_eq!(visible_answers(&m, &switched_back), answers(&[("deploymentType", "github.com")]));
+        let switched_back = answers(&[
+            ("deploymentType", "github.com"),
+            ("enterpriseUrl", "acme.ghe.com"),
+        ]);
+        assert_eq!(
+            visible_answers(&m, &switched_back),
+            answers(&[("deploymentType", "github.com")])
+        );
 
         // Unanswered reads as empty, so `eq` hides and the field waits.
         assert!(visible_answers(&m, &answers(&[])).is_empty());
@@ -2288,8 +2641,15 @@ mod tests {
     #[test]
     fn answers_the_method_never_asked_for_do_not_travel() {
         let m = method(COPILOT_METHODS, 0);
-        let padded = answers(&[("deploymentType", "github.com"), ("key", "sk-something"), ("blank", "")]);
-        assert_eq!(visible_answers(&m, &padded), answers(&[("deploymentType", "github.com")]));
+        let padded = answers(&[
+            ("deploymentType", "github.com"),
+            ("key", "sk-something"),
+            ("blank", ""),
+        ]);
+        assert_eq!(
+            visible_answers(&m, &padded),
+            answers(&[("deploymentType", "github.com")])
+        );
     }
 
     #[test]
@@ -2312,7 +2672,10 @@ mod tests {
         );
         assert!(!msg.contains("sk-proj"), "{msg}");
         assert!(msg.contains("[redacted]"));
-        assert_eq!(redact("cannot reach opencode", "abc"), "cannot reach opencode");
+        assert_eq!(
+            redact("cannot reach opencode", "abc"),
+            "cannot reach opencode"
+        );
     }
 
     #[test]
@@ -2345,11 +2708,14 @@ mod tests {
                   "env": ["ANTHROPIC_API_KEY"], "options": {}, "models": {} }
             ]
         });
-        let methods: Value = serde_json::from_str(&format!("{{\"openai\": {OPENAI_METHODS}}}")).unwrap();
+        let methods: Value =
+            serde_json::from_str(&format!("{{\"openai\": {OPENAI_METHODS}}}")).unwrap();
         let rows = parse_providers(&all, &methods).unwrap();
 
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-                   vec!["anthropic", "openai", "tss-nvidia-spark"]);
+        assert_eq!(
+            rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["anthropic", "openai", "tss-nvidia-spark"]
+        );
 
         let openai = &rows[1];
         assert!(!openai.connected);
@@ -2357,7 +2723,11 @@ mod tests {
         assert_eq!(openai.methods.len(), 3);
 
         let anthropic = &rows[0];
-        assert_eq!(anthropic.methods, vec![default_method()], "no entry means a plain key");
+        assert_eq!(
+            anthropic.methods,
+            vec![default_method()],
+            "no entry means a plain key"
+        );
 
         let spark = &rows[2];
         assert!(spark.connected);
@@ -2402,9 +2772,15 @@ mod tests {
         );
         assert_eq!(models[0].display_name, "Aion-2.0");
         assert_eq!(models[0].description, "131K context");
-        assert!(models[0].variants.is_empty(), "an empty object is no levels");
+        assert!(
+            models[0].variants.is_empty(),
+            "an empty object is no levels"
+        );
 
-        assert_eq!(models[1].variants, vec!["high".to_string(), "low".to_string()]);
+        assert_eq!(
+            models[1].variants,
+            vec!["high".to_string(), "low".to_string()]
+        );
         assert_eq!(models[1].default_variant.as_deref(), Some("high"));
     }
 
@@ -2412,12 +2788,20 @@ mod tests {
     fn the_default_level_is_high_or_the_nearest_below_it() {
         let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
-        assert_eq!(default_variant(&v(&["low", "medium", "high"])).as_deref(), Some("high"));
-        assert_eq!(default_variant(&v(&["low", "medium", "xhigh"])).as_deref(), Some("medium"));
-        assert_eq!(default_variant(&v(&["max", "xhigh"])).as_deref(), Some("max"));
+        assert_eq!(
+            default_variant(&v(&["low", "medium", "high"])).as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            default_variant(&v(&["low", "medium", "xhigh"])).as_deref(),
+            Some("medium")
+        );
+        assert_eq!(
+            default_variant(&v(&["max", "xhigh"])).as_deref(),
+            Some("max")
+        );
         assert_eq!(default_variant(&[]), None);
     }
-
 
     // ── The real thing ───────────────────────────────────────────────────────
 
@@ -2501,16 +2885,31 @@ mod tests {
         };
 
         // 1. A tool turn.
-        let session = server.start_session(&opts(TOOL_MODEL), sink.clone()).expect("a session");
+        let session = server
+            .start_session(&opts(TOOL_MODEL), sink.clone())
+            .expect("a session");
         assert!(session.starts_with("ses_"), "{session}");
-        assert!(matches!(rx.recv_timeout(Duration::from_secs(1)), Ok(HarnessEvent::SessionStarted { .. })));
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(1)),
+            Ok(HarnessEvent::SessionStarted { .. })
+        ));
         let started = Instant::now();
         server
-            .prompt(&session, "Use the bash tool to run `ls`, then say one file name you saw.")
+            .prompt(
+                &session,
+                "Use the bash tool to run `ls`, then say one file name you saw.",
+            )
             .expect("prompt_async");
         let events = one_turn(&rx, Duration::from_secs(120));
-        eprintln!("tool turn: {} events in {:.1}s", events.len(), started.elapsed().as_secs_f64());
-        assert_eq!(count(&events, |e| matches!(e, HarnessEvent::TurnStarted)), 1);
+        eprintln!(
+            "tool turn: {} events in {:.1}s",
+            events.len(),
+            started.elapsed().as_secs_f64()
+        );
+        assert_eq!(
+            count(&events, |e| matches!(e, HarnessEvent::TurnStarted)),
+            1
+        );
         let anchors: Vec<&str> = events
             .iter()
             .filter_map(|e| match e {
@@ -2522,11 +2921,20 @@ mod tests {
         assert!(anchors[0].starts_with("msg_"), "{anchors:?}");
         let anchor = anchors[0].to_string();
         assert_eq!(
-            count(&events, |e| matches!(e, HarnessEvent::ToolStarted { name, .. } if name == "bash")),
+            count(
+                &events,
+                |e| matches!(e, HarnessEvent::ToolStarted { name, .. } if name == "bash")
+            ),
             1,
             "{events:#?}"
         );
-        assert_eq!(count(&events, |e| matches!(e, HarnessEvent::ToolFinished { ok: true, .. })), 1);
+        assert_eq!(
+            count(&events, |e| matches!(
+                e,
+                HarnessEvent::ToolFinished { ok: true, .. }
+            )),
+            1
+        );
         assert!(!messages(&events).is_empty(), "{events:#?}");
         assert_eq!(finishes(&events), vec!["completed"]);
         assert!(errors(&events).is_empty(), "{:?}", errors(&events));
@@ -2538,25 +2946,46 @@ mod tests {
         eprintln!("  revert {anchor}: ok");
 
         // 3. Another model: the one asked for on attach wins.
-        server.attach_session(&session, &opts(TEXT_MODEL), sink.clone()).expect("attach");
-        assert!(matches!(rx.recv_timeout(Duration::from_secs(1)), Ok(HarnessEvent::SessionStarted { model: Some(m), .. }) if m == TEXT_MODEL));
+        server
+            .attach_session(&session, &opts(TEXT_MODEL), sink.clone())
+            .expect("attach");
+        assert!(
+            matches!(rx.recv_timeout(Duration::from_secs(1)), Ok(HarnessEvent::SessionStarted { model: Some(m), .. }) if m == TEXT_MODEL)
+        );
         let started = Instant::now();
-        server.prompt(&session, "Reply with the single word: ok").expect("prompt_async");
+        server
+            .prompt(&session, "Reply with the single word: ok")
+            .expect("prompt_async");
         let events = one_turn(&rx, Duration::from_secs(60));
-        eprintln!("text turn after revert: {} events in {:.1}s, answer {:?}", events.len(), started.elapsed().as_secs_f64(), messages(&events));
+        eprintln!(
+            "text turn after revert: {} events in {:.1}s, answer {:?}",
+            events.len(),
+            started.elapsed().as_secs_f64(),
+            messages(&events)
+        );
         assert_eq!(finishes(&events), vec!["completed"]);
         assert!(errors(&events).is_empty(), "{:?}", errors(&events));
 
         // 4. Stop a long answer mid-stream.
         let started = Instant::now();
-        server.prompt(&session, "Count from 1 to 300, one per line").expect("prompt_async");
+        server
+            .prompt(&session, "Count from 1 to 300, one per line")
+            .expect("prompt_async");
         let mut before = Vec::new();
         loop {
-            let ev = rx.recv_timeout(Duration::from_secs(60)).expect("the turn to start streaming");
-            let go = matches!(ev, HarnessEvent::AssistantDelta { .. } | HarnessEvent::ToolStarted { .. });
+            let ev = rx
+                .recv_timeout(Duration::from_secs(60))
+                .expect("the turn to start streaming");
+            let go = matches!(
+                ev,
+                HarnessEvent::AssistantDelta { .. } | HarnessEvent::ToolStarted { .. }
+            );
             let over = matches!(ev, HarnessEvent::TurnFinished { .. });
             before.push(ev);
-            assert!(!over, "the turn finished before it could be stopped: {before:#?}");
+            assert!(
+                !over,
+                "the turn finished before it could be stopped: {before:#?}"
+            );
             if go {
                 break;
             }
@@ -2564,9 +2993,17 @@ mod tests {
         server.interrupt(&session).expect("abort");
         let mut events = before;
         events.extend(one_turn(&rx, Duration::from_secs(60)));
-        eprintln!("interrupted turn: {} events in {:.1}s", events.len(), started.elapsed().as_secs_f64());
+        eprintln!(
+            "interrupted turn: {} events in {:.1}s",
+            events.len(),
+            started.elapsed().as_secs_f64()
+        );
         assert_eq!(finishes(&events), vec!["interrupted"], "{events:#?}");
-        assert!(errors(&events).is_empty(), "stopping is not an error: {:?}", errors(&events));
+        assert!(
+            errors(&events).is_empty(),
+            "stopping is not an error: {:?}",
+            errors(&events)
+        );
         assert!(!server.busy());
 
         server.delete_session(&session);

@@ -13,7 +13,10 @@ pub(crate) struct Channel {
 
 impl Channel {
     pub(crate) const fn new(name: &'static str) -> Self {
-        Self { name, app: OnceLock::new() }
+        Self {
+            name,
+            app: OnceLock::new(),
+        }
     }
 
     /// Bind once in app setup. Unbound CLI channels are no-ops.
@@ -66,11 +69,20 @@ pub(crate) struct Status {
 impl Status {
     pub(crate) fn new(relative_path: &str, subject_id: i64, status: &'static str) -> Self {
         Self {
-            relative_path: relative_path.to_string(), subject_id, status,
-            pages_done: None, total_pages: None,
-            phase: None, bytes_done: None, bytes_total: None, error: None,
-            kind: None, retryable: None, latching: None,
-            waiting_until_ms: None, waiting_reason: None,
+            relative_path: relative_path.to_string(),
+            subject_id,
+            status,
+            pages_done: None,
+            total_pages: None,
+            phase: None,
+            bytes_done: None,
+            bytes_total: None,
+            error: None,
+            kind: None,
+            retryable: None,
+            latching: None,
+            waiting_until_ms: None,
+            waiting_reason: None,
         }
     }
 
@@ -130,9 +142,12 @@ mod tests {
     #[test]
     fn queued_and_parse_success_keep_the_wire_contract() {
         for state in ["queued", "quality"] {
-            assert_eq!(to_value(Status::new("courses/a.pdf", 4, state)).unwrap(), json!({
-                "relative_path": "courses/a.pdf", "subject_id": 4, "status": state,
-            }));
+            assert_eq!(
+                to_value(Status::new("courses/a.pdf", 4, state)).unwrap(),
+                json!({
+                    "relative_path": "courses/a.pdf", "subject_id": 4, "status": state,
+                })
+            );
         }
     }
 
@@ -150,8 +165,12 @@ mod tests {
         let plain = to_value(Status::new("a.pdf", 4, "running").progress(3, 9)).unwrap();
         assert!(plain.get("waiting_until_ms").is_none());
         assert!(plain.get("waiting_reason").is_none());
-        let held = to_value(Status::new("a.pdf", 4, "running").progress(3, 9)
-            .waiting(1_700_000_000_000, "rate-limited by Voyage".into())).unwrap();
+        let held = to_value(
+            Status::new("a.pdf", 4, "running")
+                .progress(3, 9)
+                .waiting(1_700_000_000_000, "rate-limited by Voyage".into()),
+        )
+        .unwrap();
         assert_eq!(held["waiting_until_ms"], 1_700_000_000_000u64);
         assert_eq!(held["waiting_reason"], "rate-limited by Voyage");
         assert_eq!(held["pages_done"], 3);
@@ -159,20 +178,35 @@ mod tests {
 
     #[test]
     fn upload_phases_carry_their_byte_counts_and_nothing_else_does() {
-        let uploading = to_value(Status::new("a.pdf", 4, "running").progress(0, 9)
-            .phase("uploading", Some(512), Some(2048))).unwrap();
-        assert_eq!(uploading, json!({
-            "relative_path": "a.pdf", "subject_id": 4, "status": "running",
-            "pages_done": 0, "total_pages": 9,
-            "phase": "uploading", "bytes_done": 512, "bytes_total": 2048,
-        }));
-        let waiting = to_value(Status::new("a.pdf", 4, "running").progress(0, 9)
-            .phase("upload_wait", None, Some(2048))).unwrap();
+        let uploading = to_value(Status::new("a.pdf", 4, "running").progress(0, 9).phase(
+            "uploading",
+            Some(512),
+            Some(2048),
+        ))
+        .unwrap();
+        assert_eq!(
+            uploading,
+            json!({
+                "relative_path": "a.pdf", "subject_id": 4, "status": "running",
+                "pages_done": 0, "total_pages": 9,
+                "phase": "uploading", "bytes_done": 512, "bytes_total": 2048,
+            })
+        );
+        let waiting = to_value(Status::new("a.pdf", 4, "running").progress(0, 9).phase(
+            "upload_wait",
+            None,
+            Some(2048),
+        ))
+        .unwrap();
         assert_eq!(waiting["phase"], "upload_wait");
         assert!(waiting.get("bytes_done").is_none());
         assert_eq!(waiting["bytes_total"], 2048);
-        let processing = to_value(Status::new("a.pdf", 4, "running").progress(3, 9)
-            .phase("processing", None, None)).unwrap();
+        let processing = to_value(Status::new("a.pdf", 4, "running").progress(3, 9).phase(
+            "processing",
+            None,
+            None,
+        ))
+        .unwrap();
         assert_eq!(processing["phase"], "processing");
         assert!(processing.get("bytes_done").is_none());
         assert!(processing.get("bytes_total").is_none());
@@ -183,20 +217,29 @@ mod tests {
 
     #[test]
     fn a_skip_is_a_bare_terminal_status() {
-        assert_eq!(to_value(Status::new("courses/a.pdf", 4, "skipped")).unwrap(), json!({
-            "relative_path": "courses/a.pdf", "subject_id": 4, "status": "skipped",
-        }));
+        assert_eq!(
+            to_value(Status::new("courses/a.pdf", 4, "skipped")).unwrap(),
+            json!({
+                "relative_path": "courses/a.pdf", "subject_id": 4, "status": "skipped",
+            })
+        );
     }
 
     #[test]
     fn failures_preserve_unknown_and_false_discriminants() {
-        let unknown = to_value(Status::new("a.pdf", 4, "error")
-            .failure("failed".into(), None, None, None)).unwrap();
+        let unknown =
+            to_value(Status::new("a.pdf", 4, "error").failure("failed".into(), None, None, None))
+                .unwrap();
         assert!(unknown.get("kind").is_none());
         assert!(unknown.get("retryable").is_none());
         assert!(unknown.get("latching").is_none());
-        let known = to_value(Status::new("a.pdf", 4, "error")
-            .failure("failed".into(), Some("document"), Some(false), Some(false))).unwrap();
+        let known = to_value(Status::new("a.pdf", 4, "error").failure(
+            "failed".into(),
+            Some("document"),
+            Some(false),
+            Some(false),
+        ))
+        .unwrap();
         assert_eq!(known["kind"], "document");
         assert_eq!(known["retryable"], false);
         assert_eq!(known["latching"], false);

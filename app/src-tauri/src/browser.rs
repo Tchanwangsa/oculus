@@ -168,7 +168,11 @@ fn saved_sessions() -> Vec<(&'static str, String, bool)> {
     };
     [
         (CANVAS_HOST, crate::auth::saved_cookie_header(), true),
-        (crate::okta::SSO_HOST, crate::auth::saved_sso_cookie_header(), replace_sso),
+        (
+            crate::okta::SSO_HOST,
+            crate::auth::saved_sso_cookie_header(),
+            replace_sso,
+        ),
     ]
     .into_iter()
     .filter(|(_, header, _)| !header.trim().is_empty())
@@ -261,7 +265,10 @@ pub fn seed_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
             let all = unsafe { all.as_ref() };
             let key = |c: &NSHTTPCookie| {
                 let domain = c.domain().to_string();
-                (domain.trim_start_matches('.').to_string(), c.name().to_string())
+                (
+                    domain.trim_start_matches('.').to_string(),
+                    c.name().to_string(),
+                )
             };
             let present: HashSet<_> = all.iter().map(|c| key(&c)).collect();
             let replacing: HashSet<_> = cookies
@@ -423,7 +430,9 @@ pub fn clear_sessions(app: &AppHandle, then: impl FnOnce() + Send + 'static) {
                 let then = then.clone();
                 Rc::new(move || {
                     if let Some(then) = then.take() {
-                        eprintln!("[oculus] browser: cleared {count} Canvas and Okta cookies from WebKit");
+                        eprintln!(
+                            "[oculus] browser: cleared {count} Canvas and Okta cookies from WebKit"
+                        );
                         then();
                     }
                 })
@@ -899,9 +908,7 @@ fn find_string(app: &AppHandle, id: u32, query: String, backwards: bool) {
     if let Some(webview) = page(app, id) {
         let escaped = serde_json::to_string(&query).unwrap_or_else(|_| "\"\"".into());
         webview
-            .eval(&format!(
-                "window.find({escaped}, false, {backwards}, true)"
-            ))
+            .eval(&format!("window.find({escaped}, false, {backwards}, true)"))
             .ok();
     }
     app.emit_to(
@@ -966,11 +973,7 @@ unsafe fn png_bytes(image: *mut objc2::runtime::AnyObject) -> Option<Vec<u8>> {
 }
 
 #[cfg(target_os = "macos")]
-fn snapshot_page(
-    app: &AppHandle,
-    id: u32,
-    reply: tokio::sync::oneshot::Sender<Option<Vec<u8>>>,
-) {
+fn snapshot_page(app: &AppHandle, id: u32, reply: tokio::sync::oneshot::Sender<Option<Vec<u8>>>) {
     use block2::RcBlock;
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
@@ -1008,11 +1011,7 @@ fn snapshot_page(
 }
 
 #[cfg(not(target_os = "macos"))]
-fn snapshot_page(
-    _app: &AppHandle,
-    _id: u32,
-    reply: tokio::sync::oneshot::Sender<Option<Vec<u8>>>,
-) {
+fn snapshot_page(_app: &AppHandle, _id: u32, reply: tokio::sync::oneshot::Sender<Option<Vec<u8>>>) {
     let _ = reply.send(None);
 }
 
@@ -1127,7 +1126,14 @@ fn sniff_image(content_type: &str, bytes: &[u8]) -> Option<String> {
     }
     content_type
         .starts_with("image/")
-        .then(|| content_type.split(';').next().unwrap_or_default().trim().to_string())
+        .then(|| {
+            content_type
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        })
         .filter(|mime| !mime.is_empty())
 }
 
@@ -1246,8 +1252,13 @@ pub fn browser_history(app: AppHandle, id: u32, delta: i32) {
 /// reload can keep serving a cached response.
 #[tauri::command]
 pub fn browser_reload(app: AppHandle, id: u32, hard: bool) {
-    let url = with_state(&app, |s| s.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone()));
-    if url.and_then(|u| u.parse().ok()).is_some_and(|u| wants_sessions(&u)) {
+    let url = with_state(&app, |s| {
+        s.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone())
+    });
+    if url
+        .and_then(|u| u.parse().ok())
+        .is_some_and(|u| wants_sessions(&u))
+    {
         let reload_app = app.clone();
         seed_sessions(&app, move || reload_page(&reload_app, id, hard));
         return;

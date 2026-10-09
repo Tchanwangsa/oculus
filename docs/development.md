@@ -127,9 +127,9 @@ current release binary is guaranteed to exist.
 ## CI proves a fresh checkout builds; releases are cut by hand
 
 `ci.yml` runs on every push to `master` and every pull request, on a macOS
-runner with nothing cached but crates: `bun run test`, `bun run build`, the
-two native fetches, the speech helper and `whisper-cli`, `stage-cli`, `cargo test --release --locked`, then
-`docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
+runner with nothing cached but crates: `cargo fmt --check`, `bun run test`,
+`bun run build`, the two native fetches, the speech helper and `whisper-cli`,
+`stage-cli`, `cargo test --release --locked`, then `docs:cli` with a `git diff --exit-code` so a CLI change that skipped the
 reference fails. `stage-cli` comes before any cargo call because tauri-build
 refuses to compile until every `externalBin` exists, and it is what writes the
 placeholder sidecar on a clean tree. The release profile is shared with that
@@ -182,8 +182,8 @@ the path.
 
 - Frontend type-check and bundle: `cd app && bun run build`; editor, shared
   frontend logic and offline script regressions: `bun run test`.
-- Rust: `cargo check` / `cargo test` in `app/src-tauri`. None of the tests
-  touch the network: the cloud clients run against a fake server, and the
+- Rust: `cargo fmt`, `cargo check` / `cargo test` in `app/src-tauri`. None of
+  the tests touch the network: the cloud clients run against a fake server, and the
   renderer tests in `app/src-tauri/src/parse/mineru/render.rs` pin output
   against the renderer it was ported from.
 - Real parse regressions: the gitignored golden fixtures in

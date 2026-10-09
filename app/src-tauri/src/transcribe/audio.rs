@@ -31,9 +31,21 @@ pub(super) fn extract(ffmpeg: &Path, video: &Path, out: &Path) -> Result<Extract
         .args(["-nostdin", "-hide_banner", "-nostats", "-y", "-i"])
         .arg(video)
         .args([
-            "-map", "0:a:0", "-vn",
-            "-ac", "1", "-ar", "16000",
-            "-c:a", "libopus", "-b:a", "24k", "-vbr", "constrained", "-application", "voip",
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "24k",
+            "-vbr",
+            "constrained",
+            "-application",
+            "voip",
         ])
         .arg(out)
         .output()
@@ -43,10 +55,16 @@ pub(super) fn extract(ffmpeg: &Path, video: &Path, out: &Path) -> Result<Extract
         if log.contains("matches no streams") {
             return Err("this recording has no audio track to transcribe".into());
         }
-        return Err(format!("ffmpeg could not extract the audio: {}", last_line(&log)));
+        return Err(format!(
+            "ffmpeg could not extract the audio: {}",
+            last_line(&log)
+        ));
     }
     let bytes = std::fs::metadata(out).map_err(|e| e.to_string())?.len();
-    Ok(Extracted { bytes, duration: duration(&log) })
+    Ok(Extracted {
+        bytes,
+        duration: duration(&log),
+    })
 }
 
 /// Decode `audio` to 16 kHz mono 16-bit PCM WAV, for an engine that cannot
@@ -61,7 +79,10 @@ pub(super) fn to_wav(ffmpeg: &Path, audio: &Path, out: &Path) -> Result<(), Stri
         .map_err(|e| format!("could not run ffmpeg: {e}"))?;
     if !output.status.success() {
         let log = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("ffmpeg could not decode the audio to WAV: {}", last_line(&log)));
+        return Err(format!(
+            "ffmpeg could not decode the audio to WAV: {}",
+            last_line(&log)
+        ));
     }
     Ok(())
 }
@@ -84,15 +105,25 @@ pub(super) fn cut(ffmpeg: &Path, audio: &Path, out: &Path, span: &Span) -> Resul
         .map_err(|e| format!("could not run ffmpeg: {e}"))?;
     if !output.status.success() {
         let log = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("ffmpeg could not split the audio: {}", last_line(&log)));
+        return Err(format!(
+            "ffmpeg could not split the audio: {}",
+            last_line(&log)
+        ));
     }
     Ok(())
 }
 
 /// Split `bytes` of audio lasting `duration` into the fewest equal-length
 /// spans that each fit `cap`. Cuts fall at fixed times, with no overlap.
-pub(super) fn plan(bytes: u64, duration: Option<f64>, cap: Option<u64>) -> Result<Vec<Span>, String> {
-    let whole = vec![Span { start: 0.0, len: None }];
+pub(super) fn plan(
+    bytes: u64,
+    duration: Option<f64>,
+    cap: Option<u64>,
+) -> Result<Vec<Span>, String> {
+    let whole = vec![Span {
+        start: 0.0,
+        len: None,
+    }];
     let Some(cap) = cap.filter(|&cap| cap > 0 && bytes > cap) else {
         return Ok(whole);
     };
@@ -115,12 +146,17 @@ pub(crate) fn duration(log: &str) -> Option<f64> {
     let stamp = rest.split(',').next()?.trim();
     let mut parts = stamp.split(':');
     let (h, m, s) = (parts.next()?, parts.next()?, parts.next()?);
-    let seconds = h.parse::<f64>().ok()? * 3600.0 + m.parse::<f64>().ok()? * 60.0 + s.parse::<f64>().ok()?;
+    let seconds =
+        h.parse::<f64>().ok()? * 3600.0 + m.parse::<f64>().ok()? * 60.0 + s.parse::<f64>().ok()?;
     Some(seconds)
 }
 
 fn last_line(log: &str) -> &str {
-    log.lines().rev().map(str::trim).find(|line| !line.is_empty()).unwrap_or("no output")
+    log.lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("no output")
 }
 
 #[cfg(test)]
@@ -129,8 +165,14 @@ mod tests {
 
     #[test]
     fn audio_under_the_cap_is_one_whole_span() {
-        let whole = vec![Span { start: 0.0, len: None }];
-        assert_eq!(plan(19_000_000, Some(5000.0), Some(20_000_000)).unwrap(), whole);
+        let whole = vec![Span {
+            start: 0.0,
+            len: None,
+        }];
+        assert_eq!(
+            plan(19_000_000, Some(5000.0), Some(20_000_000)).unwrap(),
+            whole
+        );
         assert_eq!(plan(20_000_000, None, Some(20_000_000)).unwrap(), whole);
         // An engine with no cap reads any length, even without a duration.
         assert_eq!(plan(900_000_000, None, None).unwrap(), whole);
@@ -142,9 +184,18 @@ mod tests {
         assert_eq!(
             spans,
             vec![
-                Span { start: 0.0, len: Some(3000.0) },
-                Span { start: 3000.0, len: Some(3000.0) },
-                Span { start: 6000.0, len: None },
+                Span {
+                    start: 0.0,
+                    len: Some(3000.0)
+                },
+                Span {
+                    start: 3000.0,
+                    len: Some(3000.0)
+                },
+                Span {
+                    start: 6000.0,
+                    len: None
+                },
             ]
         );
     }
@@ -173,7 +224,10 @@ mod tests {
 
     #[test]
     fn the_last_log_line_names_the_failure() {
-        assert_eq!(last_line("a\nStream map '0:a:0' matches no streams.\n\n"), "Stream map '0:a:0' matches no streams.");
+        assert_eq!(
+            last_line("a\nStream map '0:a:0' matches no streams.\n\n"),
+            "Stream map '0:a:0' matches no streams."
+        );
         assert_eq!(last_line(""), "no output");
     }
 }

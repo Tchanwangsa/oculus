@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter};
 
-use crate::sync::{Engine, FileEvent, FileFailed, FileStart, Progress, Reporter, Subject, SyncOptions};
+use crate::sync::{
+    Engine, FileEvent, FileFailed, FileStart, Progress, Reporter, Subject, SyncOptions,
+};
 
 #[derive(serde::Deserialize)]
 pub struct ScrapeSubject {
@@ -50,7 +52,10 @@ pub async fn scrape_content(
     let data_dir = crate::paths::data_dir();
     let targets: Vec<Subject> = subjects
         .into_iter()
-        .map(|s| Subject { id: s.id, code: s.code })
+        .map(|s| Subject {
+            id: s.id,
+            code: s.code,
+        })
         .collect();
 
     let flag = Arc::clone(&cancel.0);
@@ -64,8 +69,8 @@ pub async fn scrape_content(
             app: app.clone(),
             cancel: Arc::clone(&flag),
         };
-        let engine = Engine::new(&data_dir, Box::new(reporter))
-            .with_options(options.unwrap_or_default());
+        let engine =
+            Engine::new(&data_dir, Box::new(reporter)).with_options(options.unwrap_or_default());
         let count = engine.scrape(&targets);
         let cancelled = flag.load(Ordering::SeqCst);
 
@@ -95,7 +100,10 @@ impl Reporter for AppReporter {
     }
 
     fn file(&self, f: &FileEvent) {
-        eprintln!("[oculus] wrote {} ({} bytes)", f.relative_path, f.size_bytes);
+        eprintln!(
+            "[oculus] wrote {} ({} bytes)",
+            f.relative_path, f.size_bytes
+        );
         self.app.emit("scrape-file", f).ok();
     }
 
@@ -142,7 +150,9 @@ pub fn parse_file(
         }
         std::thread::spawn(move || {
             match crate::sheets::index(&data_dir, &relative_path, subject_id) {
-                Ok(pages) => eprintln!("[oculus] parse_file {relative_path}: {pages} sheet(s) as text"),
+                Ok(pages) => {
+                    eprintln!("[oculus] parse_file {relative_path}: {pages} sheet(s) as text")
+                }
                 Err(e) => eprintln!("[oculus] parse_file {relative_path}: {e}"),
             }
         });

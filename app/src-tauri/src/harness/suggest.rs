@@ -15,7 +15,8 @@ use super::{opencode, Handle, Harness, OneOff, Provider};
 
 /// The brief: Claude's appended system prompt, Codex's developer
 /// instructions, opencode's `oculus-writer` agent, ahead of agy's message.
-pub const INSTRUCTIONS: &str = "You are the inline autocomplete in a university student's markdown \
+pub const INSTRUCTIONS: &str =
+    "You are the inline autocomplete in a university student's markdown \
 note editor. You are shown the note with the caret marked <CARET/>, and you reply with only the \
 text to insert there — usually a few words, at most one sentence of about 25 words.\n\n\
 - Continue the sentence or line the caret is on, naturally, in the note's own language, voice and \
@@ -225,15 +226,20 @@ impl Harness {
         let key = Key::of(sel);
         {
             let s = self.suggest.lock().unwrap();
-            if s.warm.as_ref().is_some_and(|w| w.key == key && w.turn.handle.is_alive()) {
+            if s.warm
+                .as_ref()
+                .is_some_and(|w| w.key == key && w.turn.handle.is_alive())
+            {
                 return;
             }
         }
         let (h, sel) = (self.clone(), sel.clone());
-        std::thread::spawn(move || match h.one_off(&sel, INSTRUCTIONS, opencode::WRITER_AGENT) {
-            Ok(turn) => h.keep_warm(key, turn),
-            Err(e) => eprintln!("[oculus] suggestion warm-up: {e}"),
-        });
+        std::thread::spawn(
+            move || match h.one_off(&sel, INSTRUCTIONS, opencode::WRITER_AGENT) {
+                Ok(turn) => h.keep_warm(key, turn),
+                Err(e) => eprintln!("[oculus] suggestion warm-up: {e}"),
+            },
+        );
     }
 }
 
@@ -248,7 +254,9 @@ fn prompt(path: &str, before: &str, after: &str) -> Option<String> {
         return None;
     }
     let (title, subject) = note_names(path);
-    let subject = subject.map(|c| format!(", in the subject {c}")).unwrap_or_default();
+    let subject = subject
+        .map(|c| format!(", in the subject {c}"))
+        .unwrap_or_default();
     let (before, after) = (tail(before, BEFORE_CHARS), head(after, AFTER_CHARS));
     Some(format!(
         "Complete the student's note at the caret.\n\n\
@@ -291,7 +299,12 @@ fn caret_note(before: &str) -> String {
     }
     if last.is_alphanumeric() {
         let fragment: String = {
-            let rev: Vec<char> = before.chars().rev().take_while(|c| c.is_alphanumeric()).take(40).collect();
+            let rev: Vec<char> = before
+                .chars()
+                .rev()
+                .take_while(|c| c.is_alphanumeric())
+                .take(40)
+                .collect();
             rev.into_iter().rev().collect()
         };
         return format!(
@@ -299,7 +312,9 @@ fn caret_note(before: &str) -> String {
              continue it with no leading space; if it is complete, start with a space."
         );
     }
-    format!("The caret is directly after \"{last}\". Start with a space if the next word needs one.")
+    format!(
+        "The caret is directly after \"{last}\". Start with a space if the next word needs one."
+    )
 }
 
 /// The last `n` characters of `s`, marked when cut.
@@ -334,7 +349,11 @@ fn clean(raw: &str, before: &str, after: &str) -> String {
     // Spacing: never double the space before the caret, and leave one
     // between the suggestion and a word right after it.
     let at_gap = before.is_empty() || before.ends_with(char::is_whitespace);
-    let s = if at_gap { s.trim_start().to_string() } else { collapse_lead(&s) };
+    let s = if at_gap {
+        s.trim_start().to_string()
+    } else {
+        collapse_lead(&s)
+    };
     let mut out = cap(s.trim_end());
     if out.trim().is_empty() {
         return String::new();
@@ -349,7 +368,10 @@ fn clean(raw: &str, before: &str, after: &str) -> String {
 /// leading whitespace apart, since that decides the spacing.
 fn unwrap(raw: &str) -> (String, String) {
     let mut t = raw.trim();
-    let lead: String = raw.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+    let lead: String = raw
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect();
     // A model that set the text on a line of its own meant a new word.
     let lead = if lead.is_empty() && raw.starts_with(['\n', '\r']) && !t.is_empty() {
         " ".to_string()
@@ -357,7 +379,9 @@ fn unwrap(raw: &str) -> (String, String) {
         lead
     };
     for label in ["completion:", "suggestion:", "continuation:"] {
-        if t.get(..label.len()).is_some_and(|h| h.eq_ignore_ascii_case(label)) {
+        if t.get(..label.len())
+            .is_some_and(|h| h.eq_ignore_ascii_case(label))
+        {
             t = t[label.len()..].trim();
         }
     }
@@ -390,13 +414,20 @@ fn unwrap(raw: &str) -> (String, String) {
 fn strip_echo(lead: &str, body: &str, before: &str) -> String {
     let min = if lead.is_empty() { 3 } else { 12 };
     let mut best: Option<usize> = None;
-    for (end, _) in body.char_indices().skip(1).chain(std::iter::once((body.len(), ' '))) {
+    for (end, _) in body
+        .char_indices()
+        .skip(1)
+        .chain(std::iter::once((body.len(), ' ')))
+    {
         let piece = &body[..end];
         if piece.chars().count() < min || !before.ends_with(piece) {
             continue;
         }
         let start = before.len() - piece.len();
-        let boundary = before[..start].chars().next_back().is_none_or(|c| !c.is_alphanumeric());
+        let boundary = before[..start]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric());
         if boundary {
             best = Some(end);
         }
@@ -456,8 +487,15 @@ fn cap(s: &str) -> String {
     if s.chars().count() <= MAX_CHARS {
         return s.trim_end().to_string();
     }
-    let limit = s.char_indices().nth(MAX_CHARS).map(|(i, _)| i).unwrap_or(s.len());
-    let cut = s[..limit].rfind(char::is_whitespace).filter(|i| *i > 0).unwrap_or(limit);
+    let limit = s
+        .char_indices()
+        .nth(MAX_CHARS)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    let cut = s[..limit]
+        .rfind(char::is_whitespace)
+        .filter(|i| *i > 0)
+        .unwrap_or(limit);
     s[..cut].trim_end().to_string()
 }
 
@@ -467,20 +505,44 @@ mod tests {
 
     #[test]
     fn wrapping_quotes_and_fences_come_off() {
-        assert_eq!(clean("\"the shortest path\"", "Dijkstra finds ", ""), "the shortest path");
-        assert_eq!(clean("“the shortest path”", "Dijkstra finds ", ""), "the shortest path");
-        assert_eq!(clean("```\nthe shortest path\n```", "Dijkstra finds ", ""), "the shortest path");
-        assert_eq!(clean("```markdown\nthe shortest path\n```", "Dijkstra finds ", ""), "the shortest path");
-        assert_eq!(clean("Completion: the shortest path", "Dijkstra finds ", ""), "the shortest path");
-        assert_eq!(clean("```the shortest path```", "Dijkstra finds ", ""), "the shortest path");
+        assert_eq!(
+            clean("\"the shortest path\"", "Dijkstra finds ", ""),
+            "the shortest path"
+        );
+        assert_eq!(
+            clean("“the shortest path”", "Dijkstra finds ", ""),
+            "the shortest path"
+        );
+        assert_eq!(
+            clean("```\nthe shortest path\n```", "Dijkstra finds ", ""),
+            "the shortest path"
+        );
+        assert_eq!(
+            clean("```markdown\nthe shortest path\n```", "Dijkstra finds ", ""),
+            "the shortest path"
+        );
+        assert_eq!(
+            clean("Completion: the shortest path", "Dijkstra finds ", ""),
+            "the shortest path"
+        );
+        assert_eq!(
+            clean("```the shortest path```", "Dijkstra finds ", ""),
+            "the shortest path"
+        );
         // A short non-ASCII reply is not sliced through while looking for a label.
         assert_eq!(clean("é", "caf", ""), "é");
     }
 
     #[test]
     fn a_word_is_continued_without_a_space_and_a_new_one_gets_one() {
-        assert_eq!(clean("thm runs in $O(n^2)$", "The algori", ""), "thm runs in $O(n^2)$");
-        assert_eq!(clean(" theory of computation", "the", ""), " theory of computation");
+        assert_eq!(
+            clean("thm runs in $O(n^2)$", "The algori", ""),
+            "thm runs in $O(n^2)$"
+        );
+        assert_eq!(
+            clean(" theory of computation", "the", ""),
+            " theory of computation"
+        );
         assert_eq!(clean("   of computation", "theory", ""), " of computation");
         // The caret already follows a space.
         assert_eq!(clean(" the cat", "I saw ", ""), "the cat");
@@ -491,10 +553,17 @@ mod tests {
     fn a_restatement_of_the_text_before_the_caret_is_dropped() {
         assert_eq!(clean("algorithm runs in", "The algori", ""), "thm runs in");
         assert_eq!(
-            clean("Dijkstra's algorithm finds the shortest path.", "Dijkstra's algorithm finds the", ""),
+            clean(
+                "Dijkstra's algorithm finds the shortest path.",
+                "Dijkstra's algorithm finds the",
+                ""
+            ),
             " shortest path."
         );
-        assert_eq!(clean(" quick brown fox jumps", "the quick brown fox", ""), " jumps");
+        assert_eq!(
+            clean(" quick brown fox jumps", "the quick brown fox", ""),
+            " jumps"
+        );
         // Starts on a word boundary only: "cat" is not an echo of "concat".
         assert_eq!(clean("cat", "concat", ""), "cat");
         // Too short to be an echo once the reply opened with a space.
@@ -513,8 +582,14 @@ mod tests {
 
     #[test]
     fn only_the_first_line_and_one_sentence_s_length_survive() {
-        assert_eq!(clean("the shortest path\nSecond paragraph", "Finds ", ""), "the shortest path");
-        let long = (1..=60).map(|i| format!("w{i}")).collect::<Vec<_>>().join(" ");
+        assert_eq!(
+            clean("the shortest path\nSecond paragraph", "Finds ", ""),
+            "the shortest path"
+        );
+        let long = (1..=60)
+            .map(|i| format!("w{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let out = clean(&long, "x ", "");
         assert_eq!(out.split_whitespace().count(), MAX_WORDS);
         assert!(out.starts_with("w1 w2"));
@@ -532,7 +607,12 @@ mod tests {
 
     #[test]
     fn the_prompt_names_the_note_and_marks_the_caret() {
-        let p = prompt("courses/COMP3121/documents/week_3_notes.md", "Greedy algorithms ", "\n\nNext").unwrap();
+        let p = prompt(
+            "courses/COMP3121/documents/week_3_notes.md",
+            "Greedy algorithms ",
+            "\n\nNext",
+        )
+        .unwrap();
         assert!(p.contains("\"week 3 notes\", in the subject COMP3121"));
         assert!(p.contains("`courses/COMP3121/documents/week_3_notes.md`"));
         assert!(p.contains("Greedy algorithms <CARET/>\n\nNext"));
@@ -552,7 +632,12 @@ mod tests {
     fn the_prompt_carries_only_the_text_near_the_caret() {
         let before = format!("START{}", "a".repeat(BEFORE_CHARS));
         let after = format!("{}END", "b".repeat(AFTER_CHARS));
-        let p = prompt("courses/X/documents/a.md", &format!("{before} "), &format!(" {after}")).unwrap();
+        let p = prompt(
+            "courses/X/documents/a.md",
+            &format!("{before} "),
+            &format!(" {after}"),
+        )
+        .unwrap();
         assert!(!p.contains("START") && !p.contains("END"));
         assert!(p.contains("…a") && p.contains("b…"));
         // Characters, not bytes: a cut never lands inside one.

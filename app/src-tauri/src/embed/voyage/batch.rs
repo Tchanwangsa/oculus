@@ -82,7 +82,9 @@ pub fn refuse_oversized(page: &RenderedPage) -> Result<u64, EmbedError> {
     } else {
         return Ok(tokens);
     };
-    Err(EmbedError::Document { code: format!("{code}-p{}", page.page_no) })
+    Err(EmbedError::Document {
+        code: format!("{code}-p{}", page.page_no),
+    })
 }
 
 /// The packing rule, also used by `estimate`: given each page's token cost in
@@ -163,7 +165,10 @@ impl RunState {
     /// What the row should show: the wait that ends first, since that is when
     /// the document next moves.
     fn waiting(&self) -> Option<Wait> {
-        self.waits.values().min_by_key(|wait| wait.until_ms).copied()
+        self.waits
+            .values()
+            .min_by_key(|wait| wait.until_ms)
+            .copied()
     }
 }
 
@@ -190,7 +195,9 @@ impl DocumentRun {
     }
 
     fn wait_for_change<'a>(&self, state: MutexGuard<'a, RunState>) -> MutexGuard<'a, RunState> {
-        self.changed.wait(state).unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.changed
+            .wait(state)
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn set_wait(&self, request: usize, wait: Option<Wait>) {
@@ -284,7 +291,11 @@ pub fn run_document(
     let mut batch: Vec<RenderedPage> = Vec::new();
     let mut spent: u64 = 0;
     // Shared by both passes so neither repeats the other.
-    let mut narrator = Narrator { on_progress, total: expected_pages, last: None };
+    let mut narrator = Narrator {
+        on_progress,
+        total: expected_pages,
+        last: None,
+    };
     // `render_pages` stops only on a `RasterError`; the real reason is parked
     // here and the sentinel discarded.
     let mut stop: Option<EmbedError> = None;
@@ -306,7 +317,13 @@ pub fn run_document(
         // Re-read every page: see `RequestRun::max_tokens`.
         let ceiling = limits.max_tokens.min(runner.max_tokens());
         if !batch.is_empty() && (batch.len() >= limits.max_inputs || spent + cost > ceiling) {
-            dispatch(&run, &runner, std::mem::take(&mut batch), &mut workers, &mut narrator);
+            dispatch(
+                &run,
+                &runner,
+                std::mem::take(&mut batch),
+                &mut workers,
+                &mut narrator,
+            );
             spent = 0;
             // Reported while rendering too: rendering and embedding overlap.
             narrator.catch_up(&run);
@@ -318,7 +335,13 @@ pub fn run_document(
 
     let outcome: Result<u32, EmbedError> = match rendered {
         Ok(count) => {
-            dispatch(&run, &runner, std::mem::take(&mut batch), &mut workers, &mut narrator);
+            dispatch(
+                &run,
+                &runner,
+                std::mem::take(&mut batch),
+                &mut workers,
+                &mut narrator,
+            );
             Ok(count)
         }
         Err(error) => Err(match stop.take() {
@@ -357,10 +380,14 @@ pub fn run_document(
     // The boundary guard: pdfium must agree with the parse record's page count
     // (`page_no` is the join key), and every page must have embedded.
     if rendered_pages != expected_pages {
-        return Err(EmbedError::Document { code: "page-count-mismatch".into() });
+        return Err(EmbedError::Document {
+            code: "page-count-mismatch".into(),
+        });
     }
     if pages.len() as u32 != expected_pages {
-        return Err(EmbedError::Document { code: "incomplete".into() });
+        return Err(EmbedError::Document {
+            code: "incomplete".into(),
+        });
     }
     Ok(pages)
 }
@@ -427,9 +454,9 @@ fn dispatch(
                         None => worker_run.finished(built),
                     }
                 }
-                Ok(Ok(_)) => {
-                    worker_run.fail(EmbedError::Document { code: "vector-count-mismatch".into() })
-                }
+                Ok(Ok(_)) => worker_run.fail(EmbedError::Document {
+                    code: "vector-count-mismatch".into(),
+                }),
                 Ok(Err(error)) => worker_run.fail(error),
                 // Otherwise a panic would park the caller in the progress loop.
                 Err(_) => worker_run.fail(EmbedError::Io("the embedding worker panicked".into())),
@@ -440,7 +467,9 @@ fn dispatch(
     match spawned {
         Ok(handle) => workers.push(handle),
         Err(error) => {
-            run.fail(EmbedError::Io(format!("start an embedding worker: {error}")));
+            run.fail(EmbedError::Io(format!(
+                "start an embedding worker: {error}"
+            )));
             run.leave();
         }
     }
@@ -449,7 +478,10 @@ fn dispatch(
 /// The sentinel that stops `render_pages` early. Its message never surfaces —
 /// the caller replaces it with the reason it parked.
 fn halt(page_no: u32) -> RasterError {
-    RasterError::Page { page_no, message: "stopped by the embedder".into() }
+    RasterError::Page {
+        page_no,
+        message: "stopped by the embedder".into(),
+    }
 }
 
 /// Reconcile the renderer's vocabulary into the seam's. A missing libpdfium
@@ -457,14 +489,22 @@ fn halt(page_no: u32) -> RasterError {
 impl From<RasterError> for EmbedError {
     fn from(error: RasterError) -> Self {
         match error {
-            RasterError::Library(_) => EmbedError::NotReady { backend: "page renderer".into() },
-            RasterError::Unreadable(_) => EmbedError::Document { code: "unreadable-pdf".into() },
-            RasterError::Encrypted => EmbedError::Document { code: "encrypted-pdf".into() },
-            RasterError::Empty => EmbedError::Document { code: "empty-pdf".into() },
+            RasterError::Library(_) => EmbedError::NotReady {
+                backend: "page renderer".into(),
+            },
+            RasterError::Unreadable(_) => EmbedError::Document {
+                code: "unreadable-pdf".into(),
+            },
+            RasterError::Encrypted => EmbedError::Document {
+                code: "encrypted-pdf".into(),
+            },
+            RasterError::Empty => EmbedError::Document {
+                code: "empty-pdf".into(),
+            },
             // The message is a pdfium string; only the page number travels.
-            RasterError::Page { page_no, .. } => {
-                EmbedError::Document { code: format!("page-render-failed-p{page_no}") }
-            }
+            RasterError::Page { page_no, .. } => EmbedError::Document {
+                code: format!("page-render-failed-p{page_no}"),
+            },
         }
     }
 }
@@ -492,7 +532,12 @@ mod tests {
         assert_eq!(tokens_for(560, 1), 1);
         assert_eq!(tokens_for(561, 1), 2);
         // The cap is on billing, not on the raster.
-        let page = RenderedPage { page_no: 1, width, height, png: Vec::new() };
+        let page = RenderedPage {
+            page_no: 1,
+            width,
+            height,
+            png: Vec::new(),
+        };
         assert_eq!(raw_pixels(&page), 3_866_367);
         assert_eq!(billed_pixels(&page), BILLED_PIXEL_CAP);
     }
@@ -516,11 +561,10 @@ mod tests {
         let requests = plan(&costs, MAX_INPUTS_PER_REQUEST, MAX_TOKENS_PER_REQUEST);
         assert!(requests.len() >= 2);
         assert!(
-            requests.iter().all(|request| request
-                .iter()
-                .map(|index| costs[*index])
-                .sum::<u64>()
-                <= MAX_TOKENS_PER_REQUEST),
+            requests.iter().all(
+                |request| request.iter().map(|index| costs[*index]).sum::<u64>()
+                    <= MAX_TOKENS_PER_REQUEST
+            ),
             "a request went over the token ceiling: {requests:?}"
         );
         assert_eq!(requests[0].len(), 89);
@@ -559,7 +603,9 @@ mod tests {
         let shrunk = plan(&costs, MAX_INPUTS_PER_REQUEST, free_ceiling);
         assert_eq!(shrunk.len(), 4, "2 pages a request at 3,572 tokens each");
         assert!(
-            shrunk.iter().all(|r| r.iter().map(|i| costs[*i]).sum::<u64>() <= free_ceiling),
+            shrunk
+                .iter()
+                .all(|r| r.iter().map(|i| costs[*i]).sum::<u64>() <= free_ceiling),
             "{shrunk:?}"
         );
         assert_eq!(shrunk.iter().flatten().count(), 8);
@@ -569,7 +615,9 @@ mod tests {
     fn one_page_always_fits_inside_the_smallest_programme_voyage_runs() {
         // Shrinking always terminates: the billing cap keeps any page under
         // the free tier's TPM.
-        assert!((BILLED_PIXEL_CAP.div_ceil(PIXELS_PER_TOKEN) as f64) < super::super::ledger::FREE_TPM);
+        assert!(
+            (BILLED_PIXEL_CAP.div_ceil(PIXELS_PER_TOKEN) as f64) < super::super::ledger::FREE_TPM
+        );
     }
 
     #[test]
@@ -579,7 +627,12 @@ mod tests {
 
     #[test]
     fn an_oversized_page_is_this_documents_problem_and_nobody_elses() {
-        let page = RenderedPage { page_no: 7, width: 5_000, height: 5_000, png: vec![0; 16] };
+        let page = RenderedPage {
+            page_no: 7,
+            width: 5_000,
+            height: 5_000,
+            png: vec![0; 16],
+        };
         let error = refuse_oversized(&page).unwrap_err();
         assert_eq!(error.kind(), "document");
         assert!(!error.latching(), "one huge page must not condemn the run");
@@ -594,8 +647,12 @@ mod tests {
         };
         assert!(refuse_oversized(&heavy).is_err());
 
-        let ordinary =
-            RenderedPage { page_no: 1, width: A4_LANDSCAPE.0, height: A4_LANDSCAPE.1, png: vec![0; 16] };
+        let ordinary = RenderedPage {
+            page_no: 1,
+            width: A4_LANDSCAPE.0,
+            height: A4_LANDSCAPE.1,
+            png: vec![0; 16],
+        };
         assert_eq!(refuse_oversized(&ordinary).unwrap(), 3_572);
     }
 
@@ -650,7 +707,11 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
-        assert!(peak.load(Ordering::SeqCst) <= 2, "{}", peak.load(Ordering::SeqCst));
+        assert!(
+            peak.load(Ordering::SeqCst) <= 2,
+            "{}",
+            peak.load(Ordering::SeqCst)
+        );
     }
 
     #[test]
